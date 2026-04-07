@@ -6,12 +6,24 @@ module Lakeraven
       isolate_namespace Lakeraven::EHR
 
       # Tell Zeitwerk that "ehr" should resolve to the EHR constant
-      # (capitalized acronym) rather than the default "Ehr". Without
-      # this, autoloading from app/services/lakeraven/ehr/foo.rb would
-      # try to find Lakeraven::Ehr::Foo and not find Lakeraven::EHR::Foo.
+      # (capitalized acronym) rather than the default "Ehr". "fhir"
+      # gets the same treatment so app/.../fhir/patient_serializer.rb
+      # resolves to Lakeraven::EHR::FHIR::PatientSerializer.
       config.before_initialize do
         Rails.autoloaders.each do |loader|
-          loader.inflector.inflect("ehr" => "EHR")
+          loader.inflector.inflect("ehr" => "EHR", "fhir" => "FHIR")
+        end
+      end
+
+      # Register EHR and FHIR as ActiveSupport acronyms too. Rails
+      # routing uses its own inflector (not Zeitwerk's) to constantize
+      # controller paths — without this, routes pointing at
+      # "lakeraven/ehr/patients#show" would try to resolve
+      # Lakeraven::Ehr::PatientsController and fail.
+      initializer "lakeraven_ehr.acronyms", before: :set_autoload_paths do
+        ActiveSupport::Inflector.inflections(:en) do |inflect|
+          inflect.acronym "EHR"
+          inflect.acronym "FHIR"
         end
       end
     end
