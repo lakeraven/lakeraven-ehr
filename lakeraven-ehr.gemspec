@@ -1,26 +1,34 @@
+# frozen_string_literal: true
+
 require_relative "lib/lakeraven/ehr/version"
 
 Gem::Specification.new do |spec|
   spec.name        = "lakeraven-ehr"
   spec.version     = Lakeraven::EHR::VERSION
-  spec.authors     = [ "TODO: Write your name" ]
-  spec.email       = [ "TODO: Write your email address" ]
-  spec.homepage    = "TODO"
-  spec.summary     = "TODO: Summary of Lakeraven::Ehr."
-  spec.description = "TODO: Description of Lakeraven::Ehr."
+  spec.authors     = [ "Lakeraven" ]
+  spec.email       = [ "eng@lakeraven.com" ]
+  spec.homepage    = "https://github.com/lakeraven/lakeraven-ehr"
+  spec.summary     = "SMART-on-FHIR Rails engine for VistA/RPMS-backed EHRs"
+  spec.description = "Public Rails engine providing FHIR R4 patient and " \
+                     "practitioner reads, SMART on FHIR authentication, and " \
+                     "PHI audit logging for VistA/RPMS-backed EHR deployments. " \
+                     "Stores zero PHI at rest — clinical data flows through " \
+                     "the rpms-rpc adapter at request time."
   spec.license     = "MIT"
 
-  # Prevent pushing this gem to RubyGems.org. To allow pushes either set the "allowed_push_host"
-  # to allow pushing to a single host or delete this section to allow pushing to any host.
-  spec.metadata["allowed_push_host"] = "TODO: Set to 'http://mygemserver.com'"
+  spec.metadata = {
+    "homepage_uri"      => "https://github.com/lakeraven/lakeraven-ehr",
+    "source_code_uri"   => "https://github.com/lakeraven/lakeraven-ehr",
+    "changelog_uri"     => "https://github.com/lakeraven/lakeraven-ehr/blob/main/CHANGELOG.md",
+    "documentation_uri" => "https://github.com/lakeraven/lakeraven-ehr/tree/main/docs"
+  }
 
-  spec.metadata["homepage_uri"] = spec.homepage
-  spec.metadata["source_code_uri"] = "TODO: Put your gem's public repo URL here."
-  spec.metadata["changelog_uri"] = "TODO: Put your gem's CHANGELOG.md URL here."
+  spec.required_ruby_version = ">= 3.4.0"
 
   spec.files = Dir.chdir(File.expand_path(__dir__)) do
-    Dir["{app,config,db,lib}/**/*", "MIT-LICENSE", "Rakefile", "README.md"]
+    Dir["{app,config,db,docs,lib}/**/*", "MIT-LICENSE", "Rakefile", "README.md"]
   end
 
   spec.add_dependency "rails", ">= 8.1.3"
+  spec.add_dependency "rpms-rpc", "~> 0.1"
 end
