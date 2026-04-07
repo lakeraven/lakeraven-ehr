@@ -25,36 +25,27 @@ layer for an EHR running on top of an RPMS / VistA backend:
 
 - **Not a case-management system.** Case workflows live in
   [`corvid`](https://github.com/lakeraven/corvid), a sibling engine.
-  Neither depends on the other; the host SaaS app wires them
+  Neither depends on the other; a host application wires them
   together at the application boundary.
 - **Not a PHI store.** The engine ships zero PHI at rest. Patient
   identifiers are stored as opaque tokens; clinical data flows
   through the adapter at request time and is presented as FHIR
-  resources without persistence. (See ADR 0002 once published.)
+  resources without persistence.
 - **Not a billing or claims engine.** Billing, claims, and other
-  third-party integrations live in the private host app, not in
-  this engine.
+  third-party integrations live outside this engine in the host
+  application that mounts it.
 
 ## Architecture
 
 ```
-┌──────────────────────┐
-│  lakeraven-ehr-saas  │  (private host app — Jumpstart Pro)
-│                      │
-│  ┌────────────────┐  │
-│  │  lakeraven-ehr │  │  ← this engine
-│  │  (FHIR/SMART)  │  │
-│  └───────┬────────┘  │
-│          │           │
-│  ┌───────▼────────┐  │
-│  │   rpms-rpc     │  │  ← wire layer to VistA/RPMS
-│  └────────────────┘  │
-│                      │
-│  ┌────────────────┐  │
-│  │     corvid     │  │  ← case management (sibling, optional)
-│  └────────────────┘  │
-└──────────────────────┘
+lakeraven-ehr  ←—— sibling ——→  corvid  (case management, optional)
+    ↓ uses
+rpms-rpc      (pure Ruby wire layer for VistA/RPMS)
 ```
+
+A host application mounts `lakeraven-ehr`, optionally also mounts
+`corvid`, and wires `Lakeraven::Case.adapter` to call into
+`lakeraven-ehr` services so corvid can stay EHR-agnostic.
 
 ## Installation
 
