@@ -57,6 +57,15 @@ class Lakeraven::EHR::FHIR::PatientSerializerTest < ActiveSupport::TestCase
     assert_equal "unknown", Serializer.call(base_record.merge(gender: nil))[:gender]
   end
 
+  test "gender returns 'unknown' for an invalid value outside the FHIR code set" do
+    # Locks in the normalization behavior — anything that isn't one of
+    # male/female/other/unknown becomes "unknown" so the rendered
+    # resource always validates against the administrative-gender
+    # value set, regardless of what casing or junk the adapter passes.
+    assert_equal "unknown", Serializer.call(base_record.merge(gender: "MALE"))[:gender]
+    assert_equal "unknown", Serializer.call(base_record.merge(gender: "bogus"))[:gender]
+  end
+
   test "birthDate is ISO8601 yyyy-mm-dd" do
     assert_equal "1980-01-15", Serializer.call(base_record)[:birthDate]
   end

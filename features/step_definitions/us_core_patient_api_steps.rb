@@ -17,10 +17,13 @@ end
 World(FhirRackHelpers)
 
 # Tenancy is established by request headers (X-Tenant-Identifier and
-# X-Facility-Identifier) until SMART auth lands in #52. Cucumber
-# scenarios that already set "the current tenant" via the patient_search
-# steps stash the value in @cucumber_tenant_header so the request can
-# replay it.
+# X-Facility-Identifier) until SMART auth lands in #52. These step
+# definitions read the current tenant/facility back out of
+# Lakeraven::EHR::Current (set by the shared "the current tenant is
+# ..." step from patient_search_steps.rb) and replay them as headers
+# on the rack-test request, so scenarios stay declarative and don't
+# have to know whether the tenant came from a header, a SMART launch,
+# or anywhere else.
 
 Given('patient {string} has identifier system {string} and value {string}') do |display_name, system, value|
   tenant = Lakeraven::EHR::Current.tenant_identifier

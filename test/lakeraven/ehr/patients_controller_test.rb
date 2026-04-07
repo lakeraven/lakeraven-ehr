@@ -94,6 +94,17 @@ class Lakeraven::EHR::PatientsControllerTest < ActionDispatch::IntegrationTest
     assert_equal "required", issue["code"]
   end
 
+  test "whitespace-only tenant header is treated the same as missing" do
+    # Regression for Copilot review on PR #3: a header of " " was
+    # slipping past the blank check and producing a 404 downstream
+    # instead of the intended 400 required OperationOutcome.
+    get "/lakeraven-ehr/Patient/#{@patient_identifier}", headers: { "X-Tenant-Identifier" => "   " }
+    assert_response :bad_request
+    body = JSON.parse(response.body)
+    assert_equal "OperationOutcome", body["resourceType"]
+    assert_equal "required", body["issue"].first["code"]
+  end
+
   test "Current is reset after the request so state doesn't leak across actions" do
     get "/lakeraven-ehr/Patient/#{@patient_identifier}", headers: tenant_headers
     assert_response :ok
