@@ -62,6 +62,16 @@ module Lakeraven
           row ? public_view(row) : nil
         end
 
+        # Test helper — appends a FHIR-shaped identifier to an existing
+        # patient. Lets test setups attach SSN, MRN, tribal ID, etc. after
+        # the patient has been seeded, so the seed call doesn't have to
+        # know about every identifier shape upfront.
+        def attach_patient_identifier(tenant_identifier:, patient_identifier:, system:, value:)
+          row = @patients[tenant_identifier].find { |r| r[:patient_identifier] == patient_identifier }
+          raise ArgumentError, "no patient with identifier #{patient_identifier} in tenant #{tenant_identifier}" unless row
+          row[:identifiers] = (row[:identifiers] || []) + [ { system: system, value: value } ]
+        end
+
         # -- practitioners ----------------------------------------------------
 
         # Test helper — adds a practitioner to the in-memory store. Mints

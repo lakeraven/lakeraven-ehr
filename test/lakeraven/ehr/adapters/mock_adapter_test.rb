@@ -163,6 +163,21 @@ class Lakeraven::EHR::Adapters::MockAdapterTest < ActiveSupport::TestCase
     assert_equal [], result[:identifiers]
   end
 
+  test "attach_patient_identifier appends an identifier to an existing patient" do
+    identifier = @adapter.seed_patient(
+      tenant_identifier: "tnt_test", facility_identifier: "fac_main",
+      display_name: "DOE,JOHN", date_of_birth: Date.new(1980, 1, 15), gender: "male"
+    )
+    @adapter.attach_patient_identifier(
+      tenant_identifier: "tnt_test",
+      patient_identifier: identifier,
+      system: "http://hl7.org/fhir/sid/us-ssn",
+      value: "111-11-1111"
+    )
+    result = @adapter.find_patient(tenant_identifier: "tnt_test", patient_identifier: identifier)
+    assert_equal [ { system: "http://hl7.org/fhir/sid/us-ssn", value: "111-11-1111" } ], result[:identifiers]
+  end
+
   # -- practitioners ----------------------------------------------------------
 
   test "starts with no practitioners" do
