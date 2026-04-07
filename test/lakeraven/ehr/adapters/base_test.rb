@@ -27,4 +27,18 @@ class Lakeraven::EHR::Adapters::BaseTest < ActiveSupport::TestCase
     end
     assert_equal [], subclass.new.search_patients(tenant_identifier: "tnt_test")
   end
+
+  test "search_practitioners raises NotImplementedError on the base class" do
+    error = assert_raises(NotImplementedError) do
+      Base.new.search_practitioners(tenant_identifier: "tnt_test")
+    end
+    assert_match(/search_practitioners/, error.message)
+  end
+
+  test "find_practitioner raises NotImplementedError on the base class" do
+    error = assert_raises(NotImplementedError) do
+      Base.new.find_practitioner(tenant_identifier: "tnt_test", practitioner_identifier: "pr_x")
+    end
+    assert_match(/find_practitioner/, error.message)
+  end
 end

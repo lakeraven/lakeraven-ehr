@@ -43,6 +43,29 @@ module Lakeraven
         def find_patient(tenant_identifier:, patient_identifier:)
           raise NotImplementedError, "#{self.class} must implement #find_patient"
         end
+
+        # Search practitioners by name, specialty, and/or FHIR Identifier.
+        #
+        # @param tenant_identifier [String] opaque tenant token
+        # @param facility_identifier [String, nil] opaque facility token; nil = all facilities
+        # @param name [String, nil] partial or full name (case-insensitive substring)
+        # @param specialty [String, nil] specialty / qualification text
+        # @param identifier_system [String, nil] FHIR Identifier system URI (e.g. NPI)
+        # @param identifier_value [String, nil] FHIR Identifier value
+        # @return [Array<Hash>] each result with keys :practitioner_identifier,
+        #   :display_name, :specialty, :facility_identifier, :identifiers
+        def search_practitioners(tenant_identifier:, facility_identifier: nil, name: nil, specialty: nil, identifier_system: nil, identifier_value: nil)
+          raise NotImplementedError, "#{self.class} must implement #search_practitioners"
+        end
+
+        # Resolve a single practitioner by opaque identifier.
+        #
+        # @param tenant_identifier [String]
+        # @param practitioner_identifier [String]
+        # @return [Hash, nil] same shape as a search_practitioners result, or nil if not found
+        def find_practitioner(tenant_identifier:, practitioner_identifier:)
+          raise NotImplementedError, "#{self.class} must implement #find_practitioner"
+        end
       end
     end
   end
