@@ -1,2 +1,2 @@
-Lakeraven::Ehr::Engine.routes.draw do
+Lakeraven::EHR::Engine.routes.draw do
 end

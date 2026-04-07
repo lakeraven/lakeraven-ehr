@@ -2,7 +2,7 @@ require_relative "lib/lakeraven/ehr/version"
 
 Gem::Specification.new do |spec|
   spec.name        = "lakeraven-ehr"
-  spec.version     = Lakeraven::Ehr::VERSION
+  spec.version     = Lakeraven::EHR::VERSION
   spec.authors     = [ "TODO: Write your name" ]
   spec.email       = [ "TODO: Write your email address" ]
   spec.homepage    = "TODO"
