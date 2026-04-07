@@ -1,5 +1,5 @@
 module Lakeraven
-  module Ehr
+  module EHR
     module ApplicationHelper
     end
   end
