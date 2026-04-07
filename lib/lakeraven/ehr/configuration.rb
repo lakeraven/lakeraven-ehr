@@ -13,9 +13,24 @@ module Lakeraven
     # The adapter is the only required setting at boot.
     class Configuration
       attr_accessor :adapter
+      attr_accessor :resource_owner_authenticator
+      attr_accessor :admin_authenticator
 
       def initialize
         @adapter = nil
+        # Default resource owner authenticator: fail loud. The host
+        # application MUST override this with a lambda that returns
+        # the authenticated user (or redirects). Doorkeeper invokes
+        # this on every authorization request, so leaving it
+        # unconfigured surfaces immediately.
+        @resource_owner_authenticator = ->(_controller) {
+          raise NotConfiguredError,
+            "Lakeraven::EHR.configuration.resource_owner_authenticator must be set " \
+            "by the host application before any SMART authorization request"
+        }
+        # Default admin authenticator: deny everything. The host
+        # overrides if it wants to expose the Doorkeeper admin UI.
+        @admin_authenticator = ->(_controller) { false }
       end
     end
 
