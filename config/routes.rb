@@ -1,5 +1,9 @@
 Lakeraven::EHR::Engine.routes.draw do
   use_doorkeeper
+
+  # SMART App Launch discovery — clients hit this before they have a token.
+  get ".well-known/smart-configuration", to: "smart/configuration#show"
+
   # FHIR R4 Patient resource. The path uses the resource name (Patient,
   # not patients) per FHIR convention. The :identifier param is the
   # opaque pt_-prefixed token from ADR 0004 — never the backend DFN.
