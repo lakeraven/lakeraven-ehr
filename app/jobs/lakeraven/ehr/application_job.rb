@@ -1,5 +1,5 @@
 module Lakeraven
-  module Ehr
+  module EHR
     class ApplicationJob < ActiveJob::Base
     end
   end

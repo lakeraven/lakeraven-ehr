@@ -1,5 +1,5 @@
 module Lakeraven
-  module Ehr
+  module EHR
     class ApplicationController < ActionController::Base
     end
   end
