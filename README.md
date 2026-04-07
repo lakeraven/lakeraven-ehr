@@ -31,8 +31,9 @@ layer for an EHR running on top of an RPMS / VistA backend:
   identifiers are stored as opaque tokens; clinical data flows
   through the adapter at request time and is presented as FHIR
   resources without persistence. (See ADR 0002 once published.)
-- **Not a billing or claims engine.** Stedi and other integrations
-  live in the private host app.
+- **Not a billing or claims engine.** Billing, claims, and other
+  third-party integrations live in the private host app, not in
+  this engine.
 
 ## Architecture
 
