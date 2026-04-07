@@ -2,7 +2,7 @@
 
 module Lakeraven
   module EHR
-    module SMART
+    module Smart
       # SMART App Launch discovery document, served at:
       #
       #   GET /.well-known/smart-configuration

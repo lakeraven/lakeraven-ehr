@@ -2,7 +2,7 @@
 
 require "test_helper"
 
-class Lakeraven::EHR::SMART::ConfigurationControllerTest < ActionDispatch::IntegrationTest
+class Lakeraven::EHR::Smart::ConfigurationControllerTest < ActionDispatch::IntegrationTest
   test "GET /.well-known/smart-configuration returns the discovery document" do
     get "/lakeraven-ehr/.well-known/smart-configuration"
     assert_response :ok
