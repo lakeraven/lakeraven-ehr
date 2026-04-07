@@ -14,6 +14,18 @@ module Lakeraven
           loader.inflector.inflect("ehr" => "EHR", "fhir" => "FHIR")
         end
       end
+
+      # Register EHR and FHIR as ActiveSupport acronyms too. Rails
+      # routing uses its own inflector (not Zeitwerk's) to constantize
+      # controller paths — without this, routes pointing at
+      # "lakeraven/ehr/patients#show" would try to resolve
+      # Lakeraven::Ehr::PatientsController and fail.
+      initializer "lakeraven_ehr.acronyms", before: :set_autoload_paths do
+        ActiveSupport::Inflector.inflections(:en) do |inflect|
+          inflect.acronym "EHR"
+          inflect.acronym "FHIR"
+        end
+      end
     end
   end
 end
