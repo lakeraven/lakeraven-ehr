@@ -4,6 +4,7 @@ require "lakeraven/ehr/version"
 require "lakeraven/ehr/engine"
 require "lakeraven/ehr/configuration"
 require "lakeraven/ehr/current"
+require "lakeraven/ehr/adapters/base"
 
 module Lakeraven
   # Lakeraven EHR — public Rails engine for SMART-on-FHIR-compliant
