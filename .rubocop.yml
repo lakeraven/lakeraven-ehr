@@ -1,0 +1,16 @@
+inherit_gem:
+  rubocop-rails-omakase: rubocop.yml
+
+AllCops:
+  TargetRubyVersion: 3.4
+  NewCops: enable
+  SuggestExtensions: false
+  Exclude:
+    - "bin/**/*"
+    - "test/dummy/**/*"
+    - "vendor/**/*"
+    - "tmp/**/*"
+    - "Gemfile.lock"
+
+Layout/LineLength:
+  Max: 200
