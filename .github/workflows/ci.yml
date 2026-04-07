@@ -4,7 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
 
 jobs:
   test:
@@ -39,8 +38,12 @@ jobs:
           bundler-cache: true
       - name: Prepare database
         run: bundle exec rails app:db:create app:db:migrate
-      - name: Run tests
+      - name: Zeitwerk eager-load check
+        run: bundle exec rails app:zeitwerk:check
+      - name: Run unit tests
         run: bundle exec rake test
+      - name: Run Cucumber features
+        run: bundle exec cucumber --publish-quiet
 
   lint:
     name: Lint
