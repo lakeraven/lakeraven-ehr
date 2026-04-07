@@ -22,6 +22,8 @@ module Lakeraven
           super
           # patients[tenant_identifier] => Array<Hash>
           @patients = Hash.new { |h, k| h[k] = [] }
+          # practitioners[tenant_identifier] => Array<Hash>
+          @practitioners = Hash.new { |h, k| h[k] = [] }
         end
 
         # Test helper — adds a patient to the in-memory store. Mints
@@ -59,6 +61,43 @@ module Lakeraven
           row ? public_view(row) : nil
         end
 
+        # -- practitioners ----------------------------------------------------
+
+        # Test helper — adds a practitioner to the in-memory store. Mints
+        # an opaque practitioner_identifier and returns it. `identifiers`
+        # is an optional array of FHIR-shaped { system:, value: } hashes
+        # so seeded practitioners can carry NPIs, DEA numbers, state
+        # license numbers, etc.
+        def seed_practitioner(tenant_identifier:, facility_identifier:, display_name:, specialty:, identifiers: [])
+          identifier = mint_practitioner_identifier
+          record = {
+            practitioner_identifier: identifier,
+            tenant_identifier: tenant_identifier,
+            facility_identifier: facility_identifier,
+            display_name: display_name,
+            specialty: specialty,
+            identifiers: identifiers
+          }
+          @practitioners[tenant_identifier] << record
+          identifier
+        end
+
+        def search_practitioners(tenant_identifier:, facility_identifier: nil, name: nil, specialty: nil, identifier_system: nil, identifier_value: nil)
+          rows = @practitioners[tenant_identifier]
+          rows = rows.select { |r| r[:facility_identifier] == facility_identifier } if facility_identifier
+          rows = rows.select { |r| r[:display_name].downcase.include?(name.downcase) } if name && !name.empty?
+          rows = rows.select { |r| r[:specialty].to_s.downcase.include?(specialty.downcase) } if specialty && !specialty.empty?
+          if identifier_system || identifier_value
+            rows = rows.select { |r| match_identifier?(r, identifier_system, identifier_value) }
+          end
+          rows.map { |r| public_practitioner_view(r) }
+        end
+
+        def find_practitioner(tenant_identifier:, practitioner_identifier:)
+          row = @practitioners[tenant_identifier].find { |r| r[:practitioner_identifier] == practitioner_identifier }
+          row ? public_practitioner_view(row) : nil
+        end
+
         private
 
         # Mints a prefixed token. Uses a UUIDv4 internally rather than a
@@ -66,6 +105,10 @@ module Lakeraven
         # SecureRandom is in stdlib. Real adapters mint per ADR 0004.
         def mint_patient_identifier
           "pt_#{SecureRandom.uuid.delete('-')}"
+        end
+
+        def mint_practitioner_identifier
+          "pr_#{SecureRandom.uuid.delete('-')}"
         end
 
         # Strip internal-only keys before returning to caller. tenant_identifier
@@ -78,6 +121,16 @@ module Lakeraven
             display_name: row[:display_name],
             date_of_birth: row[:date_of_birth],
             gender: row[:gender],
+            identifiers: row[:identifiers] || []
+          }
+        end
+
+        def public_practitioner_view(row)
+          {
+            practitioner_identifier: row[:practitioner_identifier],
+            facility_identifier: row[:facility_identifier],
+            display_name: row[:display_name],
+            specialty: row[:specialty],
             identifiers: row[:identifiers] || []
           }
         end

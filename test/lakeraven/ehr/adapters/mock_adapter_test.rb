@@ -162,4 +162,115 @@ class Lakeraven::EHR::Adapters::MockAdapterTest < ActiveSupport::TestCase
     result = @adapter.search_patients(tenant_identifier: "tnt_test", name: "DOE").first
     assert_equal [], result[:identifiers]
   end
+
+  # -- practitioners ----------------------------------------------------------
+
+  test "starts with no practitioners" do
+    assert_empty @adapter.search_practitioners(tenant_identifier: "tnt_test")
+  end
+
+  test "seed_practitioner adds a practitioner and search returns it" do
+    @adapter.seed_practitioner(
+      tenant_identifier: "tnt_test", facility_identifier: "fac_main",
+      display_name: "MARTINEZ,SARAH", specialty: "Cardiology"
+    )
+    results = @adapter.search_practitioners(tenant_identifier: "tnt_test", name: "MARTINEZ")
+    assert_equal 1, results.length
+    assert_equal "MARTINEZ,SARAH", results.first[:display_name]
+    assert_equal "Cardiology", results.first[:specialty]
+  end
+
+  test "seeded practitioner gets an opaque practitioner_identifier prefixed with pr_" do
+    @adapter.seed_practitioner(tenant_identifier: "tnt_test", facility_identifier: "fac_main",
+                               display_name: "MARTINEZ,SARAH", specialty: "Cardiology")
+    result = @adapter.search_practitioners(tenant_identifier: "tnt_test", name: "MARTINEZ").first
+    assert result[:practitioner_identifier].start_with?("pr_"), result[:practitioner_identifier]
+  end
+
+  test "search_practitioners by name is case-insensitive partial match" do
+    @adapter.seed_practitioner(tenant_identifier: "tnt_test", facility_identifier: "fac_main",
+                               display_name: "MARTINEZ,SARAH", specialty: "Cardiology")
+    @adapter.seed_practitioner(tenant_identifier: "tnt_test", facility_identifier: "fac_main",
+                               display_name: "MARTIN,JANE", specialty: "Family Medicine")
+    results = @adapter.search_practitioners(tenant_identifier: "tnt_test", name: "martin")
+    assert_equal 2, results.length
+  end
+
+  test "search_practitioners by specialty matches case-insensitively" do
+    @adapter.seed_practitioner(tenant_identifier: "tnt_test", facility_identifier: "fac_main",
+                               display_name: "MARTINEZ,SARAH", specialty: "Cardiology")
+    @adapter.seed_practitioner(tenant_identifier: "tnt_test", facility_identifier: "fac_main",
+                               display_name: "CHEN,JAMES", specialty: "Orthopedic Surgery")
+    results = @adapter.search_practitioners(tenant_identifier: "tnt_test", specialty: "cardiology")
+    assert_equal 1, results.length
+    assert_equal "MARTINEZ,SARAH", results.first[:display_name]
+  end
+
+  test "search_practitioners by NPI identifier matches" do
+    @adapter.seed_practitioner(
+      tenant_identifier: "tnt_test", facility_identifier: "fac_main",
+      display_name: "MARTINEZ,SARAH", specialty: "Cardiology",
+      identifiers: [ { system: "http://hl7.org/fhir/sid/us-npi", value: "1234567890" } ]
+    )
+    @adapter.seed_practitioner(
+      tenant_identifier: "tnt_test", facility_identifier: "fac_main",
+      display_name: "CHEN,JAMES", specialty: "Orthopedic Surgery",
+      identifiers: [ { system: "http://hl7.org/fhir/sid/us-npi", value: "2345678901" } ]
+    )
+    results = @adapter.search_practitioners(
+      tenant_identifier: "tnt_test",
+      identifier_system: "http://hl7.org/fhir/sid/us-npi",
+      identifier_value: "2345678901"
+    )
+    assert_equal 1, results.length
+    assert_equal "CHEN,JAMES", results.first[:display_name]
+  end
+
+  test "search_practitioners is scoped to tenant" do
+    @adapter.seed_practitioner(tenant_identifier: "tnt_a", facility_identifier: "fac_main",
+                               display_name: "MARTINEZ,SARAH", specialty: "Cardiology")
+    @adapter.seed_practitioner(tenant_identifier: "tnt_b", facility_identifier: "fac_main",
+                               display_name: "MARTINEZ,JANE", specialty: "Cardiology")
+    results = @adapter.search_practitioners(tenant_identifier: "tnt_a", name: "MARTINEZ")
+    assert_equal 1, results.length
+    assert_equal "MARTINEZ,SARAH", results.first[:display_name]
+  end
+
+  test "search_practitioners is scoped to facility when facility_identifier is given" do
+    @adapter.seed_practitioner(tenant_identifier: "tnt_test", facility_identifier: "fac_main",
+                               display_name: "MARTINEZ,SARAH", specialty: "Cardiology")
+    @adapter.seed_practitioner(tenant_identifier: "tnt_test", facility_identifier: "fac_other",
+                               display_name: "OTHER,PROVIDER", specialty: "Dermatology")
+    results = @adapter.search_practitioners(tenant_identifier: "tnt_test", facility_identifier: "fac_main")
+    assert_equal 1, results.length
+  end
+
+  test "search_practitioners results never expose backend-native ien key" do
+    @adapter.seed_practitioner(tenant_identifier: "tnt_test", facility_identifier: "fac_main",
+                               display_name: "MARTINEZ,SARAH", specialty: "Cardiology")
+    result = @adapter.search_practitioners(tenant_identifier: "tnt_test", name: "MARTINEZ").first
+    refute_includes result.keys, :ien
+    refute_includes result.keys, "ien"
+    refute_includes result.keys, :IEN
+    refute_includes result.keys, "IEN"
+  end
+
+  test "find_practitioner resolves a previously-seeded practitioner by identifier" do
+    @adapter.seed_practitioner(tenant_identifier: "tnt_test", facility_identifier: "fac_main",
+                               display_name: "MARTINEZ,SARAH", specialty: "Cardiology")
+    identifier = @adapter.search_practitioners(tenant_identifier: "tnt_test", name: "MARTINEZ").first[:practitioner_identifier]
+    found = @adapter.find_practitioner(tenant_identifier: "tnt_test", practitioner_identifier: identifier)
+    assert_equal "MARTINEZ,SARAH", found[:display_name]
+  end
+
+  test "find_practitioner returns nil for unknown identifier" do
+    assert_nil @adapter.find_practitioner(tenant_identifier: "tnt_test", practitioner_identifier: "pr_unknown")
+  end
+
+  test "find_practitioner returns nil if identifier exists in a different tenant" do
+    @adapter.seed_practitioner(tenant_identifier: "tnt_a", facility_identifier: "fac_main",
+                               display_name: "MARTINEZ,SARAH", specialty: "Cardiology")
+    identifier = @adapter.search_practitioners(tenant_identifier: "tnt_a", name: "MARTINEZ").first[:practitioner_identifier]
+    assert_nil @adapter.find_practitioner(tenant_identifier: "tnt_b", practitioner_identifier: identifier)
+  end
 end
