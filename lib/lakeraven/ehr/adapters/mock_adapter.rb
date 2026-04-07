@@ -25,8 +25,10 @@ module Lakeraven
         end
 
         # Test helper — adds a patient to the in-memory store. Mints
-        # an opaque patient_identifier and returns it.
-        def seed_patient(tenant_identifier:, facility_identifier:, display_name:, date_of_birth:, gender:)
+        # an opaque patient_identifier and returns it. `identifiers`
+        # is an optional array of FHIR-shaped { system:, value: } hashes
+        # so seeded patients can carry MRNs, NPIs, SSNs, tribal IDs, etc.
+        def seed_patient(tenant_identifier:, facility_identifier:, display_name:, date_of_birth:, gender:, identifiers: [])
           identifier = mint_patient_identifier
           record = {
             patient_identifier: identifier,
@@ -34,7 +36,8 @@ module Lakeraven
             facility_identifier: facility_identifier,
             display_name: display_name,
             date_of_birth: date_of_birth,
-            gender: gender
+            gender: gender,
+            identifiers: identifiers
           }
           @patients[tenant_identifier] << record
           identifier
@@ -45,6 +48,9 @@ module Lakeraven
           rows = rows.select { |r| r[:facility_identifier] == facility_identifier } if facility_identifier
           rows = rows.select { |r| r[:display_name].downcase.include?(name.downcase) } if name && !name.empty?
           rows = rows.select { |r| r[:date_of_birth] == coerce_date(date_of_birth) } if date_of_birth
+          if identifier_system || identifier_value
+            rows = rows.select { |r| match_identifier?(r, identifier_system, identifier_value) }
+          end
           rows.map { |r| public_view(r) }
         end
 
@@ -71,8 +77,20 @@ module Lakeraven
             facility_identifier: row[:facility_identifier],
             display_name: row[:display_name],
             date_of_birth: row[:date_of_birth],
-            gender: row[:gender]
+            gender: row[:gender],
+            identifiers: row[:identifiers] || []
           }
+        end
+
+        # Match a row against a (system, value) pair. Either side may be
+        # nil — a nil system matches any system; a nil value matches any
+        # value (so callers can search by system alone if they want all
+        # patients with an MRN, etc.).
+        def match_identifier?(row, system, value)
+          (row[:identifiers] || []).any? do |id|
+            (system.nil? || id[:system] == system) &&
+              (value.nil? || id[:value] == value)
+          end
         end
 
         def coerce_date(value)

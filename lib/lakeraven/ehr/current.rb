@@ -24,11 +24,17 @@ module Lakeraven
     class Current < ActiveSupport::CurrentAttributes
       attribute :tenant_identifier, :facility_identifier
 
-      # Alias for ActiveSupport::CurrentAttributes.clear_all so engine
-      # code can use the more conventional reset! verb. Cucumber Before
-      # hooks and test setups call this between scenarios.
+      # Reset only this engine's Current class, not every
+      # ActiveSupport::CurrentAttributes subclass in the process.
+      # `clear_all` would wipe the host application's own Current
+      # state too, which would be a hostile thing for an embedded
+      # engine to do between scenarios. `instance.reset` only
+      # resets the per-thread instance for this class.
+      #
+      # Cucumber Before hooks and test setups call this between
+      # scenarios; the host app's Current is left untouched.
       def self.reset!
-        clear_all
+        instance.reset
       end
 
       # Run the block with tenant_identifier set to the supplied value,

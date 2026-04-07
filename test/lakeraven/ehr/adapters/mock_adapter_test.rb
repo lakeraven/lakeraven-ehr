@@ -106,4 +106,60 @@ class Lakeraven::EHR::Adapters::MockAdapterTest < ActiveSupport::TestCase
     identifier = @adapter.search_patients(tenant_identifier: "tnt_a", name: "DOE").first[:patient_identifier]
     assert_nil @adapter.find_patient(tenant_identifier: "tnt_b", patient_identifier: identifier)
   end
+
+  # -- identifier filtering ---------------------------------------------------
+
+  test "search by identifier_system + identifier_value matches FHIR Identifier" do
+    @adapter.seed_patient(
+      tenant_identifier: "tnt_test", facility_identifier: "fac_main",
+      display_name: "DOE,JOHN", date_of_birth: Date.new(1980, 1, 15), gender: "male",
+      identifiers: [ { system: "http://hl7.org/fhir/sid/us-ssn", value: "123-45-6789" } ]
+    )
+    @adapter.seed_patient(
+      tenant_identifier: "tnt_test", facility_identifier: "fac_main",
+      display_name: "SMITH,JANE", date_of_birth: Date.new(1975, 6, 20), gender: "female",
+      identifiers: [ { system: "http://hl7.org/fhir/sid/us-ssn", value: "987-65-4321" } ]
+    )
+    results = @adapter.search_patients(
+      tenant_identifier: "tnt_test",
+      identifier_system: "http://hl7.org/fhir/sid/us-ssn",
+      identifier_value: "123-45-6789"
+    )
+    assert_equal 1, results.length
+    assert_equal "DOE,JOHN", results.first[:display_name]
+  end
+
+  test "search by identifier_system alone matches any value with that system" do
+    @adapter.seed_patient(tenant_identifier: "tnt_test", facility_identifier: "fac_main",
+                          display_name: "WITH,SSN", date_of_birth: Date.new(1980, 1, 1), gender: "male",
+                          identifiers: [ { system: "http://hl7.org/fhir/sid/us-ssn", value: "111-11-1111" } ])
+    @adapter.seed_patient(tenant_identifier: "tnt_test", facility_identifier: "fac_main",
+                          display_name: "WITHOUT,SSN", date_of_birth: Date.new(1981, 2, 2), gender: "female",
+                          identifiers: [])
+    results = @adapter.search_patients(
+      tenant_identifier: "tnt_test",
+      identifier_system: "http://hl7.org/fhir/sid/us-ssn"
+    )
+    assert_equal 1, results.length
+    assert_equal "WITH,SSN", results.first[:display_name]
+  end
+
+  test "search by identifier returns nothing when value doesn't match" do
+    @adapter.seed_patient(tenant_identifier: "tnt_test", facility_identifier: "fac_main",
+                          display_name: "DOE,JOHN", date_of_birth: Date.new(1980, 1, 15), gender: "male",
+                          identifiers: [ { system: "http://hl7.org/fhir/sid/us-ssn", value: "123-45-6789" } ])
+    results = @adapter.search_patients(
+      tenant_identifier: "tnt_test",
+      identifier_system: "http://hl7.org/fhir/sid/us-ssn",
+      identifier_value: "000-00-0000"
+    )
+    assert_empty results
+  end
+
+  test "patient with no identifiers seeded gets an empty identifiers array in results" do
+    @adapter.seed_patient(tenant_identifier: "tnt_test", facility_identifier: "fac_main",
+                          display_name: "DOE,JOHN", date_of_birth: Date.new(1980, 1, 15), gender: "male")
+    result = @adapter.search_patients(tenant_identifier: "tnt_test", name: "DOE").first
+    assert_equal [], result[:identifiers]
+  end
 end

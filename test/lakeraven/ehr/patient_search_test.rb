@@ -31,8 +31,13 @@ class Lakeraven::EHR::PatientSearchTest < ActiveSupport::TestCase
   end
 
   test "PatientSearch passes the current tenant_identifier to the adapter" do
+    # Seed an identically-named patient in a different tenant. If
+    # PatientSearch ignored Current.tenant_identifier and passed nothing
+    # (or the wrong value) through to the adapter, this would return 2.
+    @adapter.seed_patient(tenant_identifier: "tnt_other", facility_identifier: "fac_main",
+                          display_name: "DOE,JOHN", date_of_birth: Date.new(1980, 1, 15), gender: "male")
     results = Lakeraven::EHR::PatientSearch.call(name: "DOE")
-    assert_equal 1, results.length
+    assert_equal 1, results.length, "expected tnt_other patient to be filtered out by tenant scope"
   end
 
   test "PatientSearch passes the current facility_identifier when set" do

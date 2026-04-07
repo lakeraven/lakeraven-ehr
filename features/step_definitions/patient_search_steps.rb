@@ -59,10 +59,12 @@ Then('every result has an opaque patient_identifier prefixed with {string}') do 
 end
 
 Then("no result exposes a backend-native DFN") do
+  # Normalize keys to lowercase strings so we catch any casing/symbol
+  # variant: :dfn, "dfn", :DFN, "DFN", and anything else that means the
+  # same thing.
   @search_results.each do |result|
-    refute_includes result.keys, :dfn
-    refute_includes result.keys, "dfn"
-    refute_includes result.keys, :DFN
+    normalized_keys = result.keys.map { |k| k.to_s.downcase }
+    refute_includes normalized_keys, "dfn"
   end
 end
 
