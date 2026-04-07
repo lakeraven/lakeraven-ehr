@@ -8,15 +8,16 @@ module Lakeraven
     module Adapters
       # In-memory adapter used by tests and Cucumber scenarios.
       #
-      # Holds patients in a Ruby hash keyed by tenant_identifier so each
-      # test can seed its own data without coordinating with anyone
-      # else. Not thread-safe — there's no need; tests run serially
-      # against a fresh instance.
+      # Holds patients and practitioners in Ruby hashes keyed by
+      # tenant_identifier so each test can seed its own data without
+      # coordinating with anyone else. Not thread-safe — there's no need;
+      # tests run serially against a fresh instance.
       #
       # Per ADR 0002, this still doesn't store backend-native identifiers
       # in the result hashes returned to engine code. The patient_identifier
-      # it returns is an opaque token (per ADR 0004), and the internal DFN
-      # equivalent is held only inside the adapter.
+      # and practitioner_identifier it returns are opaque tokens (per
+      # ADR 0004); the internal DFN/IEN equivalents are held only inside
+      # the adapter and stripped from the public_view shapes.
       class MockAdapter < Base
         def initialize
           super
