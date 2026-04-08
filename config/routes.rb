@@ -1,5 +1,15 @@
 Lakeraven::EHR::Engine.routes.draw do
-  use_doorkeeper
+  # Doorkeeper's controllers live at top-level (Doorkeeper::TokensController etc.).
+  # An isolated engine would otherwise try to resolve them under
+  # Lakeraven::EHR::Doorkeeper::*; the leading-slash absolute paths
+  # tell Rails routing to constantize them at the top level.
+  use_doorkeeper do
+    controllers tokens: "/doorkeeper/tokens",
+                authorizations: "/doorkeeper/authorizations",
+                applications: "/doorkeeper/applications",
+                authorized_applications: "/doorkeeper/authorized_applications",
+                token_info: "/doorkeeper/token_info"
+  end
 
   # SMART App Launch discovery — clients hit this before they have a token.
   get ".well-known/smart-configuration", to: "smart/configuration#show"
