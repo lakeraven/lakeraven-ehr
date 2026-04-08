@@ -6,6 +6,7 @@ class Lakeraven::EHR::PatientsControllerTest < ActionDispatch::IntegrationTest
   setup do
     Lakeraven::EHR.reset_configuration!
     Lakeraven::EHR::Current.reset!
+    Lakeraven::EHR::AuditEvent.delete_all
     Doorkeeper::AccessToken.delete_all
     Doorkeeper::AccessGrant.delete_all
     Doorkeeper::Application.delete_all
@@ -187,6 +188,51 @@ class Lakeraven::EHR::PatientsControllerTest < ActionDispatch::IntegrationTest
     assert_response :forbidden
     body = JSON.parse(response.body)
     assert_equal "forbidden", body["issue"].first["code"]
+  end
+
+  # -- audit logging --------------------------------------------------------
+
+  test "a successful GET produces an AuditEvent row" do
+    assert_difference -> { Lakeraven::EHR::AuditEvent.count }, 1 do
+      get "/lakeraven-ehr/Patient/#{@patient_identifier}", headers: auth_headers
+    end
+    event = Lakeraven::EHR::AuditEvent.recent.first
+    assert_equal "rest", event.event_type
+    assert_equal "R", event.action
+    assert_equal "0", event.outcome
+    assert_equal "tnt_test", event.tenant_identifier
+    assert_equal "fac_main", event.facility_identifier
+    assert_equal "Patient", event.entity_type
+    assert_equal @patient_identifier, event.entity_identifier
+    assert_equal "Application", event.agent_who_type
+    assert_equal @oauth_app.uid, event.agent_who_identifier
+  end
+
+  test "a 404 response produces an AuditEvent with minor-failure outcome" do
+    assert_difference -> { Lakeraven::EHR::AuditEvent.count }, 1 do
+      get "/lakeraven-ehr/Patient/pt_does_not_exist", headers: auth_headers
+    end
+    event = Lakeraven::EHR::AuditEvent.recent.first
+    assert_equal "4", event.outcome
+    assert_equal "pt_does_not_exist", event.entity_identifier
+  end
+
+  test "a 401 auth failure does NOT produce an AuditEvent" do
+    # The audit concern runs as after_action inside the PatientsController
+    # request cycle. A 401 from authenticate_smart_token! short-circuits
+    # before reaching the show action and before the after_action fires.
+    # That's intentional: failed auth is logged at the auth layer, not
+    # as a successful PHI access.
+    assert_no_difference -> { Lakeraven::EHR::AuditEvent.count } do
+      get "/lakeraven-ehr/Patient/#{@patient_identifier}",
+          headers: { "X-Tenant-Identifier" => "tnt_test" }
+    end
+  end
+
+  test "audit rows are immutable" do
+    get "/lakeraven-ehr/Patient/#{@patient_identifier}", headers: auth_headers
+    event = Lakeraven::EHR::AuditEvent.recent.first
+    assert_raises(ActiveRecord::ReadOnlyRecord) { event.update!(outcome: "4") }
   end
 
   test "custom tenant_resolver overrides the default header reader" do
