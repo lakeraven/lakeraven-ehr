@@ -5,6 +5,8 @@ require "test_helper"
 class Lakeraven::EHR::Smart::TokensControllerTest < ActionDispatch::IntegrationTest
   setup do
     Lakeraven::EHR::LaunchContext.delete_all
+    Doorkeeper::AccessToken.delete_all
+    Doorkeeper::AccessGrant.delete_all
     Doorkeeper::Application.delete_all
 
     @client = Doorkeeper::Application.create!(
