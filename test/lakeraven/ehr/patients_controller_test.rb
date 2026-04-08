@@ -188,4 +188,23 @@ class Lakeraven::EHR::PatientsControllerTest < ActionDispatch::IntegrationTest
     body = JSON.parse(response.body)
     assert_equal "forbidden", body["issue"].first["code"]
   end
+
+  test "custom tenant_resolver overrides the default header reader" do
+    # Integration lock-in: a host application override (subdomain,
+    # JWT claim, anything) replaces the default header read and
+    # flows through ApplicationController + Current + the adapter
+    # call without any code changes to the engine.
+    Lakeraven::EHR.configure do |config|
+      config.tenant_resolver = ->(_request) { "tnt_test" }
+      config.facility_resolver = ->(_request) { "fac_main" }
+    end
+    # NO X-Tenant-Identifier header — the resolver hard-codes it.
+    token = issue_token(scopes: "system/Patient.read")
+    plaintext = token.plaintext_token || token.token
+    get "/lakeraven-ehr/Patient/#{@patient_identifier}",
+        headers: { "Authorization" => "Bearer #{plaintext}" }
+    assert_response :ok
+    body = JSON.parse(response.body)
+    assert_equal "Patient", body["resourceType"]
+  end
 end

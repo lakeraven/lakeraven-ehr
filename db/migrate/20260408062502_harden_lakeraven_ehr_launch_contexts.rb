@@ -5,10 +5,18 @@ class HardenLakeravenEHRLaunchContexts < ActiveRecord::Migration[8.1]
     add_column :lakeraven_ehr_launch_contexts, :oauth_application_uid, :string, null: false, default: ""
     add_column :lakeraven_ehr_launch_contexts, :consumed_at, :datetime
 
-    # Drop the default after the column is created so future inserts
-    # must specify the OAuth client. The empty-string default exists
-    # only to satisfy the not-null constraint at add_column time on
-    # any existing rows.
+    # Defensively delete any pre-hardening rows that carry the
+    # empty-string default. These rows have no OAuth client binding
+    # and can never resolve under the new resolve(... oauth_application_uid:)
+    # contract, so they're dead weight in the table regardless.
+    reversible do |dir|
+      dir.up do
+        execute "DELETE FROM lakeraven_ehr_launch_contexts WHERE oauth_application_uid = ''"
+      end
+    end
+
+    # Drop the default now that the column is populated. Future
+    # inserts must specify the OAuth client explicitly.
     change_column_default :lakeraven_ehr_launch_contexts, :oauth_application_uid, from: "", to: nil
 
     add_index :lakeraven_ehr_launch_contexts, :oauth_application_uid
