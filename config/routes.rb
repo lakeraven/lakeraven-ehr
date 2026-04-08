@@ -4,7 +4,10 @@ Lakeraven::EHR::Engine.routes.draw do
   # Lakeraven::EHR::Doorkeeper::*; the leading-slash absolute paths
   # tell Rails routing to constantize them at the top level.
   use_doorkeeper do
-    controllers tokens: "/doorkeeper/tokens",
+    # Tokens endpoint uses the engine's custom Smart::TokensController
+    # so SMART launch context (patient + encounter) can be embedded in
+    # the token response.
+    controllers tokens: "smart/tokens",
                 authorizations: "/doorkeeper/authorizations",
                 applications: "/doorkeeper/applications",
                 authorized_applications: "/doorkeeper/authorized_applications",
