@@ -57,6 +57,38 @@ module Lakeraven
         false
       end
 
+      # Authorize a FHIR resource read by checking the token against
+      # all three SMART contexts (patient/, user/, system/) plus their
+      # wildcards for the requested resource. Any one of:
+      #
+      #   patient/{Resource}.read | patient/*.read | patient/*.*
+      #   user/{Resource}.read    | user/*.read    | user/*.*
+      #   system/{Resource}.read  | system/*.read  | system/*.*
+      #
+      # is sufficient. Renders 403 OperationOutcome with code
+      # "forbidden" if none match.
+      def authorize_resource_read!(resource_type)
+        return true if can_read?(resource_type)
+
+        render_forbidden("Insufficient scope for #{resource_type} read")
+        false
+      end
+
+      # True if the token holds any read scope for the resource (or
+      # the matching wildcard).
+      def can_read?(resource_type)
+        return false unless current_token
+
+        token_scopes = current_token.scopes.to_s.split
+        allowed = %w[patient user system].flat_map do |ctx|
+          [
+            "#{ctx}/#{resource_type}.read", "#{ctx}/#{resource_type}.*",
+            "#{ctx}/*.read", "#{ctx}/*.*"
+          ]
+        end
+        (token_scopes & allowed).any?
+      end
+
       # Enforce patient-context binding: if the current token was
       # issued with a patient/ scope (i.e. it's bound to a specific
       # patient compartment), the requested patient_identifier must

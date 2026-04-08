@@ -20,12 +20,15 @@ class ChangeOauthAccessTokensResourceOwnerIdToString < ActiveRecord::Migration[8
   end
 
   def down
-    remove_index :oauth_access_tokens, :resource_owner_id if index_exists?(:oauth_access_tokens, :resource_owner_id)
-    change_column :oauth_access_tokens, :resource_owner_id, :bigint, using: "resource_owner_id::bigint"
-    add_index :oauth_access_tokens, :resource_owner_id
-
-    remove_index :oauth_access_grants, :resource_owner_id if index_exists?(:oauth_access_grants, :resource_owner_id)
-    change_column :oauth_access_grants, :resource_owner_id, :bigint, using: "resource_owner_id::bigint"
-    add_index :oauth_access_grants, :resource_owner_id
+    # The forward migration is effectively irreversible once any
+    # opaque pt_*-prefixed identifiers have been written to the
+    # column — the bigint cast would error on the first non-numeric
+    # row. Refuse the rollback rather than fail partway and leave
+    # the schema in a half-changed state. Operators who genuinely
+    # need to roll back must drop the affected rows first.
+    raise ActiveRecord::IrreversibleMigration,
+      "Cannot revert: opaque patient identifiers may already be stored in " \
+      "oauth_access_tokens.resource_owner_id and oauth_access_grants.resource_owner_id. " \
+      "Drop or rewrite affected rows before attempting rollback."
   end
 end

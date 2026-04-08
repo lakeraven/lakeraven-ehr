@@ -79,12 +79,23 @@ module Lakeraven
       end
 
       # Mark this context as consumed. Returns true if this call
-      # actually flipped the bit (single-use guarantee), false if the
-      # context was already consumed by an earlier resolve.
+      # actually flipped the bit (single-use guarantee), false if a
+      # parallel request beat us to it.
+      #
+      # The check is atomic: a single SQL UPDATE with a
+      # `consumed_at IS NULL` predicate. Two concurrent redemptions
+      # of the same launch token will see exactly one rows-affected
+      # count of 1; the other gets 0 and returns false.
       def consume!
-        return false if consumed_at.present?
-        update!(consumed_at: Time.current)
-        true
+        rows = self.class
+          .where(id: id, consumed_at: nil)
+          .update_all(consumed_at: Time.current)
+        if rows == 1
+          reload
+          true
+        else
+          false
+        end
       end
 
       def expired?
