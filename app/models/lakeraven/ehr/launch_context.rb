@@ -47,10 +47,15 @@ module Lakeraven
         )
       end
 
-      # Resolve a launch token to its context, or nil if missing/expired.
-      def self.resolve(launch_token)
-        return nil if launch_token.nil? || launch_token.empty?
-        active.find_by(launch_token: launch_token)
+      # Resolve a launch token to its context, or nil if missing,
+      # expired, or bound to a different tenant. Per ADR 0003 the
+      # caller MUST supply a tenant_identifier so a launch token
+      # minted by tenant A can't be replayed inside tenant B's OAuth
+      # flow to leak A's patient context.
+      def self.resolve(launch_token, tenant_identifier:)
+        return nil if launch_token.nil? || launch_token.to_s.empty?
+        return nil if tenant_identifier.nil? || tenant_identifier.to_s.empty?
+        active.find_by(launch_token: launch_token, tenant_identifier: tenant_identifier)
       end
 
       def expired?

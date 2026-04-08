@@ -29,7 +29,14 @@ module Lakeraven
           launch_token = params[:launch]
           return if launch_token.blank?
 
-          context = LaunchContext.resolve(launch_token)
+          # Resolve the tenant from the configured resolver (subdomain,
+          # header, or whatever the host app maps). A launch token
+          # bound to tenant A is only redeemable when the request
+          # arrives on tenant A's surface — per ADR 0003.
+          tenant_identifier = Lakeraven::EHR.configuration.tenant_resolver.call(request)
+          return if tenant_identifier.nil? || tenant_identifier.to_s.empty?
+
+          context = LaunchContext.resolve(launch_token, tenant_identifier: tenant_identifier)
           return unless context
 
           body = parsed_response_body

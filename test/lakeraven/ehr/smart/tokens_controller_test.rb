@@ -18,13 +18,16 @@ class Lakeraven::EHR::Smart::TokensControllerTest < ActionDispatch::IntegrationT
     @client_secret = @client.plaintext_secret || @client.secret
   end
 
-  def post_token(params = {})
-    post "/lakeraven-ehr/oauth/token", params: {
-      grant_type: "client_credentials",
-      client_id: @client.uid,
-      client_secret: @client_secret,
-      scope: "system/Patient.read"
-    }.merge(params)
+  def post_token(params = {}, tenant: "tnt_test")
+    headers = tenant ? { "X-Tenant-Identifier" => tenant } : {}
+    post "/lakeraven-ehr/oauth/token",
+         params: {
+           grant_type: "client_credentials",
+           client_id: @client.uid,
+           client_secret: @client_secret,
+           scope: "system/Patient.read"
+         }.merge(params),
+         headers: headers
   end
 
   test "client_credentials without launch returns a normal token response" do
@@ -40,7 +43,7 @@ class Lakeraven::EHR::Smart::TokensControllerTest < ActionDispatch::IntegrationT
       tenant_identifier: "tnt_test",
       patient_identifier: "pt_01H8X"
     )
-    post_token(launch: ctx.launch_token)
+    post_token({ launch: ctx.launch_token })
     assert_response :ok
     body = JSON.parse(response.body)
     assert body["access_token"].present?
@@ -48,7 +51,7 @@ class Lakeraven::EHR::Smart::TokensControllerTest < ActionDispatch::IntegrationT
   end
 
   test "client_credentials with an unknown launch token returns the token without patient" do
-    post_token(launch: "lc_does_not_exist")
+    post_token({ launch: "lc_does_not_exist" })
     assert_response :ok
     body = JSON.parse(response.body)
     assert body["access_token"].present?
@@ -62,7 +65,7 @@ class Lakeraven::EHR::Smart::TokensControllerTest < ActionDispatch::IntegrationT
       ttl: 1.minute
     )
     travel_to(Time.current + 5.minutes) do
-      post_token(launch: ctx.launch_token)
+      post_token({ launch: ctx.launch_token })
       assert_response :ok
       body = JSON.parse(response.body)
       refute body.key?("patient")
@@ -75,7 +78,7 @@ class Lakeraven::EHR::Smart::TokensControllerTest < ActionDispatch::IntegrationT
       patient_identifier: "pt_01H8X",
       encounter_identifier: "enc_01H8Y"
     )
-    post_token(launch: ctx.launch_token)
+    post_token({ launch: ctx.launch_token })
     assert_response :ok
     body = JSON.parse(response.body)
     assert_equal "pt_01H8X", body["patient"]
@@ -87,7 +90,7 @@ class Lakeraven::EHR::Smart::TokensControllerTest < ActionDispatch::IntegrationT
       tenant_identifier: "tnt_test",
       patient_identifier: "pt_01H8X"
     )
-    post_token(launch: ctx.launch_token)
+    post_token({ launch: ctx.launch_token })
     body = JSON.parse(response.body)
     assert_equal "Bearer", body["token_type"]
   end
@@ -98,5 +101,21 @@ class Lakeraven::EHR::Smart::TokensControllerTest < ActionDispatch::IntegrationT
     assert body["expires_in"].present?
     assert_equal "Bearer", body["token_type"]
     assert body["scope"].include?("system/Patient.read")
+  end
+
+  test "launch token from another tenant does not embed patient context" do
+    # Regression: a launch token minted in tnt_other must not embed
+    # its patient into a token response issued on tnt_test's surface.
+    # The resolver reads the request's tenant; LaunchContext.resolve
+    # enforces the binding.
+    ctx = Lakeraven::EHR::LaunchContext.mint(
+      tenant_identifier: "tnt_other",
+      patient_identifier: "pt_foreign"
+    )
+    post_token({ launch: ctx.launch_token }, tenant: "tnt_test")
+    assert_response :ok
+    body = JSON.parse(response.body)
+    assert body["access_token"].present?
+    refute body.key?("patient"), "expected no patient field on cross-tenant launch"
   end
 end

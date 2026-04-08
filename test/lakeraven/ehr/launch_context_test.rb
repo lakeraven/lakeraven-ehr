@@ -51,25 +51,40 @@ class Lakeraven::EHR::LaunchContextTest < ActiveSupport::TestCase
     assert_equal "enc_01H8Y", ctx.encounter_identifier
   end
 
-  test "resolve finds an active launch context by token" do
+  test "resolve finds an active launch context by token and tenant" do
     ctx = Lakeraven::EHR::LaunchContext.mint(**base_args)
-    found = Lakeraven::EHR::LaunchContext.resolve(ctx.launch_token)
+    found = Lakeraven::EHR::LaunchContext.resolve(ctx.launch_token, tenant_identifier: "tnt_test")
     assert_equal ctx, found
   end
 
   test "resolve returns nil for unknown token" do
-    assert_nil Lakeraven::EHR::LaunchContext.resolve("lc_unknown")
+    assert_nil Lakeraven::EHR::LaunchContext.resolve("lc_unknown", tenant_identifier: "tnt_test")
   end
 
-  test "resolve returns nil for nil and empty inputs" do
-    assert_nil Lakeraven::EHR::LaunchContext.resolve(nil)
-    assert_nil Lakeraven::EHR::LaunchContext.resolve("")
+  test "resolve returns nil for nil and empty launch_token" do
+    assert_nil Lakeraven::EHR::LaunchContext.resolve(nil, tenant_identifier: "tnt_test")
+    assert_nil Lakeraven::EHR::LaunchContext.resolve("", tenant_identifier: "tnt_test")
+  end
+
+  test "resolve returns nil for nil and empty tenant_identifier" do
+    ctx = Lakeraven::EHR::LaunchContext.mint(**base_args)
+    assert_nil Lakeraven::EHR::LaunchContext.resolve(ctx.launch_token, tenant_identifier: nil)
+    assert_nil Lakeraven::EHR::LaunchContext.resolve(ctx.launch_token, tenant_identifier: "")
+  end
+
+  test "resolve returns nil when the token belongs to a different tenant" do
+    # Regression: a launch token minted for tnt_test must not resolve
+    # when the request arrives on tnt_other's surface. Per ADR 0003 a
+    # launch bound to one tenant can't be redeemed inside another
+    # tenant's OAuth flow.
+    ctx = Lakeraven::EHR::LaunchContext.mint(**base_args)
+    assert_nil Lakeraven::EHR::LaunchContext.resolve(ctx.launch_token, tenant_identifier: "tnt_other")
   end
 
   test "resolve returns nil for an expired context" do
     ctx = Lakeraven::EHR::LaunchContext.mint(**base_args, ttl: 5.minutes)
     travel_to(Time.current + 6.minutes) do
-      assert_nil Lakeraven::EHR::LaunchContext.resolve(ctx.launch_token)
+      assert_nil Lakeraven::EHR::LaunchContext.resolve(ctx.launch_token, tenant_identifier: "tnt_test")
     end
   end
 

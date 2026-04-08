@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 class CreateLakeravenEHRLaunchContexts < ActiveRecord::Migration[8.1]
   def change
     create_table :lakeraven_ehr_launch_contexts do |t|

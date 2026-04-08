@@ -15,6 +15,8 @@ module Lakeraven
       attr_accessor :adapter
       attr_accessor :resource_owner_authenticator
       attr_accessor :admin_authenticator
+      attr_accessor :tenant_resolver
+      attr_accessor :facility_resolver
 
       def initialize
         @adapter = nil
@@ -31,6 +33,22 @@ module Lakeraven
         # Default admin authenticator: deny everything. The host
         # overrides if it wants to expose the Doorkeeper admin UI.
         @admin_authenticator = ->(_controller) { false }
+
+        # Default tenant resolver: read X-Tenant-Identifier header.
+        # Host SaaS apps override this with subdomain extraction or
+        # any other policy. Receives the request object and returns
+        # an opaque tenant identifier (or nil).
+        @tenant_resolver = ->(request) {
+          value = request.headers["X-Tenant-Identifier"].to_s.strip
+          value.empty? ? nil : value
+        }
+
+        # Default facility resolver: read X-Facility-Identifier header.
+        # May return nil; facility scoping is optional.
+        @facility_resolver = ->(request) {
+          value = request.headers["X-Facility-Identifier"].to_s.strip
+          value.empty? ? nil : value
+        }
       end
     end
 

@@ -46,7 +46,7 @@ When('I POST to the OAuth token endpoint with grant_type {string} and the launch
     client_secret: @client_secret,
     scope: @oauth_app.scopes.to_s,
     launch: @launch_context.launch_token
-  }
+  }, { "HTTP_X_TENANT_IDENTIFIER" => Lakeraven::EHR::Current.tenant_identifier || "tnt_test" }
 end
 
 When('I POST to the OAuth token endpoint with grant_type {string} and an unknown launch token') do |grant_type|
@@ -56,7 +56,7 @@ When('I POST to the OAuth token endpoint with grant_type {string} and an unknown
     client_secret: @client_secret,
     scope: @oauth_app.scopes.to_s,
     launch: "lc_does_not_exist"
-  }
+  }, { "HTTP_X_TENANT_IDENTIFIER" => Lakeraven::EHR::Current.tenant_identifier || "tnt_test" }
 end
 
 Then("the response body has no patient field") do
