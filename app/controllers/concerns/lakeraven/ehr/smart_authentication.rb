@@ -66,8 +66,14 @@ module Lakeraven
       end
 
       # Match a required scope like "patient/Patient.read" against the
-      # token's scope list, allowing wildcards in either the resource
-      # or the permission slot, plus system/* fallthrough.
+      # token's scope list, allowing wildcards in the resource slot
+      # plus a same-or-broader system/* fallthrough.
+      #
+      # Only candidates whose permission is the SAME as the requested
+      # permission (or `*`, meaning all permissions) are considered.
+      # A required `patient/Patient.write` is NOT satisfied by a
+      # `patient/*.read` token — that would let read scopes silently
+      # grant write access.
       def wildcard_scope_matches?(required_scope)
         return false unless current_token
 
@@ -77,9 +83,8 @@ module Lakeraven
         context, _resource, perm = match.captures
         wildcards = [
           "#{context}/*.#{perm}",
-          "#{context}/*.read",
           "#{context}/*.*",
-          "system/*.read",
+          "system/*.#{perm}",
           "system/*.*"
         ]
         wildcards.any? { |w| current_token.scopes.include?(w) }

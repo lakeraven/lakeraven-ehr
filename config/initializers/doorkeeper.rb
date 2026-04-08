@@ -15,10 +15,13 @@ Doorkeeper.configure do
   # other ActionController::Base helpers.
   api_only
 
-  # The base controller every Doorkeeper route inherits from. Use the
-  # engine's ApplicationController so the FHIR error helpers and tenant
-  # context are available to OAuth flows that go through the engine.
-  base_controller "Lakeraven::EHR::ApplicationController"
+  # Doorkeeper's controllers must NOT inherit from
+  # Lakeraven::EHR::ApplicationController. That class enforces
+  # require_tenant_context! and returns a 400 OperationOutcome when
+  # X-Tenant-Identifier is missing — but SMART OAuth endpoints
+  # (authorize, token, revoke) are explicitly callable before a
+  # client has tenant context. Doorkeeper falls back to its own
+  # ActionController::API base when base_controller isn't set.
 
   # Resource owner / admin authentication: delegate to host-app hooks.
   # The host-supplied lambda receives `self` (the controller instance)

@@ -20,4 +20,11 @@ World(Minitest::Assertions)
 Before do
   Lakeraven::EHR.reset_configuration!
   Lakeraven::EHR::Current.reset!
+
+  # Stub the SMART resource owner authenticator so OAuth scenarios
+  # that touch /oauth/authorize don't trip the default
+  # NotConfiguredError. Real host applications override this with
+  # a real user lookup.
+  Lakeraven::EHR.configuration.resource_owner_authenticator =
+    ->(_controller) { Struct.new(:id).new(1) }
 end

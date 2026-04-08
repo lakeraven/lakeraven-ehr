@@ -24,7 +24,6 @@ module Lakeraven
             authorization_endpoint: oauth_authorization_url,
             token_endpoint: oauth_token_url,
             revocation_endpoint: oauth_revoke_url,
-            introspection_endpoint: oauth_introspect_url,
 
             capabilities: capabilities,
             scopes_supported: scopes_supported,
@@ -43,10 +42,15 @@ module Lakeraven
         # SMART App Launch capabilities advertised by this server.
         # See http://hl7.org/fhir/smart-app-launch/conformance.html#capabilities
         def capabilities
+          # client-public is intentionally NOT advertised: the
+          # Doorkeeper schema requires oauth_applications.secret to
+          # be non-null, so public clients (which have no secret)
+          # can't actually be registered. Adding public-client
+          # support is a follow-up that needs a schema change and
+          # PKCE-only client validation.
           %w[
             launch-ehr
             launch-standalone
-            client-public
             client-confidential-symmetric
             context-passthrough-banner
             context-passthrough-style
@@ -105,10 +109,6 @@ module Lakeraven
 
         def oauth_revoke_url
           Lakeraven::EHR::Engine.routes.url_helpers.oauth_revoke_url(host: request.host_with_port, protocol: request.protocol)
-        end
-
-        def oauth_introspect_url
-          Lakeraven::EHR::Engine.routes.url_helpers.oauth_introspect_url(host: request.host_with_port, protocol: request.protocol)
         end
       end
     end

@@ -18,6 +18,11 @@ class SmartAuthTestController < ::ActionController::API
     return unless authorize_scope!("patient/Patient.read")
     render json: { ok: true }
   end
+
+  def patient_write
+    return unless authorize_scope!("patient/Patient.write")
+    render json: { ok: true }
+  end
 end
 
 class Lakeraven::EHR::SmartAuthenticationTest < ActionDispatch::IntegrationTest
@@ -26,6 +31,7 @@ class Lakeraven::EHR::SmartAuthenticationTest < ActionDispatch::IntegrationTest
     Rails.application.routes.draw do
       get "/_smart_auth_test/show", to: "smart_auth_test#show"
       get "/_smart_auth_test/patient_read", to: "smart_auth_test#patient_read"
+      get "/_smart_auth_test/patient_write", to: "smart_auth_test#patient_write"
     end
 
     @client = Doorkeeper::Application.create!(
@@ -130,6 +136,32 @@ class Lakeraven::EHR::SmartAuthenticationTest < ActionDispatch::IntegrationTest
   test "authorize_scope! accepts system/*.read for any patient resource" do
     token = issue_token(scopes: "system/*.read")
     get "/_smart_auth_test/patient_read", headers: bearer(token)
+    assert_response :ok
+  end
+
+  test "patient/*.read does NOT satisfy a write requirement" do
+    # Regression: a read-only wildcard token must not silently pass a
+    # write authorization check.
+    token = issue_token(scopes: "patient/*.read")
+    get "/_smart_auth_test/patient_write", headers: bearer(token)
+    assert_response :forbidden
+  end
+
+  test "system/*.read does NOT satisfy a write requirement" do
+    token = issue_token(scopes: "system/*.read")
+    get "/_smart_auth_test/patient_write", headers: bearer(token)
+    assert_response :forbidden
+  end
+
+  test "patient/*.write satisfies a patient/Patient.write requirement" do
+    token = issue_token(scopes: "patient/*.write")
+    get "/_smart_auth_test/patient_write", headers: bearer(token)
+    assert_response :ok
+  end
+
+  test "patient/*.* satisfies any patient permission" do
+    token = issue_token(scopes: "patient/*.*")
+    get "/_smart_auth_test/patient_write", headers: bearer(token)
     assert_response :ok
   end
 end
