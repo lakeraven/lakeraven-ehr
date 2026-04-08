@@ -10,9 +10,22 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_04_07_234907) do
+ActiveRecord::Schema[8.1].define(version: 2026_04_08_000318) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
+
+  create_table "lakeraven_ehr_launch_contexts", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "encounter_identifier"
+    t.datetime "expires_at", null: false
+    t.string "facility_identifier"
+    t.string "launch_token", null: false
+    t.string "patient_identifier", null: false
+    t.string "tenant_identifier", null: false
+    t.datetime "updated_at", null: false
+    t.index ["launch_token"], name: "index_lakeraven_ehr_launch_contexts_on_launch_token", unique: true
+    t.index ["tenant_identifier"], name: "index_lakeraven_ehr_launch_contexts_on_tenant_identifier"
+  end
 
   create_table "oauth_access_grants", force: :cascade do |t|
     t.bigint "application_id", null: false
