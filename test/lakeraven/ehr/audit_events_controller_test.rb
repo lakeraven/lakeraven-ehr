@@ -137,4 +137,46 @@ class Lakeraven::EHR::AuditEventsControllerTest < ActionDispatch::IntegrationTes
     get "/lakeraven-ehr/AuditEvent", headers: auth_headers(scopes: "user/AuditEvent.read")
     assert_response :ok
   end
+
+  test "Bundle.total reports the full match count, not the current page size" do
+    # Seed enough rows in tnt_test that a _count-limited page under-counts
+    # total matches. The previous implementation set total from the
+    # limited .to_a, which would report 2 here instead of 10.
+    10.times do |i|
+      Lakeraven::EHR::AuditEvent.create!(
+        event_type: "rest", action: "R", outcome: "0",
+        tenant_identifier: "tnt_test", facility_identifier: "fac_main",
+        agent_who_type: "Application", agent_who_identifier: "client-a",
+        entity_type: "Patient", entity_identifier: "pt_bulk_#{i}"
+      )
+    end
+    get "/lakeraven-ehr/AuditEvent?_count=2", headers: auth_headers
+    body = JSON.parse(response.body)
+    # 2 original tnt_test rows from setup + 10 new ones = 12 total
+    assert_equal 12, body["total"]
+    assert_equal 2, body["entry"].length
+  end
+
+  test "partial entity filter returns 400 OperationOutcome" do
+    # Supplying entity-type without entity-identifier (or vice versa)
+    # was previously ignored; now fails loud so ambiguous queries
+    # don't silently return unfiltered tenant rows.
+    get "/lakeraven-ehr/AuditEvent?entity-type=Patient", headers: auth_headers
+    assert_response :bad_request
+    body = JSON.parse(response.body)
+    assert_equal "OperationOutcome", body["resourceType"]
+    assert_equal "invalid", body["issue"].first["code"]
+  end
+
+  test "partial entity filter with only entity-identifier also returns 400" do
+    get "/lakeraven-ehr/AuditEvent?entity-identifier=pt_01H8X", headers: auth_headers
+    assert_response :bad_request
+    body = JSON.parse(response.body)
+    assert_equal "invalid", body["issue"].first["code"]
+  end
+
+  test "no entity filter params returns all tenant rows (unchanged)" do
+    get "/lakeraven-ehr/AuditEvent", headers: auth_headers
+    assert_response :ok
+  end
 end
