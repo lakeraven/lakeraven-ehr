@@ -57,6 +57,77 @@ module Lakeraven
         false
       end
 
+      # Authorize a FHIR resource read by checking the token against
+      # all three SMART contexts (patient/, user/, system/) plus their
+      # wildcards for the requested resource. Any one of:
+      #
+      #   patient/{Resource}.read | patient/*.read | patient/*.*
+      #   user/{Resource}.read    | user/*.read    | user/*.*
+      #   system/{Resource}.read  | system/*.read  | system/*.*
+      #
+      # is sufficient. Renders 403 OperationOutcome with code
+      # "forbidden" if none match.
+      def authorize_resource_read!(resource_type)
+        return true if can_read?(resource_type)
+
+        render_forbidden("Insufficient scope for #{resource_type} read")
+        false
+      end
+
+      # True if the token holds any read scope for the resource (or
+      # the matching wildcard).
+      def can_read?(resource_type)
+        return false unless current_token
+
+        token_scopes = current_token.scopes.to_s.split
+        allowed = %w[patient user system].flat_map do |ctx|
+          [
+            "#{ctx}/#{resource_type}.read", "#{ctx}/#{resource_type}.*",
+            "#{ctx}/*.read", "#{ctx}/*.*"
+          ]
+        end
+        (token_scopes & allowed).any?
+      end
+
+      # Enforce patient-context binding: if the current token was
+      # issued with a patient/ scope (i.e. it's bound to a specific
+      # patient compartment), the requested patient_identifier must
+      # match the one bound to the token.
+      #
+      # user/ and system/ tokens bypass this check because they're
+      # not patient-scoped.
+      #
+      # Returns true on success; renders a 403 OperationOutcome with
+      # code "forbidden" and returns false on failure.
+      def authorize_patient_context!(requested_patient_identifier)
+        return true unless patient_context_token?
+
+        bound_identifier = current_token_patient_identifier
+        if bound_identifier.nil? || bound_identifier.empty?
+          render_forbidden("Patient context required but not bound to token")
+          return false
+        end
+        if bound_identifier != requested_patient_identifier.to_s
+          render_forbidden("Patient context mismatch")
+          return false
+        end
+        true
+      end
+
+      # The opaque patient identifier (pt_*) bound to the current
+      # token via SMART launch context. Stored on the access token's
+      # resource_owner_id when the token was issued with a patient/
+      # scope.
+      def current_token_patient_identifier
+        return nil unless current_token
+        current_token.resource_owner_id.to_s
+      end
+
+      def patient_context_token?
+        return false unless current_token
+        current_token.scopes.to_s.include?("patient/")
+      end
+
       private
 
       def extract_bearer_token

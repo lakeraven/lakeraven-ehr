@@ -130,6 +130,28 @@ def do_get_patient(identifier)
   headers = {}
   headers["X-Tenant-Identifier"]   = Lakeraven::EHR::Current.tenant_identifier unless @omit_tenant_header
   headers["X-Facility-Identifier"] = Lakeraven::EHR::Current.facility_identifier if Lakeraven::EHR::Current.facility_identifier
+
+  # Mint a Bearer token with system/Patient.read scope so the
+  # SmartAuthentication boundary on PatientsController is satisfied.
+  # The us_core_patient_api scenarios assume an authorized client; the
+  # auth-boundary cases (missing token, wrong scope) live in
+  # fhir_smart_authentication.feature.
+  unless @omit_bearer_token
+    @cucumber_oauth_app ||= Doorkeeper::Application.create!(
+      name: "us-core-patient-cucumber",
+      redirect_uri: "https://example.test/callback",
+      scopes: "system/Patient.read",
+      confidential: true
+    )
+    token = Doorkeeper::AccessToken.create!(
+      application: @cucumber_oauth_app,
+      scopes: "system/Patient.read",
+      expires_in: 3600
+    )
+    plaintext = token.plaintext_token || token.token
+    headers["Authorization"] = "Bearer #{plaintext}"
+  end
+
   rack_env = headers.transform_keys { |k| "HTTP_#{k.upcase.tr('-', '_')}" }
   get "/lakeraven-ehr/Patient/#{identifier}", {}, rack_env
 end
@@ -141,6 +163,8 @@ end
 Before do
   @parsed_body = nil
   @omit_tenant_header = false
+  @omit_bearer_token = false
   @last_requested_identifier = nil
   @other_tenant_identifier = nil
+  @cucumber_oauth_app = nil
 end

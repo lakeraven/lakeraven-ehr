@@ -23,6 +23,11 @@ class SmartAuthTestController < ::ActionController::API
     return unless authorize_scope!("patient/Patient.write")
     render json: { ok: true }
   end
+
+  def patient_context
+    return unless authorize_patient_context!(params[:identifier])
+    render json: { ok: true, identifier: params[:identifier] }
+  end
 end
 
 class Lakeraven::EHR::SmartAuthenticationTest < ActionDispatch::IntegrationTest
@@ -32,6 +37,7 @@ class Lakeraven::EHR::SmartAuthenticationTest < ActionDispatch::IntegrationTest
       get "/_smart_auth_test/show", to: "smart_auth_test#show"
       get "/_smart_auth_test/patient_read", to: "smart_auth_test#patient_read"
       get "/_smart_auth_test/patient_write", to: "smart_auth_test#patient_write"
+      get "/_smart_auth_test/patient_context/:identifier", to: "smart_auth_test#patient_context"
     end
 
     @client = Doorkeeper::Application.create!(
@@ -163,5 +169,50 @@ class Lakeraven::EHR::SmartAuthenticationTest < ActionDispatch::IntegrationTest
     token = issue_token(scopes: "patient/*.*")
     get "/_smart_auth_test/patient_write", headers: bearer(token)
     assert_response :ok
+  end
+
+  # -- authorize_patient_context! --------------------------------------------
+
+  def issue_patient_token(patient_identifier:, scopes: "patient/Patient.read")
+    Doorkeeper::AccessToken.create!(
+      application: @client,
+      resource_owner_id: patient_identifier,
+      scopes: scopes,
+      expires_in: 3600
+    )
+  end
+
+  test "authorize_patient_context! grants access when token patient matches request" do
+    token = issue_patient_token(patient_identifier: "pt_01H8X")
+    get "/_smart_auth_test/patient_context/pt_01H8X", headers: bearer(token)
+    assert_response :ok
+  end
+
+  test "authorize_patient_context! returns 403 forbidden on patient mismatch" do
+    token = issue_patient_token(patient_identifier: "pt_01H8X")
+    get "/_smart_auth_test/patient_context/pt_other", headers: bearer(token)
+    assert_response :forbidden
+    body = JSON.parse(response.body)
+    assert_equal "forbidden", body["issue"].first["code"]
+  end
+
+  test "authorize_patient_context! bypasses the check for system tokens" do
+    token = issue_token(scopes: "system/Patient.read")
+    get "/_smart_auth_test/patient_context/pt_01H8X", headers: bearer(token)
+    assert_response :ok
+  end
+
+  test "authorize_patient_context! bypasses the check for user tokens" do
+    token = issue_token(scopes: "user/Patient.read")
+    get "/_smart_auth_test/patient_context/pt_01H8X", headers: bearer(token)
+    assert_response :ok
+  end
+
+  test "authorize_patient_context! returns 403 when patient scope token has no bound patient" do
+    token = issue_patient_token(patient_identifier: "")
+    get "/_smart_auth_test/patient_context/pt_01H8X", headers: bearer(token)
+    assert_response :forbidden
+    body = JSON.parse(response.body)
+    assert_equal "forbidden", body["issue"].first["code"]
   end
 end

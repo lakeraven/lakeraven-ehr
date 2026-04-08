@@ -6,16 +6,17 @@ module Lakeraven
     #
     # Handles two cross-cutting concerns:
     #
-    # 1. **Tenant context.** Reads X-Tenant-Identifier and
-    #    X-Facility-Identifier from request headers and stuffs them
-    #    into Lakeraven::EHR::Current. SMART auth (#52) will replace
-    #    the header source with the SMART launch context once it
-    #    lands; the rest of the engine doesn't need to care which
-    #    flavor populated Current.
+    # 1. **Tenant context.** Calls the host-supplied tenant_resolver
+    #    on every request, populates Lakeraven::EHR::Current with the
+    #    resolved tenant and facility, and renders a 400 OperationOutcome
+    #    when the resolver returns blank. The default resolvers read
+    #    X-Tenant-Identifier / X-Facility-Identifier headers; host
+    #    SaaS apps override these to extract from a subdomain or any
+    #    other URL-bound source.
     #
-    # 2. **FHIR error rendering.** Standardizes 404, 400, and other
-    #    error responses as application/fhir+json OperationOutcome
-    #    resources rather than the Rails default HTML / JSON.
+    # 2. **FHIR error rendering.** Standardizes 400/404/4xx error
+    #    responses as application/fhir+json OperationOutcome resources
+    #    rather than the Rails default HTML / JSON.
     class ApplicationController < ActionController::API
       FHIR_CONTENT_TYPE = "application/fhir+json"
 
@@ -24,21 +25,18 @@ module Lakeraven
       private
 
       def require_tenant_context!
-        # Strip whitespace before the blank check so a header of " " or
-        # "\t" produces the same 400 OperationOutcome as a missing header
-        # rather than slipping through and producing a 404 downstream.
-        tenant = request.headers["X-Tenant-Identifier"].to_s.strip
-        if tenant.empty?
+        tenant = Lakeraven::EHR.configuration.tenant_resolver.call(request)
+        if tenant.nil? || tenant.to_s.strip.empty?
           render_operation_outcome(
             status: :bad_request,
             severity: "error",
             code: "required",
-            diagnostics: "X-Tenant-Identifier header is required"
+            diagnostics: "Tenant context is required"
           )
           return
         end
         Current.tenant_identifier   = tenant
-        Current.facility_identifier = request.headers["X-Facility-Identifier"].to_s.strip.presence
+        Current.facility_identifier = Lakeraven::EHR.configuration.facility_resolver.call(request)
       end
 
       def render_operation_outcome(status:, severity:, code:, diagnostics: nil)
