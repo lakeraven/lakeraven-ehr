@@ -32,6 +32,15 @@ module Lakeraven
       private
 
       def record_clinical_access_audit
+        # Rails runs after_action callbacks even when a before_action
+        # short-circuited the request with a render (e.g. 401 from
+        # authenticate_smart_token!). Skip auditing when there is no
+        # authenticated token — a failed-auth request never touched
+        # PHI, so it doesn't belong in the clinical-access audit log.
+        # Failed auth is captured by SmartAuthentication at the login
+        # boundary.
+        return unless respond_to?(:current_token, true) && current_token
+
         AuditEvent.create!(
           event_type: "rest",
           action: audit_action_from_http_method,

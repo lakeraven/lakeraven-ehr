@@ -19,7 +19,7 @@ module Lakeraven
         def to_h
           {
             resourceType: "AuditEvent",
-            id: @record.id.to_s,
+            id: @record.audit_event_identifier,
             type: build_type,
             action: @record.action,
             recorded: @record.recorded&.iso8601,

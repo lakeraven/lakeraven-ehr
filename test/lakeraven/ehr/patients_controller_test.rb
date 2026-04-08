@@ -218,11 +218,12 @@ class Lakeraven::EHR::PatientsControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "a 401 auth failure does NOT produce an AuditEvent" do
-    # The audit concern runs as after_action inside the PatientsController
-    # request cycle. A 401 from authenticate_smart_token! short-circuits
-    # before reaching the show action and before the after_action fires.
-    # That's intentional: failed auth is logged at the auth layer, not
-    # as a successful PHI access.
+    # Rails runs after_action callbacks even when a before_action
+    # renders a 401 and halts the filter chain. AuditableClinicalAccess
+    # explicitly checks that current_token is set and skips when it
+    # isn't, so a failed-auth request never hits the audit table.
+    # Failed auth is captured at the login boundary in
+    # SmartAuthentication, not as a clinical-access audit row.
     assert_no_difference -> { Lakeraven::EHR::AuditEvent.count } do
       get "/lakeraven-ehr/Patient/#{@patient_identifier}",
           headers: { "X-Tenant-Identifier" => "tnt_test" }

@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "securerandom"
+
 module Lakeraven
   module EHR
     # FHIR R4 AuditEvent — persistent record of PHI access.
@@ -46,6 +48,7 @@ module Lakeraven
         "12" => "Major Failure"
       }.freeze
 
+      validates :audit_event_identifier, presence: true, uniqueness: true
       validates :event_type, presence: true, inclusion: { in: EVENT_TYPES.keys }
       validates :action, presence: true, inclusion: { in: ACTIONS.keys }
       validates :outcome, presence: true, inclusion: { in: OUTCOMES.keys }
@@ -55,6 +58,7 @@ module Lakeraven
       validates :agent_who_identifier, presence: true
 
       before_validation :set_recorded_timestamp, on: :create
+      before_validation :mint_audit_event_identifier, on: :create
 
       scope :for_tenant, ->(tenant_identifier) { where(tenant_identifier: tenant_identifier) }
       scope :for_entity, ->(type, identifier) { where(entity_type: type, entity_identifier: identifier) }
@@ -62,7 +66,9 @@ module Lakeraven
       scope :by_action, ->(action) { where(action: action) }
       scope :successful, -> { where(outcome: "0") }
       scope :failed, -> { where.not(outcome: "0") }
-      scope :recent, -> { order(recorded: :desc) }
+      # recent sort breaks ties on id so tests (and real clients) get
+      # a stable order when two rows share the same recorded timestamp.
+      scope :recent, -> { order(recorded: :desc, id: :desc) }
 
       # -- immutability --------------------------------------------------------
 
@@ -98,6 +104,10 @@ module Lakeraven
 
       def set_recorded_timestamp
         self.recorded ||= Time.current
+      end
+
+      def mint_audit_event_identifier
+        self.audit_event_identifier ||= "aud_#{SecureRandom.hex(16)}"
       end
     end
   end

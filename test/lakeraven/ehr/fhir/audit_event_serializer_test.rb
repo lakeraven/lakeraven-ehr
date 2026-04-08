@@ -29,9 +29,12 @@ class Lakeraven::EHR::FHIR::AuditEventSerializerTest < ActiveSupport::TestCase
     assert_equal "AuditEvent", Serializer.call(record)[:resourceType]
   end
 
-  test "id is the Rails primary key as a string" do
+  test "id is the opaque aud_-prefixed audit_event_identifier, never the Rails PK" do
     r = record
-    assert_equal r.id.to_s, Serializer.call(r)[:id]
+    serialized = Serializer.call(r)
+    assert_equal r.audit_event_identifier, serialized[:id]
+    assert serialized[:id].start_with?("aud_"), serialized[:id]
+    refute_equal r.id.to_s, serialized[:id]
   end
 
   test "type block carries the audit-event-type coding" do
