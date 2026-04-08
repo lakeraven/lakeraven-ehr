@@ -21,6 +21,12 @@ Before do
   Lakeraven::EHR.reset_configuration!
   Lakeraven::EHR::Current.reset!
 
+  # Clear engine-managed state so rows don't bleed across scenarios.
+  # Audit rows are read-only via ActiveRecord but delete_all hits the
+  # SQL layer directly and is allowed.
+  Lakeraven::EHR::AuditEvent.delete_all
+  Lakeraven::EHR::LaunchContext.delete_all
+
   # Stub the SMART resource owner authenticator so OAuth scenarios
   # that touch /oauth/authorize don't trip the default
   # NotConfiguredError. Real host applications override this with
