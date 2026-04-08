@@ -12,10 +12,13 @@ module Lakeraven
     # patient must match the requested identifier.
     class PatientsController < ApplicationController
       include SmartAuthentication
+      include AuditableClinicalAccess
 
       before_action :authenticate_smart_token!
       before_action :require_patient_read_scope!, only: :show
       before_action :enforce_patient_context!, only: :show
+
+      audit_clinical_access only: :show
 
       def show
         record = EHR.adapter.find_patient(

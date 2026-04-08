@@ -22,4 +22,7 @@ Lakeraven::EHR::Engine.routes.draw do
   # opaque pt_-prefixed token from ADR 0004 — never the backend DFN.
   get "Patient/:identifier", to: "patients#show", as: :patient,
       constraints: { identifier: %r{[^/]+} }
+
+  # FHIR R4 AuditEvent — compliance query endpoint.
+  get "AuditEvent", to: "audit_events#index", as: :audit_events
 end
