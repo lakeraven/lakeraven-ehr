@@ -14,6 +14,12 @@ gem "puma"
 gem "pg"
 gem "propshaft"
 
+# SMART on FHIR / OAuth 2.0 provider — handles the authorization
+# code flow, PKCE, refresh tokens, and token introspection. The
+# engine wraps Doorkeeper with a SMART configuration endpoint and
+# its own scope vocabulary; Doorkeeper handles the OAuth 2.0 mechanics.
+gem "doorkeeper", "~> 5.9"
+
 group :development, :test do
   gem "rubocop-rails-omakase", require: false
   gem "cucumber-rails", require: false

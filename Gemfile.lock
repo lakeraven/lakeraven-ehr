@@ -139,6 +139,8 @@ GEM
     cucumber-tag-expressions (8.1.0)
     date (3.5.1)
     diff-lcs (1.6.2)
+    doorkeeper (5.9.0)
+      railties (>= 5)
     drb (2.2.3)
     erb (6.0.2)
     erubi (1.13.1)
@@ -347,6 +349,7 @@ PLATFORMS
 
 DEPENDENCIES
   cucumber-rails
+  doorkeeper (~> 5.9)
   lakeraven-ehr!
   pg
   propshaft

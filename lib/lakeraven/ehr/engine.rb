@@ -20,6 +20,12 @@ module Lakeraven
       # controller paths — without this, routes pointing at
       # "lakeraven/ehr/patients#show" would try to resolve
       # Lakeraven::Ehr::PatientsController and fail.
+      #
+      # SMART is intentionally NOT registered as an acronym. The wire
+      # name "SMART" appears in URL paths and the discovery doc, but
+      # the Ruby namespace is Lakeraven::EHR::Smart so that idiomatic
+      # Ruby names like SmartAuthentication still resolve via standard
+      # inflection.
       initializer "lakeraven_ehr.acronyms", before: :set_autoload_paths do
         ActiveSupport::Inflector.inflections(:en) do |inflect|
           inflect.acronym "EHR"
