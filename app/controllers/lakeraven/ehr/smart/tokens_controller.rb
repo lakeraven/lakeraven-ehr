@@ -36,8 +36,24 @@ module Lakeraven
           tenant_identifier = Lakeraven::EHR.configuration.tenant_resolver.call(request)
           return if tenant_identifier.nil? || tenant_identifier.to_s.empty?
 
-          context = LaunchContext.resolve(launch_token, tenant_identifier: tenant_identifier)
+          # The OAuth client_id binds the launch to a specific SMART
+          # app. A launch minted for app X can't be redeemed by app Y
+          # even with a stolen launch token.
+          client_id = params[:client_id].to_s
+          return if client_id.empty?
+
+          context = LaunchContext.resolve(
+            launch_token,
+            tenant_identifier: tenant_identifier,
+            oauth_application_uid: client_id
+          )
           return unless context
+
+          # Single-use: mark the context consumed before embedding so
+          # a replay (even from the legitimate client) returns the
+          # token without patient context. consume! returns false if
+          # something else already won the race.
+          return unless context.consume!
 
           body = parsed_response_body
           body["patient"] = context.patient_identifier if context.patient_identifier

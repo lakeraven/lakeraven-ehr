@@ -9,6 +9,7 @@ Given('the host mints a launch context for patient {string}') do |display_name|
 
   @launch_context = Lakeraven::EHR::LaunchContext.mint(
     tenant_identifier: tenant,
+    oauth_application_uid: @oauth_app.uid,
     patient_identifier: patient[:patient_identifier],
     facility_identifier: Lakeraven::EHR::Current.facility_identifier
   )
@@ -21,6 +22,7 @@ Given('the host mints a launch context for patient {string} that expires in {int
 
   @launch_context = Lakeraven::EHR::LaunchContext.mint(
     tenant_identifier: tenant,
+    oauth_application_uid: @oauth_app.uid,
     patient_identifier: patient[:patient_identifier],
     ttl: minutes.minutes
   )
