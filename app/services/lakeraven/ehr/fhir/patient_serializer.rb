@@ -77,17 +77,18 @@ module Lakeraven
         # Gender
         # ----------------------------------------------------------------
 
+        # FHIR R4 administrative-gender: male | female | other | unknown.
+        # VistA/RPMS uses single-char M/F/U — map those to FHIR codes.
+        # Anything already in the FHIR code set passes through; anything
+        # else normalizes to "unknown" so the resource always validates.
         def gender_value
           raw = (@record[:gender] || @record[:sex]).to_s
-          case raw.upcase
-          when "M" then "male"
-          when "F" then "female"
-          when "MALE" then "male"
-          when "FEMALE" then "female"
-          when "OTHER" then "other"
-          else
-            %w[male female other unknown].include?(raw) ? raw : "unknown"
-          end
+          # VistA single-char codes
+          return "male" if raw == "M"
+          return "female" if raw == "F"
+          # Already FHIR-compliant (lowercase)
+          return raw if %w[male female other unknown].include?(raw)
+          "unknown"
         end
 
         # ----------------------------------------------------------------

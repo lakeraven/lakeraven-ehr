@@ -8,16 +8,20 @@ module Lakeraven
     # This is the canonical Patient for lakeraven-ehr host apps. It provides:
     # - RPMS/VistA attribute set (DFN, name in LAST,FIRST format, etc.)
     # - Composite field syncing (name ↔ first_name/last_name, dob ↔ born_on)
-    # - FHIR R4 serialization via Fhir::PatientSerializer
-    # - FHIR R4 deserialization via Fhir::PatientDeserializer
+    # - FHIR R4 serialization via FHIR::PatientSerializer
+    # - FHIR R4 deserialization via FHIR::PatientDeserializer
     # - US Core race/ethnicity + IHS tribal + SOGI extensions
     #
-    # Host apps (rpms_redux, lakeraven-ehr-saas) subclass this to wire
-    # gateway persistence and host-specific behavior.
+    # Host apps subclass this to wire gateway persistence and
+    # host-specific behavior.
     class Patient
       include ActiveModel::Model
       include ActiveModel::Attributes
       include ActiveModel::Validations
+
+      # Opaque identifier per ADR 0004. Set by the adapter; not derived
+      # from dfn or any backend-native key.
+      attribute :patient_identifier, :string
 
       # RPMS/VistA core demographics
       attribute :dfn, :integer
@@ -106,14 +110,14 @@ module Lakeraven
       end
 
       def to_param
-        dfn.to_s
+        patient_identifier || dfn.to_s
       end
 
       private
 
       def to_serializer_hash
         {
-          patient_identifier: dfn.present? ? "rpms-#{dfn}" : nil,
+          patient_identifier: patient_identifier || dfn&.to_s,
           display_name: name,
           date_of_birth: dob || birth_date,
           gender: gender || sex,

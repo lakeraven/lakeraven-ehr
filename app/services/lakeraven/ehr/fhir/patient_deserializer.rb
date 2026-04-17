@@ -38,7 +38,14 @@ module Lakeraven
           family = dig_from(name_obj, :family)
           given = dig_from(name_obj, :given)
           given_str = given.is_a?(Array) ? given.join(" ") : given
-          given_str.present? ? "#{family},#{given_str}" : family
+
+          if family.present? && given_str.present?
+            "#{family},#{given_str}"
+          elsif family.present?
+            family
+          elsif given_str.present?
+            given_str
+          end
         end
 
         def extract_birth_date
@@ -56,11 +63,13 @@ module Lakeraven
           end
         end
 
+        SSN_SYSTEM = "http://hl7.org/fhir/sid/us-ssn"
+
         def extract_ssn
           ids = dig(:identifier)
           return nil unless ids.is_a?(Array)
 
-          ssn_id = ids.find { |id| dig_from(id, :system).to_s.include?("ssn") }
+          ssn_id = ids.find { |id| dig_from(id, :system).to_s == SSN_SYSTEM }
           dig_from(ssn_id, :value)
         end
 
