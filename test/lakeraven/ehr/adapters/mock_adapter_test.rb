@@ -113,7 +113,7 @@ class Lakeraven::EHR::Adapters::MockAdapterTest < ActiveSupport::TestCase
     @adapter.seed_patient(
       tenant_identifier: "tnt_test", facility_identifier: "fac_main",
       display_name: "DOE,JOHN", date_of_birth: Date.new(1980, 1, 15), gender: "male",
-      identifiers: [ { system: "http://hl7.org/fhir/sid/us-ssn", value: "123-45-6789" } ]
+      identifiers: [ { system: "http://hl7.org/fhir/sid/us-ssn", value: "000-00-0000" } ]
     )
     @adapter.seed_patient(
       tenant_identifier: "tnt_test", facility_identifier: "fac_main",
@@ -123,7 +123,7 @@ class Lakeraven::EHR::Adapters::MockAdapterTest < ActiveSupport::TestCase
     results = @adapter.search_patients(
       tenant_identifier: "tnt_test",
       identifier_system: "http://hl7.org/fhir/sid/us-ssn",
-      identifier_value: "123-45-6789"
+      identifier_value: "000-00-0000"
     )
     assert_equal 1, results.length
     assert_equal "DOE,JOHN", results.first[:display_name]
@@ -147,11 +147,11 @@ class Lakeraven::EHR::Adapters::MockAdapterTest < ActiveSupport::TestCase
   test "search by identifier returns nothing when value doesn't match" do
     @adapter.seed_patient(tenant_identifier: "tnt_test", facility_identifier: "fac_main",
                           display_name: "DOE,JOHN", date_of_birth: Date.new(1980, 1, 15), gender: "male",
-                          identifiers: [ { system: "http://hl7.org/fhir/sid/us-ssn", value: "123-45-6789" } ])
+                          identifiers: [ { system: "http://hl7.org/fhir/sid/us-ssn", value: "000-00-0000" } ])
     results = @adapter.search_patients(
       tenant_identifier: "tnt_test",
       identifier_system: "http://hl7.org/fhir/sid/us-ssn",
-      identifier_value: "000-00-0000"
+      identifier_value: "999-99-9999"
     )
     assert_empty results
   end
