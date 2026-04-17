@@ -68,6 +68,14 @@ Then("the patient first_name should be {string}") do |expected|
   assert_equal expected, @patient.first_name
 end
 
+Then("the patient first_name should be blank") do
+  assert_nil @patient.first_name
+end
+
+Then("the patient last_name should be blank") do
+  assert_nil @patient.last_name
+end
+
 Then("the patient display_name should be {string}") do |expected|
   assert_equal expected, @patient.display_name
 end
@@ -168,18 +176,14 @@ Given("a FHIR Patient resource with family {string} given {string} gender {strin
   }
 end
 
-When("I extract attributes from the FHIR resource") do
-  @extracted = Lakeraven::EHR::FHIR::PatientDeserializer.call(@fhir_input)
-end
-
-Then("the extracted name should be {string}") do |expected|
-  assert_equal expected, @extracted[:name]
+When("I build a patient from the FHIR resource") do
+  @patient = Lakeraven::EHR::Patient.from_fhir(@fhir_input)
 end
 
 Then("the extracted sex should be {string}") do |expected|
-  assert_equal expected, @extracted[:sex]
+  assert_equal expected, @patient.sex
 end
 
 Then("the extracted dob should be {string}") do |expected|
-  assert_equal Date.parse(expected), @extracted[:dob]
+  assert_equal Date.parse(expected), @patient.dob
 end

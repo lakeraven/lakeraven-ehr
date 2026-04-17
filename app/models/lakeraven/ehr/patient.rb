@@ -105,8 +105,8 @@ module Lakeraven
         FHIR::PatientSerializer.call(to_serializer_hash)
       end
 
-      def self.from_fhir_attributes(fhir_resource)
-        FHIR::PatientDeserializer.call(fhir_resource)
+      def self.from_fhir(fhir_resource)
+        new(**FHIR::PatientDeserializer.call(fhir_resource))
       end
 
       def to_param

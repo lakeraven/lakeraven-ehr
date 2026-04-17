@@ -15,6 +15,13 @@ Feature: Patient clinical identity model
     And the patient display_name should be "John A Doe"
     And the patient formal_name should be "Doe, John A"
 
+  Scenario: Create a patient from a single-token name (no comma)
+    Given a patient with name "CHER"
+    Then the patient display_name should be "CHER"
+    And the patient formal_name should be "CHER"
+    And the patient first_name should be blank
+    And the patient last_name should be blank
+
   Scenario: Create a patient from separate name parts
     Given a patient with first_name "Jane" and last_name "Smith"
     Then the patient name should be "Smith,Jane"
@@ -38,10 +45,10 @@ Feature: Patient clinical identity model
     And the FHIR name given should include "JOHN"
 
   Scenario: to_fhir includes DFN and SSN identifiers
-    Given a patient with dfn 12345 and ssn "123-45-6789"
+    Given a patient with dfn 12345 and ssn "000-00-0000"
     When I serialize the patient to FHIR
     Then the FHIR identifiers should include system "urn:oid:2.16.840.1.113883.4.349" with value "12345"
-    And the FHIR identifiers should include system "http://hl7.org/fhir/sid/us-ssn" with value "123-45-6789"
+    And the FHIR identifiers should include system "http://hl7.org/fhir/sid/us-ssn" with value "000-00-0000"
 
   Scenario: to_fhir includes address and telecom
     Given a patient with address "123 Main St" city "Toppenish" state "WA" zip "98948" phone "555-1234"
@@ -98,9 +105,11 @@ Feature: Patient clinical identity model
   # FHIR DESERIALIZATION
   # ===========================================================================
 
-  Scenario: from_fhir_attributes extracts demographics
+  Scenario: from_fhir builds a Patient from a FHIR resource
     Given a FHIR Patient resource with family "DOE" given "JOHN" gender "male" birthDate "1980-01-15"
-    When I extract attributes from the FHIR resource
-    Then the extracted name should be "DOE,JOHN"
+    When I build a patient from the FHIR resource
+    Then the patient name should be "DOE,JOHN"
+    And the patient last_name should be "Doe"
+    And the patient first_name should be "John"
     And the extracted sex should be "M"
     And the extracted dob should be "1980-01-15"
