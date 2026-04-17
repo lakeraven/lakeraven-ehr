@@ -98,6 +98,32 @@ Given("a FHIR Practitioner resource with family {string} given {string} npi {str
   }
 end
 
+Given("a FHIR Practitioner resource with ien {string} specialty {string} and provider_class {string}") do |ien, specialty, provider_class|
+  @fhir_input = {
+    resourceType: "Practitioner",
+    name: [ { family: "DOE", given: [ "JOHN" ] } ],
+    identifier: [
+      { system: "http://ihs.gov/rpms/provider-id", value: ien }
+    ],
+    qualification: [
+      { code: { text: specialty } },
+      { code: { text: provider_class } }
+    ]
+  }
+end
+
 When("I build a practitioner from the FHIR resource") do
   @practitioner = Lakeraven::EHR::Practitioner.from_fhir(@fhir_input)
+end
+
+Then("the practitioner ien should be {int}") do |expected|
+  assert_equal expected, @practitioner.ien
+end
+
+Then("the practitioner specialty should be {string}") do |expected|
+  assert_equal expected, @practitioner.specialty
+end
+
+Then("the practitioner provider_class should be {string}") do |expected|
+  assert_equal expected, @practitioner.provider_class
 end

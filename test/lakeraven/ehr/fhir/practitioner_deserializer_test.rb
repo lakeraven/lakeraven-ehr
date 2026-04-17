@@ -86,10 +86,37 @@ class Lakeraven::EHR::FHIR::PractitionerDeserializerTest < ActiveSupport::TestCa
     assert_nil Deserializer.call(resource)[:gender]
   end
 
-  # ── Specialty ──
+  # ── IEN ──
+
+  test "extracts IEN as integer from identifier" do
+    resource = base_resource.merge(identifier: base_resource[:identifier] + [
+      { system: "http://ihs.gov/rpms/provider-id", value: "42" }
+    ])
+    assert_equal 42, Deserializer.call(resource)[:ien]
+  end
+
+  test "returns nil IEN when not present" do
+    assert_nil Deserializer.call(base_resource)[:ien]
+  end
+
+  # ── Specialty + provider_class ──
 
   test "extracts specialty from first qualification" do
     assert_equal "Family Medicine", Deserializer.call(base_resource)[:specialty]
+  end
+
+  test "extracts provider_class from second qualification" do
+    resource = base_resource.merge(qualification: [
+      { code: { text: "Family Medicine" } },
+      { code: { text: "Physician" } }
+    ])
+    result = Deserializer.call(resource)
+    assert_equal "Family Medicine", result[:specialty]
+    assert_equal "Physician", result[:provider_class]
+  end
+
+  test "returns nil provider_class when only one qualification" do
+    assert_nil Deserializer.call(base_resource)[:provider_class]
   end
 
   test "returns nil specialty when no qualifications" do

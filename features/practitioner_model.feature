@@ -74,3 +74,10 @@ Feature: Practitioner clinical identity model
     And the practitioner last_name should be "Doe"
     And the practitioner first_name should be "John"
     And the practitioner npi should be "1234567890"
+
+  Scenario: from_fhir round-trips IEN and qualifications
+    Given a FHIR Practitioner resource with ien "42" specialty "Family Medicine" and provider_class "Physician"
+    When I build a practitioner from the FHIR resource
+    Then the practitioner ien should be 42
+    And the practitioner specialty should be "Family Medicine"
+    And the practitioner provider_class should be "Physician"

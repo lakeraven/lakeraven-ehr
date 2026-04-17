@@ -107,8 +107,6 @@ module Lakeraven
           ien: ien,
           specialty: specialty,
           provider_class: provider_class,
-          title: title,
-          service_section: service_section,
           phone: phone,
           identifiers: []
         }

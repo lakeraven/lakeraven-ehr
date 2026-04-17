@@ -9,6 +9,7 @@ module Lakeraven
       class PractitionerDeserializer
         NPI_SYSTEM = "http://hl7.org/fhir/sid/us-npi"
         DEA_SYSTEM = "http://hl7.org/fhir/sid/us-dea"
+        IEN_SYSTEM = "http://ihs.gov/rpms/provider-id"
 
         def self.call(fhir_resource)
           new(fhir_resource).extract
@@ -21,10 +22,12 @@ module Lakeraven
         def extract
           {
             name: extract_name,
+            ien: extract_ien,
             npi: extract_identifier(NPI_SYSTEM),
             dea_number: extract_identifier(DEA_SYSTEM),
             gender: map_gender,
-            specialty: extract_specialty
+            specialty: extract_qualification(0),
+            provider_class: extract_qualification(1)
           }.compact
         end
 
@@ -68,11 +71,16 @@ module Lakeraven
           end
         end
 
-        def extract_specialty
-          quals = dig(:qualification)
-          return nil unless quals.is_a?(Array) && quals.any?
+        def extract_ien
+          val = extract_identifier(IEN_SYSTEM)
+          val.present? ? val.to_i : nil
+        end
 
-          code = dig_from(quals.first, :code)
+        def extract_qualification(index)
+          quals = dig(:qualification)
+          return nil unless quals.is_a?(Array) && quals.length > index
+
+          code = dig_from(quals[index], :code)
           return nil unless code
 
           dig_from(code, :text)
