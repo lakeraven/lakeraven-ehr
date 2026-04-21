@@ -72,20 +72,21 @@ module Lakeraven
       def extract_bearer_token
         auth = request.headers["Authorization"]
         return nil if auth.blank?
+
         match = auth.match(/\ABearer\s+(.+)\z/i)
         match&.captures&.first
       end
 
       def patient_context_scope?
-        current_token&.scopes&.to_s&.match?(/\bpatient\//)
+        current_token&.scopes&.to_s&.match?(%r{\bpatient/})
       end
 
       def user_context_scope?
-        current_token&.scopes&.to_s&.match?(/\buser\//)
+        current_token&.scopes&.to_s&.match?(%r{\buser/})
       end
 
       def system_scope?
-        current_token&.scopes&.to_s&.match?(/\bsystem\//)
+        current_token&.scopes&.to_s&.match?(%r{\bsystem/})
       end
 
       def render_unauthorized(message = "Unauthorized")

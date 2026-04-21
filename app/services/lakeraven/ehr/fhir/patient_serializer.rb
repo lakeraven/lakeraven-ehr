@@ -41,6 +41,7 @@ module Lakeraven
 
         def build_name
           return {} if @p.name.blank?
+
           parts = @p.name.split(",")
           family = parts[0]&.strip
           given = parts[1]&.strip&.split(" ") || []
@@ -57,23 +58,21 @@ module Lakeraven
 
         def build_identifiers
           ids = []
-          if @p.dfn.present?
-            ids << { use: "usual", system: "urn:oid:2.16.840.1.113883.4.349", value: @p.dfn.to_s }
-          end
-          if @p.ssn.present?
-            ids << { use: "secondary", system: "http://hl7.org/fhir/sid/us-ssn", value: @p.ssn }
-          end
+          ids << { use: "usual", system: "urn:oid:2.16.840.1.113883.4.349", value: @p.dfn.to_s } if @p.dfn.present?
+          ids << { use: "secondary", system: "http://hl7.org/fhir/sid/us-ssn", value: @p.ssn } if @p.ssn.present?
           ids
         end
 
         def build_addresses
           return [] if @p.address_line1.blank?
+
           [ { use: "home", line: [ @p.address_line1 ], city: @p.city,
-              state: @p.state, postalCode: @p.zip_code, country: "US" }.compact ]
+             state: @p.state, postalCode: @p.zip_code, country: "US" }.compact ]
         end
 
         def build_telecoms
           return [] if @p.phone.blank?
+
           [ { system: "phone", value: @p.phone, use: "home" } ]
         end
       end

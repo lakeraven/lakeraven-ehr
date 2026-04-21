@@ -7,9 +7,9 @@ module Lakeraven
 
       def index
         patients = if params[:name].present?
-          Patient.search(params[:name])
+                     Patient.search(params[:name])
         else
-          Patient.search("")
+                     Patient.search("")
         end
 
         render_bundle(patients.map(&:to_fhir))

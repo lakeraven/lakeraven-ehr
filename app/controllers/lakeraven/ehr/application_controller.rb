@@ -18,6 +18,7 @@ module Lakeraven
 
       def authorize_fhir_scope!
         return if can_read?(fhir_resource_type)
+
         render_forbidden("Insufficient scope for reading #{fhir_resource_type}")
       end
 
