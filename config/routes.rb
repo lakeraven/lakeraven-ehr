@@ -14,4 +14,5 @@ Lakeraven::EHR::Engine.routes.draw do
   resources :service_requests, path: "ServiceRequest", only: %i[index]
   resources :immunizations, path: "Immunization", only: %i[index]
   resources :procedures, path: "Procedure", only: %i[index]
+  resources :coverage_eligibility_requests, path: "CoverageEligibilityRequest", only: %i[create]
 end
