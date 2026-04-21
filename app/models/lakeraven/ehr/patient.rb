@@ -37,7 +37,8 @@ module Lakeraven
       # -- Class methods (AR-like) -------------------------------------------
 
       def self.find_by_dfn(dfn)
-        return nil unless dfn.present? && dfn.to_i > 0
+        return nil unless dfn.present? && dfn.to_i.positive?
+
         PatientGateway.find(dfn.to_i)
       end
 
@@ -47,6 +48,7 @@ module Lakeraven
 
       def self.find_by_ssn(ssn)
         return nil if ssn.blank?
+
         PatientGateway.find_by_ssn(ssn.to_s)
       end
 
@@ -61,6 +63,7 @@ module Lakeraven
 
       def display_name
         return name if name.blank?
+
         parts = name.split(",")
         last = parts[0]&.strip
         first = parts[1]&.strip
@@ -69,6 +72,7 @@ module Lakeraven
 
       def formal_name
         return name if name.blank?
+
         parts = name.split(",")
         if parts.length >= 2
           last = parts[0]&.strip&.split&.map(&:capitalize)&.join(" ")
@@ -92,15 +96,13 @@ module Lakeraven
       private
 
       def sync_composite_fields
-        if first_name.present? && last_name.present? && name.blank?
-          self.name = "#{last_name},#{first_name}"
-        end
+        self.name = "#{last_name},#{first_name}" if first_name.present? && last_name.present? && name.blank?
 
-        if name.present? && first_name.blank? && last_name.blank?
-          parts = name.split(",")
-          self.last_name = parts[0]&.strip&.capitalize
-          self.first_name = parts[1]&.strip&.capitalize if parts.length > 1
-        end
+        return unless name.present? && first_name.blank? && last_name.blank?
+
+        parts = name.split(",")
+        self.last_name = parts[0]&.strip&.capitalize
+        self.first_name = parts[1]&.strip&.capitalize if parts.length > 1
       end
     end
   end

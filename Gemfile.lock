@@ -1,5 +1,7 @@
-PATH
-  remote: ../rpms-rpc
+GIT
+  remote: https://github.com/lakeraven/rpms-rpc.git
+  revision: 3ac2c769fc34df296484e4ff2947311ac0e1a5bc
+  branch: main
   specs:
     rpms-rpc (0.1.0)
       rexml (~> 3.2)
@@ -8,6 +10,7 @@ PATH
   remote: .
   specs:
     lakeraven-ehr (0.1.0)
+      doorkeeper (~> 5.8)
       rails (>= 8.1.0)
       rpms-rpc (~> 0.1)
 
@@ -96,6 +99,8 @@ GEM
     connection_pool (3.0.2)
     crass (1.0.6)
     date (3.5.1)
+    doorkeeper (5.9.0)
+      railties (>= 5)
     drb (2.2.3)
     erb (6.0.3)
     erubi (1.13.1)
