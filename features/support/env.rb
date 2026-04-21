@@ -2,6 +2,7 @@
 
 ENV["RAILS_ENV"] ||= "test"
 require File.expand_path("../../test/dummy/config/environment", __dir__)
+require File.expand_path("../../test/test_helper", __dir__)
 require "minitest/assertions"
 
 World(Minitest::Assertions)
