@@ -1,5 +1,7 @@
-PATH
-  remote: ../rpms-rpc
+GIT
+  remote: https://github.com/lakeraven/rpms-rpc.git
+  revision: 3ac2c769fc34df296484e4ff2947311ac0e1a5bc
+  branch: main
   specs:
     rpms-rpc (0.1.0)
       rexml (~> 3.2)
