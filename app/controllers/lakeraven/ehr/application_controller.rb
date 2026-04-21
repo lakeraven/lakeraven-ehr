@@ -4,6 +4,7 @@ module Lakeraven
   module EHR
     class ApplicationController < ActionController::API
       include SmartAuthentication
+      include AuditableClinicalAccess
 
       FHIR_CONTENT_TYPE = "application/fhir+json"
 
