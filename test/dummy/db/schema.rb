@@ -10,7 +10,24 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_04_21_080000) do
+ActiveRecord::Schema[8.1].define(version: 2026_04_21_090000) do
+  create_table "lakeraven_ehr_audit_events", force: :cascade do |t|
+    t.string "action", null: false
+    t.string "agent_who_identifier"
+    t.string "agent_who_type"
+    t.datetime "created_at", null: false
+    t.string "entity_identifier"
+    t.string "entity_type"
+    t.string "event_type", null: false
+    t.string "facility_identifier"
+    t.string "outcome", null: false
+    t.string "tenant_identifier"
+    t.datetime "updated_at", null: false
+    t.index [ "created_at" ], name: "index_lakeraven_ehr_audit_events_on_created_at"
+    t.index [ "entity_type" ], name: "index_lakeraven_ehr_audit_events_on_entity_type"
+    t.index [ "tenant_identifier" ], name: "index_lakeraven_ehr_audit_events_on_tenant_identifier"
+  end
+
   create_table "lakeraven_ehr_launch_contexts", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "encounter_id"
