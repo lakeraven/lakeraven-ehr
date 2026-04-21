@@ -58,6 +58,28 @@ module Lakeraven
       def emergency? = class_code == "EMER"
       def inpatient? = class_code == "IMP"
 
+      # -- Workflow methods --------------------------------------------------
+
+      # Close an encounter. Sets status to finished, records end time.
+      # Returns false if already finished.
+      def close(reason_code: nil, reason_display: nil)
+        if finished?
+          errors.add(:status, "already finished")
+          return false
+        end
+
+        self.status = "finished"
+        self.period_end = DateTime.current
+        self.reason_code = reason_code if reason_code
+        self.reason_display = reason_display if reason_display
+        true
+      end
+
+      # Cancel a planned encounter.
+      def cancel
+        self.status = "cancelled"
+      end
+
       # -- FHIR serialization ------------------------------------------------
 
       US_CORE_PROFILE = "http://hl7.org/fhir/us/core/StructureDefinition/us-core-encounter"
