@@ -24,7 +24,8 @@ module Lakeraven
       # -- Class methods -----------------------------------------------------
 
       def self.find_by_ien(ien)
-        return nil unless ien.present? && ien.to_i > 0
+        return nil unless ien.present? && ien.to_i.positive?
+
         PractitionerGateway.find(ien.to_i)
       end
 
@@ -43,6 +44,7 @@ module Lakeraven
 
       def display_name
         return name if name.blank?
+
         parts = name.split(",")
         last = parts[0]&.strip
         first = parts[1]&.strip
@@ -62,15 +64,13 @@ module Lakeraven
       private
 
       def sync_composite_fields
-        if first_name.present? && last_name.present? && name.blank?
-          self.name = "#{last_name},#{first_name}"
-        end
+        self.name = "#{last_name},#{first_name}" if first_name.present? && last_name.present? && name.blank?
 
-        if name.present? && first_name.blank? && last_name.blank?
-          parts = name.split(",")
-          self.last_name = parts[0]&.strip&.capitalize
-          self.first_name = parts[1]&.strip&.capitalize if parts.length > 1
-        end
+        return unless name.present? && first_name.blank? && last_name.blank?
+
+        parts = name.split(",")
+        self.last_name = parts[0]&.strip&.capitalize
+        self.first_name = parts[1]&.strip&.capitalize if parts.length > 1
       end
     end
   end
