@@ -5,20 +5,14 @@ require "test_helper"
 module Lakeraven
   module EHR
     class PractitionersControllerTest < ActionDispatch::IntegrationTest
+      include SmartAuthTestHelper
+
       setup do
-        @oauth_app = Doorkeeper::Application.create!(
-          name: "test", redirect_uri: "https://example.test/callback",
-          scopes: "system/Practitioner.read", confidential: true
-        )
-        token = Doorkeeper::AccessToken.create!(
-          application: @oauth_app, scopes: "system/Practitioner.read", expires_in: 3600
-        )
-        @headers = { "Authorization" => "Bearer #{token.plaintext_token || token.token}" }
+        setup_smart_auth
       end
 
       teardown do
-        Doorkeeper::AccessToken.delete_all
-        Doorkeeper::Application.delete_all
+        teardown_smart_auth
       end
 
       test "GET /Practitioner/:ien returns 200 with FHIR Practitioner" do
