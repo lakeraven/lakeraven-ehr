@@ -5,22 +5,16 @@ require "test_helper"
 module Lakeraven
   module EHR
     class AuditLoggingTest < ActionDispatch::IntegrationTest
+      include SmartAuthTestHelper
+
       setup do
         AuditEvent.delete_all
-        @oauth_app = Doorkeeper::Application.create!(
-          name: "test", redirect_uri: "https://example.test/callback",
-          scopes: "system/Patient.read", confidential: true
-        )
-        token = Doorkeeper::AccessToken.create!(
-          application: @oauth_app, scopes: "system/Patient.read", expires_in: 3600
-        )
-        @headers = { "Authorization" => "Bearer #{token.plaintext_token || token.token}" }
+        setup_smart_auth(scopes: "system/Patient.read")
       end
 
       teardown do
         AuditEvent.delete_all
-        Doorkeeper::AccessToken.delete_all
-        Doorkeeper::Application.delete_all
+        teardown_smart_auth
       end
 
       test "successful GET produces an AuditEvent" do

@@ -62,6 +62,25 @@ RpmsRpc.mock! do |m|
   ])
 end
 
+# Shared auth helper for integration tests.
+module SmartAuthTestHelper
+  def setup_smart_auth(scopes: "system/*.read")
+    @oauth_app = Doorkeeper::Application.create!(
+      name: "test", redirect_uri: "https://example.test/callback",
+      scopes: scopes, confidential: true
+    )
+    token = Doorkeeper::AccessToken.create!(
+      application: @oauth_app, scopes: scopes, expires_in: 3600
+    )
+    @headers = { "Authorization" => "Bearer #{token.plaintext_token || token.token}" }
+  end
+
+  def teardown_smart_auth
+    Doorkeeper::AccessToken.delete_all
+    Doorkeeper::Application.delete_all
+  end
+end
+
 # Load fixtures from the engine
 if ActiveSupport::TestCase.respond_to?(:fixture_paths=)
   ActiveSupport::TestCase.fixture_paths = [ File.expand_path("fixtures", __dir__) ]
