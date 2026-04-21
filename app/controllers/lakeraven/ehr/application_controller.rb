@@ -3,9 +3,23 @@
 module Lakeraven
   module EHR
     class ApplicationController < ActionController::API
+      include SmartAuthentication
+
       FHIR_CONTENT_TYPE = "application/fhir+json"
 
+      before_action :authenticate_smart_token!
+      before_action :authorize_fhir_scope!
+
       private
+
+      def fhir_resource_type
+        self.class.name.demodulize.delete_suffix("Controller").singularize
+      end
+
+      def authorize_fhir_scope!
+        return if can_read?(fhir_resource_type)
+        render_forbidden("Insufficient scope for reading #{fhir_resource_type}")
+      end
 
       def render_operation_outcome(status:, severity:, code:, diagnostics: nil)
         outcome = {

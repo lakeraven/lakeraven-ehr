@@ -28,4 +28,5 @@ Gem::Specification.new do |spec|
 
   spec.add_dependency "rails", ">= 8.1.0"
   spec.add_dependency "rpms-rpc", "~> 0.1"
+  spec.add_dependency "doorkeeper", "~> 5.8"
 end

@@ -8,6 +8,7 @@ PATH
   remote: .
   specs:
     lakeraven-ehr (0.1.0)
+      doorkeeper (~> 5.8)
       rails (>= 8.1.0)
       rpms-rpc (~> 0.1)
 
@@ -96,6 +97,8 @@ GEM
     connection_pool (3.0.2)
     crass (1.0.6)
     date (3.5.1)
+    doorkeeper (5.9.0)
+      railties (>= 5)
     drb (2.2.3)
     erb (6.0.3)
     erubi (1.13.1)
