@@ -39,6 +39,15 @@ RpmsRpc.mock! do |m|
   m.seed_collection(:practitioner_list,
     [ { ien: 101, name: "MARTINEZ,SARAH", title: "MD" }, { ien: 102, name: "CHEN,JAMES", title: "DO" } ],
     filter_field: :name)
+
+  # Institutions (IEN 1)
+  m.seed(:institution, "1", { ien: 1, name: "Alaska Native Medical Center", station_number: "463",
+                               address: "4315 Diplomacy Dr", city: "Anchorage", state: "AK",
+                               zip_code: "99508", phone: "907-729-1900" })
+
+  # Locations (IEN 1)
+  m.seed(:hospital_location, "1", { ien: 1, name: "Primary Care Clinic", abbreviation: "PCC",
+                                     type: "C", division: "463" })
 end
 
 # Load fixtures from the engine
