@@ -48,6 +48,18 @@ RpmsRpc.mock! do |m|
   # Locations (IEN 1)
   m.seed(:hospital_location, "1", { ien: 1, name: "Primary Care Clinic", abbreviation: "PCC",
                                      type: "C", division: "463" })
+
+  # VFC Eligibility
+  m.seed(:vfc_eligibility, "1", { code: "V04", label: "American Indian/Alaska Native" })
+  m.seed_collection(:vfc_eligibility_list, [
+    { code: "V01", label: "Not VFC eligible" },
+    { code: "V02", label: "VFC eligible - Medicaid" },
+    { code: "V03", label: "VFC eligible - Uninsured" },
+    { code: "V04", label: "VFC eligible - AI/AN" },
+    { code: "V05", label: "VFC eligible - FQHC" },
+    { code: "V06", label: "VFC eligible - State specific" },
+    { code: "V07", label: "VFC eligible - Local specific" }
+  ])
 end
 
 # Load fixtures from the engine
