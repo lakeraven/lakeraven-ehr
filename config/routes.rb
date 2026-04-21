@@ -8,4 +8,5 @@ Lakeraven::EHR::Engine.routes.draw do
   resources :conditions, path: "Condition", only: %i[index]
   resources :medication_requests, path: "MedicationRequest", only: %i[index]
   resources :observations, path: "Observation", only: %i[index]
+  resources :encounters, path: "Encounter", only: %i[index]
 end
