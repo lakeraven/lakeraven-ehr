@@ -1,3 +1,3 @@
 Rails.application.routes.draw do
-  mount Lakeraven::Ehr::Engine => "/lakeraven-ehr"
+  mount Lakeraven::EHR::Engine => "/lakeraven-ehr"
 end
