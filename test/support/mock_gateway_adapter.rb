@@ -111,8 +111,6 @@ class MockGatewayAdapter
 
   def format_date(date)
     return "" unless date
-    year_code = ((date.year - 1700) / 100.0).floor + 1
-    century_year = date.year % 100
-    format("%d%02d%02d%02d", year_code, century_year, date.month, date.day)
+    RpmsRpc::FilemanDateParser.format_date(date)
   end
 end

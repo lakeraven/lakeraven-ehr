@@ -3,6 +3,8 @@
 module Lakeraven
   module EHR
     class PatientsController < ApplicationController
+      before_action :enforce_patient_context!, only: :show
+
       def index
         patients = if params[:name].present?
           Patient.search(params[:name])
@@ -27,6 +29,12 @@ module Lakeraven
         end
 
         render_fhir(patient.to_fhir)
+      end
+
+      private
+
+      def enforce_patient_context!
+        authorize_patient_context!(params[:dfn])
       end
     end
   end
