@@ -30,6 +30,7 @@ class MockGatewayAdapter
       dfn = params[0].to_i
       p = @patients[dfn]
       return "" unless p
+
       age = p[:dob] ? ((Date.current - p[:dob]).to_i / 365) : ""
       "#{p[:name]}^#{p[:sex]}^#{format_date(p[:dob])}^#{p[:ssn]}^^^^^^^^^^^#{age}"
 
@@ -37,6 +38,7 @@ class MockGatewayAdapter
       dfn = params[0].to_i
       p = @patients[dfn]
       return "" unless p
+
       "#{p[:name]}^#{p[:sex]}^#{format_date(p[:dob])}^#{p[:ssn]}^#{p[:race]}^#{p[:address_line1]}^#{p[:city]}^#{p[:state]}^#{p[:zip_code]}^#{p[:phone]}^#{p[:tribal_enrollment_number]}^#{p[:service_area]}^#{p[:coverage_type]}"
 
     when "ORWPT LIST ALL"
@@ -53,6 +55,7 @@ class MockGatewayAdapter
       ien = params[0].to_i
       pr = @practitioners[ien]
       return "" unless pr
+
       "#{pr[:name]}^#{pr[:title]}^#{pr[:service_section]}^#{pr[:specialty]}^#{pr[:npi]}^#{pr[:dea_number]}^#{pr[:phone]}^#{pr[:provider_class]}"
 
     when "ORWU NEWPERS"
@@ -73,8 +76,10 @@ class MockGatewayAdapter
 
   def ensure_seeded!
     return if @seeded
+
     @mutex.synchronize do
       return if @seeded
+
       seed_patients
       seed_practitioners
       @seeded = true
@@ -106,13 +111,13 @@ class MockGatewayAdapter
 
   def name_matches?(name, pattern)
     return true if pattern.blank?
+
     name.to_s.upcase.start_with?(pattern.upcase)
   end
 
   def format_date(date)
     return "" unless date
-    year_code = ((date.year - 1700) / 100.0).floor + 1
-    century_year = date.year % 100
-    format("%d%02d%02d%02d", year_code, century_year, date.month, date.day)
+
+    RpmsRpc::FilemanDateParser.format_date(date)
   end
 end

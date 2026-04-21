@@ -25,6 +25,7 @@ module Lakeraven
       def self.rpc_mode?
         return false if Rails.env.test?
         return true if Rails.env.production?
+
         ENV["RPMS_INTEGRATION_MODE"] != "mock"
       end
 
@@ -54,7 +55,8 @@ module Lakeraven
         when "bmx" then RpmsRpc::BmxClient.instance
         when "cia", "xwb" then RpmsRpc::CiaClient.instance
         else
-          raise ConfigurationError, "Unknown RPC_PROTOCOL: '#{ENV['RPC_PROTOCOL']}'. Valid: #{VALID_PROTOCOLS.join(', ')}"
+          raise ConfigurationError,
+                "Unknown RPC_PROTOCOL: '#{ENV['RPC_PROTOCOL']}'. Valid: #{VALID_PROTOCOLS.join(', ')}"
         end
       end
 

@@ -1,8 +1,10 @@
+# frozen_string_literal: true
+
 source "https://rubygems.org"
 
 gemspec
 
-gem "rpms-rpc", path: "../rpms-rpc"
+gem "rpms-rpc", github: "lakeraven/rpms-rpc", branch: "main"
 
 gem "puma"
 gem "sqlite3"

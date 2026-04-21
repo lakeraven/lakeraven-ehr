@@ -1,5 +1,7 @@
+# frozen_string_literal: true
+
 module Lakeraven
-  module Ehr
+  module EHR
     class ApplicationRecord < ActiveRecord::Base
       self.abstract_class = true
     end

@@ -23,6 +23,7 @@ module Lakeraven
 
           RpmsRpc::DataMapper[:practitioner_list].parse_many(response).filter_map do |attrs|
             next if attrs[:name].blank?
+
             Practitioner.new(**attrs)
           end
         end

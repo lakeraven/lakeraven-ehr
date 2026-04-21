@@ -38,6 +38,7 @@ module Lakeraven
 
         def build_name
           return {} if @p.name.blank?
+
           parts = @p.name.split(",")
           family = parts[0]&.strip
           given = parts[1]&.strip&.split(" ") || []
@@ -46,22 +47,20 @@ module Lakeraven
 
         def build_identifiers
           ids = []
-          if @p.npi.present?
-            ids << { system: "http://hl7.org/fhir/sid/us-npi", value: @p.npi }
-          end
-          if @p.ien.present?
-            ids << { use: "usual", system: "http://ihs.gov/rpms/provider-id", value: @p.ien.to_s }
-          end
+          ids << { system: "http://hl7.org/fhir/sid/us-npi", value: @p.npi } if @p.npi.present?
+          ids << { use: "usual", system: "http://ihs.gov/rpms/provider-id", value: @p.ien.to_s } if @p.ien.present?
           ids
         end
 
         def build_telecoms
           return [] if @p.phone.blank?
+
           [ { system: "phone", value: @p.phone, use: "work" } ]
         end
 
         def build_qualifications
           return [] if @p.specialty.blank?
+
           [ { code: { text: @p.specialty } } ]
         end
       end

@@ -5,9 +5,9 @@ module Lakeraven
     class PractitionersController < ApplicationController
       def index
         practitioners = if params[:name].present?
-          Practitioner.search(params[:name])
+                          Practitioner.search(params[:name])
         else
-          Practitioner.search("")
+                          Practitioner.search("")
         end
 
         render_bundle(practitioners.map(&:to_fhir))
