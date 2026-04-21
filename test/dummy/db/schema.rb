@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 # This file is auto-generated from the current state of the database. Instead
 # of editing this file, please use the migrations feature of Active Record to
 # incrementally modify your database, and then regenerate this schema definition.
@@ -12,7 +10,19 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 20_260_421_072_524) do
+ActiveRecord::Schema[8.1].define(version: 2026_04_21_080000) do
+  create_table "lakeraven_ehr_launch_contexts", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "encounter_id"
+    t.datetime "expires_at", null: false
+    t.string "facility_identifier"
+    t.string "launch_token", null: false
+    t.string "oauth_application_uid", null: false
+    t.string "patient_dfn"
+    t.datetime "updated_at", null: false
+    t.index [ "launch_token" ], name: "index_lakeraven_ehr_launch_contexts_on_launch_token", unique: true
+  end
+
   create_table "oauth_access_grants", force: :cascade do |t|
     t.integer "application_id", null: false
     t.datetime "created_at", null: false
