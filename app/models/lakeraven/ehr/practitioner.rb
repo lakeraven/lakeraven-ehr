@@ -55,6 +55,18 @@ module Lakeraven
         ien.to_s
       end
 
+      def persisted?
+        ien.present? && ien.to_i.positive?
+      end
+
+      def can_prescribe_controlled?
+        dea_number.present? && !dea_number.empty?
+      end
+
+      def credentials_summary
+        [ title, specialty ].compact.reject(&:empty?).join(", ")
+      end
+
       # -- FHIR serialization -----------------------------------------------
 
       def to_fhir

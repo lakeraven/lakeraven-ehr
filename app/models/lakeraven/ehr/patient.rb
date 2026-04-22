@@ -24,6 +24,10 @@ module Lakeraven
       attribute :zip_code, :string
       attribute :phone, :string
 
+      # Date aliases
+      attribute :born_on, :date
+      attribute :birth_date, :date
+
       # Derived name parts
       attribute :first_name, :string
       attribute :last_name, :string
@@ -34,7 +38,16 @@ module Lakeraven
       attribute :service_area, :string
       attribute :coverage_type, :string
 
+      class RecordNotFound < StandardError; end
+
       # -- Class methods (AR-like) -------------------------------------------
+
+      def self.find(dfn)
+        patient = find_by_dfn(dfn)
+        raise RecordNotFound, "Couldn't find Patient with 'dfn'=#{dfn}" unless patient
+
+        patient
+      end
 
       def self.find_by_dfn(dfn)
         return nil unless dfn.present? && dfn.to_i.positive?
@@ -44,6 +57,11 @@ module Lakeraven
 
       def self.search(name_pattern)
         PatientGateway.search(name_pattern.to_s)
+      end
+
+      def self.search_by_ssn(ssn)
+        patient = find_by_ssn(ssn)
+        patient ? [ patient ] : []
       end
 
       def self.find_by_ssn(ssn)
@@ -85,6 +103,10 @@ module Lakeraven
 
       def to_param
         dfn.to_s
+      end
+
+      def persisted?
+        dfn.present? && dfn.to_i.positive?
       end
 
       # -- Tribal enrollment -------------------------------------------------
@@ -135,6 +157,11 @@ module Lakeraven
       private
 
       def sync_composite_fields
+        # Sync born_on ↔ dob
+        self.born_on ||= dob
+        self.dob ||= born_on
+
+        # Sync name ↔ first_name/last_name
         self.name = "#{last_name},#{first_name}" if first_name.present? && last_name.present? && name.blank?
 
         return unless name.present? && first_name.blank? && last_name.blank?

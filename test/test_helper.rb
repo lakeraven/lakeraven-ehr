@@ -26,6 +26,8 @@ RpmsRpc.mock! do |m|
   m.seed(:patient_id_info, "3", { race: "AMERICAN INDIAN", tribal_enrollment_number: "CNO-24680",
                                    service_area: "Oklahoma", coverage_type: "IHS" })
 
+  m.seed(:patient_ssn, "111-11-1111", { dfn: 1, name: "Anderson,Alice", ssn: "111-11-1111" })
+
   m.seed_collection(:patient_list,
     [ { dfn: 1, name: "Anderson,Alice" }, { dfn: 2, name: "MOUSE,MICKEY M" }, { dfn: 3, name: "DOE,JANE" } ],
     filter_field: :name)
