@@ -60,6 +60,29 @@ RpmsRpc.mock! do |m|
     { code: "V06", label: "VFC eligible - State specific" },
     { code: "V07", label: "VFC eligible - Local specific" }
   ])
+
+  # Tribal enrollment (BHDPTRPC*)
+  m.seed(:tribal_enrollment, "1", { enrollment_number: "ANLC-12345", tribe_name: "Alaska Native - Anchorage (ANLC)",
+                                     enrollment_date: Date.new(2020, 1, 1), status: "ACTIVE",
+                                     service_unit: "Anchorage", tribe_code: "ANLC" })
+  m.seed(:tribal_validation, "ANLC-12345", { valid: true, tribe_code: "ANLC", enrollment_number: "12345",
+                                              status: "ACTIVE", message: "Valid enrollment" })
+  m.seed(:tribal_validation, "INVALID", { valid: false, tribe_code: nil, enrollment_number: nil,
+                                           status: "INACTIVE", message: "Enrollment not found or inactive" })
+  m.seed(:enrollment_eligibility, "1", { active: true, eligible_for_ihs: true,
+                                          service_unit: "Anchorage", message: "Eligible for IHS services",
+                                          benefit_package: "BASIC" })
+  m.seed(:enrollment_eligibility, "4", { active: false, eligible_for_ihs: false,
+                                          service_unit: nil, message: nil, benefit_package: nil })
+  m.seed(:service_unit, "1", { ien: 1, name: "Anchorage", region: "Alaska" })
+  m.seed(:tribe_info, "ANLC", { ien: 100, name: "Alaska Native - Anchorage (ANLC)", code: "ANLC",
+                                  service_unit: "Anchorage", region: "Alaska", area: "Alaska Area" })
+  m.seed(:tribe_info, "CN", { ien: 101, name: "Cherokee Nation", code: "CN",
+                                service_unit: "Tahlequah", region: "Oklahoma", area: "Oklahoma City Area" })
+  m.seed(:tribe_info, "NN", { ien: 102, name: "Navajo Nation", code: "NN",
+                                service_unit: "Window Rock", region: "Arizona", area: "Navajo Area" })
+  m.seed(:tribe_info, "OST", { ien: 104, name: "Oglala Sioux Tribe", code: "OST",
+                                 service_unit: "Pine Ridge", region: "South Dakota", area: "Great Plains Area" })
 end
 
 # Shared auth helper for integration tests.
