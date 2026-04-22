@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_04_21_090000) do
+ActiveRecord::Schema[8.1].define(version: 2026_04_22_120000) do
   create_table "lakeraven_ehr_audit_events", force: :cascade do |t|
     t.string "action", null: false
     t.string "agent_who_identifier"
@@ -38,6 +38,15 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_21_090000) do
     t.string "patient_dfn"
     t.datetime "updated_at", null: false
     t.index [ "launch_token" ], name: "index_lakeraven_ehr_launch_contexts_on_launch_token", unique: true
+  end
+
+  create_table "lakeraven_ehr_patient_supplements", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "gender_identity"
+    t.integer "patient_dfn", null: false
+    t.string "sexual_orientation"
+    t.datetime "updated_at", null: false
+    t.index [ "patient_dfn" ], name: "index_lakeraven_ehr_patient_supplements_on_patient_dfn", unique: true
   end
 
   create_table "oauth_access_grants", force: :cascade do |t|
