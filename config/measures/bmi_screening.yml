@@ -1,0 +1,25 @@
+# BMI Screening and Follow-Up (NQF 0421)
+# Percentage of patients aged 18+ with a BMI recorded during the measurement period
+id: bmi_screening
+title: "Preventive Care and Screening: Body Mass Index (BMI) Screening and Follow-Up Plan"
+nqf_number: "0421"
+scoring: proportion
+
+# Population criteria
+initial_population:
+  description: "All patients aged 18 and older"
+  resource_type: Patient
+  min_age: 18
+
+denominator:
+  description: "Equals initial population"
+  same_as: initial_population
+
+numerator:
+  description: "Patients with a BMI recorded during the measurement period"
+  resource_type: Observation
+  code: "39156-5"
+  code_system: "http://loinc.org"
+
+denominator_exclusion:
+  description: "None"
