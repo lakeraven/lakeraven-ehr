@@ -1,0 +1,26 @@
+# Diabetes HbA1c Control (NQF 0059)
+# Percentage of patients with diabetes whose most recent HbA1c is < 9.0%
+id: diabetes_a1c_control
+title: "Diabetes: Hemoglobin A1c (HbA1c) Good Control (< 9%)"
+nqf_number: "0059"
+scoring: proportion
+
+# Population criteria
+initial_population:
+  description: "Patients with a diagnosis of diabetes"
+  resource_type: Condition
+  valueset_id: gpra-bgpmu-diabetes-dx
+
+denominator:
+  description: "Equals initial population"
+  same_as: initial_population
+
+numerator:
+  description: "Patients whose most recent HbA1c level is < 9.0%"
+  resource_type: Observation
+  valueset_id: gpra-bgpmu-lab-loinc-hgba1c
+  value_threshold: 9.0
+  value_comparator: "<"
+
+denominator_exclusion:
+  description: "None"

@@ -1,0 +1,24 @@
+# Depression Screening (NQF 0418)
+# Percentage of patients aged 12+ screened for depression using a standardized tool
+id: depression_screening
+title: "Preventive Care and Screening: Screening for Depression and Follow-Up Plan"
+nqf_number: "0418"
+scoring: proportion
+
+# Population criteria
+initial_population:
+  description: "All patients aged 12 and older"
+  resource_type: Patient
+  min_age: 12
+
+denominator:
+  description: "Equals initial population"
+  same_as: initial_population
+
+numerator:
+  description: "Patients with a depression screening completed during the measurement period"
+  resource_type: Observation
+  valueset_id: gpra-bgpmu-depression-screening
+
+denominator_exclusion:
+  description: "None"
