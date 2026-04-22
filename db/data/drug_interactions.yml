@@ -1,0 +1,267 @@
+# Drug Interaction Knowledge Base
+#
+# Sources: FDA Drug Safety Communications, NLM DailyMed, clinical pharmacology references
+# This is a curated subset of clinically significant interactions for ONC § 170.315(a)(4).
+#
+# RxNorm codes from NLM RxNorm (https://www.nlm.nih.gov/research/umls/rxnorm/)
+#
+# Structure:
+#   drug_drug: Array of drug-drug interaction pairs
+#   drug_allergy: Array of drug-allergy cross-reactivity rules
+#   class_members: Maps drug class names to RxNorm codes and drug names
+
+class_members:
+  warfarin:
+    rxnorm: ["11289"]
+    names: ["warfarin"]
+  aspirin:
+    rxnorm: ["1191"]
+    names: ["aspirin"]
+  nsaids:
+    rxnorm: ["5640", "41493", "7646"]
+    names: ["ibuprofen", "naproxen", "piroxicam"]
+  ssris:
+    rxnorm: ["4493", "36437", "32937", "2556"]
+    names: ["fluoxetine", "sertraline", "paroxetine", "citalopram"]
+  maois:
+    rxnorm: ["8123", "6011", "30121"]
+    names: ["phenelzine", "isocarboxazid", "tranylcypromine"]
+  ace_inhibitors:
+    rxnorm: ["29046", "3827", "50166"]
+    names: ["lisinopril", "enalapril", "ramipril"]
+  potassium:
+    rxnorm: ["8591"]
+    names: ["potassium chloride"]
+  potassium_sparing_diuretics:
+    rxnorm: ["9997", "37798"]
+    names: ["spironolactone", "triamterene"]
+  methotrexate:
+    rxnorm: ["6851"]
+    names: ["methotrexate"]
+  digoxin:
+    rxnorm: ["3407"]
+    names: ["digoxin"]
+  amiodarone:
+    rxnorm: ["703"]
+    names: ["amiodarone"]
+  simvastatin:
+    rxnorm: ["36567"]
+    names: ["simvastatin"]
+  lithium:
+    rxnorm: ["6448"]
+    names: ["lithium"]
+  penicillins:
+    rxnorm: ["723", "7980", "7984"]
+    names: ["amoxicillin", "penicillin", "penicillin v"]
+  cephalosporins:
+    rxnorm: ["2231", "2191", "20489"]
+    names: ["cephalexin", "cefazolin", "ceftriaxone"]
+  sulfonamides:
+    rxnorm: ["10180", "10831", "10171"]
+    names: ["sulfamethoxazole", "trimethoprim-sulfamethoxazole", "sulfonamide"]
+  fluoroquinolones:
+    rxnorm: ["2551", "82122"]
+    names: ["ciprofloxacin", "levofloxacin"]
+  opioids:
+    rxnorm: ["7052", "3423", "5489"]
+    names: ["morphine", "hydrocodone", "fentanyl"]
+  benzodiazepines:
+    rxnorm: ["596", "3322", "6470"]
+    names: ["alprazolam", "diazepam", "lorazepam"]
+  carbamazepine:
+    rxnorm: ["2002"]
+    names: ["carbamazepine"]
+  phenytoin:
+    rxnorm: ["8183"]
+    names: ["phenytoin"]
+
+drug_drug:
+  # HIGH SEVERITY — Bleeding risk
+  - drug_a_class: warfarin
+    drug_b_class: aspirin
+    severity: high
+    description: "Concurrent use increases risk of serious bleeding. Aspirin inhibits platelet aggregation while warfarin inhibits clotting factors."
+    source: "FDA Drug Safety Communication"
+
+  - drug_a_class: warfarin
+    drug_b_class: nsaids
+    severity: high
+    description: "NSAIDs increase anticoagulant effect of warfarin and risk of GI bleeding. Avoid concurrent use or monitor INR closely."
+    source: "FDA Drug Safety Communication"
+
+  # HIGH SEVERITY — Serotonin syndrome
+  - drug_a_class: ssris
+    drug_b_class: maois
+    severity: high
+    description: "Concurrent use may cause serotonin syndrome (agitation, hyperthermia, tachycardia). Contraindicated — allow 14-day washout between agents."
+    source: "FDA Drug Safety Communication"
+
+  # HIGH SEVERITY — Respiratory depression
+  - drug_a_class: opioids
+    drug_b_class: benzodiazepines
+    severity: high
+    description: "Concurrent use increases risk of profound sedation, respiratory depression, coma, and death. Avoid concurrent prescribing when possible."
+    source: "FDA Drug Safety Communication, 2016 Black Box Warning"
+
+  # HIGH SEVERITY — QT prolongation
+  - drug_a_class: amiodarone
+    drug_b_class: fluoroquinolones
+    severity: high
+    description: "Both agents prolong QT interval. Concurrent use increases risk of torsades de pointes and sudden cardiac death."
+    source: "NLM DailyMed"
+
+  # HIGH SEVERITY — Digoxin toxicity
+  - drug_a_class: digoxin
+    drug_b_class: amiodarone
+    severity: high
+    description: "Amiodarone increases digoxin levels by 70-100%. Reduce digoxin dose by 50% and monitor levels."
+    source: "NLM DailyMed"
+
+  # HIGH SEVERITY — Methotrexate toxicity
+  - drug_a_class: methotrexate
+    drug_b_class: nsaids
+    severity: high
+    description: "NSAIDs reduce renal clearance of methotrexate, increasing toxicity risk (pancytopenia, hepatotoxicity, nephrotoxicity)."
+    source: "FDA Drug Safety Communication"
+
+  # MODERATE SEVERITY — Hyperkalemia
+  - drug_a_class: ace_inhibitors
+    drug_b_class: potassium
+    severity: moderate
+    description: "ACE inhibitors reduce potassium excretion. Concurrent potassium supplementation may cause hyperkalemia. Monitor serum potassium."
+    source: "NLM DailyMed"
+
+  - drug_a_class: ace_inhibitors
+    drug_b_class: potassium_sparing_diuretics
+    severity: moderate
+    description: "Both agents increase serum potassium. Concurrent use may cause life-threatening hyperkalemia. Monitor potassium levels closely."
+    source: "NLM DailyMed"
+
+  # MODERATE SEVERITY — Statin interaction
+  - drug_a_class: simvastatin
+    drug_b_class: amiodarone
+    severity: moderate
+    description: "Amiodarone inhibits CYP3A4 metabolism of simvastatin, increasing rhabdomyolysis risk. Limit simvastatin to 20mg/day."
+    source: "FDA Drug Safety Communication"
+
+  # MODERATE SEVERITY — Lithium toxicity
+  - drug_a_class: lithium
+    drug_b_class: nsaids
+    severity: moderate
+    description: "NSAIDs reduce renal lithium clearance, increasing lithium levels and toxicity risk. Monitor lithium levels closely."
+    source: "NLM DailyMed"
+
+  - drug_a_class: lithium
+    drug_b_class: ace_inhibitors
+    severity: moderate
+    description: "ACE inhibitors reduce renal lithium clearance. Monitor lithium levels when starting or adjusting ACE inhibitor dose."
+    source: "NLM DailyMed"
+
+  # MODERATE SEVERITY — Anticonvulsant interactions
+  - drug_a_class: carbamazepine
+    drug_b_class: ssris
+    severity: moderate
+    description: "SSRIs may increase carbamazepine levels via CYP3A4 inhibition. Carbamazepine may decrease SSRI levels via enzyme induction."
+    source: "NLM DailyMed"
+
+  - drug_a_class: phenytoin
+    drug_b_class: warfarin
+    severity: moderate
+    description: "Complex bidirectional interaction. Phenytoin may increase or decrease warfarin effect. Monitor INR closely."
+    source: "NLM DailyMed"
+
+  # MODERATE SEVERITY — SSRI + NSAID bleeding
+  - drug_a_class: ssris
+    drug_b_class: nsaids
+    severity: moderate
+    description: "SSRIs impair platelet serotonin uptake. Concurrent NSAID use increases GI bleeding risk 3-fold."
+    source: "FDA Drug Safety Communication"
+
+  # MODERATE SEVERITY — Warfarin + methotrexate
+  - drug_a_class: warfarin
+    drug_b_class: methotrexate
+    severity: moderate
+    description: "Warfarin may increase methotrexate toxicity. Methotrexate may enhance warfarin anticoagulant effect. Monitor closely."
+    source: "NLM DailyMed"
+
+  # LOW SEVERITY
+  - drug_a_class: ssris
+    drug_b_class: opioids
+    severity: low
+    description: "Serotonergic opioids (tramadol, fentanyl) combined with SSRIs carry a low risk of serotonin syndrome. Monitor for symptoms."
+    source: "NLM DailyMed"
+
+  - drug_a_class: ace_inhibitors
+    drug_b_class: aspirin
+    severity: low
+    description: "High-dose aspirin may reduce the antihypertensive effect of ACE inhibitors. Low-dose aspirin (≤100mg) unlikely to be significant."
+    source: "NLM DailyMed"
+
+drug_allergy:
+  # Penicillin class cross-reactivity
+  - allergen_class: penicillins
+    drug_class: penicillins
+    severity: high
+    description: "Direct allergy match — patient is allergic to a penicillin-class antibiotic."
+    source: "FDA"
+
+  - allergen_class: penicillins
+    drug_class: cephalosporins
+    severity: moderate
+    description: "Cross-reactivity between penicillins and cephalosporins (~2% risk). Consider alternative or supervised challenge."
+    source: "AAAAI Practice Parameter"
+
+  # Sulfonamide cross-reactivity
+  - allergen_class: sulfonamides
+    drug_class: sulfonamides
+    severity: high
+    description: "Direct allergy match — patient is allergic to sulfonamide antibiotics."
+    source: "FDA"
+
+  # NSAID cross-reactivity
+  - allergen_class: nsaids
+    drug_class: nsaids
+    severity: high
+    description: "NSAID cross-reactivity — patient with NSAID allergy may react to other NSAIDs."
+    source: "AAAAI Practice Parameter"
+
+  - allergen_class: nsaids
+    drug_class: aspirin
+    severity: moderate
+    description: "Aspirin and NSAID cross-sensitivity is common (~30% of NSAID-allergic patients). Consider COX-2 selective agent."
+    source: "AAAAI Practice Parameter"
+
+  # Fluoroquinolone cross-reactivity
+  - allergen_class: fluoroquinolones
+    drug_class: fluoroquinolones
+    severity: high
+    description: "Direct allergy match — patient is allergic to a fluoroquinolone antibiotic."
+    source: "FDA"
+
+  # Opioid cross-reactivity
+  - allergen_class: opioids
+    drug_class: opioids
+    severity: high
+    description: "Patient with opioid allergy. True allergy vs. intolerance should be clarified before prescribing any opioid."
+    source: "AAAAI Practice Parameter"
+
+  # Cephalosporin to penicillin (reverse direction)
+  - allergen_class: cephalosporins
+    drug_class: penicillins
+    severity: low
+    description: "Cephalosporin-allergic patients have low risk (~1%) of penicillin cross-reactivity. Monitor for reaction."
+    source: "AAAAI Practice Parameter"
+
+  # Benzodiazepine cross-reactivity
+  - allergen_class: benzodiazepines
+    drug_class: benzodiazepines
+    severity: high
+    description: "Direct allergy match — patient is allergic to benzodiazepines."
+    source: "FDA"
+
+  # Statin cross-reactivity (rhabdomyolysis history)
+  - allergen_class: simvastatin
+    drug_class: simvastatin
+    severity: high
+    description: "Patient with documented statin adverse reaction. Evaluate for rhabdomyolysis risk before prescribing same agent."
+    source: "FDA"
