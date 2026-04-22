@@ -1,5 +1,10 @@
 # frozen_string_literal: true
 
+Given("patient {string} has an observation with code {string} and value {string} recorded on {string}") do |_dfn, code, value, date|
+  @observations ||= []
+  @observations << ::OpenStruct.new(code: code, value: value, effective_date: Date.parse(date))
+end
+
 Given("the observation has category {string}") do |category|
   @observation_category = category
 end

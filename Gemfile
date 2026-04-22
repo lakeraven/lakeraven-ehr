@@ -7,7 +7,7 @@ gemspec
 gem "rpms-rpc", github: "lakeraven/rpms-rpc", branch: "main"
 
 gem "puma"
-gem "sqlite3"
+gem "pg"
 
 gem "cucumber-rails", require: false
 gem "minitest"
