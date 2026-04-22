@@ -30,6 +30,14 @@ module Lakeraven
       end
 
       def to_param = ien.to_s
+
+      def persisted?
+        ien.present? && ien.to_i.positive?
+      end
+
+      def active?
+        true # Default; RPMS locations are active if returned
+      end
     end
   end
 end

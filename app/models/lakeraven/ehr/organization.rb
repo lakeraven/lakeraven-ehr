@@ -35,6 +35,14 @@ module Lakeraven
 
       def to_param = ien.to_s
 
+      def persisted?
+        ien.present? && ien.to_i.positive?
+      end
+
+      def full_address
+        [ address, city, state, zip_code ].compact.reject(&:empty?).join(", ")
+      end
+
       private
 
       def build_address
