@@ -87,6 +87,45 @@ module Lakeraven
         dfn.to_s
       end
 
+      # -- Tribal enrollment -------------------------------------------------
+
+      def tribal_enrollment_details
+        return nil unless dfn
+
+        TribalEnrollmentGateway.enrollment_details(dfn)
+      end
+
+      def validate_tribal_enrollment
+        return { valid: false, message: "No enrollment number" } if tribal_enrollment_number.blank?
+
+        TribalEnrollmentGateway.validate(tribal_enrollment_number)
+      end
+
+      def tribal_enrollment_valid?
+        result = validate_tribal_enrollment
+        result && result[:valid] && result[:status] == "ACTIVE"
+      end
+
+      def eligible_for_ihs_services?
+        return false unless dfn
+
+        result = TribalEnrollmentGateway.eligibility(dfn)
+        result[:active] && result[:eligible_for_ihs]
+      end
+
+      def enrollment_service_unit
+        return nil unless dfn
+
+        TribalEnrollmentGateway.service_unit(dfn)
+      end
+
+      def tribe_information
+        return nil if tribal_enrollment_number.blank?
+
+        tribe_code = tribal_enrollment_number.split("-").first
+        TribalEnrollmentGateway.tribe_info(tribe_code)
+      end
+
       # -- FHIR serialization -----------------------------------------------
 
       def to_fhir
