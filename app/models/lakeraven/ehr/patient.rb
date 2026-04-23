@@ -109,6 +109,38 @@ module Lakeraven
         dfn.present? && dfn.to_i.positive?
       end
 
+      # -- Clinical data accessors (ported from rpms_redux) ------------------
+
+      def service_requests
+        return [] unless dfn
+
+        ServiceRequest.for_patient(dfn)
+      end
+
+      def allergies
+        return [] unless dfn
+
+        AllergyIntolerance.for_patient(dfn)
+      end
+
+      def problem_list
+        return [] unless dfn
+
+        Condition.for_patient(dfn)
+      end
+
+      def medications
+        return [] unless dfn
+
+        MedicationRequest.for_patient(dfn)
+      end
+
+      def vitals
+        return [] unless dfn
+
+        Observation.for_patient(dfn)
+      end
+
       # -- Tribal enrollment -------------------------------------------------
 
       def tribal_enrollment_details
