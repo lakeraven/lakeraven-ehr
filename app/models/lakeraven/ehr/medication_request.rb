@@ -28,9 +28,22 @@ module Lakeraven
         {
           resourceType: "MedicationRequest",
           id: ien&.to_s,
+          status: status,
           subject: patient_dfn ? { reference: "Patient/#{patient_dfn}" } : nil,
-          status: respond_to?(:status) ? status : nil
+          medicationCodeableConcept: build_medication_code,
+          dosageInstruction: dosage_instruction ? [{ text: dosage_instruction }] : nil
         }.compact
+      end
+
+      private
+
+      def build_medication_code
+        return nil unless medication_code || medication_display
+
+        result = {}
+        result[:coding] = [{ code: medication_code }] if medication_code
+        result[:text] = medication_display if medication_display
+        result
       end
     end
   end

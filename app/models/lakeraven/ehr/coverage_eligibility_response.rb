@@ -49,6 +49,14 @@ module Lakeraven
         status == "pending"
       end
 
+      def denied?
+        status == "denied"
+      end
+
+      def exhausted?
+        status == "exhausted"
+      end
+
       def active_coverage?
         enrolled? && within_coverage_period?
       end

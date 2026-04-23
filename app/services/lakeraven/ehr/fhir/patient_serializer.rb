@@ -34,6 +34,9 @@ module Lakeraven
           telecoms = build_telecoms
           resource[:telecom] = telecoms if telecoms.any?
 
+          exts = build_extensions
+          resource[:extension] = exts if exts.any?
+
           resource
         end
 
@@ -74,6 +77,25 @@ module Lakeraven
           return [] if @p.phone.blank?
 
           [ { system: "phone", value: @p.phone, use: "home" } ]
+        end
+
+        def build_extensions
+          exts = []
+          if @p.race.present?
+            exts << {
+              url: "http://hl7.org/fhir/us/core/StructureDefinition/us-core-race",
+              extension: [
+                { url: "text", valueString: @p.race }
+              ]
+            }
+          end
+          if @p.tribal_enrollment_number.present?
+            exts << {
+              url: "http://hl7.org/fhir/us/core/StructureDefinition/tribal-affiliation",
+              valueString: @p.tribal_enrollment_number
+            }
+          end
+          exts
         end
       end
     end

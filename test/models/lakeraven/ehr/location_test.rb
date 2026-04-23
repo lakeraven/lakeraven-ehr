@@ -48,6 +48,37 @@ module Lakeraven
         loc = Location.new(ien: 1, name: "Test")
         assert_equal "instance", loc.to_fhir[:mode]
       end
+
+      # -- edge cases ----------------------------------------------------------
+
+      test "find_by_ien returns nil for nil" do
+        assert_nil Location.find_by_ien(nil)
+      end
+
+      test "find_by_ien returns nil for zero" do
+        assert_nil Location.find_by_ien(0)
+      end
+
+      test "find_by_ien returns nil for negative" do
+        assert_nil Location.find_by_ien(-1)
+      end
+
+      test "to_fhir omits alias when no abbreviation" do
+        loc = Location.new(ien: 1, name: "Test", abbreviation: nil)
+        fhir = loc.to_fhir
+        assert_equal [], fhir[:alias]
+      end
+
+      test "to_param returns IEN string" do
+        loc = Location.new(ien: 42, name: "Test")
+        assert_equal "42", loc.to_param
+      end
+
+      test "stores type and division" do
+        loc = Location.new(ien: 1, name: "Test", type: "clinic", division: "D1")
+        assert_equal "clinic", loc.type
+        assert_equal "D1", loc.division
+      end
     end
   end
 end

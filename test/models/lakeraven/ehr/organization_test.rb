@@ -64,6 +64,43 @@ module Lakeraven
 
         assert fhir[:identifier]&.any?
       end
+
+      # -- edge cases ----------------------------------------------------------
+
+      test "find_by_ien returns nil for nil" do
+        assert_nil Organization.find_by_ien(nil)
+      end
+
+      test "find_by_ien returns nil for zero" do
+        assert_nil Organization.find_by_ien(0)
+      end
+
+      test "full_address with all parts" do
+        org = Organization.new(address: "4315 Diplomacy Dr", city: "Anchorage", state: "AK", zip_code: "99508")
+        assert_equal "4315 Diplomacy Dr, Anchorage, AK, 99508", org.full_address
+      end
+
+      test "full_address with only city and state" do
+        org = Organization.new(city: "Fairbanks", state: "AK")
+        assert_equal "Fairbanks, AK", org.full_address
+      end
+
+      test "full_address with no parts" do
+        org = Organization.new
+        assert_equal "", org.full_address
+      end
+
+      test "to_param returns IEN string" do
+        org = Organization.new(ien: 1, name: "Test")
+        assert_equal "1", org.to_param
+      end
+
+      test "to_fhir for organization without address" do
+        org = Organization.new(ien: 99, name: "Minimal Org")
+        fhir = org.to_fhir
+        assert_equal "Organization", fhir[:resourceType]
+        assert_equal "Minimal Org", fhir[:name]
+      end
     end
   end
 end
