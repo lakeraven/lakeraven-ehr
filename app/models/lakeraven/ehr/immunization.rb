@@ -46,7 +46,7 @@ module Lakeraven
         return nil unless vaccine_code || vaccine_display
 
         result = {}
-        result[:coding] = [{ code: vaccine_code }] if vaccine_code
+        result[:coding] = [ { code: vaccine_code } ] if vaccine_code
         result[:text] = vaccine_display if vaccine_display
         result
       end

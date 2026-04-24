@@ -31,7 +31,7 @@ module Lakeraven
           status: status,
           subject: patient_dfn ? { reference: "Patient/#{patient_dfn}" } : nil,
           medicationCodeableConcept: build_medication_code,
-          dosageInstruction: dosage_instruction ? [{ text: dosage_instruction }] : nil
+          dosageInstruction: dosage_instruction ? [ { text: dosage_instruction } ] : nil
         }.compact
       end
 
@@ -41,7 +41,7 @@ module Lakeraven
         return nil unless medication_code || medication_display
 
         result = {}
-        result[:coding] = [{ code: medication_code }] if medication_code
+        result[:coding] = [ { code: medication_code } ] if medication_code
         result[:text] = medication_display if medication_display
         result
       end

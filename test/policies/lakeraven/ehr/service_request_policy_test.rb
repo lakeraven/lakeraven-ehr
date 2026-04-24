@@ -49,7 +49,7 @@ module Lakeraven
       end
 
       test "user with prc_supervisor key can approve" do
-        user = build_user(role: "clerk", security_keys: [:prc_supervisor])
+        user = build_user(role: "clerk", security_keys: [ :prc_supervisor ])
         policy = ServiceRequestPolicy.new(user, nil)
 
         assert policy.approve?

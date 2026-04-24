@@ -4,10 +4,10 @@ Lakeraven::EHR::Engine.routes.draw do
   use_doorkeeper
   resources :patients, path: "Patient", only: %i[index show], param: :dfn
   resources :practitioners, path: "Practitioner", only: %i[index show], param: :ien
-  resources :allergy_intolerances, path: "AllergyIntolerance", only: %i[index]
-  resources :conditions, path: "Condition", only: %i[index]
-  resources :medication_requests, path: "MedicationRequest", only: %i[index]
-  resources :observations, path: "Observation", only: %i[index]
+  resources :allergy_intolerances, path: "AllergyIntolerance", only: %i[index show]
+  resources :conditions, path: "Condition", only: %i[index show]
+  resources :medication_requests, path: "MedicationRequest", only: %i[index show]
+  resources :observations, path: "Observation", only: %i[index show]
   resources :encounters, path: "Encounter", only: %i[index]
   resources :organizations, path: "Organization", only: %i[show], param: :ien
   resources :locations, path: "Location", only: %i[show], param: :ien

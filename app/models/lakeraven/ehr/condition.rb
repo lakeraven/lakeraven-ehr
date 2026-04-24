@@ -30,9 +30,9 @@ module Lakeraven
           resourceType: "Condition",
           id: ien&.to_s,
           subject: patient_dfn ? { reference: "Patient/#{patient_dfn}" } : nil,
-          clinicalStatus: clinical_status ? { coding: [{ code: clinical_status }] } : nil,
+          clinicalStatus: clinical_status ? { coding: [ { code: clinical_status } ] } : nil,
           code: build_code,
-          category: category ? [{ coding: [{ code: category }] }] : nil
+          category: category ? [ { coding: [ { code: category } ] } ] : nil
         }.compact
 
         resource
@@ -44,7 +44,7 @@ module Lakeraven
         return nil unless code || display
 
         result = {}
-        result[:coding] = [{ code: code }] if code
+        result[:coding] = [ { code: code } ] if code
         result[:text] = display if display
         result
       end

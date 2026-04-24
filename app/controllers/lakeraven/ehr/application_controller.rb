@@ -35,6 +35,15 @@ module Lakeraven
         render json: resource, status: status, content_type: FHIR_CONTENT_TYPE
       end
 
+      def render_not_found(resource_type, id)
+        render_operation_outcome(
+          status: :not_found,
+          severity: "error",
+          code: "not-found",
+          diagnostics: "#{resource_type}/#{id} not found"
+        )
+      end
+
       def render_bundle(entries, type: "searchset")
         bundle = {
           resourceType: "Bundle",
