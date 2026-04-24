@@ -37,7 +37,7 @@ module Lakeraven
         return nil unless code || display
 
         result = {}
-        result[:coding] = [{ code: code }] if code
+        result[:coding] = [ { code: code } ] if code
         result[:text] = display if display
         result
       end

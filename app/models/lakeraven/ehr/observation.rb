@@ -32,7 +32,7 @@ module Lakeraven
           subject: patient_dfn ? { reference: "Patient/#{patient_dfn}" } : nil,
           code: build_code,
           valueQuantity: build_value_quantity,
-          category: category ? [{ coding: [{ code: category }] }] : nil
+          category: category ? [ { coding: [ { code: category } ] } ] : nil
         }.compact
       end
 
@@ -42,7 +42,7 @@ module Lakeraven
         return nil unless code || display
 
         result = {}
-        result[:coding] = [{ code: code }] if code
+        result[:coding] = [ { code: code } ] if code
         result[:text] = display if display
         result
       end
