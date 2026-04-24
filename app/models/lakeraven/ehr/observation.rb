@@ -21,6 +21,22 @@ module Lakeraven
         ObservationGateway.for_patient(dfn)
       end
 
+      def self.from_fhir(hash)
+        h = hash.transform_keys(&:to_s)
+        new(
+          ien: h["id"],
+          patient_dfn: h.dig("subject", "reference")&.delete_prefix("Patient/"),
+          code: h.dig("code", "coding", 0, "code"),
+          display: h.dig("code", "text"),
+          value: h.dig("valueString"),
+          value_quantity: h.dig("valueQuantity", "value")&.to_s,
+          unit: h.dig("valueQuantity", "unit"),
+          category: h.dig("category", 0, "coding", 0, "code"),
+          status: h["status"],
+          effective_datetime: h["effectiveDateTime"]
+        )
+      end
+
       def vital_sign? = category == "vital-signs"
       def laboratory? = category == "laboratory"
 

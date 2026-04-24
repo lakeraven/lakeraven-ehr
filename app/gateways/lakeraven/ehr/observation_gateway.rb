@@ -1,14 +1,15 @@
 # frozen_string_literal: true
 
-require "rpms_rpc/mappings"
-
 module Lakeraven
   module EHR
     class ObservationGateway
-      MAPPING = :vitals
-
       def self.for_patient(dfn)
-        RpmsRpc::DataMapper.public_send(MAPPING).fetch_many(dfn.to_s)
+        if RpmsRpc.configuration.fhir_client.present?
+          FHIRReadGateway.search("Observation", patient: dfn.to_s)
+        else
+          require "rpms_rpc/mappings"
+          RpmsRpc::DataMapper.vitals.fetch_many(dfn.to_s).map { |attrs| Observation.new(**attrs) }
+        end
       end
     end
   end

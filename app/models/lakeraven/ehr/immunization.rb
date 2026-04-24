@@ -25,6 +25,23 @@ module Lakeraven
         ImmunizationGateway.for_patient(dfn)
       end
 
+      def self.from_fhir(hash)
+        h = hash.transform_keys(&:to_s)
+        new(
+          ien: h["id"],
+          patient_dfn: (h.dig("patient", "reference") || h.dig("subject", "reference"))&.delete_prefix("Patient/"),
+          vaccine_code: h.dig("vaccineCode", "coding", 0, "code"),
+          vaccine_display: h.dig("vaccineCode", "text"),
+          status: h["status"],
+          lot_number: h["lotNumber"],
+          occurrence_datetime: h["occurrenceDateTime"],
+          site: h.dig("site", "text"),
+          route: h.dig("route", "text"),
+          performer_name: h.dig("performer", 0, "actor", "display"),
+          manufacturer: h.dig("manufacturer", "display")
+        )
+      end
+
       def completed? = status == "completed"
       def not_done? = status == "not-done"
       def entered_in_error? = status == "entered-in-error"

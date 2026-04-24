@@ -8,7 +8,7 @@ module Lakeraven
       def index
         dfn = params[:patient].to_s.delete_prefix("Patient/")
         results = EncounterGateway.for_patient(dfn)
-        render_bundle(results.map { |r| { resourceType: "Encounter" }.merge(r) })
+        render_bundle(results.map(&:to_fhir))
       end
 
       private

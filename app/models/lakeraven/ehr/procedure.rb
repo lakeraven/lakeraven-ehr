@@ -19,6 +19,20 @@ module Lakeraven
         ProcedureGateway.for_patient(dfn)
       end
 
+      def self.from_fhir(hash)
+        h = hash.transform_keys(&:to_s)
+        new(
+          ien: h["id"],
+          patient_dfn: h.dig("subject", "reference")&.delete_prefix("Patient/"),
+          code: h.dig("code", "coding", 0, "code"),
+          display: h.dig("code", "text"),
+          status: h["status"],
+          performed_datetime: h["performedDateTime"],
+          performer_name: h.dig("performer", 0, "actor", "display"),
+          location_name: h.dig("location", "display")
+        )
+      end
+
       def completed? = status == "completed"
 
       def to_fhir
