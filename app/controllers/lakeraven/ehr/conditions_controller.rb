@@ -11,6 +11,10 @@ module Lakeraven
         render_bundle(results.map { |r| { resourceType: "Condition" }.merge(r) })
       end
 
+      def show
+        render_not_found("Condition", params[:id])
+      end
+
       private
 
       def require_patient_param

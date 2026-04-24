@@ -51,7 +51,7 @@ Given("I am logged in as a case_manager") do
 end
 
 Given("I am logged in as a {word} with security key {string}") do |role, key_name|
-  setup_user_with_role(role, [key_name])
+  setup_user_with_role(role, [ key_name ])
 end
 
 Given("I am logged in as a {word} without security keys") do |role|

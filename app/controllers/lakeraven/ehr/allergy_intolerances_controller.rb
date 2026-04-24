@@ -11,6 +11,10 @@ module Lakeraven
         render_bundle(results.map { |r| { resourceType: "AllergyIntolerance" }.merge(r) })
       end
 
+      def show
+        render_not_found("AllergyIntolerance", params[:id])
+      end
+
       private
 
       def require_patient_param
