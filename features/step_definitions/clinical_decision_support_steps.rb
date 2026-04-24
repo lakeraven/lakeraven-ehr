@@ -1,9 +1,5 @@
 # frozen_string_literal: true
 
-Given("I am logged in as a provider") do
-  # Provider context established
-end
-
 Given("a patient with due clinical reminders") do
   @reminders ||= []
   @reminders.concat([

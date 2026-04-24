@@ -187,6 +187,111 @@ module Lakeraven
         telecom = fhir[:telecom]&.first
         assert_equal "907-555-1234", telecom[:value]
       end
+
+      test "to_fhir includes race extension" do
+        patient = Patient.find_by_dfn(1)
+        fhir = patient.to_fhir
+
+        race_ext = fhir[:extension]&.find { |e| e[:url]&.include?("race") }
+        assert_not_nil race_ext, "US Core requires race extension"
+      end
+
+      test "to_fhir gender maps F to female" do
+        patient = Patient.new(dfn: 1, name: "DOE,JANE", sex: "F", dob: Date.new(1980, 1, 1))
+        fhir = patient.to_fhir
+        assert_equal "female", fhir[:gender]
+      end
+
+      test "to_fhir gender maps M to male" do
+        patient = Patient.new(dfn: 2, name: "DOE,JOHN", sex: "M", dob: Date.new(1980, 1, 1))
+        fhir = patient.to_fhir
+        assert_equal "male", fhir[:gender]
+      end
+
+      test "to_fhir for minimal patient" do
+        patient = Patient.new(dfn: 99, name: "MINIMAL,TEST", sex: "M")
+        fhir = patient.to_fhir
+        assert_equal "Patient", fhir[:resourceType]
+        assert_equal "99", fhir[:id]
+      end
+
+      # -- clinical data accessors (ported from rpms_redux) ----------------------
+
+      test "service_requests returns referrals for patient" do
+        patient = Patient.find_by_dfn(1)
+        referrals = patient.service_requests
+        assert_kind_of Array, referrals
+      end
+
+      test "allergies returns allergy list for patient" do
+        patient = Patient.find_by_dfn(1)
+        allergies = patient.allergies
+        assert_kind_of Array, allergies
+      end
+
+      test "problem_list returns conditions for patient" do
+        patient = Patient.find_by_dfn(1)
+        problems = patient.problem_list
+        assert_kind_of Array, problems
+      end
+
+      test "medications returns medication requests for patient" do
+        patient = Patient.find_by_dfn(1)
+        meds = patient.medications
+        assert_kind_of Array, meds
+      end
+
+      test "vitals returns observations for patient" do
+        patient = Patient.find_by_dfn(1)
+        vitals = patient.vitals
+        assert_kind_of Array, vitals
+      end
+
+      # -- edge cases -----------------------------------------------------------
+
+      test "name syncs handles three-part name" do
+        patient = Patient.new(name: "DOE,JOHN MICHAEL JR")
+        assert_equal "Doe", patient.last_name
+        assert_equal "John michael jr", patient.first_name
+      end
+
+      test "display_name handles nil name" do
+        patient = Patient.new(name: nil)
+        assert_nil patient.display_name
+      end
+
+      test "formal_name handles nil name" do
+        patient = Patient.new(name: nil)
+        assert_nil patient.formal_name
+      end
+
+      test "age is stored from demographics" do
+        patient = Patient.new(dfn: 1, name: "DOE,JOHN", age: 45)
+        assert_equal 45, patient.age
+      end
+
+      test "stores tribal_affiliation" do
+        patient = Patient.new(tribal_affiliation: "Yup'ik")
+        assert_equal "Yup'ik", patient.tribal_affiliation
+      end
+
+      test "stores birth_date alias" do
+        patient = Patient.new(birth_date: Date.new(1980, 5, 15))
+        assert_equal Date.new(1980, 5, 15), patient.birth_date
+      end
+
+      # -- tribal enrollment (ported from rpms_redux) ----------------------------
+
+      test "validate_tribal_enrollment returns invalid when no enrollment number" do
+        patient = Patient.new(dfn: 1, name: "DOE,JOHN", sex: "M")
+        result = patient.validate_tribal_enrollment
+        refute result[:valid]
+      end
+
+      test "tribal_enrollment_valid? false without enrollment number" do
+        patient = Patient.new(dfn: 1, name: "DOE,JOHN", sex: "M")
+        refute patient.tribal_enrollment_valid?
+      end
     end
   end
 end

@@ -155,6 +155,86 @@ module Lakeraven
         assert_equal "DetectedIssue", issues.first[:resourceType]
       end
 
+      # -- InteractionAlert edge cases -----------------------------------------
+
+      test "InteractionAlert defaults interaction_type to drug_drug" do
+        alert = InteractionAlert.new(
+          severity: :high, drug_a: "a", drug_b: "b", description: "x"
+        )
+        assert_equal :drug_drug, alert.interaction_type
+      end
+
+      test "low severity is not severe" do
+        alert = InteractionAlert.new(
+          severity: :low, drug_a: "a", drug_b: "b", description: "x"
+        )
+        assert_not alert.severe?
+      end
+
+      # -- DrugInteractionResult edge cases ------------------------------------
+
+      test "blocking? false for moderate-only interactions" do
+        alert = InteractionAlert.new(
+          severity: :moderate, drug_a: "a", drug_b: "b", description: "x"
+        )
+        result = DrugInteractionResult.new(interactions: [ alert ])
+        assert_not result.blocking?
+      end
+
+      test "blocking? false when no interactions" do
+        result = DrugInteractionResult.new(interactions: [])
+        assert_not result.blocking?
+      end
+
+      test "interactions array accessible" do
+        alert = InteractionAlert.new(severity: :high, drug_a: "a", drug_b: "b", description: "x")
+        result = DrugInteractionResult.new(interactions: [ alert ])
+        assert_equal 1, result.interactions.length
+        assert_equal "a", result.interactions.first.drug_a
+      end
+
+      test "incomplete? returns true when data fetch failed" do
+        result = DrugInteractionResult.new(interactions: [], incomplete: true)
+        assert result.incomplete?
+      end
+
+      test "incomplete? returns false for complete data" do
+        result = DrugInteractionResult.new(interactions: [])
+        assert_not result.incomplete?
+      end
+
+      # -- Service edge cases --------------------------------------------------
+
+      test "service handles food allergies gracefully" do
+        result = DrugInteractionService.new.check(
+          active_medications: [],
+          proposed_medication: med("amoxicillin", "723"),
+          allergies: [ allergy("shellfish", "999", "food") ]
+        )
+        # Food allergy shouldn't trigger drug-allergy interaction
+        assert result.safe?
+      end
+
+      test "service with single medication and no allergies is safe" do
+        result = DrugInteractionService.new.check(
+          active_medications: [],
+          proposed_medication: med("acetaminophen", "161"),
+          allergies: []
+        )
+        assert result.safe?
+        assert_equal 0, result.interactions.length
+      end
+
+      test "DetectedIssue includes severity" do
+        result = DrugInteractionService.new.check(
+          active_medications: [ med("warfarin", "11289") ],
+          proposed_medication: med("aspirin", "1191"),
+          allergies: []
+        )
+        issue = result.to_fhir_detected_issues.first
+        assert issue[:severity].present?
+      end
+
       private
 
       def med(name, code)

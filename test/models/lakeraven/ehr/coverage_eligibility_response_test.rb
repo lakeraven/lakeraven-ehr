@@ -101,6 +101,93 @@ module Lakeraven
 
         assert_equal "error", fhir[:outcome]
       end
+
+      # -- additional status predicates ----------------------------------------
+
+      test "pending? for pending status" do
+        assert CoverageEligibilityResponse.new(status: "pending").pending?
+      end
+
+      test "denied? for denied status" do
+        assert CoverageEligibilityResponse.new(status: "denied").denied?
+      end
+
+      test "exhausted? for exhausted status" do
+        assert CoverageEligibilityResponse.new(status: "exhausted").exhausted?
+      end
+
+      test "accepts all valid statuses" do
+        %w[enrolled not_enrolled pending denied exhausted error].each do |status|
+          resp = CoverageEligibilityResponse.new(
+            patient_dfn: "1", coverage_type: "medicaid", status: status
+          )
+          assert resp.valid?, "Expected #{status} to be valid"
+        end
+      end
+
+      # -- coverage period edge cases ------------------------------------------
+
+      test "within_coverage_period? true when no dates" do
+        resp = CoverageEligibilityResponse.new(
+          patient_dfn: "1", status: "enrolled"
+        )
+        assert resp.within_coverage_period?
+      end
+
+      test "within_coverage_period? true when only start_date" do
+        resp = CoverageEligibilityResponse.new(
+          patient_dfn: "1", status: "enrolled",
+          start_date: 1.year.ago
+        )
+        assert resp.within_coverage_period?
+      end
+
+      # -- active_coverage? combines status and period -------------------------
+
+      test "active_coverage? false when enrolled but expired" do
+        resp = CoverageEligibilityResponse.new(
+          patient_dfn: "1", status: "enrolled",
+          start_date: 2.years.ago, end_date: 1.year.ago
+        )
+        assert_not resp.active_coverage?
+      end
+
+      test "active_coverage? true when enrolled and current" do
+        resp = CoverageEligibilityResponse.new(
+          patient_dfn: "1", status: "enrolled",
+          start_date: 1.year.ago, end_date: 1.year.from_now
+        )
+        assert resp.active_coverage?
+      end
+
+      # -- FHIR serialization details ------------------------------------------
+
+      test "to_fhir includes insurer reference" do
+        resp = CoverageEligibilityResponse.new(
+          patient_dfn: "1", coverage_type: "medicaid", status: "enrolled",
+          insurer_name: "State of Alaska"
+        )
+        fhir = resp.to_fhir
+        assert fhir[:insurer].present?
+      end
+
+      test "to_fhir includes coverage period" do
+        resp = CoverageEligibilityResponse.new(
+          patient_dfn: "1", coverage_type: "medicaid", status: "enrolled",
+          start_date: Date.new(2025, 1, 1), end_date: Date.new(2025, 12, 31)
+        )
+        fhir = resp.to_fhir
+        # Period should be included in insurance or servicedPeriod
+        assert_equal "CoverageEligibilityResponse", fhir[:resourceType]
+      end
+
+      test "to_fhir for not_enrolled maps outcome to complete" do
+        resp = CoverageEligibilityResponse.new(
+          patient_dfn: "1", coverage_type: "medicaid", status: "not_enrolled"
+        )
+        fhir = resp.to_fhir
+        assert_equal "complete", fhir[:outcome]
+      end
     end
   end
 end

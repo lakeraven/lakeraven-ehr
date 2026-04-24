@@ -85,6 +85,13 @@ RpmsRpc.mock! do |m|
                                 service_unit: "Window Rock", region: "Arizona", area: "Navajo Area" })
   m.seed(:tribe_info, "OST", { ien: 104, name: "Oglala Sioux Tribe", code: "OST",
                                  service_unit: "Pine Ridge", region: "South Dakota", area: "Great Plains Area" })
+
+  # Test users
+  m.seed_user("301", credentials: "testprovider;test123", name: "PROVIDER,TEST", role: :provider)
+  m.seed_user("302", credentials: "testnurse;test123", name: "NURSE,TEST", role: :nurse)
+  m.seed_user("303", credentials: "testclerk;test123", name: "CLERK,TEST", role: :clerk)
+  m.seed_user("304", credentials: "lindarodriguez;test123", name: "RODRIGUEZ,LINDA", role: :case_manager,
+                     security_keys: [:prc_supervisor, :cprs_gui_chart])
 end
 
 # Shared auth helper for integration tests.

@@ -130,6 +130,64 @@ module Lakeraven
         telecom = fhir[:telecom]&.first
         assert_equal "907-555-9999", telecom[:value]
       end
+
+      # -- edge cases ----------------------------------------------------------
+
+      test "handles practitioners with minimal data" do
+        prac = Practitioner.new(ien: 999, name: "MINIMAL,PROVIDER")
+        assert_equal "MINIMAL,PROVIDER", prac.name
+        refute prac.can_prescribe_controlled?
+      end
+
+      test "display_name handles single-part name" do
+        prac = Practitioner.new(name: "SINGLENAME")
+        assert_equal "SINGLENAME", prac.display_name
+      end
+
+      test "display_name handles blank name" do
+        prac = Practitioner.new(name: "")
+        assert_equal "", prac.display_name
+      end
+
+      test "credentials_summary with both title and specialty" do
+        prac = Practitioner.new(title: "MD", specialty: "Cardiology")
+        assert_equal "MD, Cardiology", prac.credentials_summary
+      end
+
+      test "credentials_summary with only specialty" do
+        prac = Practitioner.new(specialty: "Cardiology")
+        assert_equal "Cardiology", prac.credentials_summary
+      end
+
+      test "credentials_summary with only title" do
+        prac = Practitioner.new(title: "RN")
+        assert_equal "RN", prac.credentials_summary
+      end
+
+      test "credentials_summary with neither" do
+        prac = Practitioner.new
+        assert_equal "", prac.credentials_summary
+      end
+
+      test "find_by_ien returns nil for zero" do
+        assert_nil Practitioner.find_by_ien(0)
+      end
+
+      test "find_by_ien returns nil for negative" do
+        assert_nil Practitioner.find_by_ien(-1)
+      end
+
+      test "to_fhir for practitioner without NPI" do
+        prac = Practitioner.new(ien: 102, name: "NURSE,HEAD", title: "RN")
+        fhir = prac.to_fhir
+        assert_equal "Practitioner", fhir[:resourceType]
+      end
+
+      test "name syncs from MUMPS format with middle name" do
+        prac = Practitioner.new(name: "DOE,JOHN MICHAEL")
+        assert_equal "Doe", prac.last_name
+        assert_equal "John michael", prac.first_name
+      end
     end
   end
 end

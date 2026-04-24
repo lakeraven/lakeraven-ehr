@@ -25,9 +25,21 @@ module Lakeraven
         {
           resourceType: "Procedure",
           id: ien&.to_s,
+          status: status,
           subject: patient_dfn ? { reference: "Patient/#{patient_dfn}" } : nil,
-          status: respond_to?(:status) ? status : nil
+          code: build_code
         }.compact
+      end
+
+      private
+
+      def build_code
+        return nil unless code || display
+
+        result = {}
+        result[:coding] = [{ code: code }] if code
+        result[:text] = display if display
+        result
       end
     end
   end

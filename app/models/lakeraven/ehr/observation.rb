@@ -28,9 +28,29 @@ module Lakeraven
         {
           resourceType: "Observation",
           id: ien&.to_s,
+          status: status,
           subject: patient_dfn ? { reference: "Patient/#{patient_dfn}" } : nil,
-          status: respond_to?(:status) ? status : nil
+          code: build_code,
+          valueQuantity: build_value_quantity,
+          category: category ? [{ coding: [{ code: category }] }] : nil
         }.compact
+      end
+
+      private
+
+      def build_code
+        return nil unless code || display
+
+        result = {}
+        result[:coding] = [{ code: code }] if code
+        result[:text] = display if display
+        result
+      end
+
+      def build_value_quantity
+        return nil unless value_quantity
+
+        { value: value_quantity, unit: unit }.compact
       end
     end
   end

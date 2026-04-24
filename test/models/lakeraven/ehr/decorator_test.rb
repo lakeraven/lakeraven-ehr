@@ -88,12 +88,15 @@ module Lakeraven
         assert_equal "Male", gi_ext[:valueString]
       end
 
-      test "to_fhir omits extensions when no supplement" do
+      test "to_fhir omits SOGI extensions when no supplement" do
         patient = Patient.find_by_dfn(1)
         decorated = PatientDecorator.new(patient)
         fhir = decorated.to_fhir
 
-        assert_nil fhir[:extension]
+        so_ext = fhir[:extension]&.find { |e| e[:url]&.include?("sexualOrientation") }
+        gi_ext = fhir[:extension]&.find { |e| e[:url]&.include?("genderIdentity") }
+        assert_nil so_ext
+        assert_nil gi_ext
       end
 
       # -- PatientSupplement model ---------------------------------------------
