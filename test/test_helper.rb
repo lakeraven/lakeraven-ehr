@@ -34,9 +34,11 @@ RpmsRpc.mock! do |m|
 
   # Practitioners (IEN 101-102)
   m.seed(:practitioner_info, "101", { name: "MARTINEZ,SARAH", title: "MD", service_section: "Internal Medicine",
-                                       specialty: "Cardiology", npi: "1234567890", phone: "907-555-9999", provider_class: "Physician" })
+                                       specialty: "Cardiology", npi: "1234567890", dea_number: "AM1234563",
+                                       phone: "907-555-9999", provider_class: "Physician" })
   m.seed(:practitioner_info, "102", { name: "CHEN,JAMES", title: "DO", service_section: "Surgery",
-                                       specialty: "Orthopedic Surgery", npi: "2345678901", phone: "907-555-8888", provider_class: "Physician" })
+                                       specialty: "Orthopedic Surgery", npi: "2345678901",
+                                       phone: "907-555-8888", provider_class: "Physician" })
 
   m.seed_collection(:practitioner_list,
     [ { ien: 101, name: "MARTINEZ,SARAH", title: "MD" }, { ien: 102, name: "CHEN,JAMES", title: "DO" } ],
