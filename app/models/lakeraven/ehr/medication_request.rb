@@ -22,6 +22,20 @@ module Lakeraven
         MedicationRequestGateway.for_patient(dfn)
       end
 
+      def self.from_fhir(hash)
+        h = hash.transform_keys(&:to_s)
+        new(
+          ien: h["id"],
+          patient_dfn: h.dig("subject", "reference")&.delete_prefix("Patient/"),
+          medication_code: h.dig("medicationCodeableConcept", "coding", 0, "code"),
+          medication_display: h.dig("medicationCodeableConcept", "text"),
+          status: h["status"],
+          dosage_instruction: h.dig("dosageInstruction", 0, "text"),
+          authored_on: h["authoredOn"],
+          requester_name: h.dig("requester", "display")
+        )
+      end
+
       def active? = status == "active"
 
       def to_fhir

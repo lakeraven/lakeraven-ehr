@@ -21,6 +21,22 @@ module Lakeraven
         ConditionGateway.for_patient(dfn)
       end
 
+      def self.from_fhir(hash)
+        h = hash.transform_keys(&:to_s)
+        new(
+          ien: h["id"],
+          patient_dfn: h.dig("subject", "reference")&.delete_prefix("Patient/"),
+          code: h.dig("code", "coding", 0, "code"),
+          display: h.dig("code", "text"),
+          clinical_status: h.dig("clinicalStatus", "coding", 0, "code"),
+          verification_status: h.dig("verificationStatus", "coding", 0, "code"),
+          category: h.dig("category", 0, "coding", 0, "code"),
+          severity: h.dig("severity", "coding", 0, "code"),
+          onset_datetime: h["onsetDateTime"],
+          recorded_date: h["recordedDate"]
+        )
+      end
+
       def active? = clinical_status == "active"
       def resolved? = clinical_status == "resolved"
       def problem_list_item? = category == "problem-list-item"

@@ -8,7 +8,7 @@ module Lakeraven
       def index
         dfn = params[:patient].to_s.delete_prefix("Patient/")
         results = Immunization.for_patient(dfn)
-        render_bundle(results.map { |r| { resourceType: "Immunization" }.merge(r) })
+        render_bundle(results.map(&:to_fhir))
       end
 
       private

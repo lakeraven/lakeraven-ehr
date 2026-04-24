@@ -9,6 +9,7 @@ ActiveRecord::Migrator.migrations_paths << File.expand_path("../db/migrate", __d
 require "rails/test_help"
 require "rpms_rpc/version"
 require "rpms_rpc/mock_client"
+require "rpms_rpc/mock_fhir_client"
 
 # Configure RpmsRpc with mock client and seed data for all tests.
 RpmsRpc.mock! do |m|
@@ -92,6 +93,68 @@ RpmsRpc.mock! do |m|
   m.seed_user("303", credentials: "testclerk;test123", name: "CLERK,TEST", role: :clerk)
   m.seed_user("304", credentials: "lindarodriguez;test123", name: "RODRIGUEZ,LINDA", role: :case_manager,
                      security_keys: [:prc_supervisor, :cprs_gui_chart])
+end
+
+# Configure mock FHIR client with the same patient data as FHIR resources.
+RpmsRpc.mock_fhir! do |f|
+  f.seed_resource("Patient", "1", {
+    resourceType: "Patient", id: "1",
+    name: [{ use: "official", family: "Anderson", given: ["Alice"] }],
+    gender: "female", birthDate: "1980-05-15",
+    identifier: [
+      { use: "usual", system: "urn:oid:2.16.840.1.113883.4.349", value: "1" },
+      { use: "secondary", system: "http://hl7.org/fhir/sid/us-ssn", value: "111-11-1111" }
+    ],
+    address: [{ use: "home", line: ["123 Main St"], city: "Anchorage", state: "AK", postalCode: "99501" }],
+    telecom: [{ system: "phone", value: "907-555-1234", use: "home" }],
+    extension: [
+      { url: "http://hl7.org/fhir/us/core/StructureDefinition/us-core-race",
+        extension: [{ url: "text", valueString: "AMERICAN INDIAN" }] },
+      { url: "http://hl7.org/fhir/us/core/StructureDefinition/tribal-affiliation",
+        valueString: "ANLC-12345" }
+    ]
+  })
+
+  f.seed_resource("Patient", "2", {
+    resourceType: "Patient", id: "2",
+    name: [{ use: "official", family: "Mouse", given: ["Mickey", "M"] }],
+    gender: "male", birthDate: "2010-02-14",
+    identifier: [{ use: "usual", system: "urn:oid:2.16.840.1.113883.4.349", value: "2" }]
+  })
+
+  f.seed_resource("Patient", "3", {
+    resourceType: "Patient", id: "3",
+    name: [{ use: "official", family: "Doe", given: ["Jane"] }],
+    gender: "female", birthDate: "1990-12-25",
+    identifier: [{ use: "usual", system: "urn:oid:2.16.840.1.113883.4.349", value: "3" }]
+  })
+
+  f.seed_resource("Practitioner", "101", {
+    resourceType: "Practitioner", id: "101",
+    name: [{ family: "Martinez", given: ["Sarah"] }],
+    identifier: [{ system: "http://hl7.org/fhir/sid/us-npi", value: "1234567890" }]
+  })
+
+  f.seed_resource("Practitioner", "102", {
+    resourceType: "Practitioner", id: "102",
+    name: [{ family: "Chen", given: ["James"] }],
+    identifier: [{ system: "http://hl7.org/fhir/sid/us-npi", value: "2345678901" }]
+  })
+
+  f.seed_resource("Organization", "1", {
+    resourceType: "Organization", id: "1",
+    name: "Alaska Native Medical Center",
+    identifier: [{ system: "http://hl7.org/fhir/sid/us-npi", value: "463" }],
+    address: [{ line: ["4315 Diplomacy Dr"], city: "Anchorage", state: "AK", postalCode: "99508" }],
+    telecom: [{ system: "phone", value: "907-729-1900" }]
+  })
+
+  f.seed_resource("Location", "1", {
+    resourceType: "Location", id: "1",
+    name: "Primary Care Clinic",
+    alias: ["PCC"],
+    type: [{ coding: [{ code: "C" }] }]
+  })
 end
 
 # Shared auth helper for integration tests.
