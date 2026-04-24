@@ -49,10 +49,10 @@ Then("the patient demographics should show:") do |table|
       assert_equal value, @current_patient.dob.strftime("%m/%d/%Y")
     when "Sex"
       sex_display = case @current_patient.sex&.upcase
-                    when "M" then "Male"
-                    when "F" then "Female"
-                    else "Unknown"
-                    end
+      when "M" then "Male"
+      when "F" then "Female"
+      else "Unknown"
+      end
       assert_equal value, sex_display
     when "SSN"
       assert_equal value, @current_patient.ssn

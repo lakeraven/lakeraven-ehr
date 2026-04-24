@@ -93,7 +93,7 @@ RpmsRpc.mock! do |m|
   m.seed_user("302", credentials: "testnurse;test123", name: "NURSE,TEST", role: :nurse)
   m.seed_user("303", credentials: "testclerk;test123", name: "CLERK,TEST", role: :clerk)
   m.seed_user("304", credentials: "lindarodriguez;test123", name: "RODRIGUEZ,LINDA", role: :case_manager,
-                     security_keys: [:prc_supervisor, :cprs_gui_chart])
+                     security_keys: [ :prc_supervisor, :cprs_gui_chart ])
 end
 
 # Shared auth helper for integration tests.
