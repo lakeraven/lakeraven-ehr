@@ -1,0 +1,1 @@
+{"resourceType":"ValueSet","id":"prc-specialized-services","title":"PRC Specialized Services","compose":{"include":[{"system":"http://www.ama-assn.org/go/cpt","concept":[{"code":"27447","display":"Total knee replacement"},{"code":"33533","display":"Coronary artery bypass"},{"code":"61510","display":"Neurosurgery - craniotomy"}]}]}}

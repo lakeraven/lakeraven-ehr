@@ -1,0 +1,23 @@
+{
+  "resourceType": "ValueSet",
+  "id": "gpra-bgpmu-diabetes-dx",
+  "title": "Diabetes Diagnosis Codes",
+  "status": "active",
+  "compose": {
+    "include": [
+      {
+        "system": "http://hl7.org/fhir/sid/icd-10-cm",
+        "concept": [
+          {"code": "E11.9", "display": "Type 2 diabetes mellitus without complications"},
+          {"code": "E11.65", "display": "Type 2 diabetes mellitus with hyperglycemia"}
+        ]
+      },
+      {
+        "system": "http://hl7.org/fhir/sid/icd-9-cm",
+        "concept": [
+          {"code": "250.00", "display": "Diabetes mellitus without complication"}
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,1 @@
+{"resourceType":"ValueSet","id":"prc-emergency-diagnosis-codes","title":"PRC Emergency Diagnosis Codes","compose":{"include":[{"system":"http://hl7.org/fhir/sid/icd-10-cm","concept":[{"code":"I21.0","display":"Acute myocardial infarction"},{"code":"I46.9","display":"Cardiac arrest, unspecified"},{"code":"I63.9","display":"Cerebral infarction"}]}]}}
