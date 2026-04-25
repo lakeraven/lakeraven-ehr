@@ -10,20 +10,24 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_04_22_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_04_25_010000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
   create_table "lakeraven_ehr_audit_events", force: :cascade do |t|
     t.string "action", null: false
+    t.string "agent_name"
+    t.string "agent_network_address"
     t.string "agent_who_identifier"
     t.string "agent_who_type"
     t.datetime "created_at", null: false
+    t.string "entity_id"
     t.string "entity_identifier"
     t.string "entity_type"
     t.string "event_type", null: false
     t.string "facility_identifier"
     t.string "outcome", null: false
+    t.text "outcome_desc"
     t.string "tenant_identifier"
     t.datetime "updated_at", null: false
     t.index [ "created_at" ], name: "index_lakeraven_ehr_audit_events_on_created_at"

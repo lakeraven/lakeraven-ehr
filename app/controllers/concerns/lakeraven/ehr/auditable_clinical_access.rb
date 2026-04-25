@@ -24,6 +24,7 @@ module Lakeraven
           entity_identifier: audit_entity_identifier,
           agent_who_type: "Application",
           agent_who_identifier: current_token.application&.uid,
+          agent_network_address: request.remote_ip,
           tenant_identifier: request.headers["X-Tenant-Identifier"],
           facility_identifier: request.headers["X-Facility-Identifier"]
         )
