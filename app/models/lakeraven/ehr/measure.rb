@@ -27,7 +27,7 @@ module Lakeraven
       end
 
       def self.load_from_yaml(file)
-        data = YAML.safe_load_file(file, permitted_classes: [Symbol])
+        data = YAML.safe_load_file(file, permitted_classes: [ Symbol ])
         new(
           id: data["id"], title: data["title"],
           nqf_number: data["nqf_number"], scoring: data["scoring"]
@@ -71,7 +71,7 @@ module Lakeraven
           title: title,
           status: "active",
           identifier: build_nqf_identifier,
-          scoring: { coding: [{ code: scoring }] },
+          scoring: { coding: [ { code: scoring } ] },
           group: build_groups
         }.compact
       end
@@ -81,13 +81,13 @@ module Lakeraven
       def build_nqf_identifier
         return nil if nqf_number.blank?
 
-        [{ system: "http://hl7.org/fhir/cqi/ecqm/Measure/Identifier/nqf", value: nqf_number }]
+        [ { system: "http://hl7.org/fhir/cqi/ecqm/Measure/Identifier/nqf", value: nqf_number } ]
       end
 
       def build_groups
-        [{
+        [ {
           population: build_populations
-        }]
+        } ]
       end
 
       def build_populations
@@ -103,7 +103,7 @@ module Lakeraven
 
       def build_population_entry(code, _criteria)
         {
-          code: { coding: [{ code: code }] }
+          code: { coding: [ { code: code } ] }
         }
       end
 

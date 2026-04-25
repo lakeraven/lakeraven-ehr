@@ -78,10 +78,10 @@ module Lakeraven
       end
 
       def build_groups
-        [{
+        [ {
           population: build_population_entries,
           measureScore: build_measure_score
-        }.compact]
+        }.compact ]
       end
 
       def build_population_entries
@@ -95,7 +95,7 @@ module Lakeraven
 
       def build_population(code, count)
         {
-          code: { coding: [{ code: code }] },
+          code: { coding: [ { code: code } ] },
           count: count
         }
       end

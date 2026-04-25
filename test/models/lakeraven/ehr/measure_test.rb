@@ -134,7 +134,7 @@ module Lakeraven
         fhir_resource = {
           "id" => "test_measure",
           "title" => "Test Measure",
-          "scoring" => { "coding" => [{ "code" => "proportion" }] }
+          "scoring" => { "coding" => [ { "code" => "proportion" } ] }
         }
 
         attrs = Measure.from_fhir_attributes(fhir_resource)
@@ -148,10 +148,10 @@ module Lakeraven
         fhir_resource = {
           "id" => "test_nqf",
           "title" => "NQF Test",
-          "identifier" => [{
+          "identifier" => [ {
             "system" => "http://hl7.org/fhir/cqi/ecqm/Measure/Identifier/nqf",
             "value" => "0059"
-          }]
+          } ]
         }
 
         attrs = Measure.from_fhir_attributes(fhir_resource)
@@ -171,7 +171,7 @@ module Lakeraven
         fhir_resource = {
           id: "test_symbol",
           title: "Symbol Keys",
-          scoring: { coding: [{ code: "continuous-variable" }] }
+          scoring: { coding: [ { code: "continuous-variable" } ] }
         }
 
         attrs = Measure.from_fhir_attributes(fhir_resource)

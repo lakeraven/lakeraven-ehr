@@ -94,7 +94,7 @@ module Lakeraven
       test "from_fhir_attributes maps FHIR gender to VistA" do
         { "male" => "M", "female" => "F", "other" => "U", "unknown" => "U" }.each do |fhir_gender, sex|
           fhir = ::OpenStruct.new(
-            name: [::OpenStruct.new(text: "TEST")],
+            name: [ ::OpenStruct.new(text: "TEST") ],
             gender: fhir_gender,
             birthDate: nil,
             identifier: []
@@ -115,9 +115,9 @@ module Lakeraven
 
         # Build an ::OpenStruct resembling a FHIR resource for from_fhir_attributes
         fhir_resource = ::OpenStruct.new(
-          name: [::OpenStruct.new(family: fhir_hash[:name].first[:family],
+          name: [ ::OpenStruct.new(family: fhir_hash[:name].first[:family],
                                 given: fhir_hash[:name].first[:given],
-                                text: nil)],
+                                text: nil) ],
           gender: fhir_hash[:gender],
           birthDate: fhir_hash[:birthDate],
           identifier: fhir_hash[:identifier].map { |id| ::OpenStruct.new(id) }

@@ -61,7 +61,7 @@ module Lakeraven
       end
 
       def compute_content_hash
-        content = [id, *SIGNED_ATTRIBUTES.map { |attr| public_send(attr) }].join("|")
+        content = [ id, *SIGNED_ATTRIBUTES.map { |attr| public_send(attr) } ].join("|")
         Digest::SHA256.hexdigest(content)
       end
 
