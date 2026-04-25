@@ -12,6 +12,8 @@ end
 
 gem "puma"
 gem "pg"
+gem "lakeraven-integrations", github: "lakeraven/lakeraven-integrations", branch: "main", glob: "lakeraven-integrations/*.gemspec"
+gem "lakeraven-fhir-models", github: "lakeraven/lakeraven-integrations", branch: "main", glob: "lakeraven-fhir-models/*.gemspec"
 
 gem "cucumber-rails", require: false
 gem "minitest"
