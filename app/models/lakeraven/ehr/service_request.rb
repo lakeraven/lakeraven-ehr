@@ -30,8 +30,44 @@ module Lakeraven
       validates :status, inclusion: { in: %w[active completed cancelled draft], allow_nil: true }
       validates :urgency, inclusion: { in: %w[ROUTINE URGENT EMERGENT], allow_nil: true }
 
+      attribute :appointment_on, :date
+      attribute :completed_on, :date
+      attribute :notes, :string
+
       def persisted?
         ien.present? && ien.to_i.positive?
+      end
+
+      # -- Status predicates ---------------------------------------------------
+
+      def pending?
+        status == "draft"
+      end
+
+      def active?
+        status == "active"
+      end
+
+      def completed?
+        status == "completed"
+      end
+
+      def cancelled?
+        status == "cancelled"
+      end
+
+      # -- Business logic (ported from rpms_redux) -----------------------------
+
+      def priority
+        if emergent? then 1
+        elsif urgent? then 2
+        else 3
+        end
+      end
+
+      def overdue?
+        return false unless appointment_on.present?
+        appointment_on < Date.current && !completed? && !cancelled?
       end
 
       def self.for_patient(dfn)

@@ -98,6 +98,79 @@ module Lakeraven
       end
 
       # =========================================================================
+      # STATUS PREDICATE TESTS (ported from rpms_redux)
+      # =========================================================================
+
+      test "pending? when status is draft" do
+        assert ServiceRequest.new(status: "draft").pending?
+      end
+
+      test "pending? false when active" do
+        refute ServiceRequest.new(status: "active").pending?
+      end
+
+      test "active? when status is active" do
+        assert ServiceRequest.new(status: "active").active?
+      end
+
+      test "completed? when status is completed" do
+        assert ServiceRequest.new(status: "completed").completed?
+      end
+
+      test "cancelled? when status is cancelled" do
+        assert ServiceRequest.new(status: "cancelled").cancelled?
+      end
+
+      # =========================================================================
+      # BUSINESS LOGIC TESTS (ported from rpms_redux)
+      # =========================================================================
+
+      test "priority returns 1 for emergent" do
+        sr = ServiceRequest.new(urgency: "EMERGENT")
+        assert_equal 1, sr.priority
+      end
+
+      test "priority returns 2 for urgent" do
+        sr = ServiceRequest.new(urgency: "URGENT")
+        assert_equal 2, sr.priority
+      end
+
+      test "priority returns 3 for routine" do
+        sr = ServiceRequest.new(urgency: "ROUTINE")
+        assert_equal 3, sr.priority
+      end
+
+      test "priority returns 3 for nil urgency" do
+        sr = ServiceRequest.new(urgency: nil)
+        assert_equal 3, sr.priority
+      end
+
+      test "overdue? when appointment is past and not completed" do
+        sr = ServiceRequest.new(appointment_on: Date.current - 1, status: "active")
+        assert sr.overdue?
+      end
+
+      test "overdue? false when no appointment" do
+        sr = ServiceRequest.new(status: "active")
+        refute sr.overdue?
+      end
+
+      test "overdue? false when completed" do
+        sr = ServiceRequest.new(appointment_on: Date.current - 1, status: "completed")
+        refute sr.overdue?
+      end
+
+      test "overdue? false when cancelled" do
+        sr = ServiceRequest.new(appointment_on: Date.current - 1, status: "cancelled")
+        refute sr.overdue?
+      end
+
+      test "overdue? false when appointment is in future" do
+        sr = ServiceRequest.new(appointment_on: Date.current + 1, status: "active")
+        refute sr.overdue?
+      end
+
+      # =========================================================================
       # ATTRIBUTE TESTS
       # =========================================================================
 
