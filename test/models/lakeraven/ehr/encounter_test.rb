@@ -80,6 +80,14 @@ module Lakeraven
         assert Encounter.new(status: "planned", class_code: "IMP").inpatient?
       end
 
+      test "arrived? true for arrived status" do
+        assert Encounter.new(status: "arrived", class_code: "AMB").arrived?
+      end
+
+      test "virtual? true for VR class" do
+        assert Encounter.new(status: "planned", class_code: "VR").virtual?
+      end
+
       # =============================================================================
       # DISPLAY HELPERS
       # =============================================================================
@@ -93,6 +101,40 @@ module Lakeraven
         assert_equal "Ambulatory", Encounter.new(status: "planned", class_code: "AMB").class_display
         assert_equal "Emergency", Encounter.new(status: "planned", class_code: "EMER").class_display
         assert_equal "Inpatient", Encounter.new(status: "planned", class_code: "IMP").class_display
+      end
+
+      # =============================================================================
+      # PERIOD HELPERS
+      # =============================================================================
+
+      test "within_period? returns true when no period set" do
+        enc = Encounter.new(status: "in-progress", class_code: "AMB")
+        assert enc.within_period?
+      end
+
+      test "within_period? returns true when within period" do
+        enc = Encounter.new(
+          status: "in-progress", class_code: "AMB",
+          period_start: DateTime.current - 1.hour,
+          period_end: DateTime.current + 1.hour
+        )
+        assert enc.within_period?
+      end
+
+      test "within_period? returns false when before period" do
+        enc = Encounter.new(
+          status: "planned", class_code: "AMB",
+          period_start: DateTime.current + 1.day
+        )
+        refute enc.within_period?
+      end
+
+      test "within_period? returns false when after period" do
+        enc = Encounter.new(
+          status: "finished", class_code: "AMB",
+          period_end: DateTime.current - 1.day
+        )
+        refute enc.within_period?
       end
 
       # =============================================================================
@@ -187,6 +229,58 @@ module Lakeraven
         enc = Encounter.new(status: "finished", class_code: "AMB", reason_display: "Chest pain", reason_code: "R07.9")
         fhir = enc.to_fhir
         assert_equal "Chest pain", fhir[:reasonCode].first[:text]
+      end
+
+      test "to_fhir includes location when present" do
+        enc = Encounter.new(status: "in-progress", class_code: "AMB", location_ien: 201)
+        fhir = enc.to_fhir
+        assert fhir[:location].any?
+        assert fhir[:location].first.dig(:location, :reference).include?("Location")
+      end
+
+      test "to_fhir includes service provider when present" do
+        enc = Encounter.new(status: "in-progress", class_code: "AMB", service_provider_organization_ien: 301)
+        fhir = enc.to_fhir
+        assert_not_nil fhir[:serviceProvider]
+        assert fhir[:serviceProvider][:reference].include?("Organization")
+      end
+
+      test "resource_class returns Encounter" do
+        assert_equal "Encounter", Encounter.resource_class
+      end
+
+      test "from_fhir_attributes extracts attributes from hash" do
+        fhir = {
+          status: "finished",
+          class: { code: "AMB" },
+          subject: { reference: "Patient/12345" }
+        }
+        attrs = Encounter.from_fhir_attributes(fhir)
+        assert_equal "finished", attrs[:status]
+        assert_equal "AMB", attrs[:class_code]
+        assert_equal "12345", attrs[:patient_identifier]
+      end
+
+      # =============================================================================
+      # EDGE CASES
+      # =============================================================================
+
+      test "to_fhir handles empty participant_practitioner_iens" do
+        enc = Encounter.new(status: "in-progress", class_code: "AMB", participant_practitioner_iens: [])
+        fhir = enc.to_fhir
+        assert_nil fhir[:participant]
+      end
+
+      test "to_fhir handles nil location" do
+        enc = Encounter.new(status: "in-progress", class_code: "AMB", location_ien: nil)
+        fhir = enc.to_fhir
+        assert_nil fhir[:location]
+      end
+
+      test "to_fhir handles nil type" do
+        enc = Encounter.new(status: "in-progress", class_code: "AMB", type_display: nil)
+        fhir = enc.to_fhir
+        assert_nil fhir[:type]
       end
 
       # =============================================================================

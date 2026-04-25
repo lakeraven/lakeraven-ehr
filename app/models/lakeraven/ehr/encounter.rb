@@ -36,6 +36,10 @@ module Lakeraven
       attribute :practitioner_identifier, :string
       attribute :patient_dfn, :integer
       attribute :location_ien, :integer
+      attribute :service_provider_organization_ien, :integer
+
+      # Array attribute — not natively typed by ActiveModel, use plain accessor
+      attr_accessor :participant_practitioner_iens
 
       validates :status, inclusion: { in: VALID_STATUSES }
       validates :class_code, inclusion: { in: VALID_CLASS_CODES }
@@ -51,12 +55,14 @@ module Lakeraven
       def finished? = status == "finished"
       def cancelled? = status == "cancelled"
       def planned? = status == "planned"
+      def arrived? = status == "arrived"
 
       # -- Class predicates --------------------------------------------------
 
       def ambulatory? = class_code == "AMB"
       def emergency? = class_code == "EMER"
       def inpatient? = class_code == "IMP"
+      def virtual? = class_code == "VR"
 
       # -- Workflow methods --------------------------------------------------
 
@@ -80,6 +86,15 @@ module Lakeraven
         self.status = "cancelled"
       end
 
+      # -- Period helpers ----------------------------------------------------
+
+      def within_period?
+        now = DateTime.current
+        start_ok = period_start.nil? || period_start <= now
+        end_ok = period_end.nil? || period_end >= now
+        start_ok && end_ok
+      end
+
       # -- FHIR serialization ------------------------------------------------
 
       US_CORE_PROFILE = "http://hl7.org/fhir/us/core/StructureDefinition/us-core-encounter"
@@ -100,12 +115,37 @@ module Lakeraven
         resource[:subject] = { reference: "Patient/#{patient_identifier}" } if patient_identifier
         if practitioner_identifier
           resource[:participant] = [ { individual: { reference: "Practitioner/#{practitioner_identifier}" } } ]
+        elsif participant_practitioner_iens.is_a?(Array) && participant_practitioner_iens.any?
+          resource[:participant] = participant_practitioner_iens.map do |ien|
+            { individual: { reference: "Practitioner/rpms-practitioner-#{ien}" } }
+          end
+        end
+
+        if location_ien
+          resource[:location] = [ { location: { reference: "Location/rpms-location-#{location_ien}" } } ]
+        end
+
+        if service_provider_organization_ien
+          resource[:serviceProvider] = { reference: "Organization/rpms-organization-#{service_provider_organization_ien}" }
         end
 
         resource
       end
 
+      def self.resource_class
+        "Encounter"
+      end
+
       # -- FHIR deserialization ----------------------------------------------
+
+      def self.from_fhir_attributes(fhir)
+        attrs = { status: fhir[:status] }
+        attrs[:class_code] = fhir.dig(:class, :code) if fhir.dig(:class, :code)
+        if fhir.dig(:subject, :reference)&.include?("Patient/")
+          attrs[:patient_identifier] = fhir.dig(:subject, :reference).split("/").last
+        end
+        attrs
+      end
 
       def self.from_fhir(fhir)
         new(
