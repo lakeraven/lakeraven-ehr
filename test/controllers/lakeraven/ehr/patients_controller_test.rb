@@ -74,6 +74,11 @@ module Lakeraven
         body = JSON.parse(response.body)
         assert_equal 0, body["total"]
       end
+
+      test "requires auth" do
+        get "/lakeraven-ehr/Patient/1"
+        assert_response :unauthorized
+      end
     end
   end
 end

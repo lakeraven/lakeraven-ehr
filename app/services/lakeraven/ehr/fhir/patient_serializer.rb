@@ -7,6 +7,23 @@ module Lakeraven
       class PatientSerializer
         US_CORE_PROFILE = "http://hl7.org/fhir/us/core/StructureDefinition/us-core-patient"
 
+        # CDC Race & Ethnicity code system OID
+        RACE_CODE_SYSTEM = "urn:oid:2.16.840.1.113883.6.238"
+
+        # Map RPMS race values to CDC Race & Ethnicity codes
+        RACE_CODE_MAP = {
+          "AMERICAN INDIAN OR ALASKA NATIVE" => { code: "1002-5", display: "American Indian or Alaska Native" },
+          "AMERICAN INDIAN" => { code: "1002-5", display: "American Indian or Alaska Native" },
+          "ALASKA NATIVE" => { code: "1002-5", display: "American Indian or Alaska Native" },
+          "ASIAN" => { code: "2028-9", display: "Asian" },
+          "BLACK OR AFRICAN AMERICAN" => { code: "2054-5", display: "Black or African American" },
+          "BLACK" => { code: "2054-5", display: "Black or African American" },
+          "NATIVE HAWAIIAN OR OTHER PACIFIC ISLANDER" => { code: "2076-8", display: "Native Hawaiian or Other Pacific Islander" },
+          "WHITE" => { code: "2106-3", display: "White" },
+          "OTHER" => { code: "2131-1", display: "Other Race" },
+          "UNKNOWN" => { code: "UNK", display: "Unknown" }
+        }.freeze
+
         def self.call(patient)
           new(patient).to_h
         end
@@ -81,21 +98,71 @@ module Lakeraven
 
         def build_extensions
           exts = []
-          if @p.race.present?
-            exts << {
-              url: "http://hl7.org/fhir/us/core/StructureDefinition/us-core-race",
-              extension: [
-                { url: "text", valueString: @p.race }
-              ]
-            }
-          end
+
+          # US Core Race extension (complex extension per US Core spec)
+          exts << build_race_extension if @p.race.present?
+
+          # US Core Ethnicity extension (Inferno requires this)
+          exts << build_ethnicity_extension
+
+          # Tribal affiliation
           if @p.tribal_enrollment_number.present?
             exts << {
               url: "http://hl7.org/fhir/us/core/StructureDefinition/tribal-affiliation",
               valueString: @p.tribal_enrollment_number
             }
           end
+
+          # SOGI extensions (USCDI v3 / ONC 170.315(a)(15))
+          if @p.respond_to?(:sexual_orientation) && @p.sexual_orientation.present?
+            exts << {
+              url: "http://hl7.org/fhir/StructureDefinition/patient-sexualOrientation",
+              valueString: @p.sexual_orientation
+            }
+          end
+
+          if @p.respond_to?(:gender_identity) && @p.gender_identity.present?
+            exts << {
+              url: "http://hl7.org/fhir/StructureDefinition/patient-genderIdentity",
+              valueString: @p.gender_identity
+            }
+          end
+
           exts
+        end
+
+        def build_race_extension
+          race_upper = @p.race.upcase.strip
+          mapped = RACE_CODE_MAP[race_upper]
+          sub_extensions = []
+
+          if mapped
+            sub_extensions << {
+              url: "ombCategory",
+              valueCoding: {
+                system: RACE_CODE_SYSTEM,
+                code: mapped[:code],
+                display: mapped[:display]
+              }
+            }
+            sub_extensions << { url: "text", valueString: mapped[:display] }
+          else
+            sub_extensions << { url: "text", valueString: @p.race }
+          end
+
+          {
+            url: "http://hl7.org/fhir/us/core/StructureDefinition/us-core-race",
+            extension: sub_extensions
+          }
+        end
+
+        def build_ethnicity_extension
+          {
+            url: "http://hl7.org/fhir/us/core/StructureDefinition/us-core-ethnicity",
+            extension: [
+              { url: "text", valueString: "Unknown" }
+            ]
+          }
         end
       end
     end

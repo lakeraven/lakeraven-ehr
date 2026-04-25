@@ -30,6 +30,16 @@ module Lakeraven
         body = JSON.parse(response.body)
         assert_equal "OperationOutcome", body["resourceType"]
       end
+
+      test "returns FHIR JSON content type" do
+        get "/lakeraven-ehr/Location/1", headers: @headers
+        assert_equal "application/fhir+json", response.media_type
+      end
+
+      test "requires auth" do
+        get "/lakeraven-ehr/Location/1"
+        assert_response :unauthorized
+      end
     end
   end
 end

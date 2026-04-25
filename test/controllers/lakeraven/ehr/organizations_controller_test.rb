@@ -38,6 +38,16 @@ module Lakeraven
         assert_equal "Anchorage", addr["city"]
         assert_equal "AK", addr["state"]
       end
+
+      test "returns FHIR JSON content type" do
+        get "/lakeraven-ehr/Organization/1", headers: @headers
+        assert_equal "application/fhir+json", response.media_type
+      end
+
+      test "requires auth" do
+        get "/lakeraven-ehr/Organization/1"
+        assert_response :unauthorized
+      end
     end
   end
 end
