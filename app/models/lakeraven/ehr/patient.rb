@@ -42,6 +42,16 @@ module Lakeraven
 
       # -- Class methods (AR-like) -------------------------------------------
 
+      # -- Gateway DI -----------------------------------------------------------
+
+      class << self
+        attr_writer :gateway
+
+        def gateway
+          @gateway || PatientGateway
+        end
+      end
+
       def self.find(dfn)
         patient = find_by_dfn(dfn)
         raise RecordNotFound, "Couldn't find Patient with 'dfn'=#{dfn}" unless patient
@@ -52,11 +62,11 @@ module Lakeraven
       def self.find_by_dfn(dfn)
         return nil unless dfn.present? && dfn.to_i.positive?
 
-        PatientGateway.find(dfn.to_i)
+        gateway.find(dfn.to_i)
       end
 
       def self.search(name_pattern)
-        PatientGateway.search(name_pattern.to_s)
+        gateway.search(name_pattern.to_s)
       end
 
       def self.search_by_ssn(ssn)
@@ -67,7 +77,7 @@ module Lakeraven
       def self.find_by_ssn(ssn)
         return nil if ssn.blank?
 
-        PatientGateway.find_by_ssn(ssn.to_s)
+        gateway.find_by_ssn(ssn.to_s)
       end
 
       # -- Initialize with composite field sync ------------------------------

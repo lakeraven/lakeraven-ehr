@@ -357,6 +357,70 @@ module Lakeraven
         patient = Patient.new(dfn: 99999, name: "NOREFS,PATIENT", sex: "M")
         assert_equal [], patient.providers
       end
+
+      # =========================================================================
+      # DEPENDENCY INJECTION (Option B pilot)
+      # =========================================================================
+
+      test "gateway is configurable" do
+        assert Patient.respond_to?(:gateway)
+        assert Patient.respond_to?(:gateway=)
+      end
+
+      test "gateway defaults to PatientGateway" do
+        assert_equal PatientGateway, Patient.gateway
+      end
+
+      test "gateway can be swapped for testing" do
+        mock_gw = Object.new
+        def mock_gw.find(dfn)
+          Lakeraven::EHR::Patient.new(dfn: dfn, name: "MOCK,PATIENT", sex: "M")
+        end
+
+        original = Patient.gateway
+        begin
+          Patient.gateway = mock_gw
+          patient = Patient.find_by_dfn(42)
+          assert_equal "MOCK,PATIENT", patient.name
+          assert_equal 42, patient.dfn
+        ensure
+          Patient.gateway = original
+        end
+      end
+
+      test "search delegates to gateway" do
+        mock_gw = Object.new
+        def mock_gw.search(pattern)
+          [ Lakeraven::EHR::Patient.new(dfn: 1, name: "DOE,JOHN", sex: "M") ]
+        end
+
+        original = Patient.gateway
+        begin
+          Patient.gateway = mock_gw
+          results = Patient.search("DOE")
+          assert_equal 1, results.length
+          assert_equal "DOE,JOHN", results.first.name
+        ensure
+          Patient.gateway = original
+        end
+      end
+
+      test "find_by_ssn delegates to gateway" do
+        mock_gw = Object.new
+        def mock_gw.find_by_ssn(ssn)
+          Lakeraven::EHR::Patient.new(dfn: 1, name: "DOE,JOHN", sex: "M", ssn: ssn)
+        end
+
+        original = Patient.gateway
+        begin
+          Patient.gateway = mock_gw
+          patient = Patient.find_by_ssn("111-11-1111")
+          assert_equal "DOE,JOHN", patient.name
+          assert_equal "111-11-1111", patient.ssn
+        ensure
+          Patient.gateway = original
+        end
+      end
     end
   end
 end
