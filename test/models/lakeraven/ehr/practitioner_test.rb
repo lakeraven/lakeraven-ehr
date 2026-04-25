@@ -369,6 +369,153 @@ module Lakeraven
           "http://hl7.org/fhir/us/core/StructureDefinition/us-core-practitioner"
         )
       end
+      # =========================================================================
+      # DEPENDENCY INJECTION (gateway pattern)
+      # =========================================================================
+
+      test "gateway is configurable" do
+        assert Practitioner.respond_to?(:gateway)
+        assert Practitioner.respond_to?(:gateway=)
+      end
+
+      test "gateway defaults to PractitionerGateway" do
+        assert_equal PractitionerGateway, Practitioner.gateway
+      end
+
+      test "gateway can be swapped for testing" do
+        mock_gw = Object.new
+        def mock_gw.find(ien)
+          Lakeraven::EHR::Practitioner.new(ien: ien, name: "MOCK,DOCTOR", specialty: "Testing")
+        end
+
+        original = Practitioner.gateway
+        begin
+          Practitioner.gateway = mock_gw
+          prac = Practitioner.find_by_ien(42)
+          assert_equal "MOCK,DOCTOR", prac.name
+          assert_equal 42, prac.ien
+        ensure
+          Practitioner.gateway = original
+        end
+      end
+
+      test "search delegates to gateway" do
+        mock_gw = Object.new
+        def mock_gw.search(pattern)
+          [ Lakeraven::EHR::Practitioner.new(ien: 1, name: "DOE,JOHN") ]
+        end
+
+        original = Practitioner.gateway
+        begin
+          Practitioner.gateway = mock_gw
+          results = Practitioner.search("DOE")
+          assert_equal 1, results.length
+          assert_equal "DOE,JOHN", results.first.name
+        ensure
+          Practitioner.gateway = original
+        end
+      end
+
+      # =========================================================================
+      # PERSISTENCE VIA DI GATEWAY
+      # =========================================================================
+
+      class MockPractitionerGateway
+        attr_reader :registered
+
+        def initialize
+          @store = {}
+          @next_ien = 9000
+          @registered = []
+        end
+
+        def find(ien)
+          @store[ien]
+        end
+
+        def search(pattern)
+          @store.values.select { |p| p.name.to_s.upcase.include?(pattern.to_s.upcase) }
+        end
+
+        def register(attrs)
+          @next_ien += 1
+          prac = Lakeraven::EHR::Practitioner.new(**attrs.merge(ien: @next_ien))
+          @store[@next_ien] = prac
+          @registered << prac
+          { success: true, ien: @next_ien }
+        end
+      end
+
+      def with_mock_gateway
+        mock = MockPractitionerGateway.new
+        original = Practitioner.gateway
+        Practitioner.gateway = mock
+        yield mock
+      ensure
+        Practitioner.gateway = original
+      end
+
+      test "save persists a new practitioner via gateway" do
+        with_mock_gateway do |gw|
+          prac = Practitioner.new(first_name: "Sarah", last_name: "Martinez", specialty: "Cardiology")
+          assert prac.save
+          assert prac.persisted?
+          assert prac.ien.present?
+          assert_equal 1, gw.registered.length
+        end
+      end
+
+      test "save returns false for invalid practitioner" do
+        with_mock_gateway do |_gw|
+          prac = Practitioner.new # no name, no first/last
+          refute prac.save
+          refute prac.persisted?
+        end
+      end
+
+      test "save! raises on validation failure" do
+        with_mock_gateway do |_gw|
+          prac = Practitioner.new
+          assert_raises(ActiveModel::ValidationError) { prac.save! }
+        end
+      end
+
+      test "create returns persisted practitioner" do
+        with_mock_gateway do |_gw|
+          prac = Practitioner.create(first_name: "Jane", last_name: "Smith", specialty: "Radiology")
+          assert prac.is_a?(Practitioner)
+          assert prac.persisted?
+          assert_equal "Jane", prac.first_name
+        end
+      end
+
+      test "create! returns persisted practitioner" do
+        with_mock_gateway do |_gw|
+          prac = Practitioner.create!(first_name: "Bob", last_name: "Jones", specialty: "Oncology")
+          assert prac.persisted?
+          assert_equal "Bob", prac.first_name
+        end
+      end
+
+      test "create! raises on validation failure" do
+        with_mock_gateway do |_gw|
+          assert_raises(ActiveModel::ValidationError) { Practitioner.create! }
+        end
+      end
+
+      test "find via gateway returns practitioner" do
+        with_mock_gateway do |_gw|
+          created = Practitioner.create!(first_name: "Find", last_name: "Test", specialty: "GP")
+          found = Practitioner.find(created.ien)
+          assert_equal created.ien, found.ien
+        end
+      end
+
+      test "find via mock gateway raises RecordNotFound for unknown IEN" do
+        with_mock_gateway do |_gw|
+          assert_raises(Practitioner::RecordNotFound) { Practitioner.find(99999) }
+        end
+      end
     end
   end
 end

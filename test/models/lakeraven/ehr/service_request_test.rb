@@ -435,6 +435,141 @@ module Lakeraven
         assert_kind_of Array, results
         assert_equal 0, results.length
       end
+
+      # =========================================================================
+      # DEPENDENCY INJECTION (gateway pattern)
+      # =========================================================================
+
+      test "gateway is configurable" do
+        assert ServiceRequest.respond_to?(:gateway)
+        assert ServiceRequest.respond_to?(:gateway=)
+      end
+
+      test "gateway defaults to ServiceRequestGateway" do
+        assert_equal ServiceRequestGateway, ServiceRequest.gateway
+      end
+
+      test "gateway can be swapped for testing" do
+        mock_gw = Object.new
+        def mock_gw.for_patient(dfn)
+          [ Lakeraven::EHR::ServiceRequest.new(ien: 1, patient_dfn: dfn, service_requested: "MOCK", requesting_provider_ien: 1) ]
+        end
+
+        original = ServiceRequest.gateway
+        begin
+          ServiceRequest.gateway = mock_gw
+          results = ServiceRequest.for_patient(42)
+          assert_equal 1, results.length
+          assert_equal 42, results.first.patient_dfn
+        ensure
+          ServiceRequest.gateway = original
+        end
+      end
+
+      # =========================================================================
+      # PERSISTENCE VIA DI GATEWAY
+      # =========================================================================
+
+      class MockServiceRequestGateway
+        attr_reader :registered
+
+        def initialize
+          @store = {}
+          @next_ien = 9000
+          @registered = []
+        end
+
+        def find(ien)
+          @store[ien]
+        end
+
+        def for_patient(dfn)
+          @store.values.select { |sr| sr.patient_dfn == dfn }
+        end
+
+        def register(attrs)
+          @next_ien += 1
+          sr = Lakeraven::EHR::ServiceRequest.new(**attrs.merge(ien: @next_ien))
+          @store[@next_ien] = sr
+          @registered << sr
+          { success: true, ien: @next_ien }
+        end
+      end
+
+      def with_mock_gateway
+        mock = MockServiceRequestGateway.new
+        original = ServiceRequest.gateway
+        ServiceRequest.gateway = mock
+        yield mock
+      ensure
+        ServiceRequest.gateway = original
+      end
+
+      test "save persists a new service request via gateway" do
+        with_mock_gateway do |gw|
+          sr = ServiceRequest.new(valid_sr_attributes)
+          assert sr.save
+          assert sr.persisted?
+          assert sr.ien.present?
+          assert_equal 1, gw.registered.length
+        end
+      end
+
+      test "save sets ien from gateway response" do
+        with_mock_gateway do |_gw|
+          sr = ServiceRequest.new(valid_sr_attributes)
+          sr.save
+          assert sr.ien > 0
+        end
+      end
+
+      test "save returns false for invalid service request" do
+        with_mock_gateway do |_gw|
+          sr = ServiceRequest.new(patient_dfn: nil, requesting_provider_ien: nil, service_requested: nil)
+          refute sr.save
+          refute sr.persisted?
+        end
+      end
+
+      test "save! raises on validation failure" do
+        with_mock_gateway do |_gw|
+          sr = ServiceRequest.new(patient_dfn: nil)
+          assert_raises(ActiveModel::ValidationError) { sr.save! }
+        end
+      end
+
+      test "create returns persisted service request" do
+        with_mock_gateway do |_gw|
+          sr = ServiceRequest.create(valid_sr_attributes)
+          assert sr.is_a?(ServiceRequest)
+          assert sr.persisted?
+          assert_equal "Cardiology consult", sr.service_requested
+        end
+      end
+
+      test "create! returns persisted service request" do
+        with_mock_gateway do |_gw|
+          sr = ServiceRequest.create!(valid_sr_attributes)
+          assert sr.persisted?
+        end
+      end
+
+      test "create! raises on validation failure" do
+        with_mock_gateway do |_gw|
+          assert_raises(ActiveModel::ValidationError) { ServiceRequest.create!(patient_dfn: nil) }
+        end
+      end
+
+      test "for_patient delegates to gateway via DI" do
+        with_mock_gateway do |_gw|
+          ServiceRequest.create!(valid_sr_attributes.merge(patient_dfn: 42))
+          ServiceRequest.create!(valid_sr_attributes.merge(patient_dfn: 42))
+          ServiceRequest.create!(valid_sr_attributes.merge(patient_dfn: 99))
+          results = ServiceRequest.for_patient(42)
+          assert_equal 2, results.length
+          assert(results.all? { |sr| sr.patient_dfn == 42 })
+        end
+      end
     end
   end
 end

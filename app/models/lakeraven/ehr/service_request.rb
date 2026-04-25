@@ -34,6 +34,18 @@ module Lakeraven
       attribute :completed_on, :date
       attribute :notes, :string
 
+      class RecordNotFound < StandardError; end
+
+      # -- Gateway DI --------------------------------------------------------
+
+      class << self
+        attr_writer :gateway
+
+        def gateway
+          @gateway || ServiceRequestGateway
+        end
+      end
+
       def persisted?
         ien.present? && ien.to_i.positive?
       end
@@ -71,7 +83,38 @@ module Lakeraven
       end
 
       def self.for_patient(dfn)
-        ServiceRequestGateway.for_patient(dfn)
+        gateway.for_patient(dfn)
+      end
+
+      def self.create(attributes = {})
+        new(attributes).tap(&:save)
+      end
+
+      def self.create!(attributes = {})
+        new(attributes).tap(&:save!)
+      end
+
+      # -- Persistence -------------------------------------------------------
+
+      def save
+        return false unless valid?
+
+        if persisted?
+          true
+        else
+          result = self.class.gateway.register(persistable_attributes)
+          if result[:success]
+            self.ien = result[:ien]
+            true
+          else
+            errors.add(:base, result[:error] || "Registration failed")
+            false
+          end
+        end
+      end
+
+      def save!
+        save || raise(ActiveModel::ValidationError.new(self))
       end
 
       # -- Urgency predicates ------------------------------------------------
@@ -137,6 +180,18 @@ module Lakeraven
       end
 
       private
+
+      def persistable_attributes
+        {
+          patient_dfn: patient_dfn, requesting_provider_ien: requesting_provider_ien,
+          service_requested: service_requested, reason_for_referral: reason_for_referral,
+          urgency: urgency, status: status, referral_type: referral_type,
+          performer_name: performer_name, identifier: identifier,
+          estimated_cost: estimated_cost, diagnosis_codes: diagnosis_codes,
+          procedure_codes: procedure_codes, medical_priority_level: medical_priority_level,
+          appointment_on: appointment_on, completed_on: completed_on, notes: notes
+        }.compact
+      end
 
       def map_status_to_fhir
         if completed? then "completed"
