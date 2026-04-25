@@ -40,7 +40,9 @@ module Lakeraven
 
       class RecordNotFound < StandardError; end
 
-      # -- Class methods (AR-like) -------------------------------------------
+      # Validations
+      validates :name, presence: true, if: -> { first_name.blank? && last_name.blank? }
+      validates :sex, inclusion: { in: %w[M F U], allow_nil: true }
 
       # -- Gateway DI -----------------------------------------------------------
 
@@ -50,6 +52,37 @@ module Lakeraven
         def gateway
           @gateway || PatientGateway
         end
+      end
+
+      # -- Persistence (ported from rpms_redux) --------------------------------
+
+      def save
+        return false unless valid?
+
+        if persisted?
+          true
+        else
+          result = self.class.gateway.register(persistable_attributes)
+          if result[:success]
+            self.dfn = result[:dfn]
+            true
+          else
+            errors.add(:base, result[:error] || "Registration failed")
+            false
+          end
+        end
+      end
+
+      def save!
+        save || raise(ActiveModel::ValidationError.new(self))
+      end
+
+      def self.create(attributes = {})
+        new(attributes).tap(&:save)
+      end
+
+      def self.create!(attributes = {})
+        new(attributes).tap(&:save!)
       end
 
       def self.find(dfn)
@@ -242,6 +275,17 @@ module Lakeraven
       end
 
       private
+
+      def persistable_attributes
+        {
+          name: name, first_name: first_name, last_name: last_name,
+          dob: dob, born_on: born_on, sex: sex, ssn: ssn,
+          address_line1: address_line1, city: city, state: state,
+          zip_code: zip_code, phone: phone, race: race,
+          tribal_enrollment_number: tribal_enrollment_number,
+          service_area: service_area, coverage_type: coverage_type
+        }.compact
+      end
 
       def sync_composite_fields
         # Sync born_on ↔ dob

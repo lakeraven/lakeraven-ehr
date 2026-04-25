@@ -421,6 +421,112 @@ module Lakeraven
           Patient.gateway = original
         end
       end
+
+      # =========================================================================
+      # PERSISTENCE VIA DI GATEWAY (ported from rpms_redux)
+      # =========================================================================
+
+      # In-memory mock gateway for persistence tests
+      class MockPatientGateway
+        attr_reader :registered
+
+        def initialize
+          @store = {}
+          @next_dfn = 9000
+          @registered = []
+        end
+
+        def find(dfn)
+          @store[dfn]
+        end
+
+        def search(pattern)
+          @store.values.select { |p| p.name.to_s.upcase.include?(pattern.to_s.upcase) }
+        end
+
+        def find_by_ssn(ssn)
+          @store.values.find { |p| p.ssn == ssn }
+        end
+
+        def register(attrs)
+          @next_dfn += 1
+          patient = Lakeraven::EHR::Patient.new(**attrs.merge(dfn: @next_dfn))
+          @store[@next_dfn] = patient
+          @registered << patient
+          { success: true, dfn: @next_dfn }
+        end
+      end
+
+      def with_mock_gateway
+        mock = MockPatientGateway.new
+        original = Patient.gateway
+        Patient.gateway = mock
+        yield mock
+      ensure
+        Patient.gateway = original
+      end
+
+      test "save persists a new patient via gateway" do
+        with_mock_gateway do |gw|
+          patient = Patient.new(first_name: "Alice", last_name: "Williams", born_on: Date.parse("1985-12-05"), sex: "F")
+          assert patient.save
+          assert patient.persisted?
+          assert patient.dfn.present?
+          assert_equal 1, gw.registered.length
+        end
+      end
+
+      test "save returns false for invalid patient" do
+        with_mock_gateway do |_gw|
+          patient = Patient.new(sex: "INVALID")
+          refute patient.save
+          refute patient.persisted?
+        end
+      end
+
+      test "save! raises on validation failure" do
+        with_mock_gateway do |_gw|
+          patient = Patient.new(sex: "INVALID")
+          assert_raises(ActiveModel::ValidationError) { patient.save! }
+        end
+      end
+
+      test "create returns persisted patient" do
+        with_mock_gateway do |_gw|
+          patient = Patient.create(first_name: "Jane", last_name: "Smith", born_on: Date.parse("1975-06-20"), sex: "F")
+          assert patient.is_a?(Patient)
+          assert patient.persisted?
+          assert_equal "Jane", patient.first_name
+        end
+      end
+
+      test "create! returns persisted patient" do
+        with_mock_gateway do |_gw|
+          patient = Patient.create!(first_name: "Bob", last_name: "Jones", born_on: Date.parse("1990-03-10"), sex: "M")
+          assert patient.persisted?
+          assert_equal "Bob", patient.first_name
+        end
+      end
+
+      test "create! raises on validation failure" do
+        with_mock_gateway do |_gw|
+          assert_raises(ActiveModel::ValidationError) { Patient.create!(sex: "INVALID") }
+        end
+      end
+
+      test "find via gateway returns patient" do
+        with_mock_gateway do |_gw|
+          created = Patient.create!(first_name: "Find", last_name: "Test", born_on: Date.parse("1970-01-01"), sex: "M")
+          found = Patient.find(created.dfn)
+          assert_equal created.dfn, found.dfn
+        end
+      end
+
+      test "find via mock gateway raises RecordNotFound for unknown DFN" do
+        with_mock_gateway do |_gw|
+          assert_raises(Patient::RecordNotFound) { Patient.find(99999) }
+        end
+      end
     end
   end
 end
