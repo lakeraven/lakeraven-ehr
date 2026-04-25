@@ -1,0 +1,206 @@
+# CDS Rules Configuration — ONC § 170.315(a)(9)
+#
+# Configurable clinical decision support rules. Each rule has an :enabled flag
+# that providers can toggle via ClinicalDecisionSupportService.update_rule_enabled.
+#
+# Rule categories:
+#   condition_rules  — ONC (a)(9)(iv): problem list, lab values
+#   demographic_rules — ONC (a)(9)(iii): age, sex
+#   device_rules     — ONC (a)(9)(v): implantable device data
+#
+# Drug-drug and drug-allergy rules are in db/data/drug_interactions.yml.
+
+condition_rules:
+  - id: diabetes_monitoring
+    pattern: "diabet|e11|e10|e13"
+    message: "Diabetes: Ensure HbA1c monitoring every 3-6 months, annual eye exam, and foot exam"
+    monitoring:
+      - HbA1c
+      - eGFR
+      - urine_albumin
+      - eye_exam
+      - foot_exam
+    severity: info
+    evidence_level: guideline
+    source: "ADA Standards of Care 2024"
+    source_url: "https://diabetesjournals.org/care/issue/47/Supplement_1"
+    enabled: true
+
+  - id: hypertension_monitoring
+    pattern: "hypertens|i10|i11|i12|i13"
+    message: "Hypertension: Monitor blood pressure, assess cardiovascular risk, check renal function annually"
+    monitoring:
+      - blood_pressure
+      - BMP
+      - lipid_panel
+    severity: info
+    evidence_level: guideline
+    source: "ACC/AHA Hypertension Guideline 2017"
+    source_url: "https://www.ahajournals.org/doi/10.1161/HYP.0000000000000065"
+    enabled: true
+
+  - id: ckd_monitoring
+    pattern: "chronic kidney|renal failure|n18"
+    message: "CKD: Monitor eGFR and urine albumin every 3-6 months, adjust renally-cleared medications"
+    monitoring:
+      - eGFR
+      - urine_albumin
+      - BMP
+    severity: info
+    evidence_level: guideline
+    source: "KDIGO CKD Guideline 2024"
+    source_url: "https://kdigo.org/guidelines/ckd-evaluation-and-management/"
+    enabled: true
+
+  - id: heart_failure_monitoring
+    pattern: "heart failure|i50"
+    message: "Heart Failure: Monitor weight daily, BNP/NT-proBNP, electrolytes, and renal function"
+    monitoring:
+      - BNP
+      - weight
+      - BMP
+    severity: info
+    evidence_level: guideline
+    source: "AHA/ACC Heart Failure Guideline 2022"
+    source_url: "https://www.ahajournals.org/doi/10.1161/CIR.0000000000001063"
+    enabled: true
+
+  - id: copd_monitoring
+    pattern: "copd|chronic obstructive|j44"
+    message: "COPD: Assess inhaler technique, monitor FEV1 annually, screen for depression"
+    monitoring:
+      - spirometry
+      - oxygen_saturation
+      - depression_screen
+    severity: info
+    evidence_level: guideline
+    source: "GOLD COPD Report 2024"
+    source_url: "https://goldcopd.org/2024-gold-report/"
+    enabled: true
+
+  - id: asthma_monitoring
+    pattern: "asthma|j45"
+    message: "Asthma: Assess control level, review action plan, check inhaler technique"
+    monitoring:
+      - peak_flow
+      - asthma_control_test
+    severity: info
+    evidence_level: guideline
+    source: "NAEPP Expert Panel Report 4"
+    source_url: "https://www.nhlbi.nih.gov/health-topics/asthma-management-guidelines-2020-updates"
+    enabled: true
+
+demographic_rules:
+  - id: nsaid_elderly
+    min_age: 65
+    message: "Age >=65: NSAIDs increase risk of GI bleeding, renal injury, and cardiovascular events. Consider alternatives (acetaminophen, topical NSAIDs)"
+    severity: warning
+    evidence_level: guideline
+    source: "AGS Beers Criteria 2023"
+    source_url: "https://agsjournals.onlinelibrary.wiley.com/doi/10.1111/jgs.18372"
+    enabled: true
+
+  - id: fall_risk_elderly
+    min_age: 65
+    message: "Age >=65: Screen for fall risk annually. Assess gait, balance, vision, medications (sedatives, antihypertensives)"
+    severity: info
+    evidence_level: guideline
+    source: "USPSTF Fall Prevention 2018"
+    source_url: "https://www.uspreventiveservicestaskforce.org/uspstf/recommendation/falls-prevention-in-older-adults-interventions"
+    enabled: true
+
+  - id: cervical_cancer_screening
+    min_age: 21
+    max_age: 65
+    sex: F
+    message: "Female age 21-65: Cervical cancer screening recommended per USPSTF guidelines"
+    severity: info
+    evidence_level: guideline
+    source: "USPSTF Cervical Cancer Screening 2018"
+    source_url: "https://www.uspreventiveservicestaskforce.org/uspstf/recommendation/cervical-cancer-screening"
+    enabled: true
+
+  - id: osteoporosis_screening
+    min_age: 65
+    sex: F
+    message: "Female age >=65: Screen for osteoporosis with bone density measurement (DEXA)"
+    severity: info
+    evidence_level: guideline
+    source: "USPSTF Osteoporosis Screening 2018"
+    source_url: "https://www.uspreventiveservicestaskforce.org/uspstf/recommendation/osteoporosis-screening"
+    enabled: true
+
+  - id: aaa_screening
+    min_age: 65
+    max_age: 75
+    sex: M
+    message: "Male age 65-75 with smoking history: One-time abdominal aortic aneurysm screening recommended"
+    severity: info
+    evidence_level: guideline
+    source: "USPSTF AAA Screening 2019"
+    source_url: "https://www.uspreventiveservicestaskforce.org/uspstf/recommendation/abdominal-aortic-aneurysm-screening"
+    enabled: true
+
+  - id: pediatric_lead_screening
+    max_age: 6
+    message: "Child <=6: Screen for blood lead level per CDC/AAP guidelines, especially in high-risk areas"
+    severity: info
+    evidence_level: guideline
+    source: "CDC Blood Lead Reference Value 2021"
+    source_url: "https://www.cdc.gov/lead-prevention/php/data/blood-lead-reference-value.html"
+    enabled: true
+
+  - id: pediatric_immunization_review
+    max_age: 18
+    message: "Patient <=18: Review immunization schedule per CDC recommendations"
+    severity: info
+    evidence_level: guideline
+    source: "CDC Immunization Schedule 2024"
+    source_url: "https://www.cdc.gov/vaccines/schedules/"
+    enabled: true
+
+device_rules:
+  - id: pacemaker_mri
+    device_pattern: "pacemaker|cardiac rhythm|icd|defibrillator"
+    message: "Cardiac implantable device detected: MRI requires device interrogation before and after. Verify MRI-conditional status"
+    severity: warning
+    evidence_level: guideline
+    source: "HRS Expert Consensus 2017"
+    source_url: "https://www.hrsonline.org/guidance/clinical-resources/mri-in-patients-with-cardiac-devices"
+    enabled: true
+
+  - id: pacemaker_diathermy
+    device_pattern: "pacemaker|cardiac rhythm|icd|defibrillator"
+    message: "Cardiac implantable device detected: Diathermy and electrocautery may cause device malfunction. Consult cardiology before surgical procedures"
+    severity: warning
+    evidence_level: guideline
+    source: "FDA Safety Communication - Electrosurgery and CIEDs"
+    source_url: "https://www.fda.gov/medical-devices/safety-communications"
+    enabled: true
+
+  - id: joint_implant_prophylaxis
+    device_pattern: "joint|prosthesis|arthroplasty|hip replacement|knee replacement"
+    message: "Joint prosthesis detected: Consider antibiotic prophylaxis before dental procedures per ADA/AAOS guidelines"
+    severity: info
+    evidence_level: guideline
+    source: "ADA/AAOS Clinical Practice Guideline 2012"
+    source_url: "https://www.ada.org/resources/research/science-and-research-institute/evidence-based-dental-research/prevention-of-orthopaedic-implant-infection"
+    enabled: true
+
+  - id: insulin_pump_imaging
+    device_pattern: "insulin pump|continuous glucose|cgm"
+    message: "Insulin pump/CGM detected: Remove device before MRI, CT, or X-ray. Device may malfunction or cause burns"
+    severity: warning
+    evidence_level: manufacturer
+    source: "FDA Safety Communication - Insulin Pumps and Imaging"
+    source_url: "https://www.fda.gov/medical-devices/safety-communications"
+    enabled: true
+
+  - id: cochlear_implant_mri
+    device_pattern: "cochlear|hearing implant"
+    message: "Cochlear implant detected: MRI requires specific protocols. Verify MRI compatibility and magnet removal requirements"
+    severity: warning
+    evidence_level: guideline
+    source: "FDA Guidance - MRI and Cochlear Implants"
+    source_url: "https://www.fda.gov/medical-devices"
+    enabled: true

@@ -28,6 +28,23 @@ module Lakeraven
       validates :device_name, presence: true
       validates :status, inclusion: { in: VALID_STATUSES }
 
+      # -- Gateway DI -----------------------------------------------------------
+
+      class << self
+        attr_writer :gateway
+
+        def gateway
+          @gateway || DeviceGateway
+        end
+      end
+
+      def self.for_patient(dfn, **_opts)
+        gateway.for_patient(dfn)
+      rescue NameError
+        # DeviceGateway not yet implemented
+        []
+      end
+
       def active? = status == "active"
       def persisted? = ien.present?
 

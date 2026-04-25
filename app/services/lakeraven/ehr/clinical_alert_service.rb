@@ -8,6 +8,8 @@ module Lakeraven
     #
     # Does NOT call DrugInteractionService — drug checks happen at prescribing time,
     # not on background page load.
+    #
+    # Ported from rpms_redux ClinicalAlertService.
     class ClinicalAlertService
       Alert = Struct.new(:type, :description, :severity, keyword_init: true)
 
@@ -52,10 +54,13 @@ module Lakeraven
 
       def allergy_alerts
         @allergies.map do |a|
+          allergen = a.respond_to?(:allergen) ? a.allergen : a[:allergen]
+          severity_val = a.respond_to?(:severity) ? a.severity : a[:severity]
+
           Alert.new(
             type: :allergy,
-            description: a[:allergen] || a[:description],
-            severity: map_allergy_severity(a[:severity])
+            description: allergen || (a.respond_to?(:description) ? a.description : a[:description]),
+            severity: map_allergy_severity(severity_val)
           )
         end
       end
@@ -63,8 +68,8 @@ module Lakeraven
       def map_reminder_severity(reminder)
         case reminder[:priority]&.downcase
         when "high", "urgent" then :high
-        when "moderate", "normal" then :moderate
-        else :low
+        when "low" then :low
+        else :moderate # DUE status defaults to moderate
         end
       end
 
@@ -72,7 +77,8 @@ module Lakeraven
         case severity&.downcase
         when "severe", "high" then :high
         when "moderate" then :moderate
-        else :low
+        when "mild", "low" then :low
+        else :moderate # unknown severity defaults to moderate
         end
       end
     end

@@ -3,15 +3,18 @@
 module Lakeraven
   module EHR
     class DrugInteractionResult
-      attr_reader :interactions, :message, :decision_source
+      attr_reader :interactions, :message, :decision_source, :incomplete_reason, :degraded_reason
 
       def initialize(interactions: [], message: nil, incomplete: false,
-                     decision_source: nil, degraded: false)
+                     incomplete_reason: nil, decision_source: nil,
+                     degraded: false, degraded_reason: nil)
         @interactions = interactions
         @message = message
         @incomplete = incomplete
+        @incomplete_reason = incomplete_reason
         @decision_source = decision_source
         @degraded = degraded
+        @degraded_reason = degraded_reason
       end
 
       def safe?
@@ -49,8 +52,9 @@ module Lakeraven
         new(interactions: [], decision_source: decision_source, degraded: degraded)
       end
 
-      def self.failure(message:, decision_source: nil, degraded: false)
-        new(interactions: [], message: message, decision_source: decision_source, degraded: degraded)
+      def self.failure(message:, decision_source: nil, degraded: false, degraded_reason: nil)
+        new(interactions: [], message: message, decision_source: decision_source,
+            degraded: degraded, degraded_reason: degraded_reason)
       end
     end
   end
