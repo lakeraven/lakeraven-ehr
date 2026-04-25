@@ -1,0 +1,1 @@
+{"resourceType":"ValueSet","id":"ihs-available-services","title":"IHS Available Services","compose":{"include":[{"system":"local","concept":[{"code":"cardiology","display":"Cardiology"},{"code":"neurosurgery","display":"Neurosurgery"},{"code":"orthopedics","display":"Orthopedics"}]}]}}

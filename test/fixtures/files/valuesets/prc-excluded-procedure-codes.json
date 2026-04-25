@@ -1,0 +1,1 @@
+{"resourceType":"ValueSet","id":"prc-excluded-procedure-codes","title":"PRC Excluded Procedure Codes","compose":{"include":[{"system":"http://www.ama-assn.org/go/cpt","concept":[{"code":"15780","display":"Dermabrasion"},{"code":"99201","display":"Office visit (excluded)"}]}]}}

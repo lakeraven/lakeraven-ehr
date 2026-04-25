@@ -203,6 +203,62 @@ module Lakeraven
         assert_not result.incomplete?
       end
 
+      # -- DrugInteractionResult incomplete_reason / degraded_reason -----------
+
+      test "incomplete result carries reason" do
+        result = DrugInteractionResult.new(
+          interactions: [], incomplete: true,
+          incomplete_reason: "medication list unavailable from RPMS"
+        )
+        assert result.incomplete?
+        assert_includes result.incomplete_reason, "medication list unavailable"
+      end
+
+      test "success factory is not incomplete" do
+        result = DrugInteractionResult.success
+        assert_not result.incomplete?
+        assert result.safe?
+      end
+
+      test "success factory accepts decision_source and degraded" do
+        result = DrugInteractionResult.success(decision_source: :rpms)
+        assert_equal :rpms, result.decision_source
+        assert_not result.degraded?
+      end
+
+      test "failure factory accepts decision_source and degraded" do
+        result = DrugInteractionResult.failure(
+          message: "error",
+          decision_source: :local,
+          degraded: true,
+          degraded_reason: "using local rules"
+        )
+        assert_equal :local, result.decision_source
+        assert result.degraded?
+        assert_equal "using local rules", result.degraded_reason
+      end
+
+      test "degraded result carries reason" do
+        result = DrugInteractionResult.new(
+          interactions: [], degraded: true,
+          degraded_reason: "local rules"
+        )
+        assert result.degraded?
+        assert_equal "local rules", result.degraded_reason
+      end
+
+      test "degraded? defaults to false" do
+        result = DrugInteractionResult.new(interactions: [])
+        assert_not result.degraded?
+      end
+
+      test "success factory returns empty interactions" do
+        result = DrugInteractionResult.success
+        assert_empty result.interactions
+        assert result.safe?
+        assert_not result.blocking?
+      end
+
       # -- Service edge cases --------------------------------------------------
 
       test "service handles food allergies gracefully" do
