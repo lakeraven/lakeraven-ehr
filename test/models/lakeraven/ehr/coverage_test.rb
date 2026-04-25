@@ -131,6 +131,62 @@ module Lakeraven
         assert_not Coverage.new(order: 1).secondary?
       end
 
+      # -- Payor display ---------------------------------------------------------
+
+      test "payor_display returns default for Medicare" do
+        cov = Coverage.new(patient_dfn: "1", coverage_type: "medicare_a")
+        assert_equal "Medicare", cov.payor_display
+      end
+
+      test "payor_display returns default for Medicaid" do
+        cov = Coverage.new(patient_dfn: "1", coverage_type: "medicaid")
+        assert_equal "Medicaid", cov.payor_display
+      end
+
+      test "payor_display returns default for VA" do
+        cov = Coverage.new(patient_dfn: "1", coverage_type: "va_benefits")
+        assert_equal "Department of Veterans Affairs", cov.payor_display
+      end
+
+      test "payor_display uses custom payor_name when provided" do
+        cov = Coverage.new(patient_dfn: "1", coverage_type: "private_insurance", payor_name: "Blue Cross")
+        assert_equal "Blue Cross", cov.payor_display
+      end
+
+      # -- Payor type display ---------------------------------------------------
+
+      test "payor_type_display for Medicare Part A" do
+        cov = Coverage.new(patient_dfn: "1", coverage_type: "medicare_a")
+        assert_equal "Medicare Part A", cov.payor_type_display
+      end
+
+      test "payor_type_display for Medicare Part B" do
+        cov = Coverage.new(patient_dfn: "1", coverage_type: "medicare_b")
+        assert_equal "Medicare Part B", cov.payor_type_display
+      end
+
+      test "payor_type_display for Medicaid" do
+        cov = Coverage.new(patient_dfn: "1", coverage_type: "medicaid")
+        assert_equal "Medicaid", cov.payor_type_display
+      end
+
+      # -- Coordination of benefits defaults ------------------------------------
+
+      test "coordination_order defaults to 1 for private insurance" do
+        cov = Coverage.new(patient_dfn: "1", coverage_type: "private_insurance")
+        assert_equal 1, cov.coordination_order
+      end
+
+      test "coordination_order defaults to 2 for Medicare" do
+        cov = Coverage.new(patient_dfn: "1", coverage_type: "medicare_a")
+        assert_equal 2, cov.coordination_order
+      end
+
+      test "coordination_order defaults to 3 for Medicaid" do
+        cov = Coverage.new(patient_dfn: "1", coverage_type: "medicaid")
+        assert_equal 3, cov.coordination_order
+      end
+
       # -- FHIR serialization ----------------------------------------------------
 
       test "to_fhir returns Coverage resource" do
@@ -157,11 +213,13 @@ module Lakeraven
         assert_equal "2025-12-31", fhir.dig(:period, :end)
       end
 
-      test "to_fhir includes payor" do
-        cov = Coverage.new(patient_dfn: "1", coverage_type: "medicaid", payor_name: "State Medicaid")
+      test "to_fhir includes payor with org reference" do
+        cov = Coverage.new(patient_dfn: "1", coverage_type: "medicare_a")
         fhir = cov.to_fhir
 
-        assert_equal "State Medicaid", fhir[:payor].first[:display]
+        assert fhir[:payor].present?
+        assert_equal "Organization/CMS", fhir[:payor].first[:reference]
+        assert_equal "Medicare", fhir[:payor].first[:display]
       end
 
       test "to_fhir includes class with subscriber_id" do
@@ -170,6 +228,100 @@ module Lakeraven
 
         plan_class = fhir[:class]&.find { |c| c.dig(:type, :coding, 0, :code) == "plan" }
         assert_equal "MCD123", plan_class[:value]
+      end
+
+      test "to_fhir includes class for group and plan" do
+        cov = Coverage.new(
+          patient_dfn: "1", coverage_type: "private_insurance",
+          group_id: "GRP001", plan_name: "PPO Gold"
+        )
+        fhir = cov.to_fhir
+
+        assert fhir[:class].present?
+        group = fhir[:class].find { |c| c.dig(:type, :coding, 0, :code) == "group" }
+        assert_equal "GRP001", group[:value]
+
+        plan = fhir[:class].find { |c| c.dig(:type, :coding, 0, :code) == "plan" }
+        assert_equal "PPO Gold", plan[:name]
+      end
+
+      # -- FHIR parsing ---------------------------------------------------------
+
+      test "from_fhir creates coverage from FHIR hash" do
+        fhir = {
+          resourceType: "Coverage",
+          id: "cov-123",
+          status: "active",
+          beneficiary: { reference: "Patient/12345" },
+          payor: [ { reference: "Organization/CMS", display: "Medicare" } ]
+        }
+
+        cov = Coverage.from_fhir(fhir)
+
+        assert_equal "cov-123", cov.id
+        assert_equal "12345", cov.patient_dfn
+        assert_equal "active", cov.status
+      end
+
+      test "from_fhir extracts period" do
+        fhir = {
+          resourceType: "Coverage",
+          beneficiary: { reference: "Patient/12345" },
+          period: { start: "2024-01-01", end: "2024-12-31" }
+        }
+
+        cov = Coverage.from_fhir(fhir)
+
+        assert_equal Date.new(2024, 1, 1), cov.start_date
+        assert_equal Date.new(2024, 12, 31), cov.end_date
+      end
+
+      test "from_fhir extracts class info" do
+        fhir = {
+          resourceType: "Coverage",
+          beneficiary: { reference: "Patient/12345" },
+          class: [
+            { type: { coding: [ { code: "group" } ] }, value: "GRP001" },
+            { type: { coding: [ { code: "plan" } ] }, value: "PLAN123", name: "PPO Gold" }
+          ]
+        }
+
+        cov = Coverage.from_fhir(fhir)
+
+        assert_equal "GRP001", cov.group_id
+        assert_equal "PPO Gold", cov.plan_name
+      end
+
+      # -- Factory: from_eligibility_response ------------------------------------
+
+      test "from_eligibility_response creates coverage when enrolled" do
+        response = CoverageEligibilityResponse.new(
+          patient_dfn: "12345",
+          coverage_type: "medicare_a",
+          status: "enrolled",
+          start_date: Date.new(2024, 1, 1),
+          end_date: Date.new(2024, 12, 31),
+          plan_name: "Medicare Part A"
+        )
+
+        cov = Coverage.from_eligibility_response(response)
+
+        assert cov.present?
+        assert_equal "12345", cov.patient_dfn
+        assert_equal "medicare_a", cov.coverage_type
+        assert_equal Date.new(2024, 1, 1), cov.start_date
+      end
+
+      test "from_eligibility_response returns nil when not enrolled" do
+        response = CoverageEligibilityResponse.new(
+          patient_dfn: "12345",
+          coverage_type: "medicare_a",
+          status: "not_enrolled"
+        )
+
+        cov = Coverage.from_eligibility_response(response)
+
+        assert_nil cov
       end
     end
   end

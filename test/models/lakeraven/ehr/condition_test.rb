@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "test_helper"
+require "ostruct"
 
 module Lakeraven
   module EHR
@@ -106,6 +107,134 @@ module Lakeraven
         c = Condition.new(ien: "42")
         fhir = c.to_fhir
         assert_nil fhir[:subject]
+      end
+
+      # -- validations -----------------------------------------------------------
+
+      test "validates patient_dfn presence" do
+        c = Condition.new(display: "Diabetes")
+        refute c.valid?
+        assert_includes c.errors[:patient_dfn], "can't be blank"
+      end
+
+      test "validates display presence" do
+        c = Condition.new(patient_dfn: "123")
+        refute c.valid?
+        assert_includes c.errors[:display], "can't be blank"
+      end
+
+      test "validates clinical_status values" do
+        c = Condition.new(patient_dfn: "123", display: "Diabetes", clinical_status: "invalid")
+        refute c.valid?
+        assert_includes c.errors[:clinical_status], "is not included in the list"
+      end
+
+      test "allows valid clinical_status values" do
+        %w[active recurrence relapse inactive remission resolved].each do |status|
+          c = Condition.new(patient_dfn: "123", display: "Diabetes", clinical_status: status)
+          assert c.valid?, "Expected #{status} to be valid"
+        end
+      end
+
+      test "validates category values" do
+        c = Condition.new(patient_dfn: "123", display: "Diabetes", category: "invalid")
+        refute c.valid?
+        assert_includes c.errors[:category], "is not included in the list"
+      end
+
+      test "allows valid category values" do
+        %w[problem-list-item encounter-diagnosis health-concern].each do |cat|
+          c = Condition.new(patient_dfn: "123", display: "Diabetes", category: cat)
+          assert c.valid?, "Expected #{cat} to be valid"
+        end
+      end
+
+      # -- resource_class --------------------------------------------------------
+
+      test "resource_class returns Condition" do
+        assert_equal "Condition", Condition.resource_class
+      end
+
+      # -- persisted? ------------------------------------------------------------
+
+      test "persisted? true when ien present" do
+        c = Condition.new(ien: "123", patient_dfn: "456", display: "Test")
+        assert c.persisted?
+      end
+
+      test "persisted? false when ien blank" do
+        c = Condition.new(patient_dfn: "456", display: "Test")
+        refute c.persisted?
+      end
+
+      # -- to_fhir includes clinicalStatus system --------------------------------
+
+      test "to_fhir clinicalStatus includes system" do
+        c = Condition.new(ien: "1", patient_dfn: "100", clinical_status: "active")
+        fhir = c.to_fhir
+        coding = fhir.dig(:clinicalStatus, :coding, 0)
+        assert_equal "http://terminology.hl7.org/CodeSystem/condition-clinical", coding[:system]
+      end
+
+      # -- to_fhir includes ICD-10 code system URL -------------------------------
+
+      test "to_fhir includes ICD-10 code system URL" do
+        c = Condition.new(
+          ien: "1", patient_dfn: "100",
+          code: "E11.9", code_system: "icd10", display: "Type 2 diabetes"
+        )
+        fhir = c.to_fhir
+        coding = fhir.dig(:code, :coding, 0)
+        assert_equal "http://hl7.org/fhir/sid/icd-10-cm", coding[:system]
+      end
+
+      test "to_fhir includes SNOMED code system URL" do
+        c = Condition.new(
+          ien: "1", patient_dfn: "100",
+          code: "44054006", code_system: "snomed", display: "Type 2 diabetes"
+        )
+        fhir = c.to_fhir
+        coding = fhir.dig(:code, :coding, 0)
+        assert_equal "http://snomed.info/sct", coding[:system]
+      end
+
+      # -- to_fhir includes severity ---------------------------------------------
+
+      test "to_fhir includes severity with SNOMED code" do
+        c = Condition.new(
+          ien: "1", patient_dfn: "100", display: "Diabetes", severity: "moderate"
+        )
+        fhir = c.to_fhir
+        assert_equal "6736007", fhir.dig(:severity, :coding, 0, :code)
+        assert_equal "Moderate", fhir.dig(:severity, :coding, 0, :display)
+      end
+
+      # -- from_fhir_attributes --------------------------------------------------
+
+      test "from_fhir_attributes extracts attributes" do
+        fhir_resource = OpenStruct.new(
+          code: OpenStruct.new(
+            coding: [ OpenStruct.new(code: "E11.9", display: "Type 2 diabetes") ],
+            text: "Type 2 diabetes"
+          ),
+          clinicalStatus: OpenStruct.new(
+            coding: [ OpenStruct.new(code: "active") ]
+          ),
+          verificationStatus: OpenStruct.new(
+            coding: [ OpenStruct.new(code: "confirmed") ]
+          ),
+          category: [ OpenStruct.new(
+            coding: [ OpenStruct.new(code: "problem-list-item") ]
+          ) ]
+        )
+
+        attrs = Condition.from_fhir_attributes(fhir_resource)
+
+        assert_equal "E11.9", attrs[:code]
+        assert_equal "Type 2 diabetes", attrs[:display]
+        assert_equal "active", attrs[:clinical_status]
+        assert_equal "confirmed", attrs[:verification_status]
+        assert_equal "problem-list-item", attrs[:category]
       end
     end
   end

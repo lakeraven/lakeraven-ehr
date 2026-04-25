@@ -180,10 +180,55 @@ module Lakeraven
         TribalEnrollmentGateway.tribe_info(tribe_code)
       end
 
+      # -- Providers (ported from rpms_redux) ----------------------------------
+
+      def providers
+        all_srs = service_requests || []
+        provider_iens = (all_srs.map(&:requesting_provider_ien) +
+                         all_srs.map { |sr| sr.respond_to?(:referred_provider_ien) ? sr.referred_provider_ien : nil })
+                        .compact.uniq.select(&:positive?)
+        provider_iens.filter_map { |ien| Practitioner.find_by_ien(ien) }
+      end
+
       # -- FHIR serialization -----------------------------------------------
 
       def to_fhir
         FHIR::PatientSerializer.call(self)
+      end
+
+      # -- FHIR deserialization (ported from rpms_redux) ---------------------
+
+      def self.from_fhir_attributes(fhir_resource)
+        gender_code = map_fhir_gender_to_sex(fhir_resource.gender)
+        {
+          name: extract_name_from_fhir(fhir_resource),
+          dob: fhir_resource.birthDate ? Date.parse(fhir_resource.birthDate) : nil,
+          sex: gender_code,
+          ssn: extract_ssn_from_fhir(fhir_resource)
+        }
+      end
+
+      def self.extract_name_from_fhir(fhir_resource)
+        return nil unless fhir_resource.name&.any?
+        name_obj = fhir_resource.name.first
+        return name_obj.text if name_obj.respond_to?(:text) && name_obj.text.present?
+        family = name_obj.family
+        given = name_obj.given&.join(" ")
+        given.present? ? "#{family},#{given}" : family
+      end
+
+      def self.map_fhir_gender_to_sex(gender)
+        case gender&.downcase
+        when "male" then "M"
+        when "female" then "F"
+        else "U"
+        end
+      end
+
+      def self.extract_ssn_from_fhir(fhir_resource)
+        return nil unless fhir_resource.identifier&.any?
+        ssn_id = fhir_resource.identifier.find { |id| id.system&.include?("ssn") }
+        ssn_id&.value
       end
 
       private

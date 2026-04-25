@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "test_helper"
+require "ostruct"
 
 module Lakeraven
   module EHR
@@ -187,6 +188,186 @@ module Lakeraven
         prac = Practitioner.new(name: "DOE,JOHN MICHAEL")
         assert_equal "Doe", prac.last_name
         assert_equal "John michael", prac.first_name
+      end
+
+      # -- resource_class --------------------------------------------------------
+
+      test "resource_class returns Practitioner" do
+        assert_equal "Practitioner", Practitioner.resource_class
+      end
+
+      # -- from_fhir_attributes --------------------------------------------------
+
+      test "from_fhir_attributes extracts attributes from FHIR resource" do
+        fhir_resource = OpenStruct.new(
+          name: [ OpenStruct.new(family: "SMITH", given: [ "JANE", "M" ]) ],
+          identifier: [
+            OpenStruct.new(system: "http://hl7.org/fhir/sid/us-npi", value: "9876543210")
+          ],
+          qualification: [
+            OpenStruct.new(code: OpenStruct.new(text: "EMERGENCY MEDICINE"))
+          ]
+        )
+
+        attributes = Practitioner.from_fhir_attributes(fhir_resource)
+
+        assert_equal "SMITH, JANE M", attributes[:name]
+        assert_equal "9876543210", attributes[:npi]
+        assert_equal "EMERGENCY MEDICINE", attributes[:specialty]
+      end
+
+      test "from_fhir_attributes handles missing data" do
+        fhir_resource = OpenStruct.new(
+          name: [ OpenStruct.new(family: "DOE") ],
+          identifier: [],
+          qualification: []
+        )
+
+        attributes = Practitioner.from_fhir_attributes(fhir_resource)
+
+        assert_equal "DOE", attributes[:name]
+        assert_nil attributes[:npi]
+        assert_nil attributes[:specialty]
+      end
+
+      # -- FHIR parsing helpers --------------------------------------------------
+
+      test "extract_name_from_fhir handles family and given names" do
+        fhir_resource = OpenStruct.new(
+          name: [ OpenStruct.new(family: "DOE", given: [ "JOHN", "MICHAEL" ]) ]
+        )
+        assert_equal "DOE, JOHN MICHAEL", Practitioner.extract_name_from_fhir(fhir_resource)
+      end
+
+      test "extract_name_from_fhir handles family name only" do
+        fhir_resource = OpenStruct.new(
+          name: [ OpenStruct.new(family: "DOE", given: nil) ]
+        )
+        assert_equal "DOE", Practitioner.extract_name_from_fhir(fhir_resource)
+      end
+
+      test "extract_name_from_fhir handles empty names" do
+        assert_nil Practitioner.extract_name_from_fhir(OpenStruct.new(name: []))
+        assert_nil Practitioner.extract_name_from_fhir(OpenStruct.new(name: nil))
+      end
+
+      test "extract_npi_from_fhir finds NPI identifier" do
+        fhir_resource = OpenStruct.new(
+          identifier: [
+            OpenStruct.new(system: "http://ihs.gov/rpms/provider-id", value: "101"),
+            OpenStruct.new(system: "http://hl7.org/fhir/sid/us-npi", value: "1234567890"),
+            OpenStruct.new(system: "other-system", value: "other-value")
+          ]
+        )
+        assert_equal "1234567890", Practitioner.extract_npi_from_fhir(fhir_resource)
+      end
+
+      test "extract_npi_from_fhir returns nil when no NPI" do
+        fhir_resource = OpenStruct.new(
+          identifier: [ OpenStruct.new(system: "other-system", value: "other-value") ]
+        )
+        assert_nil Practitioner.extract_npi_from_fhir(fhir_resource)
+      end
+
+      test "extract_npi_from_fhir returns nil for empty identifiers" do
+        assert_nil Practitioner.extract_npi_from_fhir(OpenStruct.new(identifier: []))
+      end
+
+      test "extract_specialty_from_fhir finds specialty" do
+        fhir_resource = OpenStruct.new(
+          qualification: [ OpenStruct.new(code: OpenStruct.new(text: "CARDIOLOGY")) ]
+        )
+        assert_equal "CARDIOLOGY", Practitioner.extract_specialty_from_fhir(fhir_resource)
+      end
+
+      test "extract_specialty_from_fhir returns nil for empty qualifications" do
+        assert_nil Practitioner.extract_specialty_from_fhir(OpenStruct.new(qualification: []))
+        assert_nil Practitioner.extract_specialty_from_fhir(OpenStruct.new(qualification: nil))
+      end
+
+      # -- to_fhir missing optional data -----------------------------------------
+
+      test "to_fhir handles missing optional data" do
+        prac = Practitioner.new(
+          ien: 999,
+          name: "BARE,MINIMUM",
+          npi: nil,
+          dea_number: nil,
+          specialty: nil,
+          service_section: nil,
+          title: nil,
+          phone: nil
+        )
+        fhir = prac.to_fhir
+
+        assert_equal "Practitioner", fhir[:resourceType]
+        # Only RPMS ID when no NPI
+        rpms_ids = fhir[:identifier]&.select { |id| id[:system]&.include?("rpms") }
+        assert rpms_ids&.any?, "Should have RPMS identifier"
+        npi_ids = fhir[:identifier]&.select { |id| id[:system]&.include?("npi") } || []
+        assert_empty npi_ids, "Should not have NPI identifier"
+        assert_empty(fhir[:qualification] || [])
+        assert_empty(fhir[:telecom] || [])
+      end
+
+      # -- can_prescribe_controlled? with empty string ---------------------------
+
+      test "can_prescribe_controlled? false with empty string" do
+        prac = Practitioner.new(dea_number: "")
+        refute prac.can_prescribe_controlled?
+      end
+
+      # -- persisted? with zero IEN ----------------------------------------------
+
+      test "persisted? false with zero IEN" do
+        prac = Practitioner.new(ien: 0, name: "TEST,DOC")
+        refute prac.persisted?
+      end
+
+      # -- unicode and edge cases ------------------------------------------------
+
+      test "handles unicode characters in names" do
+        prac = Practitioner.new(name: "GARCIA,JOSE")
+        assert_equal "JOSE GARCIA", prac.display_name
+      end
+
+      test "handles very long names" do
+        long_name = "A" * 100 + "," + "B" * 100
+        prac = Practitioner.new(name: long_name)
+        assert prac.display_name.length > 200
+      end
+
+      # -- FHIR includes RPMS identifier -----------------------------------------
+
+      test "to_fhir includes RPMS identifier for provenance" do
+        prac = Practitioner.new(ien: 101, name: "DOE,JOHN", npi: "2222222222")
+        fhir = prac.to_fhir
+
+        rpms_id = fhir[:identifier]&.find { |id| id[:system]&.include?("rpms") }
+        npi_id = fhir[:identifier]&.find { |id| id[:system]&.include?("npi") }
+
+        assert_not_nil rpms_id, "Should have RPMS identifier"
+        assert_not_nil npi_id, "Should have NPI identifier"
+      end
+
+      # -- to_fhir includes given names ------------------------------------------
+
+      test "to_fhir includes given names" do
+        prac = Practitioner.new(ien: 101, name: "DOE,JOHN MICHAEL")
+        fhir = prac.to_fhir
+
+        name = fhir[:name]&.first
+        assert_equal "DOE", name[:family]
+        assert_includes name[:given], "JOHN"
+      end
+
+      test "to_fhir includes US Core profile" do
+        prac = Practitioner.new(ien: 101, name: "DOE,JOHN")
+        fhir = prac.to_fhir
+
+        assert fhir[:meta][:profile].include?(
+          "http://hl7.org/fhir/us/core/StructureDefinition/us-core-practitioner"
+        )
       end
     end
   end
