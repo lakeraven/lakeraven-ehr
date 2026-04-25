@@ -40,7 +40,50 @@ module Lakeraven
 
       class RecordNotFound < StandardError; end
 
-      # -- Class methods (AR-like) -------------------------------------------
+      # Validations
+      validates :name, presence: true, if: -> { first_name.blank? && last_name.blank? }
+      validates :sex, inclusion: { in: %w[M F U], allow_nil: true }
+
+      # -- Gateway DI -----------------------------------------------------------
+
+      class << self
+        attr_writer :gateway
+
+        def gateway
+          @gateway || PatientGateway
+        end
+      end
+
+      # -- Persistence (ported from rpms_redux) --------------------------------
+
+      def save
+        return false unless valid?
+
+        if persisted?
+          true
+        else
+          result = self.class.gateway.register(persistable_attributes)
+          if result[:success]
+            self.dfn = result[:dfn]
+            true
+          else
+            errors.add(:base, result[:error] || "Registration failed")
+            false
+          end
+        end
+      end
+
+      def save!
+        save || raise(ActiveModel::ValidationError.new(self))
+      end
+
+      def self.create(attributes = {})
+        new(attributes).tap(&:save)
+      end
+
+      def self.create!(attributes = {})
+        new(attributes).tap(&:save!)
+      end
 
       def self.find(dfn)
         patient = find_by_dfn(dfn)
@@ -52,11 +95,11 @@ module Lakeraven
       def self.find_by_dfn(dfn)
         return nil unless dfn.present? && dfn.to_i.positive?
 
-        PatientGateway.find(dfn.to_i)
+        gateway.find(dfn.to_i)
       end
 
       def self.search(name_pattern)
-        PatientGateway.search(name_pattern.to_s)
+        gateway.search(name_pattern.to_s)
       end
 
       def self.search_by_ssn(ssn)
@@ -67,7 +110,7 @@ module Lakeraven
       def self.find_by_ssn(ssn)
         return nil if ssn.blank?
 
-        PatientGateway.find_by_ssn(ssn.to_s)
+        gateway.find_by_ssn(ssn.to_s)
       end
 
       # -- Initialize with composite field sync ------------------------------
@@ -232,6 +275,17 @@ module Lakeraven
       end
 
       private
+
+      def persistable_attributes
+        {
+          name: name, first_name: first_name, last_name: last_name,
+          dob: dob, born_on: born_on, sex: sex, ssn: ssn,
+          address_line1: address_line1, city: city, state: state,
+          zip_code: zip_code, phone: phone, race: race,
+          tribal_enrollment_number: tribal_enrollment_number,
+          service_area: service_area, coverage_type: coverage_type
+        }.compact
+      end
 
       def sync_composite_fields
         # Sync born_on ↔ dob
