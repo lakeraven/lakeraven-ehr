@@ -44,6 +44,34 @@ module Lakeraven
         assert_kind_of Array, results
       end
 
+      # -- Gateway DI ----------------------------------------------------------
+
+      test "gateway is configurable" do
+        assert Observation.respond_to?(:gateway)
+        assert Observation.respond_to?(:gateway=)
+      end
+
+      test "gateway defaults to ObservationGateway" do
+        assert_equal ObservationGateway, Observation.gateway
+      end
+
+      test "for_patient delegates to gateway" do
+        mock_gw = Object.new
+        def mock_gw.for_patient(_dfn)
+          [ Lakeraven::EHR::Observation.new(ien: "99", display: "MOCK BP") ]
+        end
+
+        original = Observation.gateway
+        begin
+          Observation.gateway = mock_gw
+          results = Observation.for_patient(1)
+          assert_equal 1, results.length
+          assert_equal "MOCK BP", results.first.display
+        ensure
+          Observation.gateway = original
+        end
+      end
+
       test "to_fhir returns Observation resource" do
         obs = Observation.new(ien: "42", patient_dfn: "100", status: "final")
         fhir = obs.to_fhir

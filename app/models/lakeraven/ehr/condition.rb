@@ -39,8 +39,18 @@ module Lakeraven
       validates :category, inclusion: { in: VALID_CATEGORIES, allow_blank: true }
       validates :code_system, inclusion: { in: VALID_CODE_SYSTEMS, allow_blank: true }
 
+      # -- Gateway DI -----------------------------------------------------------
+
+      class << self
+        attr_writer :gateway
+
+        def gateway
+          @gateway || ConditionGateway
+        end
+      end
+
       def self.for_patient(dfn)
-        ConditionGateway.for_patient(dfn)
+        gateway.for_patient(dfn)
       end
 
       def self.resource_class

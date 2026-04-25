@@ -57,6 +57,34 @@ module Lakeraven
         assert_kind_of Array, results
       end
 
+      # -- Gateway DI ----------------------------------------------------------
+
+      test "gateway is configurable" do
+        assert AllergyIntolerance.respond_to?(:gateway)
+        assert AllergyIntolerance.respond_to?(:gateway=)
+      end
+
+      test "gateway defaults to AllergyIntoleranceGateway" do
+        assert_equal AllergyIntoleranceGateway, AllergyIntolerance.gateway
+      end
+
+      test "for_patient delegates to gateway" do
+        mock_gw = Object.new
+        def mock_gw.for_patient(_dfn)
+          [ Lakeraven::EHR::AllergyIntolerance.new(ien: "99", allergen: "MOCK") ]
+        end
+
+        original = AllergyIntolerance.gateway
+        begin
+          AllergyIntolerance.gateway = mock_gw
+          results = AllergyIntolerance.for_patient(1)
+          assert_equal 1, results.length
+          assert_equal "MOCK", results.first.allergen
+        ensure
+          AllergyIntolerance.gateway = original
+        end
+      end
+
       # -- FHIR serialization --------------------------------------------------
 
       test "to_fhir returns AllergyIntolerance resource" do
