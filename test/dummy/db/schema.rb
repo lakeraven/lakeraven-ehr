@@ -30,9 +30,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_25_010000) do
     t.text "outcome_desc"
     t.string "tenant_identifier"
     t.datetime "updated_at", null: false
-    t.index [ "created_at" ], name: "index_lakeraven_ehr_audit_events_on_created_at"
-    t.index [ "entity_type" ], name: "index_lakeraven_ehr_audit_events_on_entity_type"
-    t.index [ "tenant_identifier" ], name: "index_lakeraven_ehr_audit_events_on_tenant_identifier"
+    t.index ["created_at"], name: "index_lakeraven_ehr_audit_events_on_created_at"
+    t.index ["entity_type"], name: "index_lakeraven_ehr_audit_events_on_entity_type"
+    t.index ["tenant_identifier"], name: "index_lakeraven_ehr_audit_events_on_tenant_identifier"
   end
 
   create_table "lakeraven_ehr_launch_contexts", force: :cascade do |t|
@@ -44,7 +44,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_25_010000) do
     t.string "oauth_application_uid", null: false
     t.string "patient_dfn"
     t.datetime "updated_at", null: false
-    t.index [ "launch_token" ], name: "index_lakeraven_ehr_launch_contexts_on_launch_token", unique: true
+    t.index ["launch_token"], name: "index_lakeraven_ehr_launch_contexts_on_launch_token", unique: true
   end
 
   create_table "lakeraven_ehr_patient_supplements", force: :cascade do |t|
@@ -53,7 +53,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_25_010000) do
     t.integer "patient_dfn", null: false
     t.string "sexual_orientation"
     t.datetime "updated_at", null: false
-    t.index [ "patient_dfn" ], name: "index_lakeraven_ehr_patient_supplements_on_patient_dfn", unique: true
+    t.index ["patient_dfn"], name: "index_lakeraven_ehr_patient_supplements_on_patient_dfn", unique: true
   end
 
   create_table "oauth_access_grants", force: :cascade do |t|
@@ -65,9 +65,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_25_010000) do
     t.datetime "revoked_at"
     t.string "scopes", default: "", null: false
     t.string "token", null: false
-    t.index [ "application_id" ], name: "index_oauth_access_grants_on_application_id"
-    t.index [ "resource_owner_id" ], name: "index_oauth_access_grants_on_resource_owner_id"
-    t.index [ "token" ], name: "index_oauth_access_grants_on_token", unique: true
+    t.index ["application_id"], name: "index_oauth_access_grants_on_application_id"
+    t.index ["resource_owner_id"], name: "index_oauth_access_grants_on_resource_owner_id"
+    t.index ["token"], name: "index_oauth_access_grants_on_token", unique: true
   end
 
   create_table "oauth_access_tokens", force: :cascade do |t|
@@ -80,10 +80,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_25_010000) do
     t.datetime "revoked_at"
     t.string "scopes"
     t.string "token", null: false
-    t.index [ "application_id" ], name: "index_oauth_access_tokens_on_application_id"
-    t.index [ "refresh_token" ], name: "index_oauth_access_tokens_on_refresh_token", unique: true
-    t.index [ "resource_owner_id" ], name: "index_oauth_access_tokens_on_resource_owner_id"
-    t.index [ "token" ], name: "index_oauth_access_tokens_on_token", unique: true
+    t.index ["application_id"], name: "index_oauth_access_tokens_on_application_id"
+    t.index ["refresh_token"], name: "index_oauth_access_tokens_on_refresh_token", unique: true
+    t.index ["resource_owner_id"], name: "index_oauth_access_tokens_on_resource_owner_id"
+    t.index ["token"], name: "index_oauth_access_tokens_on_token", unique: true
   end
 
   create_table "oauth_applications", force: :cascade do |t|
@@ -95,7 +95,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_25_010000) do
     t.string "secret", null: false
     t.string "uid", null: false
     t.datetime "updated_at", null: false
-    t.index [ "uid" ], name: "index_oauth_applications_on_uid", unique: true
+    t.index ["uid"], name: "index_oauth_applications_on_uid", unique: true
   end
 
   add_foreign_key "oauth_access_grants", "oauth_applications", column: "application_id"
