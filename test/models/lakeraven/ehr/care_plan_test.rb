@@ -68,6 +68,80 @@ module Lakeraven
         fhir = cp.to_fhir
         assert_equal "Patient/100", fhir.dig(:subject, :reference)
       end
+
+      # -- Validations (ported from rpms_redux) ----------------------------------
+
+      test "validates patient_dfn presence" do
+        cp = CarePlan.new(title: "Care Plan")
+        assert_not cp.valid?
+        assert_includes cp.errors[:patient_dfn], "can't be blank"
+      end
+
+      test "validates status inclusion" do
+        cp = CarePlan.new(patient_dfn: "1", status: "invalid")
+        assert_not cp.valid?
+        assert_includes cp.errors[:status], "is not included in the list"
+      end
+
+      test "allows valid status values" do
+        %w[draft active on-hold revoked completed entered-in-error unknown].each do |s|
+          cp = CarePlan.new(patient_dfn: "1", status: s)
+          assert cp.valid?, "Expected #{s} to be valid"
+        end
+      end
+
+      test "validates intent inclusion" do
+        cp = CarePlan.new(patient_dfn: "1", intent: "invalid")
+        assert_not cp.valid?
+        assert_includes cp.errors[:intent], "is not included in the list"
+      end
+
+      test "allows valid intent values" do
+        %w[proposal plan order option].each do |i|
+          cp = CarePlan.new(patient_dfn: "1", intent: i)
+          assert cp.valid?, "Expected #{i} to be valid"
+        end
+      end
+
+      # -- FHIR extras (ported from rpms_redux) ----------------------------------
+
+      test "to_fhir includes category coding" do
+        cp = CarePlan.new(ien: "1", patient_dfn: "100", category: "assess-plan")
+        fhir = cp.to_fhir
+        coding = fhir[:category].first[:coding].first
+        assert_equal "assess-plan", coding[:code]
+        assert_equal "http://hl7.org/fhir/us/core/CodeSystem/careplan-category", coding[:system]
+      end
+
+      test "to_fhir includes period" do
+        cp = CarePlan.new(
+          ien: "1", patient_dfn: "100",
+          period_start: Date.new(2026, 1, 1), period_end: Date.new(2026, 12, 31)
+        )
+        fhir = cp.to_fhir
+        assert_equal "2026-01-01", fhir[:period][:start]
+        assert_equal "2026-12-31", fhir[:period][:end]
+      end
+
+      test "to_fhir includes description" do
+        cp = CarePlan.new(ien: "1", patient_dfn: "100", description: "Monitor blood glucose")
+        fhir = cp.to_fhir
+        assert_equal "Monitor blood glucose", fhir[:description]
+      end
+
+      test "to_fhir includes author when author_name present" do
+        cp = CarePlan.new(ien: "1", patient_dfn: "100", author_name: "Dr. Smith")
+        fhir = cp.to_fhir
+        assert_equal "Dr. Smith", fhir[:author][:display]
+      end
+
+      test "persisted? true when ien present" do
+        assert CarePlan.new(ien: "1", patient_dfn: "1").persisted?
+      end
+
+      test "persisted? false when ien blank" do
+        refute CarePlan.new(patient_dfn: "1").persisted?
+      end
     end
   end
 end

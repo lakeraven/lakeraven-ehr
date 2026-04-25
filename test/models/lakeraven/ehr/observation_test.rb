@@ -105,6 +105,136 @@ module Lakeraven
         fhir = obs.to_fhir
         assert fhir[:category]&.any?
       end
+
+      # -- SDOH constants --------------------------------------------------------
+
+      test "defines SDOH_CODES constant" do
+        assert_equal "71802-3", Observation::SDOH_CODES[:housing_status]
+        assert_equal "88122-7", Observation::SDOH_CODES[:food_insecurity]
+        assert_equal "93025-5", Observation::SDOH_CODES[:prapare]
+        assert_equal "96777-8", Observation::SDOH_CODES[:ahc_hrsn]
+        assert_equal "76513-1", Observation::SDOH_CODES[:financial_strain]
+        assert_equal "67875-5", Observation::SDOH_CODES[:employment_status]
+      end
+
+      test "defines SOGI_CODES constant" do
+        assert_equal "76690-7", Observation::SOGI_CODES[:sexual_orientation]
+        assert_equal "76691-5", Observation::SOGI_CODES[:gender_identity]
+      end
+
+      test "sdoh? for social-history category" do
+        assert Observation.new(category: "social-history").sdoh?
+      end
+
+      test "sdoh? for survey category" do
+        assert Observation.new(category: "survey").sdoh?
+      end
+
+      test "sdoh? false for vital-signs" do
+        refute Observation.new(category: "vital-signs").sdoh?
+      end
+
+      # -- SDOH FHIR serialization -----------------------------------------------
+
+      test "social-history observation to_fhir includes category coding with system" do
+        obs = Observation.new(
+          ien: "sdoh-1", patient_dfn: "1", category: "social-history",
+          code: "71802-3", display: "Housing status", value: "Permanently housed", status: "final"
+        )
+        fhir = obs.to_fhir
+        coding = fhir[:category].first[:coding].first
+        assert_equal "http://terminology.hl7.org/CodeSystem/observation-category", coding[:system]
+        assert_equal "social-history", coding[:code]
+      end
+
+      test "sdoh observation to_fhir includes LOINC code system" do
+        obs = Observation.new(
+          ien: "sdoh-1", patient_dfn: "1", category: "social-history",
+          code: "71802-3", display: "Housing status", status: "final"
+        )
+        fhir = obs.to_fhir
+        assert_equal "http://loinc.org", fhir.dig(:code, :coding, 0, :system)
+      end
+
+      test "sdoh observation to_fhir includes valueString" do
+        obs = Observation.new(
+          ien: "sdoh-1", patient_dfn: "1", category: "social-history",
+          code: "71802-3", display: "Housing status",
+          value: "Permanently housed", status: "final"
+        )
+        fhir = obs.to_fhir
+        assert_equal "Permanently housed", fhir[:valueString]
+      end
+
+      # -- Vital signs -----------------------------------------------------------
+
+      test "defines VITAL_SIGNS_CODES constant" do
+        assert Observation::VITAL_SIGNS_CODES[:blood_pressure].present?
+        assert Observation::VITAL_SIGNS_CODES[:heart_rate].present?
+        assert Observation::VITAL_SIGNS_CODES[:temperature].present?
+        assert Observation::VITAL_SIGNS_CODES[:systolic].present?
+        assert Observation::VITAL_SIGNS_CODES[:diastolic].present?
+      end
+
+      test "blood pressure to_fhir uses component pattern" do
+        bp = Observation.new(
+          ien: "bp-1", patient_dfn: "1", category: "vital-signs",
+          code: Observation::VITAL_SIGNS_CODES[:blood_pressure],
+          display: "Blood Pressure", value: "120/80", status: "final"
+        )
+        fhir = bp.to_fhir
+        assert fhir[:component].present?, "Blood pressure should use component pattern"
+        assert_nil fhir[:valueQuantity], "Blood pressure should not have flat valueQuantity"
+      end
+
+      test "blood pressure components have systolic and diastolic codes" do
+        bp = Observation.new(
+          ien: "bp-1", patient_dfn: "1", category: "vital-signs",
+          code: Observation::VITAL_SIGNS_CODES[:blood_pressure],
+          display: "Blood Pressure", value: "120/80", status: "final"
+        )
+        fhir = bp.to_fhir
+        codes = fhir[:component].map { |c| c.dig(:code, :coding, 0, :code) }
+        assert_includes codes, Observation::VITAL_SIGNS_CODES[:systolic]
+        assert_includes codes, Observation::VITAL_SIGNS_CODES[:diastolic]
+      end
+
+      test "blood pressure components have mm[Hg] unit" do
+        bp = Observation.new(
+          ien: "bp-1", patient_dfn: "1", category: "vital-signs",
+          code: Observation::VITAL_SIGNS_CODES[:blood_pressure],
+          display: "Blood Pressure", value: "120/80", status: "final"
+        )
+        fhir = bp.to_fhir
+        fhir[:component].each do |component|
+          assert_equal "mm[Hg]", component[:valueQuantity][:unit]
+          assert_equal "http://unitsofmeasure.org", component[:valueQuantity][:system]
+        end
+      end
+
+      test "heart rate to_fhir has /min unit" do
+        hr = Observation.new(
+          ien: "hr-1", patient_dfn: "1", category: "vital-signs",
+          code: Observation::VITAL_SIGNS_CODES[:heart_rate],
+          display: "Heart Rate", value: "72", value_quantity: "72",
+          unit: "/min", status: "final"
+        )
+        fhir = hr.to_fhir
+        assert_equal "/min", fhir[:valueQuantity][:unit]
+      end
+
+      test "vital-signs category coding includes system" do
+        hr = Observation.new(
+          ien: "hr-1", patient_dfn: "1", category: "vital-signs",
+          code: Observation::VITAL_SIGNS_CODES[:heart_rate],
+          display: "Heart Rate", value: "72", value_quantity: "72",
+          unit: "/min", status: "final"
+        )
+        fhir = hr.to_fhir
+        coding = fhir[:category].first[:coding].first
+        assert_equal "http://terminology.hl7.org/CodeSystem/observation-category", coding[:system]
+        assert_equal "vital-signs", coding[:code]
+      end
     end
   end
 end

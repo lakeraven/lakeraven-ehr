@@ -79,6 +79,76 @@ module Lakeraven
         get "/lakeraven-ehr/Patient/1"
         assert_response :unauthorized
       end
+
+      # -- Expired/revoked/invalid token auth ------------------------------------
+
+      test "expired token returns 401" do
+        expired = Doorkeeper::AccessToken.create!(
+          application: @oauth_app, scopes: "system/*.read", expires_in: -1
+        )
+        get "/lakeraven-ehr/Patient/1",
+          headers: { "Authorization" => "Bearer #{expired.plaintext_token || expired.token}" }
+        assert_response :unauthorized
+      end
+
+      test "revoked token returns 401" do
+        revoked = Doorkeeper::AccessToken.create!(
+          application: @oauth_app, scopes: "system/*.read", expires_in: 3600
+        )
+        revoked.revoke
+        get "/lakeraven-ehr/Patient/1",
+          headers: { "Authorization" => "Bearer #{revoked.plaintext_token || revoked.token}" }
+        assert_response :unauthorized
+      end
+
+      test "invalid token returns 401" do
+        get "/lakeraven-ehr/Patient/1",
+          headers: { "Authorization" => "Bearer totally_bogus_token" }
+        assert_response :unauthorized
+      end
+
+      # -- Scope enforcement -----------------------------------------------------
+
+      test "token without Patient read scope returns 403" do
+        app = Doorkeeper::Application.create!(
+          name: "scope-test", redirect_uri: "https://example.test/callback",
+          scopes: "openid", confidential: true
+        )
+        token = Doorkeeper::AccessToken.create!(application: app, scopes: "openid", expires_in: 3600)
+        get "/lakeraven-ehr/Patient/1",
+          headers: { "Authorization" => "Bearer #{token.plaintext_token || token.token}" }
+        assert_response :forbidden
+        body = JSON.parse(response.body)
+        assert_equal "OperationOutcome", body["resourceType"]
+        assert_equal "forbidden", body["issue"].first["code"]
+      end
+
+      # -- Error response structure ----------------------------------------------
+
+      test "401 response is OperationOutcome" do
+        get "/lakeraven-ehr/Patient/1"
+        body = JSON.parse(response.body)
+        assert_equal "OperationOutcome", body["resourceType"]
+        assert_equal "login", body["issue"].first["code"]
+      end
+
+      test "404 response is OperationOutcome with not-found code" do
+        get "/lakeraven-ehr/Patient/99999", headers: @headers
+        body = JSON.parse(response.body)
+        assert_equal "OperationOutcome", body["resourceType"]
+        assert_equal "not-found", body["issue"].first["code"]
+        assert_equal "error", body["issue"].first["severity"]
+      end
+
+      test "FHIR content type on 401 responses" do
+        get "/lakeraven-ehr/Patient/1"
+        assert_equal "application/fhir+json", response.media_type
+      end
+
+      test "FHIR content type on 404 responses" do
+        get "/lakeraven-ehr/Patient/99999", headers: @headers
+        assert_equal "application/fhir+json", response.media_type
+      end
     end
   end
 end
