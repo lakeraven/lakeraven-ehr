@@ -5,15 +5,14 @@ require "test_helper"
 module Lakeraven
   module EHR
     class TerminologyServiceTest < ActiveSupport::TestCase
-      RPMS_REDUX_VALUESETS = "/Users/kimball/code/lakeraven/rpms/rpms_redux/db/valuesets"
+      TEST_VALUESETS = File.expand_path("../../../fixtures/files/valuesets", __dir__)
 
       setup do
         @original_umls = ENV["UMLS_API_KEY"]
         @original_iris = ENV["IRIS_TERMINOLOGY_URL"]
         ENV["UMLS_API_KEY"] = nil
         ENV["IRIS_TERMINOLOGY_URL"] = nil
-        # Add rpms_redux valuesets as fallback source until engine has its own
-        TerminologyService.additional_valueset_paths = [ RPMS_REDUX_VALUESETS ]
+        TerminologyService.additional_valueset_paths = [ TEST_VALUESETS ]
       end
 
       teardown do
