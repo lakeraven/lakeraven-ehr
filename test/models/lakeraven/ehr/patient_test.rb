@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "test_helper"
+require "ostruct"
 
 module Lakeraven
   module EHR
@@ -291,6 +292,70 @@ module Lakeraven
       test "tribal_enrollment_valid? false without enrollment number" do
         patient = Patient.new(dfn: 1, name: "DOE,JOHN", sex: "M")
         refute patient.tribal_enrollment_valid?
+      end
+
+      # -- from_fhir_attributes (ported from rpms_redux) -------------------------
+
+      test "from_fhir_attributes parses FHIR resource" do
+        fhir = OpenStruct.new(
+          name: [ OpenStruct.new(family: "Parser", given: [ "Test", "Middle" ]) ],
+          gender: "female",
+          birthDate: "1990-05-15",
+          identifier: [ OpenStruct.new(system: "http://hl7.org/fhir/sid/us-ssn", value: "555-55-5555") ]
+        )
+        attrs = Patient.from_fhir_attributes(fhir)
+        assert_equal "Parser,Test Middle", attrs[:name]
+        assert_equal "F", attrs[:sex]
+        assert_equal Date.parse("1990-05-15"), attrs[:dob]
+        assert_equal "555-55-5555", attrs[:ssn]
+      end
+
+      test "from_fhir_attributes handles missing name" do
+        fhir = OpenStruct.new(name: [], gender: "male", birthDate: nil, identifier: [])
+        attrs = Patient.from_fhir_attributes(fhir)
+        assert_nil attrs[:name]
+        assert_equal "M", attrs[:sex]
+      end
+
+      # -- FHIR US Core / TEFCA (ported from rpms_redux) -------------------------
+
+      test "to_fhir includes tribal enrollment extension for TEFCA" do
+        patient = Patient.new(dfn: 1, name: "TEST,TEFCA", sex: "M",
+                              tribal_enrollment_number: "ANLC-12345")
+        fhir = patient.to_fhir
+        extensions = fhir[:extension] || []
+        tribal_ext = extensions.find { |e| e[:url]&.include?("tribal") }
+        assert tribal_ext, "TEFCA requires tribal enrollment extension"
+      end
+
+      test "to_fhir supports US Core Patient profile requirements" do
+        patient = Patient.find_by_dfn(1)
+        fhir = patient.to_fhir
+
+        assert fhir[:identifier]&.any?, "US Core requires identifier"
+        assert fhir[:name]&.any?, "US Core requires name"
+        assert fhir[:gender].present?, "US Core requires gender"
+        assert fhir[:birthDate].present?, "US Core requires birthDate"
+
+        extensions = fhir[:extension] || []
+        race_ext = extensions.find { |e| e[:url]&.include?("race") }
+        assert race_ext, "US Core requires race extension"
+      end
+
+      test "to_fhir ready for QHIN exchange" do
+        patient = Patient.find_by_dfn(1)
+        fhir = patient.to_fhir
+
+        assert_equal "Patient", fhir[:resourceType]
+        assert fhir[:id].present?, "QHIN requires resource ID"
+        assert fhir[:identifier]&.any?, "QHIN requires identifiers"
+      end
+
+      # -- providers association (ported from rpms_redux) ------------------------
+
+      test "providers returns empty array when no service requests" do
+        patient = Patient.new(dfn: 99999, name: "NOREFS,PATIENT", sex: "M")
+        assert_equal [], patient.providers
       end
     end
   end
