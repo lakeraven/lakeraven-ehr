@@ -21,16 +21,66 @@ module Lakeraven
       attribute :first_name, :string
       attribute :last_name, :string
 
+      class RecordNotFound < StandardError; end
+
+      # -- Gateway DI --------------------------------------------------------
+
+      class << self
+        attr_writer :gateway
+
+        def gateway
+          @gateway || PractitionerGateway
+        end
+      end
+
       # -- Class methods -----------------------------------------------------
+
+      def self.find(ien)
+        practitioner = find_by_ien(ien)
+        raise RecordNotFound, "Couldn't find Practitioner with 'ien'=#{ien}" unless practitioner
+
+        practitioner
+      end
 
       def self.find_by_ien(ien)
         return nil unless ien.present? && ien.to_i.positive?
 
-        PractitionerGateway.find(ien.to_i)
+        gateway.find(ien.to_i)
       end
 
       def self.search(name_pattern)
-        PractitionerGateway.search(name_pattern.to_s)
+        gateway.search(name_pattern.to_s)
+      end
+
+      def self.create(attributes = {})
+        new(attributes).tap(&:save)
+      end
+
+      def self.create!(attributes = {})
+        new(attributes).tap(&:save!)
+      end
+
+      # -- Persistence -------------------------------------------------------
+
+      def save
+        return false unless valid?
+
+        if persisted?
+          true
+        else
+          result = self.class.gateway.register(persistable_attributes)
+          if result[:success]
+            self.ien = result[:ien]
+            true
+          else
+            errors.add(:base, result[:error] || "Registration failed")
+            false
+          end
+        end
+      end
+
+      def save!
+        save || raise(ActiveModel::ValidationError.new(self))
       end
 
       # -- Initialize --------------------------------------------------------
@@ -113,7 +163,20 @@ module Lakeraven
         FHIR::PractitionerSerializer.call(self)
       end
 
+      # -- Validations (for save) ----------------------------------------------
+
+      validates :name, presence: true, if: -> { first_name.blank? && last_name.blank? }
+
       private
+
+      def persistable_attributes
+        {
+          name: name, first_name: first_name, last_name: last_name,
+          npi: npi, dea_number: dea_number, specialty: specialty,
+          provider_class: provider_class, title: title,
+          service_section: service_section, phone: phone
+        }.compact
+      end
 
       def sync_composite_fields
         self.name = "#{last_name},#{first_name}" if first_name.present? && last_name.present? && name.blank?

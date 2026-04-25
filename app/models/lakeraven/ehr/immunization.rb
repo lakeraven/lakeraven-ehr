@@ -38,8 +38,18 @@ module Lakeraven
         allow_blank: true
       }
 
+      # -- Gateway DI -----------------------------------------------------------
+
+      class << self
+        attr_writer :gateway
+
+        def gateway
+          @gateway || ImmunizationGateway
+        end
+      end
+
       def self.for_patient(dfn)
-        ImmunizationGateway.for_patient(dfn)
+        gateway.for_patient(dfn)
       end
 
       def self.resource_class

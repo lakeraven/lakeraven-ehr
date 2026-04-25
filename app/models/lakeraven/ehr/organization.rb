@@ -42,6 +42,16 @@ module Lakeraven
       validates :npi, length: { is: 10 }, allow_blank: true
       validate :ien_valid_if_present
 
+      # -- Gateway DI -----------------------------------------------------------
+
+      class << self
+        attr_writer :gateway
+
+        def gateway
+          @gateway || OrganizationGateway
+        end
+      end
+
       # =============================================================================
       # FIND
       # =============================================================================
@@ -49,7 +59,7 @@ module Lakeraven
       def self.find_by_ien(ien)
         return nil unless ien.present? && ien.to_i > 0
 
-        attrs = OrganizationGateway.find(ien.to_i)
+        attrs = gateway.find(ien.to_i)
         attrs ? new(**attrs) : nil
       end
 

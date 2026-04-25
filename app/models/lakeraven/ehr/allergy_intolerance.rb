@@ -16,8 +16,18 @@ module Lakeraven
       attribute :category, :string
       attribute :criticality, :string
 
+      # -- Gateway DI -----------------------------------------------------------
+
+      class << self
+        attr_writer :gateway
+
+        def gateway
+          @gateway || AllergyIntoleranceGateway
+        end
+      end
+
       def self.for_patient(dfn)
-        AllergyIntoleranceGateway.for_patient(dfn)
+        gateway.for_patient(dfn)
       end
 
       def active? = clinical_status == "active"

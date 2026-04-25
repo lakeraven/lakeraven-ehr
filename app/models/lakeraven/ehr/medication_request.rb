@@ -33,8 +33,18 @@ module Lakeraven
       validates :status, inclusion: { in: VALID_STATUSES, allow_blank: true }
       validates :intent, inclusion: { in: VALID_INTENTS, allow_blank: true }
 
+      # -- Gateway DI -----------------------------------------------------------
+
+      class << self
+        attr_writer :gateway
+
+        def gateway
+          @gateway || MedicationRequestGateway
+        end
+      end
+
       def self.for_patient(dfn)
-        MedicationRequestGateway.for_patient(dfn)
+        gateway.for_patient(dfn)
       end
 
       def self.resource_class
