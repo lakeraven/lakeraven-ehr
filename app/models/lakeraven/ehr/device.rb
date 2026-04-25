@@ -5,6 +5,9 @@ module Lakeraven
     class Device
       include ActiveModel::Model
       include ActiveModel::Attributes
+      include ActiveModel::Validations
+
+      VALID_STATUSES = %w[active inactive entered-in-error unknown].freeze
 
       attribute :ien, :string
       attribute :patient_dfn, :string
@@ -21,18 +24,37 @@ module Lakeraven
       attribute :type_code, :string
       attribute :type_display, :string
 
+      validates :patient_dfn, presence: true
+      validates :device_name, presence: true
+      validates :status, inclusion: { in: VALID_STATUSES }
+
       def active? = status == "active"
+      def persisted? = ien.present?
 
       def to_fhir
         {
           resourceType: "Device",
           id: ien,
           patient: patient_dfn ? { reference: "Patient/#{patient_dfn}" } : nil,
-          udiCarrier: udi_carrier ? [ { carrierHRF: udi_carrier } ] : nil,
+          udiCarrier: udi_carrier ? [ { carrierHRF: udi_carrier, deviceIdentifier: udi_device_identifier }.compact ] : nil,
           status: status,
           manufacturer: manufacturer,
+          modelNumber: model_number,
+          serialNumber: serial_number,
+          lotNumber: lot_number,
+          manufactureDate: manufacture_date&.iso8601,
+          expirationDate: expiration_date&.iso8601,
+          type: build_type,
           deviceName: device_name ? [ { name: device_name, type: "user-friendly-name" } ] : nil
         }.compact
+      end
+
+      private
+
+      def build_type
+        return nil unless type_code
+
+        { coding: [ { code: type_code, system: "http://snomed.info/sct", display: type_display }.compact ] }
       end
     end
   end

@@ -20,6 +20,8 @@ module Lakeraven
         VACCINE_TYPE VACCINE_DATE ONSET_DATE
       ].freeze
 
+      def persisted? = false
+
       def to_vaers
         {
           patient_name: patient_name,

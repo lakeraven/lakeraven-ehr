@@ -70,6 +70,64 @@ module Lakeraven
         fhir = g.to_fhir
         assert_equal "Patient/100", fhir.dig(:subject, :reference)
       end
+
+      # -- Validations (ported from rpms_redux) ----------------------------------
+
+      test "validates patient_dfn presence" do
+        g = Goal.new(description: "Health goal")
+        assert_not g.valid?
+        assert_includes g.errors[:patient_dfn], "can't be blank"
+      end
+
+      test "validates description presence" do
+        g = Goal.new(patient_dfn: "1")
+        assert_not g.valid?
+        assert_includes g.errors[:description], "can't be blank"
+      end
+
+      test "validates lifecycle_status inclusion" do
+        g = Goal.new(patient_dfn: "1", description: "Goal", lifecycle_status: "invalid")
+        assert_not g.valid?
+        assert_includes g.errors[:lifecycle_status], "is not included in the list"
+      end
+
+      test "allows valid lifecycle_status values" do
+        %w[proposed planned accepted active on-hold completed cancelled entered-in-error rejected].each do |s|
+          g = Goal.new(patient_dfn: "1", description: "Goal", lifecycle_status: s)
+          assert g.valid?, "Expected #{s} to be valid"
+        end
+      end
+
+      # -- FHIR extras (ported from rpms_redux) ----------------------------------
+
+      test "to_fhir includes achievement status" do
+        g = Goal.new(ien: "1", patient_dfn: "100", description: "Goal", achievement_status: "in-progress")
+        fhir = g.to_fhir
+        coding = fhir[:achievementStatus][:coding].first
+        assert_equal "in-progress", coding[:code]
+        assert_equal "http://terminology.hl7.org/CodeSystem/goal-achievement", coding[:system]
+      end
+
+      test "to_fhir includes start date" do
+        g = Goal.new(ien: "1", patient_dfn: "100", description: "Goal", start_date: Date.new(2026, 1, 1))
+        fhir = g.to_fhir
+        assert_equal "2026-01-01", fhir[:startDate]
+      end
+
+      test "to_fhir includes target date" do
+        g = Goal.new(ien: "1", patient_dfn: "100", description: "Goal", target_date: Date.new(2026, 6, 30))
+        fhir = g.to_fhir
+        assert_equal 1, fhir[:target].length
+        assert_equal "2026-06-30", fhir[:target].first[:dueDate]
+      end
+
+      test "persisted? true when ien present" do
+        assert Goal.new(ien: "1", patient_dfn: "1", description: "Goal").persisted?
+      end
+
+      test "persisted? false when ien blank" do
+        refute Goal.new(patient_dfn: "1", description: "Goal").persisted?
+      end
     end
   end
 end
