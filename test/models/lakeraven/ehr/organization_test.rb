@@ -93,6 +93,36 @@ module Lakeraven
       end
 
       # =============================================================================
+      # GATEWAY DI
+      # =============================================================================
+
+      test "gateway is configurable" do
+        assert Organization.respond_to?(:gateway)
+        assert Organization.respond_to?(:gateway=)
+      end
+
+      test "gateway defaults to OrganizationGateway" do
+        assert_equal OrganizationGateway, Organization.gateway
+      end
+
+      test "find_by_ien delegates to gateway" do
+        mock_gw = Object.new
+        def mock_gw.find(ien)
+          { ien: ien, name: "MOCK ORG" }
+        end
+
+        original = Organization.gateway
+        begin
+          Organization.gateway = mock_gw
+          org = Organization.find_by_ien(42)
+          assert_equal "MOCK ORG", org.name
+          assert_equal 42, org.ien
+        ensure
+          Organization.gateway = original
+        end
+      end
+
+      # =============================================================================
       # FIND / PERSISTENCE TESTS (existing)
       # =============================================================================
 

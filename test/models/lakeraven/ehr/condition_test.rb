@@ -74,6 +74,34 @@ module Lakeraven
         assert_kind_of Array, results
       end
 
+      # -- Gateway DI ----------------------------------------------------------
+
+      test "gateway is configurable" do
+        assert Condition.respond_to?(:gateway)
+        assert Condition.respond_to?(:gateway=)
+      end
+
+      test "gateway defaults to ConditionGateway" do
+        assert_equal ConditionGateway, Condition.gateway
+      end
+
+      test "for_patient delegates to gateway" do
+        mock_gw = Object.new
+        def mock_gw.for_patient(_dfn)
+          [ Lakeraven::EHR::Condition.new(ien: "99", patient_dfn: "1", display: "MOCK") ]
+        end
+
+        original = Condition.gateway
+        begin
+          Condition.gateway = mock_gw
+          results = Condition.for_patient(1)
+          assert_equal 1, results.length
+          assert_equal "MOCK", results.first.display
+        ensure
+          Condition.gateway = original
+        end
+      end
+
       # -- FHIR serialization --------------------------------------------------
 
       test "to_fhir returns Condition resource" do

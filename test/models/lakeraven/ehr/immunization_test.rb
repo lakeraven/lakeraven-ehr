@@ -70,6 +70,34 @@ module Lakeraven
         assert_kind_of Array, results
       end
 
+      # -- Gateway DI ----------------------------------------------------------
+
+      test "gateway is configurable" do
+        assert Immunization.respond_to?(:gateway)
+        assert Immunization.respond_to?(:gateway=)
+      end
+
+      test "gateway defaults to ImmunizationGateway" do
+        assert_equal ImmunizationGateway, Immunization.gateway
+      end
+
+      test "for_patient delegates to gateway" do
+        mock_gw = Object.new
+        def mock_gw.for_patient(_dfn)
+          [ Lakeraven::EHR::Immunization.new(ien: "99", patient_dfn: "1", vaccine_display: "MOCK") ]
+        end
+
+        original = Immunization.gateway
+        begin
+          Immunization.gateway = mock_gw
+          results = Immunization.for_patient(1)
+          assert_equal 1, results.length
+          assert_equal "MOCK", results.first.vaccine_display
+        ensure
+          Immunization.gateway = original
+        end
+      end
+
       # -- FHIR serialization --------------------------------------------------
 
       test "to_fhir returns Immunization resource" do

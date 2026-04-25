@@ -71,6 +71,34 @@ module Lakeraven
         assert_equal "Take 5mg daily", fhir[:dosageInstruction]&.first&.dig(:text)
       end
 
+      # -- Gateway DI ----------------------------------------------------------
+
+      test "gateway is configurable" do
+        assert MedicationRequest.respond_to?(:gateway)
+        assert MedicationRequest.respond_to?(:gateway=)
+      end
+
+      test "gateway defaults to MedicationRequestGateway" do
+        assert_equal MedicationRequestGateway, MedicationRequest.gateway
+      end
+
+      test "for_patient delegates to gateway" do
+        mock_gw = Object.new
+        def mock_gw.for_patient(_dfn)
+          [ Lakeraven::EHR::MedicationRequest.new(ien: "99", patient_dfn: "1", medication_display: "MOCK") ]
+        end
+
+        original = MedicationRequest.gateway
+        begin
+          MedicationRequest.gateway = mock_gw
+          results = MedicationRequest.for_patient(1)
+          assert_equal 1, results.length
+          assert_equal "MOCK", results.first.medication_display
+        ensure
+          MedicationRequest.gateway = original
+        end
+      end
+
       # -- validations -----------------------------------------------------------
 
       test "validates patient_dfn presence" do

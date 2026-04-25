@@ -169,6 +169,36 @@ module Lakeraven
       end
 
       # =============================================================================
+      # GATEWAY DI
+      # =============================================================================
+
+      test "gateway is configurable" do
+        assert Encounter.respond_to?(:gateway)
+        assert Encounter.respond_to?(:gateway=)
+      end
+
+      test "gateway defaults to EncounterGateway" do
+        assert_equal EncounterGateway, Encounter.gateway
+      end
+
+      test "for_patient delegates to gateway" do
+        mock_gw = Object.new
+        def mock_gw.for_patient(_dfn)
+          [ Lakeraven::EHR::Encounter.new(status: "finished", class_code: "AMB") ]
+        end
+
+        original = Encounter.gateway
+        begin
+          Encounter.gateway = mock_gw
+          results = Encounter.for_patient(1)
+          assert_equal 1, results.length
+          assert results.first.finished?
+        ensure
+          Encounter.gateway = original
+        end
+      end
+
+      # =============================================================================
       # FHIR SERIALIZATION
       # =============================================================================
 

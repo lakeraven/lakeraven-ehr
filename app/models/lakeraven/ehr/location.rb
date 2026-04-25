@@ -59,10 +59,20 @@ module Lakeraven
       validates :physical_type, inclusion: { in: PHYSICAL_TYPES.keys }, allow_blank: true
       validate :ien_valid_if_present
 
+      # -- Gateway DI -----------------------------------------------------------
+
+      class << self
+        attr_writer :gateway
+
+        def gateway
+          @gateway || LocationGateway
+        end
+      end
+
       def self.find_by_ien(ien)
         return nil unless ien.present? && ien.to_i > 0
 
-        attrs = LocationGateway.find(ien.to_i)
+        attrs = gateway.find(ien.to_i)
         attrs ? new(**attrs) : nil
       end
 

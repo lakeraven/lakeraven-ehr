@@ -17,8 +17,18 @@ module Lakeraven
       attribute :status, :string
       attribute :effective_datetime, :datetime
 
+      # -- Gateway DI -----------------------------------------------------------
+
+      class << self
+        attr_writer :gateway
+
+        def gateway
+          @gateway || ObservationGateway
+        end
+      end
+
       def self.for_patient(dfn)
-        ObservationGateway.for_patient(dfn)
+        gateway.for_patient(dfn)
       end
 
       def vital_sign? = category == "vital-signs"

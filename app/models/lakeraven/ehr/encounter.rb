@@ -44,6 +44,20 @@ module Lakeraven
       validates :status, inclusion: { in: VALID_STATUSES }
       validates :class_code, inclusion: { in: VALID_CLASS_CODES }
 
+      # -- Gateway DI -----------------------------------------------------------
+
+      class << self
+        attr_writer :gateway
+
+        def gateway
+          @gateway || EncounterGateway
+        end
+      end
+
+      def self.for_patient(dfn)
+        gateway.for_patient(dfn)
+      end
+
       # -- Display helpers ---------------------------------------------------
 
       def status_display = STATUS_DISPLAY[status]

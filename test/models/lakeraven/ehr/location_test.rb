@@ -86,6 +86,36 @@ module Lakeraven
       end
 
       # =============================================================================
+      # GATEWAY DI
+      # =============================================================================
+
+      test "gateway is configurable" do
+        assert Location.respond_to?(:gateway)
+        assert Location.respond_to?(:gateway=)
+      end
+
+      test "gateway defaults to LocationGateway" do
+        assert_equal LocationGateway, Location.gateway
+      end
+
+      test "find_by_ien delegates to gateway" do
+        mock_gw = Object.new
+        def mock_gw.find(ien)
+          { ien: ien, name: "MOCK CLINIC" }
+        end
+
+        original = Location.gateway
+        begin
+          Location.gateway = mock_gw
+          loc = Location.find_by_ien(42)
+          assert_equal "MOCK CLINIC", loc.name
+          assert_equal 42, loc.ien
+        ensure
+          Location.gateway = original
+        end
+      end
+
+      # =============================================================================
       # VALIDATION TESTS (ported from rpms_redux)
       # =============================================================================
 

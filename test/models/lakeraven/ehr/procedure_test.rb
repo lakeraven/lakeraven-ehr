@@ -58,6 +58,34 @@ module Lakeraven
         assert_equal "Total knee replacement", fhir.dig(:code, :text)
       end
 
+      # -- Gateway DI ----------------------------------------------------------
+
+      test "gateway is configurable" do
+        assert Procedure.respond_to?(:gateway)
+        assert Procedure.respond_to?(:gateway=)
+      end
+
+      test "gateway defaults to ProcedureGateway" do
+        assert_equal ProcedureGateway, Procedure.gateway
+      end
+
+      test "for_patient delegates to gateway" do
+        mock_gw = Object.new
+        def mock_gw.for_patient(_dfn)
+          [ Lakeraven::EHR::Procedure.new(ien: "99", patient_dfn: "1", display: "MOCK") ]
+        end
+
+        original = Procedure.gateway
+        begin
+          Procedure.gateway = mock_gw
+          results = Procedure.for_patient(1)
+          assert_equal 1, results.length
+          assert_equal "MOCK", results.first.display
+        ensure
+          Procedure.gateway = original
+        end
+      end
+
       # -- validations -----------------------------------------------------------
 
       test "validates patient_dfn presence" do
