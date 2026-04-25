@@ -186,7 +186,7 @@ module Lakeraven
       test "from_fhir_attributes extracts attributes" do
         fhir_resource = OpenStruct.new(
           medicationCodeableConcept: OpenStruct.new(
-            coding: [OpenStruct.new(code: "29046", display: "Lisinopril 10mg")],
+            coding: [ OpenStruct.new(code: "29046", display: "Lisinopril 10mg") ],
             text: "Lisinopril 10mg"
           ),
           status: "active",

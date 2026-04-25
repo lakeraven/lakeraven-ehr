@@ -306,7 +306,7 @@ module Lakeraven
           request: { reference: "CoverageEligibilityRequest/req-456" },
           outcome: "complete",
           disposition: "Coverage active",
-          insurance: [{ inforce: true }]
+          insurance: [ { inforce: true } ]
         }
 
         resp = CoverageEligibilityResponse.from_fhir(fhir_hash)
@@ -336,10 +336,10 @@ module Lakeraven
           resourceType: "CoverageEligibilityResponse",
           id: "resp-123",
           outcome: "complete",
-          insurance: [{
+          insurance: [ {
             inforce: true,
             benefitPeriod: { start: "2024-01-01", end: "2024-12-31" }
-          }]
+          } ]
         }
 
         resp = CoverageEligibilityResponse.from_fhir(fhir_hash)

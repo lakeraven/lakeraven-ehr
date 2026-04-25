@@ -72,7 +72,7 @@ module Lakeraven
         result = {}
         if code
           system_url = CODE_SYSTEM_URLS[code_system]
-          result[:coding] = [{ code: code, system: system_url }.compact]
+          result[:coding] = [ { code: code, system: system_url }.compact ]
         end
         result[:text] = display if display
         result
@@ -81,12 +81,12 @@ module Lakeraven
       def build_performers
         return nil if performer_duz.blank?
 
-        [{
+        [ {
           actor: {
             reference: "Practitioner/#{performer_duz}",
             display: performer_name
           }.compact
-        }]
+        } ]
       end
 
       def build_location

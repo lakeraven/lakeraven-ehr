@@ -78,7 +78,7 @@ module Lakeraven
       # =============================================================================
 
       def full_address
-        [address, city, state, zip_code].compact.reject(&:empty?).join(", ")
+        [ address, city, state, zip_code ].compact.reject(&:empty?).join(", ")
       end
 
       # =============================================================================
@@ -170,19 +170,19 @@ module Lakeraven
       def build_fhir_type
         return [] if org_type.blank?
 
-        [{
-          coding: [{
+        [ {
+          coding: [ {
             system: "http://terminology.hl7.org/CodeSystem/organization-type",
             code: org_type,
             display: type_display
-          }]
-        }]
+          } ]
+        } ]
       end
 
       def build_fhir_address
         return [] if address.blank? && city.blank?
 
-        [{ line: [address].compact, city: city, state: state, postalCode: zip_code, country: "US" }.compact]
+        [ { line: [ address ].compact, city: city, state: state, postalCode: zip_code, country: "US" }.compact ]
       end
 
       def build_fhir_telecom

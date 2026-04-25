@@ -214,18 +214,18 @@ module Lakeraven
       test "from_fhir_attributes extracts attributes" do
         fhir_resource = OpenStruct.new(
           code: OpenStruct.new(
-            coding: [OpenStruct.new(code: "E11.9", display: "Type 2 diabetes")],
+            coding: [ OpenStruct.new(code: "E11.9", display: "Type 2 diabetes") ],
             text: "Type 2 diabetes"
           ),
           clinicalStatus: OpenStruct.new(
-            coding: [OpenStruct.new(code: "active")]
+            coding: [ OpenStruct.new(code: "active") ]
           ),
           verificationStatus: OpenStruct.new(
-            coding: [OpenStruct.new(code: "confirmed")]
+            coding: [ OpenStruct.new(code: "confirmed") ]
           ),
-          category: [OpenStruct.new(
-            coding: [OpenStruct.new(code: "problem-list-item")]
-          )]
+          category: [ OpenStruct.new(
+            coding: [ OpenStruct.new(code: "problem-list-item") ]
+          ) ]
         )
 
         attrs = Condition.from_fhir_attributes(fhir_resource)

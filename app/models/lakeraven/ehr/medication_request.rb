@@ -78,11 +78,11 @@ module Lakeraven
 
         result = {}
         if medication_code
-          result[:coding] = [{
+          result[:coding] = [ {
             system: "http://www.nlm.nih.gov/research/umls/rxnorm",
             code: medication_code,
             display: medication_display
-          }.compact]
+          }.compact ]
         end
         result[:text] = medication_display if medication_display
         result
@@ -95,7 +95,7 @@ module Lakeraven
         instruction[:route] = { text: route } if route.present?
         instruction[:timing] = { code: { text: frequency } } if frequency.present?
 
-        [instruction]
+        [ instruction ]
       end
 
       def build_dispense_request

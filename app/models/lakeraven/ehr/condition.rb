@@ -72,7 +72,7 @@ module Lakeraven
           subject: patient_dfn ? { reference: "Patient/#{patient_dfn}" } : nil,
           clinicalStatus: build_clinical_status,
           code: build_code,
-          category: category ? [{ coding: [{ code: category }] }] : nil,
+          category: category ? [ { coding: [ { code: category } ] } ] : nil,
           severity: build_severity
         }.compact
       end
@@ -83,10 +83,10 @@ module Lakeraven
         return nil unless clinical_status
 
         {
-          coding: [{
+          coding: [ {
             system: "http://terminology.hl7.org/CodeSystem/condition-clinical",
             code: clinical_status
-          }]
+          } ]
         }
       end
 
@@ -96,7 +96,7 @@ module Lakeraven
         result = {}
         if code
           system_url = CODE_SYSTEM_URLS[code_system] || CODE_SYSTEM_URLS["icd10"]
-          result[:coding] = [{ code: code, system: system_url }]
+          result[:coding] = [ { code: code, system: system_url } ]
         end
         result[:text] = display if display
         result
@@ -109,11 +109,11 @@ module Lakeraven
         return nil unless snomed_code
 
         {
-          coding: [{
+          coding: [ {
             system: "http://snomed.info/sct",
             code: snomed_code,
             display: severity.capitalize
-          }]
+          } ]
         }
       end
     end

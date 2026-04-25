@@ -131,18 +131,18 @@ module Lakeraven
           network: agent_network_address.present? ? { address: agent_network_address } : nil
         }.compact
 
-        [agent]
+        [ agent ]
       end
 
       def build_fhir_entities
         return [] unless has_entity?
 
-        [{
+        [ {
           what: {
             reference: "#{entity_type}/#{entity_identifier}"
           },
           type: entity_type.present? ? { code: entity_type } : nil
-        }.compact]
+        }.compact ]
       end
     end
   end

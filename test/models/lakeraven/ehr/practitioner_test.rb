@@ -200,7 +200,7 @@ module Lakeraven
 
       test "from_fhir_attributes extracts attributes from FHIR resource" do
         fhir_resource = OpenStruct.new(
-          name: [OpenStruct.new(family: "SMITH", given: ["JANE", "M"])],
+          name: [ OpenStruct.new(family: "SMITH", given: [ "JANE", "M" ]) ],
           identifier: [
             OpenStruct.new(system: "http://hl7.org/fhir/sid/us-npi", value: "9876543210")
           ],
@@ -218,7 +218,7 @@ module Lakeraven
 
       test "from_fhir_attributes handles missing data" do
         fhir_resource = OpenStruct.new(
-          name: [OpenStruct.new(family: "DOE")],
+          name: [ OpenStruct.new(family: "DOE") ],
           identifier: [],
           qualification: []
         )
@@ -234,14 +234,14 @@ module Lakeraven
 
       test "extract_name_from_fhir handles family and given names" do
         fhir_resource = OpenStruct.new(
-          name: [OpenStruct.new(family: "DOE", given: ["JOHN", "MICHAEL"])]
+          name: [ OpenStruct.new(family: "DOE", given: [ "JOHN", "MICHAEL" ]) ]
         )
         assert_equal "DOE, JOHN MICHAEL", Practitioner.extract_name_from_fhir(fhir_resource)
       end
 
       test "extract_name_from_fhir handles family name only" do
         fhir_resource = OpenStruct.new(
-          name: [OpenStruct.new(family: "DOE", given: nil)]
+          name: [ OpenStruct.new(family: "DOE", given: nil) ]
         )
         assert_equal "DOE", Practitioner.extract_name_from_fhir(fhir_resource)
       end
@@ -264,7 +264,7 @@ module Lakeraven
 
       test "extract_npi_from_fhir returns nil when no NPI" do
         fhir_resource = OpenStruct.new(
-          identifier: [OpenStruct.new(system: "other-system", value: "other-value")]
+          identifier: [ OpenStruct.new(system: "other-system", value: "other-value") ]
         )
         assert_nil Practitioner.extract_npi_from_fhir(fhir_resource)
       end
@@ -275,7 +275,7 @@ module Lakeraven
 
       test "extract_specialty_from_fhir finds specialty" do
         fhir_resource = OpenStruct.new(
-          qualification: [OpenStruct.new(code: OpenStruct.new(text: "CARDIOLOGY"))]
+          qualification: [ OpenStruct.new(code: OpenStruct.new(text: "CARDIOLOGY")) ]
         )
         assert_equal "CARDIOLOGY", Practitioner.extract_specialty_from_fhir(fhir_resource)
       end

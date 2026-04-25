@@ -157,7 +157,7 @@ module Lakeraven
       test "from_fhir_attributes extracts attributes" do
         fhir_resource = OpenStruct.new(
           code: OpenStruct.new(
-            coding: [OpenStruct.new(code: "99213", display: "Office visit")],
+            coding: [ OpenStruct.new(code: "99213", display: "Office visit") ],
             text: "Office visit"
           ),
           status: "completed"

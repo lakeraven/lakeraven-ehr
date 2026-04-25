@@ -171,10 +171,10 @@ module Lakeraven
       def build_insurance
         return nil unless enrolled?
 
-        [{
+        [ {
           coverage: { display: coverage_type },
           benefitPeriod: build_period
-        }.compact]
+        }.compact ]
       end
 
       def build_period

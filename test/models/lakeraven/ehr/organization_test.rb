@@ -272,7 +272,7 @@ module Lakeraven
             OpenStruct.new(system: "http://hl7.org/fhir/sid/us-npi", value: "9876543210")
           ],
           type: [
-            OpenStruct.new(coding: [OpenStruct.new(code: "prov")])
+            OpenStruct.new(coding: [ OpenStruct.new(code: "prov") ])
           ]
         )
 
