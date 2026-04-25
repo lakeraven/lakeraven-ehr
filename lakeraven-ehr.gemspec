@@ -31,4 +31,5 @@ Gem::Specification.new do |spec|
   spec.add_dependency 'pundit', '~> 2.4'
   spec.add_dependency 'rails', '>= 8.1.0'
   spec.add_dependency 'rpms-rpc', '~> 0.1'
+  spec.add_dependency 'lakeraven-integrations', '~> 0.1'
 end
