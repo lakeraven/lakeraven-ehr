@@ -23,6 +23,17 @@ module Lakeraven
       attribute :procedure_codes, :string
       attribute :medical_priority_level, :integer
 
+      # Validations (ported from rpms_redux)
+      validates :patient_dfn, presence: true, numericality: { greater_than: 0 }
+      validates :requesting_provider_ien, presence: true, numericality: { greater_than: 0 }
+      validates :service_requested, presence: true
+      validates :status, inclusion: { in: %w[active completed cancelled draft], allow_nil: true }
+      validates :urgency, inclusion: { in: %w[ROUTINE URGENT EMERGENT], allow_nil: true }
+
+      def persisted?
+        ien.present? && ien.to_i.positive?
+      end
+
       def self.for_patient(dfn)
         ServiceRequestGateway.for_patient(dfn)
       end

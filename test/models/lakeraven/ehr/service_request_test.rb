@@ -6,6 +6,98 @@ module Lakeraven
   module EHR
     class ServiceRequestTest < ActiveSupport::TestCase
       # =========================================================================
+      # VALIDATION TESTS (ported from rpms_redux)
+      # =========================================================================
+
+      def valid_sr_attributes
+        { patient_dfn: 100, requesting_provider_ien: 101, service_requested: "Cardiology consult" }
+      end
+
+      test "valid with all required attributes" do
+        sr = ServiceRequest.new(valid_sr_attributes)
+        assert sr.valid?, "ServiceRequest should be valid: #{sr.errors.full_messages}"
+      end
+
+      test "requires patient_dfn" do
+        sr = ServiceRequest.new(valid_sr_attributes.merge(patient_dfn: nil))
+        refute sr.valid?
+        assert_includes sr.errors[:patient_dfn], "can't be blank"
+      end
+
+      test "requires patient_dfn greater than 0" do
+        sr = ServiceRequest.new(valid_sr_attributes.merge(patient_dfn: 0))
+        refute sr.valid?
+        assert sr.errors[:patient_dfn].any? { |e| e.include?("greater than") }
+      end
+
+      test "requires requesting_provider_ien" do
+        sr = ServiceRequest.new(valid_sr_attributes.merge(requesting_provider_ien: nil))
+        refute sr.valid?
+        assert_includes sr.errors[:requesting_provider_ien], "can't be blank"
+      end
+
+      test "requires requesting_provider_ien greater than 0" do
+        sr = ServiceRequest.new(valid_sr_attributes.merge(requesting_provider_ien: 0))
+        refute sr.valid?
+        assert sr.errors[:requesting_provider_ien].any? { |e| e.include?("greater than") }
+      end
+
+      test "requires service_requested" do
+        sr = ServiceRequest.new(valid_sr_attributes.merge(service_requested: nil))
+        refute sr.valid?
+        assert_includes sr.errors[:service_requested], "can't be blank"
+      end
+
+      test "validates status inclusion" do
+        %w[active completed cancelled draft].each do |status|
+          sr = ServiceRequest.new(valid_sr_attributes.merge(status: status))
+          assert sr.valid?, "Status '#{status}' should be valid: #{sr.errors.full_messages}"
+        end
+
+        sr = ServiceRequest.new(valid_sr_attributes.merge(status: "bogus"))
+        refute sr.valid?
+      end
+
+      test "validates urgency inclusion" do
+        %w[ROUTINE URGENT EMERGENT].each do |urgency|
+          sr = ServiceRequest.new(valid_sr_attributes.merge(urgency: urgency))
+          assert sr.valid?, "Urgency '#{urgency}' should be valid: #{sr.errors.full_messages}"
+        end
+
+        sr = ServiceRequest.new(valid_sr_attributes.merge(urgency: "SUPER_FAST"))
+        refute sr.valid?
+      end
+
+      test "allows nil status" do
+        sr = ServiceRequest.new(valid_sr_attributes.merge(status: nil))
+        assert sr.valid?
+      end
+
+      test "allows nil urgency" do
+        sr = ServiceRequest.new(valid_sr_attributes.merge(urgency: nil))
+        assert sr.valid?
+      end
+
+      # =========================================================================
+      # PERSISTENCE TESTS (ported from rpms_redux)
+      # =========================================================================
+
+      test "persisted? true when ien is set" do
+        sr = ServiceRequest.new(ien: 1001)
+        assert sr.persisted?
+      end
+
+      test "persisted? false when ien is nil" do
+        sr = ServiceRequest.new(ien: nil)
+        refute sr.persisted?
+      end
+
+      test "persisted? false when ien is 0" do
+        sr = ServiceRequest.new(ien: 0)
+        refute sr.persisted?
+      end
+
+      # =========================================================================
       # ATTRIBUTE TESTS
       # =========================================================================
 
