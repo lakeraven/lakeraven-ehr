@@ -52,6 +52,16 @@ module Lakeraven
         body = JSON.parse(response.body)
         assert_equal 0, body["total"]
       end
+
+      test "returns FHIR JSON content type" do
+        get "/lakeraven-ehr/Practitioner/101", headers: @headers
+        assert_equal "application/fhir+json", response.media_type
+      end
+
+      test "requires auth" do
+        get "/lakeraven-ehr/Practitioner/101"
+        assert_response :unauthorized
+      end
     end
   end
 end
