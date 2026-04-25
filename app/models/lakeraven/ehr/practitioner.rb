@@ -56,15 +56,55 @@ module Lakeraven
       end
 
       def persisted?
-        ien.present? && ien.to_i.positive?
+        ien.present? && ien.to_i > 0
       end
 
       def can_prescribe_controlled?
-        dea_number.present? && !dea_number.empty?
+        dea_number.present? && !dea_number.strip.empty?
       end
 
       def credentials_summary
         [ title, specialty ].compact.reject(&:empty?).join(", ")
+      end
+
+      # -- Class methods (FHIR) -----------------------------------------------
+
+      def self.resource_class
+        "Practitioner"
+      end
+
+      def self.from_fhir_attributes(fhir_resource)
+        {
+          name: extract_name_from_fhir(fhir_resource),
+          npi: extract_npi_from_fhir(fhir_resource),
+          specialty: extract_specialty_from_fhir(fhir_resource)
+        }
+      end
+
+      def self.extract_name_from_fhir(fhir_resource)
+        return nil unless fhir_resource.name&.any?
+
+        name_obj = fhir_resource.name.first
+        family = name_obj.family
+        given = name_obj.given&.join(" ")
+
+        given.present? ? "#{family}, #{given}" : family
+      end
+
+      def self.extract_npi_from_fhir(fhir_resource)
+        return nil unless fhir_resource.identifier&.any?
+
+        npi_identifier = fhir_resource.identifier.find do |id|
+          id.system&.include?("npi")
+        end
+
+        npi_identifier&.value
+      end
+
+      def self.extract_specialty_from_fhir(fhir_resource)
+        return nil unless fhir_resource.qualification&.any?
+
+        fhir_resource.qualification.first&.code&.text
       end
 
       # -- FHIR serialization -----------------------------------------------
