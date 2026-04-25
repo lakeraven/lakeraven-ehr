@@ -4,7 +4,7 @@ require "test_helper"
 
 module Lakeraven
   module EHR
-    class AllergyIntolerancesControllerTest < ActionDispatch::IntegrationTest
+    class ImmunizationsControllerTest < ActionDispatch::IntegrationTest
       include SmartAuthTestHelper
 
       setup do
@@ -15,8 +15,8 @@ module Lakeraven
         teardown_smart_auth
       end
 
-      test "GET /AllergyIntolerance?patient=1 returns FHIR Bundle" do
-        get "/lakeraven-ehr/AllergyIntolerance", params: { patient: "1" }, headers: @headers
+      test "GET /Immunization?patient=1 returns FHIR Bundle" do
+        get "/lakeraven-ehr/Immunization", params: { patient: "1" }, headers: @headers
         assert_response :ok
         body = JSON.parse(response.body)
         assert_equal "Bundle", body["resourceType"]
@@ -24,41 +24,33 @@ module Lakeraven
       end
 
       test "search without patient param returns 400" do
-        get "/lakeraven-ehr/AllergyIntolerance", headers: @headers
+        get "/lakeraven-ehr/Immunization", headers: @headers
         assert_response :bad_request
         body = JSON.parse(response.body)
         assert_equal "OperationOutcome", body["resourceType"]
       end
 
       test "entries have correct resourceType" do
-        get "/lakeraven-ehr/AllergyIntolerance", params: { patient: "1" }, headers: @headers
+        get "/lakeraven-ehr/Immunization", params: { patient: "1" }, headers: @headers
         assert_response :ok
         body = JSON.parse(response.body)
         body["entry"]&.each do |entry|
-          assert_equal "AllergyIntolerance", entry.dig("resource", "resourceType")
+          assert_equal "Immunization", entry.dig("resource", "resourceType")
         end
       end
 
       test "returns FHIR JSON content type" do
-        get "/lakeraven-ehr/AllergyIntolerance", params: { patient: "1" }, headers: @headers
+        get "/lakeraven-ehr/Immunization", params: { patient: "1" }, headers: @headers
         assert_equal "application/fhir+json", response.media_type
       end
 
       test "accepts Patient/ prefix in patient param" do
-        get "/lakeraven-ehr/AllergyIntolerance", params: { patient: "Patient/1" }, headers: @headers
+        get "/lakeraven-ehr/Immunization", params: { patient: "Patient/1" }, headers: @headers
         assert_response :ok
       end
 
-      test "show returns 404 OperationOutcome" do
-        get "/lakeraven-ehr/AllergyIntolerance/99999", headers: @headers
-        assert_response :not_found
-        body = JSON.parse(response.body)
-        assert_equal "OperationOutcome", body["resourceType"]
-        assert_equal "not-found", body["issue"].first["code"]
-      end
-
       test "requires auth" do
-        get "/lakeraven-ehr/AllergyIntolerance", params: { patient: "1" }
+        get "/lakeraven-ehr/Immunization", params: { patient: "1" }
         assert_response :unauthorized
       end
     end

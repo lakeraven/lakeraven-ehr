@@ -38,6 +38,10 @@ module Lakeraven
       attribute :service_area, :string
       attribute :coverage_type, :string
 
+      # SOGI data elements (USCDI v3 / ONC 170.315(a)(15))
+      attribute :sexual_orientation, :string
+      attribute :gender_identity, :string
+
       class RecordNotFound < StandardError; end
 
       # Validations
@@ -203,11 +207,15 @@ module Lakeraven
         result && result[:valid] && result[:status] == "ACTIVE"
       end
 
-      def eligible_for_ihs_services?
-        return false unless dfn
+      def tribal_enrollment_eligibility
+        return { active: false, eligible_for_ihs: false } unless persisted?
 
-        result = TribalEnrollmentGateway.eligibility(dfn)
-        result[:active] && result[:eligible_for_ihs]
+        TribalEnrollmentGateway.eligibility(dfn)
+      end
+
+      def eligible_for_ihs_services?
+        eligibility = tribal_enrollment_eligibility
+        eligibility[:active] && eligibility[:eligible_for_ihs]
       end
 
       def enrollment_service_unit

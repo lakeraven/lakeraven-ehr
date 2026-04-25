@@ -71,12 +71,24 @@ RpmsRpc.mock! do |m|
                                      service_unit: "Anchorage", tribe_code: "ANLC" })
   m.seed(:tribal_validation, "ANLC-12345", { valid: true, tribe_code: "ANLC", enrollment_number: "12345",
                                               status: "ACTIVE", message: "Valid enrollment" })
+  m.seed(:tribal_validation, "CN-67890", { valid: true, tribe_code: "CN", enrollment_number: "67890",
+                                            status: "ACTIVE", message: "Valid enrollment" })
+  m.seed(:tribal_validation, "NN-67890", { valid: true, tribe_code: "NN", enrollment_number: "67890",
+                                            status: "ACTIVE", message: "Valid enrollment" })
+  m.seed(:tribal_validation, "NN-11111", { valid: true, tribe_code: "NN", enrollment_number: "11111",
+                                            status: "ACTIVE", message: "Valid enrollment" })
+  m.seed(:tribal_validation, "12345", { valid: false, tribe_code: nil, enrollment_number: nil,
+                                         status: "INACTIVE", message: "Invalid enrollment format" })
   m.seed(:tribal_validation, "INVALID", { valid: false, tribe_code: nil, enrollment_number: nil,
                                            status: "INACTIVE", message: "Enrollment not found or inactive" })
   m.seed(:enrollment_eligibility, "1", { active: true, eligible_for_ihs: true,
                                           service_unit: "Anchorage", message: "Eligible for IHS services",
                                           benefit_package: "BASIC" })
   m.seed(:enrollment_eligibility, "4", { active: false, eligible_for_ihs: false,
+                                          service_unit: nil, message: nil, benefit_package: nil })
+  m.seed(:enrollment_eligibility, "7", { active: false, eligible_for_ihs: false,
+                                          service_unit: nil, message: nil, benefit_package: nil })
+  m.seed(:enrollment_eligibility, "8", { active: false, eligible_for_ihs: false,
                                           service_unit: nil, message: nil, benefit_package: nil })
   m.seed(:service_unit, "1", { ien: 1, name: "Anchorage", region: "Alaska" })
   m.seed(:tribe_info, "ANLC", { ien: 100, name: "Alaska Native - Anchorage (ANLC)", code: "ANLC",
