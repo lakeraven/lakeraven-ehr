@@ -88,15 +88,74 @@ module Lakeraven
         urgency.blank? || urgency == "ROUTINE"
       end
 
+      # -- Class methods (FHIR) -----------------------------------------------
+
+      def self.resource_class
+        "ServiceRequest"
+      end
+
+      def self.from_fhir_attributes(fhir_resource)
+        {
+          service_requested: fhir_resource.code&.text,
+          reason_for_referral: fhir_resource.reasonCode&.first&.text,
+          urgency: map_fhir_priority_to_urgency(fhir_resource.priority),
+          status: map_fhir_status_to_status(fhir_resource.status)
+        }
+      end
+
+      def self.map_fhir_priority_to_urgency(priority)
+        case priority&.downcase
+        when "urgent" then "URGENT"
+        when "stat" then "EMERGENT"
+        else "ROUTINE"
+        end
+      end
+
+      def self.map_fhir_status_to_status(fhir_status)
+        case fhir_status&.downcase
+        when "active" then "active"
+        when "completed" then "completed"
+        when "cancelled", "revoked" then "cancelled"
+        else "draft"
+        end
+      end
+
       # -- FHIR serialization ------------------------------------------------
 
       def to_fhir
         {
           resourceType: "ServiceRequest",
           id: ien&.to_s,
-          status: status,
-          subject: patient_dfn ? { reference: "Patient/#{patient_dfn}" } : nil
+          identifier: build_fhir_identifiers,
+          status: map_status_to_fhir,
+          intent: "order",
+          priority: map_urgency_to_fhir_priority,
+          code: service_requested.present? ? { text: service_requested } : nil,
+          subject: patient_dfn ? { reference: "Patient/#{patient_dfn}" } : nil,
+          reasonCode: reason_for_referral.present? ? [ { text: reason_for_referral } ] : nil
         }.compact
+      end
+
+      private
+
+      def map_status_to_fhir
+        if completed? then "completed"
+        elsif cancelled? then "cancelled"
+        else "active"
+        end
+      end
+
+      def map_urgency_to_fhir_priority
+        if emergent? || urgent? then "urgent"
+        else "routine"
+        end
+      end
+
+      def build_fhir_identifiers
+        ids = []
+        ids << { use: "official", system: "http://ihs.gov/rpms/consult-id", value: ien.to_s } if ien.present?
+        ids << { use: "usual", system: "http://ihs.gov/rpms/service-request-identifier", value: identifier } if identifier.present?
+        ids.presence
       end
     end
   end

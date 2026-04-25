@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "test_helper"
+require "ostruct"
 
 module Lakeraven
   module EHR
@@ -335,6 +336,89 @@ module Lakeraven
         fhir = sr.to_fhir
         assert_equal "ServiceRequest", fhir[:resourceType]
         assert_nil fhir[:id]
+      end
+
+      # =========================================================================
+      # FHIR MAPPING TESTS (ported from rpms_redux)
+      # =========================================================================
+
+      test "map_status_to_fhir returns active for draft" do
+        sr = ServiceRequest.new(status: "draft")
+        assert_equal "active", sr.send(:map_status_to_fhir)
+      end
+
+      test "map_status_to_fhir returns active for active" do
+        sr = ServiceRequest.new(status: "active")
+        assert_equal "active", sr.send(:map_status_to_fhir)
+      end
+
+      test "map_status_to_fhir returns completed for completed" do
+        sr = ServiceRequest.new(status: "completed")
+        assert_equal "completed", sr.send(:map_status_to_fhir)
+      end
+
+      test "map_status_to_fhir returns cancelled for cancelled" do
+        sr = ServiceRequest.new(status: "cancelled")
+        assert_equal "cancelled", sr.send(:map_status_to_fhir)
+      end
+
+      test "map_urgency_to_fhir_priority returns urgent for emergent" do
+        sr = ServiceRequest.new(urgency: "EMERGENT")
+        assert_equal "urgent", sr.send(:map_urgency_to_fhir_priority)
+      end
+
+      test "map_urgency_to_fhir_priority returns urgent for urgent" do
+        sr = ServiceRequest.new(urgency: "URGENT")
+        assert_equal "urgent", sr.send(:map_urgency_to_fhir_priority)
+      end
+
+      test "map_urgency_to_fhir_priority returns routine for routine" do
+        sr = ServiceRequest.new(urgency: "ROUTINE")
+        assert_equal "routine", sr.send(:map_urgency_to_fhir_priority)
+      end
+
+      test "resource_class returns ServiceRequest" do
+        assert_equal "ServiceRequest", ServiceRequest.resource_class
+      end
+
+      test "from_fhir_attributes extracts service and status" do
+        fhir = OpenStruct.new(
+          code: OpenStruct.new(text: "Cardiology consult"),
+          reasonCode: [ OpenStruct.new(text: "Chest pain") ],
+          priority: "urgent",
+          status: "active"
+        )
+        attrs = ServiceRequest.from_fhir_attributes(fhir)
+        assert_equal "Cardiology consult", attrs[:service_requested]
+        assert_equal "Chest pain", attrs[:reason_for_referral]
+        assert_equal "URGENT", attrs[:urgency]
+        assert_equal "active", attrs[:status]
+      end
+
+      test "to_fhir includes intent and priority" do
+        sr = ServiceRequest.new(valid_sr_attributes.merge(ien: 42, urgency: "EMERGENT", status: "active"))
+        fhir = sr.to_fhir
+        assert_equal "order", fhir[:intent]
+        assert_equal "urgent", fhir[:priority]
+        assert_equal "active", fhir[:status]
+      end
+
+      test "to_fhir includes IHS consult identifier" do
+        sr = ServiceRequest.new(valid_sr_attributes.merge(ien: 42))
+        fhir = sr.to_fhir
+        identifiers = fhir[:identifier]
+        ihs_id = identifiers.find { |i| i[:system] == "http://ihs.gov/rpms/consult-id" }
+        assert ihs_id, "Should have IHS consult identifier"
+        assert_equal "42", ihs_id[:value]
+      end
+
+      test "to_fhir includes code and reasonCode" do
+        sr = ServiceRequest.new(valid_sr_attributes.merge(
+          ien: 1, service_requested: "CARDIOLOGY", reason_for_referral: "Chest pain"
+        ))
+        fhir = sr.to_fhir
+        assert_equal "CARDIOLOGY", fhir.dig(:code, :text)
+        assert_equal "Chest pain", fhir[:reasonCode].first[:text]
       end
 
       # =========================================================================
