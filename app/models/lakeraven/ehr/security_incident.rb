@@ -24,7 +24,7 @@ module Lakeraven
       attribute :incident_type, :string, default: "brute_force"
       attribute :status, :string, default: "open"
       attribute :description, :string
-      attribute :source_ip, :string
+      attribute :ip_address, :string
       attribute :dedup_key, :string
       attribute :resolved_at, :datetime
       attribute :created_at, :datetime
@@ -53,9 +53,9 @@ module Lakeraven
         value && value >= 1 ? value : DEFAULT_THRESHOLD
       end
 
-      def self.generate_dedup_key(incident_type, source_ip, time = Time.current)
+      def self.generate_dedup_key(incident_type, ip_address, time = Time.current)
         time_bucket = time.beginning_of_hour.to_i
-        "#{incident_type}:#{source_ip}:#{time_bucket}"
+        "#{incident_type}:#{ip_address}:#{time_bucket}"
       end
 
       private
