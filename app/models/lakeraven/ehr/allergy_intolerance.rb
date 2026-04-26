@@ -34,6 +34,15 @@ module Lakeraven
       def medication? = category == "medication"
       def food? = category == "food"
 
+      # Matching key for clinical reconciliation (ONC § 170.315(b)(2))
+      def matching_key
+        if allergen_code.present?
+          "rxnorm:#{allergen_code}"
+        elsif allergen.present?
+          "name:#{allergen.downcase.strip}"
+        end
+      end
+
       def to_fhir
         {
           resourceType: "AllergyIntolerance",

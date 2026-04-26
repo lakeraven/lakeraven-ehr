@@ -48,6 +48,21 @@ module Lakeraven
       def active? = status == "active"
       def persisted? = ien.present?
 
+      # Parse UDI carrier string and populate device fields.
+      # Does not overwrite existing values. ONC § 170.315(a)(14).
+      def parse_udi!
+        return unless udi_carrier.present?
+
+        parsed = UdiParser.parse(udi_carrier)
+        return if parsed.empty?
+
+        self.udi_device_identifier ||= parsed[:device_identifier]
+        self.expiration_date       ||= parsed[:expiration_date]
+        self.lot_number            ||= parsed[:lot_number]
+        self.serial_number         ||= parsed[:serial_number]
+        self.manufacture_date      ||= parsed[:manufacture_date]
+      end
+
       def to_fhir
         {
           resourceType: "Device",
