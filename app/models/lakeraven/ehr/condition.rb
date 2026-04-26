@@ -71,6 +71,16 @@ module Lakeraven
       def resolved? = clinical_status == "resolved"
       def problem_list_item? = category == "problem-list-item"
 
+      # Matching key for clinical reconciliation (ONC § 170.315(b)(2))
+      def matching_key
+        if code.present?
+          system = code_system || "icd10"
+          "#{system}:#{code}"
+        elsif display.present?
+          "name:#{display.downcase.strip}"
+        end
+      end
+
       def persisted?
         ien.present?
       end

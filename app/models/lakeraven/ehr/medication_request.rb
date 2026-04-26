@@ -63,6 +63,15 @@ module Lakeraven
 
       def active? = status == "active"
 
+      # Matching key for clinical reconciliation (ONC § 170.315(b)(2))
+      def matching_key
+        if medication_code.present?
+          "rxnorm:#{medication_code}"
+        elsif medication_display.present?
+          "name:#{medication_display.downcase.strip}"
+        end
+      end
+
       def persisted?
         ien.present?
       end
