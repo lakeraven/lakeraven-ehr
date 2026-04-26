@@ -15,7 +15,7 @@ module Lakeraven
           incident_type: "brute_force",
           status: "open",
           description: "Multiple failed logins from 10.0.0.1",
-          source_ip: "10.0.0.1",
+          ip_address: "10.0.0.1",
           dedup_key: "brute_force:10.0.0.1:1234567890"
         )
         assert incident.valid?
@@ -190,7 +190,7 @@ module Lakeraven
           incident_type: "brute_force",
           status: status,
           description: "test incident",
-          source_ip: "10.0.0.#{rand(255)}",
+          ip_address: "10.0.0.#{rand(255)}",
           dedup_key: "test:#{SecureRandom.hex(4)}"
         )
       end
