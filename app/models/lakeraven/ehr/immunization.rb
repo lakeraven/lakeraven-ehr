@@ -52,6 +52,10 @@ module Lakeraven
         gateway.for_patient(dfn)
       end
 
+      def self.find_by_ien(ien)
+        gateway.find(ien)
+      end
+
       def self.resource_class
         "Immunization"
       end

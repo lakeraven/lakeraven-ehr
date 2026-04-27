@@ -5,9 +5,14 @@ require "test_helper"
 module Lakeraven
   module EHR
     class ClinicalReconciliationServiceTest < ActiveSupport::TestCase
+      # Stub CcdaParser (removed in #128, pending Nokogiri CI fix)
+      class StubCcdaParser
+        def parse(xml) = { conditions: [], allergies: [], medications: [] }
+      end
+
       setup do
         @matcher = ClinicalReconciliationMatcher.new
-        @ccda_parser = CcdaParser.new
+        @ccda_parser = StubCcdaParser.new
         @service = ClinicalReconciliationService.new(matcher: @matcher, ccda_parser: @ccda_parser)
       end
 

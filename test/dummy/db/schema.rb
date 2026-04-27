@@ -10,9 +10,26 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_04_25_010000) do
+ActiveRecord::Schema[8.1].define(version: 2026_04_25_030000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
+
+  create_table "lakeraven_ehr_amendment_requests", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.text "description", null: false
+    t.string "patient_dfn", null: false
+    t.text "reason", null: false
+    t.string "requested_by", null: false
+    t.string "resource_id"
+    t.string "resource_type", null: false
+    t.text "review_reason"
+    t.datetime "reviewed_at"
+    t.string "reviewed_by"
+    t.string "status", default: "pending", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "patient_dfn" ], name: "index_lakeraven_ehr_amendment_requests_on_patient_dfn"
+    t.index [ "status" ], name: "index_lakeraven_ehr_amendment_requests_on_status"
+  end
 
   create_table "lakeraven_ehr_audit_events", force: :cascade do |t|
     t.string "action", null: false
@@ -33,6 +50,24 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_25_010000) do
     t.index [ "created_at" ], name: "index_lakeraven_ehr_audit_events_on_created_at"
     t.index [ "entity_type" ], name: "index_lakeraven_ehr_audit_events_on_entity_type"
     t.index [ "tenant_identifier" ], name: "index_lakeraven_ehr_audit_events_on_tenant_identifier"
+  end
+
+  create_table "lakeraven_ehr_disclosures", force: :cascade do |t|
+    t.string "authorization_method"
+    t.string "consent_reference"
+    t.datetime "created_at", null: false
+    t.text "data_disclosed", null: false
+    t.datetime "disclosed_at", null: false
+    t.string "disclosed_by", null: false
+    t.string "disclosed_by_name"
+    t.string "patient_dfn", null: false
+    t.string "purpose", null: false
+    t.string "recipient_name", null: false
+    t.string "recipient_npi"
+    t.string "recipient_type"
+    t.datetime "updated_at", null: false
+    t.index [ "disclosed_at" ], name: "index_lakeraven_ehr_disclosures_on_disclosed_at"
+    t.index [ "patient_dfn" ], name: "index_lakeraven_ehr_disclosures_on_patient_dfn"
   end
 
   create_table "lakeraven_ehr_launch_contexts", force: :cascade do |t|

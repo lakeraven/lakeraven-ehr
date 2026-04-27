@@ -67,6 +67,10 @@ module Lakeraven
         )
       end
 
+      def trail_for(order_id)
+        AuditEvent.where(entity_identifier: order_id.to_s).order(:created_at)
+      end
+
       def record_event(type:, subtype:, action:, provider_duz:, description: nil)
         AuditEvent.create!(
           event_type: type,
