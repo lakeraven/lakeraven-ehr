@@ -63,6 +63,16 @@ module Lakeraven
 
       def active? = status == "active"
 
+      # SHA-256 of order content for audit trail integrity.
+      def signed_content_hash
+        require "digest"
+        Digest::SHA256.hexdigest(
+          [ ien, patient_dfn, medication_code, medication_display,
+           dosage_instruction, route, frequency,
+           dispense_quantity, refills, days_supply ].map(&:to_s).join("|")
+        )
+      end
+
       # Matching key for clinical reconciliation (ONC § 170.315(b)(2))
       def matching_key
         if medication_code.present?
