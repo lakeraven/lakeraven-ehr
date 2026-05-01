@@ -285,6 +285,53 @@ module Lakeraven
         AlternateResourceService.terminology_service = nil
       end
 
+      test "uses TerminologyService for IHS available services lookup when configured" do
+        AlternateResourceService.terminology_service = TerminologyService.new(backend: :local)
+
+        sr = build_sr(
+          service_requested: "Primary Care",
+          reason_for_referral: "Routine checkup"
+        )
+
+        result = AlternateResourceService.check(sr)
+
+        assert result.service_available_at_ihs?
+      ensure
+        AlternateResourceService.terminology_service = nil
+      end
+
+      test "uses TerminologyService for specialized services lookup when configured" do
+        AlternateResourceService.terminology_service = TerminologyService.new(backend: :local)
+
+        sr = build_sr(
+          service_requested: "Neurosurgery",
+          reason_for_referral: "Complex neurosurgical procedure not available at IHS"
+        )
+
+        result = AlternateResourceService.check(sr)
+
+        assert result.valid_alternate_resource_reason?
+      ensure
+        AlternateResourceService.terminology_service = nil
+      end
+
+      test "rollback strategy works by setting terminology_service to nil" do
+        AlternateResourceService.terminology_service = TerminologyService.new(backend: :local)
+        refute_nil AlternateResourceService.terminology_service
+
+        AlternateResourceService.terminology_service = nil
+
+        sr = build_sr(
+          service_requested: "Neurosurgery",
+          reason_for_referral: "Complex neurosurgical procedure not available at IHS"
+        )
+
+        result = AlternateResourceService.check(sr)
+        assert result.valid_alternate_resource_reason?
+      ensure
+        AlternateResourceService.terminology_service = nil
+      end
+
       test "falls back gracefully when TerminologyService raises error" do
         mock_ts = Object.new
         mock_ts.define_singleton_method(:expand_valueset) { |*_args| raise TerminologyService::ValueSetNotFoundError, "Test error" }
