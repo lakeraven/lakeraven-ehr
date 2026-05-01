@@ -32,9 +32,16 @@ module Lakeraven
       def sanitize_message(message)
         return "" if message.nil? || message.to_s.empty?
         sanitized = message.dup
+        # Patient names: LAST,FIRST or LAST,FIRST MIDDLE (VistA format)
+        sanitized.gsub!(/\b[A-Z]{2,},[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)*(?:\s+(?:JR|SR|III?|IV|V))?\b/, "[NAME-REDACTED]")
+        # DFN/HRN identifiers
         sanitized.gsub!(/\bDFN[:\s]*\d+/i, "DFN:[REDACTED]")
+        sanitized.gsub!(/\bHRN[:\s]*\d+/i, "HRN:[REDACTED]")
         sanitized.gsub!(/\bpatient[_\s]*dfn[:\s]*\d+/i, "patient_dfn:[REDACTED]")
+        # SSN
         sanitized.gsub!(/\b\d{3}-\d{2}-\d{4}\b/, "[SSN-REDACTED]")
+        # Phone numbers: (907) 555-1234 or 907-555-1234
+        sanitized.gsub!(/\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/, "[PHONE-REDACTED]")
         sanitized
       end
 
