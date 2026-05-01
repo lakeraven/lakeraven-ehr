@@ -62,19 +62,19 @@ module Lakeraven
 
       test "DrugInteractionResult#safe? returns false when interactions exist" do
         alert = InteractionAlert.new(severity: :moderate, drug_a: "a", drug_b: "b", description: "test")
-        result = DrugInteractionResult.new(interactions: [alert])
+        result = DrugInteractionResult.new(interactions: [ alert ])
         refute result.safe?
       end
 
       test "DrugInteractionResult#blocking? returns true for high-severity" do
         alert = InteractionAlert.new(severity: :high, drug_a: "warfarin", drug_b: "aspirin", description: "Bleeding")
-        result = DrugInteractionResult.new(interactions: [alert])
+        result = DrugInteractionResult.new(interactions: [ alert ])
         assert result.blocking?
       end
 
       test "DrugInteractionResult#blocking? returns false for moderate-only" do
         alert = InteractionAlert.new(severity: :moderate, drug_a: "a", drug_b: "b", description: "test")
-        result = DrugInteractionResult.new(interactions: [alert])
+        result = DrugInteractionResult.new(interactions: [ alert ])
         refute result.blocking?
       end
 
@@ -104,7 +104,7 @@ module Lakeraven
 
       test "DrugInteractionResult#to_fhir_detected_issues maps interactions" do
         alert = InteractionAlert.new(severity: :high, drug_a: "warfarin", drug_b: "aspirin", description: "Bleeding risk")
-        result = DrugInteractionResult.new(interactions: [alert])
+        result = DrugInteractionResult.new(interactions: [ alert ])
         issues = result.to_fhir_detected_issues
 
         assert_equal 1, issues.length
@@ -148,7 +148,7 @@ module Lakeraven
         service = DrugInteractionService.new
 
         result = service.check(
-          active_medications: [build_medication("warfarin", "11289")],
+          active_medications: [ build_medication("warfarin", "11289") ],
           proposed_medication: build_medication("aspirin", "1191"),
           allergies: []
         )
@@ -164,7 +164,7 @@ module Lakeraven
         result = service.check(
           active_medications: [],
           proposed_medication: build_medication("amoxicillin", "723"),
-          allergies: [build_allergy("penicillin", "7984")]
+          allergies: [ build_allergy("penicillin", "7984") ]
         )
 
         allergy_alerts = result.interactions.select { |a| a.interaction_type == :drug_allergy }
@@ -208,7 +208,7 @@ module Lakeraven
         service = DrugInteractionService.new(adapter: failing_adapter)
 
         result = service.check(
-          active_medications: [build_medication("warfarin", "11289")],
+          active_medications: [ build_medication("warfarin", "11289") ],
           proposed_medication: build_medication("aspirin", "1191"),
           allergies: []
         )
@@ -225,7 +225,7 @@ module Lakeraven
         service = DrugInteractionService.new(adapter: null_adapter)
 
         result = service.check(
-          active_medications: [build_medication("warfarin", "11289")],
+          active_medications: [ build_medication("warfarin", "11289") ],
           proposed_medication: build_medication("aspirin", "1191"),
           allergies: []
         )

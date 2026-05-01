@@ -13,7 +13,7 @@ module Lakeraven
       end
 
       def check(active_medications:, proposed_medication:, allergies:)
-        all_meds = active_medications + [proposed_medication]
+        all_meds = active_medications + [ proposed_medication ]
 
         interactions = []
         interactions.concat(@adapter.check_interactions(all_meds))

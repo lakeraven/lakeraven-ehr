@@ -19,8 +19,8 @@ module Lakeraven
       test "evaluate returns MeasureReport for individual patient" do
         service = build_service(
           measure: @diabetes_measure,
-          conditions: [build_condition("pt_1", "2.16.840.1.113883.3.464.1003.103.12.1001")],
-          observations: [build_observation("pt_1", 8.5, Date.new(2026, 3, 1))]
+          conditions: [ build_condition("pt_1", "2.16.840.1.113883.3.464.1003.103.12.1001") ],
+          observations: [ build_observation("pt_1", 8.5, Date.new(2026, 3, 1)) ]
         )
 
         report = service.evaluate("CMS122v5", "pt_1", period: Date.new(2026, 1, 1)..Date.new(2026, 12, 31))
@@ -34,8 +34,8 @@ module Lakeraven
       test "evaluate counts patient in numerator when threshold met" do
         service = build_service(
           measure: @diabetes_measure,
-          conditions: [build_condition("pt_1", "2.16.840.1.113883.3.464.1003.103.12.1001")],
-          observations: [build_observation("pt_1", 9.5, Date.new(2026, 6, 1))]
+          conditions: [ build_condition("pt_1", "2.16.840.1.113883.3.464.1003.103.12.1001") ],
+          observations: [ build_observation("pt_1", 9.5, Date.new(2026, 6, 1)) ]
         )
 
         report = service.evaluate("CMS122v5", "pt_1", period: Date.new(2026, 1, 1)..Date.new(2026, 12, 31))
@@ -45,8 +45,8 @@ module Lakeraven
       test "evaluate excludes patient from numerator when threshold not met" do
         service = build_service(
           measure: @diabetes_measure,
-          conditions: [build_condition("pt_1", "2.16.840.1.113883.3.464.1003.103.12.1001")],
-          observations: [build_observation("pt_1", 7.0, Date.new(2026, 6, 1))]
+          conditions: [ build_condition("pt_1", "2.16.840.1.113883.3.464.1003.103.12.1001") ],
+          observations: [ build_observation("pt_1", 7.0, Date.new(2026, 6, 1)) ]
         )
 
         report = service.evaluate("CMS122v5", "pt_1", period: Date.new(2026, 1, 1)..Date.new(2026, 12, 31))
@@ -56,8 +56,8 @@ module Lakeraven
       test "evaluate excludes patient without qualifying condition" do
         service = build_service(
           measure: @diabetes_measure,
-          conditions: [build_condition("pt_1", "other-valueset")],
-          observations: [build_observation("pt_1", 9.5, Date.new(2026, 6, 1))]
+          conditions: [ build_condition("pt_1", "other-valueset") ],
+          observations: [ build_observation("pt_1", 9.5, Date.new(2026, 6, 1)) ]
         )
 
         report = service.evaluate("CMS122v5", "pt_1", period: Date.new(2026, 1, 1)..Date.new(2026, 12, 31))
@@ -67,8 +67,8 @@ module Lakeraven
       test "evaluate excludes observations outside measurement period" do
         service = build_service(
           measure: @diabetes_measure,
-          conditions: [build_condition("pt_1", "2.16.840.1.113883.3.464.1003.103.12.1001")],
-          observations: [build_observation("pt_1", 9.5, Date.new(2025, 6, 1))]
+          conditions: [ build_condition("pt_1", "2.16.840.1.113883.3.464.1003.103.12.1001") ],
+          observations: [ build_observation("pt_1", 9.5, Date.new(2025, 6, 1)) ]
         )
 
         report = service.evaluate("CMS122v5", "pt_1", period: Date.new(2026, 1, 1)..Date.new(2026, 12, 31))
@@ -99,7 +99,7 @@ module Lakeraven
         service = build_service(
           measure: @screening_measure,
           conditions: [],
-          observations: [build_observation("pt_1", nil, Date.new(2026, 6, 1))]
+          observations: [ build_observation("pt_1", nil, Date.new(2026, 6, 1)) ]
         )
 
         report = service.evaluate("CMS130v5", "pt_1", period: Date.new(2026, 1, 1)..Date.new(2026, 12, 31))
