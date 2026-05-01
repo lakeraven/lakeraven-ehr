@@ -248,6 +248,12 @@ module Lakeraven
         assert_equal :mock, adapter.mode
       end
 
+      test "factory raises on unknown adapter mode" do
+        assert_raises(ArgumentError) do
+          Eprescribing::EprescribingAdapterFactory.build(:unknown)
+        end
+      end
+
       private
 
       def build_medication_order(status: "active", intent: "order")

@@ -151,6 +151,13 @@ module Lakeraven
         assert_match(/170\.315/, parsed["certification_criterion"])
       end
 
+      test "manifest includes format description" do
+        result = export_ehi
+        manifest = result[:files].find { |f| f[:name] == "manifest.json" }
+        parsed = JSON.parse(manifest[:content])
+        assert parsed["format"].present?, "Expected manifest to include format description"
+      end
+
       # =============================================================================
       # EDGE CASES
       # =============================================================================
