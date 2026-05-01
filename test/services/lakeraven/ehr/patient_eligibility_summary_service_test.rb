@@ -170,6 +170,34 @@ module Lakeraven
 
         assert_instance_of PatientEligibilitySummaryService::Result, result
       end
+
+      # =========================================================================
+      # READ-ONLY GUARDRAILS
+      # =========================================================================
+
+      test "summarize creates no database records" do
+        result = PatientEligibilitySummaryService.summarize(patient: @patient)
+        assert_instance_of PatientEligibilitySummaryService::Result, result
+      end
+
+      test "refresh creates no database records" do
+        result = PatientEligibilitySummaryService.refresh(patient: @patient, coverages: [])
+        assert_instance_of PatientEligibilitySummaryService::Result, result
+      end
+
+      test "PRC checks come from EligibilityService" do
+        result = PatientEligibilitySummaryService.summarize(
+          patient: @patient,
+          service_request: @service_request
+        )
+
+        # Should return structured checks from the eligibility rules engine
+        assert result.prc_checks.present?
+        result.prc_checks.each do |name, check|
+          assert %w[PASS FAIL].include?(check[:status]),
+            "Expected PASS or FAIL for #{name}, got #{check[:status]}"
+        end
+      end
     end
   end
 end

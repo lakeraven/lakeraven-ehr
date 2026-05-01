@@ -113,6 +113,56 @@ module Lakeraven
         assert_equal "Bleeding risk", issues.first[:detail][:text]
       end
 
+      test "DrugInteractionResult#incomplete? returns false for complete data" do
+        result = DrugInteractionResult.new(interactions: [])
+        refute result.incomplete?
+      end
+
+      test "DrugInteractionResult.success is not incomplete" do
+        result = DrugInteractionResult.success
+        refute result.incomplete?
+        assert result.safe?
+      end
+
+      test "DrugInteractionResult exposes decision_source" do
+        result = DrugInteractionResult.new(interactions: [], decision_source: :local)
+        assert_equal :local, result.decision_source
+      end
+
+      test "DrugInteractionResult exposes degraded flag" do
+        result = DrugInteractionResult.new(interactions: [], degraded: true, degraded_reason: "local rules")
+        assert result.degraded?
+        assert_equal "local rules", result.degraded_reason
+      end
+
+      test "DrugInteractionResult#degraded? defaults to false" do
+        result = DrugInteractionResult.new(interactions: [])
+        refute result.degraded?
+      end
+
+      test "DrugInteractionResult.success accepts decision_source" do
+        result = DrugInteractionResult.success(decision_source: :rpms)
+        assert_equal :rpms, result.decision_source
+        refute result.degraded?
+      end
+
+      test "DrugInteractionResult.failure accepts degraded flags" do
+        result = DrugInteractionResult.failure(
+          message: "error", decision_source: :local,
+          degraded: true, degraded_reason: "using local rules"
+        )
+        assert_equal :local, result.decision_source
+        assert result.degraded?
+      end
+
+      test "DrugInteractionResult exposes interactions count" do
+        alert1 = InteractionAlert.new(severity: :high, drug_a: "a", drug_b: "b", description: "t1")
+        alert2 = InteractionAlert.new(severity: :moderate, drug_a: "c", drug_b: "d", description: "t2")
+        result = DrugInteractionResult.new(interactions: [ alert1, alert2 ])
+
+        assert_equal 2, result.interactions.length
+      end
+
       # =============================================================================
       # BASE ADAPTER INTERFACE
       # =============================================================================

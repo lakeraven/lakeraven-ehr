@@ -240,6 +240,44 @@ module Lakeraven
         assert_nil ip_vs
       end
 
+      test "single-valueset measure safely assigns the only artifact" do
+        measure = build_fhir_measure(id: "test_single_vs", title: "Single VS Test")
+        measure["group"] = [ {
+          "population" => [
+            {
+              "code" => { "coding" => [ { "code" => "initial-population" } ] },
+              "description" => "Test population"
+            }
+          ]
+        } ]
+        measure["relatedArtifact"] = [
+          { "type" => "depends-on", "resource" => "http://cts.nlm.nih.gov/fhir/ValueSet/2.16.840.1.113883.3.464.1003.103.12.1001" }
+        ]
+        track_measure("test_single_vs")
+
+        result = @service.import_from_resource(measure)
+
+        assert result.success?
+        imported = Measure.find("test_single_vs")
+        ip_vs = imported.initial_population&.dig(:valueset_id) || imported.initial_population&.dig("valueset_id")
+        assert_equal "2.16.840.1.113883.3.464.1003.103.12.1001", ip_vs
+      end
+
+      test "rejects valueset_id with path traversal sequences" do
+        measure = build_fhir_measure(id: "test_traversal", title: "Traversal Test")
+        measure["relatedArtifact"] = [
+          { "type" => "depends-on", "resource" => "../../etc/passwd" }
+        ]
+        track_measure("test_traversal")
+
+        result = @service.import_from_resource(measure)
+
+        assert result.success?
+        requirements = @service.data_requirements("test_traversal") || []
+        urls = requirements.map { |r| r[:canonical_url] }.compact
+        assert_equal 0, urls.count { |u| u.include?("..") }, "Path traversal must not appear in canonical URLs"
+      end
+
       # =============================================================================
       # CANONICAL URLS
       # =============================================================================
