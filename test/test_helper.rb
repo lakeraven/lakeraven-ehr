@@ -121,6 +121,17 @@ RpmsRpc.mock! do |m|
   m.seed_user("303", credentials: "testclerk;test123", name: "CLERK,TEST", role: :clerk)
   m.seed_user("304", credentials: "lindarodriguez;test123", name: "RODRIGUEZ,LINDA", role: :case_manager,
                      security_keys: [ :prc_supervisor, :cprs_gui_chart ])
+
+  # Referral details (for ServiceRequestGateway delete/cancel tests)
+  m.seed(:referral_detail, "SR-DRAFT-001", { ien: "SR-DRAFT-001", status: "draft", patient_dfn: "1",
+                                              service: "Cardiology", to_service: "Cardiology Clinic" })
+  m.seed(:referral_detail, "SR-PENDING-001", { ien: "SR-PENDING-001", status: "pending", patient_dfn: "1",
+                                                service: "Orthopedics", to_service: "Ortho Clinic" })
+  m.seed(:referral_detail, "SR-AUTHORIZED-001", { ien: "SR-AUTHORIZED-001", status: "authorized", patient_dfn: "1",
+                                                    service: "Neurology", to_service: "Neuro Clinic" })
+  m.seed(:referral_delete, "SR-DRAFT-001", { success: true, message: "Referral deleted" })
+  m.seed(:referral_delete, "SR-PENDING-001", { success: true, message: "Referral deleted" })
+  m.seed(:referral_delete, "SR-AUTHORIZED-001", { success: true, message: "Referral cancelled" })
 end
 
 # Shared auth helper for integration tests.
