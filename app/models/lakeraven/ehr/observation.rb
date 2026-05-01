@@ -38,6 +38,30 @@ module Lakeraven
 
       CATEGORY_SYSTEM = "http://terminology.hl7.org/CodeSystem/observation-category"
 
+      # US Core vital sign profile URLs
+      US_CORE_PROFILES = {
+        "85354-9" => "http://hl7.org/fhir/us/core/StructureDefinition/us-core-blood-pressure",
+        "8867-4"  => "http://hl7.org/fhir/us/core/StructureDefinition/us-core-heart-rate",
+        "8310-5"  => "http://hl7.org/fhir/us/core/StructureDefinition/us-core-body-temperature",
+        "9279-1"  => "http://hl7.org/fhir/us/core/StructureDefinition/us-core-respiratory-rate",
+        "2708-6"  => "http://hl7.org/fhir/us/core/StructureDefinition/us-core-pulse-oximetry",
+        "29463-7" => "http://hl7.org/fhir/us/core/StructureDefinition/us-core-body-weight",
+        "8302-2"  => "http://hl7.org/fhir/us/core/StructureDefinition/us-core-body-height",
+        "39156-5" => "http://hl7.org/fhir/us/core/StructureDefinition/us-core-bmi"
+      }.freeze
+
+      # Map RPMS vital type strings to LOINC codes and UCUM units
+      VITAL_TYPE_MAP = {
+        "BP"    => { code: "85354-9", display: "Blood Pressure",      unit: "mm[Hg]" },
+        "P"     => { code: "8867-4",  display: "Heart Rate",          unit: "/min" },
+        "T"     => { code: "8310-5",  display: "Body Temperature",    unit: "[degF]" },
+        "R"     => { code: "9279-1",  display: "Respiratory Rate",    unit: "/min" },
+        "POX"   => { code: "2708-6",  display: "Oxygen Saturation",   unit: "%" },
+        "WT"    => { code: "29463-7", display: "Body Weight",         unit: "[lb_av]" },
+        "HT"    => { code: "8302-2",  display: "Body Height",         unit: "[in_i]" },
+        "BMI"   => { code: "39156-5", display: "BMI",                 unit: "kg/m2" }
+      }.freeze
+
       attribute :ien, :string
       attribute :patient_dfn, :string
       attribute :code, :string
@@ -64,6 +88,29 @@ module Lakeraven
         gateway.for_patient(dfn)
       end
 
+      # Build Observation instances from raw RPC vital hashes.
+      # Each hash has { type:, value:, units:, recorded_date: }.
+      def self.from_vital_hashes(hashes, patient_dfn:)
+        hashes.filter_map do |h|
+          mapping = VITAL_TYPE_MAP[h[:type]]
+          next unless mapping
+
+          new(
+            ien: h[:ien] || SecureRandom.uuid,
+            patient_dfn: patient_dfn,
+            code: mapping[:code],
+            code_system: "loinc",
+            display: mapping[:display],
+            value: h[:value],
+            value_quantity: h[:type] == "BP" ? nil : h[:value],
+            unit: mapping[:unit],
+            category: "vital-signs",
+            status: "final",
+            effective_datetime: h[:recorded_date]
+          )
+        end
+      end
+
       def vital_sign? = category == "vital-signs"
       def laboratory? = category == "laboratory"
       def sdoh? = category == "social-history" || category == "survey"
@@ -86,6 +133,7 @@ module Lakeraven
         {
           resourceType: "Observation",
           id: ien&.to_s,
+          meta: build_meta,
           status: status,
           subject: patient_dfn ? { reference: "Patient/#{patient_dfn}" } : nil,
           code: build_code,
@@ -100,6 +148,7 @@ module Lakeraven
         {
           resourceType: "Observation",
           id: ien&.to_s,
+          meta: build_meta,
           status: status,
           subject: patient_dfn ? { reference: "Patient/#{patient_dfn}" } : nil,
           code: build_code,
@@ -135,10 +184,19 @@ module Lakeraven
         nil
       end
 
+      def build_meta
+        profile_url = US_CORE_PROFILES[code]
+        profile_url ? { profile: [ profile_url ] } : nil
+      end
+
       def build_value_quantity
         return nil unless value_quantity
 
-        { value: value_quantity, unit: unit }.compact
+        qty = { value: value_quantity }
+        qty[:unit] = unit if unit
+        qty[:code] = unit if unit
+        qty[:system] = "http://unitsofmeasure.org" if unit
+        qty
       end
     end
   end

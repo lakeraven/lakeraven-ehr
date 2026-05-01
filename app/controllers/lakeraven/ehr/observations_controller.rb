@@ -7,8 +7,10 @@ module Lakeraven
 
       def index
         dfn = extract_patient_dfn(params[:patient])
-        results = Observation.for_patient(dfn)
-        render_bundle(results.map { |r| { resourceType: "Observation" }.merge(r) })
+        raw = Observation.for_patient(dfn)
+        observations = Observation.from_vital_hashes(raw, patient_dfn: dfn)
+        observations = filter_observations(observations)
+        render_bundle(observations.map(&:to_fhir))
       end
 
       def show
@@ -30,6 +32,15 @@ module Lakeraven
 
       def extract_patient_dfn(param)
         param.to_s.delete_prefix("Patient/")
+      end
+
+      def filter_observations(observations)
+        observations = observations.select { |o| o.category == params[:category] } if params[:category].present?
+        if params[:code].present?
+          codes = params[:code].split(",")
+          observations = observations.select { |o| codes.include?(o.code) }
+        end
+        observations
       end
     end
   end

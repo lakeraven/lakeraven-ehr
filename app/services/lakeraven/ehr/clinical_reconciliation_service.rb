@@ -19,7 +19,11 @@ module Lakeraven
 
       def initialize(matcher: nil, ccda_parser: nil)
         @matcher = matcher || ClinicalReconciliationMatcher.new
-        @ccda_parser = ccda_parser || CcdaParser.new
+        @ccda_parser = ccda_parser
+      end
+
+      def ccda_parser
+        @ccda_parser ||= CcdaParser.new
       end
 
       # Import from a FHIR Bundle containing clinical resources
@@ -45,7 +49,7 @@ module Lakeraven
 
       # Import from a C-CDA XML document
       def import_from_ccda(patient_dfn:, clinician_duz:, xml_string:)
-        parsed = @ccda_parser.parse(xml_string)
+        parsed = ccda_parser.parse(xml_string)
 
         create_session_with_items(
           patient_dfn: patient_dfn,

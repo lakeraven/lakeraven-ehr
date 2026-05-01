@@ -12,8 +12,11 @@ module Lakeraven
         measure = Measure.find(measure_id)
         return nil unless measure
 
-        in_pop = in_initial_population?(measure)
-        in_num = in_pop && meets_numerator?(measure, period)
+        patient_conditions = @conditions.select { |c| c.respond_to?(:dfn) ? c.dfn.to_s == patient_dfn.to_s : true }
+        patient_observations = @observations.select { |o| o.respond_to?(:dfn) ? o.dfn.to_s == patient_dfn.to_s : true }
+
+        in_pop = in_initial_population?(measure, patient_conditions)
+        in_num = in_pop && meets_numerator?(measure, period, patient_observations)
 
         MeasureReport.new(
           measure_id: measure_id, patient_dfn: patient_dfn, report_type: "individual",
@@ -38,7 +41,7 @@ module Lakeraven
 
       private
 
-      def in_initial_population?(measure)
+      def in_initial_population?(measure, conditions)
         pop = measure.initial_population
         return false unless pop
 
@@ -48,17 +51,17 @@ module Lakeraven
           true
         when "Condition"
           valueset = pop["valueset_id"]
-          @conditions.any? { |c| c.valueset_id == valueset }
+          conditions.any? { |c| c.valueset_id == valueset }
         else
           false
         end
       end
 
-      def meets_numerator?(measure, period)
+      def meets_numerator?(measure, period, observations)
         num = measure.numerator
         return false unless num
 
-        relevant_obs = @observations.select do |o|
+        relevant_obs = observations.select do |o|
           o.effective_date >= period.begin && o.effective_date <= period.end
         end
         return false if relevant_obs.empty?
