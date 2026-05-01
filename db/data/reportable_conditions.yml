@@ -1,0 +1,218 @@
+# Reportable Conditions — NYS/CDC Notifiable Disease List
+#
+# ONC § 170.315(f)(5) — Electronic Case Reporting
+#
+# ICD-10-CM codes and prefixes for conditions reportable to
+# NYS ECLRS and CDC NNDSS. Prefix matches (e.g. "A15") will
+# match any code starting with that prefix (A15.0, A15.1, etc.).
+#
+# Sources:
+#   - NYS Communicable Disease Reporting Requirements (10 NYCRR 2.10)
+#   - CDC NNDSS Notifiable Conditions (2026)
+#   - CSTE Position Statements
+#
+# Ulster County relevance: STI/HIV, TB, Hep B, lead, communicable disease
+
+# ---------------------------------------------------------------------------
+# Tuberculosis
+# ---------------------------------------------------------------------------
+- code: "A15"
+  display: "Respiratory tuberculosis"
+  category: tuberculosis
+  jurisdiction: NYS
+  reporting_timeframe: "24 hours"
+
+- code: "A16"
+  display: "Respiratory tuberculosis, not confirmed"
+  category: tuberculosis
+  jurisdiction: NYS
+  reporting_timeframe: "24 hours"
+
+- code: "A17"
+  display: "Tuberculosis of nervous system"
+  category: tuberculosis
+  jurisdiction: NYS
+  reporting_timeframe: "24 hours"
+
+- code: "A18"
+  display: "Tuberculosis of other organs"
+  category: tuberculosis
+  jurisdiction: NYS
+  reporting_timeframe: "24 hours"
+
+- code: "A19"
+  display: "Miliary tuberculosis"
+  category: tuberculosis
+  jurisdiction: NYS
+  reporting_timeframe: "24 hours"
+
+# ---------------------------------------------------------------------------
+# Sexually Transmitted Infections
+# ---------------------------------------------------------------------------
+- code: "A54"
+  display: "Gonococcal infection"
+  category: sti
+  jurisdiction: NYS
+  reporting_timeframe: "5 days"
+
+- code: "A56"
+  display: "Other sexually transmitted chlamydial diseases"
+  category: sti
+  jurisdiction: NYS
+  reporting_timeframe: "5 days"
+
+- code: "A50"
+  display: "Congenital syphilis"
+  category: sti
+  jurisdiction: NYS
+  reporting_timeframe: "24 hours"
+
+- code: "A51"
+  display: "Early syphilis"
+  category: sti
+  jurisdiction: NYS
+  reporting_timeframe: "5 days"
+
+- code: "A52"
+  display: "Late syphilis"
+  category: sti
+  jurisdiction: NYS
+  reporting_timeframe: "5 days"
+
+- code: "A53"
+  display: "Other and unspecified syphilis"
+  category: sti
+  jurisdiction: NYS
+  reporting_timeframe: "5 days"
+
+# ---------------------------------------------------------------------------
+# HIV / AIDS
+# ---------------------------------------------------------------------------
+- code: "B20"
+  display: "Human immunodeficiency virus [HIV] disease"
+  category: hiv
+  jurisdiction: NYS
+  reporting_timeframe: "24 hours"
+
+# ---------------------------------------------------------------------------
+# Hepatitis
+# ---------------------------------------------------------------------------
+- code: "B15"
+  display: "Acute hepatitis A"
+  category: hepatitis
+  jurisdiction: NYS
+  reporting_timeframe: "24 hours"
+
+- code: "B16"
+  display: "Acute hepatitis B"
+  category: hepatitis
+  jurisdiction: NYS
+  reporting_timeframe: "24 hours"
+
+- code: "B17.1"
+  display: "Acute hepatitis C"
+  category: hepatitis
+  jurisdiction: NYS
+  reporting_timeframe: "5 days"
+
+- code: "B18.1"
+  display: "Chronic viral hepatitis B"
+  category: hepatitis
+  jurisdiction: NYS
+  reporting_timeframe: "5 days"
+
+- code: "B18.2"
+  display: "Chronic viral hepatitis C"
+  category: hepatitis
+  jurisdiction: NYS
+  reporting_timeframe: "5 days"
+
+# ---------------------------------------------------------------------------
+# Vaccine-Preventable Diseases
+# ---------------------------------------------------------------------------
+- code: "B05"
+  display: "Measles"
+  category: vaccine_preventable
+  jurisdiction: NYS
+  reporting_timeframe: "immediately"
+
+- code: "B06"
+  display: "Rubella"
+  category: vaccine_preventable
+  jurisdiction: NYS
+  reporting_timeframe: "24 hours"
+
+- code: "A37"
+  display: "Whooping cough (pertussis)"
+  category: vaccine_preventable
+  jurisdiction: NYS
+  reporting_timeframe: "24 hours"
+
+- code: "B26"
+  display: "Mumps"
+  category: vaccine_preventable
+  jurisdiction: NYS
+  reporting_timeframe: "24 hours"
+
+# ---------------------------------------------------------------------------
+# Foodborne / Enteric
+# ---------------------------------------------------------------------------
+- code: "A01"
+  display: "Typhoid and paratyphoid fevers"
+  category: enteric
+  jurisdiction: NYS
+  reporting_timeframe: "24 hours"
+
+- code: "A02"
+  display: "Other salmonella infections"
+  category: enteric
+  jurisdiction: NYS
+  reporting_timeframe: "24 hours"
+
+- code: "A03"
+  display: "Shigellosis"
+  category: enteric
+  jurisdiction: NYS
+  reporting_timeframe: "24 hours"
+
+- code: "A04.7"
+  display: "Enterocolitis due to Clostridium difficile"
+  category: enteric
+  jurisdiction: NYS
+  reporting_timeframe: "5 days"
+
+# ---------------------------------------------------------------------------
+# Lead Poisoning (Ulster County relevance)
+# ---------------------------------------------------------------------------
+- code: "T56.0"
+  display: "Toxic effects of lead and its compounds"
+  category: environmental
+  jurisdiction: NYS
+  reporting_timeframe: "5 days"
+
+# ---------------------------------------------------------------------------
+# Other Notifiable
+# ---------------------------------------------------------------------------
+- code: "A39"
+  display: "Meningococcal infection"
+  category: bacterial
+  jurisdiction: NYS
+  reporting_timeframe: "immediately"
+
+- code: "A22"
+  display: "Anthrax"
+  category: bioterrorism
+  jurisdiction: NYS
+  reporting_timeframe: "immediately"
+
+- code: "A75"
+  display: "Typhus fever"
+  category: vector_borne
+  jurisdiction: NYS
+  reporting_timeframe: "24 hours"
+
+- code: "A84"
+  display: "Tick-borne viral encephalitis"
+  category: vector_borne
+  jurisdiction: NYS
+  reporting_timeframe: "24 hours"

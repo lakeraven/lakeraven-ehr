@@ -2,19 +2,19 @@
 
 require "ostruct"
 
-Given("patient {string} has a condition with code {string} in valueset {string}") do |_dfn, code, valueset|
+Given("patient {string} has a condition with code {string} in valueset {string}") do |dfn, code, valueset|
   @conditions ||= []
-  @conditions << OpenStruct.new(code: code, valueset_id: valueset)
+  @conditions << OpenStruct.new(dfn: dfn, code: code, valueset_id: valueset)
 end
 
-Given("patient {string} has an observation with code {string} and value {float} recorded on {string}") do |_dfn, code, value, date|
+Given("patient {string} has an observation with code {string} and value {float} recorded on {string}") do |dfn, code, value, date|
   @observations ||= []
-  @observations << OpenStruct.new(code: code, value: value, effective_date: Date.parse(date))
+  @observations << OpenStruct.new(dfn: dfn, code: code, value: value, effective_date: Date.parse(date))
 end
 
-Given("patient {string} has an observation with code {string} in valueset {string} recorded on {string}") do |_dfn, code, _valueset, date|
+Given("patient {string} has an observation with code {string} in valueset {string} recorded on {string}") do |dfn, code, _valueset, date|
   @observations ||= []
-  @observations << OpenStruct.new(code: code, value: 1, effective_date: Date.parse(date))
+  @observations << OpenStruct.new(dfn: dfn, code: code, value: 1, effective_date: Date.parse(date))
 end
 
 Given("patient {string} has no conditions in valueset {string}") do |_dfn, _valueset|

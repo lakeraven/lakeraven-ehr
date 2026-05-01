@@ -2,15 +2,27 @@
 
 module Lakeraven
   module EHR
-    # In-memory provenance store for ValueSetAuditService.
+    # In-memory provenance store for ValueSetAuditService and FHIR _revinclude.
     # Replaces ActiveRecord Provenance scopes with plain Ruby collections.
     class ProvenanceStore
       def initialize
         @records = []
       end
 
+      def self.instance
+        @instance ||= new
+      end
+
+      def self.reset_instance!
+        @instance = new
+      end
+
       def add(provenance)
         @records << provenance
+      end
+
+      def clear!
+        @records.clear
       end
 
       def all

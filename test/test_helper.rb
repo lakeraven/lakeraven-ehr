@@ -29,7 +29,11 @@ RpmsRpc.mock! do |m|
   m.seed(:patient_ssn, "111-11-1111", { dfn: 1, name: "Anderson,Alice", ssn: "111-11-1111" })
 
   m.seed_collection(:patient_list,
-    [ { dfn: 1, name: "Anderson,Alice" }, { dfn: 2, name: "MOUSE,MICKEY M" }, { dfn: 3, name: "DOE,JANE" } ],
+    [
+      { dfn: 1, name: "Anderson,Alice", sex: "F", dob: Date.parse("1980-05-15") },
+      { dfn: 2, name: "MOUSE,MICKEY M", sex: "M", dob: Date.parse("2010-02-14") },
+      { dfn: 3, name: "DOE,JANE", sex: "F", dob: Date.parse("1990-12-25") }
+    ],
     filter_field: :name)
 
   # Practitioners (IEN 101-102)
@@ -99,6 +103,17 @@ RpmsRpc.mock! do |m|
                                 service_unit: "Window Rock", region: "Arizona", area: "Navajo Area" })
   m.seed(:tribe_info, "OST", { ien: 104, name: "Oglala Sioux Tribe", code: "OST",
                                  service_unit: "Pine Ridge", region: "South Dakota", area: "Great Plains Area" })
+
+  # Vitals (ORQQVI VITALS) for patient DFN 1
+  m.seed_keyed_collection(:vitals, "1", [
+    { type: "BP",  value: "120/80", units: "mm[Hg]", recorded_date: Date.new(2025, 1, 15) },
+    { type: "P",   value: "72",     units: "/min",   recorded_date: Date.new(2025, 1, 15) },
+    { type: "T",   value: "98.6",   units: "[degF]", recorded_date: Date.new(2025, 1, 15) },
+    { type: "R",   value: "16",     units: "/min",   recorded_date: Date.new(2025, 1, 15) },
+    { type: "POX", value: "98",     units: "%",      recorded_date: Date.new(2025, 1, 15) },
+    { type: "WT",  value: "150",    units: "[lb_av]", recorded_date: Date.new(2025, 1, 15) },
+    { type: "HT",  value: "65",     units: "[in_i]", recorded_date: Date.new(2025, 1, 15) }
+  ])
 
   # Test users
   m.seed_user("301", credentials: "testprovider;test123", name: "PROVIDER,TEST", role: :provider)

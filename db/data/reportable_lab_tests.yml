@@ -1,0 +1,201 @@
+# Reportable Lab Tests — NYS/CDC Notifiable Laboratory Tests
+#
+# ONC § 170.315(f)(3) — Electronic Laboratory Reporting
+#
+# LOINC codes for laboratory tests reportable to NYS ECLRS.
+# When a lab result matches a LOINC code in this list, an HL7 v2.5.1
+# ORU message should be generated and transmitted to ECLRS.
+#
+# Sources:
+#   - NYS Communicable Disease Reporting Requirements (10 NYCRR 2.10)
+#   - CDC NNDSS Notifiable Conditions (2026)
+#   - APHL/CDC ELR Implementation Guide
+#
+# Ulster County relevance: STI/HIV, TB, Hep B, lead, communicable disease
+
+# ---------------------------------------------------------------------------
+# Hepatitis B
+# ---------------------------------------------------------------------------
+- loinc: "11585-7"
+  display: "Hepatitis B virus surface Ag [Presence] in Serum"
+  category: hepatitis
+  organism_snomed: "81665004"
+  organism_display: "Hepatitis B virus"
+  jurisdiction: NYS
+  reporting_timeframe: "24 hours"
+
+- loinc: "5196-1"
+  display: "Hepatitis B virus surface Ab [Units/volume] in Serum"
+  category: hepatitis
+  jurisdiction: NYS
+  reporting_timeframe: "5 days"
+
+- loinc: "16933-4"
+  display: "Hepatitis B virus core Ab [Presence] in Serum"
+  category: hepatitis
+  jurisdiction: NYS
+  reporting_timeframe: "5 days"
+
+# ---------------------------------------------------------------------------
+# Hepatitis C
+# ---------------------------------------------------------------------------
+- loinc: "16128-1"
+  display: "Hepatitis C virus Ab [Presence] in Serum"
+  category: hepatitis
+  jurisdiction: NYS
+  reporting_timeframe: "5 days"
+
+- loinc: "11259-9"
+  display: "Hepatitis C virus RNA [Presence] in Serum by NAA"
+  category: hepatitis
+  jurisdiction: NYS
+  reporting_timeframe: "5 days"
+
+# ---------------------------------------------------------------------------
+# HIV
+# ---------------------------------------------------------------------------
+- loinc: "20447-9"
+  display: "HIV 1 RNA [#/volume] in Serum or Plasma by NAA"
+  category: hiv
+  organism_snomed: "19030005"
+  organism_display: "Human immunodeficiency virus"
+  jurisdiction: NYS
+  reporting_timeframe: "24 hours"
+
+- loinc: "7918-6"
+  display: "HIV 1+2 Ab [Presence] in Serum"
+  category: hiv
+  organism_snomed: "19030005"
+  organism_display: "Human immunodeficiency virus"
+  jurisdiction: NYS
+  reporting_timeframe: "24 hours"
+
+- loinc: "56888-1"
+  display: "HIV 1+2 Ab+Ag [Presence] in Serum by Immunoassay (4th gen)"
+  category: hiv
+  jurisdiction: NYS
+  reporting_timeframe: "24 hours"
+
+# ---------------------------------------------------------------------------
+# Chlamydia
+# ---------------------------------------------------------------------------
+- loinc: "21613-5"
+  display: "Chlamydia trachomatis DNA [Presence] in Specimen by NAA"
+  category: sti
+  organism_snomed: "63938009"
+  organism_display: "Chlamydia trachomatis"
+  jurisdiction: NYS
+  reporting_timeframe: "5 days"
+
+# ---------------------------------------------------------------------------
+# Gonorrhea
+# ---------------------------------------------------------------------------
+- loinc: "688-2"
+  display: "Neisseria gonorrhoeae [Presence] in Cervix by Organism specific culture"
+  category: sti
+  organism_snomed: "68704007"
+  organism_display: "Neisseria gonorrhoeae"
+  jurisdiction: NYS
+  reporting_timeframe: "5 days"
+
+- loinc: "21415-5"
+  display: "Neisseria gonorrhoeae DNA [Presence] in Urethra by NAA"
+  category: sti
+  organism_snomed: "68704007"
+  organism_display: "Neisseria gonorrhoeae"
+  jurisdiction: NYS
+  reporting_timeframe: "5 days"
+
+# ---------------------------------------------------------------------------
+# Syphilis
+# ---------------------------------------------------------------------------
+- loinc: "20507-0"
+  display: "Treponema pallidum Ab [Presence] in Serum by Immunoassay"
+  category: sti
+  organism_snomed: "72904005"
+  organism_display: "Treponema pallidum"
+  jurisdiction: NYS
+  reporting_timeframe: "5 days"
+
+- loinc: "5292-8"
+  display: "Reagin Ab [Presence] in Serum by RPR"
+  category: sti
+  jurisdiction: NYS
+  reporting_timeframe: "5 days"
+
+# ---------------------------------------------------------------------------
+# Tuberculosis
+# ---------------------------------------------------------------------------
+- loinc: "38379-4"
+  display: "Mycobacterium tuberculosis complex DNA [Presence] in Specimen by NAA"
+  category: tuberculosis
+  organism_snomed: "113858008"
+  organism_display: "Mycobacterium tuberculosis complex"
+  jurisdiction: NYS
+  reporting_timeframe: "24 hours"
+
+- loinc: "11477-7"
+  display: "Mycobacterium sp identified in Specimen by Organism specific culture"
+  category: tuberculosis
+  organism_snomed: "113858008"
+  organism_display: "Mycobacterium tuberculosis complex"
+  jurisdiction: NYS
+  reporting_timeframe: "24 hours"
+
+# ---------------------------------------------------------------------------
+# Lead (Ulster County relevance)
+# ---------------------------------------------------------------------------
+- loinc: "5671-3"
+  display: "Lead [Mass/volume] in Blood"
+  category: environmental
+  jurisdiction: NYS
+  reporting_timeframe: "5 days"
+
+# ---------------------------------------------------------------------------
+# Enteric / Foodborne
+# ---------------------------------------------------------------------------
+- loinc: "20955-0"
+  display: "Salmonella sp identified in Specimen by Organism specific culture"
+  category: enteric
+  organism_snomed: "27268008"
+  organism_display: "Salmonella"
+  jurisdiction: NYS
+  reporting_timeframe: "24 hours"
+
+- loinc: "17563-8"
+  display: "Shigella sp identified in Stool by Organism specific culture"
+  category: enteric
+  organism_snomed: "77352002"
+  organism_display: "Shigella"
+  jurisdiction: NYS
+  reporting_timeframe: "24 hours"
+
+# ---------------------------------------------------------------------------
+# Vaccine-Preventable
+# ---------------------------------------------------------------------------
+- loinc: "21500-4"
+  display: "Measles virus IgM Ab [Presence] in Serum"
+  category: vaccine_preventable
+  organism_snomed: "52584002"
+  organism_display: "Measles virus"
+  jurisdiction: NYS
+  reporting_timeframe: "immediately"
+
+- loinc: "31616-6"
+  display: "Bordetella pertussis DNA [Presence] in Specimen by NAA"
+  category: vaccine_preventable
+  organism_snomed: "5247005"
+  organism_display: "Bordetella pertussis"
+  jurisdiction: NYS
+  reporting_timeframe: "24 hours"
+
+# ---------------------------------------------------------------------------
+# Tick-borne (Ulster County relevance)
+# ---------------------------------------------------------------------------
+- loinc: "23867-8"
+  display: "Borrelia burgdorferi IgM Ab [Presence] in Serum"
+  category: vector_borne
+  organism_snomed: "51526001"
+  organism_display: "Borrelia burgdorferi"
+  jurisdiction: NYS
+  reporting_timeframe: "5 days"

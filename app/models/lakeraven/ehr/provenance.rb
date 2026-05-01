@@ -60,10 +60,10 @@ module Lakeraven
       def to_fhir
         resource = {
           resourceType: "Provenance",
-          target: [{ reference: "#{target_type}/#{target_id}" }],
+          target: [ { reference: "#{target_type}/#{target_id}" } ],
           recorded: recorded&.iso8601,
           activity: build_activity,
-          agent: [build_agent]
+          agent: [ build_agent ]
         }.compact
 
         resource[:entity] = build_entity if has_entity?
@@ -77,7 +77,7 @@ module Lakeraven
         return nil unless activity
 
         {
-          coding: [{ system: ACTIVITY_SYSTEM, code: activity, display: activity_display }]
+          coding: [ { system: ACTIVITY_SYSTEM, code: activity, display: activity_display } ]
         }
       end
 
@@ -86,16 +86,16 @@ module Lakeraven
           who: { reference: "#{agent_who_type}/#{agent_who_id}" }
         }
         if agent_type.present?
-          agent[:type] = [{ coding: [{ code: agent_type }] }]
+          agent[:type] = [ { coding: [ { code: agent_type } ] } ]
         end
         agent
       end
 
       def build_entity
-        [{
+        [ {
           role: entity_role,
           what: { reference: "#{entity_what_type}/#{entity_what_id}" }
-        }]
+        } ]
       end
     end
   end

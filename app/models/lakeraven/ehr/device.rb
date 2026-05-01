@@ -23,6 +23,7 @@ module Lakeraven
       attribute :model_number, :string
       attribute :type_code, :string
       attribute :type_display, :string
+      attribute :distinct_identifier, :string
 
       validates :patient_dfn, presence: true
       validates :device_name, presence: true
@@ -67,6 +68,7 @@ module Lakeraven
         {
           resourceType: "Device",
           id: ien,
+          meta: build_meta,
           patient: patient_dfn ? { reference: "Patient/#{patient_dfn}" } : nil,
           udiCarrier: udi_carrier ? [ { carrierHRF: udi_carrier, deviceIdentifier: udi_device_identifier }.compact ] : nil,
           status: status,
@@ -76,12 +78,19 @@ module Lakeraven
           lotNumber: lot_number,
           manufactureDate: manufacture_date&.iso8601,
           expirationDate: expiration_date&.iso8601,
+          distinctIdentifier: distinct_identifier,
           type: build_type,
           deviceName: device_name ? [ { name: device_name, type: "user-friendly-name" } ] : nil
         }.compact
       end
 
       private
+
+      def build_meta
+        {
+          profile: [ "http://hl7.org/fhir/us/core/StructureDefinition/us-core-implantable-device" ]
+        }
+      end
 
       def build_type
         return nil unless type_code

@@ -17,6 +17,10 @@ module Lakeraven
       validates :data_disclosed, presence: true
       validates :disclosed_by, presence: true
 
+      def readonly?
+        persisted?
+      end
+
       scope :for_patient, ->(dfn) { where(patient_dfn: dfn) }
       scope :within_retention, -> { where(disclosed_at: RETENTION_PERIOD.ago..) }
 

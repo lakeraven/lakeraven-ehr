@@ -63,6 +63,8 @@ Feature: Clinical Quality Measures (ONC § 170.315(c)(1-3))
   Scenario: Population-level measure evaluation
     Given patient "1" has a condition with code "E11.9" in valueset "gpra-bgpmu-diabetes-dx"
     And patient "1" has an observation with code "4548-4" and value 7.5 recorded on "2026-01-15"
+    And patient "2" has a condition with code "E11.9" in valueset "gpra-bgpmu-diabetes-dx"
+    And patient "2" has an observation with code "4548-4" and value 8.0 recorded on "2026-01-15"
     When I evaluate measure "diabetes_a1c_control" for patients "1,2" for period "2025-04-01" to "2026-03-31"
     Then the summary report should show initial population count of 2
     And the summary report should show numerator count of 2
