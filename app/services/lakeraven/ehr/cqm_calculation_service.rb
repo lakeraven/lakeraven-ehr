@@ -3,13 +3,14 @@
 module Lakeraven
   module EHR
     class CqmCalculationService
-      def initialize(conditions: [], observations: [])
+      def initialize(conditions: [], observations: [], measure_resolver: nil)
         @conditions = conditions
         @observations = observations
+        @measure_resolver = measure_resolver || ->(id) { Measure.find(id) }
       end
 
       def evaluate(measure_id, patient_dfn, period:)
-        measure = Measure.find(measure_id)
+        measure = @measure_resolver.call(measure_id)
         return nil unless measure
 
         patient_conditions = @conditions.select { |c| c.respond_to?(:dfn) ? c.dfn.to_s == patient_dfn.to_s : true }
