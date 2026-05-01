@@ -12,7 +12,7 @@ Given("a provider exists with DUZ {string}") do |duz|
 end
 
 Given("the patient has an active medication {string}") do |drug_name|
-  @patient_medications = [OpenStruct.new(medication_display: drug_name, medication_code: nil)]
+  @patient_medications = [ OpenStruct.new(medication_display: drug_name, medication_code: nil) ]
   ensure_cpoe_medication_stubs!
 end
 

@@ -78,9 +78,9 @@ module Lakeraven
 
       def filter_by_gender(patients)
         sex_code = case params[:gender]
-                   when "male" then "M"
-                   when "female" then "F"
-                   else nil
+        when "male" then "M"
+        when "female" then "F"
+        else nil
         end
         return patients unless sex_code
 
