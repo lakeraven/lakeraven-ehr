@@ -2,6 +2,14 @@
 
 # Shared step definitions for Organization, Location, PractitionerRole FHIR resources
 
+# --- Shared FHIR assertions ---
+
+Then("the FHIR subject reference should include {string}") do |id|
+  subject = @fhir[:subject]
+  refute_nil subject, "Expected subject in FHIR output"
+  assert_includes subject[:reference], id
+end
+
 # --- Organization ---
 
 Given("an organization with name {string}") do |name|
