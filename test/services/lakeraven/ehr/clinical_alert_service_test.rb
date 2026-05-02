@@ -119,6 +119,33 @@ module Lakeraven
         assert_equal :moderate, allergy_alert.severity
       end
 
+      test "falls back to criticality when severity is nil" do
+        service = ClinicalAlertService.new(reminders: [], allergies: [
+          AllergyIntolerance.new(allergen: "Test", severity: nil, criticality: "high", clinical_status: "active")
+        ])
+        alerts = service.background_alerts
+        allergy_alert = alerts.find { |a| a.type == :allergy }
+        assert_equal :high, allergy_alert.severity
+      end
+
+      test "maps low criticality to :low" do
+        service = ClinicalAlertService.new(reminders: [], allergies: [
+          AllergyIntolerance.new(allergen: "Test", severity: nil, criticality: "low", clinical_status: "active")
+        ])
+        alerts = service.background_alerts
+        allergy_alert = alerts.find { |a| a.type == :allergy }
+        assert_equal :low, allergy_alert.severity
+      end
+
+      test "severity field takes precedence over criticality" do
+        service = ClinicalAlertService.new(reminders: [], allergies: [
+          AllergyIntolerance.new(allergen: "Test", severity: "mild", criticality: "high", clinical_status: "active")
+        ])
+        alerts = service.background_alerts
+        allergy_alert = alerts.find { |a| a.type == :allergy }
+        assert_equal :low, allergy_alert.severity
+      end
+
       # =============================================================================
       # REMINDER SEVERITY MAPPING
       # =============================================================================
