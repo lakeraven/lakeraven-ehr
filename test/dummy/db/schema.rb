@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_04_25_030000) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_02_030000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -70,6 +70,26 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_25_030000) do
     t.index [ "patient_dfn" ], name: "index_lakeraven_ehr_disclosures_on_patient_dfn"
   end
 
+  create_table "lakeraven_ehr_emergency_accesses", force: :cascade do |t|
+    t.datetime "accessed_at", null: false
+    t.string "accessed_by", null: false
+    t.string "accessed_by_name"
+    t.datetime "created_at", null: false
+    t.datetime "expires_at", null: false
+    t.text "justification", null: false
+    t.string "patient_dfn", null: false
+    t.string "reason", null: false
+    t.text "review_notes"
+    t.string "review_outcome"
+    t.datetime "reviewed_at"
+    t.string "reviewed_by"
+    t.string "reviewed_by_name"
+    t.datetime "updated_at", null: false
+    t.index [ "accessed_by" ], name: "index_lakeraven_ehr_emergency_accesses_on_accessed_by"
+    t.index [ "expires_at" ], name: "index_lakeraven_ehr_emergency_accesses_on_expires_at"
+    t.index [ "patient_dfn" ], name: "index_lakeraven_ehr_emergency_accesses_on_patient_dfn"
+  end
+
   create_table "lakeraven_ehr_launch_contexts", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "encounter_id"
@@ -89,6 +109,45 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_25_030000) do
     t.string "sexual_orientation"
     t.datetime "updated_at", null: false
     t.index [ "patient_dfn" ], name: "index_lakeraven_ehr_patient_supplements_on_patient_dfn", unique: true
+  end
+
+  create_table "lakeraven_ehr_reconciliation_items", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.datetime "decided_at"
+    t.string "decided_by_duz"
+    t.string "decision", default: "pending", null: false
+    t.string "external_code"
+    t.string "external_code_system"
+    t.jsonb "external_data", default: {}
+    t.string "external_display"
+    t.jsonb "internal_data", default: {}
+    t.string "internal_ien"
+    t.string "match_status", null: false
+    t.bigint "reconciliation_session_id", null: false
+    t.string "resource_type", null: false
+    t.datetime "updated_at", null: false
+    t.boolean "write_back_completed", default: false
+    t.string "write_back_error"
+    t.index [ "decision" ], name: "index_lakeraven_ehr_reconciliation_items_on_decision"
+    t.index [ "reconciliation_session_id" ], name: "idx_on_reconciliation_session_id_5031b9cf3c"
+    t.index [ "resource_type" ], name: "index_lakeraven_ehr_reconciliation_items_on_resource_type"
+  end
+
+  create_table "lakeraven_ehr_reconciliation_sessions", force: :cascade do |t|
+    t.string "clinician_duz", null: false
+    t.datetime "completed_at"
+    t.datetime "created_at", null: false
+    t.string "patient_dfn", null: false
+    t.text "raw_document"
+    t.string "source_description"
+    t.string "source_identifier"
+    t.string "source_type"
+    t.datetime "started_at"
+    t.string "status", default: "pending", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "clinician_duz" ], name: "index_lakeraven_ehr_reconciliation_sessions_on_clinician_duz"
+    t.index [ "patient_dfn" ], name: "index_lakeraven_ehr_reconciliation_sessions_on_patient_dfn"
+    t.index [ "status" ], name: "index_lakeraven_ehr_reconciliation_sessions_on_status"
   end
 
   create_table "oauth_access_grants", force: :cascade do |t|
@@ -133,6 +192,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_25_030000) do
     t.index [ "uid" ], name: "index_oauth_applications_on_uid", unique: true
   end
 
+  add_foreign_key "lakeraven_ehr_reconciliation_items", "lakeraven_ehr_reconciliation_sessions", column: "reconciliation_session_id"
   add_foreign_key "oauth_access_grants", "oauth_applications", column: "application_id"
   add_foreign_key "oauth_access_tokens", "oauth_applications", column: "application_id"
 end

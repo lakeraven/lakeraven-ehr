@@ -27,13 +27,18 @@ module Lakeraven
       def pending? = status == "pending"
       def accepted? = status == "accepted"
       def denied? = status == "denied"
+      def reviewed? = accepted? || denied?
 
       def accept!(reviewer_duz:, reason: nil)
+        raise "Amendment already reviewed" if reviewed?
+
         update!(status: "accepted", reviewed_by: reviewer_duz, review_reason: reason, reviewed_at: Time.current)
         record_review_audit("amendment.accepted", reviewer_duz)
       end
 
       def deny!(reviewer_duz:, reason:)
+        raise "Amendment already reviewed" if reviewed?
+
         update!(status: "denied", reviewed_by: reviewer_duz, review_reason: reason, reviewed_at: Time.current)
         record_review_audit("amendment.denied", reviewer_duz)
       end
