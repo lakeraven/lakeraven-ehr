@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require "rpms_rpc/mappings"
+require "rpms_rpc/api/referral"
 
 module Lakeraven
   module EHR
@@ -8,7 +8,7 @@ module Lakeraven
       DELETABLE_STATUSES = %w[draft pending submitted].freeze
 
       def self.for_patient(dfn)
-        RpmsRpc::DataMapper.referral_search.fetch_many(dfn.to_s)
+        RpmsRpc::Referral.for_patient(dfn.to_s)
       end
 
       def self.delete(ien, reason: nil)
@@ -25,7 +25,7 @@ module Lakeraven
           return { success: false, error: "Reason required for #{status} referral", ien: ien }
         end
 
-        result = RpmsRpc::DataMapper.referral_delete.fetch_one(ien, reason)
+        result = RpmsRpc::Referral.delete(ien, reason: reason)
         if result && result[:success]
           { success: true, message: "Referral deleted", ien: ien }
         else
@@ -41,7 +41,7 @@ module Lakeraven
         referral = find_referral(ien)
         return { success: false, error: "Referral not found" } unless referral
 
-        result = RpmsRpc::DataMapper.referral_delete.fetch_one(ien, reason)
+        result = RpmsRpc::Referral.delete(ien, reason: reason)
         if result && result[:success]
           { success: true, message: "Referral cancelled", ien: ien }
         else
@@ -59,7 +59,7 @@ module Lakeraven
       end
 
       def self.find_referral(ien)
-        RpmsRpc::DataMapper.referral_detail.fetch_one(ien.to_s)
+        RpmsRpc::Referral.find(ien.to_s)
       end
       private_class_method :find_referral
     end

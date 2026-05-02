@@ -1,12 +1,12 @@
 # frozen_string_literal: true
 
-require "rpms_rpc/mappings"
+require "rpms_rpc/api/location"
 
 module Lakeraven
   module EHR
     class LocationGateway
       def self.find(ien)
-        RpmsRpc::DataMapper.hospital_location.fetch_one(ien.to_s)
+        RpmsRpc::Location.find(ien)
       end
     end
   end
