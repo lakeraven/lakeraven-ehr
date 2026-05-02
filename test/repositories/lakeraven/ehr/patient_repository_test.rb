@@ -98,6 +98,37 @@ module Lakeraven
       end
 
       # =============================================================================
+      # SOURCE PREFERENCE
+      # =============================================================================
+
+      test "find defaults to rpc_only source" do
+        patient = PatientRepository.find(1)
+
+        assert_equal :rpc, patient.provenance[:rpms][:source]
+      end
+
+      test "find accepts source_preference rpc_only" do
+        patient = PatientRepository.find(1, source_preference: :rpc_only)
+
+        refute_nil patient
+        assert_equal :rpc, patient.provenance[:rpms][:source]
+      end
+
+      test "find accepts source_preference fhir_first" do
+        patient = PatientRepository.find(1, source_preference: :fhir_first)
+
+        refute_nil patient
+        # Falls back to RPC when FHIR client not configured
+        assert_includes [ :rpc, :fhir ], patient.provenance[:rpms][:source]
+      end
+
+      test "search accepts source_preference" do
+        patients = PatientRepository.search("Anderson", source_preference: :rpc_only)
+
+        assert patients.any?
+      end
+
+      # =============================================================================
       # MODEL DELEGATION
       # =============================================================================
 

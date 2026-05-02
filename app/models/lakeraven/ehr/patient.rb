@@ -246,7 +246,51 @@ module Lakeraven
         FHIR::PatientSerializer.call(self)
       end
 
-      # -- FHIR deserialization (ported from rpms_redux) ---------------------
+      # -- FHIR deserialization -----------------------------------------------
+
+      def self.from_fhir(hash)
+        hash = hash.transform_keys(&:to_s)
+        name_entry = Array(hash["name"]).first || {}
+        family = name_entry["family"].to_s
+        given = Array(name_entry["given"]).join(" ")
+        name = given.present? ? "#{family},#{given}" : family
+
+        ssn = Array(hash["identifier"]).find { |i| i["system"].to_s.include?("us-ssn") }&.dig("value")
+
+        attrs = {
+          dfn: hash["id"].to_i,
+          name: name,
+          dob: hash["birthDate"] ? Date.parse(hash["birthDate"]) : nil,
+          sex: case hash["gender"]
+               when "male" then "M"
+               when "female" then "F"
+               else "U"
+               end,
+          ssn: ssn
+        }
+
+        addr = Array(hash["address"]).first
+        if addr
+          attrs[:address_line1] = Array(addr["line"]).first
+          attrs[:city] = addr["city"]
+          attrs[:state] = addr["state"]
+          attrs[:zip_code] = addr["postalCode"]
+        end
+
+        phone = Array(hash["telecom"]).find { |t| t["system"] == "phone" }
+        attrs[:phone] = phone["value"] if phone
+
+        race_ext = Array(hash["extension"]).find { |e| e["url"].to_s.include?("us-core-race") }
+        if race_ext
+          text_ext = Array(race_ext["extension"]).find { |e| e["url"] == "text" }
+          attrs[:race] = text_ext["valueString"] if text_ext
+        end
+
+        tribal_ext = Array(hash["extension"]).find { |e| e["url"].to_s.include?("tribal-affiliation") }
+        attrs[:tribal_enrollment_number] = tribal_ext["valueString"] if tribal_ext
+
+        new(**attrs.compact)
+      end
 
       def self.from_fhir_attributes(fhir_resource)
         gender_code = map_fhir_gender_to_sex(fhir_resource.gender)
