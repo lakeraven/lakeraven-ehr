@@ -1,28 +1,25 @@
 # frozen_string_literal: true
 
-require "rpms_rpc/mappings"
+require "rpms_rpc/api/patient"
 
 module Lakeraven
   module EHR
     class PatientGateway
       class << self
         def find(dfn)
-          attrs = RpmsRpc::DataMapper.patient_select.fetch_one(dfn.to_s, extras: { dfn: dfn.to_i })
+          attrs = RpmsRpc::Patient.find(dfn.to_i)
           return nil unless attrs
-
-          extended = RpmsRpc::DataMapper.patient_id_info.fetch_one(dfn.to_s)
-          attrs.merge!(extended) if extended
 
           Patient.new(**attrs)
         end
 
         def search(name_pattern)
-          results = RpmsRpc::DataMapper.patient_list.fetch_many(name_pattern, "1")
+          results = RpmsRpc::Patient.search(name_pattern)
           results.map { |attrs| Patient.new(**attrs) }
         end
 
         def find_by_ssn(ssn)
-          attrs = RpmsRpc::DataMapper.patient_ssn.fetch_one(ssn)
+          attrs = RpmsRpc::Patient.find_by_ssn(ssn)
           attrs ? Patient.new(**attrs) : nil
         end
       end
