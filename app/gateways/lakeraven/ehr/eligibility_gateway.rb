@@ -1,16 +1,16 @@
 # frozen_string_literal: true
 
-require "rpms_rpc/mappings"
+require "rpms_rpc/api/vfc"
 
 module Lakeraven
   module EHR
     class EligibilityGateway
       def self.patient_eligibility(dfn)
-        RpmsRpc::DataMapper.vfc_eligibility.fetch_one(dfn.to_s) || { code: nil, label: nil }
+        RpmsRpc::VFC.eligibility(dfn)
       end
 
       def self.list_codes
-        RpmsRpc::DataMapper.vfc_eligibility_list.fetch_many
+        RpmsRpc::VFC.eligibility_codes
       end
     end
   end
