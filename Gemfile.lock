@@ -1,6 +1,6 @@
 GIT
   remote: https://github.com/lakeraven/rpms-rpc.git
-  revision: 03400976dacbedd6ca8c9345565ed7fe3cdc622c
+  revision: f7dfb35c127bbdc0e402105ef173e5f20fdaae8f
   branch: main
   specs:
     rpms-rpc (0.1.0)
