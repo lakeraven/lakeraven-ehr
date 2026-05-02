@@ -28,6 +28,19 @@ module Lakeraven
           end
 
           result
+        rescue => e
+          AuditEvent.create!(
+            event_type: "application",
+            action: "C",
+            outcome: "8",
+            agent_who_type: "Practitioner",
+            agent_who_identifier: provider_duz,
+            entity_type: "ORU",
+            entity_identifier: patient_dfn,
+            outcome_desc: "elr.lab_report.failed: #{e.message}"
+          )
+
+          { success: false, error: e.message }
         end
       end
     end
