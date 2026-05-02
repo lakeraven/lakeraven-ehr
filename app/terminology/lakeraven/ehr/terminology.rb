@@ -3,9 +3,9 @@
 module Lakeraven
   module EHR
     module Terminology
-      # Base class for terminology decorators.
+      # Base class for terminology serializers.
       # Pure transform — no I/O, no RPC calls, no database queries.
-      # Projects a code value into a terminology system using in-memory data.
+      # Projects a code value into a FHIR Coding using in-memory data.
       class Base
         attr_reader :code
 

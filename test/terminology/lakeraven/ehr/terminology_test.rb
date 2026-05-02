@@ -4,7 +4,7 @@ require "test_helper"
 
 module Lakeraven
   module EHR
-    class TerminologyDecoratorTest < ActiveSupport::TestCase
+    class TerminologySerializerTest < ActiveSupport::TestCase
       # =============================================================================
       # ICD-10 (US Clinical Modification — default)
       # =============================================================================
@@ -167,8 +167,8 @@ module Lakeraven
       # BASE CONTRACT
       # =============================================================================
 
-      test "all terminology decorators respond to code, system, display, to_coding, status" do
-        decorators = [
+      test "all terminology serializers respond to code, system, display, to_coding, status" do
+        serializers = [
           Terminology::ICD10.new("E11.9"),
           Terminology::LOINC.new("2339-0"),
           Terminology::RxNorm.new("197884"),
@@ -177,7 +177,7 @@ module Lakeraven
           Terminology::SNOMED.new("44054006")
         ]
 
-        decorators.each do |d|
+        serializers.each do |d|
           assert_respond_to d, :code
           assert_respond_to d, :system
           assert_respond_to d, :display

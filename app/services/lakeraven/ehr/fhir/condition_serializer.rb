@@ -6,7 +6,7 @@ module Lakeraven
   module EHR
     module FHIR
       # Serializes a Problem/Condition domain object to FHIR R4 Condition hash.
-      # Integrates terminology decorators for coded diagnoses.
+      # Integrates terminology serializers for coded diagnoses.
       class ConditionSerializer
         CLINICAL_STATUS_MAP = {
           "A" => { code: "active", display: "Active" },
