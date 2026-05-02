@@ -15,8 +15,8 @@ Given("a FHIR Bundle JSON with an AllergyIntolerance for patient {string}") do |
     {
       "resourceType" => "AllergyIntolerance",
       "patient" => { "reference" => "Patient/#{dfn}" },
-      "code" => { "text" => "Penicillin", "coding" => [{ "code" => "7980" }] },
-      "clinicalStatus" => { "coding" => [{ "code" => "active" }] }
+      "code" => { "text" => "Penicillin", "coding" => [ { "code" => "7980" } ] },
+      "clinicalStatus" => { "coding" => [ { "code" => "active" } ] }
     }
   ])
 end
@@ -26,8 +26,8 @@ Given("a FHIR Bundle JSON with a Condition for patient {string}") do |dfn|
     {
       "resourceType" => "Condition",
       "subject" => { "reference" => "Patient/#{dfn}" },
-      "code" => { "text" => "Type 2 Diabetes", "coding" => [{ "code" => "E11.9", "system" => "http://hl7.org/fhir/sid/icd-10-cm" }] },
-      "clinicalStatus" => { "coding" => [{ "code" => "active" }] }
+      "code" => { "text" => "Type 2 Diabetes", "coding" => [ { "code" => "E11.9", "system" => "http://hl7.org/fhir/sid/icd-10-cm" } ] },
+      "clinicalStatus" => { "coding" => [ { "code" => "active" } ] }
     }
   ])
 end
@@ -37,7 +37,7 @@ Given("a FHIR Bundle JSON with a MedicationRequest for patient {string}") do |df
     {
       "resourceType" => "MedicationRequest",
       "subject" => { "reference" => "Patient/#{dfn}" },
-      "medicationCodeableConcept" => { "text" => "Metformin 500mg", "coding" => [{ "code" => "860975" }] },
+      "medicationCodeableConcept" => { "text" => "Metformin 500mg", "coding" => [ { "code" => "860975" } ] },
       "status" => "active"
     }
   ])
@@ -49,13 +49,13 @@ Given("a FHIR Bundle JSON with allergies, conditions, and medications for patien
       "resourceType" => "AllergyIntolerance",
       "patient" => { "reference" => "Patient/#{dfn}" },
       "code" => { "text" => "Penicillin" },
-      "clinicalStatus" => { "coding" => [{ "code" => "active" }] }
+      "clinicalStatus" => { "coding" => [ { "code" => "active" } ] }
     },
     {
       "resourceType" => "Condition",
       "subject" => { "reference" => "Patient/#{dfn}" },
       "code" => { "text" => "Hypertension" },
-      "clinicalStatus" => { "coding" => [{ "code" => "active" }] }
+      "clinicalStatus" => { "coding" => [ { "code" => "active" } ] }
     },
     {
       "resourceType" => "MedicationRequest",
