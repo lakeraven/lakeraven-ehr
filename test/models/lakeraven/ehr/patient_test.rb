@@ -359,67 +359,42 @@ module Lakeraven
       end
 
       # =========================================================================
-      # DEPENDENCY INJECTION (Option B pilot)
+      # REPOSITORY DELEGATION
       # =========================================================================
 
-      test "gateway is configurable" do
+      test "find delegates to PatientRepository" do
+        patient = Patient.find(1)
+
+        assert_instance_of Patient, patient
+        assert_equal 1, patient.dfn
+        assert_equal "Anderson,Alice", patient.name
+      end
+
+      test "find_by_dfn delegates to PatientRepository" do
+        patient = Patient.find_by_dfn(1)
+
+        refute_nil patient
+        assert_equal 1, patient.dfn
+      end
+
+      test "search delegates to PatientRepository" do
+        results = Patient.search("Anderson")
+
+        assert results.any?
+        assert results.all? { |p| p.is_a?(Patient) }
+      end
+
+      test "find_by_ssn delegates to PatientRepository" do
+        patient = Patient.find_by_ssn("111-11-1111")
+
+        refute_nil patient
+        assert_instance_of Patient, patient
+      end
+
+      test "write gateway is still configurable" do
         assert Patient.respond_to?(:gateway)
         assert Patient.respond_to?(:gateway=)
-      end
-
-      test "gateway defaults to PatientGateway" do
         assert_equal PatientGateway, Patient.gateway
-      end
-
-      test "gateway can be swapped for testing" do
-        mock_gw = Object.new
-        def mock_gw.find(dfn)
-          Lakeraven::EHR::Patient.new(dfn: dfn, name: "MOCK,PATIENT", sex: "M")
-        end
-
-        original = Patient.gateway
-        begin
-          Patient.gateway = mock_gw
-          patient = Patient.find_by_dfn(42)
-          assert_equal "MOCK,PATIENT", patient.name
-          assert_equal 42, patient.dfn
-        ensure
-          Patient.gateway = original
-        end
-      end
-
-      test "search delegates to gateway" do
-        mock_gw = Object.new
-        def mock_gw.search(pattern)
-          [ Lakeraven::EHR::Patient.new(dfn: 1, name: "DOE,JOHN", sex: "M") ]
-        end
-
-        original = Patient.gateway
-        begin
-          Patient.gateway = mock_gw
-          results = Patient.search("DOE")
-          assert_equal 1, results.length
-          assert_equal "DOE,JOHN", results.first.name
-        ensure
-          Patient.gateway = original
-        end
-      end
-
-      test "find_by_ssn delegates to gateway" do
-        mock_gw = Object.new
-        def mock_gw.find_by_ssn(ssn)
-          Lakeraven::EHR::Patient.new(dfn: 1, name: "DOE,JOHN", sex: "M", ssn: ssn)
-        end
-
-        original = Patient.gateway
-        begin
-          Patient.gateway = mock_gw
-          patient = Patient.find_by_ssn("111-11-1111")
-          assert_equal "DOE,JOHN", patient.name
-          assert_equal "111-11-1111", patient.ssn
-        ensure
-          Patient.gateway = original
-        end
       end
 
       # =========================================================================
@@ -514,18 +489,14 @@ module Lakeraven
         end
       end
 
-      test "find via gateway returns patient" do
-        with_mock_gateway do |_gw|
-          created = Patient.create!(first_name: "Find", last_name: "Test", born_on: Date.parse("1970-01-01"), sex: "M")
-          found = Patient.find(created.dfn)
-          assert_equal created.dfn, found.dfn
-        end
+      test "find via repository returns patient" do
+        found = Patient.find(1)
+        assert_equal 1, found.dfn
+        assert_equal "Anderson,Alice", found.name
       end
 
-      test "find via mock gateway raises RecordNotFound for unknown DFN" do
-        with_mock_gateway do |_gw|
-          assert_raises(Patient::RecordNotFound) { Patient.find(99999) }
-        end
+      test "find raises RecordNotFound for unknown DFN via write gateway" do
+        assert_raises(Patient::RecordNotFound) { Patient.find(99999) }
       end
     end
   end
