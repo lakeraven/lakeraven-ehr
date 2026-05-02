@@ -106,6 +106,82 @@ module Lakeraven
         assert_equal 1, report.numerator_count
       end
 
+      # =============================================================================
+      # ADDITIONAL SCENARIOS (ported from rpms_redux)
+      # =============================================================================
+
+      test "observation outside period is not counted in numerator" do
+        service = build_service(
+          measure: @diabetes_measure,
+          conditions: [ build_condition("pt_1", "2.16.840.1.113883.3.464.1003.103.12.1001") ],
+          observations: [ build_observation("pt_1", 9.5, Date.new(2024, 6, 1)) ]
+        )
+
+        report = service.evaluate("CMS122v5", "pt_1", period: Date.new(2026, 1, 1)..Date.new(2026, 12, 31))
+        assert_equal 0, report.numerator_count
+      end
+
+      test "patient without qualifying condition is not in initial population" do
+        service = build_service(
+          measure: @diabetes_measure,
+          conditions: [],
+          observations: [ build_observation("pt_1", 9.5, Date.new(2026, 6, 1)) ]
+        )
+
+        report = service.evaluate("CMS122v5", "pt_1", period: Date.new(2026, 1, 1)..Date.new(2026, 12, 31))
+        assert_equal 0, report.initial_population_count
+      end
+
+      test "returns nil for non-existent measure" do
+        service = build_service(
+          measure: nil,
+          conditions: [],
+          observations: []
+        )
+
+        report = service.evaluate("NONEXISTENT", "pt_1", period: Date.new(2026, 1, 1)..Date.new(2026, 12, 31))
+        assert_nil report
+      end
+
+      test "report includes period dates" do
+        service = build_service(
+          measure: @diabetes_measure,
+          conditions: [ build_condition("pt_1", "2.16.840.1.113883.3.464.1003.103.12.1001") ],
+          observations: [ build_observation("pt_1", 8.0, Date.new(2026, 6, 1)) ]
+        )
+
+        report = service.evaluate("CMS122v5", "pt_1", period: Date.new(2026, 1, 1)..Date.new(2026, 12, 31))
+        assert_equal Date.new(2026, 1, 1), report.period_start
+        assert_equal Date.new(2026, 12, 31), report.period_end
+      end
+
+      test "report is individual type" do
+        service = build_service(
+          measure: @diabetes_measure,
+          conditions: [ build_condition("pt_1", "2.16.840.1.113883.3.464.1003.103.12.1001") ],
+          observations: [ build_observation("pt_1", 8.0, Date.new(2026, 6, 1)) ]
+        )
+
+        report = service.evaluate("CMS122v5", "pt_1", period: Date.new(2026, 1, 1)..Date.new(2026, 12, 31))
+        assert_equal "individual", report.report_type
+      end
+
+      test "evaluate_population excludes patients not in initial population" do
+        service = build_service(
+          measure: @diabetes_measure,
+          conditions: [
+            build_condition("pt_1", "2.16.840.1.113883.3.464.1003.103.12.1001")
+          ],
+          observations: [
+            build_observation("pt_1", 8.0, Date.new(2026, 6, 1)),
+            build_observation("pt_2", 9.0, Date.new(2026, 6, 1))
+          ]
+        )
+
+        report = service.evaluate_population("CMS122v5", %w[pt_1 pt_2], period: Date.new(2026, 1, 1)..Date.new(2026, 12, 31))
+        assert_equal 1, report.initial_population_count
+      end
+
       private
 
       def build_service(measure:, conditions: [], observations: [])

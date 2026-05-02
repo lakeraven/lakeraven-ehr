@@ -56,11 +56,12 @@ module Lakeraven
         @allergies.map do |a|
           allergen = a.respond_to?(:allergen) ? a.allergen : a[:allergen]
           severity_val = a.respond_to?(:severity) ? a.severity : a[:severity]
+          criticality_val = a.respond_to?(:criticality) ? a.criticality : a[:criticality]
 
           Alert.new(
             type: :allergy,
             description: allergen || (a.respond_to?(:description) ? a.description : a[:description]),
-            severity: map_allergy_severity(severity_val)
+            severity: map_allergy_severity(severity_val, criticality: criticality_val)
           )
         end
       end
@@ -73,12 +74,24 @@ module Lakeraven
         end
       end
 
-      def map_allergy_severity(severity)
-        case severity&.downcase
-        when "severe", "high" then :high
-        when "moderate" then :moderate
-        when "mild", "low" then :low
-        else :moderate # unknown severity defaults to moderate
+      def map_allergy_severity(severity, criticality: nil)
+        if severity.present?
+          case severity.downcase
+          when "severe", "high" then :high
+          when "moderate" then :moderate
+          when "mild", "low" then :low
+          else criticality_fallback(criticality)
+          end
+        else
+          criticality_fallback(criticality)
+        end
+      end
+
+      def criticality_fallback(criticality)
+        case criticality&.downcase
+        when "high" then :high
+        when "low", "unable-to-assess" then :low
+        else :moderate
         end
       end
     end
