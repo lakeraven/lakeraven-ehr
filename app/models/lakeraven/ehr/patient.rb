@@ -44,11 +44,40 @@ module Lakeraven
 
       class RecordNotFound < StandardError; end
 
+      # Provenance — set by repository at hydration time
+      attr_accessor :provenance
+
       # Validations
       validates :name, presence: true, if: -> { first_name.blank? && last_name.blank? }
       validates :sex, inclusion: { in: %w[M F U], allow_nil: true }
 
-      # -- Gateway DI -----------------------------------------------------------
+      # -- Public API (delegates to repository) --------------------------------
+
+      def self.find(dfn)
+        patient = PatientRepository.find(dfn)
+        raise RecordNotFound, "Couldn't find Patient with 'dfn'=#{dfn}" unless patient
+
+        patient
+      end
+
+      def self.find_by_dfn(dfn)
+        PatientRepository.find(dfn)
+      end
+
+      def self.search(name_pattern)
+        PatientRepository.search(name_pattern.to_s)
+      end
+
+      def self.search_by_ssn(ssn)
+        patient = find_by_ssn(ssn)
+        patient ? [ patient ] : []
+      end
+
+      def self.find_by_ssn(ssn)
+        PatientRepository.find_by_ssn(ssn)
+      end
+
+      # -- Write operations (remain on gateway for now) ------------------------
 
       class << self
         attr_writer :gateway
@@ -57,8 +86,6 @@ module Lakeraven
           @gateway || PatientGateway
         end
       end
-
-      # -- Persistence (ported from rpms_redux) --------------------------------
 
       def save
         return false unless valid?
@@ -87,34 +114,6 @@ module Lakeraven
 
       def self.create!(attributes = {})
         new(attributes).tap(&:save!)
-      end
-
-      def self.find(dfn)
-        patient = find_by_dfn(dfn)
-        raise RecordNotFound, "Couldn't find Patient with 'dfn'=#{dfn}" unless patient
-
-        patient
-      end
-
-      def self.find_by_dfn(dfn)
-        return nil unless dfn.present? && dfn.to_i.positive?
-
-        gateway.find(dfn.to_i)
-      end
-
-      def self.search(name_pattern)
-        gateway.search(name_pattern.to_s)
-      end
-
-      def self.search_by_ssn(ssn)
-        patient = find_by_ssn(ssn)
-        patient ? [ patient ] : []
-      end
-
-      def self.find_by_ssn(ssn)
-        return nil if ssn.blank?
-
-        gateway.find_by_ssn(ssn.to_s)
       end
 
       # -- Initialize with composite field sync ------------------------------
