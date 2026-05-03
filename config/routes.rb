@@ -32,7 +32,8 @@ Lakeraven::EHR::Engine.routes.draw do
   get "$export-status/:export_id", to: "bulk_exports#status", as: :bulk_export_status
   delete "$export-status/:export_id", to: "bulk_exports#cancel"
 
-  # SMART EHR Launch
+  # SMART discovery + EHR Launch
+  get ".well-known/smart-configuration", to: "smart_configuration#show"
   get "smart/launch", to: "smart_launch#show"
 
   # Backend Services JWT auth
