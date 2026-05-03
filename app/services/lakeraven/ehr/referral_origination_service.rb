@@ -3,14 +3,20 @@
 module Lakeraven
   module EHR
     # Orchestrates referral creation from the EHR side.
-    # Creates the ServiceRequest and prepares handoff data for the PRC engine.
+    # Validates the ServiceRequest and optionally pre-checks enrollment
+    # as clinical context for the ordering clinician.
+    #
+    # Enrollment pre-check is informational — it does not block the referral.
+    # If corvid is present, corvid enforces enrollment via the eligibility
+    # checklist. EHR-only customers still benefit from seeing enrollment
+    # status at point of referral.
     #
     # The EHR does NOT call corvid directly — it returns an origination result
     # that the host app uses to create the PrcReferral via corvid's adapter.
     class ReferralOriginationService
       OriginationResult = Struct.new(
-        :success, :service_request, :patient_identifier, :enrollment_status,
-        :coverage_summary, :errors,
+        :success, :service_request, :patient_identifier,
+        :enrollment_status, :errors,
         keyword_init: true
       ) do
         def success? = success
@@ -36,15 +42,11 @@ module Lakeraven
           )
         end
 
-        enrollment = check_enrollment(patient_dfn)
-        coverage = check_coverage(patient_dfn)
-
         OriginationResult.new(
           success: true,
           service_request: sr,
           patient_identifier: patient_dfn.to_s,
-          enrollment_status: enrollment,
-          coverage_summary: coverage,
+          enrollment_status: check_enrollment(patient_dfn),
           errors: []
         )
       end
@@ -52,20 +54,12 @@ module Lakeraven
       private
 
       def check_enrollment(patient_dfn)
-        return { verified: false } unless @enrollment_checker
+        return nil unless @enrollment_checker
 
         result = @enrollment_checker.call(patient_dfn)
         { verified: result[:enrolled] || false, tribe_name: result[:tribe_name] }
       rescue
-        { verified: false }
-      end
-
-      def check_coverage(patient_dfn)
-        return {} unless @coverage_checker
-
-        @coverage_checker.call(patient_dfn)
-      rescue
-        {}
+        nil
       end
     end
   end
