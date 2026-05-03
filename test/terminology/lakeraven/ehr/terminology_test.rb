@@ -4,7 +4,7 @@ require "test_helper"
 
 module Lakeraven
   module EHR
-    class TerminologySerializerTest < ActiveSupport::TestCase
+    class TerminologyMapperTest < ActiveSupport::TestCase
       # =============================================================================
       # ICD-10 (US Clinical Modification — default)
       # =============================================================================
@@ -167,7 +167,7 @@ module Lakeraven
       # BASE CONTRACT
       # =============================================================================
 
-      test "all terminology serializers respond to code, system, display, to_coding, status" do
+      test "all terminology mappers respond to code, system, display, to_coding, status" do
         serializers = [
           Terminology::ICD10.new("E11.9"),
           Terminology::LOINC.new("2339-0"),

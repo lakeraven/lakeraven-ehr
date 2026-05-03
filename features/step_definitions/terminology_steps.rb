@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# Terminology serializer step definitions
+# Terminology mapper step definitions
 
 Given("an ICD-10 code {string} with edition {string}") do |code, edition|
   @terminology = Lakeraven::EHR::Terminology::ICD10.new(code, edition: edition.to_sym)
