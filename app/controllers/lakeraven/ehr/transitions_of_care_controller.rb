@@ -21,7 +21,7 @@ module Lakeraven
           allergies: allergies,
           conditions: conditions,
           medications: medications,
-          author: {name: params[:author_name], npi: params[:author_npi]}
+          author: { name: params[:author_name], npi: params[:author_npi] }
         )
 
         render xml: ccda_xml, status: :created, content_type: "application/xml"

@@ -21,7 +21,7 @@ module Lakeraven
           params: ccda_xml,
           headers: @headers.merge("Content-Type" => "application/xml")
         # May succeed or fail on parse — but should not 500
-        assert_includes [201, 422], response.status
+        assert_includes [ 201, 422 ], response.status
       end
 
       test "POST /ccda_imports with empty body returns 400" do
@@ -34,7 +34,7 @@ module Lakeraven
       test "POST /ccda_imports requires auth" do
         post "/lakeraven-ehr/ccda_imports",
           params: "<ClinicalDocument/>",
-          headers: {"Content-Type" => "application/xml"}
+          headers: { "Content-Type" => "application/xml" }
         assert_response :unauthorized
       end
 
