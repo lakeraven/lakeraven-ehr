@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
-Feature: Terminology serializers
+Feature: Terminology mappers
   As a healthcare system
-  I need to serialize clinical codes into standard terminology systems
+  I need to map clinical codes into standard terminology systems
   So that coded data is interoperable across markets
 
   # --- ICD-10 ---
