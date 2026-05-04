@@ -28,11 +28,11 @@ module Lakeraven
         if result.success?
           render json: {
             resourceType: "OperationOutcome",
-            issue: [{
+            issue: [ {
               severity: "information",
               code: "informational",
               diagnostics: "C-CDA imported successfully for reconciliation"
-            }]
+            } ]
           }, status: :created, content_type: FHIR_CONTENT_TYPE
         else
           render_operation_outcome(
