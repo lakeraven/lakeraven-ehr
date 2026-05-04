@@ -27,6 +27,10 @@ Lakeraven::EHR::Engine.routes.draw do
     end
   end
 
+  # Transitions of Care — ONC §170.315(b)(1)
+  resources :transitions_of_care, only: [:create]
+  resources :ccda_imports, only: [:create]
+
   # Exports — ONC §170.315(b)(10) + (g)(10)
   resources :exports, only: [ :create, :show, :destroy ] do
     resources :files, only: [ :show ], controller: "export_files", param: :file_name
