@@ -12,12 +12,25 @@ module Lakeraven
           return render_not_found("Patient", params[:patient_dfn])
         end
 
-        allergies = AllergyIntolerance.for_patient(params[:patient_dfn]) rescue []
-        conditions = Condition.for_patient(params[:patient_dfn]) rescue []
-        medications = MedicationRequest.for_patient(params[:patient_dfn]) rescue []
+        allergies = (AllergyIntolerance.for_patient(params[:patient_dfn]) rescue [])
+          .map { |a| { code: a.allergen_code, display: a.allergen, code_system: nil } }
+        conditions = (Condition.for_patient(params[:patient_dfn]) rescue [])
+          .map { |c| { code: c.code, display: c.display, code_system: c.code_system } }
+        medications = (MedicationRequest.for_patient(params[:patient_dfn]) rescue [])
+          .map { |m| { code: m.medication_code, display: m.medication_display, code_system: nil } }
+
+        # CcdaGenerator expects hashes until #233 is resolved
+        name_parts = patient.name.to_s.split(",", 2)
+        patient_hash = {
+          dfn: patient.dfn.to_s,
+          name: { family: name_parts[0]&.strip, given: name_parts[1]&.strip },
+          dob: patient.dob,
+          sex: patient.sex,
+          address: { street: patient.address_line1, city: patient.city, state: patient.state, zip: patient.zip_code }
+        }
 
         ccda_xml = CcdaGenerator.generate(
-          patient: patient,
+          patient: patient_hash,
           allergies: allergies,
           conditions: conditions,
           medications: medications,
