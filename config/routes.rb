@@ -27,10 +27,10 @@ Lakeraven::EHR::Engine.routes.draw do
     end
   end
 
-  # Bulk export (FHIR $export)
-  get "bulk-export-files/:export_id/:file_name", to: "bulk_exports#download", as: :bulk_export_download
-  get "$export-status/:export_id", to: "bulk_exports#status", as: :bulk_export_status
-  delete "$export-status/:export_id", to: "bulk_exports#cancel"
+  # Exports — ONC §170.315(b)(10) + (g)(10)
+  resources :exports, only: [ :create, :show, :destroy ] do
+    resources :files, only: [ :show ], controller: "export_files", param: :file_name
+  end
 
   # SMART discovery + EHR Launch
   get ".well-known/smart-configuration", to: "smart_configuration#show"
