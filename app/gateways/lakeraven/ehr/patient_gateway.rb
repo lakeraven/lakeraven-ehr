@@ -22,6 +22,14 @@ module Lakeraven
           attrs = RpmsRpc::Patient.find_by_ssn(ssn)
           attrs ? Patient.new(**attrs) : nil
         end
+
+        # Chart-banner projection — returns the issue-#60 contract hash or nil.
+        # Delegates to RpmsRpc::Patient.brief_header (lakeraven/rpms-rpc#60).
+        # Coerces dfn to_i to match the convention used by `find` and
+        # `find_by_ssn` on this gateway.
+        def brief_header(dfn)
+          RpmsRpc::Patient.brief_header(dfn.to_i)
+        end
       end
     end
   end
