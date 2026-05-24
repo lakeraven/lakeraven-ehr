@@ -12,12 +12,17 @@ module Lakeraven
           return render_not_found("Patient", params[:patient_dfn])
         end
 
+        # The clinical *.for_patient methods may return either model instances
+        # or raw attribute hashes depending on whether the gateway has been
+        # updated to wrap responses. Read defensively until #233 normalizes.
+        attr = ->(item, key) { item.is_a?(Hash) ? item[key] : item.public_send(key) }
+
         allergies = (AllergyIntolerance.for_patient(params[:patient_dfn]) rescue [])
-          .map { |a| { code: a.allergen_code, display: a.allergen, code_system: nil } }
+          .map { |a| { code: attr.call(a, :allergen_code), display: attr.call(a, :allergen), code_system: nil } }
         conditions = (Condition.for_patient(params[:patient_dfn]) rescue [])
-          .map { |c| { code: c.code, display: c.display, code_system: c.code_system } }
+          .map { |c| { code: attr.call(c, :code), display: attr.call(c, :display), code_system: attr.call(c, :code_system) } }
         medications = (MedicationRequest.for_patient(params[:patient_dfn]) rescue [])
-          .map { |m| { code: m.medication_code, display: m.medication_display, code_system: nil } }
+          .map { |m| { code: attr.call(m, :medication_code), display: attr.call(m, :medication_display), code_system: nil } }
 
         # CcdaGenerator expects hashes until #233 is resolved
         name_parts = patient.name.to_s.split(",", 2)
