@@ -42,8 +42,10 @@ module Lakeraven
         assert_equal "Normal", call[:opts][:finding]
       end
 
-      test "default_provider is RpmsRpc::ExamComponent" do
-        assert_equal ::RpmsRpc::ExamComponent, ExamComponentGateway.default_provider
+      test "default_provider resolves to RpmsRpc::ExamComponent when the gem ships it" do
+        provider = ExamComponentGateway.default_provider
+        refute_nil provider, "expected RpmsRpc::ExamComponent to be loaded via the gateway's guarded require"
+        assert_equal "RpmsRpc::ExamComponent", provider.name
       end
     end
   end

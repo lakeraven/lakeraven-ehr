@@ -44,8 +44,10 @@ module Lakeraven
         assert_equal({ primary: true }, call[:opts][:modifiers])
       end
 
-      test "default_provider is RpmsRpc::Pov" do
-        assert_equal ::RpmsRpc::Pov, PovGateway.default_provider
+      test "default_provider resolves to RpmsRpc::Pov when the gem ships it" do
+        provider = PovGateway.default_provider
+        refute_nil provider, "expected RpmsRpc::Pov to be loaded via the gateway's guarded require"
+        assert_equal "RpmsRpc::Pov", provider.name
       end
     end
   end

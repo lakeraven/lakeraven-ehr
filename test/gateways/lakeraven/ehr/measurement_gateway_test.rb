@@ -46,8 +46,10 @@ module Lakeraven
         assert_equal "STANDING", call[:opts][:qualifier]
       end
 
-      test "default_provider is RpmsRpc::Measurement" do
-        assert_equal ::RpmsRpc::Measurement, MeasurementGateway.default_provider
+      test "default_provider resolves to RpmsRpc::Measurement when the gem ships it" do
+        provider = MeasurementGateway.default_provider
+        refute_nil provider, "expected RpmsRpc::Measurement to be loaded via the gateway's guarded require"
+        assert_equal "RpmsRpc::Measurement", provider.name
       end
     end
   end

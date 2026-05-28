@@ -43,8 +43,10 @@ module Lakeraven
         assert_equal "Daily smoker", call[:opts][:narrative]
       end
 
-      test "default_provider is RpmsRpc::HealthFactor" do
-        assert_equal ::RpmsRpc::HealthFactor, HealthFactorGateway.default_provider
+      test "default_provider resolves to RpmsRpc::HealthFactor when the gem ships it" do
+        provider = HealthFactorGateway.default_provider
+        refute_nil provider, "expected RpmsRpc::HealthFactor to be loaded via the gateway's guarded require"
+        assert_equal "RpmsRpc::HealthFactor", provider.name
       end
     end
   end
