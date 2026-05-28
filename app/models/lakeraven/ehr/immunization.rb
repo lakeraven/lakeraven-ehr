@@ -49,7 +49,8 @@ module Lakeraven
       end
 
       def self.for_patient(dfn)
-        gateway.for_patient(dfn)
+        dfn_s = dfn.to_s
+        Array(gateway.for_patient(dfn_s)).map { |record| new(record.merge(patient_dfn: dfn_s)) }
       end
 
       def self.find_by_ien(ien)
