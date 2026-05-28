@@ -11,6 +11,10 @@ module Lakeraven
         RpmsRpc::Referral.for_patient(dfn.to_s)
       end
 
+      def self.create(dfn, params)
+        RpmsRpc::Referral.create(dfn.to_s, params)
+      end
+
       def self.delete(ien, reason: nil)
         referral = find_referral(ien)
         return { success: false, error: "Referral not found", ien: ien } unless referral
