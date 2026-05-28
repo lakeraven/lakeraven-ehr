@@ -36,20 +36,10 @@ module Lakeraven
         assert_equal [ { dfn: "8791", visit_ien: "2090061" } ], fake.calls
       end
 
-      test "default_provider is nil when RpmsRpc::Reminders is undefined" do
-        # In the current gem state RpmsRpc::Reminders has not shipped, so
-        # the default provider should be nil and for_visit should return [].
-        if defined?(::RpmsRpc::Reminders) && ::RpmsRpc::Reminders.respond_to?(:for_visit)
-          skip "RpmsRpc::Reminders has shipped; remove this skip when the gem update lands"
-        end
-        assert_nil RemindersGateway.default_provider
-        assert_equal [], RemindersGateway.for_visit(8791, 2090061)
-      end
-
-      test "default_provider returns RpmsRpc::Reminders when it ships" do
-        skip "Requires real RpmsRpc::Reminders.for_visit (lakeraven/rpms-rpc#59)" unless
-          defined?(::RpmsRpc::Reminders) && ::RpmsRpc::Reminders.respond_to?(:for_visit)
-        assert_equal ::RpmsRpc::Reminders, RemindersGateway.default_provider
+      test "default_provider resolves to RpmsRpc::Reminders now that the gem ships it" do
+        provider = RemindersGateway.default_provider
+        refute_nil provider, "expected RpmsRpc::Reminders to be loaded via the gateway's guarded require"
+        assert_equal "RpmsRpc::Reminders", provider.name
       end
     end
   end
