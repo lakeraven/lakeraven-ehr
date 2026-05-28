@@ -53,7 +53,8 @@ module Lakeraven
       end
 
       def self.find_by_ien(ien)
-        gateway.find(ien)
+        record = gateway.find(ien)
+        record && new(record)
       end
 
       def self.resource_class
