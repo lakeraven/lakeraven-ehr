@@ -98,6 +98,42 @@ module Lakeraven
         end
       end
 
+      # The gateway returns a structured Hash from RpmsRpc::Immunization.find;
+      # find_by_ien must wrap that into an Immunization instance so callers
+      # like VaersExportService can use the attribute interface.
+      test "find_by_ien wraps the gateway hash into an Immunization instance" do
+        mock_gw = Object.new
+        def mock_gw.find(_ien)
+          { ien: "IMM-1", vaccine_code: "207", vaccine_display: "COVID-19 Pfizer",
+            lot_number: "EX1234", occurrence_datetime: Time.utc(2026, 1, 15, 10, 0, 0) }
+        end
+
+        original = Immunization.gateway
+        begin
+          Immunization.gateway = mock_gw
+          result = Immunization.find_by_ien("IMM-1")
+
+          assert_kind_of Lakeraven::EHR::Immunization, result
+          assert_equal "COVID-19 Pfizer", result.vaccine_display
+          assert_equal "EX1234", result.lot_number
+        ensure
+          Immunization.gateway = original
+        end
+      end
+
+      test "find_by_ien returns nil when the gateway returns nil" do
+        mock_gw = Object.new
+        def mock_gw.find(_ien) = nil
+
+        original = Immunization.gateway
+        begin
+          Immunization.gateway = mock_gw
+          assert_nil Immunization.find_by_ien("999999")
+        ensure
+          Immunization.gateway = original
+        end
+      end
+
       # -- FHIR serialization --------------------------------------------------
 
       test "to_fhir returns Immunization resource" do

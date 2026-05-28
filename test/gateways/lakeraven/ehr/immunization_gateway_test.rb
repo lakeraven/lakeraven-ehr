@@ -2,53 +2,90 @@
 
 require "test_helper"
 
-# Tests for ImmunizationGateway — immunization/allergy list via ORQQAL LIST.
-# Note: the EHR ImmunizationGateway currently delegates to allergy_list mapping
-# (to be expanded to BIPC IMMLIST when immunization-specific RPCs are wired).
-# Uses mock data seeded in test_helper.rb.
+# Tests for ImmunizationGateway — wraps RpmsRpc::Immunization.
+# Replaces the previous Allergy-stub delegation (wrong domain) now that
+# rpms-rpc ships a structured Immunization read (lakeraven/rpms-rpc#107).
 module Lakeraven
   module EHR
     class ImmunizationGatewayTest < ActiveSupport::TestCase
-      setup do
-        seed_immunization_data
+      class FakeImmunizationAPI
+        attr_reader :calls
+
+        def initialize(returns: {})
+          @returns = returns
+          @calls = []
+        end
+
+        def for_patient(dfn)
+          @calls << { method: :for_patient, args: [ dfn ] }
+          @returns[:for_patient] || []
+        end
+
+        def find(ien)
+          @calls << { method: :find, args: [ ien ] }
+          @returns[:find]
+        end
       end
 
-      # === for_patient ===
+      STRUCTURED_RECORD = {
+        ien: 7001,
+        vaccine_code: "207",
+        vaccine_display: "COVID-19 Pfizer-BioNTech, mRNA",
+        status: "completed",
+        lot_number: "EX1234",
+        expiration_date: Date.new(2026, 12, 31),
+        site: "Left deltoid",
+        route: "IM",
+        performer_duz: "301",
+        performer_name: "MARTINEZ,SARAH",
+        occurrence_datetime: Time.utc(2026, 1, 15, 10, 0, 0),
+        dose_quantity: 0.3,
+        dose_unit: "mL",
+        manufacturer: "Pfizer-BioNTech",
+        vfc_eligibility_code: "V04",
+        funding_source: "VFC"
+      }.freeze
 
-      test "for_patient returns array" do
-        results = ImmunizationGateway.for_patient(1)
+      # --- via: nil ---
 
-        assert results.is_a?(Array), "Should return array"
+      test "for_patient returns empty when no provider is available" do
+        assert_equal [], ImmunizationGateway.for_patient(1, via: nil)
       end
 
-      test "for_patient returns seeded data" do
-        results = ImmunizationGateway.for_patient(1)
-
-        assert results.length >= 1, "Should find seeded immunization/allergy data"
+      test "find returns nil when no provider is available" do
+        assert_nil ImmunizationGateway.find(7001, via: nil)
       end
 
-      test "for_patient parses allergy fields" do
-        results = ImmunizationGateway.for_patient(1)
-        return skip "No data seeded" if results.empty?
+      # --- delegation + coercion ---
 
-        entry = results.first
-        assert entry.key?(:allergen), "Entry should have allergen"
+      test "for_patient delegates with dfn coerced to a string and returns structured records" do
+        fake = FakeImmunizationAPI.new(returns: { for_patient: [ STRUCTURED_RECORD ] })
+
+        result = ImmunizationGateway.for_patient(1, via: fake)
+
+        assert_equal 1, result.length
+        assert_equal "207", result.first[:vaccine_code]
+        assert_equal "EX1234", result.first[:lot_number]
+        assert_equal "V04", result.first[:vfc_eligibility_code]
+        assert_equal [ "1" ], fake.calls.first[:args]
       end
 
-      test "for_patient returns empty for unknown patient" do
-        results = ImmunizationGateway.for_patient(999999)
+      test "find delegates with ien coerced to a string and returns a single record" do
+        fake = FakeImmunizationAPI.new(returns: { find: STRUCTURED_RECORD })
 
-        assert results.is_a?(Array), "Should return array"
-        assert_equal 0, results.length
+        result = ImmunizationGateway.find(7001, via: fake)
+
+        assert_equal "207", result[:vaccine_code]
+        assert_equal "Pfizer-BioNTech", result[:manufacturer]
+        assert_equal [ "7001" ], fake.calls.first[:args]
       end
 
-      private
+      # --- default_provider ---
 
-      def seed_immunization_data
-        RpmsRpc.client.seed_keyed_collection(:allergy_list, "1", [
-          { allergen: "PENICILLIN", reaction: "RASH", severity: "MODERATE" },
-          { allergen: "ASPIRIN", reaction: "HIVES", severity: "MILD" }
-        ])
+      test "default_provider resolves to RpmsRpc::Immunization now that the gem ships it" do
+        provider = ImmunizationGateway.default_provider
+        refute_nil provider, "expected RpmsRpc::Immunization to be loaded via the gateway's guarded require"
+        assert_equal "RpmsRpc::Immunization", provider.name
       end
     end
   end
