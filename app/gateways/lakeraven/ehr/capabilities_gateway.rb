@@ -1,6 +1,10 @@
 # frozen_string_literal: true
 
-require "rpms_rpc/capabilities"
+begin
+  require "rpms_rpc/capabilities"
+rescue LoadError
+  # rpms-rpc gem does not yet expose RpmsRpc::Capabilities.imaging_user?.
+end
 
 module Lakeraven
   module EHR
@@ -13,10 +17,17 @@ module Lakeraven
       UserId = Struct.new(:duz)
       private_constant :UserId
 
-      def self.imaging_user?(duz)
+      def self.imaging_user?(duz, via: default_provider)
+        return false if via.nil?
         return false if duz.nil? || duz.to_s.strip.empty?
 
-        RpmsRpc::Capabilities.imaging_user?(UserId.new(duz.to_s))
+        via.imaging_user?(UserId.new(duz.to_s))
+      end
+
+      def self.default_provider
+        return nil unless defined?(::RpmsRpc::Capabilities) &&
+                          ::RpmsRpc::Capabilities.respond_to?(:imaging_user?)
+        ::RpmsRpc::Capabilities
       end
     end
   end
