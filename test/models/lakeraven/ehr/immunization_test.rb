@@ -81,10 +81,14 @@ module Lakeraven
         assert_equal ImmunizationGateway, Immunization.gateway
       end
 
-      test "for_patient delegates to gateway" do
+      # The gateway returns Array of structured Hashes from
+      # RpmsRpc::Immunization.for_patient; the model class method wraps
+      # each into an Immunization instance and injects patient_dfn from
+      # the caller's argument (the wire hash doesn't carry it).
+      test "for_patient wraps each gateway hash into an Immunization instance with patient_dfn injected" do
         mock_gw = Object.new
         def mock_gw.for_patient(_dfn)
-          [ Lakeraven::EHR::Immunization.new(ien: "99", patient_dfn: "1", vaccine_display: "MOCK") ]
+          [ { ien: 99, vaccine_code: "207", vaccine_display: "MOCK" } ]
         end
 
         original = Immunization.gateway
@@ -92,7 +96,9 @@ module Lakeraven
           Immunization.gateway = mock_gw
           results = Immunization.for_patient(1)
           assert_equal 1, results.length
+          assert_kind_of Lakeraven::EHR::Immunization, results.first
           assert_equal "MOCK", results.first.vaccine_display
+          assert_equal "1", results.first.patient_dfn
         ensure
           Immunization.gateway = original
         end
