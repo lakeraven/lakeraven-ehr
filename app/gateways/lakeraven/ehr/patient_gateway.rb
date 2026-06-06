@@ -10,17 +10,17 @@ module Lakeraven
           attrs = RpmsRpc::Patient.find(dfn.to_i)
           return nil unless attrs
 
-          Patient.new(**attrs)
+          build_patient(attrs)
         end
 
         def search(name_pattern)
           results = RpmsRpc::Patient.search(name_pattern)
-          results.map { |attrs| Patient.new(**attrs) }
+          results.map { |attrs| build_patient(attrs) }
         end
 
         def find_by_ssn(ssn)
           attrs = RpmsRpc::Patient.find_by_ssn(ssn)
-          attrs ? Patient.new(**attrs) : nil
+          attrs ? build_patient(attrs) : nil
         end
 
         # Chart-banner projection — returns the issue-#60 contract hash or nil.
@@ -29,6 +29,16 @@ module Lakeraven
         # `find_by_ssn` on this gateway.
         def brief_header(dfn)
           RpmsRpc::Patient.brief_header(dfn.to_i)
+        end
+
+        private
+
+        # rpms-rpc returns fields beyond the Patient model's declared
+        # attributes (race_code, site_ien, etc.); slice to model.attribute_names
+        # so ActiveModel doesn't raise UnknownAttributeError on the extras.
+        def build_patient(attrs)
+          known = Patient.attribute_names.map(&:to_sym)
+          Patient.new(**attrs.slice(*known))
         end
       end
     end

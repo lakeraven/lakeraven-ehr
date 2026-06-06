@@ -8,15 +8,17 @@ module Lakeraven
     class PractitionerTest < ActiveSupport::TestCase
       # -- find_by_ien -----------------------------------------------------------
 
-      test "find_by_ien returns a Practitioner for a known IEN" do
+      test "find_by_ien returns a Practitioner for the session user IEN" do
+        # ORWU USERINFO only returns the authenticated session user (see
+        # rpms-rpc rr-fyf). specialty / npi / dea_number / provider_class
+        # / phone / title / service_section are not in its response and
+        # will only populate when a BHDPTRPC NEWPERSON or DDR LISTER
+        # path lands.
         prac = Practitioner.find_by_ien(101)
         assert_not_nil prac
         assert_kind_of Practitioner, prac
         assert_equal 101, prac.ien
         assert_equal "MARTINEZ,SARAH", prac.name
-        assert_equal "Cardiology", prac.specialty
-        assert_equal "1234567890", prac.npi
-        assert_equal "Physician", prac.provider_class
       end
 
       test "find_by_ien returns nil for unknown IEN" do
@@ -110,7 +112,10 @@ module Lakeraven
       end
 
       test "to_fhir includes NPI identifier" do
-        prac = Practitioner.find_by_ien(101)
+        # to_fhir is a serialization test; construct directly so it's
+        # decoupled from the gateway (which currently can't surface NPI
+        # — only the session user's basic identity comes through).
+        prac = Practitioner.new(ien: 101, name: "MARTINEZ,SARAH", npi: "1234567890")
         fhir = prac.to_fhir
 
         npi_id = fhir[:identifier].find { |id| id[:system]&.include?("npi") }
@@ -118,14 +123,13 @@ module Lakeraven
       end
 
       test "to_fhir includes qualification" do
-        prac = Practitioner.find_by_ien(101)
-        fhir = prac.to_fhir
-
+        prac = Practitioner.new(ien: 101, name: "MARTINEZ,SARAH",
+                                 specialty: "Cardiology", provider_class: "Physician")
         assert prac.to_fhir[:qualification]&.any?
       end
 
       test "to_fhir includes telecom" do
-        prac = Practitioner.find_by_ien(101)
+        prac = Practitioner.new(ien: 101, name: "MARTINEZ,SARAH", phone: "907-555-9999")
         fhir = prac.to_fhir
 
         telecom = fhir[:telecom]&.first
