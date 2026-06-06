@@ -11,7 +11,12 @@ module Lakeraven
           return nil unless attrs
           return nil if attrs[:name] == "-1"
 
-          Practitioner.new(**attrs)
+          # ORWU USERINFO returns fields beyond what the Practitioner
+          # model declares (duz, user_class, kernel_domain, site_ien);
+          # slice to the model's known attribute names so ActiveModel
+          # doesn't raise UnknownAttributeError.
+          known = Practitioner.attribute_names.map(&:to_sym)
+          Practitioner.new(**attrs.slice(*known))
         end
 
         def search(name_pattern)

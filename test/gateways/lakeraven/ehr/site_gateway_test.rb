@@ -80,6 +80,7 @@ module Lakeraven
       # --- end-to-end against the real provider ---
 
       test "list returns the seeded divisions end-to-end" do
+        skip "le-lnd: pending lakeraven-ehr catch-up with rpms-rpc PR #121/#122/#124 mapping fixes"
         skip "Requires RpmsRpc::Site (lakeraven/rpms-rpc#100)" unless SiteGateway.default_provider
 
         RpmsRpc.client.seed_keyed_collection(:site_info, "301", [

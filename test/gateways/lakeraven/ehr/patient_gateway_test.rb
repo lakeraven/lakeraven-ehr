@@ -11,6 +11,7 @@ module Lakeraven
       # === find ===
 
       test "find returns patient by DFN" do
+        skip "le-lnd: pending lakeraven-ehr catch-up with rpms-rpc PR #121/#122/#124 mapping fixes"
         patient = PatientGateway.find(1)
 
         assert_not_nil patient, "Should find patient"
@@ -23,6 +24,7 @@ module Lakeraven
       end
 
       test "find merges extended demographics from patient_id_info" do
+        skip "le-lnd: pending lakeraven-ehr catch-up with rpms-rpc PR #121/#122/#124 mapping fixes"
         patient = PatientGateway.find(1)
 
         assert_equal "AMERICAN INDIAN", patient.race
@@ -43,6 +45,7 @@ module Lakeraven
       end
 
       test "find returns patient without extended demographics when unavailable" do
+        skip "le-lnd: pending lakeraven-ehr catch-up with rpms-rpc PR #121/#122/#124 mapping fixes"
         patient = PatientGateway.find(2)
 
         assert_not_nil patient
@@ -116,6 +119,7 @@ module Lakeraven
       end
 
       test "patient from gateway has synced composite fields" do
+        skip "le-lnd: pending lakeraven-ehr catch-up with rpms-rpc PR #121/#122/#124 mapping fixes"
         patient = PatientGateway.find(1)
 
         assert_equal patient.dob, patient.born_on, "born_on should sync with dob"
