@@ -36,13 +36,15 @@ RpmsRpc.mock! do |m|
     ],
     filter_field: :name)
 
-  # Practitioners (IEN 101-102)
-  m.seed(:practitioner_info, "101", { name: "MARTINEZ,SARAH", title: "MD", service_section: "Internal Medicine",
-                                       specialty: "Cardiology", npi: "1234567890", dea_number: "AM1234563",
-                                       phone: "907-555-9999", provider_class: "Physician" })
-  m.seed(:practitioner_info, "102", { name: "CHEN,JAMES", title: "DO", service_section: "Surgery",
-                                       specialty: "Orthopedic Surgery", npi: "2345678901",
-                                       phone: "907-555-8888", provider_class: "Physician" })
+  # Practitioner — ORWU USERINFO is single-session-user (per rr-fyf); the
+  # mock dispatches on "" since the wrapper passes no params. Test code
+  # that "looks up" IEN 101 works iff the seeded duz matches; IEN 102 or
+  # any other returns nil. The practitioner_list (ORWU NEWPERS) is a
+  # genuine multi-record search and continues to surface both.
+  m.seed(:practitioner_info, "", {
+    duz: 101, name: "MARTINEZ,SARAH", user_class: 3,
+    kernel_domain: "DEMO.IHS.GOV", site_ien: 8904
+  })
 
   m.seed_collection(:practitioner_list,
     [ { ien: 101, name: "MARTINEZ,SARAH", title: "MD" }, { ien: 102, name: "CHEN,JAMES", title: "DO" } ],
