@@ -25,7 +25,6 @@ module Lakeraven
       end
 
       test "response includes NPI identifier" do
-
         skip "le-lnd: pending lakeraven-ehr catch-up with rpms-rpc PR #121/#122/#124 mapping fixes"
         get "/lakeraven-ehr/Practitioner/101", headers: @headers
         body = JSON.parse(response.body)

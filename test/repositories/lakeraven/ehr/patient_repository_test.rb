@@ -10,7 +10,6 @@ module Lakeraven
       # =============================================================================
 
       test "find returns Patient for known DFN" do
-
         skip "le-lnd: pending lakeraven-ehr catch-up with rpms-rpc PR #121/#122/#124 mapping fixes"
         patient = PatientRepository.find(1)
 
@@ -29,7 +28,6 @@ module Lakeraven
       end
 
       test "find merges extended demographics" do
-
         skip "le-lnd: pending lakeraven-ehr catch-up with rpms-rpc PR #121/#122/#124 mapping fixes"
         patient = PatientRepository.find(1)
 
@@ -39,7 +37,6 @@ module Lakeraven
       end
 
       test "find includes tribal enrollment data" do
-
         skip "le-lnd: pending lakeraven-ehr catch-up with rpms-rpc PR #121/#122/#124 mapping fixes"
         patient = PatientRepository.find(1)
 

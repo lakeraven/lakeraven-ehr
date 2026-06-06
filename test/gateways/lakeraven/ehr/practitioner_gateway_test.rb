@@ -11,7 +11,6 @@ module Lakeraven
       # === find ===
 
       test "find returns practitioner by IEN" do
-
         skip "le-lnd: pending lakeraven-ehr catch-up with rpms-rpc PR #121/#122/#124 mapping fixes"
         practitioner = PractitionerGateway.find(101)
 
@@ -29,7 +28,6 @@ module Lakeraven
       end
 
       test "find returns second practitioner" do
-
         skip "le-lnd: pending lakeraven-ehr catch-up with rpms-rpc PR #121/#122/#124 mapping fixes"
         practitioner = PractitionerGateway.find(102)
 
@@ -85,7 +83,6 @@ module Lakeraven
       end
 
       test "practitioner can_prescribe_controlled reflects DEA presence" do
-
         skip "le-lnd: pending lakeraven-ehr catch-up with rpms-rpc PR #121/#122/#124 mapping fixes"
         with_dea = PractitionerGateway.find(101)
         assert with_dea.can_prescribe_controlled?, "Practitioner with DEA should be able to prescribe"
