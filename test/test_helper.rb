@@ -17,14 +17,24 @@ RpmsRpc.mock! do |m|
   m.seed(:patient_select, "2", { name: "MOUSE,MICKEY M", sex: "M", dob: Date.parse("2010-02-14"), ssn: "000009999", age: 16 })
   m.seed(:patient_select, "3", { name: "DOE,JANE", sex: "F", dob: Date.parse("1990-12-25"), ssn: "555667777", age: 35 })
 
-  m.seed(:patient_id_info, "1", { race: "AMERICAN INDIAN", address_line1: "123 Main St", city: "Anchorage", state: "AK",
-                                   zip_code: "99501", phone: "907-555-1234", tribal_enrollment_number: "ANLC-12345",
-                                   service_area: "Anchorage", coverage_type: "IHS" })
-  m.seed(:patient_id_info, "2", { race: "AMERICAN INDIAN", address_line1: "456 Disney Ave", city: "Orlando", state: "FL",
-                                   zip_code: "32801", phone: "555-5678", tribal_enrollment_number: "NN-67890",
-                                   service_area: "Arizona", coverage_type: "IHS/Medicaid" })
-  m.seed(:patient_id_info, "3", { race: "AMERICAN INDIAN", tribal_enrollment_number: "CNO-24680",
-                                   service_area: "Oklahoma", coverage_type: "IHS" })
+  # patient_id_info now returns the identifier projection from ORWPT ID INFO
+  # (SSN/DOB/sex/race_code/site_ien/name) — not the extended demographics
+  # that the prior mapping hallucinated. Address, phone, tribal enrollment,
+  # service_area, coverage_type aren't surfaceable until BHDPTRPC is
+  # installed on staging (rr-6jr). Tests that need those fields construct
+  # Patient.new(...) directly rather than going through the gateway.
+  m.seed(:patient_id_info, "1", {
+    ssn: "111-11-1111", dob: Date.parse("1980-05-15"), sex: "F",
+    race_code: "I", site_ien: 7819, name: "Anderson,Alice"
+  })
+  m.seed(:patient_id_info, "2", {
+    ssn: "000009999", dob: Date.parse("2010-02-14"), sex: "M",
+    race_code: "I", site_ien: 7819, name: "MOUSE,MICKEY M"
+  })
+  m.seed(:patient_id_info, "3", {
+    ssn: "555667777", dob: Date.parse("1990-12-25"), sex: "F",
+    race_code: "I", site_ien: 7819, name: "DOE,JANE"
+  })
 
   m.seed(:patient_ssn, "111-11-1111", { dfn: 1, name: "Anderson,Alice", ssn: "111-11-1111" })
 

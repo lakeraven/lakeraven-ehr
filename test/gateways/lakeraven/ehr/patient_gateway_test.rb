@@ -11,7 +11,6 @@ module Lakeraven
       # === find ===
 
       test "find returns patient by DFN" do
-        skip "le-lnd: pending lakeraven-ehr catch-up with rpms-rpc PR #121/#122/#124 mapping fixes"
         patient = PatientGateway.find(1)
 
         assert_not_nil patient, "Should find patient"
@@ -23,19 +22,16 @@ module Lakeraven
         assert_equal 45, patient.age
       end
 
-      test "find merges extended demographics from patient_id_info" do
-        skip "le-lnd: pending lakeraven-ehr catch-up with rpms-rpc PR #121/#122/#124 mapping fixes"
+      test "find merges identifier fields from patient_id_info" do
+        # ORWPT ID INFO surfaces race_code and site_ien on top of
+        # patient_select. Extended demographics (full race string,
+        # address, phone, tribal_enrollment_number, service_area,
+        # coverage_type) come from BHDPTRPC — not installed on staging
+        # (rpms-rpc rr-6jr).
         patient = PatientGateway.find(1)
 
-        assert_equal "AMERICAN INDIAN", patient.race
-        assert_equal "123 Main St", patient.address_line1
-        assert_equal "Anchorage", patient.city
-        assert_equal "AK", patient.state
-        assert_equal "99501", patient.zip_code
-        assert_equal "907-555-1234", patient.phone
-        assert_equal "ANLC-12345", patient.tribal_enrollment_number
-        assert_equal "Anchorage", patient.service_area
-        assert_equal "IHS", patient.coverage_type
+        assert_equal "I", patient.race_code
+        assert_equal 7819, patient.site_ien
       end
 
       test "find returns nil for invalid DFN" do
@@ -44,15 +40,14 @@ module Lakeraven
         assert_nil patient, "Should return nil for non-existent patient"
       end
 
-      test "find returns patient without extended demographics when unavailable" do
-        skip "le-lnd: pending lakeraven-ehr catch-up with rpms-rpc PR #121/#122/#124 mapping fixes"
+      test "find returns patient with only core demographics when no extended source available" do
         patient = PatientGateway.find(2)
 
         assert_not_nil patient
         assert_equal "MOUSE,MICKEY M", patient.name
         assert_equal "M", patient.sex
-        # Extended fields come from patient_id_info seed for DFN 2
-        assert_equal "AMERICAN INDIAN", patient.race
+        # The long-form :race string comes from BHDPTRPC; not surfaced.
+        assert_nil patient.race
       end
 
       # === search ===
@@ -119,7 +114,6 @@ module Lakeraven
       end
 
       test "patient from gateway has synced composite fields" do
-        skip "le-lnd: pending lakeraven-ehr catch-up with rpms-rpc PR #121/#122/#124 mapping fixes"
         patient = PatientGateway.find(1)
 
         assert_equal patient.dob, patient.born_on, "born_on should sync with dob"
