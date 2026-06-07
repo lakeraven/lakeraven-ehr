@@ -79,18 +79,22 @@ module Lakeraven
 
       # --- end-to-end against the real provider ---
 
-      test "list returns the seeded divisions end-to-end" do
-        skip "le-lnd: pending lakeraven-ehr catch-up with rpms-rpc PR #121/#122/#124 mapping fixes"
+      test "list returns the authenticated user's single current site end-to-end" do
+        # BEHOSICX SITEINFO is single-site / no-param on the live broker
+        # (see rpms-rpc rr-5tm); the prior multi-site fixture pattern no
+        # longer reflects reality. RpmsRpc::Site.list wraps the single
+        # current site in a one-element Array for backward compat.
         skip "Requires RpmsRpc::Site (lakeraven/rpms-rpc#100)" unless SiteGateway.default_provider
 
-        RpmsRpc.client.seed_keyed_collection(:site_info, "301", [
-          { ien: 539, name: "TEST SERVICE UNIT", abbreviation: "TSU", current: true },
-          { ien: 540, name: "TEST CLINIC A", abbreviation: "TCA", current: false }
-        ])
+        RpmsRpc.client.seed_lines(:site_info, "", {
+          domain: "RPMS.LAKERAVEN.COM", name: "TEST SERVICE UNIT",
+          abbreviation: "TSU", state: "AK", address: "1 Test St",
+          city: "TestCity", zip: "99501", ien: 539
+        })
 
         sites = SiteGateway.list("301")
 
-        assert_equal [ 539, 540 ], sites.map { |s| s[:ien] }
+        assert_equal [ 539 ], sites.map { |s| s[:ien] }
       end
     end
   end

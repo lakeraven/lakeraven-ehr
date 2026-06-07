@@ -38,6 +38,13 @@ module Lakeraven
       attribute :service_area, :string
       attribute :coverage_type, :string
 
+      # From ORWPT ID INFO — IHS single-letter race code (e.g. "I" =
+      # American Indian/Alaska Native) and the current site IEN. Distinct
+      # from `:race` which holds the long-form string and currently isn't
+      # populated by any RPC mapped to this codebase.
+      attribute :race_code, :string
+      attribute :site_ien, :integer
+
       # SOGI data elements (USCDI v3 / ONC 170.315(a)(15))
       attribute :sexual_orientation, :string
       attribute :gender_identity, :string

@@ -10,31 +10,24 @@ module Lakeraven
     class PractitionerGatewayTest < ActiveSupport::TestCase
       # === find ===
 
-      test "find returns practitioner by IEN" do
-        skip "le-lnd: pending lakeraven-ehr catch-up with rpms-rpc PR #121/#122/#124 mapping fixes"
+      test "find returns practitioner by IEN when IEN matches session user" do
+        # ORWU USERINFO returns the AUTHENTICATED session user only.
+        # name + ien are surfaceable; title, service_section, specialty,
+        # npi, dea_number, phone, provider_class come from a different
+        # RPC not currently mapped (see rpms-rpc rr-fyf for the rationale).
         practitioner = PractitionerGateway.find(101)
 
         assert_not_nil practitioner, "Should find practitioner"
         assert_instance_of Practitioner, practitioner
         assert_equal 101, practitioner.ien
         assert_equal "MARTINEZ,SARAH", practitioner.name
-        assert_equal "MD", practitioner.title
-        assert_equal "Internal Medicine", practitioner.service_section
-        assert_equal "Cardiology", practitioner.specialty
-        assert_equal "1234567890", practitioner.npi
-        assert_equal "AM1234563", practitioner.dea_number
-        assert_equal "907-555-9999", practitioner.phone
-        assert_equal "Physician", practitioner.provider_class
       end
 
-      test "find returns second practitioner" do
-        skip "le-lnd: pending lakeraven-ehr catch-up with rpms-rpc PR #121/#122/#124 mapping fixes"
+      test "find returns nil for IEN that does not match session user" do
+        # ORWU USERINFO can't look up arbitrary IENs — see rpms-rpc rr-fyf.
         practitioner = PractitionerGateway.find(102)
 
-        assert_not_nil practitioner
-        assert_equal "CHEN,JAMES", practitioner.name
-        assert_equal "DO", practitioner.title
-        assert_equal "Orthopedic Surgery", practitioner.specialty
+        assert_nil practitioner
       end
 
       test "find returns nil for invalid IEN" do
@@ -82,13 +75,14 @@ module Lakeraven
         assert practitioner.persisted?, "Practitioner with IEN should be persisted"
       end
 
-      test "practitioner can_prescribe_controlled reflects DEA presence" do
-        skip "le-lnd: pending lakeraven-ehr catch-up with rpms-rpc PR #121/#122/#124 mapping fixes"
-        with_dea = PractitionerGateway.find(101)
-        assert with_dea.can_prescribe_controlled?, "Practitioner with DEA should be able to prescribe"
+      test "can_prescribe_controlled reflects DEA presence on the model" do
+        # Verified at the model level — the gateway can't surface a
+        # practitioner's DEA number from ORWU USERINFO (see rr-fyf).
+        with_dea = Practitioner.new(ien: 101, name: "MARTINEZ,SARAH", dea_number: "AM1234563")
+        assert with_dea.can_prescribe_controlled?
 
-        without_dea = PractitionerGateway.find(102)
-        refute without_dea.can_prescribe_controlled?, "Practitioner without DEA should not be able to prescribe"
+        without_dea = Practitioner.new(ien: 102, name: "CHEN,JAMES", dea_number: nil)
+        refute without_dea.can_prescribe_controlled?
       end
     end
   end

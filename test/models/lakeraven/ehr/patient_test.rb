@@ -9,7 +9,6 @@ module Lakeraven
       # -- find_by_dfn -----------------------------------------------------------
 
       test "find_by_dfn returns a Patient for a known DFN" do
-        skip "le-lnd: pending lakeraven-ehr catch-up with rpms-rpc PR #121/#122/#124 mapping fixes"
         patient = Patient.find_by_dfn(1)
         assert_not_nil patient
         assert_kind_of Patient, patient
@@ -30,14 +29,15 @@ module Lakeraven
         assert_nil Patient.find_by_dfn(nil)
       end
 
-      test "find_by_dfn merges extended demographics" do
-        skip "le-lnd: pending lakeraven-ehr catch-up with rpms-rpc PR #121/#122/#124 mapping fixes"
+      test "find_by_dfn merges identifier fields from patient_id_info" do
+        # ORWPT ID INFO contributes the IHS race code and current site IEN
+        # to the merged patient hash; extended demographics (full race
+        # string, address, phone, tribal_enrollment_number) require
+        # BHDPTRPC NEWPERSON/PATIENT which isn't installed on staging
+        # (tracked as rr-6jr in rpms-rpc).
         patient = Patient.find_by_dfn(1)
-        assert_equal "AMERICAN INDIAN", patient.race
-        assert_equal "123 Main St", patient.address_line1
-        assert_equal "AK", patient.state
-        assert_equal "907-555-1234", patient.phone
-        assert_equal "ANLC-12345", patient.tribal_enrollment_number
+        assert_equal "I", patient.race_code
+        assert_equal 7819, patient.site_ien
       end
 
       # -- find (raises) --------------------------------------------------------
@@ -140,8 +140,8 @@ module Lakeraven
       # -- to_fhir ---------------------------------------------------------------
 
       test "to_fhir returns a FHIR Patient hash" do
-        skip "le-lnd: pending lakeraven-ehr catch-up with rpms-rpc PR #121/#122/#124 mapping fixes"
-        patient = Patient.find_by_dfn(1)
+        patient = Patient.new(dfn: 1, name: "Anderson,Alice", sex: "F",
+                              dob: Date.new(1980, 5, 15), ssn: "111-11-1111")
         fhir = patient.to_fhir
 
         assert_equal "Patient", fhir[:resourceType]
@@ -161,8 +161,7 @@ module Lakeraven
       end
 
       test "to_fhir includes SSN identifier" do
-        skip "le-lnd: pending lakeraven-ehr catch-up with rpms-rpc PR #121/#122/#124 mapping fixes"
-        patient = Patient.find_by_dfn(1)
+        patient = Patient.new(dfn: 1, name: "Anderson,Alice", ssn: "111-11-1111")
         fhir = patient.to_fhir
 
         ssn_id = fhir[:identifier].find { |id| id[:system]&.include?("ssn") }
@@ -170,16 +169,16 @@ module Lakeraven
       end
 
       test "to_fhir includes birthDate" do
-        skip "le-lnd: pending lakeraven-ehr catch-up with rpms-rpc PR #121/#122/#124 mapping fixes"
-        patient = Patient.find_by_dfn(1)
+        patient = Patient.new(dfn: 1, name: "Anderson,Alice", dob: Date.new(1980, 5, 15))
         fhir = patient.to_fhir
 
         assert_equal "1980-05-15", fhir[:birthDate]
       end
 
       test "to_fhir includes address" do
-        skip "le-lnd: pending lakeraven-ehr catch-up with rpms-rpc PR #121/#122/#124 mapping fixes"
-        patient = Patient.find_by_dfn(1)
+        patient = Patient.new(dfn: 1, name: "Anderson,Alice",
+                              address_line1: "123 Main St", city: "Anchorage",
+                              state: "AK", zip_code: "99501")
         fhir = patient.to_fhir
 
         addr = fhir[:address]&.first
@@ -188,8 +187,7 @@ module Lakeraven
       end
 
       test "to_fhir includes telecom" do
-        skip "le-lnd: pending lakeraven-ehr catch-up with rpms-rpc PR #121/#122/#124 mapping fixes"
-        patient = Patient.find_by_dfn(1)
+        patient = Patient.new(dfn: 1, name: "Anderson,Alice", phone: "907-555-1234")
         fhir = patient.to_fhir
 
         telecom = fhir[:telecom]&.first
@@ -197,8 +195,7 @@ module Lakeraven
       end
 
       test "to_fhir includes race extension" do
-        skip "le-lnd: pending lakeraven-ehr catch-up with rpms-rpc PR #121/#122/#124 mapping fixes"
-        patient = Patient.find_by_dfn(1)
+        patient = Patient.new(dfn: 1, name: "Anderson,Alice", race: "American Indian or Alaska Native")
         fhir = patient.to_fhir
 
         race_ext = fhir[:extension]&.find { |e| e[:url]&.include?("race") }
@@ -337,8 +334,9 @@ module Lakeraven
       end
 
       test "to_fhir supports US Core Patient profile requirements" do
-        skip "le-lnd: pending lakeraven-ehr catch-up with rpms-rpc PR #121/#122/#124 mapping fixes"
-        patient = Patient.find_by_dfn(1)
+        patient = Patient.new(dfn: 1, name: "Anderson,Alice", sex: "F",
+                              dob: Date.new(1980, 5, 15), ssn: "111-11-1111",
+                              race: "American Indian or Alaska Native")
         fhir = patient.to_fhir
 
         assert fhir[:identifier]&.any?, "US Core requires identifier"
@@ -372,7 +370,6 @@ module Lakeraven
       # =========================================================================
 
       test "find delegates to PatientRepository" do
-        skip "le-lnd: pending lakeraven-ehr catch-up with rpms-rpc PR #121/#122/#124 mapping fixes"
         patient = Patient.find(1)
 
         assert_instance_of Patient, patient
@@ -500,7 +497,6 @@ module Lakeraven
       end
 
       test "find via repository returns patient" do
-        skip "le-lnd: pending lakeraven-ehr catch-up with rpms-rpc PR #121/#122/#124 mapping fixes"
         found = Patient.find(1)
         assert_equal 1, found.dfn
         assert_equal "Anderson,Alice", found.name

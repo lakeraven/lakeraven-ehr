@@ -10,7 +10,6 @@ module Lakeraven
       # =============================================================================
 
       test "find returns Patient for known DFN" do
-        skip "le-lnd: pending lakeraven-ehr catch-up with rpms-rpc PR #121/#122/#124 mapping fixes"
         patient = PatientRepository.find(1)
 
         assert_instance_of Patient, patient
@@ -27,21 +26,19 @@ module Lakeraven
         assert_nil PatientRepository.find("")
       end
 
-      test "find merges extended demographics" do
-        skip "le-lnd: pending lakeraven-ehr catch-up with rpms-rpc PR #121/#122/#124 mapping fixes"
+      test "find merges identifier fields from patient_id_info" do
+        # ORWPT ID INFO contributes race_code + site_ien on top of
+        # patient_select. The long-form :race string, address, city,
+        # phone, tribal_enrollment_number, service_area, coverage_type
+        # all come from BHDPTRPC, which is uninstalled on staging
+        # (rpms-rpc rr-6jr).
         patient = PatientRepository.find(1)
 
-        assert_equal "AMERICAN INDIAN", patient.race
-        assert_equal "123 Main St", patient.address_line1
-        assert_equal "Anchorage", patient.city
-      end
-
-      test "find includes tribal enrollment data" do
-        skip "le-lnd: pending lakeraven-ehr catch-up with rpms-rpc PR #121/#122/#124 mapping fixes"
-        patient = PatientRepository.find(1)
-
-        assert_equal "ANLC-12345", patient.tribal_enrollment_number
-        assert_equal "Anchorage", patient.service_area
+        assert_equal "I", patient.race_code
+        assert_equal 7819, patient.site_ien
+        assert_nil patient.race
+        assert_nil patient.address_line1
+        assert_nil patient.tribal_enrollment_number
       end
 
       # =============================================================================

@@ -24,12 +24,14 @@ module Lakeraven
         assert_equal "MARTINEZ", body["name"].first["family"]
       end
 
-      test "response includes NPI identifier" do
-        skip "le-lnd: pending lakeraven-ehr catch-up with rpms-rpc PR #121/#122/#124 mapping fixes"
+      test "response excludes NPI identifier when source RPC cannot surface it" do
+        # ORWU USERINFO doesn't return NPI; until BHDPTRPC or equivalent is
+        # installed (rpms-rpc rr-6jr), the controller emits no NPI identifier.
         get "/lakeraven-ehr/Practitioner/101", headers: @headers
         body = JSON.parse(response.body)
-        npi_id = body["identifier"].find { |id| id["system"]&.include?("npi") }
-        assert_equal "1234567890", npi_id["value"]
+        identifiers = body["identifier"] || []
+        npi_id = identifiers.find { |id| id["system"]&.include?("npi") && id["value"].present? }
+        assert_nil npi_id
       end
 
       test "unknown IEN returns 404 OperationOutcome" do
