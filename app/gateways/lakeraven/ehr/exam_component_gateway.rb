@@ -5,7 +5,7 @@ require "rpms_rpc/api/exam_component"
 module Lakeraven
   module EHR
     # Physical-exam component entry against an open encounter.
-    # Wraps RpmsRpc::ExamComponent 
+    # Wraps RpmsRpc::ExamComponent
     class ExamComponentGateway
       FAILURE = { success: false, ien: nil, raw: nil }.freeze
 

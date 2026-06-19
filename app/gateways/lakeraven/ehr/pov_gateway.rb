@@ -5,7 +5,7 @@ require "rpms_rpc/api/pov"
 module Lakeraven
   module EHR
     # Visit purpose-of-visit (diagnosis) entry against an open encounter.
-    # Wraps RpmsRpc::Pov 
+    # Wraps RpmsRpc::Pov
     class PovGateway
       FAILURE = { success: false, ien: nil, raw: nil }.freeze
 

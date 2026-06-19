@@ -5,7 +5,7 @@ require "rpms_rpc/api/note_template"
 module Lakeraven
   module EHR
     # TIU note template tree, boilerplate text, and per-user access level.
-    # Wraps RpmsRpc::NoteTemplate 
+    # Wraps RpmsRpc::NoteTemplate
     class NoteTemplateGateway
       def self.roots(user_duz, via: default_provider)
         return [] if via.nil?

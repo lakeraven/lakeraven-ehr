@@ -6,7 +6,7 @@ module Lakeraven
   module EHR
     # TIU progress note create, list, fetch, edit, lock. Signing lives in
     # ESignatureGateway, not here.
-    # Wraps RpmsRpc::ProgressNote 
+    # Wraps RpmsRpc::ProgressNote
     class ProgressNoteGateway
       CREATE_FAILURE = { success: false, ien: nil, raw: nil }.freeze
       UPDATE_FAILURE = { success: false, raw: nil }.freeze

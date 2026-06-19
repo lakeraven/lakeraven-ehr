@@ -5,8 +5,7 @@ require "rpms_rpc/api/immunization"
 module Lakeraven
   module EHR
     # Patient-administered immunization records.
-    # Wraps RpmsRpc::Immunization (lakeraven/rpms-rpc#107) — structured
-    # records via BIPC IMMLIST / BIPC IMMGET.
+    # Wraps RpmsRpc::Immunization — structured records via BIPC IMMLIST / BIPC IMMGET.
     class ImmunizationGateway
       def self.for_patient(dfn, via: default_provider)
         return [] if via.nil?

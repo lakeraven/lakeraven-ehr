@@ -6,7 +6,7 @@ module Lakeraven
   module EHR
     # Division (site) context: list accessible divisions, look up the
     # currently-selected one, and switch the active division.
-    # Wraps RpmsRpc::Site 
+    # Wraps RpmsRpc::Site
     class SiteGateway
       def self.list(duz, via: default_provider)
         return [] if via.nil?

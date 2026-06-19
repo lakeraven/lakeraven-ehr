@@ -6,7 +6,7 @@ module Lakeraven
   module EHR
     # Allergy-symptom catalog lookup, driving the order-entry
     # allergy-precheck UI.
-    # Wraps RpmsRpc::Symptom 
+    # Wraps RpmsRpc::Symptom
     class SymptomGateway
       def self.search(query, via: default_provider)
         return [] if via.nil?

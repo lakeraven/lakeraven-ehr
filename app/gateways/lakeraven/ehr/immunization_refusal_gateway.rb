@@ -6,7 +6,7 @@ module Lakeraven
   module EHR
     # Records a patient's refusal of an immunization on the open encounter.
     # Distinct from ImmunizationGateway (read-only).
-    # Wraps RpmsRpc::ImmunizationRefusal 
+    # Wraps RpmsRpc::ImmunizationRefusal
     class ImmunizationRefusalGateway
       FAILURE = { success: false, ien: nil, raw: nil }.freeze
 

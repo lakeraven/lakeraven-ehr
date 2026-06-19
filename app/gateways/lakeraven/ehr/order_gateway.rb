@@ -6,7 +6,7 @@ module Lakeraven
   module EHR
     # Clinical-order list APIs — a user's unsigned queue, or a patient's
     # chart filtered by status and view.
-    # Wraps RpmsRpc::Order 
+    # Wraps RpmsRpc::Order
     class OrderGateway
       def self.unsigned_for_user(user_duz, via: default_provider)
         return [] if via.nil?

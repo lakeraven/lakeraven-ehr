@@ -5,7 +5,7 @@ require "rpms_rpc/capabilities"
 module Lakeraven
   module EHR
     # Imaging-access predicate fired on every chart open.
-    # Wraps RpmsRpc::Capabilities.imaging_user? 
+    # Wraps RpmsRpc::Capabilities.imaging_user?
     #
     # Accepts a plain DUZ string/integer at the engine boundary and adapts
     # to the user-shaped object the underlying predicate expects.

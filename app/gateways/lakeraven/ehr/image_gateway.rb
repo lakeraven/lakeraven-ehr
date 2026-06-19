@@ -7,7 +7,7 @@ module Lakeraven
     # Imaging-study list and viewer-launch handoff. The viewer is a
     # desktop component external to RPMS; the gateway issues a token
     # the front-end hands off to whatever viewer is configured.
-    # Wraps RpmsRpc::Image 
+    # Wraps RpmsRpc::Image
     class ImageGateway
       DEFAULT_TTL_SECONDS = 300
 

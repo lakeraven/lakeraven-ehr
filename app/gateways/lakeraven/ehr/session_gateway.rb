@@ -6,7 +6,7 @@ module Lakeraven
   module EHR
     # Cold-launch bootstrap: resolves a user DUZ to client-config root,
     # registry hints, and the user's default division IEN.
-    # Wraps RpmsRpc::Session 
+    # Wraps RpmsRpc::Session
     class SessionGateway
       def self.bootstrap(duz, via: default_provider)
         return nil if via.nil?

@@ -6,7 +6,7 @@ module Lakeraven
   module EHR
     # PCC measurement entry (height, weight, BMI, etc.) against an open
     # encounter. Distinct from clinical vitals (VitalGateway / BEHOVM).
-    # Wraps RpmsRpc::Measurement 
+    # Wraps RpmsRpc::Measurement
     class MeasurementGateway
       FAILURE = { success: false, ien: nil, raw: nil }.freeze
 

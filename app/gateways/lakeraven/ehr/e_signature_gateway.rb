@@ -7,7 +7,7 @@ module Lakeraven
     # TIU e-signature: validate a user's signature code, look up which
     # signing action is permitted on a note, add a signature (sign /
     # cosign / addend), and remove an existing signature.
-    # Wraps RpmsRpc::ESignature 
+    # Wraps RpmsRpc::ESignature
     class ESignatureGateway
       SIGN_FAILURE = { success: false, raw: nil }.freeze
 

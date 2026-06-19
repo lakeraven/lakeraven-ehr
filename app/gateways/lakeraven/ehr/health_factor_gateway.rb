@@ -5,7 +5,7 @@ require "rpms_rpc/api/health_factor"
 module Lakeraven
   module EHR
     # IHS-specific structured observation entry against an open encounter.
-    # Wraps RpmsRpc::HealthFactor 
+    # Wraps RpmsRpc::HealthFactor
     class HealthFactorGateway
       FAILURE = { success: false, ien: nil, raw: nil }.freeze
 

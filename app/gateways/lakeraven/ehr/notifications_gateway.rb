@@ -5,7 +5,7 @@ require "rpms_rpc/api/notifications"
 module Lakeraven
   module EHR
     # Clinician alert inbox — fires at login and on patient open.
-    # Wraps RpmsRpc::Notifications 
+    # Wraps RpmsRpc::Notifications
     class NotificationsGateway
       MARK_READ_FAILURE = { success: false, raw: nil }.freeze
 
