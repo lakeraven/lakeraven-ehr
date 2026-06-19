@@ -1,16 +1,12 @@
 # frozen_string_literal: true
 
-begin
-  require "rpms_rpc/api/measurement"
-rescue LoadError
-  # rpms-rpc gem does not yet expose RpmsRpc::Measurement.
-end
+require "rpms_rpc/api/measurement"
 
 module Lakeraven
   module EHR
     # PCC measurement entry (height, weight, BMI, etc.) against an open
     # encounter. Distinct from clinical vitals (VitalGateway / BEHOVM).
-    # Wraps RpmsRpc::Measurement (lakeraven/rpms-rpc#67).
+    # Wraps RpmsRpc::Measurement 
     class MeasurementGateway
       FAILURE = { success: false, ien: nil, raw: nil }.freeze
 
@@ -22,8 +18,6 @@ module Lakeraven
       end
 
       def self.default_provider
-        return nil unless defined?(::RpmsRpc::Measurement) &&
-                          ::RpmsRpc::Measurement.respond_to?(:add)
         ::RpmsRpc::Measurement
       end
     end
