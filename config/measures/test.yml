@@ -3,3 +3,19 @@ id: test
 title: test
 nqf_number:
 scoring: proportion
+
+# Population criteria
+initial_population:
+  description: "All test patients"
+  resource_type: Patient
+
+denominator:
+  description: "Equals initial population"
+  same_as: initial_population
+
+numerator:
+  description: "Patients with any test observation recorded during the measurement period"
+  resource_type: Observation
+
+denominator_exclusion:
+  description: "None"
