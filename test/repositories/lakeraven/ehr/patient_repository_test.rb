@@ -26,19 +26,19 @@ module Lakeraven
         assert_nil PatientRepository.find("")
       end
 
-      test "find merges identifier fields from patient_id_info" do
+      test "find merges identifier and extended demographic fields from patient_id_info" do
         # ORWPT ID INFO contributes race_code + site_ien on top of
-        # patient_select. The long-form :race string, address, city,
-        # phone, tribal_enrollment_number, service_area, coverage_type
-        # all come from BHDPTRPC, which is uninstalled on staging
-        # (rpms-rpc rr-6jr).
+        # patient_select. The enriched mock seed also surfaces the long-form
+        # :race string, address, phone, tribal_enrollment_number, and
+        # service_area so Cucumber coverage can exercise them.
         patient = PatientRepository.find(1)
 
         assert_equal "I", patient.race_code
         assert_equal 7819, patient.site_ien
-        assert_nil patient.race
-        assert_nil patient.address_line1
-        assert_nil patient.tribal_enrollment_number
+        assert_equal "AMERICAN INDIAN OR ALASKA NATIVE", patient.race
+        assert_equal "123 Arctic Ave", patient.address_line1
+        assert_equal "ANLC-12345", patient.tribal_enrollment_number
+        assert_equal "Anchorage", patient.service_area
       end
 
       # =============================================================================

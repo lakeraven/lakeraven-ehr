@@ -24,14 +24,14 @@ module Lakeraven
         assert_equal "MARTINEZ", body["name"].first["family"]
       end
 
-      test "response excludes NPI identifier when source RPC cannot surface it" do
-        # ORWU USERINFO doesn't return NPI; until BHDPTRPC or equivalent is
-        # installed (rpms-rpc rr-6jr), the controller emits no NPI identifier.
+      test "response includes NPI identifier when mock source surfaces it" do
+        # The enriched ORWU USERINFO mock seed now includes NPI so the
+        # FHIR Practitioner carries the corresponding identifier.
         get "/lakeraven-ehr/Practitioner/101", headers: @headers
         body = JSON.parse(response.body)
         identifiers = body["identifier"] || []
         npi_id = identifiers.find { |id| id["system"]&.include?("npi") && id["value"].present? }
-        assert_nil npi_id
+        assert_equal "1234567890", npi_id["value"]
       end
 
       test "unknown IEN returns 404 OperationOutcome" do
