@@ -1,16 +1,12 @@
 # frozen_string_literal: true
 
-begin
-  require "rpms_rpc/api/progress_note"
-rescue LoadError
-  # rpms-rpc gem does not yet expose RpmsRpc::ProgressNote.
-end
+require "rpms_rpc/api/progress_note"
 
 module Lakeraven
   module EHR
     # TIU progress note create, list, fetch, edit, lock. Signing lives in
     # ESignatureGateway, not here.
-    # Wraps RpmsRpc::ProgressNote (lakeraven/rpms-rpc#57).
+    # Wraps RpmsRpc::ProgressNote
     class ProgressNoteGateway
       CREATE_FAILURE = { success: false, ien: nil, raw: nil }.freeze
       UPDATE_FAILURE = { success: false, raw: nil }.freeze
@@ -58,8 +54,6 @@ module Lakeraven
       end
 
       def self.default_provider
-        return nil unless defined?(::RpmsRpc::ProgressNote) &&
-                          ::RpmsRpc::ProgressNote.respond_to?(:create)
         ::RpmsRpc::ProgressNote
       end
     end

@@ -1,15 +1,11 @@
 # frozen_string_literal: true
 
-begin
-  require "rpms_rpc/api/exam_component"
-rescue LoadError
-  # rpms-rpc gem does not yet expose RpmsRpc::ExamComponent.
-end
+require "rpms_rpc/api/exam_component"
 
 module Lakeraven
   module EHR
     # Physical-exam component entry against an open encounter.
-    # Wraps RpmsRpc::ExamComponent (lakeraven/rpms-rpc#66).
+    # Wraps RpmsRpc::ExamComponent
     class ExamComponentGateway
       FAILURE = { success: false, ien: nil, raw: nil }.freeze
 
@@ -21,8 +17,6 @@ module Lakeraven
       end
 
       def self.default_provider
-        return nil unless defined?(::RpmsRpc::ExamComponent) &&
-                          ::RpmsRpc::ExamComponent.respond_to?(:add)
         ::RpmsRpc::ExamComponent
       end
     end

@@ -1,15 +1,11 @@
 # frozen_string_literal: true
 
-begin
-  require "rpms_rpc/api/note_template"
-rescue LoadError
-  # rpms-rpc gem does not yet expose RpmsRpc::NoteTemplate.
-end
+require "rpms_rpc/api/note_template"
 
 module Lakeraven
   module EHR
     # TIU note template tree, boilerplate text, and per-user access level.
-    # Wraps RpmsRpc::NoteTemplate (lakeraven/rpms-rpc#56).
+    # Wraps RpmsRpc::NoteTemplate
     class NoteTemplateGateway
       def self.roots(user_duz, via: default_provider)
         return [] if via.nil?
@@ -42,8 +38,6 @@ module Lakeraven
       end
 
       def self.default_provider
-        return nil unless defined?(::RpmsRpc::NoteTemplate) &&
-                          ::RpmsRpc::NoteTemplate.respond_to?(:roots)
         ::RpmsRpc::NoteTemplate
       end
     end

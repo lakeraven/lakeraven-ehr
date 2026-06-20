@@ -1,15 +1,11 @@
 # frozen_string_literal: true
 
-begin
-  require "rpms_rpc/api/health_factor"
-rescue LoadError
-  # rpms-rpc gem does not yet expose RpmsRpc::HealthFactor.
-end
+require "rpms_rpc/api/health_factor"
 
 module Lakeraven
   module EHR
     # IHS-specific structured observation entry against an open encounter.
-    # Wraps RpmsRpc::HealthFactor (lakeraven/rpms-rpc#65).
+    # Wraps RpmsRpc::HealthFactor
     class HealthFactorGateway
       FAILURE = { success: false, ien: nil, raw: nil }.freeze
 
@@ -21,8 +17,6 @@ module Lakeraven
       end
 
       def self.default_provider
-        return nil unless defined?(::RpmsRpc::HealthFactor) &&
-                          ::RpmsRpc::HealthFactor.respond_to?(:add)
         ::RpmsRpc::HealthFactor
       end
     end

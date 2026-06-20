@@ -1,15 +1,11 @@
 # frozen_string_literal: true
 
-begin
-  require "rpms_rpc/api/notifications"
-rescue LoadError
-  # rpms-rpc gem does not yet expose RpmsRpc::Notifications.
-end
+require "rpms_rpc/api/notifications"
 
 module Lakeraven
   module EHR
     # Clinician alert inbox — fires at login and on patient open.
-    # Wraps RpmsRpc::Notifications (lakeraven/rpms-rpc#74).
+    # Wraps RpmsRpc::Notifications
     class NotificationsGateway
       MARK_READ_FAILURE = { success: false, raw: nil }.freeze
 
@@ -26,8 +22,6 @@ module Lakeraven
       end
 
       def self.default_provider
-        return nil unless defined?(::RpmsRpc::Notifications) &&
-                          ::RpmsRpc::Notifications.respond_to?(:inbox)
         ::RpmsRpc::Notifications
       end
     end

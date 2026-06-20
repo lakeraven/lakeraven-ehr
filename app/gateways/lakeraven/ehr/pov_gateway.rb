@@ -1,15 +1,11 @@
 # frozen_string_literal: true
 
-begin
-  require "rpms_rpc/api/pov"
-rescue LoadError
-  # rpms-rpc gem does not yet expose RpmsRpc::Pov.
-end
+require "rpms_rpc/api/pov"
 
 module Lakeraven
   module EHR
     # Visit purpose-of-visit (diagnosis) entry against an open encounter.
-    # Wraps RpmsRpc::Pov (lakeraven/rpms-rpc#63).
+    # Wraps RpmsRpc::Pov
     class PovGateway
       FAILURE = { success: false, ien: nil, raw: nil }.freeze
 
@@ -21,7 +17,6 @@ module Lakeraven
       end
 
       def self.default_provider
-        return nil unless defined?(::RpmsRpc::Pov) && ::RpmsRpc::Pov.respond_to?(:add)
         ::RpmsRpc::Pov
       end
     end

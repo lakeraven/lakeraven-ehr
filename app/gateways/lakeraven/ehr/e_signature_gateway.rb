@@ -1,17 +1,13 @@
 # frozen_string_literal: true
 
-begin
-  require "rpms_rpc/api/e_signature"
-rescue LoadError
-  # rpms-rpc gem does not yet expose RpmsRpc::ESignature.
-end
+require "rpms_rpc/api/e_signature"
 
 module Lakeraven
   module EHR
     # TIU e-signature: validate a user's signature code, look up which
     # signing action is permitted on a note, add a signature (sign /
     # cosign / addend), and remove an existing signature.
-    # Wraps RpmsRpc::ESignature (lakeraven/rpms-rpc#58).
+    # Wraps RpmsRpc::ESignature
     class ESignatureGateway
       SIGN_FAILURE = { success: false, raw: nil }.freeze
 
@@ -40,8 +36,6 @@ module Lakeraven
       end
 
       def self.default_provider
-        return nil unless defined?(::RpmsRpc::ESignature) &&
-                          ::RpmsRpc::ESignature.respond_to?(:add)
         ::RpmsRpc::ESignature
       end
     end

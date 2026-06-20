@@ -1,17 +1,13 @@
 # frozen_string_literal: true
 
-begin
-  require "rpms_rpc/api/image"
-rescue LoadError
-  # rpms-rpc gem does not yet expose RpmsRpc::Image.
-end
+require "rpms_rpc/api/image"
 
 module Lakeraven
   module EHR
     # Imaging-study list and viewer-launch handoff. The viewer is a
     # desktop component external to RPMS; the gateway issues a token
     # the front-end hands off to whatever viewer is configured.
-    # Wraps RpmsRpc::Image (lakeraven/rpms-rpc#75).
+    # Wraps RpmsRpc::Image
     class ImageGateway
       DEFAULT_TTL_SECONDS = 300
 
@@ -28,8 +24,6 @@ module Lakeraven
       end
 
       def self.default_provider
-        return nil unless defined?(::RpmsRpc::Image) &&
-                          ::RpmsRpc::Image.respond_to?(:launch_token)
         ::RpmsRpc::Image
       end
     end
