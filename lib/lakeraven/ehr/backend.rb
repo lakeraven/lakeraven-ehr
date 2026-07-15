@@ -2,6 +2,8 @@
 
 require "rpms_rpc/api/patient"
 require "vista_rpc/api/patient"
+require "rpms_rpc/api/practitioner"
+require "vista_rpc/api/practitioner"
 
 module Lakeraven
   module EHR
