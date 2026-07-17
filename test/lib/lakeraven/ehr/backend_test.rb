@@ -63,6 +63,26 @@ class Lakeraven::EHR::BackendTest < ActiveSupport::TestCase
     assert_equal RpmsRpc::Lab, Lakeraven::EHR::Backend.current.lab_api
   end
 
+  def test_rpms_backend_resolves_rpms_problem_api
+    Lakeraven::EHR.configure { |c| c.backend = :rpms }
+    assert_equal RpmsRpc::Problem, Lakeraven::EHR::Backend.current.problem_api
+  end
+
+  def test_vista_backend_resolves_vista_problem_api
+    Lakeraven::EHR.configure { |c| c.backend = :vista }
+    assert_equal VistaRpc::Problem, Lakeraven::EHR::Backend.current.problem_api
+  end
+
+  def test_rpms_backend_resolves_rpms_allergy_api
+    Lakeraven::EHR.configure { |c| c.backend = :rpms }
+    assert_equal RpmsRpc::Allergy, Lakeraven::EHR::Backend.current.allergy_api
+  end
+
+  def test_vista_backend_resolves_vista_allergy_api
+    Lakeraven::EHR.configure { |c| c.backend = :vista }
+    assert_equal VistaRpc::Allergy, Lakeraven::EHR::Backend.current.allergy_api
+  end
+
   def test_backend_reset_creates_new_adapter
     Lakeraven::EHR.configure { |c| c.backend = :rpms }
     first = Lakeraven::EHR::Backend.current

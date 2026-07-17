@@ -34,9 +34,30 @@ module Lakeraven
         get "/lakeraven-ehr/Condition", params: { patient: "1" }, headers: @headers
         assert_response :ok
         body = JSON.parse(response.body)
-        body["entry"]&.each do |entry|
+        entries = body["entry"]
+        assert entries.any?, "seeded problem list should produce Condition entries"
+        entries.each do |entry|
           assert_equal "Condition", entry.dig("resource", "resourceType")
         end
+      end
+
+      test "entries are US Core Conditions built from the seeded problem list" do
+        get "/lakeraven-ehr/Condition", params: { patient: "1" }, headers: @headers
+        assert_response :ok
+
+        entries = JSON.parse(response.body)["entry"]
+        assert_equal 2, entries.length
+
+        diabetes = entries.map { |e| e["resource"] }.find { |r| r["id"] == "501" }
+        assert_includes Array(diabetes.dig("meta", "profile")), Condition::US_CORE_CONDITION_PROFILE
+        assert_equal "E11.9", diabetes.dig("code", "coding", 0, "code")
+        assert_equal "Type 2 diabetes mellitus", diabetes.dig("code", "text")
+        assert_equal "active", diabetes.dig("clinicalStatus", "coding", 0, "code")
+        assert_equal "problem-list-item", diabetes.dig("category", 0, "coding", 0, "code")
+        assert_equal "Patient/1", diabetes.dig("subject", "reference")
+
+        hypertension = entries.map { |e| e["resource"] }.find { |r| r["id"] == "502" }
+        assert_equal "inactive", hypertension.dig("clinicalStatus", "coding", 0, "code")
       end
 
       test "returns FHIR JSON content type" do

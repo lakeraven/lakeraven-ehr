@@ -136,6 +136,73 @@ module Lakeraven
           assert_empty errors
         end
 
+        # =========================================================================
+        # Condition
+        # =========================================================================
+
+        test "valid Condition passes validation" do
+          result = UsCoreValidator.validate!(valid_condition.to_fhir)
+
+          assert_equal "Condition", result[:resourceType]
+        end
+
+        test "Condition without category fails validation" do
+          resource = valid_condition.to_fhir
+          resource.delete(:category)
+
+          error = assert_raises(UsCoreValidationError) { UsCoreValidator.validate!(resource) }
+          assert_includes error.errors.join, "category"
+        end
+
+        test "Condition without code fails validation" do
+          resource = valid_condition.to_fhir
+          resource.delete(:code)
+
+          error = assert_raises(UsCoreValidationError) { UsCoreValidator.validate!(resource) }
+          assert_includes error.errors.join, "code"
+        end
+
+        test "Condition without subject fails validation" do
+          resource = valid_condition.to_fhir
+          resource.delete(:subject)
+
+          error = assert_raises(UsCoreValidationError) { UsCoreValidator.validate!(resource) }
+          assert_includes error.errors.join, "subject"
+        end
+
+        test "Condition with text-only code passes validation" do
+          resource = valid_condition.to_fhir
+          resource[:code] = { text: "Essential hypertension" }
+
+          assert_empty UsCoreValidator.validate(resource)
+        end
+
+        # =========================================================================
+        # AllergyIntolerance
+        # =========================================================================
+
+        test "valid AllergyIntolerance passes validation" do
+          result = UsCoreValidator.validate!(valid_allergy.to_fhir)
+
+          assert_equal "AllergyIntolerance", result[:resourceType]
+        end
+
+        test "AllergyIntolerance without code fails validation" do
+          resource = valid_allergy.to_fhir
+          resource.delete(:code)
+
+          error = assert_raises(UsCoreValidationError) { UsCoreValidator.validate!(resource) }
+          assert_includes error.errors.join, "code"
+        end
+
+        test "AllergyIntolerance without patient fails validation" do
+          resource = valid_allergy.to_fhir
+          resource.delete(:patient)
+
+          error = assert_raises(UsCoreValidationError) { UsCoreValidator.validate!(resource) }
+          assert_includes error.errors.join, "patient"
+        end
+
         private
 
         def valid_patient
@@ -165,6 +232,21 @@ module Lakeraven
             code: Observation::VITAL_SIGNS_CODES[:blood_pressure],
             display: "Blood Pressure", value: "120/80", status: "final",
             effective_datetime: DateTime.new(2025, 1, 15, 8, 0)
+          )
+        end
+
+        def valid_condition
+          Condition.new(
+            ien: "733", patient_dfn: "1", code: "I10", code_system: "icd10",
+            display: "Essential hypertension", clinical_status: "active",
+            category: "problem-list-item"
+          )
+        end
+
+        def valid_allergy
+          AllergyIntolerance.new(
+            ien: "701", patient_dfn: "1", allergen: "PENICILLIN",
+            reaction: "HIVES", severity: "moderate"
           )
         end
       end

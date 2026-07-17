@@ -8,6 +8,10 @@ require "rpms_rpc/api/vital"
 require "vista_rpc/api/vital"
 require "rpms_rpc/api/lab"
 require "vista_rpc/api/lab"
+require "rpms_rpc/api/problem"
+require "vista_rpc/api/problem"
+require "rpms_rpc/api/allergy"
+require "vista_rpc/api/allergy"
 
 module Lakeraven
   module EHR
@@ -50,6 +54,17 @@ module Lakeraven
 
       def lab_api
         vista? ? VistaRpc::Lab : RpmsRpc::Lab
+      end
+
+      # Problem/allergy reads are stock VistA on both backends; RpmsRpc
+      # keeps the IHS-specific write surface (BGOPROB*), so RPMS resolves
+      # to RpmsRpc::Problem rather than the shared read-only module.
+      def problem_api
+        vista? ? VistaRpc::Problem : RpmsRpc::Problem
+      end
+
+      def allergy_api
+        vista? ? VistaRpc::Allergy : RpmsRpc::Allergy
       end
 
       private

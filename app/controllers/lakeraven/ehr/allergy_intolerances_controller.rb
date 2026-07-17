@@ -7,8 +7,8 @@ module Lakeraven
 
       def index
         dfn = extract_patient_dfn(params[:patient])
-        results = AllergyIntolerance.for_patient(dfn)
-        render_bundle(results.map { |r| { resourceType: "AllergyIntolerance" }.merge(r) })
+        allergies = AllergyIntolerance.fhir_for_patient(dfn)
+        render_bundle(allergies.map(&:to_fhir))
       end
 
       def show

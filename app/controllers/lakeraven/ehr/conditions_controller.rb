@@ -7,8 +7,8 @@ module Lakeraven
 
       def index
         dfn = extract_patient_dfn(params[:patient])
-        results = Condition.for_patient(dfn)
-        render_bundle(results.map { |r| { resourceType: "Condition" }.merge(r) })
+        conditions = Condition.fhir_for_patient(dfn)
+        render_bundle(conditions.map(&:to_fhir))
       end
 
       def show

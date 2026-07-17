@@ -137,6 +137,69 @@ module Lakeraven
         assert_nil fhir[:subject]
       end
 
+      # -- VistA problem-list adapter (ORQQPL LIST rows → FHIR Condition) -------
+
+      def problem_row
+        { ien: "733", description: "Essential hypertension", status: "A", icd_code: "I10",
+          onset_date: Date.new(2020, 3, 1), modified_date: Date.new(2025, 2, 10), service_connected: "NSC" }
+      end
+
+      test "from_problem_hashes builds problem-list-item Conditions" do
+        c = Condition.from_problem_hashes([ problem_row ], patient_dfn: "100").first
+
+        assert_equal "733", c.ien
+        assert_equal "100", c.patient_dfn
+        assert_equal "I10", c.code
+        assert_equal "icd10", c.code_system
+        assert_equal "Essential hypertension", c.display
+        assert_equal "active", c.clinical_status
+        assert_equal "problem-list-item", c.category
+        assert c.valid?
+      end
+
+      test "from_problem_hashes maps inactive status" do
+        c = Condition.from_problem_hashes([ problem_row.merge(status: "I") ], patient_dfn: "100").first
+        assert_equal "inactive", c.clinical_status
+      end
+
+      test "adapter to_fhir claims and passes US Core Condition profile" do
+        fhir = Condition.from_problem_hashes([ problem_row ], patient_dfn: "100").first.to_fhir
+
+        assert_includes Array(fhir.dig(:meta, :profile)), Condition::US_CORE_CONDITION_PROFILE
+        assert_empty Lakeraven::EHR::FHIR::UsCoreValidator.validate(fhir)
+        assert_equal "http://hl7.org/fhir/sid/icd-10-cm", fhir.dig(:code, :coding, 0, :system)
+        assert_equal Condition::CATEGORY_SYSTEM, fhir.dig(:category, 0, :coding, 0, :system)
+        assert_equal "2020-03-01", fhir[:onsetDateTime].to_s[0, 10]
+      end
+
+      test "adapter handles uncoded problems via code text" do
+        fhir = Condition.from_problem_hashes(
+          [ problem_row.merge(icd_code: nil) ], patient_dfn: "100"
+        ).first.to_fhir
+
+        assert_nil fhir.dig(:code, :coding)
+        assert_equal "Essential hypertension", fhir.dig(:code, :text)
+        assert_empty Lakeraven::EHR::FHIR::UsCoreValidator.validate(fhir)
+      end
+
+      test "fhir_for_patient builds Conditions from the gateway" do
+        mock_gw = Object.new
+        def mock_gw.for_patient(_dfn)
+          [ { ien: "9", description: "Asthma", status: "A", icd_code: "J45.909" } ]
+        end
+
+        original = Condition.gateway
+        begin
+          Condition.gateway = mock_gw
+          conditions = Condition.fhir_for_patient("100")
+          assert_equal 1, conditions.length
+          assert_equal "Asthma", conditions.first.display
+          assert_equal "100", conditions.first.patient_dfn
+        ensure
+          Condition.gateway = original
+        end
+      end
+
       # -- validations -----------------------------------------------------------
 
       test "validates patient_dfn presence" do

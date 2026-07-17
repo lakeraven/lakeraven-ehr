@@ -6,7 +6,7 @@ module Lakeraven
   module EHR
     class AllergyIntoleranceGateway
       def self.for_patient(dfn)
-        RpmsRpc::Allergy.for_patient(dfn.to_s)
+        Backend.current.allergy_api.for_patient(dfn.to_s)
       end
     end
   end

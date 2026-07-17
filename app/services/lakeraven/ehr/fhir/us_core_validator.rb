@@ -63,6 +63,8 @@ module Lakeraven
           when "Patient" then validate_patient
           when "Practitioner" then validate_practitioner
           when "Observation" then validate_observation
+          when "Condition" then validate_condition
+          when "AllergyIntolerance" then validate_allergy_intolerance
           else []
           end
         end
@@ -143,6 +145,28 @@ module Lakeraven
           end
 
           errors
+        end
+
+        def validate_condition
+          errors = []
+          errors << "Condition resource must have an id" if blank?(@resource[:id])
+          errors << "Condition resource must have a category" if Array(@resource[:category]).empty?
+          errors << "Condition resource must have a code" if missing_codeable_concept?(@resource[:code])
+          errors << "Condition resource must have a subject" if @resource[:subject].nil? || blank?(@resource.dig(:subject, :reference))
+          errors
+        end
+
+        def validate_allergy_intolerance
+          errors = []
+          errors << "AllergyIntolerance resource must have an id" if blank?(@resource[:id])
+          errors << "AllergyIntolerance resource must have a code" if missing_codeable_concept?(@resource[:code])
+          errors << "AllergyIntolerance resource must have a patient" if @resource[:patient].nil? || blank?(@resource.dig(:patient, :reference))
+          errors
+        end
+
+        # A usable CodeableConcept needs at least one coding or a text.
+        def missing_codeable_concept?(concept)
+          concept.nil? || (Array(concept[:coding]).empty? && blank?(concept[:text]))
         end
 
         def blood_pressure?
