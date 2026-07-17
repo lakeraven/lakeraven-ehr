@@ -180,7 +180,8 @@ module Lakeraven
         bp = Observation.new(
           ien: "bp-1", patient_dfn: "1", category: "vital-signs",
           code: Observation::VITAL_SIGNS_CODES[:blood_pressure],
-          display: "Blood Pressure", value: "120/80", status: "final"
+          display: "Blood Pressure", value: "120/80", status: "final",
+          effective_datetime: DateTime.new(2025, 1, 15, 8, 0)
         )
         fhir = bp.to_fhir
         assert fhir[:component].present?, "Blood pressure should use component pattern"
@@ -191,7 +192,8 @@ module Lakeraven
         bp = Observation.new(
           ien: "bp-1", patient_dfn: "1", category: "vital-signs",
           code: Observation::VITAL_SIGNS_CODES[:blood_pressure],
-          display: "Blood Pressure", value: "120/80", status: "final"
+          display: "Blood Pressure", value: "120/80", status: "final",
+          effective_datetime: DateTime.new(2025, 1, 15, 8, 0)
         )
         fhir = bp.to_fhir
         codes = fhir[:component].map { |c| c.dig(:code, :coding, 0, :code) }
@@ -203,7 +205,8 @@ module Lakeraven
         bp = Observation.new(
           ien: "bp-1", patient_dfn: "1", category: "vital-signs",
           code: Observation::VITAL_SIGNS_CODES[:blood_pressure],
-          display: "Blood Pressure", value: "120/80", status: "final"
+          display: "Blood Pressure", value: "120/80", status: "final",
+          effective_datetime: DateTime.new(2025, 1, 15, 8, 0)
         )
         fhir = bp.to_fhir
         fhir[:component].each do |component|
@@ -217,7 +220,8 @@ module Lakeraven
           ien: "hr-1", patient_dfn: "1", category: "vital-signs",
           code: Observation::VITAL_SIGNS_CODES[:heart_rate],
           display: "Heart Rate", value: "72", value_quantity: "72",
-          unit: "/min", status: "final"
+          unit: "/min", status: "final",
+          effective_datetime: DateTime.new(2025, 1, 15, 8, 0)
         )
         fhir = hr.to_fhir
         assert_equal "/min", fhir[:valueQuantity][:unit]
@@ -228,12 +232,73 @@ module Lakeraven
           ien: "hr-1", patient_dfn: "1", category: "vital-signs",
           code: Observation::VITAL_SIGNS_CODES[:heart_rate],
           display: "Heart Rate", value: "72", value_quantity: "72",
-          unit: "/min", status: "final"
+          unit: "/min", status: "final",
+          effective_datetime: DateTime.new(2025, 1, 15, 8, 0)
         )
         fhir = hr.to_fhir
         coding = fhir[:category].first[:coding].first
         assert_equal "http://terminology.hl7.org/CodeSystem/observation-category", coding[:system]
         assert_equal "vital-signs", coding[:code]
+      end
+
+      test "from_lab_hashes maps LOINC-coded lab results to laboratory observations" do
+        collected = DateTime.new(2025, 1, 14, 8, 30)
+        obs = Observation.from_lab_hashes([
+          {
+            ien: 9001, test_name: "718-7", result: "13.5", units: "g/dL",
+            reference_range: "12.0-15.5", abnormal_flag: "N", abnormal: false,
+            collection_date: collected, status: "final"
+          }
+        ], patient_dfn: "1").first
+
+        assert_equal "laboratory", obs.category
+        assert_equal "718-7", obs.code
+        assert_equal "loinc", obs.code_system
+        assert_equal "13.5", obs.value_quantity
+        assert_equal collected, obs.effective_datetime
+        assert_equal "12.0-15.5", obs.reference_range
+      end
+
+      test "LOINC laboratory observation serializes with US Core lab profile" do
+        obs = Observation.from_lab_hashes([
+          {
+            ien: 9001, test_name: "718-7", result: "13.5", units: "g/dL",
+            reference_range: "12.0-15.5", abnormal_flag: "N", abnormal: false,
+            collection_date: DateTime.new(2025, 1, 14, 8, 30), status: "final"
+          }
+        ], patient_dfn: "1").first
+
+        fhir = obs.to_fhir
+
+        assert_includes Array(fhir.dig(:meta, :profile)), Observation::US_CORE_LAB_PROFILE
+        assert_equal "http://loinc.org", fhir.dig(:code, :coding, 0, :system)
+        assert_equal [ { text: "12.0-15.5" } ], fhir[:referenceRange]
+        assert_equal "N", fhir.dig(:interpretation, 0, :coding, 0, :code)
+      end
+
+      test "non-LOINC laboratory observation uses text code and valueString without US Core profile" do
+        obs = Observation.from_lab_hashes([
+          {
+            ien: 9002, test_name: "URINE COLOR", result: "YELLOW", units: "",
+            reference_range: "", abnormal_flag: "", abnormal: false,
+            collection_date: DateTime.new(2025, 1, 14, 9, 0), status: "completed"
+          }
+        ], patient_dfn: "1").first
+
+        fhir = obs.to_fhir
+
+        assert_nil obs.code
+        assert_equal "URINE COLOR", fhir.dig(:code, :text)
+        assert_equal "YELLOW", fhir[:valueString]
+        assert_equal "final", fhir[:status]
+        assert_nil fhir.dig(:meta, :profile)
+      end
+
+      test "fhir_for_patient returns vital sign and laboratory observations" do
+        results = Observation.fhir_for_patient(1)
+
+        assert results.any?(&:vital_sign?)
+        assert results.any?(&:laboratory?)
       end
     end
   end

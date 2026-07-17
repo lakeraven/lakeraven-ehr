@@ -57,6 +57,11 @@ module Lakeraven
         assert patients.length >= 1
         patients.each { |p| assert_instance_of Patient, p }
       end
+      test "brief_header returns nil for VistA backend" do
+        header = PatientGateway.brief_header(1)
+
+        assert_nil header
+      end
     end
   end
 end

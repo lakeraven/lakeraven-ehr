@@ -2,7 +2,7 @@
 
 ## Status
 
-Draft
+Accepted
 
 ## Context
 
@@ -53,6 +53,16 @@ The backend defaults to `:rpms` for backwards compatibility.
 module Lakeraven
   module EHR
     class Backend
+      class << self
+        def current
+          @current ||= new(EHR.configuration.backend)
+        end
+
+        def reset!
+          @current = nil
+        end
+      end
+
       def initialize(kind)
         @kind = kind
       end
@@ -87,11 +97,15 @@ class Lakeraven::EHR::PatientGateway
     end
 
     def backend
-      EHR.config.backend_adapter
+      Lakeraven::EHR::Backend.current
     end
   end
 end
 ```
+
+### Client wiring
+
+`Lakeraven::EHR.configure` applies `config.client` to `VistaRpc.client`. Because `RpmsRpc.client` delegates to `VistaRpc.client` via the shared infrastructure, a single configured client serves both backends.
 
 ## Consequences
 
@@ -107,7 +121,7 @@ end
 
 ### lakeraven-ehr responsibilities
 
-- Gateways reference `backend.*_api` instead of `RpmsRpc::*` directly.
+- Gateways reference `Backend.current.*_api` instead of `RpmsRpc::*` directly.
 - Configuration exposes `backend` and `client`.
 - Default remains `:rpms`.
 
@@ -115,4 +129,10 @@ end
 
 - How to handle IHS-specific gateway behavior when backend is `:vista` (raise? return nil? stub?).
 - Whether to move all symbolic API modules into `vista-rpc` and have `rpms-rpc` only add IHS-specific wrappers.
-- How `VistaRpc.client` and `RpmsRpc.client` should be unified in the host app (currently both delegate to `VistaRpc.client`).
+
+## References
+
+- `lib/lakeraven/ehr.rb` — configuration object and `Lakeraven::EHR.configure`
+- `lib/lakeraven/ehr/backend.rb` — backend adapter
+- `lib/lakeraven/ehr/engine.rb` — Rails engine entry point
+- `app/controllers/concerns/lakeraven/ehr/auditable_clinical_access.rb` — records configured backend in audit logs

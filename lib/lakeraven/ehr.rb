@@ -9,7 +9,7 @@ module Lakeraven
   module EHR
     class Configuration
       attr_accessor :tenant_resolver, :facility_resolver, :eligibility_adapter,
-                    :backend, :client
+                    :backend, :client, :validate_fhir_us_core
 
       def initialize
         @tenant_resolver = ->(request) {
@@ -23,6 +23,7 @@ module Lakeraven
         @eligibility_adapter = MockEligibilityAdapter.new
         @backend = :rpms
         @client = nil
+        @validate_fhir_us_core = false
       end
     end
 

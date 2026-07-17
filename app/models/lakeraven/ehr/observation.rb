@@ -50,6 +50,9 @@ module Lakeraven
         "39156-5" => "http://hl7.org/fhir/us/core/StructureDefinition/us-core-bmi"
       }.freeze
 
+      US_CORE_LAB_PROFILE = "http://hl7.org/fhir/us/core/StructureDefinition/us-core-observation-lab"
+      LOINC_CODE_PATTERN = /\A\d{3,7}-\d\z/.freeze
+
       # Map RPMS vital type strings to LOINC codes and UCUM units
       VITAL_TYPE_MAP = {
         "BP"    => { code: "85354-9", display: "Blood Pressure",      unit: "mm[Hg]" },
@@ -73,6 +76,9 @@ module Lakeraven
       attribute :category, :string
       attribute :status, :string
       attribute :effective_datetime, :datetime
+      attribute :reference_range, :string
+      attribute :abnormal_flag, :string
+      attribute :abnormal, :boolean
 
       # -- Gateway DI -----------------------------------------------------------
 
@@ -111,16 +117,60 @@ module Lakeraven
         end
       end
 
+      def self.fhir_for_patient(dfn, days: 90)
+        from_vital_hashes(gateway.for_patient(dfn), patient_dfn: dfn) +
+          from_lab_hashes(gateway.labs_for_patient(dfn, days: days), patient_dfn: dfn)
+      end
+
+      def self.from_lab_hashes(hashes, patient_dfn:)
+        hashes.filter_map do |h|
+          result = h[:result]
+          numeric_result = begin
+            Float(result)
+            true
+          rescue ArgumentError, TypeError
+            false
+          end
+          code = h[:code].presence
+          code ||= h[:test_name].to_s if h[:test_name].to_s.match?(LOINC_CODE_PATTERN)
+          code_system = h[:code_system].presence
+          code_system ||= "loinc" if code.present? && code.match?(LOINC_CODE_PATTERN)
+          status = h[:status].to_s.downcase
+          status = "final" if status.empty? || status == "completed"
+
+          new(
+            ien: (h[:ien] || SecureRandom.uuid).to_s,
+            patient_dfn: patient_dfn,
+            code: code,
+            code_system: code_system,
+            display: h[:test_name],
+            value: result,
+            value_quantity: numeric_result ? result : nil,
+            unit: h[:units],
+            category: "laboratory",
+            status: status,
+            effective_datetime: h[:collection_date],
+            reference_range: h[:reference_range],
+            abnormal_flag: h[:abnormal_flag],
+            abnormal: h[:abnormal]
+          )
+        end
+      end
+
       def vital_sign? = category == "vital-signs"
       def laboratory? = category == "laboratory"
       def sdoh? = category == "social-history" || category == "survey"
 
       def to_fhir
-        if blood_pressure?
+        resource = if blood_pressure?
           build_blood_pressure_fhir
         else
           build_standard_fhir
         end
+
+        Lakeraven::EHR::FHIR::UsCoreValidator.validate!(resource) if Lakeraven::EHR.configuration.validate_fhir_us_core
+
+        resource
       end
 
       private
@@ -137,8 +187,11 @@ module Lakeraven
           status: status,
           subject: patient_dfn ? { reference: "Patient/#{patient_dfn}" } : nil,
           code: build_code,
+          effectiveDateTime: effective_datetime&.iso8601,
           valueQuantity: build_value_quantity,
-          valueString: sdoh? && value_quantity.blank? ? value : nil,
+          valueString: value_quantity.blank? && (sdoh? || laboratory?) ? value : nil,
+          referenceRange: build_reference_range,
+          interpretation: build_interpretation,
           category: category ? [ { coding: [ { code: category, system: CATEGORY_SYSTEM } ] } ] : nil
         }.compact
       end
@@ -152,6 +205,7 @@ module Lakeraven
           status: status,
           subject: patient_dfn ? { reference: "Patient/#{patient_dfn}" } : nil,
           code: build_code,
+          effectiveDateTime: effective_datetime&.iso8601,
           category: category ? [ { coding: [ { code: category, system: CATEGORY_SYSTEM } ] } ] : nil,
           component: [
             {
@@ -186,7 +240,29 @@ module Lakeraven
 
       def build_meta
         profile_url = US_CORE_PROFILES[code]
+        profile_url ||= US_CORE_LAB_PROFILE if laboratory? && code_system == "loinc" && code.present?
         profile_url ? { profile: [ profile_url ] } : nil
+      end
+
+      def build_reference_range
+        return nil if reference_range.blank?
+
+        [ { text: reference_range } ]
+      end
+
+      def build_interpretation
+        return nil if abnormal_flag.blank?
+
+        [
+          {
+            coding: [
+              {
+                code: abnormal_flag.to_s.upcase,
+                system: "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation"
+              }
+            ]
+          }
+        ]
       end
 
       def build_value_quantity

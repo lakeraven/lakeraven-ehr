@@ -4,6 +4,10 @@ require "rpms_rpc/api/patient"
 require "vista_rpc/api/patient"
 require "rpms_rpc/api/practitioner"
 require "vista_rpc/api/practitioner"
+require "rpms_rpc/api/vital"
+require "vista_rpc/api/vital"
+require "rpms_rpc/api/lab"
+require "vista_rpc/api/lab"
 
 module Lakeraven
   module EHR
@@ -38,6 +42,14 @@ module Lakeraven
 
       def practitioner_api
         vista? ? VistaRpc::Practitioner : RpmsRpc::Practitioner
+      end
+
+      def vital_api
+        vista? ? VistaRpc::Vital : RpmsRpc::Vital
+      end
+
+      def lab_api
+        vista? ? VistaRpc::Lab : RpmsRpc::Lab
       end
 
       private

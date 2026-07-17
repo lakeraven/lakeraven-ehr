@@ -25,6 +25,52 @@ class Lakeraven::EHR::BackendTest < ActiveSupport::TestCase
     assert_equal VistaRpc::Patient, Lakeraven::EHR::Backend.current.patient_api
   end
 
+  def test_rpms_backend_resolves_rpms_practitioner_api
+    Lakeraven::EHR.configure { |c| c.backend = :rpms }
+    assert_equal RpmsRpc::Practitioner, Lakeraven::EHR::Backend.current.practitioner_api
+  end
+
+  def test_vista_backend_resolves_vista_practitioner_api
+    Lakeraven::EHR.configure { |c| c.backend = :vista }
+    assert_equal VistaRpc::Practitioner, Lakeraven::EHR::Backend.current.practitioner_api
+  end
+
+  def test_rpms_backend_resolves_rpms_vital_api
+    Lakeraven::EHR.configure { |c| c.backend = :rpms }
+    assert_equal RpmsRpc::Vital, Lakeraven::EHR::Backend.current.vital_api
+  end
+
+  def test_vista_backend_resolves_vista_vital_api
+    Lakeraven::EHR.configure { |c| c.backend = :vista }
+    assert_equal VistaRpc::Vital, Lakeraven::EHR::Backend.current.vital_api
+  end
+
+  def test_rpms_backend_resolves_rpms_lab_api
+    Lakeraven::EHR.configure { |c| c.backend = :rpms }
+    assert_equal RpmsRpc::Lab, Lakeraven::EHR::Backend.current.lab_api
+  end
+
+  def test_vista_backend_resolves_vista_lab_api
+    Lakeraven::EHR.configure { |c| c.backend = :vista }
+    assert_equal VistaRpc::Lab, Lakeraven::EHR::Backend.current.lab_api
+  end
+
+  def test_unknown_backend_falls_back_to_rpms
+    Lakeraven::EHR.configure { |c| c.backend = :some_other_system }
+    assert_equal RpmsRpc::Patient, Lakeraven::EHR::Backend.current.patient_api
+    assert_equal RpmsRpc::Practitioner, Lakeraven::EHR::Backend.current.practitioner_api
+    assert_equal RpmsRpc::Vital, Lakeraven::EHR::Backend.current.vital_api
+    assert_equal RpmsRpc::Lab, Lakeraven::EHR::Backend.current.lab_api
+  end
+
+  def test_backend_reset_creates_new_adapter
+    Lakeraven::EHR.configure { |c| c.backend = :rpms }
+    first = Lakeraven::EHR::Backend.current
+    Lakeraven::EHR::Backend.reset!
+    second = Lakeraven::EHR::Backend.current
+    refute_same first, second
+  end
+
   def test_configure_applies_client_to_vista_rpc
     original_client = VistaRpc.configuration.client
     mock_client = Object.new

@@ -1,12 +1,22 @@
 # frozen_string_literal: true
 
-require "rpms_rpc/api/vital"
-
 module Lakeraven
   module EHR
     class ObservationGateway
-      def self.for_patient(dfn)
-        RpmsRpc::Vital.for_patient(dfn.to_s)
+      class << self
+        def for_patient(dfn)
+          backend.vital_api.for_patient(dfn.to_s)
+        end
+
+        def labs_for_patient(dfn, days: 90)
+          backend.lab_api.for_patient(dfn.to_s, days: days)
+        end
+
+        private
+
+        def backend
+          Backend.current
+        end
       end
     end
   end

@@ -10,6 +10,9 @@ require "rails/test_help"
 require "rpms_rpc/version"
 require "rpms_rpc/mock_client"
 
+# Enable US Core validation in the adapter serialization path for tests.
+Lakeraven::EHR.configuration.validate_fhir_us_core = true
+
 # Configure RpmsRpc with mock client and seed data for all tests.
 RpmsRpc.mock! do |m|
   # Patients (DFN 1-3)
@@ -125,6 +128,10 @@ RpmsRpc.mock! do |m|
     { type: "POX", value: "98",     units: "%",      recorded_date: Date.new(2025, 1, 15) },
     { type: "WT",  value: "150",    units: "[lb_av]", recorded_date: Date.new(2025, 1, 15) },
     { type: "HT",  value: "65",     units: "[in_i]", recorded_date: Date.new(2025, 1, 15) }
+  ])
+
+  m.seed_keyed_collection(:lab_result_list, "1", [
+    { ien: 9001, test_name: "718-7", result: "13.5", units: "g/dL", reference_range: "12.0-15.5", abnormal_flag: "N", collection_date: DateTime.new(2025, 1, 14, 8, 30), status: "final" }
   ])
 
   # Test users

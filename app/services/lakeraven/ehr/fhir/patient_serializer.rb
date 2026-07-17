@@ -72,10 +72,16 @@ module Lakeraven
           exts = build_extensions
           resource[:extension] = exts if exts.any?
 
+          validate!(resource) if Lakeraven::EHR.configuration.validate_fhir_us_core
+
           resource
         end
 
         private
+
+        def validate!(resource)
+          Lakeraven::EHR::FHIR::UsCoreValidator.validate!(resource)
+        end
 
         def build_name
           return {} if @p.name.blank?
@@ -117,19 +123,13 @@ module Lakeraven
         def build_extensions
           exts = []
 
-          # US Core Race extension (complex extension per US Core spec)
-          exts << build_race_extension if @p.race.present? || @p.race_code.present?
+          exts << build_race_extension
 
           # US Core Ethnicity extension (Inferno requires this)
           exts << build_ethnicity_extension
 
           # US Core Birthsex extension
-          if @p.sex.present?
-            exts << {
-              url: "http://hl7.org/fhir/us/core/StructureDefinition/us-core-birthsex",
-              valueCode: BIRTHSEX_MAP.fetch(@p.sex, "UNK")
-            }
-          end
+          exts << build_birthsex_extension
 
           # Tribal affiliation
           if @p.tribal_enrollment_number.present?
@@ -175,7 +175,8 @@ module Lakeraven
             }
             sub_extensions << { url: "text", valueString: mapped[:display] }
           else
-            sub_extensions << { url: "text", valueString: @p.race }
+            text = race_upper.present? ? @p.race : "Unknown"
+            sub_extensions << { url: "text", valueString: text }
           end
 
           {
@@ -190,6 +191,13 @@ module Lakeraven
             extension: [
               { url: "text", valueString: "Unknown" }
             ]
+          }
+        end
+
+        def build_birthsex_extension
+          {
+            url: "http://hl7.org/fhir/us/core/StructureDefinition/us-core-birthsex",
+            valueCode: BIRTHSEX_MAP.fetch(@p.sex, "UNK")
           }
         end
       end

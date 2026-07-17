@@ -7,8 +7,7 @@ module Lakeraven
 
       def index
         dfn = extract_patient_dfn(params[:patient])
-        raw = Observation.for_patient(dfn)
-        observations = Observation.from_vital_hashes(raw, patient_dfn: dfn)
+        observations = Observation.fhir_for_patient(dfn)
         observations = filter_observations(observations)
         render_bundle(observations.map(&:to_fhir))
       end

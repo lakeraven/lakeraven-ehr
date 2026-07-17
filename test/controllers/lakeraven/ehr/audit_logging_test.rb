@@ -57,7 +57,7 @@ module Lakeraven
         assert_equal VistaRpc::PhiSanitizer.hash_identifier("1"), event.entity_identifier
       end
 
-      test "backend identifier is recorded in audit event" do
+      test "backend identifier is recorded for VistA Patient read" do
         Lakeraven::EHR.configure { |c| c.backend = :vista }
         Lakeraven::EHR::Backend.reset!
 
@@ -65,6 +65,43 @@ module Lakeraven
 
         event = AuditEvent.recent.first
         assert_equal "vista", event.backend_identifier
+        assert_equal "Patient", event.entity_type
+        assert_equal VistaRpc::PhiSanitizer.hash_identifier("1"), event.entity_identifier
+      ensure
+        Lakeraven::EHR.configure { |c| c.backend = :rpms }
+        Lakeraven::EHR::Backend.reset!
+      end
+
+      test "VistA Practitioner read logs with hashed IEN and backend identifier" do
+        Lakeraven::EHR.configure { |c| c.backend = :vista }
+        Lakeraven::EHR::Backend.reset!
+        setup_smart_auth(scopes: "system/Practitioner.read")
+
+        assert_difference -> { AuditEvent.count }, 1 do
+          get "/lakeraven-ehr/Practitioner/101", headers: @headers
+        end
+
+        event = AuditEvent.recent.first
+        assert_equal "vista", event.backend_identifier
+        assert_equal "Practitioner", event.entity_type
+        assert_equal VistaRpc::PhiSanitizer.hash_identifier("101"), event.entity_identifier
+      ensure
+        Lakeraven::EHR.configure { |c| c.backend = :rpms }
+        Lakeraven::EHR::Backend.reset!
+      end
+
+      test "VistA Patient search logs backend identifier without raw search terms" do
+        Lakeraven::EHR.configure { |c| c.backend = :vista }
+        Lakeraven::EHR::Backend.reset!
+
+        assert_difference -> { AuditEvent.count }, 1 do
+          get "/lakeraven-ehr/Patient", params: { name: "DOE" }, headers: @headers
+        end
+
+        event = AuditEvent.recent.first
+        assert_equal "vista", event.backend_identifier
+        assert_equal "Patient", event.entity_type
+        assert_nil event.entity_identifier
       ensure
         Lakeraven::EHR.configure { |c| c.backend = :rpms }
         Lakeraven::EHR::Backend.reset!

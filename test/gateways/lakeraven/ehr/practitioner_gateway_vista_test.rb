@@ -39,13 +39,26 @@ module Lakeraven
         practitioners.each { |p| assert_instance_of Practitioner, p }
       end
 
-      test "VistA practitioner serializes to FHIR" do
+      test "VistA practitioner serializes to US Core conformant Practitioner" do
         practitioner = PractitionerGateway.find(101)
         fhir = practitioner.to_fhir
 
         assert_equal "Practitioner", fhir[:resourceType]
         assert_equal "101", fhir[:id]
-        assert_equal "MARTINEZ", fhir[:name].first[:family]
+        assert_equal [ "http://hl7.org/fhir/us/core/StructureDefinition/us-core-practitioner" ], fhir[:meta][:profile]
+        refute_empty fhir[:name]
+
+        identifier = fhir[:identifier].find { |i| i[:value] == "101" }
+        refute_nil identifier, "expected an identifier carrying the VistA DUZ"
+      end
+
+      test "VistA practitioner name parses family and given" do
+        practitioner = PractitionerGateway.find(101)
+        fhir = practitioner.to_fhir
+
+        name = fhir[:name].first
+        assert_equal "MARTINEZ", name[:family]
+        assert_includes name[:given], "SARAH"
       end
     end
   end

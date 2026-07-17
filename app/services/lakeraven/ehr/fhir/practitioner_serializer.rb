@@ -31,6 +31,8 @@ module Lakeraven
           quals = build_qualifications
           resource[:qualification] = quals if quals.any?
 
+          Lakeraven::EHR::FHIR::UsCoreValidator.validate!(resource) if Lakeraven::EHR.configuration.validate_fhir_us_core
+
           resource
         end
 
