@@ -27,7 +27,8 @@ module Lakeraven
         labs = ObservationGateway.labs_for_patient(1)
 
         assert_kind_of Array, labs
-        assert labs.any? { |r| r[:ien] == 9001 && r[:test_name] == "718-7" }
+        # ien is "<test ien>;<collection timestamp>" — one datapoint of one test.
+        assert labs.any? { |r| r[:ien].start_with?("9001;") && r[:test_name] == "718-7" }
         assert labs.all? { |r| r.key?(:abnormal) }
       end
 

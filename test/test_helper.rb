@@ -130,8 +130,17 @@ RpmsRpc.mock! do |m|
     { type: "HT",  value: "65",     units: "[in_i]", recorded_date: Date.new(2025, 1, 15) }
   ])
 
-  m.seed_keyed_collection(:lab_result_list, "1", [
-    { ien: 9001, test_name: "718-7", result: "13.5", units: "g/dL", reference_range: "12.0-15.5", abnormal_flag: "N", collection_date: DateTime.new(2025, 1, 14, 8, 30), status: "final" }
+  # Labs come from the CPRS graphing pair: ORWGRPC ITEMS enumerates the
+  # patient's lab tests (keyed by DFN), ORWGRPC ITEMDATA returns datapoints
+  # (keyed by its first param — the "63^<test ien>" item). The test name is
+  # a LOINC-shaped synthetic value to exercise the coded-lab path.
+  m.seed_keyed_collection(:lab_graph_items, "1", [
+    { file_number: "63", test_ien: 9001, test_name: "718-7", newest_result: DateTime.now - 2 }
+  ])
+  m.seed_keyed_collection(:lab_graph_data, "63^9001", [
+    { file_number: "63", test_ien: 9001, collection_date: DateTime.now - 2, result: "13.5",
+      abnormal_flag: "N", specimen_code: "70", specimen: "BLOOD",
+      reference_range: "12.0!15.5", units: "g/dL" }
   ])
 
   # Problems (ORQQPL LIST) for patient DFN 1 — wire order verified against
