@@ -4,6 +4,7 @@ module Lakeraven
   module EHR
     class ImmunizationsController < ApplicationController
       before_action :require_patient_param, only: :index
+      before_action :enforce_patient_context!, only: :index
 
       def index
         dfn = params[:patient].to_s.delete_prefix("Patient/")
@@ -21,6 +22,12 @@ module Lakeraven
           code: "required",
           diagnostics: "Search parameter 'patient' is required"
         )
+      end
+
+      def enforce_patient_context!
+        return unless params[:patient].present?
+
+        authorize_patient_context!(params[:patient].to_s.delete_prefix("Patient/"))
       end
     end
   end
