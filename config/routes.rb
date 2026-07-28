@@ -42,6 +42,7 @@ Lakeraven::EHR::Engine.routes.draw do
 
   # Backend Services JWT auth
   post "oauth/token", to: "backend_services#token"
+  post "oauth/introspect", to: "backend_services#introspect"
 
   # Measure $import
   post "Measure/$import", to: "measures#import"

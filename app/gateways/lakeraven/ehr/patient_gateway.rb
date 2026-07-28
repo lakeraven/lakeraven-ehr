@@ -1,37 +1,38 @@
 # frozen_string_literal: true
 
-require "rpms_rpc/api/patient"
-
 module Lakeraven
   module EHR
     class PatientGateway
       class << self
         def find(dfn)
-          attrs = RpmsRpc::Patient.find(dfn.to_i)
+          attrs = backend.patient_api.find(dfn.to_i)
           return nil unless attrs
 
           build_patient(attrs)
         end
 
         def search(name_pattern)
-          results = RpmsRpc::Patient.search(name_pattern)
+          results = backend.patient_api.search(name_pattern)
           results.map { |attrs| build_patient(attrs) }
         end
 
         def find_by_ssn(ssn)
-          attrs = RpmsRpc::Patient.find_by_ssn(ssn)
+          attrs = backend.patient_api.find_by_ssn(ssn)
           attrs ? build_patient(attrs) : nil
         end
 
         # Chart-banner projection — returns the issue-#60 contract hash or nil.
-        # Delegates to RpmsRpc::Patient.brief_header (lakeraven/rpms-rpc#60).
-        # Coerces dfn to_i to match the convention used by `find` and
-        # `find_by_ssn` on this gateway.
+        # Delegates to the backend's patient API. Coerces dfn to_i to match
+        # the convention used by `find` and `find_by_ssn` on this gateway.
         def brief_header(dfn)
-          RpmsRpc::Patient.brief_header(dfn.to_i)
+          backend.patient_api.brief_header(dfn.to_i)
         end
 
         private
+
+        def backend
+          Backend.current
+        end
 
         # rpms-rpc returns fields beyond the Patient model's declared
         # attributes (race_code, site_ien, etc.); slice to model.attribute_names

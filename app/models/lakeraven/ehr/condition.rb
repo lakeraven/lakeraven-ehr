@@ -21,6 +21,15 @@ module Lakeraven
         "snomed" => "http://snomed.info/sct"
       }.freeze
 
+      US_CORE_CONDITION_PROFILE = "http://hl7.org/fhir/us/core/StructureDefinition/us-core-condition"
+      CATEGORY_SYSTEM = "http://terminology.hl7.org/CodeSystem/condition-category"
+
+      # ORQQPL LIST status codes → FHIR condition-clinical codes.
+      PROBLEM_STATUS_MAP = {
+        "A" => "active",
+        "I" => "inactive"
+      }.freeze
+
       attribute :ien, :string
       attribute :patient_dfn, :string
       attribute :code, :string
@@ -51,6 +60,34 @@ module Lakeraven
 
       def self.for_patient(dfn)
         gateway.for_patient(dfn)
+      end
+
+      # Build Condition instances from raw problem-list rows and return them
+      # ready for FHIR serialization. Rows come from ORQQPL LIST on both
+      # backends: { ien:, description:, status:, icd_code:, onset_date:,
+      # modified_date:, service_connected: }.
+      def self.fhir_for_patient(dfn)
+        from_problem_hashes(gateway.for_patient(dfn), patient_dfn: dfn)
+      end
+
+      # NOTE: the row's modified_date is the problem's last-modified date,
+      # not its recorded date, so it is deliberately not mapped to FHIR
+      # recordedDate. The icd_code system claim comes from the mapping's
+      # terminology annotation; the wire row's coding-system piece (ICD-9
+      # vs ICD-10) is not yet mapped.
+      def self.from_problem_hashes(hashes, patient_dfn:)
+        hashes.map do |h|
+          new(
+            ien: h[:ien]&.to_s,
+            patient_dfn: patient_dfn.to_s,
+            code: h[:icd_code].presence,
+            code_system: h[:icd_code].present? ? "icd10" : nil,
+            display: h[:description],
+            clinical_status: PROBLEM_STATUS_MAP[h[:status].to_s.upcase],
+            category: "problem-list-item",
+            onset_datetime: h[:onset_date]
+          )
+        end
       end
 
       def self.resource_class
@@ -86,18 +123,46 @@ module Lakeraven
       end
 
       def to_fhir
-        {
+        resource = {
           resourceType: "Condition",
           id: ien&.to_s,
+          meta: build_meta,
           subject: patient_dfn ? { reference: "Patient/#{patient_dfn}" } : nil,
           clinicalStatus: build_clinical_status,
+          verificationStatus: build_verification_status,
           code: build_code,
-          category: category ? [ { coding: [ { code: category } ] } ] : nil,
-          severity: build_severity
+          category: category ? [ { coding: [ { code: category, system: CATEGORY_SYSTEM } ] } ] : nil,
+          severity: build_severity,
+          onsetDateTime: onset_datetime&.iso8601,
+          recordedDate: recorded_date&.iso8601
         }.compact
+
+        Lakeraven::EHR::FHIR::UsCoreValidator.validate!(resource) if Lakeraven::EHR.configuration.validate_fhir_us_core
+
+        resource
       end
 
       private
+
+      # Claim US Core conformance only when the profile's required elements
+      # are present (same conditional-claim pattern as Observation); the
+      # UsCoreValidator then enforces the rest whenever the claim is made.
+      def build_meta
+        return nil unless patient_dfn.present? && category.present? && (code.present? || display.present?)
+
+        { profile: [ US_CORE_CONDITION_PROFILE ] }
+      end
+
+      def build_verification_status
+        return nil unless verification_status.present?
+
+        {
+          coding: [ {
+            system: "http://terminology.hl7.org/CodeSystem/condition-ver-status",
+            code: verification_status
+          } ]
+        }
+      end
 
       def build_clinical_status
         return nil unless clinical_status

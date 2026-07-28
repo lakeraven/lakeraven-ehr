@@ -7,7 +7,13 @@ gemspec
 if ENV["RPMS_RPC_PATH"]
   gem "rpms-rpc", path: ENV["RPMS_RPC_PATH"]
 else
-  gem "rpms-rpc", github: "lakeraven/rpms-rpc", branch: "main"
+  gem "rpms-rpc", path: "../rpms-rpc"
+end
+
+if ENV["VISTA_RPC_PATH"]
+  gem "vista-rpc", path: ENV["VISTA_RPC_PATH"]
+else
+  gem "vista-rpc", path: "../vista-rpc"
 end
 
 gem "puma"

@@ -24,6 +24,24 @@ module Lakeraven
           "UNKNOWN" => { code: "UNK", display: "Unknown" }
         }.freeze
 
+        # Map single-letter VistA race codes (from ORWPT ID INFO) to the
+        # long-form strings used by the US Core race extension.
+        VISTA_RACE_CODE_MAP = {
+          "I" => { code: "1002-5", display: "American Indian or Alaska Native" },
+          "A" => { code: "2028-9", display: "Asian" },
+          "B" => { code: "2054-5", display: "Black or African American" },
+          "H" => { code: "2076-8", display: "Native Hawaiian or Other Pacific Islander" },
+          "W" => { code: "2106-3", display: "White" },
+          "O" => { code: "2131-1", display: "Other Race" },
+          "U" => { code: "UNK", display: "Unknown" }
+        }.freeze
+
+        # Map administrative sex to US Core birthsex codes.
+        BIRTHSEX_MAP = {
+          "M" => "M",
+          "F" => "F"
+        }.freeze
+
         def self.call(patient)
           new(patient).to_h
         end
@@ -54,10 +72,16 @@ module Lakeraven
           exts = build_extensions
           resource[:extension] = exts if exts.any?
 
+          validate!(resource) if Lakeraven::EHR.configuration.validate_fhir_us_core
+
           resource
         end
 
         private
+
+        def validate!(resource)
+          Lakeraven::EHR::FHIR::UsCoreValidator.validate!(resource)
+        end
 
         def build_name
           return {} if @p.name.blank?
@@ -99,11 +123,13 @@ module Lakeraven
         def build_extensions
           exts = []
 
-          # US Core Race extension (complex extension per US Core spec)
-          exts << build_race_extension if @p.race.present?
+          exts << build_race_extension
 
           # US Core Ethnicity extension (Inferno requires this)
           exts << build_ethnicity_extension
+
+          # US Core Birthsex extension
+          exts << build_birthsex_extension
 
           # Tribal affiliation
           if @p.tribal_enrollment_number.present?
@@ -132,8 +158,10 @@ module Lakeraven
         end
 
         def build_race_extension
-          race_upper = @p.race.upcase.strip
-          mapped = RACE_CODE_MAP[race_upper]
+          race_upper = @p.race.to_s.upcase.strip
+          mapped = RACE_CODE_MAP[race_upper] if race_upper.present?
+          mapped ||= VISTA_RACE_CODE_MAP[@p.race_code.to_s.upcase.strip]
+
           sub_extensions = []
 
           if mapped
@@ -147,7 +175,8 @@ module Lakeraven
             }
             sub_extensions << { url: "text", valueString: mapped[:display] }
           else
-            sub_extensions << { url: "text", valueString: @p.race }
+            text = race_upper.present? ? @p.race : "Unknown"
+            sub_extensions << { url: "text", valueString: text }
           end
 
           {
@@ -162,6 +191,13 @@ module Lakeraven
             extension: [
               { url: "text", valueString: "Unknown" }
             ]
+          }
+        end
+
+        def build_birthsex_extension
+          {
+            url: "http://hl7.org/fhir/us/core/StructureDefinition/us-core-birthsex",
+            valueCode: BIRTHSEX_MAP.fetch(@p.sex, "UNK")
           }
         end
       end

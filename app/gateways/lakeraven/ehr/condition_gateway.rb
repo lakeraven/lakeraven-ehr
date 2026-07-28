@@ -4,12 +4,14 @@ require "rpms_rpc/api/problem"
 
 module Lakeraven
   module EHR
-    # Engine-side gateway over RpmsRpc::Problem. The engine vocabulary is
-    # "Condition" (matches FHIR / app/models/lakeraven/ehr/condition.rb); the
-    # underlying RPC module is "Problem" (IPL terminology).
+    # Engine-side gateway over the problem-list APIs. The engine vocabulary
+    # is "Condition" (matches FHIR / app/models/lakeraven/ehr/condition.rb);
+    # the underlying RPC module is "Problem" (IPL terminology). Reads resolve
+    # through the backend abstraction (stock VistA ORQQPL LIST on both
+    # backends); writes are IHS-specific (BGOPROB*) and stay on RpmsRpc.
     class ConditionGateway
       def self.for_patient(dfn)
-        RpmsRpc::Problem.for_patient(dfn.to_s)
+        Backend.current.problem_api.for_patient(dfn.to_s)
       end
 
       def self.add(dfn, problem)

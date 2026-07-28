@@ -147,6 +147,66 @@ module Lakeraven
         # criticality may or may not be in to_fhir depending on implementation
         assert_equal "AllergyIntolerance", fhir[:resourceType]
       end
+
+      # -- VistA allergy adapter (ORQQAL LIST rows → FHIR) ----------------------
+
+      def allergy_row
+        { allergen: "PENICILLIN", reaction: "HIVES", severity: "moderate", allergy_ien: 701 }
+      end
+
+      test "from_allergy_hashes builds AllergyIntolerance instances" do
+        ai = AllergyIntolerance.from_allergy_hashes([ allergy_row ], patient_dfn: "100").first
+
+        assert_equal "701", ai.ien
+        assert_equal "100", ai.patient_dfn
+        assert_equal "PENICILLIN", ai.allergen
+        assert_equal "HIVES", ai.reaction
+        assert_equal "moderate", ai.severity
+        assert_equal "active", ai.clinical_status
+      end
+
+      test "from_allergy_hashes drops severities outside the FHIR value set" do
+        ai = AllergyIntolerance.from_allergy_hashes(
+          [ allergy_row.merge(severity: "UNKNOWN CODE") ], patient_dfn: "100"
+        ).first
+
+        assert_nil ai.severity
+      end
+
+      test "adapter to_fhir claims and passes US Core AllergyIntolerance profile" do
+        fhir = AllergyIntolerance.from_allergy_hashes([ allergy_row ], patient_dfn: "100").first.to_fhir
+
+        assert_includes Array(fhir.dig(:meta, :profile)), AllergyIntolerance::US_CORE_ALLERGY_PROFILE
+        assert_empty Lakeraven::EHR::FHIR::UsCoreValidator.validate(fhir)
+        assert_equal "701", fhir[:id]
+        assert_equal AllergyIntolerance::CLINICAL_STATUS_SYSTEM, fhir.dig(:clinicalStatus, :coding, 0, :system)
+      end
+
+      test "adapter to_fhir omits reaction severity when unmappable" do
+        fhir = AllergyIntolerance.from_allergy_hashes(
+          [ allergy_row.merge(severity: "UNKNOWN CODE") ], patient_dfn: "100"
+        ).first.to_fhir
+
+        refute fhir[:reaction].first.key?(:severity)
+      end
+
+      test "fhir_for_patient builds AllergyIntolerances from the gateway" do
+        mock_gw = Object.new
+        def mock_gw.for_patient(_dfn)
+          [ { allergen: "SULFA", reaction: "RASH", severity: "mild", allergy_ien: 9 } ]
+        end
+
+        original = AllergyIntolerance.gateway
+        begin
+          AllergyIntolerance.gateway = mock_gw
+          allergies = AllergyIntolerance.fhir_for_patient("100")
+          assert_equal 1, allergies.length
+          assert_equal "SULFA", allergies.first.allergen
+          assert_equal "100", allergies.first.patient_dfn
+        ensure
+          AllergyIntolerance.gateway = original
+        end
+      end
     end
   end
 end

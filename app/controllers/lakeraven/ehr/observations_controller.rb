@@ -4,11 +4,11 @@ module Lakeraven
   module EHR
     class ObservationsController < ApplicationController
       before_action :require_patient_param, only: :index
+      before_action :enforce_patient_context!, only: :index
 
       def index
         dfn = extract_patient_dfn(params[:patient])
-        raw = Observation.for_patient(dfn)
-        observations = Observation.from_vital_hashes(raw, patient_dfn: dfn)
+        observations = Observation.fhir_for_patient(dfn)
         observations = filter_observations(observations)
         render_bundle(observations.map(&:to_fhir))
       end
@@ -32,6 +32,12 @@ module Lakeraven
 
       def extract_patient_dfn(param)
         param.to_s.delete_prefix("Patient/")
+      end
+
+      def enforce_patient_context!
+        return unless params[:patient].present?
+
+        authorize_patient_context!(extract_patient_dfn(params[:patient]))
       end
 
       def filter_observations(observations)

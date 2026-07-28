@@ -89,7 +89,14 @@ module Lakeraven
         current_token&.scopes&.to_s&.match?(%r{\bsystem/})
       end
 
+      # RFC 6750 — 401 responses carry a WWW-Authenticate challenge so
+      # clients can distinguish a missing/invalid token (invalid_token)
+      # from a valid token with insufficient scope (insufficient_scope).
+      WWW_AUTHENTICATE_REALM = 'Bearer realm="lakeraven-ehr"'.freeze
+
       def render_unauthorized(message = "Unauthorized")
+        response.set_header("WWW-Authenticate",
+          "#{WWW_AUTHENTICATE_REALM}, error=\"invalid_token\", error_description=\"#{message}\"")
         render json: {
           resourceType: "OperationOutcome",
           issue: [ { severity: "error", code: "login", diagnostics: message } ]
@@ -97,6 +104,8 @@ module Lakeraven
       end
 
       def render_forbidden(message = "Forbidden")
+        response.set_header("WWW-Authenticate",
+          "#{WWW_AUTHENTICATE_REALM}, error=\"insufficient_scope\", error_description=\"#{message}\"")
         render json: {
           resourceType: "OperationOutcome",
           issue: [ { severity: "error", code: "forbidden", diagnostics: message } ]

@@ -167,6 +167,42 @@ module Lakeraven
           assert_equal "CUSTOM RACE", text[:valueString]
         end
 
+        test "includes US Core race extension from VistA race_code" do
+          result = serialize(build_patient(race: nil, race_code: "I"))
+
+          race_ext = result[:extension].find { |e| e[:url]&.include?("us-core-race") }
+          refute_nil race_ext
+
+          omb = race_ext[:extension].find { |e| e[:url] == "ombCategory" }
+          refute_nil omb
+          assert_equal "1002-5", omb[:valueCoding][:code]
+          assert_equal "American Indian or Alaska Native", omb[:valueCoding][:display]
+        end
+
+        test "includes US Core birthsex extension for male" do
+          result = serialize(build_patient(sex: "M"))
+
+          birthsex_ext = result[:extension].find { |e| e[:url]&.include?("us-core-birthsex") }
+          refute_nil birthsex_ext
+          assert_equal "M", birthsex_ext[:valueCode]
+        end
+
+        test "includes US Core birthsex extension for female" do
+          result = serialize(build_patient(sex: "F"))
+
+          birthsex_ext = result[:extension].find { |e| e[:url]&.include?("us-core-birthsex") }
+          refute_nil birthsex_ext
+          assert_equal "F", birthsex_ext[:valueCode]
+        end
+
+        test "birthsex defaults to UNK for unknown sex" do
+          result = serialize(build_patient(sex: "U"))
+
+          birthsex_ext = result[:extension].find { |e| e[:url]&.include?("us-core-birthsex") }
+          refute_nil birthsex_ext
+          assert_equal "UNK", birthsex_ext[:valueCode]
+        end
+
         test "includes US Core ethnicity extension" do
           result = serialize(build_patient)
 

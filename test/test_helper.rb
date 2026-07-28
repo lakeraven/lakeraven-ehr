@@ -10,6 +10,9 @@ require "rails/test_help"
 require "rpms_rpc/version"
 require "rpms_rpc/mock_client"
 
+# Enable US Core validation in the adapter serialization path for tests.
+Lakeraven::EHR.configuration.validate_fhir_us_core = true
+
 # Configure RpmsRpc with mock client and seed data for all tests.
 RpmsRpc.mock! do |m|
   # Patients (DFN 1-3)
@@ -125,6 +128,34 @@ RpmsRpc.mock! do |m|
     { type: "POX", value: "98",     units: "%",      recorded_date: Date.new(2025, 1, 15) },
     { type: "WT",  value: "150",    units: "[lb_av]", recorded_date: Date.new(2025, 1, 15) },
     { type: "HT",  value: "65",     units: "[in_i]", recorded_date: Date.new(2025, 1, 15) }
+  ])
+
+  # Labs come from the CPRS graphing pair: ORWGRPC ITEMS enumerates the
+  # patient's lab tests (keyed by DFN), ORWGRPC ITEMDATA returns datapoints
+  # (keyed by its first param — the "63^<test ien>" item). The test name is
+  # a LOINC-shaped synthetic value to exercise the coded-lab path.
+  m.seed_keyed_collection(:lab_graph_items, "1", [
+    { file_number: "63", test_ien: 9001, test_name: "718-7", newest_result: DateTime.now - 2 }
+  ])
+  m.seed_keyed_collection(:lab_graph_data, "63^9001", [
+    { file_number: "63", test_ien: 9001, collection_date: DateTime.now - 2, result: "13.5",
+      abnormal_flag: "N", specimen_code: "70", specimen: "BLOOD",
+      reference_range: "12.0!15.5", units: "g/dL" }
+  ])
+
+  # Problems (ORQQPL LIST) for patient DFN 1 — wire order verified against
+  # LIST^ORQQPL: ien^description^status^icd_code^onset^modified^SC
+  m.seed_keyed_collection(:problem_list, "1", [
+    { ien: 501, description: "Type 2 diabetes mellitus", status: "A", icd_code: "E11.9",
+      onset_date: Date.new(2020, 3, 1), modified_date: Date.new(2025, 2, 10), service_connected: "NSC" },
+    { ien: 502, description: "Essential hypertension", status: "I", icd_code: "I10",
+      onset_date: Date.new(2018, 6, 15), modified_date: Date.new(2024, 11, 5), service_connected: "NSC" }
+  ])
+
+  # Allergies (ORQQAL LIST) for patient DFN 1
+  m.seed_keyed_collection(:allergy_list, "1", [
+    { allergen: "PENICILLIN", reaction: "HIVES", severity: "moderate", allergy_ien: 701 },
+    { allergen: "PEANUTS", reaction: "ANAPHYLAXIS", severity: "severe", allergy_ien: 702 }
   ])
 
   # Test users

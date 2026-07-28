@@ -1,9 +1,14 @@
-GIT
-  remote: https://github.com/lakeraven/rpms-rpc.git
-  revision: bdf0cc9efca2e4d34b6e59386c5cc3a7cdab9cf9
-  branch: main
+PATH
+  remote: ../rpms-rpc
   specs:
     rpms-rpc (0.1.0)
+      rexml (~> 3.2)
+      vista-rpc (~> 0.1.0)
+
+PATH
+  remote: ../vista-rpc
+  specs:
+    vista-rpc (0.1.0)
       rexml (~> 3.2)
 
 PATH
@@ -359,6 +364,7 @@ DEPENDENCIES
   puma
   rpms-rpc!
   rubocop-rails-omakase
+  vista-rpc!
 
 BUNDLED WITH
    2.7.2

@@ -4,11 +4,12 @@ module Lakeraven
   module EHR
     class ConditionsController < ApplicationController
       before_action :require_patient_param, only: :index
+      before_action :enforce_patient_context!, only: :index
 
       def index
         dfn = extract_patient_dfn(params[:patient])
-        results = Condition.for_patient(dfn)
-        render_bundle(results.map { |r| { resourceType: "Condition" }.merge(r) })
+        conditions = Condition.fhir_for_patient(dfn)
+        render_bundle(conditions.map(&:to_fhir))
       end
 
       def show
@@ -30,6 +31,12 @@ module Lakeraven
 
       def extract_patient_dfn(param)
         param.to_s.delete_prefix("Patient/")
+      end
+
+      def enforce_patient_context!
+        return unless params[:patient].present?
+
+        authorize_patient_context!(extract_patient_dfn(params[:patient]))
       end
     end
   end

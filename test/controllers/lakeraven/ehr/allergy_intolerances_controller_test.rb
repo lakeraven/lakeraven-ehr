@@ -34,9 +34,27 @@ module Lakeraven
         get "/lakeraven-ehr/AllergyIntolerance", params: { patient: "1" }, headers: @headers
         assert_response :ok
         body = JSON.parse(response.body)
-        body["entry"]&.each do |entry|
+        entries = body["entry"]
+        assert entries.any?, "seeded allergy list should produce AllergyIntolerance entries"
+        entries.each do |entry|
           assert_equal "AllergyIntolerance", entry.dig("resource", "resourceType")
         end
+      end
+
+      test "entries are US Core AllergyIntolerances built from the seeded allergy list" do
+        get "/lakeraven-ehr/AllergyIntolerance", params: { patient: "1" }, headers: @headers
+        assert_response :ok
+
+        entries = JSON.parse(response.body)["entry"]
+        assert_equal 2, entries.length
+
+        penicillin = entries.map { |e| e["resource"] }.find { |r| r["id"] == "701" }
+        assert_includes Array(penicillin.dig("meta", "profile")), AllergyIntolerance::US_CORE_ALLERGY_PROFILE
+        assert_equal "PENICILLIN", penicillin.dig("code", "text")
+        assert_equal "Patient/1", penicillin.dig("patient", "reference")
+        assert_equal "HIVES", penicillin.dig("reaction", 0, "manifestation", 0, "text")
+        assert_equal "moderate", penicillin.dig("reaction", 0, "severity")
+        assert_equal "active", penicillin.dig("clinicalStatus", "coding", 0, "code")
       end
 
       test "returns FHIR JSON content type" do

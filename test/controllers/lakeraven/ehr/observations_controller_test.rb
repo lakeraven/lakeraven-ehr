@@ -49,6 +49,27 @@ module Lakeraven
         assert_response :ok
       end
 
+      test "category=laboratory returns only laboratory observations" do
+        get "/lakeraven-ehr/Observation", params: { patient: "1", category: "laboratory" }, headers: @headers
+        assert_response :ok
+
+        entries = JSON.parse(response.body)["entry"]
+        assert entries.any?
+        entries.each do |entry|
+          assert_equal "laboratory", entry.dig("resource", "category", 0, "coding", 0, "code")
+        end
+        assert entries.any? { |entry| Array(entry.dig("resource", "meta", "profile")).include?(Observation::US_CORE_LAB_PROFILE) }
+      end
+
+      test "code filter returns matching laboratory observation" do
+        get "/lakeraven-ehr/Observation", params: { patient: "1", code: "718-7" }, headers: @headers
+        assert_response :ok
+
+        entries = JSON.parse(response.body)["entry"]
+        assert_equal 1, entries.length
+        assert_equal "718-7", entries.first.dig("resource", "code", "coding", 0, "code")
+      end
+
       test "show returns 404 OperationOutcome" do
         get "/lakeraven-ehr/Observation/99999", headers: @headers
         assert_response :not_found
