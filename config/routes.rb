@@ -56,4 +56,14 @@ Lakeraven::EHR::Engine.routes.draw do
 
   # Measure $import
   post "Measure/$import", to: "measures#import"
+
+  # Web UI — login, dashboard (accessibility / ops surface)
+  get "login" => "sessions#new", as: :login
+  # Test-only canned-credential login (#401 interim); the real VistA sign-on
+  # gateway (#332) will replace this and open the route in all environments.
+  if Rails.env.test?
+    post "login" => "sessions#create"
+  end
+  delete "logout" => "sessions#destroy", as: :logout
+  get "dashboard" => "dashboards#show", as: :dashboard
 end
