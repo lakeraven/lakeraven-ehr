@@ -1,16 +1,12 @@
 # frozen_string_literal: true
 
-begin
-  require "rpms_rpc/api/site"
-rescue LoadError
-  # rpms-rpc gem does not yet expose RpmsRpc::Site.
-end
+require "rpms_rpc/api/site"
 
 module Lakeraven
   module EHR
     # Division (site) context: list accessible divisions, look up the
     # currently-selected one, and switch the active division.
-    # Wraps RpmsRpc::Site (lakeraven/rpms-rpc#100).
+    # Wraps RpmsRpc::Site
     class SiteGateway
       def self.list(duz, via: default_provider)
         return [] if via.nil?
@@ -31,8 +27,6 @@ module Lakeraven
       end
 
       def self.default_provider
-        return nil unless defined?(::RpmsRpc::Site) &&
-                          ::RpmsRpc::Site.respond_to?(:list)
         ::RpmsRpc::Site
       end
     end

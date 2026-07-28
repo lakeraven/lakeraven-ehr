@@ -1,16 +1,12 @@
 # frozen_string_literal: true
 
-begin
-  require "rpms_rpc/api/immunization_refusal"
-rescue LoadError
-  # rpms-rpc gem does not yet expose RpmsRpc::ImmunizationRefusal.
-end
+require "rpms_rpc/api/immunization_refusal"
 
 module Lakeraven
   module EHR
     # Records a patient's refusal of an immunization on the open encounter.
     # Distinct from ImmunizationGateway (read-only).
-    # Wraps RpmsRpc::ImmunizationRefusal (lakeraven/rpms-rpc#76).
+    # Wraps RpmsRpc::ImmunizationRefusal
     class ImmunizationRefusalGateway
       FAILURE = { success: false, ien: nil, raw: nil }.freeze
 
@@ -22,8 +18,6 @@ module Lakeraven
       end
 
       def self.default_provider
-        return nil unless defined?(::RpmsRpc::ImmunizationRefusal) &&
-                          ::RpmsRpc::ImmunizationRefusal.respond_to?(:record)
         ::RpmsRpc::ImmunizationRefusal
       end
     end
