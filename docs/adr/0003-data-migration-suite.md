@@ -1,7 +1,7 @@
 # ADR 0003: Data migration ETL suite stays archived in rpms_redux, not ported
 
-**Status:** Proposed
-**Date:** 2026-05-24
+**Status:** Accepted
+**Date:** 2026-05-24 (accepted 2026-07-28)
 
 ## Context
 
