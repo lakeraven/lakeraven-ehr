@@ -1,0 +1,21 @@
+<% content_for :title, "Dashboard | Lakeraven EHR" %>
+
+<div class="page-header">
+  <h1>Dashboard</h1>
+  <p>Care team overview and pending work</p>
+</div>
+
+<div class="summary-counts">
+  <div class="summary-count">
+    <span class="summary-count__number"><%= @active_cases_count %></span>
+    <span class="summary-count__label"><span class="sr-only">Number of </span>Active Cases</span>
+  </div>
+  <div class="summary-count">
+    <span class="summary-count__number"><%= @my_tasks_count %></span>
+    <span class="summary-count__label"><span class="sr-only">Number of </span>My Tasks</span>
+  </div>
+  <div class="summary-count">
+    <span class="summary-count__number"><%= @pending_referrals_count %></span>
+    <span class="summary-count__label"><span class="sr-only">Number of </span>Pending Referrals</span>
+  </div>
+</div>
