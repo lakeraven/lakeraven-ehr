@@ -48,7 +48,7 @@ healthit.gov — each row's owner links the exact procedure when the work order 
 | (g)(4) | QMS | n/a (process) | **#403** | QMS narrative + attestation | not drafted |
 | (g)(5) | Accessibility-centered design | `ui/accessibility.feature` (5) | — | WCAG audit + attestation | implemented |
 | (g)(7)(9) | API: patient selection / all-data | FHIR surface + `bulk_export_download_auth.feature` (5) | #334, #254 | Inferno subtests | implemented, infra endpoints + search params open |
-| (g)(10) | Standardized FHIR API | `onc/us_core_patient_api`, `onc/smart_ehr_launch` (3), `onc/backend_services_auth` (3), `fhir_smart_authentication` (8), `smart_launch_context` (6), `onc/provenance_revinclude` (2), `onc/vital_signs_compliance` (5) | **#261 (Inferno), #297, #360, #254** | **Inferno ONC suite report** | implemented, Inferno run = the gate |
+| (g)(10) | Standardized FHIR API | `onc/us_core_patient_api.feature` (8), `onc/smart_ehr_launch.feature` (3), `onc/backend_services_auth.feature` (3), `fhir_smart_authentication.feature` (8), `smart_launch_context.feature` (6), `onc/provenance_revinclude.feature` (2), `onc/vital_signs_compliance.feature` (5) | **#261 (Inferno), #297, #360, #254** | **Inferno ONC suite report** | implemented, Inferno run = the gate |
 | (h)(1) or (h)(2) | Direct messaging | **spec gap — no feature file** | **#226** | HISP interop evidence | **open decision: h-1 w/ HISP partner vs h-2 edge; then BDD-red spec first** |
 | cross-cutting | Evidence harness | n/a | **#404** | `evidence/` bundle from CI | not built |
 | external | ACB engagement / VSAC / FedRAMP hosting | n/a | #364 / #365 / #366 | contracts & licenses | calendar gates |
