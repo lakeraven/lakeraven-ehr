@@ -19,7 +19,9 @@ A prior framing said "staff UI lives in the SaaS shell." That was incorrect for 
 
 **Clinical staff UI controllers, views, helpers, and routes live in `lakeraven-ehr` (the engine).**
 
-The host repository (`lakeraven-ehr-saas`) is **limited to SaaS-framework functions**: account management, subscription/billing, marketing pages, multi-tenant onboarding, password-reset, the public landing page. It mounts the engine; it does not duplicate clinical UI.
+The host repository (`lakeraven-ehr-saas`) is **limited to SaaS-framework functions**: account management, authentication, MFA, sessions, subscription/billing, marketing pages, multi-tenant onboarding, password-reset, the public landing page. It mounts the engine; it does not duplicate clinical UI.
+
+**Guiding principle: let Jumpstart Pro do what it does best; keep as much core clinical logic in the engine as possible.** The host is built on Jumpstart Pro — accounts, authentication, MFA/2FA, sessions, teams/multi-tenancy, billing, subscriptions, and admin are framework concerns it already solves; the engine must not reimplement them. The engine owns clinical logic and its UI. Every placement question resolves to a single test: **is this a Jumpstart-Pro framework concern (→ host) or clinical (→ engine)?** In particular, **MFA is out of scope for the engine** — Jumpstart Pro provides 2FA, and the engine must not carry its own.
 
 Specific port placements:
 
@@ -27,7 +29,7 @@ Specific port placements:
 |---|---|
 | `home`, `dashboard`, `cases`, `tasks`, `service_requests`, `encounters`, `patients`, `reconciliations`, `public_health_dashboards`, `pwa` | `lakeraven-ehr` (engine) |
 | Subscription, billing, marketing site, account onboarding, password reset | `lakeraven-ehr-saas` (host) |
-| Admin / MFA / audit-report / session-management UI | `lakeraven-ehr-saas` (host) — see separate ADR 0001 in that repo |
+| Authentication, MFA/2FA, sessions, admin, audit-report UI | `lakeraven-ehr-saas` (host) — Jumpstart Pro concerns; **out of scope for the engine**. See ADR 0001 in that repo. |
 
 Engine ships routes mounted by the host. Views live under `app/views/lakeraven/ehr/`. The engine + decorator + repository pattern (existing convention) is the canonical seam between models, gateways, and view-rendering.
 
@@ -55,7 +57,9 @@ Engine ships routes mounted by the host. Views live under `app/views/lakeraven/e
 
 Existing host-app port issues (#48–55) that targeted "host app" are retargeted at the engine. Each becomes a per-domain port PR into `lakeraven-ehr/app/controllers/lakeraven/ehr/`.
 
-The patient portal is an exception — it lives in `lakeraven-self` (a separate consumer-DPI host), with its own ADR. Admin/MFA UI is another exception — it lives in the SaaS host because tenant/identity is cross-cutting, with its own ADR in `lakeraven-ehr-saas`.
+The patient portal is an exception — it lives in `lakeraven-self` (a separate consumer-DPI host), with its own ADR. Authentication, MFA, sessions, and admin are Jumpstart-Pro concerns in the host (above), with their own ADR in `lakeraven-ehr-saas`.
+
+**Migration debt (as of this ADR):** the engine currently carries auth/session/MFA and admin UI that predate this decision — e.g. `SessionsController`, `WebController`, `authentication.feature`, `mfa_authentication.feature`, `admin/*` views. Per the guiding principle these belong in the host on Jumpstart Pro and should migrate out of the engine. The permanent VistA sign-on (the real replacement for any interim engine login) must be built on the host's Jumpstart-Pro authentication with a VistA strategy, **not** a hand-rolled engine `SessionsController`.
 
 ## References
 
