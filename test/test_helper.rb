@@ -10,6 +10,42 @@ require "rails/test_help"
 require "rpms_rpc/version"
 require "rpms_rpc/mock_client"
 
+# Extend test-only RPC mappings so mock seeds can carry the extra patient and
+# practitioner demographics exercised by the Cucumber suite. Live ORWPT ID INFO
+# / ORWU USERINFO do not yet surface these fields (BHDPTRPC is not installed on
+# staging), but the engine's Patient/Practitioner models and FHIR serializers
+# are ready for them.
+RpmsRpc::DataMapper.define(:patient_id_info) do |m|
+  m.rpc "ORWPT ID INFO"
+  m.field 0,  :ssn
+  m.field 1,  :dob, :fileman_date
+  m.field 2,  :sex
+  m.field 3,  :race_code
+  m.field 4,  :race
+  m.field 5,  :site_ien, :integer
+  m.field 7,  :name
+  m.field 8,  :service_area
+  m.field 9,  :tribal_enrollment_number
+  m.field 10, :tribal_affiliation
+  m.field 11, :address_line1
+  m.field 12, :city
+  m.field 13, :state
+  m.field 14, :zip_code
+  m.field 15, :phone
+end
+
+RpmsRpc::DataMapper.define(:practitioner_info) do |m|
+  m.rpc "ORWU USERINFO"
+  m.field 0,  :duz,           :integer
+  m.field 1,  :name
+  m.field 2,  :user_class,    :integer
+  m.field 3,  :specialty
+  m.field 4,  :npi
+  m.field 5,  :dea_number
+  m.field 12, :kernel_domain
+  m.field 23, :site_ien,      :integer
+end
+
 # Configure RpmsRpc with mock client and seed data for all tests.
 RpmsRpc.mock! do |m|
   # Patients (DFN 1-3)
@@ -17,23 +53,29 @@ RpmsRpc.mock! do |m|
   m.seed(:patient_select, "2", { name: "MOUSE,MICKEY M", sex: "M", dob: Date.parse("2010-02-14"), ssn: "000009999", age: 16 })
   m.seed(:patient_select, "3", { name: "DOE,JANE", sex: "F", dob: Date.parse("1990-12-25"), ssn: "555667777", age: 35 })
 
-  # patient_id_info now returns the identifier projection from ORWPT ID INFO
-  # (SSN/DOB/sex/race_code/site_ien/name) — not the extended demographics
-  # that the prior mapping hallucinated. Address, phone, tribal enrollment,
-  # service_area, coverage_type aren't surfaceable until BHDPTRPC is
-  # installed on staging (rr-6jr). Tests that need those fields construct
-  # Patient.new(...) directly rather than going through the gateway.
+  # patient_id_info extends the patient_select projection with demographics
+  # needed for FHIR/US Core serialization and tribal-enrichment tests.
   m.seed(:patient_id_info, "1", {
     ssn: "111-11-1111", dob: Date.parse("1980-05-15"), sex: "F",
-    race_code: "I", site_ien: 7819, name: "Anderson,Alice"
+    race_code: "I", race: "AMERICAN INDIAN OR ALASKA NATIVE",
+    site_ien: 7819, name: "Anderson,Alice",
+    service_area: "Anchorage",
+    tribal_enrollment_number: "ANLC-12345",
+    tribal_affiliation: "Alaska Native - Anchorage (ANLC)",
+    address_line1: "123 Arctic Ave", city: "Anchorage", state: "AK",
+    zip_code: "99508", phone: "907-555-1234"
   })
   m.seed(:patient_id_info, "2", {
     ssn: "000009999", dob: Date.parse("2010-02-14"), sex: "M",
-    race_code: "I", site_ien: 7819, name: "MOUSE,MICKEY M"
+    race_code: "I", race: "AMERICAN INDIAN OR ALASKA NATIVE",
+    site_ien: 7819, name: "MOUSE,MICKEY M",
+    service_area: "Arizona"
   })
   m.seed(:patient_id_info, "3", {
     ssn: "555667777", dob: Date.parse("1990-12-25"), sex: "F",
-    race_code: "I", site_ien: 7819, name: "DOE,JANE"
+    race_code: "I", race: "AMERICAN INDIAN OR ALASKA NATIVE",
+    site_ien: 7819, name: "DOE,JANE",
+    service_area: "Oklahoma"
   })
 
   m.seed(:patient_ssn, "111-11-1111", { dfn: 1, name: "Anderson,Alice", ssn: "111-11-1111" })
@@ -53,7 +95,8 @@ RpmsRpc.mock! do |m|
   # genuine multi-record search and continues to surface both.
   m.seed(:practitioner_info, "", {
     duz: 101, name: "MARTINEZ,SARAH", user_class: 3,
-    kernel_domain: "DEMO.IHS.GOV", site_ien: 8904
+    kernel_domain: "DEMO.IHS.GOV", site_ien: 8904,
+    specialty: "Cardiology", npi: "1234567890", dea_number: "AM1234563"
   })
 
   m.seed_collection(:practitioner_list,

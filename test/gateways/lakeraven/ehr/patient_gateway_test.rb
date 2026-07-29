@@ -40,14 +40,16 @@ module Lakeraven
         assert_nil patient, "Should return nil for non-existent patient"
       end
 
-      test "find returns patient with only core demographics when no extended source available" do
+      test "find passes through extended demographics surfaced by the mock source" do
         patient = PatientGateway.find(2)
 
         assert_not_nil patient
         assert_equal "MOUSE,MICKEY M", patient.name
         assert_equal "M", patient.sex
-        # The long-form :race string comes from BHDPTRPC; not surfaced.
-        assert_nil patient.race
+        # The enriched mock seed surfaces race and service_area for DFN 2;
+        # the gateway must pass them through without dropping them.
+        assert_equal "AMERICAN INDIAN OR ALASKA NATIVE", patient.race
+        assert_equal "Arizona", patient.service_area
       end
 
       # === search ===

@@ -33,8 +33,17 @@ Lakeraven::EHR::Engine.routes.draw do
 
   # Exports — ONC §170.315(b)(10) + (g)(10)
   resources :exports, only: [ :create, :show, :destroy ] do
-    resources :files, only: [ :show ], controller: "export_files", param: :file_name
+    resources :files, only: [ :show ], controller: "export_files", param: :file_name,
+              constraints: { file_name: /[^\/]+/ }
   end
+
+  # Bulk-export status/cancel endpoints (FHIR $export-status operation)
+  get "$export-status/:id", to: "exports#show", as: :export_status
+  delete "$export-status/:id", to: "exports#destroy", as: :cancel_export
+
+  # Bulk-export file download endpoint
+  get "bulk-export-files/:export_id/:file_name", to: "export_files#show", as: :bulk_export_file,
+      constraints: { file_name: /[^\/]+/ }
 
   # SMART discovery + EHR Launch
   get ".well-known/smart-configuration", to: "smart_configuration#show"

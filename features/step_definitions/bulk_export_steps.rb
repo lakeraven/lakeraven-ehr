@@ -23,6 +23,26 @@ Given("a bulk export exists for a different client") do
   )
   @other_export_id = "other-export-1"
   @other_client_uid = other_app.uid
+
+  export = Lakeraven::EHR::BulkExport.new(
+    id: @other_export_id,
+    export_type: Lakeraven::EHR::BulkExport::EXPORT_TYPE_SYSTEM,
+    status: Lakeraven::EHR::BulkExport::STATUS_COMPLETED,
+    request_url: "http://example.org/lakeraven-ehr/$export-status/#{@other_export_id}",
+    output_format: "application/fhir+ndjson",
+    client_id: @other_client_uid
+  )
+  export.set_defaults!
+  export.complete!([
+    {
+      "type" => "Patient",
+      "url" => "/lakeraven-ehr/bulk-export-files/#{@other_export_id}/Patient.ndjson",
+      "count" => 1,
+      "file_name" => "Patient.ndjson",
+      "content" => '{"resourceType":"Patient"}'
+    }
+  ])
+  Lakeraven::EHR::ExportsController.store[@other_export_id] = export
 end
 
 When("I check the status of the other client's export with my Bearer token") do

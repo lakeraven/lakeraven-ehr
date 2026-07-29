@@ -29,14 +29,7 @@ module Lakeraven
       def show
         export = self.class.store[params[:id]]
         return render_not_found("Export", params[:id]) unless export
-
-        if export.client_id && current_token&.application&.uid != export.client_id
-          render_operation_outcome(
-            status: :forbidden, severity: "error",
-            code: "forbidden", diagnostics: "Export belongs to a different client"
-          )
-          return
-        end
+        return unless authorize_export_owner!(export)
 
         resp = export.status_response
         if resp[:status] == 202
@@ -49,8 +42,24 @@ module Lakeraven
 
       # DELETE /exports/:id
       def destroy
-        export = self.class.store.delete(params[:id])
-        export ? head(:accepted) : render_not_found("Export", params[:id])
+        export = self.class.store[params[:id]]
+        return render_not_found("Export", params[:id]) unless export
+        return unless authorize_export_owner!(export)
+
+        self.class.store.delete(params[:id])
+        head :accepted
+      end
+
+      def authorize_export_owner!(export)
+        if export.client_id && current_token&.application&.uid != export.client_id
+          render_operation_outcome(
+            status: :forbidden, severity: "error",
+            code: "forbidden", diagnostics: "Export belongs to a different client"
+          )
+          return false
+        end
+
+        true
       end
 
       def self.store
