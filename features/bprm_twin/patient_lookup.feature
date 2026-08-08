@@ -12,10 +12,10 @@ Feature: Patient lookup and face sheet
 
   Background:
     Given the following patients are registered:
-      | dfn | name           | dob        | sex | community  | tribe          |
-      | 42  | RAVEN,NORA     | 1992-03-11 | F   | Toppenish  | Yakama Nation  |
-      | 43  | RAVEN,NOAH     | 1988-01-04 | M   | Wapato     | Yakama Nation  |
-      | 44  | BEGAY,MICHELLE | 1975-09-30 | F   | Chinle     | Navajo Nation  |
+      | dfn | hrn    | name           | dob        | sex | community  | tribe          |
+      | 42  | 101226 | RAVEN,NORA     | 1992-03-11 | F   | Toppenish  | Yakama Nation  |
+      | 43  | 101227 | RAVEN,NOAH     | 1988-01-04 | M   | Wapato     | Yakama Nation  |
+      | 44  | 118834 | BEGAY,MICHELLE | 1975-09-30 | F   | Chinle     | Navajo Nation  |
 
   Scenario: Search by partial last name
     When I search patients for "RAVEN"
@@ -30,6 +30,7 @@ Feature: Patient lookup and face sheet
   Scenario: Retrieve the face sheet for a patient
     When I request the face sheet for patient 42
     Then the face sheet shows name "RAVEN,NORA", community "Toppenish", tribe "Yakama Nation"
+    And the face sheet shows the facility Health Record Number "101226"
 
   Scenario: Face sheet surfaces registration errors and warnings
     Given patient 42 has an incomplete registration item for "ELIGIBILITY"

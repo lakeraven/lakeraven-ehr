@@ -12,6 +12,7 @@ Feature: A patient's appointments and routing slip
 
   Background:
     Given a registered patient with DFN 42 named "RAVEN,NORA"
+    And patient 42 has the facility Health Record Number "101226"
     And patient 42 has appointments:
       | clinic           | time             | status    |
       | GENERAL MEDICINE | 2026-08-20 09:00 | scheduled |
@@ -32,3 +33,4 @@ Feature: A patient's appointments and routing slip
     When I request the routing slip for patient 42 on "2026-08-20"
     Then the routing slip lists the "GENERAL MEDICINE" appointment at "09:00"
     And the routing slip shows patient name "RAVEN,NORA"
+    And the routing slip shows the facility Health Record Number "101226"

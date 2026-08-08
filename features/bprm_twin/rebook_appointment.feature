@@ -1,6 +1,6 @@
 # BPRM twin — scenario #10: Rebook (cancel + book, composite)
 # HTTP:  POST /appointments/:id/rebook
-# RPC:   BSDX CANCEL APPOINTMENT (-> $$CANCEL^BSDAPI) then BSDX ADD APPOINTMENT (-> $$ADD^BSDAPI)
+# RPC:   BSDX CANCEL APPOINTMENT (-> APPDEL^BSDX08 -> $$CANCEL^BSDAPI) then BSDX ADD NEW APPOINTMENT (-> APPADD^BSDX07 -> $$MAKE^BSDAPI)
 # BPRM:  composite of BsdSetPatientAppointmentCancel + BsdSetPatientAppointment
 # Disposition: sql-mutate -> reimpl  (must be atomic-ish: cancel then rebook; roll back the cancel if the rebook fails)
 @bprm_twin @scheduling

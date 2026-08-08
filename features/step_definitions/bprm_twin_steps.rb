@@ -9,8 +9,9 @@
 # and the audit-gap ("sql-mutate -> reimpl") flags.
 #
 # These steps are intentionally PENDING: the factory implements the gateways
-# (registration via BHDPTRPC/AG, scheduling via BSDX ADD/CANCEL/CHECKIN/NOSHOW
-# APPOINTMENT -> BSDAPI, ADT via DGPMV*) and turns each step green scenario by
+# (registration via BHDPTRPC/AG; scheduling via BSDX ADD NEW APPOINTMENT /
+# BSDX CANCEL APPOINTMENT / BSDX CHECKIN APPOINTMENT / BSDX NOSHOW -> BSDAPI;
+# ADT via DGPMV*) and turns each step green scenario by
 # scenario (red -> green, BDD as-we-go). Until then every step pends so the
 # suite is runnable and the spec is visible in cucumber output.
 #
@@ -51,9 +52,9 @@ When("I delete insurance {int} for patient {int}") do |_ins, _dfn|
   bprm_twin_pending!("DELETE /patients/:dfn/insurances/:id -> AgSetPatientInsuranceDelete 7-table cascade (sql-mutate->reimpl)")
 end
 
-# --- Scheduling writes (BSDX ADD/CANCEL/CHECKIN/NOSHOW -> BSDAPI) ---------------
+# --- Scheduling writes (BSDX ADD NEW/CANCEL/CHECKIN/NOSHOW -> BSDAPI) -----------
 When("I book patient {int} into clinic {int} at {string} for {int} minutes") do |_dfn, _clinic, _time, _len|
-  bprm_twin_pending!("POST /clinics/:ien/appointments -> BSDX ADD APPOINTMENT -> $$ADD^BSDAPI (BsdSetPatientAppointment, sql-mutate->reimpl)")
+  bprm_twin_pending!("POST /clinics/:ien/appointments -> BSDX ADD NEW APPOINTMENT -> APPADD^BSDX07 -> $$MAKE^BSDAPI (BsdSetPatientAppointment, sql-mutate->reimpl)")
 end
 
 When("I cancel appointment {int} as {string} with reason {string}") do |_appt, _type, _reason|
@@ -61,11 +62,11 @@ When("I cancel appointment {int} as {string} with reason {string}") do |_appt, _
 end
 
 When("I check in appointment {int}") do |_appt|
-  bprm_twin_pending!("POST /appointments/:id/check_in -> BSDX CHECKIN APPOINTMENT -> BSDAPI (BsdSetPatientAppointmentCheckIn, sql-mutate->reimpl)")
+  bprm_twin_pending!("POST /appointments/:id/check_in -> BSDX CHECKIN APPOINTMENT -> CHECKIN^BSDX25 -> BSDAPI (BsdSetPatientAppointmentCheckIn, sql-mutate->reimpl)")
 end
 
 When("I mark appointment {int} as no-show") do |_appt|
-  bprm_twin_pending!("POST /appointments/:id/no_show -> BSDX NOSHOW APPOINTMENT -> BSDAPI (fm-write)")
+  bprm_twin_pending!("POST /appointments/:id/no_show -> BSDX NOSHOW -> NOSHOW^BSDX31 -> $$CANCEL^BSDAPI (fm-write; success signal INVERTED: result 1 = success)")
 end
 
 # --- Scheduling reads (BMX query over ^SC / BSDX APPOINTMENT) -------------------

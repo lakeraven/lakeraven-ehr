@@ -1,6 +1,6 @@
 # BPRM twin — scenario #9: Check-in / undo check-in
 # HTTP:  POST /appointments/:id/check_in   POST /appointments/:id/undo_check_in
-# RPC:   BSDX CHECKIN APPOINTMENT  ->  BSDAPI  ->  ^DGPM check-in + ^SC status
+# RPC:   BSDX CHECKIN APPOINTMENT  ->  CHECKIN^BSDX25  ->  BSDAPI  ->  ^DGPM check-in + ^SC status
 # BPRM:  BsdSetPatientAppointmentCheckIn, BsdSetPatientAppointmentCheckInV4,
 #        BsdSetPatientAppointmentUndoCheckIn, BsdSetPatientAppointmentUndoCheckInV4
 # Disposition: sql-mutate -> reimpl  (BPRM raw-writes ^DGPM/^SC; reimplement via BSDAPI/^DIE)

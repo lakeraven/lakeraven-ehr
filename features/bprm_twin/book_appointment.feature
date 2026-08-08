@@ -1,6 +1,7 @@
 # BPRM twin — scenario #5: Book an appointment
 # HTTP:  POST /clinics/:ien/appointments
-# RPC:   BSDX ADD APPOINTMENT  ->  $$ADD^BSDAPI  ->  ^SC (S nodes) + ^BSDXAPPT (9002018.4)
+# RPC:   BSDX ADD NEW APPOINTMENT  ->  APPADD^BSDX07  ->  $$MAKE^BSDAPI  ->  ^SC (S nodes) + ^BSDXAPPT (9002018.4)
+#        (BSDX ADD APPOINTMENT is the post-write event-driver PROTOCOL, not the RPC)
 # BPRM:  BsdSetPatientAppointment, BsdSetPatientAppointmentV4
 # Disposition: sql-mutate -> reimpl  (BPRM raw-writes ^SC; BSDX/BSDAPI is the FileMan-safe path)
 @bprm_twin @scheduling

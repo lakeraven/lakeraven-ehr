@@ -1,6 +1,8 @@
 # BPRM twin — scenario #8: Mark an appointment as no-show
 # HTTP:  POST /appointments/:id/no_show   (and DELETE to undo)
-# RPC:   BSDX NOSHOW APPOINTMENT  ->  BSDAPI  ->  ^SC no-show node
+# RPC:   BSDX NOSHOW  ->  NOSHOW^BSDX31  ->  $$CANCEL^BSDAPI  ->  ^SC no-show node
+# NOTE:  BSDX NOSHOW's success signal is INVERTED: result 1 = success, 0 = error
+#        (opposite polarity to BSDX ADD NEW APPOINTMENT's empty-error convention).
 # BPRM:  (no dedicated BPRM SP; BSDX-native no-show)
 # Disposition: fm-write
 @bprm_twin @scheduling

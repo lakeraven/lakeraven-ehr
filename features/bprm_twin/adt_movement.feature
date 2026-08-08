@@ -7,7 +7,8 @@
 # RPC:   DGPMV* / ^DIE on ^DGPM (INPATIENT MOVEMENT #405)
 # BPRM:  BdgSetPatientAdmission(V4), BdgSetPatientMovement(Edit/CancelV4),
 #        BdgSetPatientMovementDischarge(V4), BdgSetPatientTransfer(V4),
-#        BdgSetPatientSpecialtyTransfer(V4), BdgCancelMovement
+#        BdgSetPatientSpecialtyTransfer(V4), BdgCancelMovement;
+#        re-admit guard: BdgGetIsReAdmitCheck
 # Disposition: sql-mutate -> reimpl  (BPRM raw-writes ^DGPM bypassing movement xrefs; use DGPMV*/^DIE)
 @bprm_twin @adt
 Feature: Inpatient admission, transfer, and discharge (ADT)
@@ -43,3 +44,28 @@ Feature: Inpatient admission, transfer, and discharge (ADT)
     When I cancel movement 8001
     Then the cancellation succeeds
     And the census for ward 3 is corrected
+
+  Scenario: Admitting an already-admitted patient is rejected
+    Given patient 42 is admitted to ward 3
+    When I admit patient 42 to ward 3 at "2026-08-21 09:00" under provider "BEGAY,MICHELLE"
+    Then the admission is rejected with status 409
+    And the error message mentions "already admitted"
+    And patient 42 still has exactly one open admission
+
+  Scenario: Discharging a patient who is not admitted is rejected
+    When I discharge patient 42 at "2026-08-23 11:00" with disposition "Home"
+    Then the discharge is rejected with status 422
+    And the error message mentions "not currently admitted"
+
+  Scenario: Admitting to an unknown or closed ward is rejected
+    Given ward 99 does not exist or is closed
+    When I admit patient 42 to ward 99 at "2026-08-20 14:00" under provider "BEGAY,MICHELLE"
+    Then the admission is rejected with status 422
+    And the error message mentions "ward"
+    And no movement is created for patient 42
+
+  Scenario: Re-admission shortly after discharge surfaces the re-admit check
+    Given patient 42 was discharged from ward 3 on "2026-08-18"
+    When I admit patient 42 to ward 3 at "2026-08-20 14:00" under provider "BEGAY,MICHELLE"
+    Then the admission succeeds
+    And the response warnings include a re-admission notice referencing the "2026-08-18" discharge

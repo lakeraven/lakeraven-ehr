@@ -32,10 +32,18 @@ BMX-broker/RPC package, engine-portable. Its four named write RPCs delegate to
 the IHS scheduling API `BSDAPI`, which updates `^SC` and `^BSDXAPPT` through
 proper entry points:
 
-- `BSDX ADD APPOINTMENT`     → `$$ADD^BSDAPI`   (verified in `BSDX08.m` family)
+- `BSDX ADD NEW APPOINTMENT` → `APPADD^BSDX07` → `$$MAKE^BSDAPI`
+  (verified: `BSDX07.m`'s `APPADD` label is annotated `;Called by BSDX ADD NEW
+  APPOINTMENT`; `BSDX ADD APPOINTMENT` is the event-driver **protocol** fired
+  after the write — `BSDX07.m` line 30: `Don't execute BSDX ADD APPOINTMENT
+  protocol` — not the RPC)
 - `BSDX CANCEL APPOINTMENT`  → `APPDEL^BSDX08` → `$$CANCEL^BSDAPI`
-- `BSDX CHECKIN APPOINTMENT` → check-in via `BSDAPI` / `^DGPM` check-in node
-- `BSDX NOSHOW APPOINTMENT`  → no-show via `BSDAPI`
+- `BSDX CHECKIN APPOINTMENT` → `CHECKIN^BSDX25` → `BSDAPI` / `^DGPM` check-in node
+- `BSDX NOSHOW`              → `NOSHOW^BSDX31` → `$$CANCEL^BSDAPI`
+  ⚠️ **Inverted success signal:** `BSDX NOSHOW` returns result `1` on success
+  (`0` = error) — the **opposite** polarity of `BSDX ADD NEW APPOINTMENT`'s
+  empty-error convention. Consumers (`rpms_rpc`, gateways) implement to this
+  mapping; see rpms-rpc#171.
 
 BSDX **reads** (available slots, clinic schedule, a patient's appointments) go
 through the BMX generic-query RPC against the BSDX files
@@ -48,7 +56,7 @@ Registration re-grounds on the **AG** (IHS Patient Registration) package and
 ## Concrete RPC/file oracle (source of truth for the mapping)
 
 - Registration: `rpms_rpc` `RpmsRpc::Patient` (`BHDPTRPC REGISTER` etc.), AG package, `^DPT`/`^AUPNPAT`.
-- Scheduling writes: `BSDX ADD/CANCEL/CHECKIN/NOSHOW APPOINTMENT` → `BSDAPI` → `^SC` + `^BSDXAPPT` (9002018.4).
+- Scheduling writes: `BSDX ADD NEW APPOINTMENT` / `BSDX CANCEL APPOINTMENT` / `BSDX CHECKIN APPOINTMENT` / `BSDX NOSHOW` → `BSDAPI` → `^SC` + `^BSDXAPPT` (9002018.4).
 - Scheduling reads: BMX query over `^SC`, `BSDX APPOINTMENT` (9002018.4), `BSDX ACCESS BLOCK` (9002018.3); `ORWPT APPTLST` for a patient's appt list.
 - ADT movements: `DGPMV*` / `^DIE` on `^DGPM` (INPATIENT MOVEMENT #405).
 
@@ -64,12 +72,12 @@ procs, reimplement as a proper FileMan/API write.
 | 2 | `edit_patient_demographics.feature` | Edit demographics | `PATCH /patients/:dfn` | `BHDPTRPC` update / AG → `^DIE` on `^DPT` | `AgPatientUpdateEvent`, `AgSetCorrectPatientName`, `AgSetPatientCellNumber`, `AgSetPatientDateOfDeath`, `AgSetPatientMbi` (set) | **sql-mutate→reimpl** |
 | 3 | `patient_eligibility_insurance.feature` | View/edit eligibility + insurance | `GET/PATCH/DELETE /patients/:dfn/insurances` | AG insurance API → `^DIE` on `^AUPNPAT`/insurance files; read via BMX | `BsdGetPatientInsurances`, `AgGetPatientInsuranceInUse` (read); `AgSetPatientInsuranceDelete` (7-table dynamic delete) | read + **sql-mutate→reimpl** |
 | 4 | `patient_lookup.feature` | Search / face sheet | `GET /patients?q=` , `GET /patients/:dfn` | `BHDPTRPC`/`patient_select` + BMX search | `AgSearchPatient`, `AgGetPatientSearchResult`, `AgGetPatientFaceSheet`, `AgGetPatientErrorsAndWarnings`, `AgGetPatientMbi` (get) | read |
-| 5 | `book_appointment.feature` | Book an appointment | `POST /clinics/:ien/appointments` | `BSDX ADD APPOINTMENT` → `$$ADD^BSDAPI` → `^SC`+`^BSDXAPPT` | `BsdSetPatientAppointment`, `BsdSetPatientAppointmentV4` | **sql-mutate→reimpl** |
+| 5 | `book_appointment.feature` | Book an appointment | `POST /clinics/:ien/appointments` | `BSDX ADD NEW APPOINTMENT` → `APPADD^BSDX07` → `$$MAKE^BSDAPI` → `^SC`+`^BSDXAPPT` | `BsdSetPatientAppointment`, `BsdSetPatientAppointmentV4` | **sql-mutate→reimpl** |
 | 6 | `appointment_availability.feature` | Available slots / access blocks | `GET /clinics/:ien/availability` | BMX query on `BSDX ACCESS BLOCK` (9002018.3) + `^SC` | `BsdGetSchedulingAvailableSlots`, `BsdGetSchedulingAccessBlocks`, `BsdGetSchedulingConfigAccessBlocks` | read |
 | 7 | `cancel_appointment.feature` | Cancel an appointment | `POST /appointments/:id/cancel` | `BSDX CANCEL APPOINTMENT` → `$$CANCEL^BSDAPI` | `BsdSetPatientAppointmentCancel` | **sql-mutate→reimpl** |
-| 8 | `no_show_appointment.feature` | Mark no-show | `POST /appointments/:id/no_show` | `BSDX NOSHOW APPOINTMENT` → `BSDAPI` | (BPRM had no dedicated SP; BSDX-native) | fm-write |
-| 9 | `checkin_appointment.feature` | Check-in / undo check-in | `POST /appointments/:id/check_in`, `.../undo_check_in` | `BSDX CHECKIN APPOINTMENT` → `BSDAPI`/`^DGPM` | `BsdSetPatientAppointmentCheckIn(V4)`, `BsdSetPatientAppointmentUndoCheckIn(V4)` | **sql-mutate→reimpl** |
-| 10 | `rebook_appointment.feature` | Cancel + rebook (composite) | orchestrates #7 then #5 | cancel then add via `BSDAPI` | (composite of `BsdSetPatientAppointmentCancel` + `BsdSetPatientAppointment`) | **sql-mutate→reimpl** |
+| 8 | `no_show_appointment.feature` | Mark no-show | `POST /appointments/:id/no_show` | `BSDX NOSHOW` → `NOSHOW^BSDX31` → `$$CANCEL^BSDAPI` (success = result `1`, **inverted** vs. BSDX ADD) | (BPRM had no dedicated SP; BSDX-native) | fm-write |
+| 9 | `checkin_appointment.feature` | Check-in / undo check-in | `POST /appointments/:id/check_in`, `.../undo_check_in` | `BSDX CHECKIN APPOINTMENT` → `CHECKIN^BSDX25` → `BSDAPI`/`^DGPM` | `BsdSetPatientAppointmentCheckIn(V4)`, `BsdSetPatientAppointmentUndoCheckIn(V4)` | **sql-mutate→reimpl** |
+| 10 | `rebook_appointment.feature` | Cancel + rebook (composite) | orchestrates #7 then #5 | `$$CANCEL^BSDAPI` then `$$MAKE^BSDAPI` | (composite of `BsdSetPatientAppointmentCancel` + `BsdSetPatientAppointment`) | **sql-mutate→reimpl** |
 | 11 | `clinic_schedule.feature` | List a clinic's day | `GET /clinics/:ien/schedule?date=` | BMX query on `^SC`/`BSDX APPOINTMENT`; `BsdReportClinicSchedule` | `BsdReportClinicSchedule`, `BsdClinicScheduleReport`, `BsdGetSched*` (12E2/764F/8FC9 triplets) | read |
 | 12 | `patient_appointments.feature` | A patient's future appts / routing slip | `GET /patients/:dfn/appointments`, `.../routing_slip` | `ORWPT APPTLST` + BMX; `BsdRoutingSlip` | `BsdGetPatientFutureApptsReport`, `BsdReportPatientFutureAppts`, `BsdRoutingSlip`, `BsdReportRoutingSlip`, `BsdReportCancelledAppointment` | read |
 | 13 | `waiting_list.feature` | Waiting list add/report | `GET/POST /clinics/:ien/waiting_list` | `BSDWL*` API on wait-list file; report via BMX | `BsdReportWaitingList`, `BsdSetPatie*` (waitlist set triplets) | read + **sql-mutate→reimpl** |
@@ -95,8 +103,13 @@ procs, reimplement as a proper FileMan/API write.
 
 ## HTTP contract conventions
 
-- JSON in/out, `Content-Type: application/json`. Patient identity is `dfn`
-  (FileMan IEN of `^DPT`). Appointment identity is the `BSDX APPOINTMENT` IEN.
+- JSON in/out, `Content-Type: application/json`. Patient identity at the API is
+  `dfn` (FileMan IEN of `^DPT`) — an internal database key. The clerk-facing
+  identifier is the facility-scoped **`hrn`** (Health Record Number, the chart
+  number from the `^AUPNPAT` HRN multiple): it is what BPRM prints on the face
+  sheet and routing slip and what registration desks key on. Registration
+  output, the face sheet, and the routing slip all carry `hrn` alongside `dfn`.
+  Appointment identity is the `BSDX APPOINTMENT` IEN.
 - FileMan dates are ISO-8601 at the HTTP edge; the gateway converts to FileMan
   internal form (`rpms_rpc` `FilemanDateParser`), matching the existing
   `RpmsRpc::Patient.registration_param` (`NAME^SEX^DOB^SSN`) convention.

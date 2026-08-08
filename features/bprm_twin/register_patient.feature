@@ -7,7 +7,7 @@
 Feature: Register a new patient
   As a registration clerk at an IHS/Tribal facility
   I want to register a new patient into RPMS
-  So that they have a chart (DFN) and can be scheduled and seen
+  So that they have a chart with a facility Health Record Number (HRN) and can be scheduled and seen
 
   Background:
     Given I am authenticated as a registration clerk at service area "Portland"
@@ -25,6 +25,7 @@ Feature: Register a new patient
       | eligibility       | Direct           |
     Then the registration succeeds
     And a new patient DFN is returned
+    And a facility-scoped Health Record Number (HRN) is assigned and returned
     And the response includes the FileMan name "RAVEN,NORA"
     And an AG registration audit event is recorded
 
