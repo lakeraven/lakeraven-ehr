@@ -146,6 +146,64 @@ RpmsRpc.mock! do |m|
   m.seed(:referral_delete, "SR-AUTHORIZED-001", { success: true, message: "Referral cancelled" })
 end
 
+# Scripted RPC broker for the BPRM reg/sched/ADT twin gateway tests.
+#
+# The reg/sched gateways call RpmsRpc.client.call_rpc(rpc_name, *params)
+# directly and parse the caret response, so a gateway unit test just needs a
+# client that (a) records the calls it received and (b) returns a scripted
+# response per RPC name. `on(rpc, *responses)` queues responses (a single
+# response is reused for every call; multiple are consumed in order — handy
+# for composite flows like rebook). `raise_with` simulates a broker-unreachable
+# socket error. Swap it in with `use_broker(fake) { ... }` from a test.
+class FakeBroker
+  attr_reader :calls
+
+  def initialize
+    @calls = []
+    @responses = {}
+    @raise = nil
+    @default = ""
+  end
+
+  def on(rpc, *responses)
+    @responses[rpc] = responses
+    self
+  end
+
+  def raise_with(error)
+    @raise = error
+    self
+  end
+
+  def call_rpc(rpc, *params)
+    @calls << { rpc: rpc, params: params }
+    raise @raise if @raise
+
+    queue = @responses[rpc]
+    return @default if queue.nil? || queue.empty?
+    return queue.first if queue.length == 1
+
+    queue.shift
+  end
+
+  def supports?(_feature) = true
+  def received_calls = @calls
+  def calls_for(rpc) = @calls.select { |c| c[:rpc] == rpc }
+  def last_call = @calls.last
+end
+
+# Install a FakeBroker as RpmsRpc.client for the duration of the block,
+# restoring the shared MockClient afterward.
+module BrokerStubbing
+  def use_broker(fake)
+    original = RpmsRpc.configuration.client
+    RpmsRpc.configure { |c| c.client = fake }
+    yield fake
+  ensure
+    RpmsRpc.configure { |c| c.client = original }
+  end
+end
+
 # Shared auth helper for integration tests.
 module SmartAuthTestHelper
   def setup_smart_auth(scopes: "system/*.read")
