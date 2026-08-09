@@ -42,7 +42,7 @@ byte-identical HTTP bodies (the two apps' JSON differs by design).
    **YDB** backend and an **IRIS** backend; assert **byte-identical responses** after
    normalization. This is the cheap, strong check — same code on two engines *must* agree.
 2. **Path parity.** After each write scenario, capture lakeraven-ehr's **FileMan read-back**
-   (`$$GET1^DIQ`/`$$GET1^DIQ` over the touched fields) and assert it equals a **BPRM golden** —
+   (`$$GET1^DIQ` per field / `$$GET^DIQ` over a field list) and assert it equals a **BPRM golden** —
    the FileMan state produced by invoking the same `BMW.BSF.SP.*` SqlProcs directly (SQL, not
    HTTP) with the same inputs. Goldens are captured once per scenario and committed; the
    capture script is checked in so they regenerate deterministically.

@@ -83,7 +83,7 @@ When("I book patient {string} into clinic {int} at {string} via lakeraven-ehr") 
   parity_pending!("POST /clinics/:ien/appointments -> BSDX ADD NEW APPOINTMENT")
 end
 
-When("BPRM books the same slot via BMW.BSF.SP \\(BSDX_APPOINTMENT) against IRIS") do
+When("BPRM books the same slot via BMW.BSF.SP \\(BSDX_APPOINTMENT\\) against IRIS") do
   parity_pending!("bprm_golden.rb: BSDX_APPOINTMENT SqlProc, capture read-back")
 end
 
