@@ -45,4 +45,8 @@ Lakeraven::EHR::Engine.routes.draw do
 
   # Measure $import
   post "Measure/$import", to: "measures#import"
+
+  # Field street-medicine sync — offline iPad reconnect (#418)
+  post "field/sync", to: "field_sync#sync"
+  get "field/work_queue", to: "field_sync#work_queue"
 end
