@@ -163,6 +163,84 @@ module Lakeraven
         assert_equal 0, FieldLabTrackingRecord.count
       end
 
+      test "cross-site IDOR: an update to a record at an unauthorized site is rejected" do
+        # A record that physically belongs to site 999.
+        created = @service.reconcile(
+          operations: [ create_op(client_op_id: "idor-1", site_ien: "999") ],
+          authorized_sites: %w[999]
+        ).operations.first
+        id = created.server_resource_id
+
+        # A token authorized ONLY for site 463 tries to edit it, laundering the
+        # op through an authorized site_ien of its own.
+        result = @service.reconcile(
+          operations: [
+            { client_op_id: "idor-2", operation_type: "update", target_type: "FieldLabTracking",
+              target_id: id, base_version: 1, site_ien: "463",
+              payload: { action: "order_confirmation", confirmation_loinc: "13955-0" } }
+          ],
+          authorized_sites: %w[463]
+        )
+        op = result.operations.first
+        assert_equal "rejected", op.outcome
+        assert_match(/site/i, op.outcome_reason)
+        # The record's clinical state was NOT changed by the cross-site editor.
+        assert_equal "screened", FieldLabTrackingRecord.find(id).stage
+      end
+
+      test "a replay is authorized against the persisted op's site, not leaked cross-site" do
+        @service.reconcile(
+          operations: [ create_op(client_op_id: "rep-1", site_ien: "999") ],
+          authorized_sites: %w[999]
+        )
+
+        # A different token (site 463) that guessed the client_op_id replays it.
+        result = @service.reconcile(
+          operations: [ create_op(client_op_id: "rep-1", site_ien: "999") ],
+          authorized_sites: %w[463]
+        )
+        op = result.operations.first
+        assert_equal "rejected", op.outcome
+        refute op.replayed?, "an unauthorized replay must not be reported as a duplicate"
+        assert_nil op.server_resource_id, "the persisted resource id must not leak"
+      end
+
+      test "a wildcard token cannot create a site-less clinical record" do
+        result = @service.reconcile(
+          operations: [ create_op(client_op_id: "ws-1") ], # no site_ien
+          authorized_sites: [], all_sites: true
+        )
+        op = result.operations.first
+        assert_equal "rejected", op.outcome
+        assert_match(/site/i, op.outcome_reason)
+        assert_equal 0, FieldLabTrackingRecord.count
+      end
+
+      test "a wildcard token with a concrete site still applies" do
+        result = @service.reconcile(
+          operations: [ create_op(client_op_id: "ws-2", site_ien: "463") ],
+          authorized_sites: [], all_sites: true
+        )
+        assert_equal "applied", result.operations.first.outcome
+        assert_equal "463", FieldLabTrackingRecord.last.site_ien
+      end
+
+      test "malformed operations are rejected per-op without failing the batch" do
+        result = @service.reconcile(operations: [
+          "not-an-object",
+          [ "also", "bad" ],
+          nil,
+          { client_op_id: "bad-payload", operation_type: "create",
+            target_type: "FieldLabTracking", payload: "nope" },
+          create_op(client_op_id: "good-1")
+        ])
+        outcomes = result.operations.map(&:outcome)
+        assert_equal 4, outcomes.count("rejected")
+        assert_equal 1, outcomes.count("applied")
+        assert_equal "applied", result.operations.last.outcome
+        assert_equal 1, FieldLabTrackingRecord.count
+      end
+
       test "result summary counts outcomes across a mixed batch" do
         result = @service.reconcile(operations: [
           create_op(client_op_id: "m1"),

@@ -27,6 +27,10 @@ module Lakeraven
       # the same client_op_id (caught as a duplicate replay, never a 500).
       class DuplicateClaim < StandardError; end
 
+      # Raised when a submitted operation (or its payload) isn't a JSON object.
+      # Caught per-op so one malformed shape rejects itself, not the whole batch.
+      class MalformedOperation < StandardError; end
+
       # Normalized view of one submitted operation.
       Operation = Struct.new(
         :client_op_id, :operation_type, :target_type, :target_id,
@@ -70,8 +74,7 @@ module Lakeraven
         @all_sites = all_sites
 
         rows = Array(operations).map do |raw|
-          op = normalize(raw, batch_id:, device_id:, clinician_duz:, site_ien:)
-          reconcile_one(op)
+          reconcile_raw(raw, batch_id:, device_id:, clinician_duz:, site_ien:)
         end
 
         Result.new(operations: rows)
@@ -79,10 +82,15 @@ module Lakeraven
 
       private
 
+      def reconcile_raw(raw, **identity)
+        reconcile_one(normalize(raw, **identity))
+      rescue MalformedOperation => e
+        reject_malformed(e.message)
+      end
+
       def normalize(raw, batch_id:, device_id:, clinician_duz:, site_ien:)
-        h = raw.respond_to?(:to_unsafe_h) ? raw.to_unsafe_h : raw
-        h = h.deep_symbolize_keys
-        payload = (h[:payload] || {}).deep_symbolize_keys
+        h = coerce_hash(raw, "operation")
+        payload = coerce_hash(h[:payload] || {}, "payload")
 
         Operation.new(
           client_op_id: h[:client_op_id],
@@ -105,7 +113,7 @@ module Lakeraven
         return reject_missing_key(op) if op.client_op_id.blank?
 
         existing = FieldSyncOperation.find_by(client_op_id: op.client_op_id)
-        return replay(existing) if existing
+        return replay_or_reject(existing) if existing
 
         claim_and_reconcile(op)
       rescue ActiveRecord::RecordNotUnique, DuplicateClaim
@@ -115,7 +123,18 @@ module Lakeraven
         # never a second apply. (RecordNotUnique = simultaneous DB race;
         # DuplicateClaim = the uniqueness validation caught an already-committed
         # winner.)
-        replay(FieldSyncOperation.where(client_op_id: op.client_op_id).first!)
+        replay_or_reject(FieldSyncOperation.where(client_op_id: op.client_op_id).first!)
+      end
+
+      # A replay must still clear the token's site authorization: otherwise a
+      # caller who guessed another site's client_op_id could read that op's
+      # outcome, resource id, version, and reason. Authorize the PERSISTED row's
+      # site before returning it; a cross-site replay is a bare rejection that
+      # leaks nothing about the original.
+      def replay_or_reject(existing)
+        return unauthorized_replay(existing) unless site_value_authorized?(existing.site_ien)
+
+        replay(existing)
       end
 
       # Claim the idempotency key (ledger row) BEFORE the clinical mutation, in a
@@ -171,6 +190,17 @@ module Lakeraven
         # Lock the clinical row so the version compare-and-apply is atomic: two
         # concurrent fresh-base updates can't both pass the check and both apply.
         rec.with_lock do
+          # Cross-site IDOR guard: finalize authorized op.site_ien (which the
+          # caller supplies), but the TARGET record's own site is what actually
+          # gates the edit. A token authorized for site A must not edit a site-B
+          # record by passing site_ien: A.
+          unless record_site_authorized?(rec)
+            return finish(
+              row, outcome: "rejected",
+              reason: "record site #{rec.try(:site_ien).inspect} is not authorized for this token"
+            )
+          end
+
           server_version = handler.version_of(rec)
           if op.base_version.to_i != server_version
             return finish(
@@ -193,11 +223,54 @@ module Lakeraven
         row
       end
 
-      # Site enforcement is off unless the controller supplied an authorized set.
-      def site_authorized?(op)
-        return true if @authorized_sites.nil? || @all_sites
+      # A cross-site replay: report a bare rejection that leaks none of the
+      # persisted op's outcome/resource-id/version/reason. Not persisted.
+      def unauthorized_replay(existing)
+        FieldSyncOperation.new(
+          client_op_id: existing.client_op_id,
+          operation_type: existing.operation_type.presence || "unknown",
+          target_type: existing.target_type.presence || "unknown",
+          outcome: "rejected",
+          outcome_reason: "operation is not authorized for this token"
+        )
+      end
 
-        op.site_ien.present? && @authorized_sites.map(&:to_s).include?(op.site_ien.to_s)
+      def site_authorized?(op)
+        site_value_authorized?(op.site_ien)
+      end
+
+      def record_site_authorized?(rec)
+        site_value_authorized?(rec.try(:site_ien))
+      end
+
+      # Central site-authorization predicate for a single site IEN. Enforcement
+      # is off only when no authorized set was supplied AND this isn't a wildcard
+      # token (the unit-test convenience). Otherwise every clinical write must
+      # name a concrete site — including a wildcard backend token: a site-less
+      # row would never surface in the site-scoped work queue, silently dropping
+      # the follow-up.
+      def site_value_authorized?(site)
+        return true if @authorized_sites.nil? && !@all_sites
+        return false if site.blank?
+        return true if @all_sites
+
+        @authorized_sites.map(&:to_s).include?(site.to_s)
+      end
+
+      # Coerce a submitted value to a symbolized Hash, raising MalformedOperation
+      # (a per-op rejection, not a batch-wide 500) for null/string/array/etc.
+      def coerce_hash(value, kind)
+        value = value.to_unsafe_h if value.respond_to?(:to_unsafe_h)
+        raise MalformedOperation, "#{kind} must be a JSON object, got #{value.class}" unless value.is_a?(Hash)
+
+        value.deep_symbolize_keys
+      end
+
+      def reject_malformed(reason)
+        FieldSyncOperation.new(
+          operation_type: "unknown", target_type: "unknown",
+          outcome: "rejected", outcome_reason: reason
+        )
       end
 
       def reject_missing_key(op)
