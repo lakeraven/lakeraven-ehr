@@ -35,7 +35,18 @@ follow-up item instead of a lost paper entry.
 
 The field client captures operations offline, each with a **client-generated
 idempotency key** (`client_op_id`) and, for updates, the **version it derived
-from** (`base_version`). On reconnect it POSTs a batch to `POST /field/sync`.
+from** (`base_version`, **required** for `update` — an update without it is
+rejected, never blindly applied). On reconnect it POSTs a batch to
+`POST /field/sync`.
+
+**Identity is token-derived.** The clinician (`clinician_duz`) and site
+(`site_ien`) stamped on clinical rows and the ledger come from the bearer token,
+not the request body — a device cannot attribute a write to an arbitrary
+clinician or site. A token is scoped to its site(s) via the Lakeraven field
+extension scope `site/<ien>`; a `system/*.*`/`system/*.write` backend token may
+act across sites but must still name the site it queries. Any `clinician_duz` /
+`site_ien` in the payload is ignored (for a `system/` token with no bound
+resource owner, a payload `clinician_duz` is the documented attribution fallback).
 
 ### Request
 
@@ -74,10 +85,17 @@ POST /lakeraven-ehr/field/sync          // Authorization: Bearer <token>, user/ 
 | Outcome | Meaning | Client action |
 | --- | --- | --- |
 | `applied` | Accepted; server record is authoritative. | Adopt `server_resource_id` + `server_version`. |
-| `duplicate` | `client_op_id` already reconciled (safe replay). | No-op; adopt the returned server state. |
 | `conflict` | Update `base_version` ≠ current `server_version`. Server keeps its version; op parked unresolved in the reconciliation queue. **Never overwritten.** | Re-fetch server state; a clinician resolves. |
-| `rejected` | Malformed, target not found, or illegal clinical transition. | Fix and resubmit under a **new** `client_op_id`. |
+| `rejected` | Malformed, missing `base_version`, missing required clinical fields, unauthorized site, target not found, or illegal clinical transition. | Fix and resubmit under a **new** `client_op_id`. |
 | `unsupported` | No handler for `target_type`. Recorded, not applied — no silent fallback. | Client feature not yet server-backed (see deferred). |
+
+A **replayed** `client_op_id` returns its **original persisted outcome**
+unchanged, plus `"duplicate": true`. The replay flag never masks the real
+outcome: replaying an op that was `conflict` or `rejected` still reports
+`conflict`/`rejected` (with `duplicate: true`), so an unresolved op is never
+mistaken for a successful no-op. Replays are safe under concurrency — two
+in-flight requests with the same `client_op_id` never double-apply and never
+500; the loser is reported as a duplicate replay.
 
 ### Response
 
@@ -95,6 +113,12 @@ POST /lakeraven-ehr/field/sync          // Authorization: Bearer <token>, user/ 
 
 ### Work queue — `GET /field/work_queue?site_ien=463`
 
+Scoped to the token's authorized site(s). A request must resolve to a site: a
+`site_ien` the token authorizes, or (for a token scoped to explicit `site/<ien>`
+sites) those sites. **Omitting `site_ien` never dumps all sites** — a wildcard
+backend token that names no site is refused (`403`), as is a request for a site
+the token is not authorized for.
+
 Returns the two things a van clinician needs to close the loop:
 
 ```jsonc
@@ -107,21 +131,31 @@ Returns the two things a van clinician needs to close the loop:
 ```
 
 `follow_ups` is the direct attack on the confirmation/treatment drop-off:
-reactive screens with no confirmation result (`awaiting: "confirmation"`) and
-confirmed-positive records not yet treated (`awaiting: "treatment"`).
+reactive screens with no confirmation result (`awaiting: "confirmation"`),
+confirmed-positive records not yet treated (`awaiting: "treatment"`), and
+**indeterminate** confirmation results (`awaiting: "reconfirmation"`). An
+indeterminate result is clinically unresolved, so it stays on the queue for a
+repeat draw — it is **not** finalized as a terminal `negative`, which would
+silently drop the patient. A create with no `screening_result` is rejected for
+the same reason: it would sit unqueryable forever.
 
 ## Guarantees and non-guarantees
 
-- **Idempotent.** Unique `client_op_id` makes a replayed batch safe on flaky
-  cellular — a duplicate never double-applies.
-- **Server-authoritative.** A stale `base_version` never overwrites newer server
-  state; it becomes a conflict for human reconciliation.
-- **No silent failures.** Unknown target types, unknown actions, and illegal
-  clinical transitions are recorded with a reason, never faked as applied.
+- **Idempotent, even under concurrency.** The ledger row is claimed (unique
+  `client_op_id`, in a transaction) *before* the clinical write, so a replay —
+  including two simultaneous retries on flaky cellular — never double-applies and
+  never 500s; the loser is reported as a duplicate replay.
+- **Server-authoritative.** `base_version` is required on updates and the
+  compare-and-apply runs under a row lock, so a stale or racing update never
+  overwrites newer server state; it becomes a conflict for human reconciliation.
+- **No silent failures.** Unknown target types, unknown actions, illegal clinical
+  transitions, missing required fields, and unauthorized sites are recorded with
+  a reason, never faked as applied.
 - **Durable, not yet written back to RPMS.** Synced records persist in the
-  engine database. RPC write-back to RPMS is out of scope here (see deferred),
-  mirroring the `reconciliation_items.write_back_*` staging pattern rather than
-  pretending the write reached RPMS.
+  engine database. RPC write-back to RPMS is out of scope here (see deferred).
+  Write-back is honestly deferred, not faked — there are deliberately no
+  `write_back_*` columns yet (unlike `reconciliation_items`); they land with the
+  RPC write path.
 
 ## Deferred (tracked follow-ups, not built here)
 

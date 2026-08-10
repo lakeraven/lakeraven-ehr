@@ -14,7 +14,9 @@ module Lakeraven
     #
     # RPMS/RPC write-back of these records is intentionally out of scope for the
     # first pass; the arc is persisted durably in the engine and write-back is a
-    # tracked follow-up (mirrors the reconciliation_items write_back pattern).
+    # tracked follow-up. Write-back is honestly deferred, not faked — there are
+    # deliberately no write_back_completed/error columns yet (unlike
+    # reconciliation_items); those land when the RPC write path does.
     class FieldLabTrackingService
       TARGET_TYPE = "FieldLabTracking"
 
@@ -23,9 +25,15 @@ module Lakeraven
       # -- Clinical entry points ---------------------------------------------
 
       # Record a field screening, opening a tracking record.
+      #
+      # screening_result is required: a record with no result would sit at
+      # "screened" forever and never surface on the follow-up queue, silently
+      # dropping the patient. An incomplete capture is refused loudly instead.
       def screen(patient_ref:, condition: nil, screening_test: nil,
                  screening_result: nil, screening_recorded_at: nil,
                  site_ien: nil, clinician_duz: nil, encounter_ref: nil, details: {})
+        raise ArgumentError, "screening_result is required" if screening_result.blank?
+
         FieldLabTrackingRecord.create!(
           patient_ref: patient_ref,
           condition: condition,
@@ -44,9 +52,10 @@ module Lakeraven
       # Records that still need a confirmation result or treatment — the
       # follow-up list that attacks the 30–35% drop-off. Minimal fields, in the
       # spirit of the #399 work-queue surface.
-      def work_queue(site_ien: nil, patient_ref: nil)
+      def work_queue(site_ien: nil, site_iens: nil, patient_ref: nil)
         scope = FieldLabTrackingRecord.open_stage
-        scope = scope.for_site(site_ien) if site_ien.present?
+        sites = Array(site_iens).presence || (site_ien.present? ? [ site_ien ] : nil)
+        scope = scope.where(site_ien: sites) if sites
         scope = scope.for_patient(patient_ref) if patient_ref.present?
 
         scope.order(updated_at: :asc).select(&:awaiting).map do |rec|
@@ -68,14 +77,17 @@ module Lakeraven
       # carries the screening capture.
       def create(op)
         p = op.payload
+        # site_ien and clinician_duz are taken from the normalized operation
+        # (token-derived, see FieldSyncService), NOT the raw payload — a device
+        # must not attribute a record to an arbitrary clinician or site.
         screen(
           patient_ref: p[:patient_ref],
           condition: p[:condition],
           screening_test: p[:screening_test],
           screening_result: p[:screening_result],
           screening_recorded_at: p[:screening_recorded_at] || op.client_recorded_at,
-          site_ien: p[:site_ien] || op.site_ien,
-          clinician_duz: p[:clinician_duz] || op.clinician_duz,
+          site_ien: op.site_ien,
+          clinician_duz: op.clinician_duz,
           encounter_ref: p[:encounter_ref],
           details: p[:details] || {}
         )
@@ -100,7 +112,7 @@ module Lakeraven
             loinc: p[:confirmation_loinc],
             order_ref: p[:confirmation_order_ref],
             ordered_at: p[:confirmation_ordered_at] || op.client_recorded_at || Time.current,
-            by_duz: p[:clinician_duz] || op.clinician_duz
+            by_duz: op.clinician_duz
           )
         when "record_confirmation_result"
           record.record_confirmation_result!(
@@ -112,7 +124,7 @@ module Lakeraven
           record.start_treatment!(
             medication: p[:treatment_medication],
             started_at: p[:treatment_started_at] || op.client_recorded_at || Time.current,
-            by_duz: p[:clinician_duz] || op.clinician_duz
+            by_duz: op.clinician_duz
           )
         when "mark_lost_to_followup"
           record.mark_lost_to_followup!(reason: p[:reason])

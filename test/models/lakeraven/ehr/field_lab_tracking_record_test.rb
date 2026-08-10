@@ -64,6 +64,26 @@ module Lakeraven
         refute rec.awaiting_treatment?
       end
 
+      test "indeterminate confirmation is non-terminal and stays a follow-up" do
+        rec = reactive_screen
+        rec.order_confirmation!(loinc: "13955-0")
+        rec.record_confirmation_result!(status: "indeterminate", value: "equivocal")
+
+        assert_equal "indeterminate", rec.stage
+        refute rec.terminal?, "indeterminate must not be a terminal outcome"
+        assert_equal "reconfirmation", rec.awaiting
+        assert_includes FieldLabTrackingRecord.open_stage.to_a, rec
+      end
+
+      test "an indeterminate result can be re-ordered for confirmation" do
+        rec = reactive_screen
+        rec.order_confirmation!(loinc: "13955-0")
+        rec.record_confirmation_result!(status: "indeterminate")
+
+        rec.order_confirmation!(loinc: "13955-0", order_ref: "ORD-2")
+        assert_equal "confirmation_ordered", rec.stage
+      end
+
       test "cannot order confirmation on a nonreactive screen" do
         rec = reactive_screen(screening_result: "nonreactive")
         assert_raises(FieldLabTrackingRecord::IllegalTransition) do

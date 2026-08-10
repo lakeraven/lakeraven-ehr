@@ -95,6 +95,74 @@ module Lakeraven
         refute op.persisted?
       end
 
+      test "concurrent same client_op_id never double-applies and never raises" do
+        # First request claims the ledger, applies the clinical record.
+        first = @service.reconcile(operations: [ create_op(client_op_id: "race-1") ]).operations.first
+        assert_equal "applied", first.outcome
+        assert_equal 1, FieldLabTrackingRecord.count
+
+        # Simulate a second in-flight request that passed the find_by dedupe
+        # before the first committed: force the lookup to miss so it proceeds to
+        # the unique-index claim insert, which must be caught as a replay — not a
+        # 500 and not a second clinical mutation.
+        result = nil
+        with_find_by_miss(FieldSyncOperation) do
+          assert_nothing_raised do
+            result = @service.reconcile(operations: [ create_op(client_op_id: "race-1") ])
+          end
+        end
+
+        op = result.operations.first
+        assert op.replayed?, "the losing racer must be reported as a replay"
+        assert_equal "applied", op.outcome
+        assert_equal 1, FieldLabTrackingRecord.count, "no double clinical apply"
+        assert_equal 1, FieldSyncOperation.count, "no duplicate ledger row"
+      end
+
+      test "an update without base_version is rejected, never blindly applied" do
+        created = @service.reconcile(operations: [ create_op(client_op_id: "nb-1") ]).operations.first
+        id = created.server_resource_id
+
+        result = @service.reconcile(operations: [
+          { client_op_id: "nb-2", operation_type: "update", target_type: "FieldLabTracking",
+            target_id: id, payload: { action: "order_confirmation", confirmation_loinc: "13955-0" } }
+        ])
+        op = result.operations.first
+        assert_equal "rejected", op.outcome
+        assert_match(/base_version/, op.outcome_reason)
+        assert_equal "screened", FieldLabTrackingRecord.find(id).stage
+      end
+
+      test "a create with no screening_result is rejected, not silently applied" do
+        result = @service.reconcile(operations: [
+          { client_op_id: "inc-1", operation_type: "create", target_type: "FieldLabTracking",
+            payload: { patient_ref: "panel-1", condition: "HCV" } }
+        ])
+        assert_equal "rejected", result.operations.first.outcome
+        assert_equal 0, FieldLabTrackingRecord.count
+      end
+
+      test "replaying a rejected op preserves the original outcome" do
+        op = { client_op_id: "rj-1", operation_type: "delete", target_type: "FieldLabTracking", payload: {} }
+        @service.reconcile(operations: [ op ])
+        result = @service.reconcile(operations: [ op ])
+
+        replayed = result.operations.first
+        assert replayed.replayed?
+        assert_equal "rejected", replayed.outcome, "a replayed rejection stays rejected, not duplicate"
+      end
+
+      test "an op targeting an unauthorized site is rejected" do
+        result = @service.reconcile(
+          operations: [ create_op(client_op_id: "site-1", site_ien: "999") ],
+          authorized_sites: %w[463 500]
+        )
+        op = result.operations.first
+        assert_equal "rejected", op.outcome
+        assert_match(/site/i, op.outcome_reason)
+        assert_equal 0, FieldLabTrackingRecord.count
+      end
+
       test "result summary counts outcomes across a mixed batch" do
         result = @service.reconcile(operations: [
           create_op(client_op_id: "m1"),
@@ -106,6 +174,16 @@ module Lakeraven
       end
 
       private
+
+      # Force <model>.find_by to miss so a second concurrent request proceeds
+      # past the dedupe check to the unique-index claim insert (minitest 6 has
+      # no stub helper, so this restores the inherited method on teardown).
+      def with_find_by_miss(model)
+        model.define_singleton_method(:find_by) { |*_args, **_kwargs| nil }
+        yield
+      ensure
+        model.singleton_class.send(:remove_method, :find_by)
+      end
 
       def update_op(client_op_id, target_id, base_version:, **payload)
         {

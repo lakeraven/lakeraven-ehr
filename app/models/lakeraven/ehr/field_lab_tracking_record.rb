@@ -17,7 +17,7 @@ module Lakeraven
       self.table_name = "lakeraven_ehr_field_lab_tracking_records"
 
       STAGES = %w[
-        screened confirmation_ordered confirmed negative treated lost_to_followup
+        screened confirmation_ordered confirmed indeterminate negative treated lost_to_followup
       ].freeze
 
       SCREENING_RESULTS = %w[reactive nonreactive indeterminate].freeze
@@ -56,9 +56,15 @@ module Lakeraven
       # Confirmed positive but treatment not yet started.
       def awaiting_treatment? = confirmed?
 
+      # An indeterminate confirmation result is clinically unresolved: the
+      # patient still needs a repeat confirmation, so they stay on the queue
+      # rather than dropping off as a false "negative" terminal.
+      def awaiting_reconfirmation? = stage == "indeterminate"
+
       # What this record is currently waiting on, for the work queue.
       def awaiting
         return "confirmation" if awaiting_confirmation?
+        return "reconfirmation" if awaiting_reconfirmation?
         return "treatment" if awaiting_treatment?
 
         nil
@@ -71,7 +77,9 @@ module Lakeraven
       class IllegalTransition < StandardError; end
 
       def order_confirmation!(loinc:, order_ref: nil, ordered_at: Time.current, by_duz: nil)
-        unless stage == "screened" && screening_result == "reactive"
+        # Orderable from a fresh reactive screen, or to re-confirm after an
+        # indeterminate result (which is unresolved, not terminal).
+        unless %w[screened indeterminate].include?(stage) && screening_result == "reactive"
           raise IllegalTransition, "cannot order confirmation from stage=#{stage}, screening=#{screening_result.inspect}"
         end
 
@@ -93,7 +101,14 @@ module Lakeraven
           raise IllegalTransition, "unknown confirmation status #{status.inspect}"
         end
 
-        next_stage = status.to_s == "positive" ? "confirmed" : "negative"
+        # positive → confirmed (treat); negative → terminal negative;
+        # indeterminate → unresolved, kept on the follow-up queue for a repeat
+        # draw (never finalized as a false negative).
+        next_stage = case status.to_s
+        when "positive" then "confirmed"
+        when "indeterminate" then "indeterminate"
+        else "negative"
+        end
         update!(
           stage: next_stage,
           confirmation_result_status: status.to_s,

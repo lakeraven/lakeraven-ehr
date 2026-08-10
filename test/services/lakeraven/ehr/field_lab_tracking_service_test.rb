@@ -46,6 +46,21 @@ module Lakeraven
         assert_empty @service.work_queue(site_ien: "463")
       end
 
+      test "screen requires a screening_result (incomplete capture is refused)" do
+        assert_raises(ArgumentError) do
+          @service.screen(patient_ref: "p-x", condition: "HCV")
+        end
+      end
+
+      test "work_queue scopes to multiple authorized sites" do
+        @service.screen(patient_ref: "a", condition: "HCV", screening_result: "reactive", site_ien: "463")
+        @service.screen(patient_ref: "b", condition: "HCV", screening_result: "reactive", site_ien: "500")
+        @service.screen(patient_ref: "c", condition: "HCV", screening_result: "reactive", site_ien: "999")
+
+        refs = @service.work_queue(site_iens: %w[463 500]).map { |e| e[:patient_ref] }
+        assert_equal %w[a b], refs.sort
+      end
+
       # -- handler protocol --------------------------------------------------
 
       def op(payload:, **overrides)

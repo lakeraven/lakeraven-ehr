@@ -36,6 +36,7 @@ module Lakeraven
 
       scope :for_clinician, ->(duz) { where(clinician_duz: duz) }
       scope :for_site, ->(ien) { where(site_ien: ien) }
+      scope :for_sites, ->(iens) { where(site_ien: Array(iens)) }
       scope :for_batch, ->(id) { where(batch_id: id) }
       scope :conflicts, -> { where(outcome: "conflict") }
       scope :unresolved_conflicts, -> { where(outcome: "conflict", resolved: false) }
