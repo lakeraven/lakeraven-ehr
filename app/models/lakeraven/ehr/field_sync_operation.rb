@@ -43,7 +43,12 @@ module Lakeraven
 
       def conflict? = outcome == "conflict"
       def applied? = outcome == "applied"
-      def duplicate? = outcome == "duplicate"
+
+      # NOTE: there is deliberately no #duplicate? — "duplicate" is not a
+      # persisted outcome. A duplicate is a replay of an already-persisted op,
+      # represented by the transient #replayed? flag (and surfaced to clients as
+      # the `duplicate: true` serialization flag), while #outcome keeps the
+      # ORIGINAL persisted result (a replayed rejection still reads "rejected").
     end
   end
 end

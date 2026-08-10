@@ -36,6 +36,22 @@ module Lakeraven
         assert op.persisted?
       end
 
+      test "duplicate is not a persisted outcome; replays use the transient flag" do
+        refute_includes FieldSyncOperation::OUTCOMES, "duplicate"
+
+        op = FieldSyncOperation.new(VALID.merge(outcome: "duplicate"))
+        refute op.valid?, "\"duplicate\" must not be a storable outcome"
+
+        # A replay preserves the ORIGINAL persisted outcome; the fact that it is
+        # a replay is the transient #replayed? flag, not a #duplicate? predicate.
+        rejected = FieldSyncOperation.create!(VALID.merge(client_op_id: "rp-1", outcome: "rejected"))
+        refute rejected.respond_to?(:duplicate?), "no misleading always-false #duplicate?"
+        refute rejected.replayed?
+        rejected.replayed = true
+        assert rejected.replayed?
+        assert_equal "rejected", rejected.outcome, "replay keeps the original outcome"
+      end
+
       test "unresolved_conflicts scope filters on outcome and resolved" do
         FieldSyncOperation.create!(VALID.merge(client_op_id: "c1", outcome: "conflict", resolved: false))
         FieldSyncOperation.create!(VALID.merge(client_op_id: "c2", outcome: "conflict", resolved: true))
