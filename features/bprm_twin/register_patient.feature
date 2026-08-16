@@ -19,7 +19,7 @@ Feature: Register a new patient
       | sex               | F                |
       | date_of_birth     | 1992-03-11       |
       | ssn               | 555-01-2345      |
-      | tribe             | Yakama Nation    |
+      | tribe             | Example Tribe    |
       | community         | Toppenish        |
       | classification    | Indian/Alaska Native |
       | eligibility       | Direct           |

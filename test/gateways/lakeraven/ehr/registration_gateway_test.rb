@@ -18,7 +18,7 @@ module Lakeraven
         broker = FakeBroker.new.on("BHDPTRPC REGISTER", "1^123^")
         use_broker(broker) do
           result = RegistrationGateway.register(name: "RAVEN,NORA", sex: "F", date_of_birth: "1992-03-11",
-                                                ssn: "555-01-2345", tribe: "Yakama Nation", community: "Toppenish")
+                                                ssn: "555-01-2345", tribe: "Example Tribe", community: "Toppenish")
 
           assert result[:success]
           assert_equal 201, result[:status]
@@ -31,12 +31,12 @@ module Lakeraven
         broker = FakeBroker.new.on("BHDPTRPC REGISTER", "1^123^")
         use_broker(broker) do
           RegistrationGateway.register(name: "RAVEN,NORA", sex: "F", date_of_birth: "1992-03-11",
-                                       ssn: "555-01-2345", tribe: "Yakama Nation",
+                                       ssn: "555-01-2345", tribe: "Example Tribe",
                                        community: "Toppenish", classification: "Indian/Alaska Native",
                                        eligibility: "Direct")
 
           payload = broker.last_call[:params].first
-          assert_equal "RAVEN,NORA^F^2920311^555-01-2345^Yakama Nation^Toppenish^Indian/Alaska Native^Direct", payload
+          assert_equal "RAVEN,NORA^F^2920311^555-01-2345^Example Tribe^Toppenish^Indian/Alaska Native^Direct", payload
         end
       end
 
@@ -87,7 +87,7 @@ module Lakeraven
         broker = FakeBroker.new.on("BHDPTRPC REGISTER", "1^123^")
         use_broker(broker) do
           result = RegistrationGateway.register(name: "RAVEN,NORA", sex: "F", date_of_birth: "1992-03-11",
-                                                ssn: "555-01-2345", tribe: "Yakama^Nation")
+                                                ssn: "555-01-2345", tribe: "Example^Tribe")
 
           refute result[:success]
           assert_equal 422, result[:status]
@@ -213,18 +213,18 @@ module Lakeraven
       end
 
       test "face sheet returns name, community and tribe" do
-        broker = FakeBroker.new.on("BHDPTRPC FACESHEET", "RAVEN,NORA^Toppenish^Yakama Nation^")
+        broker = FakeBroker.new.on("BHDPTRPC FACESHEET", "RAVEN,NORA^Toppenish^Example Tribe^")
         use_broker(broker) do
           result = RegistrationGateway.face_sheet(42)
 
           assert result[:success]
           assert_equal "Toppenish", result[:face_sheet][:community]
-          assert_equal "Yakama Nation", result[:face_sheet][:tribe]
+          assert_equal "Example Tribe", result[:face_sheet][:tribe]
         end
       end
 
       test "face sheet surfaces registration errors and warnings" do
-        broker = FakeBroker.new.on("BHDPTRPC FACESHEET", "RAVEN,NORA^Toppenish^Yakama Nation^ELIGIBILITY")
+        broker = FakeBroker.new.on("BHDPTRPC FACESHEET", "RAVEN,NORA^Toppenish^Example Tribe^ELIGIBILITY")
         use_broker(broker) do
           result = RegistrationGateway.face_sheet(42)
 

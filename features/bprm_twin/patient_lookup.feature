@@ -13,8 +13,8 @@ Feature: Patient lookup and face sheet
   Background:
     Given the following patients are registered:
       | dfn | hrn    | name           | dob        | sex | community  | tribe          |
-      | 42  | 101226 | RAVEN,NORA     | 1992-03-11 | F   | Toppenish  | Yakama Nation  |
-      | 43  | 101227 | RAVEN,NOAH     | 1988-01-04 | M   | Wapato     | Yakama Nation  |
+      | 42  | 101226 | RAVEN,NORA     | 1992-03-11 | F   | Toppenish  | Example Tribe  |
+      | 43  | 101227 | RAVEN,NOAH     | 1988-01-04 | M   | Wapato     | Example Tribe  |
       | 44  | 118834 | BEGAY,MICHELLE | 1975-09-30 | F   | Chinle     | Navajo Nation  |
 
   Scenario: Search by partial last name
@@ -29,7 +29,7 @@ Feature: Patient lookup and face sheet
 
   Scenario: Retrieve the face sheet for a patient
     When I request the face sheet for patient 42
-    Then the face sheet shows name "RAVEN,NORA", community "Toppenish", tribe "Yakama Nation"
+    Then the face sheet shows name "RAVEN,NORA", community "Toppenish", tribe "Example Tribe"
     And the face sheet shows the facility Health Record Number "101226"
 
   Scenario: Face sheet surfaces registration errors and warnings
