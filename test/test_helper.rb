@@ -111,8 +111,8 @@ RpmsRpc.mock! do |m|
                                   service_unit: "Anchorage", region: "Alaska", area: "Alaska Area" })
   m.seed(:tribe_info, "CN", { ien: 101, name: "Cherokee Nation", code: "CN",
                                 service_unit: "Tahlequah", region: "Oklahoma", area: "Oklahoma City Area" })
-  m.seed(:tribe_info, "NN", { ien: 102, name: "Navajo Nation", code: "NN",
-                                service_unit: "Window Rock", region: "Arizona", area: "Navajo Area" })
+  m.seed(:tribe_info, "NN", { ien: 102, name: "Tallgrass Nation", code: "NN",
+                                service_unit: "Tallgrass Post", region: "Arizona", area: "Tallgrass Area" })
   m.seed(:tribe_info, "OST", { ien: 104, name: "Oglala Sioux Tribe", code: "OST",
                                  service_unit: "Pine Ridge", region: "South Dakota", area: "Great Plains Area" })
 
