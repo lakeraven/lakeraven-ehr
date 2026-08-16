@@ -109,12 +109,12 @@ RpmsRpc.mock! do |m|
   m.seed(:service_unit, "1", { ien: 1, name: "Anchorage", region: "Alaska" })
   m.seed(:tribe_info, "ANLC", { ien: 100, name: "Alaska Native - Anchorage (ANLC)", code: "ANLC",
                                   service_unit: "Anchorage", region: "Alaska", area: "Alaska Area" })
-  m.seed(:tribe_info, "CN", { ien: 101, name: "Cherokee Nation", code: "CN",
-                                service_unit: "Tahlequah", region: "Oklahoma", area: "Oklahoma City Area" })
+  m.seed(:tribe_info, "CN", { ien: 101, name: "Painted Sky Nation", code: "CN",
+                                service_unit: "Painted Sky", region: "Oklahoma", area: "Central Area" })
   m.seed(:tribe_info, "NN", { ien: 102, name: "Tallgrass Nation", code: "NN",
                                 service_unit: "Tallgrass Post", region: "Arizona", area: "Tallgrass Area" })
-  m.seed(:tribe_info, "OST", { ien: 104, name: "Oglala Sioux Tribe", code: "OST",
-                                 service_unit: "Pine Ridge", region: "South Dakota", area: "Great Plains Area" })
+  m.seed(:tribe_info, "OST", { ien: 104, name: "Redwater Band", code: "OST",
+                                 service_unit: "Redwater", region: "South Dakota", area: "Northern Area" })
 
   # Vitals (ORQQVI VITALS) for patient DFN 1
   m.seed_keyed_collection(:vitals, "1", [

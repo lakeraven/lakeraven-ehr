@@ -185,7 +185,7 @@ module Lakeraven
         tribe_info = patient_cn.tribe_information
 
         assert_equal "CN", tribe_info[:code]
-        assert_equal "Cherokee Nation", tribe_info[:name]
+        assert_equal "Painted Sky Nation", tribe_info[:name]
       end
 
       # =============================================================================
@@ -234,8 +234,8 @@ module Lakeraven
       end
 
       test "tribal_affiliation attribute is accessible" do
-        patient = Patient.new(tribal_affiliation: "Cherokee Nation")
-        assert_equal "Cherokee Nation", patient.tribal_affiliation
+        patient = Patient.new(tribal_affiliation: "Painted Sky Nation")
+        assert_equal "Painted Sky Nation", patient.tribal_affiliation
       end
 
       test "service_area attribute is accessible" do
