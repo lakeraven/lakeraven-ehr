@@ -201,6 +201,90 @@ module Lakeraven
         end
         assert_response :unprocessable_content
       end
+
+      test "POST Patient maps FHIR fields into the registration payload" do
+        setup_smart_auth(scopes: "system/Patient.write")
+        fake = FakeBroker.new.on(RegistrationGateway::REGISTER_RPC, "1^12345^")
+        use_broker(fake) do
+          post "/lakeraven-ehr/Patient", params: patient_fhir.to_json, headers: fhir_headers
+        end
+        assert_response :created
+        payload = fake.last_call[:params].join(" ")
+        assert_includes payload, "TESTPATIENT,SYNTH"
+        assert_includes payload, "111-11-1111"
+        assert_match(/\^F\^/, payload)
+      end
+
+      test "POST Patient surfaces a broker outage as 503" do
+        setup_smart_auth(scopes: "system/Patient.write")
+        fake = FakeBroker.new.raise_with(RpmsRpc::Client::ConnectionError.new("broker down"))
+        use_broker(fake) do
+          post "/lakeraven-ehr/Patient", params: patient_fhir.to_json, headers: fhir_headers
+        end
+        assert_response :service_unavailable
+      end
+
+      test "POST Patient rejects invalid JSON with a distinct 400" do
+        setup_smart_auth(scopes: "system/Patient.write")
+        post "/lakeraven-ehr/Patient", params: "not json", headers: fhir_headers
+        assert_response :bad_request
+        assert_includes response.body, "not valid JSON"
+      end
+
+      test "POST Patient rejects a non-Patient resource" do
+        setup_smart_auth(scopes: "system/Patient.write")
+        post "/lakeraven-ehr/Patient", params: { resourceType: "Observation" }.to_json, headers: fhir_headers
+        assert_response :bad_request
+      end
+
+      test "POST Patient returns 502 when the gateway reports success but no DFN" do
+        setup_smart_auth(scopes: "system/Patient.write")
+        fake = FakeBroker.new.on(RegistrationGateway::REGISTER_RPC, "1^^")
+        use_broker(fake) do
+          post "/lakeraven-ehr/Patient", params: patient_fhir.to_json, headers: fhir_headers
+        end
+        assert_response :bad_gateway
+      end
+
+      test "POST Patient reads the SSN identifier even when it is not first" do
+        setup_smart_auth(scopes: "system/Patient.write")
+        body = patient_fhir.merge(identifier: [
+          { system: "http://hospital.example/mrn", value: "MRN-999" },
+          { system: "http://hl7.org/fhir/sid/us-ssn", value: "222-22-2222" }
+        ])
+        fake = FakeBroker.new.on(RegistrationGateway::REGISTER_RPC, "1^12345^")
+        use_broker(fake) do
+          post "/lakeraven-ehr/Patient", params: body.to_json, headers: fhir_headers
+        end
+        assert_includes fake.last_call[:params].join(" "), "222-22-2222"
+        refute_includes fake.last_call[:params].join(" "), "MRN-999"
+      end
+
+      test "POST Patient does not echo an unsupported gender as accepted" do
+        setup_smart_auth(scopes: "system/Patient.write")
+        body = patient_fhir.merge(gender: "other")
+        fake = FakeBroker.new.on(RegistrationGateway::REGISTER_RPC, "1^12345^")
+        use_broker(fake) do
+          post "/lakeraven-ehr/Patient", params: body.to_json, headers: fhir_headers
+        end
+        assert_response :created
+        refute JSON.parse(response.body).key?("gender")
+      end
+
+      test "POST Patient forbids a patient-context token from registering" do
+        setup_smart_auth(scopes: "patient/Patient.write")
+        post "/lakeraven-ehr/Patient", params: patient_fhir.to_json, headers: fhir_headers
+        assert_response :forbidden
+      end
+
+      test "POST Patient accepts the SMART v2 create (.c) scope" do
+        setup_smart_auth(scopes: "system/Patient.c")
+        fake = FakeBroker.new.on(RegistrationGateway::REGISTER_RPC, "1^12345^")
+        use_broker(fake) do
+          post "/lakeraven-ehr/Patient", params: patient_fhir.to_json, headers: fhir_headers
+        end
+        assert_response :created
+      end
     end
   end
 end
