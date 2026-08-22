@@ -52,6 +52,22 @@ module Lakeraven
         (token_scopes & allowed).any?
       end
 
+      # Check if token can write the given FHIR resource type (SMART v2).
+      def can_write?(resource_type)
+        return false unless current_token
+
+        token_scopes = current_token.scopes.to_s.split
+        allowed = [
+          "patient/#{resource_type}.write", "patient/#{resource_type}.c", "patient/#{resource_type}.*",
+          "patient/*.write", "patient/*.c", "patient/*.*",
+          "user/#{resource_type}.write", "user/#{resource_type}.c", "user/#{resource_type}.*",
+          "user/*.write", "user/*.c", "user/*.*",
+          "system/#{resource_type}.write", "system/#{resource_type}.c", "system/#{resource_type}.*",
+          "system/*.write", "system/*.c", "system/*.*"
+        ]
+        (token_scopes & allowed).any?
+      end
+
       # Enforce patient compartment for patient-context tokens.
       def authorize_patient_context!(patient_id)
         return true if system_scope? || user_context_scope?
