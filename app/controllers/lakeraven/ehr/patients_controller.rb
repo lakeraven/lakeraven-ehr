@@ -4,6 +4,8 @@ module Lakeraven
   module EHR
     class PatientsController < ApplicationController
       before_action :enforce_patient_context!, only: :show
+      skip_before_action :authorize_fhir_scope!, only: :create
+      before_action :authorize_fhir_write_scope!, only: :create
 
       def index
         patients = resolve_patient_search
@@ -38,6 +40,29 @@ module Lakeraven
         end
 
         render_fhir(patient.to_fhir)
+      end
+
+      def create
+        fhir = parse_fhir_body
+        unless fhir.is_a?(Hash) && fhir["resourceType"] == "Patient"
+          return render_operation_outcome(
+            status: :bad_request, severity: "error", code: "invalid",
+            diagnostics: "Request body must be a FHIR Patient resource"
+          )
+        end
+
+        result = RegistrationGateway.register(registration_params_from_fhir(fhir))
+
+        if result[:success]
+          response.headers["Location"] = "#{request.base_url}#{request.path}/#{result[:dfn]}"
+          render_fhir(created_patient_fhir(result[:dfn], fhir), status: :created)
+        else
+          render_operation_outcome(
+            status: gateway_http_status(result[:status]),
+            severity: "error", code: gateway_issue_code(result[:status]),
+            diagnostics: result[:error]
+          )
+        end
       end
 
       private
@@ -89,6 +114,51 @@ module Lakeraven
 
       def build_patient_entry(patient)
         { resource: patient.to_fhir, search: { mode: "match" } }
+      end
+
+      def parse_fhir_body
+        JSON.parse(request.body.read)
+      rescue JSON::ParserError
+        nil
+      end
+
+      def registration_params_from_fhir(fhir)
+        name = Array(fhir["name"]).first || {}
+        family = name["family"].to_s
+        given = Array(name["given"]).join(" ")
+        {
+          name: [ family, given ].reject(&:empty?).join(","),
+          sex: { "male" => "M", "female" => "F" }[fhir["gender"]],
+          date_of_birth: fhir["birthDate"],
+          ssn: ssn_from_identifiers(fhir["identifier"])
+        }
+      end
+
+      def ssn_from_identifiers(identifiers)
+        Array(identifiers).each do |ident|
+          return ident["value"] if ident["system"].to_s.include?("us-ssn")
+        end
+        nil
+      end
+
+      def created_patient_fhir(dfn, submitted)
+        {
+          resourceType: "Patient",
+          id: dfn.to_s,
+          identifier: [ { system: "https://lakeraven.com/fhir/sid/dfn", value: dfn.to_s } ],
+          name: submitted["name"],
+          gender: submitted["gender"],
+          birthDate: submitted["birthDate"]
+        }.compact
+      end
+
+      def gateway_http_status(status)
+        { 422 => :unprocessable_content, 409 => :conflict, 503 => :service_unavailable }
+          .fetch(status, :bad_request)
+      end
+
+      def gateway_issue_code(status)
+        { 422 => "invalid", 409 => "conflict", 503 => "transient" }.fetch(status, "invalid")
       end
     end
   end

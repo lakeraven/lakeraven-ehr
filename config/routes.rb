@@ -4,7 +4,7 @@ Lakeraven::EHR::Engine.routes.draw do
   # Doorkeeper models (Application, AccessToken) are used directly;
   # routes are NOT mounted here because the engine provides its own
   # BackendServicesController for OAuth token issuance.
-  resources :patients, path: "Patient", only: %i[index show], param: :dfn
+  resources :patients, path: "Patient", only: %i[index show create], param: :dfn
   resources :practitioners, path: "Practitioner", only: %i[index show], param: :ien
   resources :allergy_intolerances, path: "AllergyIntolerance", only: %i[index show]
   resources :conditions, path: "Condition", only: %i[index show]

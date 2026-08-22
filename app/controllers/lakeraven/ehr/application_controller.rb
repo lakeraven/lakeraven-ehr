@@ -23,6 +23,12 @@ module Lakeraven
         render_forbidden("Insufficient scope for reading #{fhir_resource_type}")
       end
 
+      def authorize_fhir_write_scope!
+        return if can_write?(fhir_resource_type)
+
+        render_forbidden("Insufficient scope for writing #{fhir_resource_type}")
+      end
+
       def render_operation_outcome(status:, severity:, code:, diagnostics: nil)
         outcome = {
           resourceType: "OperationOutcome",

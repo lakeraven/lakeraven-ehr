@@ -6,6 +6,7 @@ module Lakeraven
   module EHR
     class PatientsControllerTest < ActionDispatch::IntegrationTest
       include SmartAuthTestHelper
+      include BrokerStubbing
 
       setup do
         setup_smart_auth
@@ -148,6 +149,57 @@ module Lakeraven
       test "FHIR content type on 404 responses" do
         get "/lakeraven-ehr/Patient/99999", headers: @headers
         assert_equal "application/fhir+json", response.media_type
+      end
+
+      # -- POST /Patient (register) ----------------------------------------------
+
+      def patient_fhir
+        {
+          resourceType: "Patient",
+          name: [ { family: "TESTPATIENT", given: [ "SYNTH" ] } ],
+          gender: "female",
+          birthDate: "1985-06-15",
+          identifier: [ { system: "http://hl7.org/fhir/sid/us-ssn", value: "111-11-1111" } ]
+        }
+      end
+
+      def fhir_headers
+        @headers.merge("Content-Type" => "application/fhir+json")
+      end
+
+      test "POST Patient registers and returns 201 with Location" do
+        setup_smart_auth(scopes: "system/Patient.write")
+        fake = FakeBroker.new.on(RegistrationGateway::REGISTER_RPC, "1^12345^")
+        use_broker(fake) do
+          post "/lakeraven-ehr/Patient", params: patient_fhir.to_json, headers: fhir_headers
+        end
+        assert_response :created
+        body = JSON.parse(response.body)
+        assert_equal "Patient", body["resourceType"]
+        assert_equal "12345", body["id"]
+        assert_match %r{/Patient/12345\z}, response.headers["Location"]
+        assert_equal RegistrationGateway::REGISTER_RPC, fake.last_call[:rpc]
+      end
+
+      test "POST Patient without write scope is forbidden" do
+        setup_smart_auth(scopes: "system/Patient.read")
+        post "/lakeraven-ehr/Patient", params: patient_fhir.to_json, headers: fhir_headers
+        assert_response :forbidden
+      end
+
+      test "POST Patient without a token is unauthorized" do
+        post "/lakeraven-ehr/Patient", params: patient_fhir.to_json,
+          headers: { "Content-Type" => "application/fhir+json" }
+        assert_response :unauthorized
+      end
+
+      test "POST Patient missing name is unprocessable" do
+        setup_smart_auth(scopes: "system/Patient.write")
+        use_broker(FakeBroker.new) do
+          post "/lakeraven-ehr/Patient",
+            params: { resourceType: "Patient", gender: "female" }.to_json, headers: fhir_headers
+        end
+        assert_response :unprocessable_content
       end
     end
   end
