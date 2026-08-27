@@ -2,12 +2,28 @@
 
 module Lakeraven
   module EHR
-    # Read-only, UNAUTHENTICATED demo patient chart (issue #452).
+    # Read-only demo patient chart (issue #452), AUTHENTICATED with a
+    # dev-only demo bypass.
     #
-    # Deliberately does NOT inherit from the engine's FHIR ApplicationController
-    # (ActionController::API + SMART bearer auth + patient-context enforcement):
-    # this is a public demo surface a clinician opens directly in a browser.
-    # No before_action auth of any kind is applied here.
+    # Inherits ActionController::Base (needed to render the HTML view) rather
+    # than the engine's ActionController::API FHIR base, but reuses the SAME
+    # protections the FHIR controllers apply, enforced for BOTH the HTML and
+    # the FHIR-JSON paths and FAILING CLOSED:
+    #   * SmartAuthentication — Doorkeeper bearer token required.
+    #   * Per-resource read scope — the chart aggregates many resource types;
+    #     it requires `Patient` read scope (else 403 for the whole request)
+    #     and OMITS any individual section the token cannot read.
+    #   * Patient-context binding — a patient-scoped token is bound to :dfn.
+    #   * AuditableClinicalAccess — every authenticated access is audited.
+    #
+    # Unauthorized/forbidden responses are FORMAT-AWARE: FHIR requests get an
+    # OperationOutcome (application/fhir+json); HTML requests get plain text.
+    #
+    # Demo bypass: authentication is skipped ONLY when
+    #   Rails.env.development? && ENV["CHART_DEMO_OPEN"] == "1"
+    # so the local synthetic demo opens with no token. The `development?` guard
+    # makes the bypass impossible in test or production. Host browser-session
+    # -> token SSO is a documented follow-up (ADR 0004), out of scope here.
     #
     # ONE endpoint, content-negotiated:
     #   GET /chart/:dfn            -> clinician-facing HTML chart
@@ -18,7 +34,14 @@ module Lakeraven
     # serializers; only the RPMS data source is mocked (see
     # test/dummy/lib/lakeraven_demo_seeds.rb).
     class ChartsController < ActionController::Base
+      include SmartAuthentication
+      include AuditableClinicalAccess
+
       FHIR_CONTENT_TYPE = "application/fhir+json"
+
+      before_action :authenticate_chart_request!
+      before_action :require_patient_scope!
+      before_action :enforce_patient_context!
 
       # RPMS problem-list status codes -> FHIR clinical-status
       PROBLEM_STATUS = { "A" => "active", "I" => "inactive" }.freeze
@@ -44,6 +67,48 @@ module Lakeraven
 
       private
 
+      # -- Authentication / authorization (fail closed) -------------------------
+
+      # Dev-only escape hatch so tomorrow's LOCAL demo opens with no token.
+      # Guarded on development? so it can NEVER apply in test or production.
+      def demo_bypass?
+        Rails.env.development? && ENV["CHART_DEMO_OPEN"] == "1"
+      end
+
+      def authenticate_chart_request!
+        return true if demo_bypass?
+
+        authenticate_smart_token! # renders 401 (format-aware) + halts on failure
+      end
+
+      # The chart always includes Patient demographics; without Patient read
+      # scope there is nothing safe to show -> deny the whole request.
+      def require_patient_scope!
+        return true if demo_bypass?
+        return true if can_read?("Patient")
+
+        render_forbidden("Insufficient scope to read Patient")
+        false
+      end
+
+      def enforce_patient_context!
+        return true if demo_bypass?
+
+        authorize_patient_context!(params[:dfn]) # renders 403 (format-aware) on mismatch
+      end
+
+      # True when the caller is permitted to see a given resource type. The
+      # dev bypass grants everything; otherwise it defers to the token scopes.
+      def readable?(resource_type)
+        demo_bypass? || can_read?(resource_type)
+      end
+
+      # AuditableClinicalAccess records entity_type from this; the chart is a
+      # Patient-centric aggregate, so audit it against Patient + the dfn.
+      def fhir_resource_type
+        "Patient"
+      end
+
       # -- Content negotiation --------------------------------------------------
 
       def fhir_requested?
@@ -53,19 +118,19 @@ module Lakeraven
         request.headers["Accept"].to_s.include?("application/fhir+json")
       end
 
-      # -- Data loading (each source guarded so a mock miss just yields []) ------
+      # -- Data loading (per-type scope enforced; a mock miss yields []) --------
 
       def load_clinical_collections
         dfn = @patient.dfn.to_s
-        @conditions    = build_conditions(dfn)
-        @medications   = build_medications(dfn)
-        @allergies     = build_allergies(dfn)
-        @vitals        = safe { ObservationGateway.for_patient(dfn) }
+        @conditions    = readable?("Condition") ? build_conditions(dfn) : []
+        @medications   = readable?("MedicationRequest") ? build_medications(dfn) : []
+        @allergies     = readable?("AllergyIntolerance") ? build_allergies(dfn) : []
+        @vitals        = readable?("Observation") ? safe { ObservationGateway.for_patient(dfn) } : []
         @observations  = Observation.from_vital_hashes(@vitals, patient_dfn: dfn)
-        @immunizations = safe { Immunization.for_patient(dfn) }
-        @procedures    = build_procedures(dfn)
-        @encounters    = safe { EncounterGateway.for_patient(dfn) } # raw appt hashes for display
-        @encounter_resources = build_encounter_resources(dfn)       # model instances for FHIR
+        @immunizations = readable?("Immunization") ? safe { Immunization.for_patient(dfn) } : []
+        @procedures    = readable?("Procedure") ? build_procedures(dfn) : []
+        @encounters    = readable?("Encounter") ? safe { EncounterGateway.for_patient(dfn) } : []
+        @encounter_resources = build_encounter_resources(dfn)
       end
 
       def build_conditions(dfn)
@@ -141,10 +206,50 @@ module Lakeraven
 
         {
           resourceType: "Bundle",
+          id: SecureRandom.uuid,
+          meta: { lastUpdated: Time.current.iso8601 },
           type: "searchset",
           total: resources.length,
-          entry: resources.map { |r| { resource: r } }
+          link: [ { relation: "self", url: request.original_url } ],
+          entry: resources.map { |r| { fullUrl: entry_full_url(r), resource: r } }
         }
+      end
+
+      # Absolute fullUrl for a resource. Resources whose serializer emits an id
+      # get a resolvable REST URL; those without (e.g. AllergyIntolerance) get
+      # a valid urn:uuid so the Bundle stays FHIR-conformant.
+      def entry_full_url(resource)
+        id = resource[:id]
+        if id.present?
+          "#{request.base_url}/fhir/#{resource[:resourceType]}/#{id}"
+        else
+          "urn:uuid:#{SecureRandom.uuid}"
+        end
+      end
+
+      # -- Format-aware auth failures (override SmartAuthentication) -------------
+      #
+      # SmartAuthentication#render_unauthorized/#render_forbidden emit FHIR JSON
+      # unconditionally. A browser hitting the HTML chart should get plain text,
+      # not a FHIR OperationOutcome — so branch on the requested representation.
+
+      def render_unauthorized(message = "Unauthorized")
+        render_auth_outcome(:unauthorized, "login", message)
+      end
+
+      def render_forbidden(message = "Forbidden")
+        render_auth_outcome(:forbidden, "forbidden", message)
+      end
+
+      def render_auth_outcome(status, code, message)
+        if fhir_requested?
+          render json: {
+            resourceType: "OperationOutcome",
+            issue: [ { severity: "error", code: code, diagnostics: message } ]
+          }, status: status, content_type: FHIR_CONTENT_TYPE
+        else
+          render plain: "#{status.to_s.titleize}: #{message}", status: status
+        end
       end
 
       # -- 404 ------------------------------------------------------------------

@@ -7,6 +7,12 @@
 # RPMS/VistA broker. Demographics AND clinical data for DFN 1 come from the
 # shared synthetic seed set in test/dummy/lib/lakeraven_demo_seeds.rb, which
 # the chart request test reuses so dev and test stay in lockstep.
+#
+# The chart itself is AUTHENTICATED. For a token-free local demo, also set
+# CHART_DEMO_OPEN=1 (honored only in development — see ChartsController):
+#
+#   CHART_DEMO_OPEN=1 SPIKE_MOCK_RPC=1 bin/rails server
+#   -> open http://localhost:3000/chart/1
 if Rails.env.development? && ENV["SPIKE_MOCK_RPC"] == "1"
   require "rpms_rpc/version"
   require "rpms_rpc/mock_client"
@@ -14,5 +20,6 @@ if Rails.env.development? && ENV["SPIKE_MOCK_RPC"] == "1"
 
   RpmsRpc.mock! { |m| LakeravenDemoSeeds.seed(m) }
 
-  Rails.logger.warn("[SPIKE] RpmsRpc mocked with synthetic seed data — NOT a real RPMS connection")
+  demo = ENV["CHART_DEMO_OPEN"] == "1" ? " (CHART_DEMO_OPEN=1: chart auth bypassed for demo)" : ""
+  Rails.logger.warn("[SPIKE] RpmsRpc mocked with synthetic seed data — NOT a real RPMS connection#{demo}")
 end
