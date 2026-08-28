@@ -19,7 +19,8 @@
   <title>Lakeraven EHR</title>
   <style>
     :root{
-      --ink:#0f172a; --muted:#64748b; --line:#e2e8f0; --bg:#f1f5f9;
+      /* --muted/--line darkened for projector contrast (washed-out rooms) */
+      --ink:#0f172a; --muted:#475569; --line:#cbd5e1; --bg:#f1f5f9;
       --card:#ffffff; --brand:#0e5a8a; --brand-dark:#0b4a72; --accent:#0891b2;
       --danger:#b91c1c; --danger-bg:#fef2f2; --danger-line:#fecaca;
       --ok:#047857; --ok-bg:#ecfdf5; --warn:#b45309; --warn-bg:#fffbeb;
@@ -27,7 +28,7 @@
     *{box-sizing:border-box}
     body{margin:0;background:var(--bg);color:var(--ink);
       font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-      font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+      font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
     a{color:var(--brand)}
     .wrap{max-width:1120px;margin:0 auto;padding:20px 20px 64px}
 
@@ -47,23 +48,28 @@
       box-shadow:0 8px 24px rgba(11,74,114,.18)}
     .banner h1{margin:0;font-size:23px;font-weight:700;letter-spacing:.2px}
     .banner .demo-tag{font-size:10.5px;text-transform:uppercase;letter-spacing:.09em;
-      background:rgba(255,255,255,.16);padding:3px 8px;border-radius:999px;font-weight:600}
+      background:rgba(255,255,255,.16);padding:3px 8px;border-radius:999px;font-weight:600;
+      vertical-align:middle;margin-left:6px}
     .demoinfo{display:flex;flex-wrap:wrap;gap:6px 26px;margin-left:auto}
     .demoinfo div{display:flex;flex-direction:column}
-    .demoinfo dt{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:#bcd6ea}
-    .demoinfo dd{margin:0;font-size:15px;font-weight:600;font-variant-numeric:tabular-nums}
+    .demoinfo dt{font-size:11.5px;text-transform:uppercase;letter-spacing:.07em;color:#bcd6ea}
+    .demoinfo dd{margin:0;font-size:16px;font-weight:600;font-variant-numeric:tabular-nums}
 
     /* Allergy alert strip */
     .allergy-strip{margin:14px 0 4px;border-radius:11px;padding:12px 16px;
-      background:var(--danger-bg);border:1px solid var(--danger-line)}
-    .allergy-strip.none{background:var(--ok-bg);border-color:#a7f3d0}
+      background:var(--danger-bg);border:1px solid var(--danger-line);
+      border-left:4px solid var(--danger)}
+    .allergy-strip.none{background:var(--ok-bg);border-color:#a7f3d0;border-left:4px solid var(--ok)}
     .allergy-strip .head{display:flex;align-items:center;gap:8px;font-weight:700;color:var(--danger);
-      text-transform:uppercase;letter-spacing:.05em;font-size:12.5px}
+      text-transform:uppercase;letter-spacing:.05em;font-size:13.5px}
     .allergy-strip.none .head{color:var(--ok)}
     .allergy-strip .items{display:flex;flex-wrap:wrap;gap:8px;margin-top:9px}
     .achip{background:#fff;border:1px solid var(--danger-line);border-radius:999px;
       padding:5px 12px;font-size:13px;font-weight:600;color:var(--danger);display:inline-flex;gap:8px;align-items:center}
     .achip .rx{font-weight:500;color:var(--muted)}
+    .achip .rx .sev-severe{color:var(--danger);font-weight:700}
+    .achip .rx .sev-moderate{color:var(--warn);font-weight:700}
+    .achip .rx .sev-mild{color:#1d4ed8;font-weight:700}
 
     /* Grid + cards */
     .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px}
@@ -74,14 +80,15 @@
     .card__head{display:flex;align-items:center;justify-content:space-between;
       padding:13px 16px;border-bottom:1px solid var(--line);background:#fbfdff}
     .card__head h2{margin:0;font-size:14.5px;font-weight:700;letter-spacing:.2px}
-    .count{background:#eef4f9;color:var(--brand);border-radius:999px;padding:2px 9px;
+    .count{background:#eef4f9;color:var(--brand-dark);border-radius:999px;padding:2px 9px;
       font-size:12px;font-weight:700;font-variant-numeric:tabular-nums}
     .card__body{padding:6px 16px 14px}
 
     table{width:100%;border-collapse:collapse}
     th,td{text-align:left;padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:top}
-    th{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700}
-    td{font-size:13.5px}
+    th{font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700}
+    td{font-size:14px}
+    tbody tr:nth-child(even) td{background:#f8fafc}
     tr:last-child td{border-bottom:none}
     .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;color:var(--muted)}
     .big{font-size:16px;font-weight:700;font-variant-numeric:tabular-nums}
@@ -99,8 +106,8 @@
     .vitals{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:8px 2px}
     @media(max-width:640px){.vitals{grid-template-columns:repeat(2,1fr)}}
     .vital{border:1px solid var(--line);border-radius:10px;padding:11px 12px;background:#fbfdff}
-    .vital .lbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:700}
-    .vital .val{font-size:19px;font-weight:700;margin-top:3px;font-variant-numeric:tabular-nums}
+    .vital .lbl{font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:700}
+    .vital .val{font-size:23px;font-weight:700;margin-top:3px;font-variant-numeric:tabular-nums}
     .vital .val .u{font-size:12px;color:var(--muted);font-weight:500;margin-left:3px}
 
     .footer{margin-top:26px;color:var(--muted);font-size:12px;text-align:center;line-height:1.7}
@@ -133,19 +140,19 @@
     <%# ---- Allergy alert strip ---- %>
     <% if @allergies.any? %>
       <div class="allergy-strip">
-        <div class="head">&#9888; Allergies &amp; Adverse Reactions (<%= @allergies.length %>)</div>
+        <div class="head">&#9888;&#xFE0E; Allergies &amp; Adverse Reactions (<%= @allergies.length %>)</div>
         <div class="items">
           <% @allergies.each do |a| %>
             <span class="achip">
               <%= a.allergen %>
-              <% if a.reaction.present? %><span class="rx">&middot; <%= a.reaction %> (<%= a.severity %>)</span><% end %>
+              <% if a.reaction.present? %><span class="rx">&middot; <%= a.reaction %> (<span class="sev-<%= a.severity.to_s.downcase %>"><%= a.severity %></span>)</span><% end %>
             </span>
           <% end %>
         </div>
       </div>
     <% else %>
       <div class="allergy-strip none">
-        <div class="head">&#10003; No Known Allergies</div>
+        <div class="head">&#10003;&#xFE0E; No Known Allergies</div>
       </div>
     <% end %>
 
@@ -228,7 +235,7 @@
                   <tr>
                     <td><%= a.allergen %></td>
                     <td><%= a.reaction %></td>
-                    <td><span class="badge sev-<%= a.severity.to_s.downcase %>"><%= a.severity %></span></td>
+                    <td><span class="badge <%= a.severity.present? ? "sev-#{a.severity.to_s.downcase}" : "inactive" %>"><%= a.severity.presence || "—" %></span></td>
                   </tr>
                 <% end %>
               </tbody>
@@ -250,8 +257,8 @@
                 <% @immunizations.each do |i| %>
                   <tr>
                     <td><%= i.vaccine_display %></td>
-                    <td class="mono"><%= i.occurrence_datetime&.strftime("%m/%d/%Y") %></td>
-                    <td><span class="badge active"><%= i.status %></span></td>
+                    <td class="mono"><%= i.occurrence_datetime&.strftime("%b %-d, %Y") %></td>
+                    <td><span class="badge <%= %w[completed active].include?(i.status) ? "active" : "inactive" %>"><%= i.status %></span></td>
                   </tr>
                 <% end %>
               </tbody>
@@ -272,7 +279,7 @@
               <tbody>
                 <% @encounters.each do |e| %>
                   <tr>
-                    <td class="mono"><%= e[:datetime].respond_to?(:strftime) ? e[:datetime].strftime("%m/%d/%Y") : e[:datetime] %></td>
+                    <td class="mono"><%= e[:datetime].respond_to?(:strftime) ? e[:datetime].strftime("%b %-d, %Y") : e[:datetime] %></td>
                     <td><%= e[:location].presence || "—" %></td>
                     <td>Ambulatory</td>
                     <td><span class="badge inactive"><%= e[:status].to_s.titleize %></span></td>

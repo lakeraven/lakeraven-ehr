@@ -105,29 +105,52 @@ class DemoPatientChartTest < ActionDispatch::IntegrationTest
     assert self_link["url"].present?
 
     assert bundle["entry"].all? { |e| e["fullUrl"].present? }, "every entry needs a fullUrl"
+    assert bundle["entry"].all? { |e| e.dig("search", "mode") == "match" },
+      "searchset entries should carry search.mode=match"
   end
 
-  test "AllergyIntolerance and Encounter entries carry an id with resolvable (non-urn) fullUrls" do
+  test "AllergyIntolerance, Observation, and Encounter entries carry an id with resolvable (non-urn) fullUrls" do
     get "/chart/1.json", headers: @headers
     bundle = JSON.parse(response.body)
 
-    %w[AllergyIntolerance Encounter].each do |type|
+    %w[AllergyIntolerance Observation Encounter].each do |type|
       entries = bundle["entry"].select { |e| e.dig("resource", "resourceType") == type }
       assert entries.any?, "expected at least one #{type} entry"
 
       entries.each do |e|
         assert e.dig("resource", "id").present?, "#{type} resource should carry an id"
         refute e["fullUrl"].start_with?("urn:uuid:"), "#{type} fullUrl should be resolvable, got #{e['fullUrl']}"
-        assert_includes e["fullUrl"], "/fhir/#{type}/", "#{type} fullUrl should be a REST URL"
+        # fullUrls live under the engine's real mount point (test/dummy mounts
+        # it at /lakeraven-ehr), NOT a fictitious /fhir prefix.
+        assert_includes e["fullUrl"], "/lakeraven-ehr/#{type}/", "#{type} fullUrl should be a REST URL under the engine mount"
       end
     end
 
-    # Encounter id is deterministic/stable across requests.
-    enc_id = bundle["entry"].find { |e| e.dig("resource", "resourceType") == "Encounter" }.dig("resource", "id")
+    # Encounter and Observation ids are deterministic/stable across requests.
+    first_ids = %w[Encounter Observation].index_with do |type|
+      bundle["entry"].find { |e| e.dig("resource", "resourceType") == type }.dig("resource", "id")
+    end
     get "/chart/1.json", headers: @headers
-    enc_id_again = JSON.parse(response.body)["entry"]
-      .find { |e| e.dig("resource", "resourceType") == "Encounter" }.dig("resource", "id")
-    assert_equal enc_id, enc_id_again, "Encounter id should be stable across requests"
+    again = JSON.parse(response.body)["entry"]
+    first_ids.each do |type, id|
+      id_again = again.find { |e| e.dig("resource", "resourceType") == type }.dig("resource", "id")
+      assert_equal id, id_again, "#{type} id should be stable across requests"
+    end
+  end
+
+  test "vital-sign Observations carry effectiveDateTime and numeric valueQuantity" do
+    get "/chart/1.json", headers: @headers
+    bundle = JSON.parse(response.body)
+
+    observations = bundle["entry"].map { |e| e["resource"] }
+      .select { |r| r["resourceType"] == "Observation" }
+    assert observations.any?
+
+    observations.each do |obs|
+      assert obs["effectiveDateTime"].present?, "vital sign needs effective[x] (required 1..1)"
+      value = obs.dig("valueQuantity", "value")
+      assert value.is_a?(Numeric), "Quantity.value must be a JSON number, got #{value.class}" if value
+    end
   end
 
   # -- Authentication: fail closed, no token -----------------------------------

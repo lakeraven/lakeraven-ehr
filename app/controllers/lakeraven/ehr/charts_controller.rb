@@ -136,7 +136,7 @@ module Lakeraven
       def build_conditions(dfn)
         safe { Condition.for_patient(dfn) }.map do |h|
           Condition.new(
-            ien: h[:ien]&.to_s, patient_dfn: dfn,
+            ien: problem_id(dfn, h), patient_dfn: dfn,
             code: h[:icd_code], code_system: "icd10", display: h[:description],
             clinical_status: PROBLEM_STATUS[h[:status]] || "active",
             category: "problem-list-item"
@@ -144,14 +144,30 @@ module Lakeraven
         end
       end
 
+      # Same deterministic-id policy as allergy_id: prefer a real IEN, else
+      # derive a stable id (never random/urn:uuid) so the Bundle entry's
+      # relative `subject` reference stays resolvable per Bundle rules.
+      def problem_id(dfn, hash)
+        hash[:ien].to_s.presence || "problem-#{dfn}-#{hash[:icd_code].to_s.parameterize}"
+      end
+
       def build_medications(dfn)
         safe { MedicationRequest.for_patient(dfn) }.map do |h|
           MedicationRequest.new(
             ien: h[:ien]&.to_s, patient_dfn: dfn,
             medication_display: h[:drug_name], dosage_instruction: h[:sig],
-            status: h[:status].presence || "active", intent: "order"
+            status: valid_status(h[:status], MedicationRequest::VALID_STATUSES, "active"),
+            intent: "order"
           )
         end
+      end
+
+      # `status` has a REQUIRED binding in FHIR. RPMS status text like
+      # "ACTIVE"/"DISCONTINUED" must never pass through raw: normalize to
+      # lowercase, keep it only if it is a legal code, else fall back.
+      def valid_status(raw, valid, fallback)
+        normalized = raw.to_s.strip.downcase
+        valid.include?(normalized) ? normalized : fallback
       end
 
       def build_allergies(dfn)
@@ -178,7 +194,8 @@ module Lakeraven
         safe { Procedure.for_patient(dfn) }.map do |h|
           Procedure.new(
             ien: h[:ien]&.to_s, patient_dfn: dfn,
-            display: h[:name], status: h[:status].presence || "completed",
+            display: h[:name],
+            status: valid_status(h[:status], Procedure::VALID_STATUSES, "completed"),
             performed_datetime: h[:date]
           )
         end
@@ -220,7 +237,9 @@ module Lakeraven
           type: "searchset",
           total: resources.length,
           link: [ { relation: "self", url: request.original_url } ],
-          entry: resources.map { |r| { fullUrl: entry_full_url(r), resource: r } }
+          entry: resources.map do |r|
+            { fullUrl: entry_full_url(r), resource: r, search: { mode: "match" } }
+          end
         }
       end
 
@@ -237,15 +256,25 @@ module Lakeraven
       end
 
       # Absolute fullUrl for a resource. Resources whose serializer emits an id
-      # get a resolvable REST URL; those without (e.g. AllergyIntolerance) get
-      # a valid urn:uuid so the Bundle stays FHIR-conformant.
+      # get a REST URL under the engine's ACTUAL mount point (previously the
+      # hardcoded `/fhir/` prefix pointed at a path that doesn't exist);
+      # resources without an id get a valid urn:uuid so the Bundle stays
+      # FHIR-conformant.
       def entry_full_url(resource)
         id = resource[:id]
         if id.present?
-          "#{request.base_url}/fhir/#{resource[:resourceType]}/#{id}"
+          "#{request.base_url}#{engine_mount_path}/#{resource[:resourceType]}/#{id}"
         else
           "urn:uuid:#{SecureRandom.uuid}"
         end
+      end
+
+      # Path where the host app mounted the engine (e.g. "/lakeraven-ehr" in
+      # test/dummy). Falls back to "" (host root) if the host defined the
+      # engine's routes without mounting it under a prefix.
+      def engine_mount_path
+        @engine_mount_path ||=
+          main_app.respond_to?(:lakeraven_ehr_path) ? main_app.lakeraven_ehr_path : ""
       end
 
       # -- Format-aware auth failures (override SmartAuthentication) -------------

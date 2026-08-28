@@ -50,12 +50,15 @@ module LakeravenDemoSeeds
       [ { ien: 1, allergen: "Penicillin", reaction: "Hives", severity: "moderate" },
         { ien: 2, allergen: "Shellfish", reaction: "Anaphylaxis", severity: "severe" } ])
 
-    # Vitals (ORQQVI VITALS) — Observation
+    # Vitals (ORQQVI VITALS) — Observation. recorded_date feeds
+    # Observation.effectiveDateTime (required 1..1 by the vital-signs
+    # profile) and the deterministic per-vital FHIR id.
+    vitals_taken = DateTime.new(2026, 2, 1, 9, 30, 0)
     m.seed_keyed_collection(:vitals, "1",
-      [ { type: "BP", value: "128/82", units: "mm[Hg]" },
-        { type: "P",  value: "74",     units: "/min" },
-        { type: "WT", value: "180",    units: "[lb_av]" },
-        { type: "T",  value: "98.6",   units: "[degF]" } ])
+      [ { type: "BP", value: "128/82", units: "mm[Hg]",   recorded_date: vitals_taken },
+        { type: "P",  value: "74",     units: "/min",     recorded_date: vitals_taken },
+        { type: "WT", value: "180",    units: "[lb_av]",  recorded_date: vitals_taken },
+        { type: "T",  value: "98.6",   units: "[degF]",   recorded_date: vitals_taken } ])
 
     # Medications (ORQQPS LIST) — MedicationRequest
     m.seed_collection(:medication_list,

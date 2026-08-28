@@ -113,14 +113,17 @@ module Lakeraven
         } ]
       end
 
+      # FHIR invariant imm-1: each education element needs documentType or
+      # reference — so omit the whole element without a VIS document URI, and
+      # compact so a nil date never serializes as an explicit JSON null.
       def build_education
-        return nil if vis_edition_date.blank? && vis_presentation_date.blank?
+        return nil if vis_document_uri.blank?
 
         [ {
           reference: vis_document_uri,
           publicationDate: vis_edition_date&.iso8601,
           presentationDate: vis_presentation_date&.iso8601
-        } ]
+        }.compact ]
       end
 
       # VFC eligibility V-code -> HL7 standard eligible/ineligible mapping
