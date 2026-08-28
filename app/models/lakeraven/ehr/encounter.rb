@@ -124,8 +124,9 @@ module Lakeraven
 
         resource[:id] = ien.to_s if ien
         resource[:period] = build_period if period_start || period_end
-        resource[:type] = [ { text: type_display, coding: [ { code: type_code } ] } ] if type_display
-        resource[:reasonCode] = [ { text: reason_display, coding: [ { code: reason_code } ] } ] if reason_display
+        # Omit `coding` (never emit "code": null) when only display text exists.
+        resource[:type] = [ { text: type_display, coding: type_code ? [ { code: type_code } ] : nil }.compact ] if type_display
+        resource[:reasonCode] = [ { text: reason_display, coding: reason_code ? [ { code: reason_code } ] : nil }.compact ] if reason_display
         resource[:subject] = { reference: "Patient/#{patient_identifier}" } if patient_identifier
         if practitioner_identifier
           resource[:participant] = [ { individual: { reference: "Practitioner/#{practitioner_identifier}" } } ]
