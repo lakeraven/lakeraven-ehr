@@ -109,6 +109,14 @@ module Lakeraven
         "Patient"
       end
 
+      # AuditableClinicalAccess hook: demo-bypass requests carry no token but
+      # must still leave an audit trail, under a dedicated fixed service actor
+      # (independent security review finding). The entity identifier stays the
+      # route dfn — no additional PHI enters the log.
+      def unauthenticated_audit_actor
+        "demo-bypass" if demo_bypass?
+      end
+
       # -- Content negotiation --------------------------------------------------
 
       def fhir_requested?

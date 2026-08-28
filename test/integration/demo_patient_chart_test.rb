@@ -191,6 +191,17 @@ class DemoPatientChartTest < ActionDispatch::IntegrationTest
     assert_equal "OperationOutcome", JSON.parse(response.body)["resourceType"]
   end
 
+  test "mixed-scope token (patient + system) bound to a DIFFERENT patient -> 403" do
+    # ANY patient/ scope binds the token to its patient compartment; a broader
+    # system/ scope on the same token must not bypass the binding
+    # (independent security review finding).
+    token = token_with(scopes: "patient/*.read system/*.read", resource_owner_id: 2)
+    get "/chart/1.json", headers: bearer(token)
+
+    assert_response :forbidden
+    assert_equal "OperationOutcome", JSON.parse(response.body)["resourceType"]
+  end
+
   test "patient-scoped token bound to THIS patient -> 200" do
     token = token_with(scopes: "patient/*.read", resource_owner_id: 1)
     get "/chart/1.json", headers: bearer(token)
@@ -206,6 +217,38 @@ class DemoPatientChartTest < ActionDispatch::IntegrationTest
       get "/chart/1.json", headers: @headers
     end
     assert_response :ok
+  end
+
+  test "demo-bypass access still records an AuditEvent with the demo-bypass actor" do
+    # Demo bypass can never activate in the test env (development? guard), so
+    # force ChartsController#demo_bypass? on for this one request to exercise
+    # the audit path (independent security review finding: bypass requests
+    # must not be invisible to the audit log).
+    with_demo_bypass_forced do
+      assert_difference -> { Lakeraven::EHR::AuditEvent.count }, 1 do
+        get "/chart/1.json" # no token at all
+      end
+    end
+
+    assert_response :ok
+    event = Lakeraven::EHR::AuditEvent.recent.first
+    assert_equal "Service", event.agent_who_type
+    assert_equal "demo-bypass", event.agent_who_identifier
+    assert_equal "Patient", event.entity_type
+    assert_equal "1", event.entity_identifier
+  end
+
+  def with_demo_bypass_forced
+    Lakeraven::EHR::ChartsController.class_eval do
+      alias_method :__real_demo_bypass?, :demo_bypass?
+      def demo_bypass? = true
+    end
+    yield
+  ensure
+    Lakeraven::EHR::ChartsController.class_eval do
+      alias_method :demo_bypass?, :__real_demo_bypass?
+      remove_method :__real_demo_bypass?
+    end
   end
 
   # -- Dev-only demo bypass is impossible in test ------------------------------

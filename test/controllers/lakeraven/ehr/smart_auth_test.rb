@@ -89,6 +89,28 @@ module Lakeraven
         assert_response :forbidden
       end
 
+      # Mixed-scope tokens: ANY patient/ scope binds the token to its patient
+      # compartment — broader system/ or user/ scopes must not bypass the
+      # binding (independent security review finding).
+
+      test "mixed patient+system scopes bound to a DIFFERENT patient returns 403" do
+        get "/lakeraven-ehr/Patient/1",
+          headers: auth_headers(scopes: "patient/Patient.read system/Patient.read", patient: "999")
+        assert_response :forbidden
+      end
+
+      test "mixed patient+user scopes bound to a DIFFERENT patient returns 403" do
+        get "/lakeraven-ehr/Patient/1",
+          headers: auth_headers(scopes: "patient/Patient.read user/Patient.read", patient: "999")
+        assert_response :forbidden
+      end
+
+      test "mixed patient+system scopes bound to THIS patient returns 200" do
+        get "/lakeraven-ehr/Patient/1",
+          headers: auth_headers(scopes: "patient/Patient.read system/Patient.read", patient: "1")
+        assert_response :ok
+      end
+
       # -- Search also requires auth ---------------------------------------------
 
       test "search without token returns 401" do
