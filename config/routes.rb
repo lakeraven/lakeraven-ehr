@@ -1,7 +1,8 @@
 # frozen_string_literal: true
 
 Lakeraven::EHR::Engine.routes.draw do
-  # Read-only, unauthenticated demo patient chart (issue #452).
+  # Read-only demo patient chart (issue #452). SMART bearer auth enforced;
+  # dev-only synthetic-demo bypass lives in ChartsController#demo_bypass?.
   # Content-negotiated: HTML for browsers, FHIR R4 Bundle for `.json`
   # (or Accept: application/fhir+json / ?_format=json). The `.:format`
   # segment is optional so `chart/1` and `chart/1.json` both resolve;

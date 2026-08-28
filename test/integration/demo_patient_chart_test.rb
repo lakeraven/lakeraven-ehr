@@ -263,6 +263,23 @@ class DemoPatientChartTest < ActionDispatch::IntegrationTest
     ENV.delete("CHART_DEMO_OPEN")
   end
 
+  test "demo bypass requires the mock-RPC flag even in development" do
+    original_env = Rails.env
+    ENV["CHART_DEMO_OPEN"] = "1"
+    ENV.delete("SPIKE_MOCK_RPC")
+    Rails.env = "development"
+
+    refute Lakeraven::EHR::ChartsController.new.send(:demo_bypass?),
+      "bypass must stay off without the synthetic mock backend"
+
+    ENV["SPIKE_MOCK_RPC"] = "1"
+    assert Lakeraven::EHR::ChartsController.new.send(:demo_bypass?)
+  ensure
+    Rails.env = original_env
+    ENV.delete("CHART_DEMO_OPEN")
+    ENV.delete("SPIKE_MOCK_RPC")
+  end
+
   # -- Not found (still an OperationOutcome, once authenticated) ----------------
 
   test "unknown patient returns 404 as OperationOutcome for FHIR requests" do

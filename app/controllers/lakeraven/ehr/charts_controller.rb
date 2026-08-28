@@ -20,9 +20,10 @@ module Lakeraven
     # OperationOutcome (application/fhir+json); HTML requests get plain text.
     #
     # Demo bypass: authentication is skipped ONLY when
-    #   Rails.env.development? && ENV["CHART_DEMO_OPEN"] == "1"
+    #   Rails.env.development? && CHART_DEMO_OPEN=1 && SPIKE_MOCK_RPC=1
     # so the local synthetic demo opens with no token. The `development?` guard
-    # makes the bypass impossible in test or production. Host browser-session
+    # makes the bypass impossible in test or production, and the mock-RPC guard
+    # keeps it from ever fronting a real backend. Host browser-session
     # -> token SSO is a documented follow-up (ADR 0004), out of scope here.
     #
     # ONE endpoint, content-negotiated:
@@ -70,9 +71,10 @@ module Lakeraven
       # -- Authentication / authorization (fail closed) -------------------------
 
       # Dev-only escape hatch so tomorrow's LOCAL demo opens with no token.
-      # Guarded on development? so it can NEVER apply in test or production.
+      # Guarded on development? so it can NEVER apply in test or production,
+      # and on the mock-RPC flag so it can never expose a real backend.
       def demo_bypass?
-        Rails.env.development? && ENV["CHART_DEMO_OPEN"] == "1"
+        Rails.env.development? && ENV["CHART_DEMO_OPEN"] == "1" && ENV["SPIKE_MOCK_RPC"] == "1"
       end
 
       def authenticate_chart_request!
