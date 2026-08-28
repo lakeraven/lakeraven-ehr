@@ -5,9 +5,12 @@ Lakeraven::EHR::Engine.routes.draw do
   # dev-only synthetic-demo bypass lives in ChartsController#demo_bypass?.
   # Content-negotiated: HTML for browsers, FHIR R4 Bundle for `.json`
   # (or Accept: application/fhir+json / ?_format=json). The `.:format`
-  # segment is optional so `chart/1` and `chart/1.json` both resolve;
+  # segment is optional so `patients/1` and `patients/1.json` both resolve;
   # dfn is constrained to digits so the extension isn't swallowed.
-  get "chart/:dfn(.:format)", to: "charts#show", as: :chart, constraints: { dfn: /\d+/ }
+  # RESTful path: the chart is the human-facing representation of a patient,
+  # so it lives at /patients/:dfn (the FHIR API keeps /Patient per convention;
+  # that resource also owns the patient_path helper, hence :patient_chart).
+  get "patients/:dfn(.:format)", to: "charts#show", as: :patient_chart, constraints: { dfn: /\d+/ }
 
   # Doorkeeper models (Application, AccessToken) are used directly;
   # routes are NOT mounted here because the engine provides its own
