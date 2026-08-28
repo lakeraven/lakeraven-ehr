@@ -46,6 +46,7 @@ module Lakeraven
       def to_fhir
         {
           resourceType: "AllergyIntolerance",
+          id: ien&.to_s,
           clinicalStatus: { coding: [ { code: clinical_status } ] },
           code: { text: allergen },
           patient: { reference: "Patient/#{patient_dfn}" },

@@ -107,6 +107,29 @@ class DemoPatientChartTest < ActionDispatch::IntegrationTest
     assert bundle["entry"].all? { |e| e["fullUrl"].present? }, "every entry needs a fullUrl"
   end
 
+  test "AllergyIntolerance and Encounter entries carry an id with resolvable (non-urn) fullUrls" do
+    get "/chart/1.json", headers: @headers
+    bundle = JSON.parse(response.body)
+
+    %w[AllergyIntolerance Encounter].each do |type|
+      entries = bundle["entry"].select { |e| e.dig("resource", "resourceType") == type }
+      assert entries.any?, "expected at least one #{type} entry"
+
+      entries.each do |e|
+        assert e.dig("resource", "id").present?, "#{type} resource should carry an id"
+        refute e["fullUrl"].start_with?("urn:uuid:"), "#{type} fullUrl should be resolvable, got #{e['fullUrl']}"
+        assert_includes e["fullUrl"], "/fhir/#{type}/", "#{type} fullUrl should be a REST URL"
+      end
+    end
+
+    # Encounter id is deterministic/stable across requests.
+    enc_id = bundle["entry"].find { |e| e.dig("resource", "resourceType") == "Encounter" }.dig("resource", "id")
+    get "/chart/1.json", headers: @headers
+    enc_id_again = JSON.parse(response.body)["entry"]
+      .find { |e| e.dig("resource", "resourceType") == "Encounter" }.dig("resource", "id")
+    assert_equal enc_id, enc_id_again, "Encounter id should be stable across requests"
+  end
+
   # -- Authentication: fail closed, no token -----------------------------------
 
   test "no token -> 401 for HTML, and NOT a FHIR JSON body" do

@@ -157,12 +157,21 @@ module Lakeraven
       def build_allergies(dfn)
         safe { AllergyIntolerance.for_patient(dfn) }.map do |h|
           AllergyIntolerance.new(
-            ien: h[:ien]&.to_s, patient_dfn: dfn,
+            ien: allergy_id(dfn, h), patient_dfn: dfn,
             allergen: h[:allergen], reaction: h[:reaction],
             severity: h[:severity], clinical_status: "active",
             criticality: h[:severity].to_s.downcase == "severe" ? "high" : "low"
           )
         end
+      end
+
+      # ORQQAL LIST (the allergy RPC) returns ALLERGEN^REACTION^SEVERITY with no
+      # IEN, so these records carry no natural identifier. Prefer a real IEN if
+      # one ever appears; otherwise derive a DETERMINISTIC id from dfn + allergen
+      # so AllergyIntolerance#to_fhir emits a stable, resolvable fullUrl (never
+      # random/urn:uuid). AllergyIntolerance#to_fhir turns this into `id`.
+      def allergy_id(dfn, hash)
+        hash[:ien].to_s.presence || "allergy-#{dfn}-#{hash[:allergen].to_s.parameterize}"
       end
 
       def build_procedures(dfn)
@@ -202,7 +211,7 @@ module Lakeraven
         resources.concat(@observations.map(&:to_fhir))
         resources.concat(@immunizations.map(&:to_fhir))
         resources.concat(@procedures.map(&:to_fhir))
-        resources.concat(@encounter_resources.map(&:to_fhir))
+        resources.concat(@encounter_resources.map { |e| encounter_to_fhir(e) })
 
         {
           resourceType: "Bundle",
@@ -213,6 +222,18 @@ module Lakeraven
           link: [ { relation: "self", url: request.original_url } ],
           entry: resources.map { |r| { fullUrl: entry_full_url(r), resource: r } }
         }
+      end
+
+      # Chart appointments (ORWPT APPTLST) carry no visit IEN, so the derived
+      # Encounter has no natural id. Derive a DETERMINISTIC, stable id from the
+      # patient dfn + appointment start (not random/urn:uuid) so the same
+      # appointment yields the same resolvable fullUrl on every request. If a
+      # real visit IEN ever flows through, Encounter#to_fhir uses it and this
+      # fallback is skipped.
+      def encounter_to_fhir(encounter)
+        fhir = encounter.to_fhir
+        fhir[:id] ||= "appt-#{encounter.patient_identifier}-#{encounter.period_start&.strftime('%Y%m%d%H%M')}"
+        fhir
       end
 
       # Absolute fullUrl for a resource. Resources whose serializer emits an id
