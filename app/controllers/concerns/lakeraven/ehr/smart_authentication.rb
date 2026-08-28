@@ -101,6 +101,14 @@ module Lakeraven
         current_token&.scopes&.to_s&.match?(%r{\bpatient/})
       end
 
+      def user_context_scope?
+        current_token&.scopes&.to_s&.match?(%r{\buser/})
+      end
+
+      def system_scope?
+        current_token&.scopes&.to_s&.match?(%r{\bsystem/})
+      end
+
       def render_unauthorized(message = "Unauthorized")
         render json: {
           resourceType: "OperationOutcome",
