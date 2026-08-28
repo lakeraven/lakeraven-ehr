@@ -12,7 +12,7 @@
 # CHART_DEMO_OPEN=1 (honored only in development — see ChartsController):
 #
 #   CHART_DEMO_OPEN=1 SPIKE_MOCK_RPC=1 bin/rails server
-#   -> open http://localhost:3000/chart/1
+#   -> open http://localhost:3000/patients/1
 if Rails.env.development? && ENV["SPIKE_MOCK_RPC"] == "1"
   require "rpms_rpc/version"
   require "rpms_rpc/mock_client"

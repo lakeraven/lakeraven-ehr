@@ -27,8 +27,8 @@ module Lakeraven
     # -> token SSO is a documented follow-up (ADR 0004), out of scope here.
     #
     # ONE endpoint, content-negotiated:
-    #   GET /chart/:dfn            -> clinician-facing HTML chart
-    #   GET /chart/:dfn.json       -> FHIR R4 Bundle (searchset)
+    #   GET /patients/:dfn         -> clinician-facing HTML chart
+    #   GET /patients/:dfn.json    -> FHIR R4 Bundle (searchset)
     #   Accept: application/fhir+json / ?_format=json also yield the Bundle
     #
     # Data flows through the engine's real gateways/models + `.to_fhir`

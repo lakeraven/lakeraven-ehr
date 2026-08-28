@@ -5,7 +5,7 @@ require_relative "../dummy/lib/lakeraven_demo_seeds"
 
 # Read-only, AUTHENTICATED demo patient chart (issue #452).
 #
-# Exercises the content-negotiated /chart/:dfn endpoint against the test/dummy
+# Exercises the content-negotiated /patients/:dfn endpoint against the test/dummy
 # host with the shared synthetic seed set — the SAME data the SPIKE dev
 # initializer loads. Installs a fully-seeded mock for the test and restores
 # the suite-wide shared mock afterward so global state stays clean.
@@ -43,7 +43,7 @@ class DemoPatientChartTest < ActionDispatch::IntegrationTest
   # -- HTML representation (authenticated) -------------------------------------
 
   test "HTML chart renders the patient banner and every clinical section" do
-    get "/chart/1", headers: @headers
+    get "/patients/1", headers: @headers
 
     assert_response :ok
     assert_equal "text/html", response.media_type
@@ -66,7 +66,7 @@ class DemoPatientChartTest < ActionDispatch::IntegrationTest
   # -- FHIR JSON representation (authenticated) --------------------------------
 
   test "chart .json returns a FHIR Bundle with the FHIR content type" do
-    get "/chart/1.json", headers: @headers
+    get "/patients/1.json", headers: @headers
 
     assert_response :ok
     assert_equal "application/fhir+json", response.media_type
@@ -83,7 +83,7 @@ class DemoPatientChartTest < ActionDispatch::IntegrationTest
   end
 
   test "Accept: application/fhir+json also yields the Bundle" do
-    get "/chart/1", headers: @headers.merge("Accept" => "application/fhir+json")
+    get "/patients/1", headers: @headers.merge("Accept" => "application/fhir+json")
 
     assert_response :ok
     assert_equal "application/fhir+json", response.media_type
@@ -93,7 +93,7 @@ class DemoPatientChartTest < ActionDispatch::IntegrationTest
   # -- FHIR Bundle conformance polish ------------------------------------------
 
   test "FHIR Bundle carries id, meta.lastUpdated, self link, and per-entry fullUrl" do
-    get "/chart/1.json", headers: @headers
+    get "/patients/1.json", headers: @headers
     bundle = JSON.parse(response.body)
 
     assert bundle["id"].present?, "Bundle should have an id"
@@ -110,7 +110,7 @@ class DemoPatientChartTest < ActionDispatch::IntegrationTest
   end
 
   test "AllergyIntolerance, Observation, and Encounter entries carry an id with resolvable (non-urn) fullUrls" do
-    get "/chart/1.json", headers: @headers
+    get "/patients/1.json", headers: @headers
     bundle = JSON.parse(response.body)
 
     %w[AllergyIntolerance Observation Encounter].each do |type|
@@ -130,7 +130,7 @@ class DemoPatientChartTest < ActionDispatch::IntegrationTest
     first_ids = %w[Encounter Observation].index_with do |type|
       bundle["entry"].find { |e| e.dig("resource", "resourceType") == type }.dig("resource", "id")
     end
-    get "/chart/1.json", headers: @headers
+    get "/patients/1.json", headers: @headers
     again = JSON.parse(response.body)["entry"]
     first_ids.each do |type, id|
       id_again = again.find { |e| e.dig("resource", "resourceType") == type }.dig("resource", "id")
@@ -139,7 +139,7 @@ class DemoPatientChartTest < ActionDispatch::IntegrationTest
   end
 
   test "vital-sign Observations carry effectiveDateTime and numeric valueQuantity" do
-    get "/chart/1.json", headers: @headers
+    get "/patients/1.json", headers: @headers
     bundle = JSON.parse(response.body)
 
     observations = bundle["entry"].map { |e| e["resource"] }
@@ -156,14 +156,14 @@ class DemoPatientChartTest < ActionDispatch::IntegrationTest
   # -- Authentication: fail closed, no token -----------------------------------
 
   test "no token -> 401 for HTML, and NOT a FHIR JSON body" do
-    get "/chart/1"
+    get "/patients/1"
 
     assert_response :unauthorized
     refute_equal "application/fhir+json", response.media_type
   end
 
   test "no token -> 401 FHIR OperationOutcome for .json" do
-    get "/chart/1.json"
+    get "/patients/1.json"
 
     assert_response :unauthorized
     assert_equal "application/fhir+json", response.media_type
@@ -175,7 +175,7 @@ class DemoPatientChartTest < ActionDispatch::IntegrationTest
 
   test "token that cannot read Patient -> 403" do
     token = token_with(scopes: "system/Observation.read")
-    get "/chart/1.json", headers: bearer(token)
+    get "/patients/1.json", headers: bearer(token)
 
     assert_response :forbidden
     assert_equal "OperationOutcome", JSON.parse(response.body)["resourceType"]
@@ -185,7 +185,7 @@ class DemoPatientChartTest < ActionDispatch::IntegrationTest
 
   test "patient-scoped token bound to a DIFFERENT patient -> 403" do
     token = token_with(scopes: "patient/*.read", resource_owner_id: 2)
-    get "/chart/1.json", headers: bearer(token)
+    get "/patients/1.json", headers: bearer(token)
 
     assert_response :forbidden
     assert_equal "OperationOutcome", JSON.parse(response.body)["resourceType"]
@@ -196,7 +196,7 @@ class DemoPatientChartTest < ActionDispatch::IntegrationTest
     # system/ scope on the same token must not bypass the binding
     # (independent security review finding).
     token = token_with(scopes: "patient/*.read system/*.read", resource_owner_id: 2)
-    get "/chart/1.json", headers: bearer(token)
+    get "/patients/1.json", headers: bearer(token)
 
     assert_response :forbidden
     assert_equal "OperationOutcome", JSON.parse(response.body)["resourceType"]
@@ -204,7 +204,7 @@ class DemoPatientChartTest < ActionDispatch::IntegrationTest
 
   test "patient-scoped token bound to THIS patient -> 200" do
     token = token_with(scopes: "patient/*.read", resource_owner_id: 1)
-    get "/chart/1.json", headers: bearer(token)
+    get "/patients/1.json", headers: bearer(token)
 
     assert_response :ok
     assert_equal "Bundle", JSON.parse(response.body)["resourceType"]
@@ -214,7 +214,7 @@ class DemoPatientChartTest < ActionDispatch::IntegrationTest
 
   test "successful access records an AuditEvent" do
     assert_difference -> { Lakeraven::EHR::AuditEvent.count }, 1 do
-      get "/chart/1.json", headers: @headers
+      get "/patients/1.json", headers: @headers
     end
     assert_response :ok
   end
@@ -226,7 +226,7 @@ class DemoPatientChartTest < ActionDispatch::IntegrationTest
     # must not be invisible to the audit log).
     with_demo_bypass_forced do
       assert_difference -> { Lakeraven::EHR::AuditEvent.count }, 1 do
-        get "/chart/1.json" # no token at all
+        get "/patients/1.json" # no token at all
       end
     end
 
@@ -255,7 +255,7 @@ class DemoPatientChartTest < ActionDispatch::IntegrationTest
 
   test "demo bypass does NOT apply in the test environment" do
     ENV["CHART_DEMO_OPEN"] = "1"
-    get "/chart/1.json" # no token
+    get "/patients/1.json" # no token
 
     assert_response :unauthorized
     assert_equal "OperationOutcome", JSON.parse(response.body)["resourceType"]
@@ -283,7 +283,7 @@ class DemoPatientChartTest < ActionDispatch::IntegrationTest
   # -- Not found (still an OperationOutcome, once authenticated) ----------------
 
   test "unknown patient returns 404 as OperationOutcome for FHIR requests" do
-    get "/chart/99999.json", headers: @headers
+    get "/patients/99999.json", headers: @headers
 
     assert_response :not_found
     body = JSON.parse(response.body)
