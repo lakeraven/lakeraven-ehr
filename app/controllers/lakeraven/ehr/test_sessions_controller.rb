@@ -14,18 +14,18 @@ module Lakeraven
       def create
         session[:duz] = params[:duz].presence || "99996"
         session[:user_type] = params[:user_type].presence || "case_manager"
-        keys = params[:security_keys]
-        session[:security_keys] = if keys.is_a?(Array)
-          keys
-        elsif keys.present?
-          keys.to_s.split(",").map(&:strip)
-        else
-          []
-        end
+        session[:security_keys] = normalized_security_keys(params[:security_keys])
         head :ok
       end
 
       private
+
+      # Arrays and comma-delimited strings normalize identically:
+      # stripped, blank entries dropped.
+      def normalized_security_keys(keys)
+        list = keys.is_a?(Array) ? keys : keys.to_s.split(",")
+        list.map { |k| k.to_s.strip }.reject(&:empty?)
+      end
 
       # Refuse to exist outside the test environment — belt to the route-guard suspenders.
       def ensure_test_environment!
