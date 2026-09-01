@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_02_030000) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_09_120100) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -88,6 +88,59 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_02_030000) do
     t.index [ "accessed_by" ], name: "index_lakeraven_ehr_emergency_accesses_on_accessed_by"
     t.index [ "expires_at" ], name: "index_lakeraven_ehr_emergency_accesses_on_expires_at"
     t.index [ "patient_dfn" ], name: "index_lakeraven_ehr_emergency_accesses_on_patient_dfn"
+  end
+
+  create_table "lakeraven_ehr_field_lab_tracking_records", force: :cascade do |t|
+    t.string "clinician_duz"
+    t.string "condition"
+    t.string "confirmation_loinc"
+    t.string "confirmation_order_ref"
+    t.datetime "confirmation_ordered_at"
+    t.string "confirmation_result_status"
+    t.string "confirmation_result_value"
+    t.datetime "confirmation_resulted_at"
+    t.datetime "created_at", null: false
+    t.jsonb "details", default: {}
+    t.string "encounter_ref"
+    t.string "patient_ref", null: false
+    t.datetime "screening_recorded_at"
+    t.string "screening_result"
+    t.string "screening_test"
+    t.string "site_ien"
+    t.string "source", default: "field"
+    t.string "stage", default: "screened", null: false
+    t.string "treatment_medication"
+    t.datetime "treatment_started_at"
+    t.datetime "updated_at", null: false
+    t.integer "version", default: 1, null: false
+    t.index [ "patient_ref" ], name: "index_lakeraven_ehr_field_lab_tracking_records_on_patient_ref"
+    t.index [ "site_ien" ], name: "index_lakeraven_ehr_field_lab_tracking_records_on_site_ien"
+    t.index [ "stage" ], name: "index_lakeraven_ehr_field_lab_tracking_records_on_stage"
+  end
+
+  create_table "lakeraven_ehr_field_sync_operations", force: :cascade do |t|
+    t.integer "base_version"
+    t.string "batch_id"
+    t.string "client_op_id", null: false
+    t.datetime "client_recorded_at"
+    t.string "clinician_duz"
+    t.datetime "created_at", null: false
+    t.string "device_id"
+    t.string "operation_type", null: false
+    t.string "outcome", default: "pending", null: false
+    t.string "outcome_reason"
+    t.jsonb "payload", default: {}
+    t.boolean "resolved", default: false, null: false
+    t.string "server_resource_id"
+    t.integer "server_version"
+    t.string "site_ien"
+    t.string "target_id"
+    t.string "target_type", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "batch_id" ], name: "index_lakeraven_ehr_field_sync_operations_on_batch_id"
+    t.index [ "client_op_id" ], name: "index_lakeraven_ehr_field_sync_operations_on_client_op_id", unique: true
+    t.index [ "outcome" ], name: "index_lakeraven_ehr_field_sync_operations_on_outcome"
+    t.index [ "target_type", "resolved" ], name: "idx_on_target_type_resolved_bbe857bec0"
   end
 
   create_table "lakeraven_ehr_launch_contexts", force: :cascade do |t|
