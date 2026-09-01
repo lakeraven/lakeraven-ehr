@@ -41,9 +41,8 @@ module Lakeraven
         return failure(:no_note) if note_ien.nil?
 
         validation = @esignature_gateway.validate(@author_duz, signature_code)
-        unless validation.is_a?(Hash) && validation[:success]
-          return failure(:invalid_signature_code, raw: validation)
-        end
+        return failure(:gateway_error, raw: validation) unless validation.is_a?(Hash)
+        return failure(:invalid_signature_code, raw: validation) unless validation[:success]
 
         raw = @esignature_gateway.add(note_ien, @author_duz, signature_code, action: :sign)
         return failure(:gateway_error, raw: raw) unless raw.is_a?(Hash) && raw[:success]

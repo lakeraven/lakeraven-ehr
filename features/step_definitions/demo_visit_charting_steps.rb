@@ -146,7 +146,7 @@ end
 Then("the note gateway should receive the note text") do
   update = @note_gateway.text_updates.last
   refute_nil update
-  assert_equal @note_result.raw, { success: true, raw: "1" }
+  assert_equal({ success: true, raw: "1" }, @note_result.raw)
   refute update[:text].to_s.empty?
 end
 
