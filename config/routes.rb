@@ -1,6 +1,17 @@
 # frozen_string_literal: true
 
 Lakeraven::EHR::Engine.routes.draw do
+  # Read-only demo patient chart (issue #452). SMART bearer auth enforced;
+  # dev-only synthetic-demo bypass lives in ChartsController#demo_bypass?.
+  # Content-negotiated: HTML for browsers, FHIR R4 Bundle for `.json`
+  # (or Accept: application/fhir+json / ?_format=json). The `.:format`
+  # segment is optional so `patients/1` and `patients/1.json` both resolve;
+  # dfn is constrained to digits so the extension isn't swallowed.
+  # RESTful path: the chart is the human-facing representation of a patient,
+  # so it lives at /patients/:dfn (the FHIR API keeps /Patient per convention;
+  # that resource also owns the patient_path helper, hence :patient_chart).
+  get "patients/:dfn(.:format)", to: "charts#show", as: :patient_chart, constraints: { dfn: /\d+/ }
+
   # Doorkeeper models (Application, AccessToken) are used directly;
   # routes are NOT mounted here because the engine provides its own
   # BackendServicesController for OAuth token issuance.
@@ -45,4 +56,14 @@ Lakeraven::EHR::Engine.routes.draw do
 
   # Measure $import
   post "Measure/$import", to: "measures#import"
+
+  # Web UI — login, dashboard (accessibility / ops surface)
+  get "login" => "sessions#new", as: :login
+  # Test-only canned-credential login (#401 interim); the real VistA sign-on
+  # gateway (#332) will replace this and open the route in all environments.
+  if Rails.env.test?
+    post "login" => "sessions#create"
+  end
+  delete "logout" => "sessions#destroy", as: :logout
+  get "dashboard" => "dashboards#show", as: :dashboard
 end

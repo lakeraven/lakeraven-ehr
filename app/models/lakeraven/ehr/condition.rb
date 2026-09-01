@@ -21,6 +21,8 @@ module Lakeraven
         "snomed" => "http://snomed.info/sct"
       }.freeze
 
+      CATEGORY_SYSTEM = "http://terminology.hl7.org/CodeSystem/condition-category"
+
       attribute :ien, :string
       attribute :patient_dfn, :string
       attribute :code, :string
@@ -92,7 +94,7 @@ module Lakeraven
           subject: patient_dfn ? { reference: "Patient/#{patient_dfn}" } : nil,
           clinicalStatus: build_clinical_status,
           code: build_code,
-          category: category ? [ { coding: [ { code: category } ] } ] : nil,
+          category: category ? [ { coding: [ { system: CATEGORY_SYSTEM, code: category } ] } ] : nil,
           severity: build_severity
         }.compact
       end

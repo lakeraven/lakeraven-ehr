@@ -90,13 +90,17 @@ module Lakeraven
 
       # Build Observation instances from raw RPC vital hashes.
       # Each hash has { type:, value:, units:, recorded_date: }.
+      #
+      # ORQQVI VITALS carries no IEN, so when one is absent derive a
+      # DETERMINISTIC id from dfn + vital type (+ timestamp when present) —
+      # never a random uuid — so ids/fullUrls are stable across requests.
       def self.from_vital_hashes(hashes, patient_dfn:)
         hashes.filter_map do |h|
           mapping = VITAL_TYPE_MAP[h[:type]]
           next unless mapping
 
           new(
-            ien: h[:ien] || SecureRandom.uuid,
+            ien: h[:ien]&.to_s || vital_id(patient_dfn, h),
             patient_dfn: patient_dfn,
             code: mapping[:code],
             code_system: "loinc",
@@ -110,6 +114,14 @@ module Lakeraven
           )
         end
       end
+
+      def self.vital_id(patient_dfn, hash)
+        id = "vital-#{patient_dfn}-#{hash[:type].to_s.downcase}"
+        recorded = hash[:recorded_date]
+        id += "-#{recorded.strftime('%Y%m%d%H%M')}" if recorded.respond_to?(:strftime)
+        id
+      end
+      private_class_method :vital_id
 
       def vital_sign? = category == "vital-signs"
       def laboratory? = category == "laboratory"
@@ -137,6 +149,7 @@ module Lakeraven
           status: status,
           subject: patient_dfn ? { reference: "Patient/#{patient_dfn}" } : nil,
           code: build_code,
+          effectiveDateTime: effective_datetime&.iso8601,
           valueQuantity: build_value_quantity,
           valueString: sdoh? && value_quantity.blank? ? value : nil,
           category: category ? [ { coding: [ { code: category, system: CATEGORY_SYSTEM } ] } ] : nil
@@ -152,6 +165,7 @@ module Lakeraven
           status: status,
           subject: patient_dfn ? { reference: "Patient/#{patient_dfn}" } : nil,
           code: build_code,
+          effectiveDateTime: effective_datetime&.iso8601,
           category: category ? [ { coding: [ { code: category, system: CATEGORY_SYSTEM } ] } ] : nil,
           component: [
             {
@@ -189,10 +203,19 @@ module Lakeraven
         profile_url ? { profile: [ profile_url ] } : nil
       end
 
+      # Quantity.value is a FHIR decimal — it must serialize as a JSON
+      # number, never a string. Non-numeric values fall back to nil (the
+      # caller compacts the element away) rather than emitting invalid JSON.
       def build_value_quantity
         return nil unless value_quantity
 
-        qty = { value: value_quantity }
+        numeric = begin
+          Float(value_quantity)
+        rescue ArgumentError, TypeError
+          return nil
+        end
+
+        qty = { value: numeric }
         qty[:unit] = unit if unit
         qty[:code] = unit if unit
         qty[:system] = "http://unitsofmeasure.org" if unit

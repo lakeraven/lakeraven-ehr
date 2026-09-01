@@ -69,15 +69,19 @@ module Lakeraven
       end
 
       # Enforce patient compartment for patient-context tokens.
+      #
+      # Binding is checked whenever the token carries ANY patient/ scope: a
+      # mixed-scope token (patient/ alongside system/ or user/) stays bound to
+      # its patient compartment — broader scopes must not bypass the binding
+      # (independent security review finding). Tokens with no patient/ scope
+      # (pure system/, user/, or non-clinical scopes) are unbound.
       def authorize_patient_context!(patient_id)
-        return true if system_scope? || user_context_scope?
+        return true unless patient_context_scope?
 
-        if patient_context_scope?
-          bound = current_token.resource_owner_id.to_s
-          if bound.blank? || bound != patient_id.to_s
-            render_forbidden("Patient context mismatch")
-            return false
-          end
+        bound = current_token.resource_owner_id.to_s
+        if bound.blank? || bound != patient_id.to_s
+          render_forbidden("Patient context mismatch")
+          return false
         end
 
         true

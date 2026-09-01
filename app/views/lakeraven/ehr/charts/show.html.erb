@@ -1,0 +1,303 @@
+<%#
+  Read-only demo patient chart (issue #452).
+  Self-contained HTML document — inline CSS only, no external CDN/fonts/assets.
+  Rendered with `layout: false` so the page is fully portable for the demo.
+  Structure/look ported from rpms_redux patients/show (card sections, data
+  tables, demographics block, clinical alert strip).
+%>
+<%
+  vital_labels = Lakeraven::EHR::Observation::VITAL_TYPE_MAP
+  patient_age = @patient.age || (@patient.dob ? ((Date.current - @patient.dob).to_i / 365) : nil)
+  sex_label = { "F" => "Female", "M" => "Male", "U" => "Unknown" }[@patient.sex] || @patient.sex
+  fhir_url = url_for(dfn: @patient.dfn, format: "json", only_path: true)
+%>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lakeraven EHR</title>
+  <style>
+    :root{
+      /* --muted/--line darkened for projector contrast (washed-out rooms) */
+      --ink:#0f172a; --muted:#475569; --line:#cbd5e1; --bg:#f1f5f9;
+      --card:#ffffff; --brand:#0e5a8a; --brand-dark:#0b4a72; --accent:#0891b2;
+      --danger:#b91c1c; --danger-bg:#fef2f2; --danger-line:#fecaca;
+      --ok:#047857; --ok-bg:#ecfdf5; --warn:#b45309; --warn-bg:#fffbeb;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--ink);
+      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+      font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
+    a{color:var(--brand)}
+    .wrap{max-width:1120px;margin:0 auto;padding:20px 20px 64px}
+
+    /* Top bar */
+    .topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;
+      padding:10px 4px 18px}
+    .brand{display:flex;align-items:center;gap:10px;font-weight:700;letter-spacing:.2px}
+    .brand .dot{width:12px;height:12px;border-radius:3px;background:var(--brand)}
+    .brand small{display:block;font-weight:500;color:var(--muted);font-size:11px;letter-spacing:.06em;text-transform:uppercase}
+    .fhir-link{font-size:12.5px;text-decoration:none;border:1px solid var(--line);
+      background:#fff;padding:6px 11px;border-radius:7px;color:var(--brand);font-weight:600;white-space:nowrap}
+    .fhir-link:hover{border-color:var(--brand)}
+
+    /* Patient banner */
+    .banner{background:linear-gradient(180deg,#0e5a8a,#0b4a72);color:#fff;border-radius:14px;
+      padding:18px 22px;display:flex;flex-wrap:wrap;align-items:center;gap:10px 28px;
+      box-shadow:0 8px 24px rgba(11,74,114,.18)}
+    .banner h1{margin:0;font-size:23px;font-weight:700;letter-spacing:.2px}
+    .banner .demo-tag{font-size:10.5px;text-transform:uppercase;letter-spacing:.09em;
+      background:rgba(255,255,255,.16);padding:3px 8px;border-radius:999px;font-weight:600;
+      vertical-align:middle;margin-left:6px}
+    .demoinfo{display:flex;flex-wrap:wrap;gap:6px 26px;margin-left:auto}
+    .demoinfo div{display:flex;flex-direction:column}
+    .demoinfo dt{font-size:11.5px;text-transform:uppercase;letter-spacing:.07em;color:#bcd6ea}
+    .demoinfo dd{margin:0;font-size:16px;font-weight:600;font-variant-numeric:tabular-nums}
+
+    /* Allergy alert strip */
+    .allergy-strip{margin:14px 0 4px;border-radius:11px;padding:12px 16px;
+      background:var(--danger-bg);border:1px solid var(--danger-line);
+      border-left:4px solid var(--danger)}
+    .allergy-strip.none{background:var(--ok-bg);border-color:#a7f3d0;border-left:4px solid var(--ok)}
+    .allergy-strip .head{display:flex;align-items:center;gap:8px;font-weight:700;color:var(--danger);
+      text-transform:uppercase;letter-spacing:.05em;font-size:13.5px}
+    .allergy-strip.none .head{color:var(--ok)}
+    .allergy-strip .items{display:flex;flex-wrap:wrap;gap:8px;margin-top:9px}
+    .achip{background:#fff;border:1px solid var(--danger-line);border-radius:999px;
+      padding:5px 12px;font-size:13px;font-weight:600;color:var(--danger);display:inline-flex;gap:8px;align-items:center}
+    .achip .rx{font-weight:500;color:var(--muted)}
+    .achip .rx .sev-severe{color:var(--danger);font-weight:700}
+    .achip .rx .sev-moderate{color:var(--warn);font-weight:700}
+    .achip .rx .sev-mild{color:#1d4ed8;font-weight:700}
+
+    /* Grid + cards */
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px}
+    @media(max-width:820px){.grid{grid-template-columns:1fr}}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:12px;
+      box-shadow:0 1px 2px rgba(15,23,42,.04);overflow:hidden}
+    .card.span{grid-column:1 / -1}
+    .card__head{display:flex;align-items:center;justify-content:space-between;
+      padding:13px 16px;border-bottom:1px solid var(--line);background:#fbfdff}
+    .card__head h2{margin:0;font-size:14.5px;font-weight:700;letter-spacing:.2px}
+    .count{background:#eef4f9;color:var(--brand-dark);border-radius:999px;padding:2px 9px;
+      font-size:12px;font-weight:700;font-variant-numeric:tabular-nums}
+    .card__body{padding:6px 16px 14px}
+
+    table{width:100%;border-collapse:collapse}
+    th,td{text-align:left;padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+    th{font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700}
+    td{font-size:14px}
+    tbody tr:nth-child(even) td{background:#f8fafc}
+    tr:last-child td{border-bottom:none}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;color:var(--muted)}
+    .big{font-size:16px;font-weight:700;font-variant-numeric:tabular-nums}
+    .unit{color:var(--muted);font-weight:500;font-size:12.5px}
+
+    .badge{display:inline-block;border-radius:999px;padding:2px 9px;font-size:11px;font-weight:700;
+      text-transform:capitalize}
+    .badge.active{background:var(--ok-bg);color:var(--ok)}
+    .badge.inactive{background:#f1f5f9;color:var(--muted)}
+    .badge.sev-severe{background:var(--danger-bg);color:var(--danger)}
+    .badge.sev-moderate{background:var(--warn-bg);color:var(--warn)}
+    .badge.sev-mild{background:#eff6ff;color:#1d4ed8}
+    .empty{color:var(--muted);font-size:13px;padding:10px 2px}
+
+    .vitals{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:8px 2px}
+    @media(max-width:640px){.vitals{grid-template-columns:repeat(2,1fr)}}
+    .vital{border:1px solid var(--line);border-radius:10px;padding:11px 12px;background:#fbfdff}
+    .vital .lbl{font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:700}
+    .vital .val{font-size:23px;font-weight:700;margin-top:3px;font-variant-numeric:tabular-nums}
+    .vital .val .u{font-size:12px;color:var(--muted);font-weight:500;margin-left:3px}
+
+    .footer{margin-top:26px;color:var(--muted);font-size:12px;text-align:center;line-height:1.7}
+    .footer code{background:#e9eef4;padding:1px 6px;border-radius:5px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <div class="brand">
+        <span class="dot"></span>
+        <span>Lakeraven EHR<small>Patient Chart</small></span>
+      </div>
+      <a class="fhir-link" href="<%= fhir_url %>">View as FHIR &rarr;</a>
+    </div>
+
+    <%# ---- Patient banner ---- %>
+    <div class="banner">
+      <div>
+        <h1><%= @patient.display_name %> <span class="demo-tag">Synthetic demo patient</span></h1>
+      </div>
+      <dl class="demoinfo">
+        <div><dt>DOB</dt><dd><%= @patient.dob&.strftime("%b %-d, %Y") || "—" %></dd></div>
+        <div><dt>Age</dt><dd><%= patient_age || "—" %></dd></div>
+        <div><dt>Sex</dt><dd><%= sex_label || "—" %></dd></div>
+        <div><dt>MRN / DFN</dt><dd><%= @patient.dfn %></dd></div>
+      </dl>
+    </div>
+
+    <%# ---- Allergy alert strip ---- %>
+    <% if @allergies.any? %>
+      <div class="allergy-strip">
+        <div class="head">&#9888;&#xFE0E; Allergies &amp; Adverse Reactions (<%= @allergies.length %>)</div>
+        <div class="items">
+          <% @allergies.each do |a| %>
+            <span class="achip">
+              <%= a.allergen %>
+              <% if a.reaction.present? %><span class="rx">&middot; <%= a.reaction %> (<span class="sev-<%= a.severity.to_s.downcase %>"><%= a.severity %></span>)</span><% end %>
+            </span>
+          <% end %>
+        </div>
+      </div>
+    <% else %>
+      <div class="allergy-strip none">
+        <div class="head">&#10003;&#xFE0E; No Known Allergies</div>
+      </div>
+    <% end %>
+
+    <div class="grid">
+      <%# ---- Problem list ---- %>
+      <div class="card">
+        <div class="card__head"><h2>Problem List</h2><span class="count"><%= @conditions.length %></span></div>
+        <div class="card__body">
+          <% if @conditions.any? %>
+            <table>
+              <thead><tr><th>Problem</th><th>ICD-10</th><th>Status</th></tr></thead>
+              <tbody>
+                <% @conditions.each do |c| %>
+                  <tr>
+                    <td><%= c.display %></td>
+                    <td class="mono"><%= c.code %></td>
+                    <td><span class="badge <%= c.clinical_status %>"><%= c.clinical_status %></span></td>
+                  </tr>
+                <% end %>
+              </tbody>
+            </table>
+          <% else %>
+            <p class="empty">No active problems recorded.</p>
+          <% end %>
+        </div>
+      </div>
+
+      <%# ---- Medications ---- %>
+      <div class="card">
+        <div class="card__head"><h2>Medications</h2><span class="count"><%= @medications.length %></span></div>
+        <div class="card__body">
+          <% if @medications.any? %>
+            <table>
+              <thead><tr><th>Medication</th><th>Sig</th><th>Status</th></tr></thead>
+              <tbody>
+                <% @medications.each do |m| %>
+                  <tr>
+                    <td><%= m.medication_display %></td>
+                    <td><%= m.dosage_instruction %></td>
+                    <td><span class="badge <%= m.status == "active" ? "active" : "inactive" %>"><%= m.status %></span></td>
+                  </tr>
+                <% end %>
+              </tbody>
+            </table>
+          <% else %>
+            <p class="empty">No active medications.</p>
+          <% end %>
+        </div>
+      </div>
+
+      <%# ---- Vitals ---- %>
+      <div class="card span">
+        <div class="card__head"><h2>Vital Signs</h2><span class="count"><%= @vitals.length %></span></div>
+        <div class="card__body">
+          <% if @vitals.any? %>
+            <div class="vitals">
+              <% @vitals.each do |v| %>
+                <% label = vital_labels.dig(v[:type], :display) || v[:type] %>
+                <div class="vital">
+                  <div class="lbl"><%= label %></div>
+                  <div class="val"><%= v[:value] %><span class="u"><%= v[:units] %></span></div>
+                </div>
+              <% end %>
+            </div>
+          <% else %>
+            <p class="empty">No vitals recorded.</p>
+          <% end %>
+        </div>
+      </div>
+
+      <%# ---- Allergies (detail) ---- %>
+      <div class="card">
+        <div class="card__head"><h2>Allergies</h2><span class="count"><%= @allergies.length %></span></div>
+        <div class="card__body">
+          <% if @allergies.any? %>
+            <table>
+              <thead><tr><th>Allergen</th><th>Reaction</th><th>Severity</th></tr></thead>
+              <tbody>
+                <% @allergies.each do |a| %>
+                  <tr>
+                    <td><%= a.allergen %></td>
+                    <td><%= a.reaction %></td>
+                    <td><span class="badge <%= a.severity.present? ? "sev-#{a.severity.to_s.downcase}" : "inactive" %>"><%= a.severity.presence || "—" %></span></td>
+                  </tr>
+                <% end %>
+              </tbody>
+            </table>
+          <% else %>
+            <p class="empty">No known allergies.</p>
+          <% end %>
+        </div>
+      </div>
+
+      <%# ---- Immunizations ---- %>
+      <div class="card">
+        <div class="card__head"><h2>Immunizations</h2><span class="count"><%= @immunizations.length %></span></div>
+        <div class="card__body">
+          <% if @immunizations.any? %>
+            <table>
+              <thead><tr><th>Vaccine</th><th>Date</th><th>Status</th></tr></thead>
+              <tbody>
+                <% @immunizations.each do |i| %>
+                  <tr>
+                    <td><%= i.vaccine_display %></td>
+                    <td class="mono"><%= i.occurrence_datetime&.strftime("%b %-d, %Y") %></td>
+                    <td><span class="badge <%= %w[completed active].include?(i.status) ? "active" : "inactive" %>"><%= i.status %></span></td>
+                  </tr>
+                <% end %>
+              </tbody>
+            </table>
+          <% else %>
+            <p class="empty">No immunizations on file.</p>
+          <% end %>
+        </div>
+      </div>
+
+      <%# ---- Encounters / Appointments ---- %>
+      <div class="card span">
+        <div class="card__head"><h2>Encounters &amp; Appointments</h2><span class="count"><%= @encounters.length %></span></div>
+        <div class="card__body">
+          <% if @encounters.any? %>
+            <table>
+              <thead><tr><th>Date</th><th>Location</th><th>Class</th><th>Status</th></tr></thead>
+              <tbody>
+                <% @encounters.each do |e| %>
+                  <tr>
+                    <td class="mono"><%= e[:datetime].respond_to?(:strftime) ? e[:datetime].strftime("%b %-d, %Y") : e[:datetime] %></td>
+                    <td><%= e[:location].presence || "—" %></td>
+                    <td>Ambulatory</td>
+                    <td><span class="badge inactive"><%= e[:status].to_s.titleize %></span></td>
+                  </tr>
+                <% end %>
+              </tbody>
+            </table>
+          <% else %>
+            <p class="empty">No encounters or upcoming appointments.</p>
+          <% end %>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer">
+      Lakeraven EHR &middot; read-only demo chart &middot; synthetic data, no PHI.<br>
+      The same URL returns a FHIR R4 Bundle: append <code>.json</code> or send <code>Accept: application/fhir+json</code>.
+    </div>
+  </div>
+</body>
+</html>

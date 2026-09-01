@@ -93,11 +93,17 @@ module Lakeraven
         assert_equal "Systolic BP", fhir.dig(:code, :text)
       end
 
-      test "to_fhir includes valueQuantity" do
+      test "to_fhir includes valueQuantity with a numeric value" do
         obs = Observation.new(ien: "1", value_quantity: "120", unit: "mmHg")
         fhir = obs.to_fhir
-        assert_equal "120", fhir.dig(:valueQuantity, :value)
+        # Quantity.value is a FHIR decimal — must be a JSON number, not a string.
+        assert_equal 120.0, fhir.dig(:valueQuantity, :value)
         assert_equal "mmHg", fhir.dig(:valueQuantity, :unit)
+      end
+
+      test "to_fhir omits valueQuantity when the value is not numeric" do
+        obs = Observation.new(ien: "1", value_quantity: "n/a", unit: "mmHg")
+        assert_nil obs.to_fhir[:valueQuantity]
       end
 
       test "to_fhir includes category" do
