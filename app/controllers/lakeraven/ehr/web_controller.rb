@@ -11,7 +11,7 @@ module Lakeraven
       def require_authentication
         return if session[:duz].present?
 
-        redirect_to main_app.root_path, alert: "Please sign in"
+        redirect_to login_path, alert: "Please sign in"
       end
 
       def current_security_keys
