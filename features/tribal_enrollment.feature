@@ -7,7 +7,7 @@ Feature: Tribal Enrollment Management
     Given the following patients exist:
       | dfn | first_name | last_name | dob        | sex | ssn         | tribal_enrollment | tribal_affiliation                    | service_area |
       | 1   | Alice      | Anderson  | 1980-05-15 | F   | 111-11-1111 | ANLC-12345       | Alaska Native - Anchorage (ANLC)      | Anchorage    |
-      | 2   | Bob        | Brown     | 1975-08-20 | M   | 222-22-2222 | CN-67890         | Cherokee Nation                        | Tahlequah    |
+      | 2   | Bob        | Brown     | 1975-08-20 | M   | 222-22-2222 | CN-67890         | Painted Sky Nation                     | Painted Sky  |
       | 3   | Charlie    | Chen      | 1990-03-10 | M   | 333-33-3333 | INVALID          | Unknown                                | Seattle      |
       | 4   | Diana      | Davis     | 1985-12-01 | F   | 444-44-4444 |                  |                                        | Portland     |
 

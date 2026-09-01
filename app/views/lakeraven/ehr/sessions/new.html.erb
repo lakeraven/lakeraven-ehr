@@ -1,0 +1,21 @@
+<% content_for :title, "Sign in | Lakeraven EHR" %>
+
+<h1>Sign in</h1>
+
+<% if Rails.env.test? %>
+  <%# POST /login is only routed in test (#401 interim); the real VistA
+      sign-on gateway (#332) reopens it in all environments. %>
+  <%= form_with url: login_path, method: :post, local: true do |f| %>
+    <div>
+      <label for="username">Username</label>
+      <input type="text" name="username" id="username" />
+    </div>
+    <div>
+      <label for="password">Password</label>
+      <input type="password" name="password" id="password" />
+    </div>
+    <button type="submit">Sign in</button>
+  <% end %>
+<% else %>
+  <p>Interactive sign-in is not yet available in this environment.</p>
+<% end %>

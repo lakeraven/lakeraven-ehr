@@ -131,12 +131,12 @@ module Lakeraven
         assert_equal "severe", fhir[:reaction].first[:severity]
       end
 
-      test "to_fhir returns empty reaction array when no reaction" do
+      test "to_fhir omits reaction when no reaction (FHIR forbids empty arrays)" do
         ai = AllergyIntolerance.new(
           patient_dfn: "100", allergen: "Shellfish", reaction: nil
         )
         fhir = ai.to_fhir
-        assert_equal [], fhir[:reaction]
+        refute fhir.key?(:reaction)
       end
 
       test "to_fhir includes criticality when present" do

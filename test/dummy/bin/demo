@@ -1,0 +1,35 @@
+#!/usr/bin/env sh
+# Demo boot for the read-only patient chart (issue #452). Dev-only convenience:
+# runs the preflight checks that have bitten us before, then starts the dummy
+# app with the exact env the demo needs. Synthetic data only — no PHI.
+#
+#   test/dummy/bin/demo            # http://localhost:3000/patients/1
+#   test/dummy/bin/demo -b 0.0.0.0 # if showing from another device
+set -e
+cd "$(dirname "$0")/.."
+
+# 1. Postgres must be up — dev-mode CheckPending middleware hits the DB on
+#    every request, so a down Postgres 500s the whole demo.
+if ! pg_isready -q; then
+  echo "Postgres is not accepting connections. Try: brew services start postgresql" >&2
+  exit 1
+fi
+
+# 2. Clear port 3000 + any stale pidfile from a previous server.
+PIDS=$(lsof -ti:3000 || true)
+if [ -n "$PIDS" ]; then
+  echo "Killing process(es) on port 3000: $PIDS"
+  kill $PIDS
+  sleep 1
+fi
+rm -f tmp/pids/server.pid
+
+# 3. A stray RPMS_RPC_PATH flips the Gemfile to a path source and bundler
+#    rejects the lockfile at boot — make sure it is unset.
+unset RPMS_RPC_PATH
+
+# 4. Both flags are required, and both are honored ONLY in development:
+#    SPIKE_MOCK_RPC=1  seeds the in-memory RPMS mock (else 404/empty chart)
+#    CHART_DEMO_OPEN=1 dev-only auth bypass (else 401 without a token)
+echo "Starting demo server -> http://localhost:3000/patients/1"
+exec env RAILS_ENV=development CHART_DEMO_OPEN=1 SPIKE_MOCK_RPC=1 bin/rails server "$@"
