@@ -87,7 +87,60 @@ module Lakeraven
         true
       end
 
+      # -- Per-organization credential scoping --------------------------------
+      # Vardana source-system profile section 2 / conformance item 2: a
+      # credential bound to one organization must not reach another
+      # organization's patients. Binding lives on the Doorkeeper application
+      # (organization_id); a nil binding means the credential is not org-bound.
+
+      def current_organization_id
+        current_token&.application&.organization_id
+      end
+
+      def organization_bound?
+        current_organization_id.present?
+      end
+
+      # Before-action: when the token is org-bound and the request addresses a
+      # specific patient (Patient/{dfn} or ?patient=), deny the request unless
+      # that patient is managed by the credential's organization. Requests
+      # without a patient parameter pass through; patient-list reads are
+      # filtered at the query layer (see PatientsController#index).
+      def enforce_organization_scope!
+        return true unless organization_bound?
+
+        dfn = organization_scoped_patient_param
+        return true if dfn.blank?
+
+        patient = Patient.find_by_dfn(dfn)
+        return true if patient.nil? # not-found is handled by the action
+
+        authorize_organization_for_patient!(patient)
+      end
+
+      def authorize_organization_for_patient!(patient)
+        return true unless organization_bound?
+        return true if organization_permits_patient?(patient)
+
+        render_forbidden("Credential is not authorized for this patient's organization")
+        false
+      end
+
+      # Fail closed: a patient whose managing organization cannot be resolved
+      # is not readable by an org-bound credential.
+      def organization_permits_patient?(patient)
+        site_ien = patient.respond_to?(:site_ien) ? patient.site_ien : nil
+        return false if site_ien.blank?
+
+        [ site_ien.to_s, "rpms-organization-#{site_ien}" ].include?(current_organization_id.to_s)
+      end
+
       private
+
+      def organization_scoped_patient_param
+        raw = params[:dfn].presence || params[:patient].presence || params[:_id].presence
+        raw.to_s.sub(%r{\APatient/}, "").presence
+      end
 
       def extract_bearer_token
         auth = request.headers["Authorization"]

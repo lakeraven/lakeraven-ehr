@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "doorkeeper"
+require "jwt"
 require "lakeraven/ehr/version"
 require "lakeraven/ehr/engine"
 

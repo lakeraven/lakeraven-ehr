@@ -6,34 +6,17 @@
 # Reuses "the response status should be {int}" from bulk_export_steps.rb.
 
 Given("a SMART backend service application is registered") do
-  @backend_app = Doorkeeper::Application.create!(
-    name: "Backend Service App",
-    uid: "backend-service-client",
-    redirect_uri: "urn:ietf:wg:oauth:2.0:oob",
-    scopes: "system/*.read",
-    confidential: true
-  )
+  # Registers a client with a published JWKS; assertions are signed with the
+  # matching private key (helpers in vardana_backend_services_auth_steps.rb).
+  vardana_register_client(name: "Backend Service App", scopes: "system/*.read")
 end
 
 When("I POST to {string} with a valid client_credentials JWT assertion") do |path|
-  # Build a minimal JWT (header.payload.signature) with iss = client_id
-  header_b64 = Base64.urlsafe_encode64({ alg: "HS256", typ: "JWT" }.to_json, padding: false)
-  payload = {
-    iss: "backend-service-client",
-    sub: "backend-service-client",
-    aud: "http://example.org/oauth/token",
-    exp: 5.minutes.from_now.to_i,
-    jti: SecureRandom.uuid
-  }
-  payload_b64 = Base64.urlsafe_encode64(payload.to_json, padding: false)
-  sig_b64 = Base64.urlsafe_encode64("test-signature", padding: false)
-  jwt_assertion = "#{header_b64}.#{payload_b64}.#{sig_b64}"
-
   url = path.sub("/oauth/", "/lakeraven-ehr/oauth/")
   post url, {
     grant_type: "client_credentials",
     client_assertion_type: "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
-    client_assertion: jwt_assertion,
+    client_assertion: vardana_assertion,
     scope: "system/*.read"
   }
   @response_json = JSON.parse(last_response.body) rescue nil

@@ -10,6 +10,9 @@ module Lakeraven
 
       def index
         patients = resolve_patient_search
+        # Org-bound backend credentials only see their own organization's
+        # patients (SmartAuthentication — Vardana conformance item 2).
+        patients = patients.select { |p| organization_permits_patient?(p) } if organization_bound?
 
         entries = patients.map { |p| build_patient_entry(p) }
 

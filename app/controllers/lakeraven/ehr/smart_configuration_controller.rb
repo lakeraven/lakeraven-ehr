@@ -20,6 +20,8 @@ module Lakeraven
           scopes_supported: supported_scopes,
           response_types_supported: [ "code" ],
           grant_types_supported: %w[authorization_code client_credentials refresh_token],
+          token_endpoint_auth_methods_supported: [ "private_key_jwt" ],
+          token_endpoint_auth_signing_alg_values_supported: %w[RS384 RS256 ES384],
           code_challenge_methods_supported: [ "S256" ],
           capabilities: capabilities
         }
@@ -40,6 +42,12 @@ module Lakeraven
           user/Patient.read user/AllergyIntolerance.read
           user/Condition.read user/MedicationRequest.read
           user/Observation.read
+          system/Patient.read system/Condition.read
+          system/MedicationRequest.read system/Medication.read
+          system/Observation.read system/DiagnosticReport.read
+          system/CarePlan.read system/AllergyIntolerance.read
+          system/Encounter.read system/Practitioner.read
+          system/Provenance.read
           system/*.read system/*.write system/*.*
         ]
       end

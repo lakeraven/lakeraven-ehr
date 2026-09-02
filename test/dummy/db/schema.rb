@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_02_030000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_02_010000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -183,12 +183,15 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_02_030000) do
   create_table "oauth_applications", force: :cascade do |t|
     t.boolean "confidential", default: true, null: false
     t.datetime "created_at", null: false
+    t.string "jwks_uri"
     t.string "name", null: false
+    t.string "organization_id"
     t.text "redirect_uri", null: false
     t.string "scopes", default: "", null: false
     t.string "secret", null: false
     t.string "uid", null: false
     t.datetime "updated_at", null: false
+    t.index [ "organization_id" ], name: "index_oauth_applications_on_organization_id"
     t.index [ "uid" ], name: "index_oauth_applications_on_uid", unique: true
   end
 
