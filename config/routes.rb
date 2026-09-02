@@ -21,6 +21,10 @@ Lakeraven::EHR::Engine.routes.draw do
   resources :conditions, path: "Condition", only: %i[index show]
   resources :medication_requests, path: "MedicationRequest", only: %i[index show]
   resources :observations, path: "Observation", only: %i[index show]
+  # Provenance — office-measured vs patient-reported (Vardana item 10).
+  # Constraint keeps the dotted-timestamp portion of derived observation ids
+  # (e.g. prov-vital-1-bp-202501150830) out of the :format segment.
+  resources :provenances, path: "Provenance", only: %i[index show], constraints: { id: /[^\/]+/ }
   resources :encounters, path: "Encounter", only: %i[index]
   resources :organizations, path: "Organization", only: %i[show], param: :ien
   resources :locations, path: "Location", only: %i[show], param: :ien

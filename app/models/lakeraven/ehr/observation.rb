@@ -62,6 +62,16 @@ module Lakeraven
         "BMI"   => { code: "39156-5", display: "BMI",                 unit: "kg/m2" }
       }.freeze
 
+      # FHIR R4 Observation.status — REQUIRED binding. Gateway rows may carry
+      # a status (e.g. the V MEASUREMENT ENTERED IN ERROR flag, file
+      # 9000010.01, added by BJPC patch bjpc0200.04, surfaces as
+      # "entered-in-error"); anything outside the legal value set falls back
+      # to "final" rather than passing through raw.
+      VALID_STATUSES = %w[
+        registered preliminary final amended corrected cancelled
+        entered-in-error unknown
+      ].freeze
+
       attribute :ien, :string
       attribute :patient_dfn, :string
       attribute :code, :string
@@ -73,6 +83,14 @@ module Lakeraven
       attribute :category, :string
       attribute :status, :string
       attribute :effective_datetime, :datetime
+      # Provenance context — how the value entered the record. RPMS/PCC keeps
+      # this on the measurement's parent VISIT (file 9000010): SERVICE
+      # CATEGORY, field .07 ("A"=ambulatory ... "T"=telecommunications,
+      # "E"=event/historical, "C"=chart review). See
+      # FHIR::ObservationProvenanceSerializer for the FHIR mapping.
+      attribute :service_category, :string
+      attribute :visit_ien, :string
+      attribute :provider_duz, :string
 
       # -- Gateway DI -----------------------------------------------------------
 
@@ -109,10 +127,20 @@ module Lakeraven
             value_quantity: h[:type] == "BP" ? nil : h[:value],
             unit: mapping[:unit],
             category: "vital-signs",
-            status: "final",
-            effective_datetime: h[:recorded_date]
+            status: normalize_status(h[:status]),
+            effective_datetime: h[:recorded_date],
+            service_category: h[:service_category],
+            visit_ien: h[:visit_ien]&.to_s,
+            provider_duz: h[:provider_duz]&.to_s
           )
         end
+      end
+
+      # Status fidelity (Vardana §5.4): honour a real status when the gateway
+      # supplies one; never invent — absent/unknown collapses to "final".
+      def self.normalize_status(raw)
+        normalized = raw.to_s.strip.downcase
+        VALID_STATUSES.include?(normalized) ? normalized : "final"
       end
 
       def self.vital_id(patient_dfn, hash)

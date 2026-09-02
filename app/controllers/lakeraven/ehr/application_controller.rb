@@ -50,14 +50,42 @@ module Lakeraven
         )
       end
 
+      # Renders a searchset Bundle. Honours FHIR paging (Vardana §4 /
+      # checklist item 7): `_count` caps the page size and `Bundle.link`
+      # carries rel=self plus rel=next while more matches remain. The next
+      # link is this same URL with `_page` advanced — FHIR treats paging
+      # links as opaque, so the page parameter is server-defined.
+      # `total` is always the FULL match count, not the page size.
       def render_bundle(entries, type: "searchset")
+        total = entries.length
+        page_entries, links = paginate_entries(entries)
         bundle = {
           resourceType: "Bundle",
           type: type,
-          total: entries.length,
-          entry: entries.map { |e| { resource: e } }
+          total: total,
+          link: links,
+          entry: page_entries.map { |e| { resource: e } }
         }
         render json: bundle, status: :ok, content_type: FHIR_CONTENT_TYPE
+      end
+
+      def paginate_entries(entries)
+        links = [ { relation: "self", url: request.original_url } ]
+        count = params[:_count].to_i
+        return [ entries, links ] unless count.positive?
+
+        page = [ params[:_page].to_i, 1 ].max
+        offset = (page - 1) * count
+        page_entries = entries.slice(offset, count) || []
+        links << { relation: "next", url: url_for_page(page + 1) } if offset + count < entries.length
+        [ page_entries, links ]
+      end
+
+      def url_for_page(page)
+        uri = URI.parse(request.original_url)
+        query = Rack::Utils.parse_query(uri.query.to_s).merge("_page" => page.to_s)
+        uri.query = Rack::Utils.build_query(query)
+        uri.to_s
       end
     end
   end

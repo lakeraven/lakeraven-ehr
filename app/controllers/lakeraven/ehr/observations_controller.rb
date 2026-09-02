@@ -3,6 +3,8 @@
 module Lakeraven
   module EHR
     class ObservationsController < ApplicationController
+      include FHIRDateSearch
+
       before_action :require_patient_param, only: :index
 
       def index
@@ -10,6 +12,8 @@ module Lakeraven
         raw = Observation.for_patient(dfn)
         observations = Observation.from_vital_hashes(raw, patient_dfn: dfn)
         observations = filter_observations(observations)
+        observations = apply_date_param(observations, params[:date], &:effective_datetime)
+        observations = apply_date_sort(observations, params[:_sort], &:effective_datetime)
         render_bundle(observations.map(&:to_fhir))
       end
 
