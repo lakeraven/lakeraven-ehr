@@ -25,8 +25,8 @@ module Lakeraven
       end
 
       test "response excludes NPI identifier when source RPC cannot surface it" do
-        # ORWU USERINFO doesn't return NPI; until BHDPTRPC or equivalent is
-        # installed (rpms-rpc rr-6jr), the controller emits no NPI identifier.
+        # ORWU USERINFO doesn't return NPI; until a real source lands (DDR
+        # LISTER / File 200 read), the controller emits no NPI identifier.
         get "/lakeraven-ehr/Practitioner/101", headers: @headers
         body = JSON.parse(response.body)
         identifiers = body["identifier"] || []

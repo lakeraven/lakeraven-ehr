@@ -30,8 +30,9 @@ module Lakeraven
         # ORWPT ID INFO contributes race_code + site_ien on top of
         # patient_select. The long-form :race string, address, city,
         # phone, tribal_enrollment_number, service_area, coverage_type
-        # all come from BHDPTRPC, which is uninstalled on staging
-        # (rpms-rpc rr-6jr).
+        # have NO known RPC source — the old BHDPTRPC attribution was
+        # unverified (see rpms-rpc docs/RPC_COVERAGE.md, "BHDPTRPC
+        # provenance").
         patient = PatientRepository.find(1)
 
         assert_equal "I", patient.race_code

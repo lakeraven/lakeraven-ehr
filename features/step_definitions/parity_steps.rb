@@ -68,7 +68,7 @@ end
 
 # --- Path parity (lakeraven-ehr RPC vs BPRM BMW-SQL) -------------------------
 When("I register patient {string} born {string} sex {string} via lakeraven-ehr") do |_name, _dob, _sex|
-  parity_pending!("POST /patients -> BHDPTRPC/AG registration RPC")
+  parity_pending!("POST /patients -> VAFC VOA ADD PATIENT + LR completion shim")
 end
 
 When("BPRM registers the same patient via BMW.BSF.SP against IRIS") do

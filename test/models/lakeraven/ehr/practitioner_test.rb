@@ -12,7 +12,7 @@ module Lakeraven
         # ORWU USERINFO only returns the authenticated session user (see
         # rpms-rpc rr-fyf). specialty / npi / dea_number / provider_class
         # / phone / title / service_section are not in its response and
-        # will only populate when a BHDPTRPC NEWPERSON or DDR LISTER
+        # will only populate when a DDR LISTER / direct File 200 read
         # path lands.
         prac = Practitioner.find_by_ien(101)
         assert_not_nil prac

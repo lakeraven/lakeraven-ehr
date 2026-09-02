@@ -14,7 +14,7 @@ scanned from 1,040 `.cs` sources; `bprm0400.06.xml`, the IRIS class layer):
 |---|---|---|
 | Kind | Rails web app | **Blazor _Server_ web app** |
 | HTTP surface | HTTP/JSON **API** | Blazor UI over HTTP+SignalR — **no API/REST/RPC tier** (`transport.rpc: none`, 0 `%CSP.REST`/`WebMethod`) |
-| Data path | RPMS **RPCs** (`AG`/`BHDPTRPC`, `BSDX`, `DGPMV*`) via `rpms_rpc` | **ADO.NET SQL** (`InterSystems.Data.IRISClient`) → `BMW.BSF.SP.*` SqlProcs (174) |
+| Data path | RPMS **RPCs** (`VAFC VOA ADD PATIENT` + LR* completion shim, `BSDX`, `DGPMV*`) via `rpms_rpc` | **ADO.NET SQL** (`InterSystems.Data.IRISClient`) → `BMW.BSF.SP.*` SqlProcs (174) |
 | Engine | YottaDB **or** IRIS | IRIS only (SQL/BMW class layer) |
 
 Both terminate in the **same FileMan files** — that shared layer is the parity oracle:

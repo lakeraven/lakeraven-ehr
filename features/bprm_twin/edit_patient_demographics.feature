@@ -1,6 +1,6 @@
 # BPRM twin — scenario #2: Edit patient demographics
 # HTTP:  PATCH /patients/:dfn
-# RPC:   BHDPTRPC (update) / AG  ->  ^DIE on ^DPT (PATIENT #2)
+# RPC:   VAFCPTED + LR/AG-faithful path  ->  ^DIE on ^DPT (PATIENT #2)
 # BPRM:  AgPatientUpdateEvent, AgSetCorrectPatientName, AgSetPatientCellNumber,
 #        AgSetPatientDateOfDeath, AgSetPatientMbi (set path)
 # Disposition: sql-mutate -> reimpl  (BPRM patches individual ^DPT fields raw; use ^DIE)

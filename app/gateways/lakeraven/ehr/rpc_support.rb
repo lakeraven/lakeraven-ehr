@@ -14,7 +14,8 @@ module Lakeraven
     # caret response, and return a transport-neutral result Hash carrying an
     # HTTP :status so a thin controller can render it directly.
     #
-    # Response convention for write RPCs (BHDPTRPC / BSDX / DG*): the first
+    # Response convention for write RPCs (BSDX / DG* / the placeholder
+    # BHDPTRPC wire names — see RegistrationGateway's header note): the first
     # caret piece is a success flag ("1"/"0"); on failure the human-readable
     # M-side message follows. Reads return an Array of caret-delimited lines.
     module RpcSupport

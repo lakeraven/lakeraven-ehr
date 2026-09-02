@@ -4,8 +4,14 @@ module Lakeraven
   module EHR
     # BPRM twin — registration group (scenarios #1, #2, #3, #4).
     #
-    # Re-grounds BPRM's IRIS/BMW-SQL registration tier on the VistA RPC broker:
-    # BHDPTRPC REGISTER / UPDATE (AG package) plus BMX reads. BPRM's original
+    # Re-grounds BPRM's IRIS/BMW-SQL registration tier on the VistA RPC broker.
+    # Target grounding: VAFC VOA ADD PATIENT (PATIENT #2 half) + the Lakeraven
+    # LR* completion shim (IHS half — #9000001/HRN/tribe/community, AGADDREG as
+    # reference; HRN clerk-supplied with AG1-faithful uniqueness) plus BMX
+    # reads. The BHDPTRPC wire names below are UNVERIFIED PLACEHOLDERS with no
+    # known server implementation anywhere (see rpms-rpc
+    # docs/RPC_COVERAGE.md, "BHDPTRPC provenance"); they stay until the LR
+    # shim lands so callers and tests don't churn. BPRM's original
     # SQL-MUTATE procs (AgPatientRegisterEvent, AgPatientUpdateEvent,
     # AgSetPatientInsuranceDelete) raw-write ^DPT/^AUPN*/insurance globals and
     # bypass FileMan cross-references + audit; here every write goes through a
@@ -13,25 +19,25 @@ module Lakeraven
     #
     # See docs/BPRM_REG_SCHED_TWIN.md for the scenario→RPC mapping.
     class RegistrationGateway
-      # Confirmed against the live #8994 dump (rpms-rpc#171). The first four
+      # PLACEHOLDER wire name — no server implementation on any known system
+      # (never in any #8994 dump; the earlier "confirmed against the live
+      # dump" claim here was wrong — see the header note). The first four
       # payload fields match the gem's RpmsRpc::Patient.registration_param
-      # (NAME^SEX^DOB^SSN); the trailing AG registration items are an extension
-      # awaiting an AG trace capture.
+      # (NAME^SEX^DOB^SSN); the trailing IHS items are OUR contract extension.
+      # Slated replacement: VAFC VOA ADD PATIENT + LR completion shim.
       REGISTER_RPC = "BHDPTRPC REGISTER"
 
-      # PROVISIONAL: RPC name/encoding unconfirmed against #8994 — needs trace capture.
-      # (No RpmsRpc::Patient.update exists — the BHDPTRPC UPDATE encoding is not
-      # in the registry source.)
+      # PLACEHOLDER wire name — see header note. Slated: VAFCPTED + LR/AG path.
       UPDATE_RPC = "BHDPTRPC UPDATE"
-      # PROVISIONAL: RPC name/encoding unconfirmed against #8994 — needs trace capture.
+      # PLACEHOLDER wire name — see header note.
       SEARCH_RPC = "BHDPTRPC LOOKUP"
-      # PROVISIONAL: RPC name/encoding unconfirmed against #8994 — needs trace capture.
+      # PLACEHOLDER wire name — see header note.
       FACE_SHEET_RPC = "BHDPTRPC FACESHEET"
-      # PROVISIONAL: RPC name/encoding unconfirmed against #8994 — needs trace capture.
+      # PLACEHOLDER wire name — see header note.
       INS_LIST_RPC = "BHDPTRPC INSLIST"
-      # PROVISIONAL: RPC name/encoding unconfirmed against #8994 — needs trace capture.
+      # PLACEHOLDER wire name — see header note.
       INS_EDIT_RPC = "BHDPTRPC INSEDIT"
-      # PROVISIONAL: RPC name/encoding unconfirmed against #8994 — needs trace capture.
+      # PLACEHOLDER wire name — see header note.
       INS_DELETE_RPC = "BHDPTRPC INSDELETE"
 
       # Field order for the REGISTER payload. Extends the existing rpms-rpc
@@ -42,7 +48,8 @@ module Lakeraven
 
       class << self
         # --- #1 Register a new patient (POST /patients) ---------------------
-        # BHDPTRPC REGISTER → AG → ^DPT/^AUPNPAT.
+        # Target: VAFC VOA ADD PATIENT + LR completion shim → ^DPT/^AUPNPAT
+        # (dispatches the placeholder REGISTER_RPC wire name until then).
         # TODO(sql-mutate→reimpl): BPRM's AgPatientRegisterEvent raw-inserts
         # ^DPT/^AUPN*; the AG REGISTER path must file via ^DIE/DBS so the .01
         # name xref, SSN xref, and registration audit fire.
@@ -60,7 +67,8 @@ module Lakeraven
         end
 
         # --- #2 Edit demographics (PATCH /patients/:dfn) -------------------
-        # BHDPTRPC UPDATE → ^DIE on ^DPT (PATIENT #2).
+        # Target: VAFCPTED + LR/AG-faithful path → ^DIE on ^DPT (PATIENT #2)
+        # (dispatches the placeholder UPDATE_RPC wire name until then).
         # TODO(sql-mutate→reimpl): BPRM patches individual ^DPT fields raw
         # (AgSetCorrectPatientName/CellNumber/DateOfDeath/Mbi). File each
         # through ^DIE so the FileMan audit (DD "AUDIT") records the change.

@@ -32,9 +32,9 @@ module Lakeraven
       test "find_by_dfn merges identifier fields from patient_id_info" do
         # ORWPT ID INFO contributes the IHS race code and current site IEN
         # to the merged patient hash; extended demographics (full race
-        # string, address, phone, tribal_enrollment_number) require
-        # BHDPTRPC NEWPERSON/PATIENT which isn't installed on staging
-        # (tracked as rr-6jr in rpms-rpc).
+        # string, address, phone, tribal_enrollment_number) have NO known
+        # RPC source — the old BHDPTRPC attribution was unverified (see
+        # rpms-rpc docs/RPC_COVERAGE.md, "BHDPTRPC provenance").
         patient = Patient.find_by_dfn(1)
         assert_equal "I", patient.race_code
         assert_equal 7819, patient.site_ien

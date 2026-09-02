@@ -1,6 +1,6 @@
 # BPRM twin — scenario #4: Patient lookup / search / face sheet
 # HTTP:  GET /patients?q=...   GET /patients/:dfn   GET /patients/:dfn/face_sheet
-# RPC:   BHDPTRPC / patient_select + BMX search
+# RPC:   patient_select + BMX search
 # BPRM:  AgSearchPatient, AgGetPatientSearchResult, AgGetPatientFaceSheet,
 #        AgGetPatientErrorsAndWarnings, AgGetPatientMbi (get)
 # Disposition: read

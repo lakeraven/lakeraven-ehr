@@ -26,8 +26,9 @@ module Lakeraven
         # ORWPT ID INFO surfaces race_code and site_ien on top of
         # patient_select. Extended demographics (full race string,
         # address, phone, tribal_enrollment_number, service_area,
-        # coverage_type) come from BHDPTRPC — not installed on staging
-        # (rpms-rpc rr-6jr).
+        # coverage_type) have NO known RPC source — the old BHDPTRPC
+        # attribution was unverified (see rpms-rpc docs/RPC_COVERAGE.md,
+        # "BHDPTRPC provenance").
         patient = PatientGateway.find(1)
 
         assert_equal "I", patient.race_code
@@ -46,7 +47,7 @@ module Lakeraven
         assert_not_nil patient
         assert_equal "MOUSE,MICKEY M", patient.name
         assert_equal "M", patient.sex
-        # The long-form :race string comes from BHDPTRPC; not surfaced.
+        # The long-form :race string has no known RPC source; not surfaced.
         assert_nil patient.race
       end
 
