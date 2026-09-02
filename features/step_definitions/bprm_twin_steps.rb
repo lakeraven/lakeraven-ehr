@@ -9,7 +9,8 @@
 # and the audit-gap ("sql-mutate -> reimpl") flags.
 #
 # These steps are intentionally PENDING: the factory implements the gateways
-# (registration via BHDPTRPC/AG; scheduling via BSDX ADD NEW APPOINTMENT /
+# (registration via VAFC VOA ADD PATIENT + the LR* completion shim, AG-faithful
+# per AGADDREG/AG1; scheduling via BSDX ADD NEW APPOINTMENT /
 # BSDX CANCEL APPOINTMENT / BSDX CHECKIN APPOINTMENT / BSDX NOSHOW -> BSDAPI;
 # ADT via DGPMV*) and turns each step green scenario by
 # scenario (red -> green, BDD as-we-go). Until then every step pends so the
@@ -25,17 +26,17 @@ module BprmTwinPending
 end
 World(BprmTwinPending)
 
-# --- Registration (BHDPTRPC REGISTER / AG / ^DPT) ------------------------------
+# --- Registration (VAFC VOA ADD PATIENT + LR shim / ^DPT) ----------------------
 Given("I am authenticated as a registration clerk at service area {string}") do |_area|
   bprm_twin_pending!("session auth + service-area context")
 end
 
 When("I submit a registration with:") do |_table|
-  bprm_twin_pending!("POST /patients -> BHDPTRPC REGISTER -> AgPatientRegisterEvent (sql-mutate->reimpl)")
+  bprm_twin_pending!("POST /patients -> VAFC VOA ADD PATIENT + LR completion shim (subsumes AgPatientRegisterEvent, sql-mutate->reimpl)")
 end
 
 When("I update patient {int} with:") do |_dfn, _table|
-  bprm_twin_pending!("PATCH /patients/:dfn -> BHDPTRPC/AG -> ^DIE on ^DPT (AgPatientUpdateEvent, sql-mutate->reimpl)")
+  bprm_twin_pending!("PATCH /patients/:dfn -> VAFCPTED + LR/AG-faithful path -> ^DIE on ^DPT (AgPatientUpdateEvent, sql-mutate->reimpl)")
 end
 
 # --- Lookup (AgSearchPatient / AgGetPatientFaceSheet, read) --------------------

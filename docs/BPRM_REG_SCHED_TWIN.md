@@ -49,13 +49,28 @@ BSDX **reads** (available slots, clinic schedule, a patient's appointments) go
 through the BMX generic-query RPC against the BSDX files
 (`9002018.4 BSDX APPOINTMENT`, `9002018.3 BSDX ACCESS BLOCK`, …) and `^SC`.
 
-Registration re-grounds on the **AG** (IHS Patient Registration) package and
-`BHDPTRPC` (already wired in `rpms_rpc`: `BHDPTRPC REGISTER`, `NEWVISIT`, `SU`,
-`TRIBAL`, `TRIBALELG`) plus FileMan `^DPT` (PATIENT #2) / `^AUPNPAT`.
+Registration re-grounds on **`VAFC VOA ADD PATIENT`** (real and on-box —
+`VAFCPTAD.m`) for the PATIENT (#2) half, plus a **to-be-authored Lakeraven
+`LR*` completion shim** for the IHS half (#9000001 / HRN / tribe / community
+via FileMan, with AG's `AGADDREG` as the reference implementation).
+Demographics edits similarly re-ground on `VAFCPTED` plus an LR/AG-faithful
+path. The HRN is **clerk-supplied**, mirroring AG1's "ENTER HEALTH RECORD
+NUMBER" prompt (1–6 digit input; uniqueness via the `^AUPNPAT("D")`
+cross-reference; filed to the `^AUPNPAT(DFN,41,DUZ(2))` facility multiple) —
+the shim takes HRN as a caller-supplied parameter with AG1-faithful
+uniqueness enforcement, **not** a counter allocation. (AG auto-assigns only
+in its optional `AGCHTMP` temp-chart flow, and stages `^XTMP("AGHL7")` for
+its HL7 interface.)
+
+> **Provenance note:** earlier revisions grounded registration on a
+> "`BHDPTRPC`" RPC family. That name was an unverified placeholder with no
+> known server implementation anywhere — see
+> `rpms-rpc/docs/RPC_COVERAGE.md`, "BHDPTRPC provenance". The `rpms_rpc`
+> wire names stay in place until the LR shim lands.
 
 ## Concrete RPC/file oracle (source of truth for the mapping)
 
-- Registration: `rpms_rpc` `RpmsRpc::Patient` (`BHDPTRPC REGISTER` etc.), AG package, `^DPT`/`^AUPNPAT`.
+- Registration: `VAFC VOA ADD PATIENT` (`VAFCPTAD.m`, PATIENT #2) + LR* completion shim (to be authored: #9000001/HRN/tribe/community via FileMan; HRN caller-supplied with AG1-faithful uniqueness; `AGADDREG` as reference), `^DPT`/`^AUPNPAT`. Demographics edit: `VAFCPTED` + LR/AG-faithful path. (`rpms_rpc`'s `BHDPTRPC` wire names are unverified placeholders pending the shim.)
 - Scheduling writes: `BSDX ADD NEW APPOINTMENT` / `BSDX CANCEL APPOINTMENT` / `BSDX CHECKIN APPOINTMENT` / `BSDX NOSHOW` → `BSDAPI` → `^SC` + `^BSDXAPPT` (9002018.4).
 - Scheduling reads: BMX query over `^SC`, `BSDX APPOINTMENT` (9002018.4), `BSDX ACCESS BLOCK` (9002018.3); `ORWPT APPTLST` for a patient's appt list.
 - ADT movements: `DGPMV*` / `^DIE` on `^DGPM` (INPATIENT MOVEMENT #405).
@@ -68,10 +83,10 @@ procs, reimplement as a proper FileMan/API write.
 
 | # | Feature file | Scenario group | HTTP | Underlying RPC / FileMan | BPRM SP(s) subsumed | Disposition |
 |---|---|---|---|---|---|---|
-| 1 | `register_patient.feature` | Register a new patient | `POST /patients` | `BHDPTRPC REGISTER` → AG → `^DPT`/`^AUPNPAT` | `AgPatientRegisterEvent` | **sql-mutate→reimpl** |
-| 2 | `edit_patient_demographics.feature` | Edit demographics | `PATCH /patients/:dfn` | `BHDPTRPC` update / AG → `^DIE` on `^DPT` | `AgPatientUpdateEvent`, `AgSetCorrectPatientName`, `AgSetPatientCellNumber`, `AgSetPatientDateOfDeath`, `AgSetPatientMbi` (set) | **sql-mutate→reimpl** |
+| 1 | `register_patient.feature` | Register a new patient | `POST /patients` | `VAFC VOA ADD PATIENT` (#2) + LR* completion shim (#9000001/HRN, `AGADDREG`-faithful) → `^DPT`/`^AUPNPAT` | `AgPatientRegisterEvent` | **sql-mutate→reimpl** |
+| 2 | `edit_patient_demographics.feature` | Edit demographics | `PATCH /patients/:dfn` | `VAFCPTED` + LR/AG-faithful path → `^DIE` on `^DPT` | `AgPatientUpdateEvent`, `AgSetCorrectPatientName`, `AgSetPatientCellNumber`, `AgSetPatientDateOfDeath`, `AgSetPatientMbi` (set) | **sql-mutate→reimpl** |
 | 3 | `patient_eligibility_insurance.feature` | View/edit eligibility + insurance | `GET/PATCH/DELETE /patients/:dfn/insurances` | AG insurance API → `^DIE` on `^AUPNPAT`/insurance files; read via BMX | `BsdGetPatientInsurances`, `AgGetPatientInsuranceInUse` (read); `AgSetPatientInsuranceDelete` (7-table dynamic delete) | read + **sql-mutate→reimpl** |
-| 4 | `patient_lookup.feature` | Search / face sheet | `GET /patients?q=` , `GET /patients/:dfn` | `BHDPTRPC`/`patient_select` + BMX search | `AgSearchPatient`, `AgGetPatientSearchResult`, `AgGetPatientFaceSheet`, `AgGetPatientErrorsAndWarnings`, `AgGetPatientMbi` (get) | read |
+| 4 | `patient_lookup.feature` | Search / face sheet | `GET /patients?q=` , `GET /patients/:dfn` | `patient_select` + BMX search | `AgSearchPatient`, `AgGetPatientSearchResult`, `AgGetPatientFaceSheet`, `AgGetPatientErrorsAndWarnings`, `AgGetPatientMbi` (get) | read |
 | 5 | `book_appointment.feature` | Book an appointment | `POST /clinics/:ien/appointments` | `BSDX ADD NEW APPOINTMENT` → `APPADD^BSDX07` → `$$MAKE^BSDAPI` → `^SC`+`^BSDXAPPT` | `BsdSetPatientAppointment`, `BsdSetPatientAppointmentV4` | **sql-mutate→reimpl** |
 | 6 | `appointment_availability.feature` | Available slots / access blocks | `GET /clinics/:ien/availability` | BMX query on `BSDX ACCESS BLOCK` (9002018.3) + `^SC` | `BsdGetSchedulingAvailableSlots`, `BsdGetSchedulingAccessBlocks`, `BsdGetSchedulingConfigAccessBlocks` | read |
 | 7 | `cancel_appointment.feature` | Cancel an appointment | `POST /appointments/:id/cancel` | `BSDX CANCEL APPOINTMENT` → `$$CANCEL^BSDAPI` | `BsdSetPatientAppointmentCancel` | **sql-mutate→reimpl** |

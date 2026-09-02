@@ -20,8 +20,10 @@ RpmsRpc.mock! do |m|
   # patient_id_info now returns the identifier projection from ORWPT ID INFO
   # (SSN/DOB/sex/race_code/site_ien/name) — not the extended demographics
   # that the prior mapping hallucinated. Address, phone, tribal enrollment,
-  # service_area, coverage_type aren't surfaceable until BHDPTRPC is
-  # installed on staging (rr-6jr). Tests that need those fields construct
+  # service_area, coverage_type have NO known RPC source — the old
+  # "BHDPTRPC, not installed on staging" attribution was itself unverified
+  # (see rpms-rpc docs/RPC_COVERAGE.md, "BHDPTRPC provenance"); a real
+  # demographics read path is future work. Tests that need those fields construct
   # Patient.new(...) directly rather than going through the gateway.
   m.seed(:patient_id_info, "1", {
     ssn: "111-11-1111", dob: Date.parse("1980-05-15"), sex: "F",
@@ -81,7 +83,8 @@ RpmsRpc.mock! do |m|
     { code: "V07", label: "VFC eligible - Local specific" }
   ])
 
-  # Tribal enrollment (BHDPTRPC*)
+  # Tribal enrollment (BHDPTRPC* — placeholder wire names, no known server
+  # implementation; see rpms-rpc docs/RPC_COVERAGE.md, "BHDPTRPC provenance")
   m.seed(:tribal_enrollment, "1", { enrollment_number: "ANLC-12345", tribe_name: "Alaska Native - Anchorage (ANLC)",
                                      enrollment_date: Date.new(2020, 1, 1), status: "ACTIVE",
                                      service_unit: "Anchorage", tribe_code: "ANLC" })
