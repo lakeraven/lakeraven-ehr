@@ -3,8 +3,9 @@ name: CI
 on:
   push:
     branches: [main]
+  # No branch filter: PRs based on another feature branch (stacked review,
+  # e.g. sandbox work based on an in-review auth branch) still get CI.
   pull_request:
-    branches: [main]
 
 jobs:
   lint:
