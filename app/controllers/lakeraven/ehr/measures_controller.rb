@@ -3,6 +3,13 @@
 module Lakeraven
   module EHR
     class MeasuresController < ApplicationController
+      # Reviewed decision (PR #460 security panel): directory/terminology
+      # resources carry no per-patient PHI, and org-bound connectors need
+      # them to interpret clinical references — so they stay readable to any
+      # authenticated credential. Known residual: this lets an org-bound
+      # credential enumerate the shared directory (tenant existence), which
+      # is accepted for now and revisited if directories become per-tenant.
+      organization_scope :not_patient_compartment, only: %i[index]
       skip_before_action :authorize_fhir_scope!, only: :import
       before_action :authorize_write_scope!, only: :import
 

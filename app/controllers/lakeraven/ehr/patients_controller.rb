@@ -3,6 +3,14 @@
 module Lakeraven
   module EHR
     class PatientsController < ApplicationController
+      # Org-bound credentials: #show authorizes the RESOLVED patient; #index
+      # filters the resolved result set by organization below. #create stays
+      # undeclared — DENIED to org-bound credentials — because registration
+      # would write into a site the credential's binding cannot vouch for;
+      # opening it needs an explicit org-match rule first.
+      organization_scope :resolved_patient, only: :show, dfn_param: :dfn
+      organization_scope :result_filtered, only: :index
+
       before_action :enforce_patient_context!, only: :show
       skip_before_action :authorize_fhir_scope!, only: :create
       before_action :authorize_fhir_write_scope!, only: :create

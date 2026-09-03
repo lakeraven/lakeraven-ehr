@@ -153,6 +153,69 @@ Feature: SMART Backend Services auth for server-to-server FHIR clients
     Then the response status should be 403
     And the response should be a FHIR OperationOutcome with code "forbidden"
 
+  # Enforcement is on the RESOLVED patient, not the request parameter name —
+  # every surface that returns patient data must verify the resolved
+  # patient's organization, whatever the parameter is called.
+
+  Scenario: Cross-organization denial applies to the patient chart endpoint
+    Given a backend client bound to organization "rpms-organization-101" holds a token with scope "system/*.read"
+    And patient 900001 is managed by organization "rpms-organization-202"
+    When I request GET "/lakeraven-ehr/patients/900001.json" with the Bearer token
+    Then the response status should be 403
+
+  Scenario: The managing organization's own credential reads the patient chart
+    Given a backend client bound to organization "rpms-organization-202" holds a token with scope "system/*.read"
+    And patient 900001 is managed by organization "rpms-organization-202"
+    When I request GET "/lakeraven-ehr/patients/900001.json" with the Bearer token
+    Then the response status should be 200
+
+  Scenario: Cross-organization denial applies to transitions of care documents
+    Given a backend client bound to organization "rpms-organization-101" holds a token with scope "system/*.*"
+    And patient 900001 is managed by organization "rpms-organization-202"
+    When I request POST "/lakeraven-ehr/transitions_of_care" with patient_dfn "900001" and the Bearer token
+    Then the response status should be 403
+    And the response should be a FHIR OperationOutcome with code "forbidden"
+
+  Scenario: Cross-organization denial applies to bulk export
+    Given a backend client bound to organization "rpms-organization-101" holds a token with scope "system/*.*"
+    And patient 900001 is managed by organization "rpms-organization-202"
+    When I request POST "/lakeraven-ehr/exports" with patient_dfn "900001" and the Bearer token
+    Then the response status should be 403
+    And the response should be a FHIR OperationOutcome with code "forbidden"
+
+  Scenario: An organization-scoped export must name a patient the credential may read
+    Given a backend client bound to organization "rpms-organization-101" holds a token with scope "system/*.*"
+    When I request POST "/lakeraven-ehr/exports" without a patient and with the Bearer token
+    Then the response status should be 403
+
+  Scenario: An export and its files belong to the client that requested them
+    Given a backend client bound to organization "rpms-organization-101" holds a token with scope "system/*.*"
+    And patient 900001 is managed by organization "rpms-organization-101"
+    And the client has requested an export for patient 900001
+    And a second backend client bound to organization "rpms-organization-101" holds a token with scope "system/*.*"
+    When the second client requests the first client's export status
+    Then the response status should be 403
+    When the second client requests the first client's export file
+    Then the response status should be 403
+
+  Scenario: Organization-scoped credentials cannot read the audit log
+    Given a backend client bound to organization "rpms-organization-101" holds a token with scope "system/*.read"
+    When I request GET "/lakeraven-ehr/AuditEvent" with the Bearer token
+    Then the response status should be 403
+    And the response should be a FHIR OperationOutcome with code "forbidden"
+
+  Scenario: Organization-scoped credentials cannot register patients
+    Given a backend client bound to organization "rpms-organization-101" holds a token with scope "system/*.*"
+    When I request POST "/lakeraven-ehr/Patient" with a FHIR Patient body and the Bearer token
+    Then the response status should be 403
+
+  Scenario: A clinical read for an unresolvable patient is denied even when clinical records exist
+    Given a backend client bound to organization "rpms-organization-101" holds a token with scope "system/*.read"
+    And patient 900001 cannot be resolved but clinical records exist for that DFN
+    When I request GET "/lakeraven-ehr/Observation?patient=900001" with the Bearer token
+    Then the response status should be 403
+    And the response should be a FHIR OperationOutcome with code "forbidden"
+
   Scenario: Patient search returns only the credential's organization's patients
     Given a backend client bound to organization "rpms-organization-101" holds a token with scope "system/*.read"
     And a patient search for "DEMO" would match patients in organizations "rpms-organization-101" and "rpms-organization-202"

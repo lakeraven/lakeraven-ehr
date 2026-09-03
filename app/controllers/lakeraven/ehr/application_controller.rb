@@ -10,8 +10,11 @@ module Lakeraven
 
       before_action :authenticate_smart_token!
       before_action :authorize_fhir_scope!
-      # Org-bound backend credentials cannot read another organization's
-      # patients (SmartAuthentication#enforce_organization_scope!).
+      # Org-bound backend credentials cannot reach another organization's
+      # patients. Enforcement binds to the RESOLVED patient / result set per
+      # each controller's `organization_scope` declaration, and any action
+      # WITHOUT a declaration is denied to org-bound credentials (fail
+      # closed) — see SmartAuthentication.
       before_action :enforce_organization_scope!
 
       private

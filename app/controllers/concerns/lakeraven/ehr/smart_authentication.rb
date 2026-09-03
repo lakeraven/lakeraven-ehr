@@ -11,6 +11,32 @@ module Lakeraven
 
       included do
         attr_reader :current_token
+        # Per-action organization-scoping declarations (see .organization_scope).
+        class_attribute :organization_scope_rules, instance_writer: false, default: {}
+      end
+
+      class_methods do
+        # Declares how actions satisfy per-organization credential scoping
+        # (enforced by #enforce_organization_scope!). Rules:
+        #
+        #   :resolved_patient — resolve params[dfn_param] to a Patient and
+        #       require the credential's organization to manage that patient.
+        #       Fail closed: a blank or unresolvable patient reference is
+        #       denied (clinical gateways can hold records for a DFN the
+        #       Patient lookup cannot resolve).
+        #   :result_filtered — the action itself authorizes at the RESULT
+        #       level (filters resolved patients by organization, or enforces
+        #       resolved-resource ownership). Declare only alongside such code.
+        #   :not_patient_compartment — the resource carries no per-patient
+        #       PHI (directory/terminology data); allowed for any credential.
+        #
+        # Any action WITHOUT a declaration is denied to org-bound credentials
+        # outright, so a new endpoint cannot leak cross-organization data by
+        # omission.
+        def organization_scope(rule, only:, dfn_param: nil)
+          entries = Array(only).to_h { |a| [ a.to_sym, { rule: rule, dfn_param: dfn_param } ] }
+          self.organization_scope_rules = organization_scope_rules.merge(entries)
+        end
       end
 
       def authenticate_smart_token!
@@ -101,21 +127,38 @@ module Lakeraven
         current_organization_id.present?
       end
 
-      # Before-action: when the token is org-bound and the request addresses a
-      # specific patient (Patient/{dfn} or ?patient=), deny the request unless
-      # that patient is managed by the credential's organization. Requests
-      # without a patient parameter pass through; patient-list reads are
-      # filtered at the query layer (see PatientsController#index).
+      # Before-action: fail-closed enforcement for org-bound credentials.
+      # Authorization binds to the RESOLVED patient / result set — never to a
+      # request parameter name (an earlier version inferred the patient from
+      # dfn/patient/_id params, which any differently-named parameter or
+      # unlisted endpoint bypassed; independent security review finding).
       def enforce_organization_scope!
         return true unless organization_bound?
 
-        dfn = organization_scoped_patient_param
-        return true if dfn.blank?
+        entry = organization_scope_rules[action_name.to_sym]
+        case entry&.dig(:rule)
+        when :not_patient_compartment, :result_filtered
+          true
+        when :resolved_patient
+          authorize_resolved_patient!(params[entry[:dfn_param]])
+        else
+          render_forbidden("This endpoint is not available to organization-scoped credentials")
+          false
+        end
+      end
 
-        patient = Patient.find_by_dfn(dfn)
-        return true if patient.nil? # not-found is handled by the action
+      # Resolves the addressed patient and requires the credential's
+      # organization to manage them. Fail closed: a blank or unresolvable
+      # patient reference is denied — clinical gateways may hold records for
+      # a DFN the Patient lookup cannot resolve, and those must never be
+      # readable across organizations.
+      def authorize_resolved_patient!(raw_dfn)
+        dfn = raw_dfn.to_s.sub(%r{\APatient/}, "")
+        patient = dfn.present? ? Patient.find_by_dfn(dfn) : nil
+        return authorize_organization_for_patient!(patient) if patient
 
-        authorize_organization_for_patient!(patient)
+        render_forbidden("Credential is not authorized for this patient's organization")
+        false
       end
 
       def authorize_organization_for_patient!(patient)
@@ -136,11 +179,6 @@ module Lakeraven
       end
 
       private
-
-      def organization_scoped_patient_param
-        raw = params[:dfn].presence || params[:patient].presence || params[:_id].presence
-        raw.to_s.sub(%r{\APatient/}, "").presence
-      end
 
       def extract_bearer_token
         auth = request.headers["Authorization"]

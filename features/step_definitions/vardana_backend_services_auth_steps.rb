@@ -231,3 +231,63 @@ Then("the SMART configuration token endpoint should be {string}") do |url|
   config = JSON.parse(last_response.body)
   assert_equal url, config["token_endpoint"]
 end
+
+# --- Resolved-resource enforcement fixtures/requests -------------------------
+
+Given("patient {int} cannot be resolved but clinical records exist for that DFN") do |_dfn|
+  # The Patient lookup fails while the clinical gateway still holds records —
+  # the fail-open case the review flagged: enforcement must bind to the
+  # RESOLVED patient and deny when resolution fails.
+  stub_gateway(Lakeraven::EHR::PatientRepository, :find, nil)
+  stub_gateway(Lakeraven::EHR::Observation, :for_patient,
+    [ { datetime: "2026-01-01T00:00", bp: "120/80", pulse: "72" } ])
+end
+
+When("I request POST {string} with patient_dfn {string} and the Bearer token") do |path, dfn|
+  header "Authorization", @fhir_headers["Authorization"]
+  post path, { patient_dfn: dfn }
+end
+
+When("I request POST {string} without a patient and with the Bearer token") do |path|
+  header "Authorization", @fhir_headers["Authorization"]
+  post path, {}
+end
+
+When("I request POST {string} with a FHIR Patient body and the Bearer token") do |path|
+  header "Authorization", @fhir_headers["Authorization"]
+  header "Content-Type", "application/fhir+json"
+  post path, {
+    resourceType: "Patient",
+    name: [ { family: "DEMO", given: [ "PATIENT" ] } ],
+    gender: "male", birthDate: "1970-01-01"
+  }.to_json
+end
+
+Given("the client has requested an export for patient {int}") do |dfn|
+  header "Authorization", @fhir_headers["Authorization"]
+  post "/lakeraven-ehr/exports", { patient_dfn: dfn.to_s }
+  body = JSON.parse(last_response.body) rescue {}
+  @vardana_export_id = body["id"]
+  assert @vardana_export_id.present?,
+    "Expected an export id, got #{last_response.status}: #{last_response.body[0..200]}"
+end
+
+Given("a second backend client bound to organization {string} holds a token with scope {string}") do |org_id, scopes|
+  app = Doorkeeper::Application.create!(
+    name: "Example Second Connector #{org_id}",
+    redirect_uri: "urn:ietf:wg:oauth:2.0:oob",
+    scopes: scopes, confidential: true, organization_id: org_id
+  )
+  token = Doorkeeper::AccessToken.create!(application: app, scopes: scopes, expires_in: 300)
+  @vardana_second_headers = { "Authorization" => "Bearer #{token.plaintext_token || token.token}" }
+end
+
+When("the second client requests the first client's export status") do
+  header "Authorization", @vardana_second_headers["Authorization"]
+  get "/lakeraven-ehr/exports/#{@vardana_export_id}"
+end
+
+When("the second client requests the first client's export file") do
+  header "Authorization", @vardana_second_headers["Authorization"]
+  get "/lakeraven-ehr/exports/#{@vardana_export_id}/files/Patient.ndjson"
+end
