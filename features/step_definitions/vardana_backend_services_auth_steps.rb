@@ -21,7 +21,10 @@ module VardanaAuthWorld
   VARDANA_TOKEN_AUD = "http://example.org/lakeraven-ehr/oauth/token"
   VARDANA_ASSERTION_TYPE = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
 
-  def vardana_register_client(name:, scopes:, organization_id: nil, with_jwks: true)
+  # Registration defaults to an organization binding: the token endpoint
+  # refuses to mint system/ tokens for unbound credentials (fail closed), so
+  # only the explicit "no organization binding" scenario registers without one.
+  def vardana_register_client(name:, scopes:, organization_id: "rpms-organization-101", with_jwks: true)
     @vardana_key = OpenSSL::PKey::RSA.new(2048)
     @vardana_jwk = JWT::JWK.new(@vardana_key)
     @vardana_app = Doorkeeper::Application.create!(
@@ -83,6 +86,14 @@ Given("a backend client {string} is registered without a JWKS and scopes {string
   vardana_register_client(name: name, scopes: scopes, with_jwks: false)
 end
 
+Given("a backend client {string} is registered with a published JWKS but no organization binding, with scopes {string}") do |name, scopes|
+  vardana_register_client(name: name, scopes: scopes, organization_id: nil)
+end
+
+Given("the server is configured with token endpoint URL {string}") do |url|
+  Lakeraven::EHR.configuration.token_endpoint_url = url
+end
+
 Given("a backend client bound to organization {string} holds a token with scope {string}") do |org_id, scopes|
   vardana_register_client(name: "Example Connector #{org_id}", scopes: scopes, organization_id: org_id)
   token = Doorkeeper::AccessToken.create!(application: @vardana_app, scopes: scopes, expires_in: 300)
@@ -110,6 +121,34 @@ end
 
 When("the client replays the same assertion") do
   vardana_post_token(@vardana_last_assertion, scope: @vardana_last_scope)
+end
+
+When("the client requests a token with a signed assertion that has no exp claim") do
+  claims = { iss: @vardana_app.uid, sub: @vardana_app.uid,
+             aud: VardanaAuthWorld::VARDANA_TOKEN_AUD, jti: SecureRandom.uuid }
+  assertion = JWT.encode(claims, @vardana_key, "RS384", { kid: @vardana_jwk.kid, typ: "JWT" })
+  vardana_post_token(assertion, scope: "system/Patient.read")
+end
+
+When("the client requests a token with a signed assertion that expires {int} seconds from now") do |seconds|
+  vardana_post_token(vardana_assertion(exp: seconds.seconds.from_now.to_i),
+    scope: "system/Patient.read")
+end
+
+When("the client requests a token with an unsigned alg=none assertion") do
+  claims = { iss: @vardana_app.uid, sub: @vardana_app.uid, aud: VardanaAuthWorld::VARDANA_TOKEN_AUD,
+             exp: 4.minutes.from_now.to_i, jti: SecureRandom.uuid }
+  vardana_post_token(JWT.encode(claims, nil, "none"), scope: "system/Patient.read")
+end
+
+# Algorithm-confusion probe: sign with HMAC using the published RSA public
+# key PEM as the shared secret. A verifier that lets the token pick the
+# algorithm would validate this against the same key material.
+When("the client requests a token with an HMAC assertion keyed with the published RSA public key") do
+  claims = { iss: @vardana_app.uid, sub: @vardana_app.uid, aud: VardanaAuthWorld::VARDANA_TOKEN_AUD,
+             exp: 4.minutes.from_now.to_i, jti: SecureRandom.uuid }
+  assertion = JWT.encode(claims, @vardana_key.public_key.to_pem, "HS384", { kid: @vardana_jwk.kid })
+  vardana_post_token(assertion, scope: "system/Patient.read")
 end
 
 # --- Token response assertions ----------------------------------------------
@@ -186,4 +225,9 @@ end
 Then("the SMART configuration should list scope {string}") do |scope|
   config = JSON.parse(last_response.body)
   assert_includes Array(config["scopes_supported"]), scope
+end
+
+Then("the SMART configuration token endpoint should be {string}") do |url|
+  config = JSON.parse(last_response.body)
+  assert_equal url, config["token_endpoint"]
 end

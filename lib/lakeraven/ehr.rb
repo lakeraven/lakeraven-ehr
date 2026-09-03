@@ -10,6 +10,14 @@ module Lakeraven
     class Configuration
       attr_accessor :tenant_resolver, :facility_resolver, :eligibility_adapter
 
+      # Absolute URL of the OAuth token endpoint as published in
+      # .well-known/smart-configuration. When set, it is the ONLY audience
+      # accepted for backend-services client assertions — the expected aud is
+      # never derived from the incoming request (reverse-proxy Host mismatch
+      # would otherwise break clients, and a request-derived audience lets an
+      # assertion minted for one host be replayed against another).
+      attr_accessor :token_endpoint_url
+
       def initialize
         @tenant_resolver = ->(request) {
           value = request.headers["X-Tenant-Identifier"].to_s.strip

@@ -14,7 +14,7 @@ module Lakeraven
       def smart_configuration
         {
           authorization_endpoint: "#{base_url}oauth/authorize",
-          token_endpoint: "#{base_url}oauth/token",
+          token_endpoint: token_endpoint,
           userinfo_endpoint: "#{base_url}oauth/userinfo",
           jwks_uri: "#{base_url}.well-known/jwks.json",
           scopes_supported: supported_scopes,
@@ -29,6 +29,14 @@ module Lakeraven
 
       def base_url
         request.base_url + "/"
+      end
+
+      # Must match the audience BackendServicesController verifies client
+      # assertions against — the configured published URL when set, else the
+      # request-derived fallback (dev/test).
+      def token_endpoint
+        Lakeraven::EHR.configuration.token_endpoint_url.presence ||
+          "#{base_url}oauth/token"
       end
 
       def supported_scopes

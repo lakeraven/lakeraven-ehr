@@ -63,6 +63,65 @@ Feature: SMART Backend Services auth for server-to-server FHIR clients
     Then the response status should be 401
     And the response JSON should include error "invalid_client"
 
+  Scenario: A client with no organization binding cannot obtain a system token
+    Given a backend client "Example Unbound Connector" is registered with a published JWKS but no organization binding, with scopes "system/Patient.read"
+    When the client requests a token with a valid signed assertion and scope "system/Patient.read"
+    Then the response status should be 401
+    And the response JSON should include error "invalid_client"
+
+  Scenario: An assertion with no exp claim is rejected
+    Given a backend client "Example Org A Connector" is registered with a published JWKS and scopes "system/Patient.read"
+    When the client requests a token with a signed assertion that has no exp claim
+    Then the response status should be 401
+    And the response JSON should include error "invalid_client"
+
+  Scenario: An assertion expiring just past the five-minute cap is rejected
+    Given a backend client "Example Org A Connector" is registered with a published JWKS and scopes "system/Patient.read"
+    When the client requests a token with a signed assertion that expires 315 seconds from now
+    Then the response status should be 401
+    And the response JSON should include error "invalid_client"
+
+  Scenario: An assertion with a six-minute lifetime is rejected
+    Given a backend client "Example Org A Connector" is registered with a published JWKS and scopes "system/Patient.read"
+    When the client requests a token with a signed assertion that expires 360 seconds from now
+    Then the response status should be 401
+    And the response JSON should include error "invalid_client"
+
+  Scenario: An unsigned alg=none assertion is rejected
+    Given a backend client "Example Org A Connector" is registered with a published JWKS and scopes "system/Patient.read"
+    When the client requests a token with an unsigned alg=none assertion
+    Then the response status should be 401
+    And the response JSON should include error "invalid_client"
+
+  Scenario: An HMAC assertion keyed with the published RSA public key is rejected
+    Given a backend client "Example Org A Connector" is registered with a published JWKS and scopes "system/Patient.read"
+    When the client requests a token with an HMAC assertion keyed with the published RSA public key
+    Then the response status should be 401
+    And the response JSON should include error "invalid_client"
+
+  # --- Audience: the expected aud is the configured token endpoint URL, not
+  # whatever host the request arrived on (proxy mismatch / cross-host replay).
+
+  Scenario: With a configured token endpoint URL, that audience is accepted
+    Given a backend client "Example Org A Connector" is registered with a published JWKS and scopes "system/Patient.read"
+    And the server is configured with token endpoint URL "https://ehr.example.test/lakeraven-ehr/oauth/token"
+    When the client requests a token with a signed assertion for audience "https://ehr.example.test/lakeraven-ehr/oauth/token"
+    Then the response status should be 200
+    And the response JSON should include "access_token"
+
+  Scenario: With a configured token endpoint URL, the request-host audience is rejected
+    Given a backend client "Example Org A Connector" is registered with a published JWKS and scopes "system/Patient.read"
+    And the server is configured with token endpoint URL "https://ehr.example.test/lakeraven-ehr/oauth/token"
+    When the client requests a token with a valid signed assertion and scope "system/Patient.read"
+    Then the response status should be 401
+    And the response JSON should include error "invalid_client"
+
+  Scenario: SMART configuration advertises the configured token endpoint URL
+    Given the server is configured with token endpoint URL "https://ehr.example.test/lakeraven-ehr/oauth/token"
+    When I request GET "/lakeraven-ehr/.well-known/smart-configuration" without a Bearer token
+    Then the response status should be 200
+    And the SMART configuration token endpoint should be "https://ehr.example.test/lakeraven-ehr/oauth/token"
+
   # --- Conformance checklist item 2:
   # "Credential is scoped to one organisation and demonstrably cannot read another's patients"
 

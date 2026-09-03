@@ -7,6 +7,11 @@ Before("@vardana_auth") do
   if defined?(Lakeraven::EHR::AssertionReplayGuard)
     Lakeraven::EHR::AssertionReplayGuard.reset!
   end
+  Lakeraven::EHR.configuration.token_endpoint_url = nil
   @fhir_headers = nil
   @response_json = nil
+end
+
+After("@vardana_auth") do
+  Lakeraven::EHR.configuration.token_endpoint_url = nil
 end

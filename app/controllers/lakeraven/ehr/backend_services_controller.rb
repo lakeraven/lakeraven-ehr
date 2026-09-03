@@ -16,8 +16,13 @@ module Lakeraven
       ALLOWED_ALGORITHMS = %w[RS384 RS256 ES384].freeze
       TOKEN_LIFETIME = 5.minutes
       # SMART Backend Services: assertion exp SHALL be no more than five
-      # minutes in the future (small allowance for clock skew).
-      MAX_ASSERTION_LIFETIME = 5.minutes + 30.seconds
+      # minutes in the future — a hard cap, with no skew allowance on top
+      # (an earlier +30s allowance exceeded the spec ceiling).
+      MAX_ASSERTION_LIFETIME = 5.minutes
+      # Every claim the verifier relies on must be present; JWT.decode
+      # otherwise treats a MISSING exp as "never expires" (nil.to_i == 0
+      # passes the max-lifetime check), yielding a replayable assertion.
+      REQUIRED_CLAIMS = %w[iss sub aud exp jti].freeze
 
       def token
         unless params[:grant_type] == "client_credentials"
@@ -44,6 +49,14 @@ module Lakeraven
 
         claims = verify_assertion!(assertion, app)
         return unless claims
+
+        # The organization binding is what scopes every FHIR read a system/
+        # token makes; an unbound credential would read every organization's
+        # patients (fail-open), so it must never be minted at all.
+        if app.organization_id.blank?
+          return render_token_error("invalid_client",
+            description: "Client is not bound to an organization", status: :unauthorized)
+        end
 
         scopes = granted_scopes(app)
         if scopes.empty?
@@ -91,7 +104,8 @@ module Lakeraven
           algorithms: ALLOWED_ALGORITHMS,
           jwks: JWT::JWK::Set.new(jwks),
           verify_aud: true,
-          aud: token_endpoint_url
+          aud: token_endpoint_url,
+          required_claims: REQUIRED_CLAIMS
         )
 
         unless claims["iss"] == app.uid && claims["sub"] == app.uid
@@ -100,7 +114,10 @@ module Lakeraven
 
         exp = claims["exp"].to_i
         if exp > MAX_ASSERTION_LIFETIME.from_now.to_i
-          return render_invalid_client("Assertion exp too far in the future")
+          return render_invalid_client("Assertion exp exceeds the five-minute maximum")
+        end
+        if claims["iat"].present? && exp - claims["iat"].to_i > MAX_ASSERTION_LIFETIME.to_i
+          return render_invalid_client("Assertion lifetime exceeds the five-minute maximum")
         end
 
         jti = claims["jti"].to_s
@@ -141,8 +158,15 @@ module Lakeraven
         end
       end
 
+      # The expected assertion audience. When the deployment configures its
+      # published token endpoint URL (the value .well-known/smart-configuration
+      # advertises), that is the ONLY accepted audience — never the incoming
+      # request's Host, which a reverse proxy rewrites and a cross-host replay
+      # controls. The request-derived value is only a fallback for
+      # unconfigured (dev/test) deployments.
       def token_endpoint_url
-        request.base_url + request.path
+        Lakeraven::EHR.configuration.token_endpoint_url.presence ||
+          request.base_url + request.path
       end
 
       def render_invalid_client(description)
