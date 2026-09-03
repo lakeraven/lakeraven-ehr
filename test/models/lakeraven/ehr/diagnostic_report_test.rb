@@ -188,6 +188,52 @@ module Lakeraven
       test "persisted? false when ien blank" do
         refute DiagnosticReport.new(patient_dfn: "1", code_display: "CBC").persisted?
       end
+
+      # -- Wire mapping (ORWLRR REPORT LIST) -----------------------------------
+
+      test "from_report_hashes maps report rows to LAB reports" do
+        reports = DiagnosticReport.from_report_hashes([ {
+          ien: 90011, report_name: "Hemoglobin A1c", loinc_code: "4548-4",
+          status: "final", collection_date: DateTime.new(2026, 8, 12, 8, 0, 0),
+          result_date: DateTime.new(2026, 8, 12, 15, 0, 0),
+          verifier_duz: "501", verifier_name: "PROVIDER,DEMO",
+          result_iens: "lab-1-hba1c,lab-1-glucose", interpretation: "Above goal"
+        } ], patient_dfn: 1)
+
+        dr = reports.first
+        assert_equal "90011", dr.ien
+        assert_equal "1", dr.patient_dfn
+        assert_equal "LAB", dr.category
+        assert_equal "4548-4", dr.code
+        assert_equal "final", dr.status
+        assert_equal "Above goal", dr.conclusion
+
+        fhir = dr.to_fhir
+        assert_equal [ { reference: "Observation/lab-1-hba1c" },
+                       { reference: "Observation/lab-1-glucose" } ], fhir[:result]
+        assert fhir[:effectiveDateTime].start_with?("2026-08-12T08:00:00")
+        assert_equal "Above goal", fhir[:conclusion]
+        assert fhir[:issued].present?
+      end
+
+      test "from_report_hashes falls back to final for non-FHIR wire statuses" do
+        reports = DiagnosticReport.from_report_hashes(
+          [ { ien: 1, report_name: "CBC", loinc_code: "58410-2", status: "VERIFIED" } ],
+          patient_dfn: 1
+        )
+        assert_equal "final", reports.first.status
+      end
+
+      test "for_patient delegates to the gateway" do
+        original = DiagnosticReport.gateway
+        fake = Class.new do
+          def self.for_patient(_dfn) = [ { ien: 7, report_name: "CBC" } ]
+        end
+        DiagnosticReport.gateway = fake
+        assert_equal [ { ien: 7, report_name: "CBC" } ], DiagnosticReport.for_patient(1)
+      ensure
+        DiagnosticReport.gateway = original
+      end
     end
   end
 end

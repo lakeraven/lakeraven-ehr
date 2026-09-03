@@ -24,6 +24,11 @@ module Lakeraven
       }.freeze
 
       attribute :ien, :integer
+      # FHIR resource id (optional; mirrors Provenance#fhir_id). Set when the
+      # encounter has no numeric IEN — appointment-derived encounters carry a
+      # deterministic derived id, fixture encounters a seeded one — so
+      # ids/fullUrls stay stable across requests. Wins over `ien` in to_fhir.
+      attribute :fhir_id, :string
       attribute :status, :string
       attribute :class_code, :string
       attribute :period_start, :datetime
@@ -57,6 +62,47 @@ module Lakeraven
       def self.for_patient(dfn)
         gateway.for_patient(dfn)
       end
+
+      # RPMS appointment external statuses (ORWPT APPTLST piece 4) to FHIR
+      # Encounter.status. Unrecognized wire statuses map to "unknown" (a
+      # legal FHIR code) rather than being invented.
+      APPOINTMENT_STATUS_MAP = {
+        "FUTURE" => "planned",
+        "SCHEDULED" => "planned",
+        "CHECKED IN" => "arrived",
+        "CHECKED OUT" => "finished",
+        "INPATIENT" => "in-progress",
+        "NO-SHOW" => "cancelled",
+        "NO SHOW" => "cancelled",
+        "CANCELLED" => "cancelled"
+      }.freeze
+
+      # Build Encounter instances from raw ORWPT APPTLST appointment hashes
+      # ({ datetime:, location_ien:, location:, status: }).
+      #
+      # The wire carries no IEN, so the id derives DETERMINISTICALLY from
+      # dfn + appointment timestamp (mirroring Observation.vital_id) — never
+      # a random uuid. Clinic appointments are ambulatory (class AMB).
+      def self.from_appointment_hashes(hashes, patient_dfn:)
+        Array(hashes).map do |h|
+          new(
+            fhir_id: appointment_id(patient_dfn, h),
+            patient_identifier: patient_dfn.to_s,
+            status: APPOINTMENT_STATUS_MAP[h[:status].to_s.upcase] || "unknown",
+            class_code: "AMB",
+            period_start: h[:datetime],
+            location_ien: h[:location_ien]
+          )
+        end
+      end
+
+      def self.appointment_id(patient_dfn, hash)
+        id = "appt-#{patient_dfn}"
+        datetime = hash[:datetime]
+        id += "-#{datetime.strftime('%Y%m%d%H%M')}" if datetime.respond_to?(:strftime)
+        id
+      end
+      private_class_method :appointment_id
 
       # -- Display helpers ---------------------------------------------------
 
@@ -122,7 +168,8 @@ module Lakeraven
           class: { system: ACT_CODE_SYSTEM, code: class_code, display: class_display }
         }
 
-        resource[:id] = ien.to_s if ien
+        resource[:id] = fhir_id.presence || ien&.to_s
+        resource.delete(:id) if resource[:id].blank?
         resource[:period] = build_period if period_start || period_end
         # Omit `coding` (never emit "code": null) when only display text exists.
         resource[:type] = [ { text: type_display, coding: type_code ? [ { code: type_code } ] : nil }.compact ] if type_display

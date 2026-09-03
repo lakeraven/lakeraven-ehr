@@ -2,7 +2,7 @@
 
 module Lakeraven
   module EHR
-    class AllergyIntolerancesController < ApplicationController
+    class CarePlansController < ApplicationController
       # Org-bound credentials: authorization binds to the patient RESOLVED
       # from ?patient=, at the result level (SmartAuthentication).
       organization_scope :resolved_patient, only: :index, dfn_param: :patient
@@ -10,13 +10,16 @@ module Lakeraven
 
       def index
         dfn = extract_patient_dfn(params[:patient])
-        allergies = AllergyIntolerance.from_rpc_hashes(AllergyIntolerance.for_patient(dfn), patient_dfn: dfn)
-        allergies += Lakeraven::EHR.configuration.supplemental_allergy_intolerances_for(dfn)
-        render_bundle(allergies.map(&:to_fhir))
+        care_plans = CarePlan.from_rpc_hashes(CarePlan.for_patient(dfn), patient_dfn: dfn)
+        if params[:status].present?
+          statuses = params[:status].split(",")
+          care_plans = care_plans.select { |cp| statuses.include?(cp.status) }
+        end
+        render_bundle(care_plans.map(&:to_fhir))
       end
 
       def show
-        render_not_found("AllergyIntolerance", params[:id])
+        render_not_found("CarePlan", params[:id])
       end
 
       private

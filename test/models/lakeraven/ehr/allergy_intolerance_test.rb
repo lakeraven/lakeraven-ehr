@@ -144,8 +144,41 @@ module Lakeraven
           patient_dfn: "100", allergen: "Bee Stings", criticality: "high"
         )
         fhir = ai.to_fhir
-        # criticality may or may not be in to_fhir depending on implementation
-        assert_equal "AllergyIntolerance", fhir[:resourceType]
+        assert_equal "high", fhir[:criticality]
+      end
+
+      test "to_fhir omits criticality when absent or not a legal code" do
+        refute AllergyIntolerance.new(patient_dfn: "100", allergen: "X").to_fhir.key?(:criticality)
+        refute AllergyIntolerance.new(patient_dfn: "100", allergen: "X", criticality: "SEVERE!")
+          .to_fhir.key?(:criticality)
+      end
+
+      test "to_fhir includes an RxNorm coding when allergen_code present" do
+        ai = AllergyIntolerance.new(
+          patient_dfn: "100", allergen: "Penicillin G", allergen_code: "7980"
+        )
+        coding = ai.to_fhir.dig(:code, :coding, 0)
+        assert_equal "http://www.nlm.nih.gov/research/umls/rxnorm", coding[:system]
+        assert_equal "7980", coding[:code]
+        assert_equal "Penicillin G", coding[:display]
+      end
+
+      test "to_fhir omits coding when no allergen_code" do
+        refute AllergyIntolerance.new(patient_dfn: "100", allergen: "Latex").to_fhir[:code].key?(:coding)
+      end
+
+      # -- Wire mapping (ORQQAL LIST) ------------------------------------------
+
+      test "from_rpc_hashes builds models with deterministic ids" do
+        allergies = AllergyIntolerance.from_rpc_hashes(
+          [ { allergen: "PENICILLIN G", reaction: "Hives", severity: "Moderate" } ],
+          patient_dfn: 100
+        )
+        ai = allergies.first
+        assert_equal "allergy-100-penicillin-g", ai.ien
+        assert_equal "100", ai.patient_dfn
+        assert_equal "active", ai.clinical_status
+        assert_equal "moderate", ai.to_fhir[:reaction].first[:severity]
       end
     end
   end

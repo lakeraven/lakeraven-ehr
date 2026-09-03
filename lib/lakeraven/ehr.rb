@@ -31,6 +31,19 @@ module Lakeraven
         Array(supplemental_observations_provider&.call(dfn.to_s))
       end
 
+      # Optional provider of additional AllergyIntolerance model instances
+      # for a patient (callable, dfn -> [AllergyIntolerance]), mirroring
+      # supplemental_observations_provider. The live RPC path (ORQQAL LIST)
+      # carries only allergen/reaction/severity; a deployment that can
+      # source coded, criticality-bearing allergies (e.g. a
+      # synthetic-sandbox fixture set) plugs them in here and they are
+      # served through the same AllergyIntolerance serializer.
+      attr_accessor :supplemental_allergy_intolerances_provider
+
+      def supplemental_allergy_intolerances_for(dfn)
+        Array(supplemental_allergy_intolerances_provider&.call(dfn.to_s))
+      end
+
       def initialize
         @tenant_resolver = ->(request) {
           value = request.headers["X-Tenant-Identifier"].to_s.strip

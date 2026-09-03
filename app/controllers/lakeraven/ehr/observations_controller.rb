@@ -3,6 +3,8 @@
 module Lakeraven
   module EHR
     class ObservationsController < ApplicationController
+      include FHIRDateSearch
+
       # Org-bound credentials: authorization binds to the patient RESOLVED
       # from ?patient=, at the result level (SmartAuthentication).
       organization_scope :resolved_patient, only: :index, dfn_param: :patient
@@ -45,53 +47,15 @@ module Lakeraven
           codes = params[:code].split(",")
           observations = observations.select { |o| codes.include?(o.code) }
         end
-        filter_by_date(observations)
-      end
-
-      # FHIR date search parameter (Vardana profile section 4:
-      # `date=ge{date}`). Supports the comparison prefixes on
-      # effectiveDateTime; repeated date params AND together.
-      DATE_PREFIXES = %w[ge le gt lt eq].freeze
-
-      def filter_by_date(observations)
-        Array(params[:date]).each do |expression|
-          prefix = DATE_PREFIXES.find { |p| expression.start_with?(p) } || "eq"
-          boundary = parse_search_date(expression.delete_prefix(prefix))
-          next unless boundary
-
-          observations = observations.select do |o|
-            date = o.effective_datetime&.to_date
-            date && date_matches?(date, prefix, boundary)
-          end
-        end
-        observations
-      end
-
-      def parse_search_date(value)
-        Date.parse(value)
-      rescue ArgumentError, TypeError
-        nil
-      end
-
-      def date_matches?(date, prefix, boundary)
-        case prefix
-        when "ge" then date >= boundary
-        when "le" then date <= boundary
-        when "gt" then date > boundary
-        when "lt" then date < boundary
-        else date == boundary
-        end
+        # FHIR date search parameter (Vardana profile section 4:
+        # `date=ge{date}`) on effectiveDateTime — see FHIRDateSearch.
+        filter_by_fhir_date(observations, &:effective_datetime)
       end
 
       # `_sort=date` / `_sort=-date` on effectiveDateTime; observations
       # without one sort last either way.
       def sort_observations(observations)
-        return observations unless %w[date -date].include?(params[:_sort])
-
-        sorted, undated = observations.partition { |o| o.effective_datetime.present? }
-        sorted = sorted.sort_by(&:effective_datetime)
-        sorted = sorted.reverse if params[:_sort] == "-date"
-        sorted + undated
+        sort_by_fhir_date(observations, &:effective_datetime)
       end
 
       # `_revinclude=Provenance:target` (US Core's mechanism for provenance,

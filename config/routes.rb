@@ -20,8 +20,11 @@ Lakeraven::EHR::Engine.routes.draw do
   resources :allergy_intolerances, path: "AllergyIntolerance", only: %i[index show]
   resources :conditions, path: "Condition", only: %i[index show]
   resources :medication_requests, path: "MedicationRequest", only: %i[index show]
+  resources :medications, path: "Medication", only: %i[index show]
   resources :observations, path: "Observation", only: %i[index show]
-  resources :encounters, path: "Encounter", only: %i[index]
+  resources :diagnostic_reports, path: "DiagnosticReport", only: %i[index show]
+  resources :care_plans, path: "CarePlan", only: %i[index show]
+  resources :encounters, path: "Encounter", only: %i[index show]
   resources :organizations, path: "Organization", only: %i[show], param: :ien
   resources :locations, path: "Location", only: %i[show], param: :ien
   resources :service_requests, path: "ServiceRequest", only: %i[index]

@@ -156,6 +156,82 @@ module Lakeraven
         get "/lakeraven-ehr/Encounter", params: { patient: "1" }
         assert_equal "application/fhir+json", response.media_type
       end
+
+      # -- Store-backed encounters: show, date search, sort ----------------------
+
+      def seed_store_encounters
+        EncounterStore.instance.add(Encounter.new(
+          fhir_id: "enc-1-1", patient_identifier: "1", status: "finished",
+          class_code: "AMB", period_start: DateTime.new(2026, 8, 12, 9, 0, 0),
+          practitioner_identifier: "101",
+          reason_code: "E11.9", reason_display: "Type 2 diabetes follow-up"
+        ))
+        EncounterStore.instance.add(Encounter.new(
+          fhir_id: "enc-1-2", patient_identifier: "1", status: "finished",
+          class_code: "AMB", period_start: DateTime.new(2026, 2, 10, 9, 0, 0)
+        ))
+      end
+
+      test "index serves store-backed encounters with class, period, participant, reasonCode" do
+        seed_store_encounters
+        get "/lakeraven-ehr/Encounter", params: { patient: "1" }, headers: @headers
+        body = JSON.parse(response.body)
+        enc = body["entry"].map { |e| e["resource"] }.find { |r| r["id"] == "enc-1-1" }
+        assert_equal "AMB", enc.dig("class", "code")
+        assert enc.dig("period", "start").start_with?("2026-08-12")
+        assert_equal "Practitioner/101", enc.dig("participant", 0, "individual", "reference")
+        assert_equal "Type 2 diabetes follow-up", enc.dig("reasonCode", 0, "text")
+      ensure
+        EncounterStore.reset_instance!
+      end
+
+      test "date=ge filter and _sort=-date order on period.start" do
+        seed_store_encounters
+        get "/lakeraven-ehr/Encounter",
+          params: { patient: "1", date: "ge2026-08-01", _sort: "-date" }, headers: @headers
+        body = JSON.parse(response.body)
+        assert_equal [ "enc-1-1" ], body["entry"].map { |e| e.dig("resource", "id") }
+
+        get "/lakeraven-ehr/Encounter", params: { patient: "1", _sort: "-date" }, headers: @headers
+        ids = JSON.parse(response.body)["entry"].map { |e| e.dig("resource", "id") }
+        assert_equal "enc-1-1", ids.first
+      ensure
+        EncounterStore.reset_instance!
+      end
+
+      test "show returns a store-backed encounter" do
+        seed_store_encounters
+        get "/lakeraven-ehr/Encounter/enc-1-1", headers: @headers
+        assert_response :ok
+        body = JSON.parse(response.body)
+        assert_equal "Encounter", body["resourceType"]
+        assert_equal "enc-1-1", body["id"]
+      ensure
+        EncounterStore.reset_instance!
+      end
+
+      test "show returns 404 for an unknown encounter" do
+        get "/lakeraven-ehr/Encounter/enc-404", headers: @headers
+        assert_response :not_found
+        assert_equal "OperationOutcome", JSON.parse(response.body)["resourceType"]
+      end
+
+      test "org-bound credential reads its own patient's encounter but not a foreign one" do
+        seed_store_encounters
+        EncounterStore.instance.add(Encounter.new(
+          fhir_id: "enc-foreign", patient_identifier: "999999", status: "finished", class_code: "AMB"
+        ))
+        teardown_smart_auth
+        setup_smart_auth(scopes: "system/Encounter.read")
+
+        get "/lakeraven-ehr/Encounter/enc-1-1", headers: @headers
+        assert_response :ok
+
+        get "/lakeraven-ehr/Encounter/enc-foreign", headers: @headers
+        assert_response :forbidden
+      ensure
+        EncounterStore.reset_instance!
+      end
     end
   end
 end

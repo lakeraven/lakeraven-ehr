@@ -352,6 +352,61 @@ module Lakeraven
         assert_equal "in-progress", parsed.status
         assert_equal "EMER", parsed.class_code
       end
+
+      # =============================================================================
+      # FHIR ID + APPOINTMENT WIRE MAPPING (ORWPT APPTLST)
+      # =============================================================================
+
+      test "to_fhir prefers fhir_id over ien" do
+        enc = Encounter.new(fhir_id: "enc-9001-1", ien: 42, status: "finished", class_code: "AMB")
+        assert_equal "enc-9001-1", enc.to_fhir[:id]
+      end
+
+      test "to_fhir keeps ien as id when no fhir_id" do
+        enc = Encounter.new(ien: 42, status: "finished", class_code: "AMB")
+        assert_equal "42", enc.to_fhir[:id]
+      end
+
+      test "from_appointment_hashes derives deterministic ids and maps statuses" do
+        encounters = Encounter.from_appointment_hashes([ {
+          datetime: DateTime.new(2026, 8, 12, 9, 0, 0), location_ien: 1,
+          location: "Primary Care Clinic", status: "CHECKED OUT"
+        } ], patient_dfn: 9001)
+
+        enc = encounters.first
+        assert_equal "appt-9001-202608120900", enc.fhir_id
+        assert_equal "finished", enc.status
+        assert_equal "AMB", enc.class_code
+        assert_equal "9001", enc.patient_identifier
+        assert enc.valid?
+      end
+
+      test "from_appointment_hashes maps unrecognized statuses to unknown" do
+        encounters = Encounter.from_appointment_hashes(
+          [ { datetime: DateTime.new(2026, 8, 12, 9, 0, 0), status: "MYSTERY" } ],
+          patient_dfn: 1
+        )
+        assert_equal "unknown", encounters.first.status
+      end
+    end
+
+    class EncounterStoreTest < ActiveSupport::TestCase
+      teardown { EncounterStore.reset_instance! }
+
+      test "for_patient matches on patient_identifier or patient_dfn" do
+        EncounterStore.instance.add(Encounter.new(fhir_id: "enc-1", patient_identifier: "9001",
+                                                  status: "finished", class_code: "AMB"))
+        EncounterStore.instance.add(Encounter.new(fhir_id: "enc-2", patient_dfn: 9002,
+                                                  status: "finished", class_code: "AMB"))
+        assert_equal [ "enc-1" ], EncounterStore.instance.for_patient("9001").map(&:fhir_id)
+        assert_equal [ "enc-2" ], EncounterStore.instance.for_patient(9002).map(&:fhir_id)
+      end
+
+      test "find matches fhir_id" do
+        EncounterStore.instance.add(Encounter.new(fhir_id: "enc-1", status: "finished", class_code: "AMB"))
+        assert_equal "enc-1", EncounterStore.instance.find("enc-1").fhir_id
+        assert_nil EncounterStore.instance.find("enc-404")
+      end
     end
   end
 end

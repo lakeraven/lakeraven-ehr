@@ -142,6 +142,57 @@ module Lakeraven
       test "persisted? false when ien blank" do
         refute CarePlan.new(patient_dfn: "1").persisted?
       end
+
+      # -- Wire mapping (ORQQCP LIST) ------------------------------------------
+
+      test "from_rpc_hashes maps care plan rows and splits activities" do
+        plans = CarePlan.from_rpc_hashes([ {
+          ien: "cp-1", title: "Type 2 diabetes management plan",
+          status: "active", intent: "plan", category: "assess-plan",
+          start_date: Date.new(2026, 2, 1), end_date: nil,
+          author_duz: "501", author_name: "PROVIDER,DEMO",
+          activity: "Metformin 500mg BID; Quarterly HbA1c;  ",
+          description: "Comprehensive diabetes care"
+        } ], patient_dfn: 100)
+
+        cp = plans.first
+        assert_equal "cp-1", cp.ien
+        assert_equal "100", cp.patient_dfn
+        assert_equal [ "Metformin 500mg BID", "Quarterly HbA1c" ], cp.activities
+        assert cp.valid?
+      end
+
+      test "to_fhir emits activity details with the required status binding" do
+        cp = CarePlan.new(
+          ien: "cp-1", patient_dfn: "100", status: "active",
+          activities: [ "Quarterly HbA1c", "Annual eye exam" ]
+        )
+        fhir = cp.to_fhir
+        assert_equal 2, fhir[:activity].length
+        assert_equal "in-progress", fhir.dig(:activity, 0, :detail, :status)
+        assert_equal "Quarterly HbA1c", fhir.dig(:activity, 0, :detail, :description)
+      end
+
+      test "to_fhir maps completed plan status to completed activity status" do
+        cp = CarePlan.new(ien: "cp-1", patient_dfn: "100", status: "completed", activities: [ "X" ])
+        assert_equal "completed", cp.to_fhir.dig(:activity, 0, :detail, :status)
+      end
+
+      test "to_fhir omits activity when there are none (FHIR forbids empty arrays)" do
+        refute CarePlan.new(ien: "cp-1", patient_dfn: "100").to_fhir.key?(:activity)
+        refute CarePlan.new(ien: "cp-1", patient_dfn: "100", activities: []).to_fhir.key?(:activity)
+      end
+
+      test "for_patient delegates to the gateway" do
+        original = CarePlan.gateway
+        fake = Class.new do
+          def self.for_patient(_dfn) = [ { ien: "cp-9", title: "Plan" } ]
+        end
+        CarePlan.gateway = fake
+        assert_equal [ { ien: "cp-9", title: "Plan" } ], CarePlan.for_patient(1)
+      ensure
+        CarePlan.gateway = original
+      end
     end
   end
 end

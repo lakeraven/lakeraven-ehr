@@ -36,6 +36,53 @@ module Lakeraven
       validates :status, inclusion: { in: VALID_STATUSES }
       validates :category, inclusion: { in: VALID_CATEGORIES }, allow_nil: true
 
+      # -- Gateway DI -----------------------------------------------------------
+
+      class << self
+        attr_writer :gateway
+
+        def gateway
+          @gateway || DiagnosticReportGateway
+        end
+      end
+
+      def self.for_patient(dfn)
+        gateway.for_patient(dfn)
+      end
+
+      def self.resource_class
+        "DiagnosticReport"
+      end
+
+      # Build DiagnosticReport instances from raw ORWLRR REPORT LIST hashes
+      # ({ ien:, report_name:, loinc_code:, status:, collection_date:,
+      #    result_date:, verifier_duz:, verifier_name:, result_iens:,
+      #    interpretation: }).
+      #
+      # Wire statuses pass through when they are already legal FHIR codes;
+      # anything else falls back to "final" (the RPC API layer defaults blank
+      # statuses to "final" too). result_iens is the comma-separated list of
+      # Observation ids the panel aggregates.
+      def self.from_report_hashes(hashes, patient_dfn:)
+        Array(hashes).map do |h|
+          wire_status = h[:status].to_s.downcase
+          new(
+            ien: h[:ien]&.to_s,
+            patient_dfn: patient_dfn.to_s,
+            category: CATEGORY_LAB,
+            code: h[:loinc_code],
+            code_display: h[:report_name],
+            status: VALID_STATUSES.include?(wire_status) ? wire_status : "final",
+            effective_datetime: h[:collection_date],
+            issued: h[:result_date],
+            performer_duz: h[:verifier_duz],
+            performer_name: h[:verifier_name],
+            conclusion: h[:interpretation],
+            result_iens: h[:result_iens]
+          )
+        end
+      end
+
       def final? = status == "final"
       def persisted? = ien.present?
 
@@ -48,6 +95,7 @@ module Lakeraven
           code: build_code,
           subject: patient_dfn ? { reference: "Patient/#{patient_dfn}" } : nil,
           effectiveDateTime: effective_datetime&.iso8601,
+          issued: issued&.iso8601,
           performer: build_performer,
           result: build_results,
           conclusion: conclusion,
