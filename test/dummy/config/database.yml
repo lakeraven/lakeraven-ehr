@@ -2,6 +2,14 @@ default: &default
   adapter: postgresql
   encoding: unicode
   pool: 5
+  # The engine's migrations are this app's migrations. Declared on the
+  # database config so the connection pool's migration context agrees with
+  # the rake tasks: on a fresh database, db:migrate's schema-initialize
+  # path and maintain_test_schema!'s assume_migrated_upto_version otherwise
+  # record only the schema's top version and abort with "pending" engine
+  # migrations (the root Rakefile's engine.rake only informs rake, not the
+  # pool).
+  migrations_paths: <%= File.expand_path("../../../db/migrate", __dir__) %>
 
 development:
   <<: *default
