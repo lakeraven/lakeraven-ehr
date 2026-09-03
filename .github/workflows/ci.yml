@@ -44,3 +44,33 @@ jobs:
           bundler-cache: true
       - run: bundle exec rails db:create db:migrate
       - run: bundle exec rails test
+
+  security-bdd:
+    name: Security BDD (auth conformance)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    env:
+      RAILS_ENV: test
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/lakeraven_ehr_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+          bundler-cache: true
+      - run: bundle exec rails db:create db:migrate
+      # The SMART Backend Services auth + per-organization isolation
+      # scenarios are a merge gate: signature/claims verification, replay,
+      # JWKS transport, and cross-organization denial must stay green.
+      - run: bundle exec cucumber --publish-quiet features/vardana_backend_services_auth.feature features/onc/backend_services_auth.feature
