@@ -69,6 +69,29 @@ Feature: SMART Backend Services auth for server-to-server FHIR clients
     Then the response status should be 401
     And the response JSON should include error "invalid_client"
 
+  # Refusing issuance is not enough: a token whose application carries no
+  # organization binding (registered before binding became mandatory, minted
+  # through another flow, or whose binding was later blanked — the column is
+  # nullable for interactive apps) must ALSO be denied at the authorization
+  # layer. Fail closed: an org-bound-absent system credential reads NOTHING.
+  # (Independent security review finding on the fail-open nil-org path.)
+
+  Scenario: A system token whose application has no organization binding reads nothing
+    Given a backend client with no organization binding holds a directly minted token with scope "system/*.read"
+    And patient 900001 is managed by organization "rpms-organization-202"
+    When I request GET "/lakeraven-ehr/Patient/900001" with the Bearer token
+    Then the response status should be 403
+    And the response should be a FHIR OperationOutcome with code "forbidden"
+
+  Scenario: An unbound system token is denied even on searches and non-clinical reads
+    Given a backend client with no organization binding holds a directly minted token with scope "system/*.read"
+    When I request GET "/lakeraven-ehr/Patient?name=DEMO" with the Bearer token
+    Then the response status should be 403
+    When I request GET "/lakeraven-ehr/Observation?patient=900001" with the Bearer token
+    Then the response status should be 403
+    When I request GET "/lakeraven-ehr/ValueSet" with the Bearer token
+    Then the response status should be 403
+
   Scenario: An assertion with no exp claim is rejected
     Given a backend client "Example Org A Connector" is registered with a published JWKS and scopes "system/Patient.read"
     When the client requests a token with a signed assertion that has no exp claim
@@ -114,6 +137,42 @@ Feature: SMART Backend Services auth for server-to-server FHIR clients
   @webmock
   Scenario: A JWKS host that resolves to a private address is not fetched
     Given a backend client whose registered JWKS host resolves to "10.0.0.5"
+    When the client requests a token with a valid signed assertion and scope "system/Patient.read"
+    Then the response status should be 401
+    And the response JSON should include error "invalid_client"
+
+  # Special-use ranges that are not loopback/private/link-local but are still
+  # not publicly routable client infrastructure: carrier-grade NAT
+  # (100.64.0.0/10), benchmarking (198.18.0.0/15), multicast (224.0.0.0/4,
+  # ff00::/8), and reserved/broadcast (240.0.0.0/4). (Independent security
+  # review finding: these fell through the earlier public-address check.)
+
+  Scenario: A carrier-grade NAT JWKS URL cannot be registered
+    Then registering a backend client with jwks_uri "https://100.64.0.5/jwks.json" is rejected
+
+  Scenario: A benchmarking-range JWKS URL cannot be registered
+    Then registering a backend client with jwks_uri "https://198.18.0.5/jwks.json" is rejected
+
+  Scenario: A multicast JWKS URL cannot be registered
+    Then registering a backend client with jwks_uri "https://224.0.0.1/jwks.json" is rejected
+
+  @webmock
+  Scenario: A JWKS host that resolves to a carrier-grade NAT address is not fetched
+    Given a backend client whose registered JWKS host resolves to "100.64.0.5"
+    When the client requests a token with a valid signed assertion and scope "system/Patient.read"
+    Then the response status should be 401
+    And the response JSON should include error "invalid_client"
+
+  @webmock
+  Scenario: A JWKS host that resolves to a benchmarking-range address is not fetched
+    Given a backend client whose registered JWKS host resolves to "198.18.0.5"
+    When the client requests a token with a valid signed assertion and scope "system/Patient.read"
+    Then the response status should be 401
+    And the response JSON should include error "invalid_client"
+
+  @webmock
+  Scenario: A JWKS host that resolves to a multicast address is not fetched
+    Given a backend client whose registered JWKS host resolves to "224.0.0.1"
     When the client requests a token with a valid signed assertion and scope "system/Patient.read"
     Then the response status should be 401
     And the response JSON should include error "invalid_client"

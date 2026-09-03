@@ -8,7 +8,7 @@ module Lakeraven
       include SmartAuthTestHelper
 
       setup do
-        setup_smart_auth
+        setup_internal_smart_auth
       end
 
       teardown do
@@ -98,7 +98,8 @@ module Lakeraven
       test "system/Encounter.read scope grants access" do
         app = Doorkeeper::Application.create!(
           name: "encounter-read", redirect_uri: "https://example.test/callback",
-          scopes: "system/Encounter.read", confidential: true
+          scopes: "system/Encounter.read", confidential: true,
+          organization_id: "rpms-organization-7819"
         )
         token = Doorkeeper::AccessToken.create!(application: app, scopes: "system/Encounter.read", expires_in: 3600)
         get "/lakeraven-ehr/Encounter", params: { patient: "1" },

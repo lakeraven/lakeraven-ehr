@@ -42,7 +42,11 @@ jobs:
         with:
           ruby-version: "3.4"
           bundler-cache: true
-      - run: bundle exec rails db:create db:migrate
+      # db:create and db:migrate must be SEPARATE invocations: combined in
+      # one process with DATABASE_URL set, db:migrate silently applies no
+      # engine migrations and later boots fail with pending migrations.
+      - run: bundle exec rails db:create
+      - run: bundle exec rails db:migrate
       - run: bundle exec rails test
 
   security-bdd:
@@ -69,7 +73,11 @@ jobs:
         with:
           ruby-version: "3.4"
           bundler-cache: true
-      - run: bundle exec rails db:create db:migrate
+      # db:create and db:migrate must be SEPARATE invocations: combined in
+      # one process with DATABASE_URL set, db:migrate silently applies no
+      # engine migrations and cucumber then fails with pending migrations.
+      - run: bundle exec rails db:create
+      - run: bundle exec rails db:migrate
       # The SMART Backend Services auth + per-organization isolation
       # scenarios are a merge gate: signature/claims verification, replay,
       # JWKS transport, and cross-organization denial must stay green.

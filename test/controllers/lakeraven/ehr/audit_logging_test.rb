@@ -9,7 +9,7 @@ module Lakeraven
 
       setup do
         AuditEvent.delete_all
-        setup_smart_auth(scopes: "system/Patient.read")
+        setup_internal_smart_auth(scopes: "user/Patient.read")
       end
 
       teardown do

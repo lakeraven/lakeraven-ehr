@@ -18,6 +18,19 @@ module Lakeraven
       # assertion minted for one host be replayed against another).
       attr_accessor :token_endpoint_url
 
+      # Optional provider of additional Observation model instances for a
+      # patient (callable, dfn -> [Observation]). The live RPC vitals path
+      # (ORQQVI VITALS) only carries vital signs; a deployment that can
+      # source other observation types (e.g. laboratory results from a
+      # different backend, or a synthetic-sandbox fixture set) plugs them in
+      # here and they are served through the same Observation serializer and
+      # search filters.
+      attr_accessor :supplemental_observations_provider
+
+      def supplemental_observations_for(dfn)
+        Array(supplemental_observations_provider&.call(dfn.to_s))
+      end
+
       def initialize
         @tenant_resolver = ->(request) {
           value = request.headers["X-Tenant-Identifier"].to_s.strip

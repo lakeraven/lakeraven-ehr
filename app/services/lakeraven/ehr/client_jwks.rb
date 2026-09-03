@@ -105,13 +105,36 @@ module Lakeraven
           nil
         end
 
+        # Special-use ranges that are not loopback/private/link-local but are
+        # still never a client's public JWKS infrastructure: carrier-grade
+        # NAT (RFC 6598), benchmarking (RFC 2544), multicast, and
+        # reserved-for-future-use / broadcast (240.0.0.0/4 includes
+        # 255.255.255.255). (Independent security review finding: these fell
+        # through the earlier check.)
+        SPECIAL_USE_RANGES = [
+          IPAddr.new("100.64.0.0/10"),  # carrier-grade NAT
+          IPAddr.new("198.18.0.0/15"),  # benchmarking
+          IPAddr.new("224.0.0.0/4"),    # IPv4 multicast
+          IPAddr.new("240.0.0.0/4"),    # reserved + limited broadcast
+          IPAddr.new("ff00::/8")        # IPv6 multicast
+        ].freeze
+
         # Public = not loopback (127/8, ::1), not RFC1918/unique-local
         # (10/8, 172.16/12, 192.168/16, fc00::/7), not link-local
-        # (169.254/16, fe80::/10), not unspecified — with IPv4-mapped IPv6
-        # unwrapped first so ::ffff:10.0.0.5 cannot slip through.
+        # (169.254/16, fe80::/10), not unspecified, and not in a special-use
+        # range — with IPv4-mapped IPv6 unwrapped first so ::ffff:10.0.0.5
+        # cannot slip through.
         def public_address?(ip)
           ip = ip.native if ip.ipv4_mapped?
-          !(ip.loopback? || ip.private? || ip.link_local? || ip.to_i.zero?)
+          return false if ip.loopback? || ip.private? || ip.link_local? || ip.to_i.zero?
+
+          SPECIAL_USE_RANGES.none? { |range| address_in_range?(range, ip) }
+        end
+
+        def address_in_range?(range, ip)
+          range.include?(ip)
+        rescue IPAddr::InvalidAddressError
+          false # family mismatch (IPv4 range vs IPv6 address, or vice versa)
         end
       end
     end
