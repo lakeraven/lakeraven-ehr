@@ -99,6 +99,40 @@ Feature: SMART Backend Services auth for server-to-server FHIR clients
     Then the response status should be 401
     And the response JSON should include error "invalid_client"
 
+  # --- JWKS transport (SSRF / key-substitution hardening): keys are fetched
+  # only over HTTPS from public addresses, and a failed fetch is never cached.
+
+  Scenario: A plain-HTTP JWKS URL cannot be registered
+    Then registering a backend client with jwks_uri "http://client.example.test/jwks.json" is rejected
+
+  Scenario: A private-address JWKS URL cannot be registered
+    Then registering a backend client with jwks_uri "https://192.168.0.10/jwks.json" is rejected
+
+  Scenario: A loopback JWKS URL cannot be registered
+    Then registering a backend client with jwks_uri "https://127.0.0.1/jwks.json" is rejected
+
+  @webmock
+  Scenario: A JWKS host that resolves to a private address is not fetched
+    Given a backend client whose registered JWKS host resolves to "10.0.0.5"
+    When the client requests a token with a valid signed assertion and scope "system/Patient.read"
+    Then the response status should be 401
+    And the response JSON should include error "invalid_client"
+
+  @webmock
+  Scenario: Assertions are verified against the JWKS actually fetched from the registered URL
+    Given a backend client whose published JWKS is served over HTTPS from a public address
+    When the client requests a token with a valid signed assertion and scope "system/Patient.read"
+    Then the response status should be 200
+    And the response JSON should include "access_token"
+
+  @webmock @jwks_cache
+  Scenario: A failed JWKS fetch is not cached as a lasting outage
+    Given a backend client whose published JWKS endpoint fails on the first fetch and succeeds afterwards
+    When the client requests a token with a valid signed assertion and scope "system/Patient.read"
+    Then the response status should be 401
+    When the client requests a token with a valid signed assertion and scope "system/Patient.read"
+    Then the response status should be 200
+
   # --- Audience: the expected aud is the configured token endpoint URL, not
   # whatever host the request arrived on (proxy mismatch / cross-host replay).
 

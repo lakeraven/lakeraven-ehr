@@ -24,7 +24,8 @@ module VardanaAuthWorld
   # Registration defaults to an organization binding: the token endpoint
   # refuses to mint system/ tokens for unbound credentials (fail closed), so
   # only the explicit "no organization binding" scenario registers without one.
-  def vardana_register_client(name:, scopes:, organization_id: "rpms-organization-101", with_jwks: true)
+  def vardana_register_client(name:, scopes:, organization_id: "rpms-organization-101",
+                              with_jwks: true, stub_fetch: true)
     @vardana_key = OpenSSL::PKey::RSA.new(2048)
     @vardana_jwk = JWT::JWK.new(@vardana_key)
     @vardana_app = Doorkeeper::Application.create!(
@@ -35,9 +36,18 @@ module VardanaAuthWorld
       jwks_uri: with_jwks ? "https://client.example.test/.well-known/jwks.json" : nil,
       organization_id: organization_id
     )
-    return unless with_jwks
+    return unless with_jwks && stub_fetch
 
     stub_gateway(Lakeraven::EHR::ClientJwks, :fetch, { keys: [ @vardana_jwk.export ] })
+  end
+
+  # Substitute DNS resolution for JWKS transport scenarios (@webmock stubs the
+  # HTTP layer; this stubs name resolution so the SSRF address checks run
+  # against controlled answers).
+  def vardana_stub_resolver(mapping)
+    fake = Object.new
+    fake.define_singleton_method(:getaddresses) { |host| Array(mapping[host]) }
+    Lakeraven::EHR::ClientJwks.resolver = fake
   end
 
   def vardana_assertion(key: @vardana_key, kid: @vardana_jwk.kid,
@@ -290,4 +300,44 @@ end
 When("the second client requests the first client's export file") do
   header "Authorization", @vardana_second_headers["Authorization"]
   get "/lakeraven-ehr/exports/#{@vardana_export_id}/files/Patient.ndjson"
+end
+
+# --- JWKS transport ----------------------------------------------------------
+
+Then("registering a backend client with jwks_uri {string} is rejected") do |uri|
+  app = Doorkeeper::Application.new(
+    name: "Example Transport Client",
+    redirect_uri: "urn:ietf:wg:oauth:2.0:oob",
+    scopes: "system/Patient.read", confidential: true,
+    jwks_uri: uri, organization_id: "rpms-organization-101"
+  )
+  refute app.valid?, "Expected registration with #{uri} to be rejected"
+  assert app.errors[:jwks_uri].present?,
+    "Expected a jwks_uri validation error, got #{app.errors.full_messages}"
+end
+
+Given("a backend client whose registered JWKS host resolves to {string}") do |address|
+  vardana_register_client(name: "Example Org A Connector",
+    scopes: "system/Patient.read", stub_fetch: false)
+  vardana_stub_resolver("client.example.test" => [ address ])
+  # No HTTP stub on purpose: the fetch must refuse before any request leaves.
+end
+
+Given("a backend client whose published JWKS is served over HTTPS from a public address") do
+  vardana_register_client(name: "Example Org A Connector",
+    scopes: "system/Patient.read", stub_fetch: false)
+  vardana_stub_resolver("client.example.test" => [ "203.0.113.10" ])
+  stub_request(:get, "https://client.example.test/.well-known/jwks.json")
+    .to_return(status: 200, body: { keys: [ @vardana_jwk.export ] }.to_json,
+               headers: { "Content-Type" => "application/json" })
+end
+
+Given("a backend client whose published JWKS endpoint fails on the first fetch and succeeds afterwards") do
+  vardana_register_client(name: "Example Org A Connector",
+    scopes: "system/Patient.read", stub_fetch: false)
+  vardana_stub_resolver("client.example.test" => [ "203.0.113.10" ])
+  stub_request(:get, "https://client.example.test/.well-known/jwks.json")
+    .to_return({ status: 503 },
+               { status: 200, body: { keys: [ @vardana_jwk.export ] }.to_json,
+                 headers: { "Content-Type" => "application/json" } })
 end

@@ -15,6 +15,7 @@ gem "pg"
 
 gem "cucumber-rails", require: false
 gem "minitest"
+gem "webmock", require: false
 
 # Omakase Ruby styling [https://github.com/rails/rubocop-rails-omakase/]
 gem "rubocop-rails-omakase", require: false
