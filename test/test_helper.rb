@@ -9,6 +9,30 @@ ActiveRecord::Migrator.migrations_paths << File.expand_path("../db/migrate", __d
 require "rails/test_help"
 require "rpms_rpc/version"
 require "rpms_rpc/mock_client"
+require "rpms_rpc/api/measurement"
+require "rpms_rpc/api/ddr_fileman"
+
+# Seed the per-measurement DDR GETS ENTRY DATA reply the rpms-rpc
+# Measurement reads issue against V MEASUREMENT (#9000010.01) — fields
+# .01 type / .02 patient / .03 visit / .04 value / 2 entered-in-error /
+# 1201 event date-time (+ .07 fallback). Reply lines mirror GETSC^DDR2
+# ("FILE^IEN^FIELD^INTERNAL^EXTERNAL").
+def seed_measurement_core(m, ien:, type:, dfn:, visit_ien:, value:,
+                          date_internal:, date_display:, eie: "0")
+  key = RpmsRpc::DdrFileman.gets_entry_param(
+    file: "9000010.01", iens: "#{ien},",
+    fields: RpmsRpc::Measurement::CORE_FIELDS, flags: "IE"
+  ).to_s
+  m.seed(:ddr_gets_entry_data, key, <<~REPLY.chomp)
+    [Data]
+    9000010.01^#{ien}^.01^#{ien}^#{type}
+    9000010.01^#{ien}^.02^#{dfn}^DEMO,PATIENT
+    9000010.01^#{ien}^.03^#{visit_ien}^#{date_display}
+    9000010.01^#{ien}^.04^#{value}^#{value}
+    9000010.01^#{ien}^2^#{eie}^#{eie == "1" ? "YES" : ""}
+    9000010.01^#{ien}^1201^#{date_internal}^#{date_display}
+  REPLY
+end
 
 # Configure RpmsRpc with mock client and seed data for all tests.
 RpmsRpc.mock! do |m|
@@ -119,16 +143,41 @@ RpmsRpc.mock! do |m|
   m.seed(:tribe_info, "OST", { ien: 104, name: "Redwater Band", code: "OST",
                                  service_unit: "Redwater", region: "South Dakota", area: "Northern Area" })
 
-  # Vitals (ORQQVI VITALS) for patient DFN 1
+  # Vitals for patient DFN 1 — the full verified read graph the rpms-rpc
+  # Measurement.history composition walks: the ORQQVI VITALS index
+  # (IEN^TYPE^DATETIME^VALUE — no units on that wire), the per-measurement
+  # DDR core read, the parent visit's SERVICE CATEGORY (BEHOENCX GETVISIT)
+  # and source units (BEHOVM2 VUNITS). ORQQVI rows carry GMRV-style type
+  # codes (T/P/R); the DDR .01 external carries the canonical AUTTMSR
+  # abbreviation (TMP/PU/RS) which wins when readable.
+  vitals_taken = Time.utc(2025, 1, 15, 8, 0)
+  vitals_fm = "3250115.08"
+  vitals_disp = "JAN 15, 2025@08:00"
   m.seed_keyed_collection(:vitals, "1", [
-    { type: "BP",  value: "120/80", units: "mm[Hg]", recorded_date: Date.new(2025, 1, 15) },
-    { type: "P",   value: "72",     units: "/min",   recorded_date: Date.new(2025, 1, 15) },
-    { type: "T",   value: "98.6",   units: "[degF]", recorded_date: Date.new(2025, 1, 15) },
-    { type: "R",   value: "16",     units: "/min",   recorded_date: Date.new(2025, 1, 15) },
-    { type: "POX", value: "98",     units: "%",      recorded_date: Date.new(2025, 1, 15) },
-    { type: "WT",  value: "150",    units: "[lb_av]", recorded_date: Date.new(2025, 1, 15) },
-    { type: "HT",  value: "65",     units: "[in_i]", recorded_date: Date.new(2025, 1, 15) }
+    { measurement_ien: 5001, type: "BP",  recorded_date: vitals_taken, value: "120/80" },
+    { measurement_ien: 5002, type: "P",   recorded_date: vitals_taken, value: "72" },
+    { measurement_ien: 5003, type: "T",   recorded_date: vitals_taken, value: "98.6" },
+    { measurement_ien: 5004, type: "R",   recorded_date: vitals_taken, value: "16" },
+    { measurement_ien: 5005, type: "POX", recorded_date: vitals_taken, value: "98" },
+    { measurement_ien: 5006, type: "WT",  recorded_date: vitals_taken, value: "150" },
+    { measurement_ien: 5007, type: "HT",  recorded_date: vitals_taken, value: "65" }
   ])
+  {
+    5001 => [ "BP", "120/80" ], 5002 => [ "PU", "72" ], 5003 => [ "TMP", "98.6" ],
+    5004 => [ "RS", "16" ], 5005 => [ "O2", "98" ], 5006 => [ "WT", "150" ],
+    5007 => [ "HT", "65" ]
+  }.each do |ien, (type, value)|
+    seed_measurement_core(m, ien: ien, type: type, dfn: 1, visit_ien: 9001,
+                          value: value, date_internal: vitals_fm, date_display: vitals_disp)
+  end
+  m.seed(:encounter_visit, "9001", {
+    location_ien: 1, datetime_raw: vitals_fm, service_category: "A",
+    patient_dfn: 1, visit_id: "9001A", locked: false
+  })
+  { "BP" => "mmHg", "PU" => "/min", "TMP" => "F", "RS" => "/min",
+    "O2" => "%", "WT" => "lb", "HT" => "in" }.each do |type, us_unit|
+    m.seed(:vital_units, type, { us_unit: us_unit, metric_unit: us_unit })
+  end
 
   # Test users
   m.seed_user("301", credentials: "testprovider;test123", name: "PROVIDER,TEST", role: :provider)

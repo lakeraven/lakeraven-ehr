@@ -55,16 +55,23 @@ module Lakeraven
         gateway.for_patient(dfn)
       end
 
-      # ORQQPL LIST problem-status codes ("A"/"I") -> FHIR clinicalStatus.
+      # ORQQPL LIST problem-status codes -> FHIR clinicalStatus. The wire
+      # carries #9000011 field .12 internal ("A"/"I" — LIST^GMPLUTL3); an
+      # unrecognized code yields NO clinicalStatus rather than a guessed
+      # "active" — an unproven status is never asserted.
       RPMS_STATUS_MAP = { "A" => "active", "I" => "inactive" }.freeze
 
-      # Build Condition instances from raw ORQQPL LIST rows
-      # ({ ien:, status:, description:, icd_code:, onset_date:,
-      # recorded_date:, provider_duz: }). Problems on the RPMS Integrated
-      # Problem List are clinician-recorded diagnoses, so verificationStatus
-      # maps to "confirmed" (US Core problem-list convention). Ids prefer the
-      # real IEN and otherwise derive deterministically from dfn + code so
-      # they stay stable across reads (Vardana §5.3).
+      # Build Condition instances from verified ORQQPL LIST rows
+      # ({ ien:, description:, status:, icd_code:, onset_date:,
+      # last_modified:, ... } — see the rpms-rpc :problem_list mapping,
+      # LIST^ORQQPL). Honest-serialization notes:
+      #   * verificationStatus is OMITTED — the wire carries problem
+      #     status (active/inactive), not a verification assertion; RPMS
+      #     problems can be provisional, so "confirmed" is never invented.
+      #   * recordedDate is OMITTED — the wire's date at piece 6 is LAST
+      #     MODIFIED, not the recorded date.
+      # Ids prefer the real IEN and otherwise derive deterministically
+      # from dfn + code so they stay stable across reads (Vardana §5.3).
       def self.from_problem_hashes(hashes, patient_dfn:)
         hashes.map do |h|
           new(
@@ -73,11 +80,9 @@ module Lakeraven
             code: h[:icd_code],
             code_system: "icd10",
             display: h[:description],
-            clinical_status: RPMS_STATUS_MAP[h[:status]] || "active",
-            verification_status: "confirmed",
+            clinical_status: RPMS_STATUS_MAP[h[:status].to_s.strip.upcase],
             category: "problem-list-item",
-            onset_datetime: h[:onset_date],
-            recorded_date: h[:recorded_date]
+            onset_datetime: h[:onset_date]
           )
         end
       end

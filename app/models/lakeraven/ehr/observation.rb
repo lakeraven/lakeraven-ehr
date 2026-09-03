@@ -50,27 +50,50 @@ module Lakeraven
         "39156-5" => "http://hl7.org/fhir/us/core/StructureDefinition/us-core-bmi"
       }.freeze
 
-      # Map RPMS vital type strings to LOINC codes and UCUM units
+      # RPMS measurement/vital type mnemonics → LOINC. Terminology mapping
+      # only — NO units here: units come from the source system
+      # (BEHOVM2 VUNITS via the rpms-rpc Measurement read); a value whose
+      # source supplies no unit is dropped, never guessed (Vardana §5.1).
+      # Both AUTTMSR abbreviations (BGOVMSR: "HT;WT;TMP;BP;PU;RS;PA") and
+      # the GMRV-style codes ORQQVI uses ("BP;HT;WT;T;R;P;PN") appear.
       VITAL_TYPE_MAP = {
-        "BP"    => { code: "85354-9", display: "Blood Pressure",      unit: "mm[Hg]" },
-        "P"     => { code: "8867-4",  display: "Heart Rate",          unit: "/min" },
-        "T"     => { code: "8310-5",  display: "Body Temperature",    unit: "[degF]" },
-        "R"     => { code: "9279-1",  display: "Respiratory Rate",    unit: "/min" },
-        "POX"   => { code: "2708-6",  display: "Oxygen Saturation",   unit: "%" },
-        "WT"    => { code: "29463-7", display: "Body Weight",         unit: "[lb_av]" },
-        "HT"    => { code: "8302-2",  display: "Body Height",         unit: "[in_i]" },
-        "BMI"   => { code: "39156-5", display: "BMI",                 unit: "kg/m2" }
+        "BP"  => { code: "85354-9", display: "Blood Pressure" },
+        "P"   => { code: "8867-4",  display: "Heart Rate" },
+        "PU"  => { code: "8867-4",  display: "Heart Rate" },
+        "T"   => { code: "8310-5",  display: "Body Temperature" },
+        "TMP" => { code: "8310-5",  display: "Body Temperature" },
+        "R"   => { code: "9279-1",  display: "Respiratory Rate" },
+        "RS"  => { code: "9279-1",  display: "Respiratory Rate" },
+        "POX" => { code: "2708-6",  display: "Oxygen Saturation" },
+        "O2"  => { code: "2708-6",  display: "Oxygen Saturation" },
+        "WT"  => { code: "29463-7", display: "Body Weight" },
+        "HT"  => { code: "8302-2",  display: "Body Height" },
+        "BMI" => { code: "39156-5", display: "BMI" }
       }.freeze
 
-      # FHIR R4 Observation.status — REQUIRED binding. Gateway rows may carry
-      # a status (e.g. the V MEASUREMENT ENTERED IN ERROR flag, file
-      # 9000010.01, added by BJPC patch bjpc0200.04, surfaces as
-      # "entered-in-error"); anything outside the legal value set falls back
-      # to "final" rather than passing through raw.
+      # Source display unit → UCUM code. Pure code-system translation of a
+      # unit the SOURCE supplied; an untranslatable source unit is carried
+      # as display text without a UCUM code/system claim.
+      UCUM_UNITS = {
+        "lb" => "[lb_av]", "lbs" => "[lb_av]", "[lb_av]" => "[lb_av]",
+        "in" => "[in_i]", "[in_i]" => "[in_i]",
+        "f" => "[degF]", "[degf]" => "[degF]",
+        "c" => "Cel", "cel" => "Cel",
+        "mmhg" => "mm[Hg]", "mm[hg]" => "mm[Hg]",
+        "kg" => "kg", "cm" => "cm", "%" => "%",
+        "/min" => "/min", "bpm" => "/min", "kg/m2" => "kg/m2"
+      }.freeze
+
+      # FHIR R4 Observation.status — REQUIRED binding.
       VALID_STATUSES = %w[
         registered preliminary final amended corrected cancelled
         entered-in-error unknown
       ].freeze
+
+      # Systolic/diastolic shape a BP value must have to be serialized;
+      # anything else (garbage text, a lone number) is dropped rather than
+      # emitted as components with fabricated 0.0 values.
+      BP_VALUE_PATTERN = %r{\A\d+(\.\d+)?\s*/\s*\d+(\.\d+)?\z}
 
       attribute :ien, :string
       attribute :patient_dfn, :string
@@ -90,7 +113,9 @@ module Lakeraven
       # FHIR::ObservationProvenanceSerializer for the FHIR mapping.
       attribute :service_category, :string
       attribute :visit_ien, :string
-      attribute :provider_duz, :string
+      # Encounter provider name when the measurement read supplies one
+      # (BGOVMSR GET reply piece 6) — display only, never an invented id.
+      attribute :provider_name, :string
 
       # -- Gateway DI -----------------------------------------------------------
 
@@ -106,50 +131,76 @@ module Lakeraven
         gateway.for_patient(dfn)
       end
 
-      # Build Observation instances from raw RPC vital hashes.
-      # Each hash has { type:, value:, units:, recorded_date: }.
+      # Build Observation instances from decorated measurement rows as the
+      # rpms-rpc Measurement reads return them (.history / .for_visit /
+      # .latest / .find):
       #
-      # ORQQVI VITALS carries no IEN, so when one is absent derive a
-      # DETERMINISTIC id from dfn + vital type (+ timestamp when present) —
-      # never a random uuid — so ids/fullUrls are stable across requests.
-      def self.from_vital_hashes(hashes, patient_dfn:)
+      #   { measurement_ien:, type:, value:, units:, date:, visit_ien:,
+      #     service_category:, capture_mode:, entered_in_error:, ... }
+      #
+      # Honest-serialization rules (Vardana §5):
+      #   * id is the real V MEASUREMENT IEN — a row without one has no
+      #     stable identity and is dropped (never a blank or colliding id).
+      #   * units come from the source (BEHOVM2 VUNITS); a row without a
+      #     source unit is DROPPED, not guessed from the type.
+      #   * a BP value that isn't systolic/diastolic is dropped, not
+      #     serialized as 0.0 components.
+      #   * status reflects the wire ENTERED IN ERROR flag; when the flag
+      #     could not be read the status is "unknown", never invented.
+      def self.from_measurement_hashes(hashes, patient_dfn:)
         hashes.filter_map do |h|
-          mapping = VITAL_TYPE_MAP[h[:type]]
+          mapping = VITAL_TYPE_MAP[h[:type].to_s]
           next unless mapping
 
+          ien = h[:measurement_ien].to_s.strip
+          next if ien.empty?
+
+          unit = translate_unit(h[:units])
+          next if unit.nil?
+
+          value = h[:value].to_s
+          blood_pressure = mapping[:code] == VITAL_SIGNS_CODES[:blood_pressure]
+          next if blood_pressure && !BP_VALUE_PATTERN.match?(value)
+
           new(
-            ien: h[:ien]&.to_s || vital_id(patient_dfn, h),
+            ien: ien,
             patient_dfn: patient_dfn,
             code: mapping[:code],
             code_system: "loinc",
             display: mapping[:display],
-            value: h[:value],
-            value_quantity: h[:type] == "BP" ? nil : h[:value],
-            unit: mapping[:unit],
+            value: value,
+            value_quantity: blood_pressure ? nil : value,
+            unit: unit,
             category: "vital-signs",
-            status: normalize_status(h[:status]),
-            effective_datetime: h[:recorded_date],
+            status: status_from_wire(h[:entered_in_error]),
+            effective_datetime: h[:date],
             service_category: h[:service_category],
             visit_ien: h[:visit_ien]&.to_s,
-            provider_duz: h[:provider_duz]&.to_s
+            provider_name: h[:provider_name]
           )
         end
       end
 
-      # Status fidelity (Vardana §5.4): honour a real status when the gateway
-      # supplies one; never invent — absent/unknown collapses to "final".
-      def self.normalize_status(raw)
-        normalized = raw.to_s.strip.downcase
-        VALID_STATUSES.include?(normalized) ? normalized : "final"
+      # Wire ENTERED IN ERROR (#9000010.01 field 2) → FHIR status.
+      # nil means the flag could not be read — reported honestly as
+      # "unknown", never guessed to "final".
+      def self.status_from_wire(entered_in_error)
+        case entered_in_error
+        when true then "entered-in-error"
+        when false then "final"
+        else "unknown"
+        end
       end
 
-      def self.vital_id(patient_dfn, hash)
-        id = "vital-#{patient_dfn}-#{hash[:type].to_s.downcase}"
-        recorded = hash[:recorded_date]
-        id += "-#{recorded.strftime('%Y%m%d%H%M')}" if recorded.respond_to?(:strftime)
-        id
+      # Source unit string → the unit to serialize (UCUM code when the
+      # source unit translates, else the raw source text). nil when the
+      # source supplied no unit — the caller drops the row (§5.1).
+      def self.translate_unit(raw)
+        text = raw.to_s.strip
+        return nil if text.empty?
+
+        UCUM_UNITS.fetch(text.downcase, text)
       end
-      private_class_method :vital_id
 
       def vital_sign? = category == "vital-signs"
       def laboratory? = category == "laboratory"
@@ -196,16 +247,17 @@ module Lakeraven
           effectiveDateTime: effective_datetime&.iso8601,
           category: category ? [ { coding: [ { code: category, system: CATEGORY_SYSTEM } ] } ] : nil,
           component: [
-            {
-              code: { coding: [ { code: VITAL_SIGNS_CODES[:systolic], system: "http://loinc.org" } ] },
-              valueQuantity: { value: systolic_val.to_f, unit: "mm[Hg]", code: "mm[Hg]", system: "http://unitsofmeasure.org" }
-            },
-            {
-              code: { coding: [ { code: VITAL_SIGNS_CODES[:diastolic], system: "http://loinc.org" } ] },
-              valueQuantity: { value: diastolic_val.to_f, unit: "mm[Hg]", code: "mm[Hg]", system: "http://unitsofmeasure.org" }
-            }
+            bp_component(VITAL_SIGNS_CODES[:systolic], systolic_val),
+            bp_component(VITAL_SIGNS_CODES[:diastolic], diastolic_val)
           ]
         }.compact
+      end
+
+      def bp_component(loinc_code, raw_value)
+        {
+          code: { coding: [ { code: loinc_code, system: "http://loinc.org" } ] },
+          valueQuantity: quantity_for(raw_value.to_f)
+        }
       end
 
       def build_code
@@ -243,10 +295,21 @@ module Lakeraven
           return nil
         end
 
+        quantity_for(numeric)
+      end
+
+      # UCUM `code`/`system` are asserted only when the (source-supplied)
+      # unit is a known UCUM code; otherwise the unit rides as display
+      # text alone — a display unit is never passed off as UCUM.
+      def quantity_for(numeric)
         qty = { value: numeric }
-        qty[:unit] = unit if unit
-        qty[:code] = unit if unit
-        qty[:system] = "http://unitsofmeasure.org" if unit
+        if unit
+          qty[:unit] = unit
+          if UCUM_UNITS.value?(unit)
+            qty[:code] = unit
+            qty[:system] = "http://unitsofmeasure.org"
+          end
+        end
         qty
       end
     end

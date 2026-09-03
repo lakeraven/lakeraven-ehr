@@ -2,41 +2,40 @@
 
 module Lakeraven
   module EHR
-    # FHIR R4 Provenance — distinguishes office-measured from patient-reported
-    # observation values (Vardana source-system profile checklist item 10).
-    # Derived per-request from the observation read path; see
-    # FHIR::ObservationProvenanceSerializer for the RPMS/PCC field grounding.
+    # FHIR R4 Provenance — distinguishes office-measured observation values
+    # from values captured outside an in-person visit (Vardana checklist
+    # item 10). Derived per-request from the measurement read path; see
+    # FHIR::ObservationProvenanceSerializer for the RPMS/PCC grounding.
     #
-    # Search: `patient` (with optional `target` filter), or `target` alone
-    # when the observation id embeds the patient DFN (the deterministic
-    # "vital-{dfn}-..." ids the vitals path emits).
+    # Search: `patient` lists provenance for that patient's observations;
+    # `target=Observation/{ien}` resolves the single measurement by its
+    # V MEASUREMENT IEN (the read supplies the patient itself, so no
+    # `patient` parameter is required). Ids are `prov-{measurement-ien}`.
     class ProvenancesController < ApplicationController
       before_action :require_search_param, only: :index
 
       def index
         target_id = extract_target_id
-        dfn = resolve_dfn(target_id)
 
-        if dfn.blank?
-          return render_operation_outcome(
-            status: :bad_request,
-            severity: "error",
-            code: "required",
-            diagnostics: "Search parameter 'patient' is required when the target id does not identify a patient"
-          )
+        observations =
+          if target_id.present?
+            observation = find_observation(target_id)
+            observation ? [ observation ] : []
+          else
+            observations_for(params[:patient].to_s.delete_prefix("Patient/"))
+          end
+
+        if params[:patient].present? && target_id.present?
+          dfn = params[:patient].to_s.delete_prefix("Patient/")
+          observations = observations.select { |o| o.patient_dfn.to_s == dfn }
         end
 
-        observations = observations_for(dfn)
-        observations = observations.select { |o| o.ien == target_id } if target_id.present?
         render_bundle(observations.filter_map { |o| FHIR::ObservationProvenanceSerializer.call(o) })
       end
 
       def show
         observation_id = params[:id].to_s.delete_prefix("prov-")
-        dfn = dfn_embedded_in(observation_id)
-        return render_not_found("Provenance", params[:id]) if dfn.blank?
-
-        observation = observations_for(dfn).find { |o| o.ien == observation_id }
+        observation = find_observation(observation_id)
         provenance = observation && FHIR::ObservationProvenanceSerializer.call(observation)
         return render_not_found("Provenance", params[:id]) if provenance.nil?
 
@@ -60,18 +59,17 @@ module Lakeraven
         params[:target].to_s.delete_prefix("Observation/").presence
       end
 
-      def resolve_dfn(target_id)
-        params[:patient].to_s.delete_prefix("Patient/").presence || dfn_embedded_in(target_id)
-      end
+      # By-IEN read (rpms-rpc Measurement.find — DDR GETS ENTRY DATA on
+      # #9000010.01, which carries the patient DFN in field .02).
+      def find_observation(measurement_ien)
+        row = ObservationGateway.find(measurement_ien)
+        return nil if row.nil?
 
-      # Derived vitals ids are "vital-{dfn}-{type}[-{timestamp}]"; a raw IEN
-      # embeds no DFN, so those lookups need the patient param.
-      def dfn_embedded_in(observation_id)
-        observation_id.to_s[/\Avital-(\d+)-/, 1]
+        Observation.from_measurement_hashes([ row ], patient_dfn: row[:patient_dfn].to_s).first
       end
 
       def observations_for(dfn)
-        Observation.from_vital_hashes(Observation.for_patient(dfn), patient_dfn: dfn)
+        Observation.from_measurement_hashes(Observation.for_patient(dfn), patient_dfn: dfn)
       end
     end
   end
