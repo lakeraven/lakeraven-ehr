@@ -2,6 +2,11 @@
 
 module Lakeraven
   module EHR
+    # CarePlan is FIXTURE-SERVED: records are seeded into CarePlanStore (by
+    # a deployment that can source them, e.g. the synthetic sandbox) and
+    # served through this serializer. There is NO live RPC read path — the
+    # previously-cited ORQQCP LIST wire mapping was never verified against a
+    # real RPMS contract and has been removed rather than presumed.
     class CarePlan
       include ActiveModel::Model
       include ActiveModel::Attributes
@@ -9,6 +14,13 @@ module Lakeraven
 
       VALID_STATUSES = %w[draft active on-hold revoked completed entered-in-error unknown].freeze
       VALID_INTENTS = %w[proposal plan order option].freeze
+
+      # CarePlan.activity.detail.status carries a REQUIRED binding (R4
+      # care-plan-activity-status).
+      VALID_ACTIVITY_STATUSES = %w[
+        not-started scheduled in-progress on-hold completed cancelled
+        stopped unknown entered-in-error
+      ].freeze
 
       attribute :ien, :string
       attribute :patient_dfn, :string
@@ -23,62 +35,16 @@ module Lakeraven
 
       # Array attribute — not natively typed by ActiveModel, use plain
       # accessor (mirrors Encounter#participant_practitioner_iens). Each
-      # entry is one planned activity's description text.
+      # entry is one planned activity: either a String (description only) or
+      # a Hash with :description and an optional activity-level :status.
       attr_accessor :activities
 
       validates :patient_dfn, presence: true
       validates :status, inclusion: { in: VALID_STATUSES }
       validates :intent, inclusion: { in: VALID_INTENTS }
 
-      # -- Gateway DI -----------------------------------------------------------
-
-      class << self
-        attr_writer :gateway
-
-        def gateway
-          @gateway || CarePlanGateway
-        end
-      end
-
-      def self.for_patient(dfn)
-        gateway.for_patient(dfn)
-      end
-
       def self.resource_class
         "CarePlan"
-      end
-
-      # CarePlan.status to the REQUIRED CarePlan.activity.detail.status
-      # binding (an activity on a revoked plan is cancelled, etc.).
-      ACTIVITY_STATUS_MAP = {
-        "active" => "in-progress",
-        "completed" => "completed",
-        "on-hold" => "on-hold",
-        "revoked" => "cancelled",
-        "draft" => "not-started"
-      }.freeze
-
-      # Build CarePlan instances from raw ORQQCP LIST hashes
-      # ({ ien:, title:, status:, intent:, category:, start_date:, end_date:,
-      #    author_duz:, author_name:, goal_iens:, activity:, description:,
-      #    note: }). The wire's ACTIVITY piece is a single ";"-separated
-      #    string; it splits into one activity entry per item.
-      def self.from_rpc_hashes(hashes, patient_dfn:)
-        Array(hashes).map do |h|
-          new(
-            ien: h[:ien]&.to_s,
-            patient_dfn: patient_dfn.to_s,
-            title: h[:title],
-            description: h[:description],
-            status: h[:status],
-            intent: h[:intent],
-            category: h[:category],
-            period_start: h[:start_date],
-            period_end: h[:end_date],
-            author_name: h[:author_name],
-            activities: h[:activity].to_s.split(";").map(&:strip).reject(&:empty?)
-          )
-        end
       end
 
       def active? = status == "active"
@@ -124,15 +90,28 @@ module Lakeraven
       end
 
       # FHIR forbids empty arrays — omit activity entirely when absent.
-      # activity.detail.status carries a REQUIRED binding, derived from the
-      # plan's own status ("unknown" when the plan status has no analogue).
+      # activity.detail.status (REQUIRED binding, 1..1) comes from the
+      # ACTIVITY's own recorded status when one exists; an activity without
+      # one is "unknown". Per-activity progress is never inferred from the
+      # plan's status — a plan being active says nothing about whether any
+      # single activity is under way.
       def build_activities
         return nil unless activities.is_a?(Array) && activities.any?
 
-        detail_status = ACTIVITY_STATUS_MAP.fetch(status, "unknown")
-        activities.map do |description|
-          { detail: { status: detail_status, description: description } }
+        activities.map do |activity|
+          detail =
+            if activity.is_a?(Hash)
+              { status: activity_status(activity[:status]), description: activity[:description] }
+            else
+              { status: "unknown", description: activity.to_s }
+            end
+          { detail: detail.compact }
         end
+      end
+
+      def activity_status(value)
+        normalized = value.to_s.strip.downcase
+        VALID_ACTIVITY_STATUSES.include?(normalized) ? normalized : "unknown"
       end
     end
   end

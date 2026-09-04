@@ -65,31 +65,44 @@ module Lakeraven
 
       # RPMS appointment external statuses (ORWPT APPTLST piece 4) to FHIR
       # Encounter.status. Unrecognized wire statuses map to "unknown" (a
-      # legal FHIR code) rather than being invented.
+      # legal FHIR code) rather than being invented. "INPATIENT" on an
+      # appointment row says the patient was ADMITTED around that visit — it
+      # does not say the admission is still under way, so it maps to
+      # "unknown", never to "in-progress" (asserting an active encounter for
+      # a possibly long-past admission would fabricate clinical state).
       APPOINTMENT_STATUS_MAP = {
         "FUTURE" => "planned",
         "SCHEDULED" => "planned",
         "CHECKED IN" => "arrived",
         "CHECKED OUT" => "finished",
-        "INPATIENT" => "in-progress",
+        "INPATIENT" => "unknown",
         "NO-SHOW" => "cancelled",
         "NO SHOW" => "cancelled",
         "CANCELLED" => "cancelled"
       }.freeze
+
+      # Encounter.class derives from the actual setting the wire reports:
+      # an INPATIENT row is an inpatient encounter (IMP); everything else on
+      # the appointment list is a clinic appointment (AMB).
+      APPOINTMENT_CLASS_MAP = {
+        "INPATIENT" => "IMP"
+      }.freeze
+      APPOINTMENT_DEFAULT_CLASS = "AMB"
 
       # Build Encounter instances from raw ORWPT APPTLST appointment hashes
       # ({ datetime:, location_ien:, location:, status: }).
       #
       # The wire carries no IEN, so the id derives DETERMINISTICALLY from
       # dfn + appointment timestamp (mirroring Observation.vital_id) — never
-      # a random uuid. Clinic appointments are ambulatory (class AMB).
+      # a random uuid.
       def self.from_appointment_hashes(hashes, patient_dfn:)
         Array(hashes).map do |h|
+          wire_status = h[:status].to_s.upcase
           new(
             fhir_id: appointment_id(patient_dfn, h),
             patient_identifier: patient_dfn.to_s,
-            status: APPOINTMENT_STATUS_MAP[h[:status].to_s.upcase] || "unknown",
-            class_code: "AMB",
+            status: APPOINTMENT_STATUS_MAP[wire_status] || "unknown",
+            class_code: APPOINTMENT_CLASS_MAP.fetch(wire_status, APPOINTMENT_DEFAULT_CLASS),
             period_start: h[:datetime],
             location_ien: h[:location_ien]
           )

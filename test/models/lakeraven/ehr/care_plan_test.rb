@@ -143,55 +143,50 @@ module Lakeraven
         refute CarePlan.new(patient_dfn: "1").persisted?
       end
 
-      # -- Wire mapping (ORQQCP LIST) ------------------------------------------
+      # -- Activity serialization (fixture-served; no wire mapping) ------------
 
-      test "from_rpc_hashes maps care plan rows and splits activities" do
-        plans = CarePlan.from_rpc_hashes([ {
-          ien: "cp-1", title: "Type 2 diabetes management plan",
-          status: "active", intent: "plan", category: "assess-plan",
-          start_date: Date.new(2026, 2, 1), end_date: nil,
-          author_duz: "501", author_name: "PROVIDER,DEMO",
-          activity: "Metformin 500mg BID; Quarterly HbA1c;  ",
-          description: "Comprehensive diabetes care"
-        } ], patient_dfn: 100)
-
-        cp = plans.first
-        assert_equal "cp-1", cp.ien
-        assert_equal "100", cp.patient_dfn
-        assert_equal [ "Metformin 500mg BID", "Quarterly HbA1c" ], cp.activities
-        assert cp.valid?
-      end
-
-      test "to_fhir emits activity details with the required status binding" do
+      test "to_fhir uses the activity's own recorded status" do
         cp = CarePlan.new(
           ien: "cp-1", patient_dfn: "100", status: "active",
-          activities: [ "Quarterly HbA1c", "Annual eye exam" ]
+          activities: [
+            { description: "Metformin 500mg BID", status: "in-progress" },
+            { description: "Quarterly HbA1c", status: "scheduled" }
+          ]
         )
         fhir = cp.to_fhir
         assert_equal 2, fhir[:activity].length
         assert_equal "in-progress", fhir.dig(:activity, 0, :detail, :status)
-        assert_equal "Quarterly HbA1c", fhir.dig(:activity, 0, :detail, :description)
+        assert_equal "Metformin 500mg BID", fhir.dig(:activity, 0, :detail, :description)
+        assert_equal "scheduled", fhir.dig(:activity, 1, :detail, :status)
       end
 
-      test "to_fhir maps completed plan status to completed activity status" do
-        cp = CarePlan.new(ien: "cp-1", patient_dfn: "100", status: "completed", activities: [ "X" ])
-        assert_equal "completed", cp.to_fhir.dig(:activity, 0, :detail, :status)
+      # Guards review finding: per-activity progress must NOT be fabricated
+      # from the plan's status. Pre-fix, an activity on an "active" plan was
+      # stamped "in-progress"; an activity on a "completed" plan "completed".
+      test "to_fhir never infers activity status from the plan status" do
+        active_plan = CarePlan.new(
+          ien: "cp-1", patient_dfn: "100", status: "active",
+          activities: [ "Quarterly HbA1c" ]
+        )
+        assert_equal "unknown", active_plan.to_fhir.dig(:activity, 0, :detail, :status)
+
+        completed_plan = CarePlan.new(
+          ien: "cp-2", patient_dfn: "100", status: "completed", activities: [ "X" ]
+        )
+        assert_equal "unknown", completed_plan.to_fhir.dig(:activity, 0, :detail, :status)
+      end
+
+      test "to_fhir maps an unrecognized activity status to unknown (required binding)" do
+        cp = CarePlan.new(
+          ien: "cp-1", patient_dfn: "100", status: "active",
+          activities: [ { description: "X", status: "WIP" } ]
+        )
+        assert_equal "unknown", cp.to_fhir.dig(:activity, 0, :detail, :status)
       end
 
       test "to_fhir omits activity when there are none (FHIR forbids empty arrays)" do
         refute CarePlan.new(ien: "cp-1", patient_dfn: "100").to_fhir.key?(:activity)
         refute CarePlan.new(ien: "cp-1", patient_dfn: "100", activities: []).to_fhir.key?(:activity)
-      end
-
-      test "for_patient delegates to the gateway" do
-        original = CarePlan.gateway
-        fake = Class.new do
-          def self.for_patient(_dfn) = [ { ien: "cp-9", title: "Plan" } ]
-        end
-        CarePlan.gateway = fake
-        assert_equal [ { ien: "cp-9", title: "Plan" } ], CarePlan.for_patient(1)
-      ensure
-        CarePlan.gateway = original
       end
     end
   end

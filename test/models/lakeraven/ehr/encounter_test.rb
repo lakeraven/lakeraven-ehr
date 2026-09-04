@@ -388,6 +388,21 @@ module Lakeraven
         )
         assert_equal "unknown", encounters.first.status
       end
+
+      # Guards review finding: an INPATIENT appointment row was mapped to an
+      # ACTIVE ("in-progress") AMBULATORY encounter pre-fix. The row says
+      # the patient was admitted, not that the admission is under way — and
+      # an admission is not ambulatory.
+      test "from_appointment_hashes maps INPATIENT to class IMP and does not assert in-progress" do
+        encounters = Encounter.from_appointment_hashes(
+          [ { datetime: DateTime.new(2026, 8, 12, 9, 0, 0), status: "INPATIENT" } ],
+          patient_dfn: 1
+        )
+        enc = encounters.first
+        assert_equal "IMP", enc.class_code
+        assert_equal "unknown", enc.status
+        refute enc.in_progress?
+      end
     end
 
     class EncounterStoreTest < ActiveSupport::TestCase

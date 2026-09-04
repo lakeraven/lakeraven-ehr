@@ -17,8 +17,8 @@ module Lakeraven
         assert_equal "All values within normal limits", dr.conclusion
       end
 
-      test "defaults status to final" do
-        assert_equal "final", DiagnosticReport.new.status
+      test "defaults status to unknown (never presumes final)" do
+        assert_equal "unknown", DiagnosticReport.new.status
       end
 
       test "final? for final status" do
@@ -82,7 +82,7 @@ module Lakeraven
       end
 
       test "allows valid status values" do
-        %w[registered partial preliminary final amended corrected appended cancelled entered-in-error].each do |s|
+        %w[registered partial preliminary final amended corrected appended cancelled entered-in-error unknown].each do |s|
           dr = DiagnosticReport.new(patient_dfn: "1", code_display: "CBC", status: s)
           assert dr.valid?, "Expected #{s} to be valid"
         end
@@ -189,50 +189,39 @@ module Lakeraven
         refute DiagnosticReport.new(patient_dfn: "1", code_display: "CBC").persisted?
       end
 
-      # -- Wire mapping (ORWLRR REPORT LIST) -----------------------------------
+      # -- Status honesty (fixture-served; no wire mapping) --------------------
 
-      test "from_report_hashes maps report rows to LAB reports" do
-        reports = DiagnosticReport.from_report_hashes([ {
-          ien: 90011, report_name: "Hemoglobin A1c", loinc_code: "4548-4",
-          status: "final", collection_date: DateTime.new(2026, 8, 12, 8, 0, 0),
-          result_date: DateTime.new(2026, 8, 12, 15, 0, 0),
-          verifier_duz: "501", verifier_name: "PROVIDER,DEMO",
-          result_iens: "lab-1-hba1c,lab-1-glucose", interpretation: "Above goal"
-        } ], patient_dfn: 1)
-
-        dr = reports.first
-        assert_equal "90011", dr.ien
-        assert_equal "1", dr.patient_dfn
-        assert_equal "LAB", dr.category
-        assert_equal "4548-4", dr.code
-        assert_equal "final", dr.status
-        assert_equal "Above goal", dr.conclusion
-
-        fhir = dr.to_fhir
-        assert_equal [ { reference: "Observation/lab-1-hba1c" },
-                       { reference: "Observation/lab-1-glucose" } ], fhir[:result]
-        assert fhir[:effectiveDateTime].start_with?("2026-08-12T08:00:00")
-        assert_equal "Above goal", fhir[:conclusion]
-        assert fhir[:issued].present?
+      # Guards review finding: an absent or unrecognized source status was
+      # promoted to "final" pre-fix. "final" asserts clinical verification;
+      # only a genuinely-final source may claim it.
+      test "a report with no status serializes as unknown, never final" do
+        dr = DiagnosticReport.new(ien: "1", patient_dfn: "1", code_display: "CBC")
+        assert_equal "unknown", dr.status
+        assert_equal "unknown", dr.to_fhir[:status]
       end
 
-      test "from_report_hashes falls back to final for non-FHIR wire statuses" do
-        reports = DiagnosticReport.from_report_hashes(
-          [ { ien: 1, report_name: "CBC", loinc_code: "58410-2", status: "VERIFIED" } ],
-          patient_dfn: 1
-        )
-        assert_equal "final", reports.first.status
+      test "an unrecognized status serializes as unknown, never final" do
+        dr = DiagnosticReport.new(ien: "1", patient_dfn: "1", code_display: "CBC", status: "VERIFIED")
+        assert_equal "unknown", dr.to_fhir[:status]
+        refute dr.valid? # inclusion validation still flags the bad source value
       end
 
-      test "for_patient delegates to the gateway" do
-        original = DiagnosticReport.gateway
-        fake = Class.new do
-          def self.for_patient(_dfn) = [ { ien: 7, report_name: "CBC" } ]
-        end
-        DiagnosticReport.gateway = fake
-        assert_equal [ { ien: 7, report_name: "CBC" } ], DiagnosticReport.for_patient(1)
-      ensure
-        DiagnosticReport.gateway = original
+      test "a genuinely final source status stays final" do
+        dr = DiagnosticReport.new(ien: "1", patient_dfn: "1", code_display: "CBC", status: "final")
+        assert_equal "final", dr.to_fhir[:status]
+      end
+
+      test "unknown is a valid stored status" do
+        dr = DiagnosticReport.new(ien: "1", patient_dfn: "1", code_display: "CBC", status: "unknown")
+        assert dr.valid?
+      end
+
+      # -- Code presence (DiagnosticReport.code is 1..1) -----------------------
+
+      test "code_present? is false only when both code and code_display are absent" do
+        assert DiagnosticReport.new(patient_dfn: "1", code_display: "CBC").code_present?
+        assert DiagnosticReport.new(patient_dfn: "1", code: "58410-2").code_present?
+        refute DiagnosticReport.new(patient_dfn: "1").code_present?
       end
     end
   end

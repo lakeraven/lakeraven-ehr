@@ -23,8 +23,13 @@ module Lakeraven
         render_bundle(encounters.map(&:to_fhir))
       end
 
+      # Resolves the same records the search emits — store-seeded encounters
+      # AND appointment-derived ones — so every id a search returns is
+      # readable. Org-bound credentials are authorized against the RESOLVED
+      # resource's owning patient: a foreign patient's encounter id is a 403
+      # (never disclosed), an unknown id a 404.
       def show
-        encounter = EncounterStore.instance.find(params[:id])
+        encounter = EncounterStore.instance.find(params[:id]) || resolve_appointment_encounter(params[:id])
         return render_not_found("Encounter", params[:id]) unless encounter
 
         # Result-level org enforcement: an org-bound credential reads an
@@ -37,6 +42,19 @@ module Lakeraven
       end
 
       private
+
+      # Appointment-derived encounter ids are deterministic
+      # ("appt-<dfn>-<timestamp>", see Encounter.appointment_id), so the
+      # owning patient parses straight out of the id and the record resolves
+      # through the exact wire path the search serves.
+      def resolve_appointment_encounter(id)
+        match = id.to_s.match(/\Aappt-(\d+)/)
+        return nil unless match
+
+        dfn = match[1]
+        Encounter.from_appointment_hashes(Encounter.for_patient(dfn), patient_dfn: dfn)
+                 .find { |e| e.fhir_id == id.to_s }
+      end
 
       def require_patient_param
         return if params[:patient].present?

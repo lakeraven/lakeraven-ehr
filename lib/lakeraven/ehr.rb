@@ -28,7 +28,7 @@ module Lakeraven
       attr_accessor :supplemental_observations_provider
 
       def supplemental_observations_for(dfn)
-        Array(supplemental_observations_provider&.call(dfn.to_s))
+        owned_by(dfn, Array(supplemental_observations_provider&.call(dfn.to_s)))
       end
 
       # Optional provider of additional AllergyIntolerance model instances
@@ -41,8 +41,20 @@ module Lakeraven
       attr_accessor :supplemental_allergy_intolerances_provider
 
       def supplemental_allergy_intolerances_for(dfn)
-        Array(supplemental_allergy_intolerances_provider&.call(dfn.to_s))
+        owned_by(dfn, Array(supplemental_allergy_intolerances_provider&.call(dfn.to_s)))
       end
+
+      # Supplemental resources are re-checked against the REQUESTED patient
+      # before they are served: the request's patient is what authorization
+      # bound to (SmartAuthentication resolves and org-checks it), so a
+      # provider entry carrying any other patient_dfn must never ride along —
+      # it would disclose another (possibly foreign-organization) patient's
+      # record inside an authorized patient's bundle. Fail closed on a blank
+      # owner too.
+      def owned_by(dfn, records)
+        records.select { |r| r.patient_dfn.present? && r.patient_dfn.to_s == dfn.to_s }
+      end
+      private :owned_by
 
       def initialize
         @tenant_resolver = ->(request) {

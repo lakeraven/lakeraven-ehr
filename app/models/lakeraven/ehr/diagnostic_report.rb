@@ -4,12 +4,23 @@ require "base64"
 
 module Lakeraven
   module EHR
+    # DiagnosticReport is FIXTURE-SERVED: records are seeded into
+    # DiagnosticReportStore (by a deployment that can source them, e.g. the
+    # synthetic sandbox) and served through this serializer. There is NO
+    # live RPC read path — the previously-cited ORWLRR REPORT LIST wire
+    # mapping was never verified against a real RPMS contract and has been
+    # removed rather than presumed.
     class DiagnosticReport
       include ActiveModel::Model
       include ActiveModel::Attributes
       include ActiveModel::Validations
 
-      VALID_STATUSES = %w[registered partial preliminary final amended corrected appended cancelled entered-in-error].freeze
+      # R4 diagnostic-report-status (REQUIRED binding). "unknown" is a legal
+      # code and is the honest mapping for a blank or unrecognized source
+      # status — a report is never promoted to "final" by default: "final"
+      # asserts clinical verification, and only a genuinely-final source
+      # status may claim it.
+      VALID_STATUSES = %w[registered partial preliminary final amended corrected appended cancelled entered-in-error unknown].freeze
       VALID_CATEGORIES = %w[LAB RAD].freeze
 
       CATEGORY_LAB = "LAB"
@@ -22,7 +33,7 @@ module Lakeraven
       attribute :category, :string
       attribute :code, :string
       attribute :code_display, :string
-      attribute :status, :string, default: "final"
+      attribute :status, :string, default: "unknown"
       attribute :effective_datetime, :datetime
       attribute :issued, :datetime
       attribute :performer_name, :string
@@ -36,61 +47,30 @@ module Lakeraven
       validates :status, inclusion: { in: VALID_STATUSES }
       validates :category, inclusion: { in: VALID_CATEGORIES }, allow_nil: true
 
-      # -- Gateway DI -----------------------------------------------------------
-
-      class << self
-        attr_writer :gateway
-
-        def gateway
-          @gateway || DiagnosticReportGateway
-        end
-      end
-
-      def self.for_patient(dfn)
-        gateway.for_patient(dfn)
-      end
-
       def self.resource_class
         "DiagnosticReport"
-      end
-
-      # Build DiagnosticReport instances from raw ORWLRR REPORT LIST hashes
-      # ({ ien:, report_name:, loinc_code:, status:, collection_date:,
-      #    result_date:, verifier_duz:, verifier_name:, result_iens:,
-      #    interpretation: }).
-      #
-      # Wire statuses pass through when they are already legal FHIR codes;
-      # anything else falls back to "final" (the RPC API layer defaults blank
-      # statuses to "final" too). result_iens is the comma-separated list of
-      # Observation ids the panel aggregates.
-      def self.from_report_hashes(hashes, patient_dfn:)
-        Array(hashes).map do |h|
-          wire_status = h[:status].to_s.downcase
-          new(
-            ien: h[:ien]&.to_s,
-            patient_dfn: patient_dfn.to_s,
-            category: CATEGORY_LAB,
-            code: h[:loinc_code],
-            code_display: h[:report_name],
-            status: VALID_STATUSES.include?(wire_status) ? wire_status : "final",
-            effective_datetime: h[:collection_date],
-            issued: h[:result_date],
-            performer_duz: h[:verifier_duz],
-            performer_name: h[:verifier_name],
-            conclusion: h[:interpretation],
-            result_iens: h[:result_iens]
-          )
-        end
       end
 
       def final? = status == "final"
       def persisted? = ien.present?
 
+      # DiagnosticReport.code is 1..1 in FHIR — a report with no source
+      # naming at all cannot be emitted as a valid resource. Serving layers
+      # check this and OMIT such a record rather than serve an invalid one.
+      def code_present?
+        code_display.present? || code.present?
+      end
+
+      # Blank/unrecognized statuses serialize as "unknown" — never "final".
+      def fhir_status
+        VALID_STATUSES.include?(status.to_s) ? status.to_s : "unknown"
+      end
+
       def to_fhir
         {
           resourceType: "DiagnosticReport",
           id: ien,
-          status: status,
+          status: fhir_status,
           category: build_category,
           code: build_code,
           subject: patient_dfn ? { reference: "Patient/#{patient_dfn}" } : nil,
@@ -106,7 +86,7 @@ module Lakeraven
       private
 
       def build_code
-        return nil unless code_display || code
+        return nil unless code_present?
 
         result = { text: code_display }
         if code.present?

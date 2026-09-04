@@ -216,6 +216,55 @@ module Lakeraven
         assert_equal "OperationOutcome", JSON.parse(response.body)["resourceType"]
       end
 
+      # Guards review finding: appointment-derived encounters emitted ids in
+      # search that show could not resolve. Every id a search returns must
+      # be readable.
+      test "every id returned by search is readable via show (store and appointment-derived)" do
+        seed_store_encounters
+        RpmsRpc.client.seed_keyed_collection(:patient_appointments, "1", [
+          { datetime: DateTime.new(2026, 8, 12, 9, 0, 0), location_ien: 1,
+            location: "Primary Care Clinic", status: "CHECKED OUT" }
+        ])
+
+        get "/lakeraven-ehr/Encounter", params: { patient: "1" }, headers: @headers
+        ids = JSON.parse(response.body)["entry"].map { |e| e.dig("resource", "id") }
+        assert ids.any? { |id| id.start_with?("appt-1-") }, "expected an appointment-derived id in #{ids}"
+        assert_includes ids, "enc-1-1"
+
+        ids.each do |id|
+          get "/lakeraven-ehr/Encounter/#{id}", headers: @headers
+          assert_response :ok
+          body = JSON.parse(response.body)
+          assert_equal "Encounter", body["resourceType"]
+          assert_equal id, body["id"]
+        end
+      ensure
+        RpmsRpc.client.seed_keyed_collection(:patient_appointments, "1", [])
+        EncounterStore.reset_instance!
+      end
+
+      # Guards review finding: a resolved foreign appointment-derived
+      # encounter must be a 403, like a store-backed one.
+      test "org-bound credential gets 403 for a foreign appointment-derived encounter id" do
+        RpmsRpc.client.seed_keyed_collection(:patient_appointments, "999999", [
+          { datetime: DateTime.new(2026, 8, 12, 9, 0, 0), status: "CHECKED OUT" }
+        ])
+        # Discover the emitted id with an unbound internal credential, then
+        # prove the org-bound credential cannot read it.
+        get "/lakeraven-ehr/Encounter", params: { patient: "999999" }, headers: @headers
+        foreign_id = JSON.parse(response.body)["entry"]
+          .map { |e| e.dig("resource", "id") }.find { |id| id.start_with?("appt-999999-") }
+        assert foreign_id
+
+        teardown_smart_auth
+        setup_smart_auth(scopes: "system/Encounter.read")
+
+        get "/lakeraven-ehr/Encounter/#{foreign_id}", headers: @headers
+        assert_response :forbidden
+      ensure
+        RpmsRpc.client.seed_keyed_collection(:patient_appointments, "999999", [])
+      end
+
       test "org-bound credential reads its own patient's encounter but not a foreign one" do
         seed_store_encounters
         EncounterStore.instance.add(Encounter.new(

@@ -6,24 +6,48 @@ module Lakeraven
       include FHIRDateSearch
 
       # Org-bound credentials: authorization binds to the patient RESOLVED
-      # from ?patient=, at the result level (SmartAuthentication).
+      # from ?patient=, at the result level (SmartAuthentication). #show
+      # authorizes at the result level itself — the owning patient resolves
+      # from the found report, never from a request parameter.
       organization_scope :resolved_patient, only: :index, dfn_param: :patient
+      organization_scope :result_filtered, only: :show
       before_action :require_patient_param, only: :index
 
+      # DiagnosticReport is fixture-served (DiagnosticReportStore) — there
+      # is no verified live RPC read path for lab report panels.
       def index
         dfn = extract_patient_dfn(params[:patient])
-        reports = DiagnosticReport.from_report_hashes(DiagnosticReport.for_patient(dfn), patient_dfn: dfn)
+        reports = servable(DiagnosticReportStore.instance.for_patient(dfn))
         # `date=ge{date}` + `_sort=-date` on effectiveDateTime (FHIRDateSearch).
         reports = filter_by_fhir_date(reports, &:effective_datetime)
         reports = sort_by_fhir_date(reports, &:effective_datetime)
         render_bundle(reports.map(&:to_fhir))
       end
 
+      # Resolves the same store the search serves, so every id a search
+      # returns is readable. Org-bound credentials are authorized against
+      # the RESOLVED resource's owning patient: a foreign patient's report
+      # id is a 403 (never disclosed), an unknown id a 404.
       def show
-        render_not_found("DiagnosticReport", params[:id])
+        report = DiagnosticReportStore.instance.find(params[:id])
+        report = nil unless report&.code_present? # a codeless record is never served (it was never searchable either)
+        return render_not_found("DiagnosticReport", params[:id]) unless report
+
+        if organization_bound?
+          return unless authorize_resolved_patient!(report.patient_dfn)
+        end
+
+        render_fhir(report.to_fhir)
       end
 
       private
+
+      # DiagnosticReport.code is 1..1: a record with no source naming cannot
+      # be emitted as valid FHIR, so it is OMITTED from results rather than
+      # served invalid (DiagnosticReport#code_present?).
+      def servable(reports)
+        reports.select(&:code_present?)
+      end
 
       def require_patient_param
         return if params[:patient].present?

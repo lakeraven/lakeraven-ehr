@@ -61,6 +61,90 @@ module Lakeraven
         get "/lakeraven-ehr/AllergyIntolerance", params: { patient: "1" }
         assert_response :unauthorized
       end
+
+      # -- Supplemental-resource authorization + read-by-id ---------------------
+
+      def with_supplemental_provider(provider)
+        Lakeraven::EHR.configuration.supplemental_allergy_intolerances_provider = provider
+        yield
+      ensure
+        Lakeraven::EHR.configuration.supplemental_allergy_intolerances_provider = nil
+      end
+
+      def penicillin_for(dfn)
+        AllergyIntolerance.new(
+          ien: "allergy-#{dfn}-penicillin-g", patient_dfn: dfn.to_s,
+          allergen: "Penicillin G", allergen_code: "7980", category: "medication",
+          reaction: "Hives", severity: "moderate", criticality: "high"
+        )
+      end
+
+      # Guards review BLOCKER: pre-fix, supplemental models were appended
+      # AFTER authorization with no ownership check, so a supplemental
+      # record owned by another (possibly foreign-organization) patient was
+      # disclosed inside the requested patient's bundle, carrying its real
+      # owner in `patient.reference`.
+      test "a supplemental allergy owned by another patient is never disclosed" do
+        rogue = ->(_dfn) { [ penicillin_for("1"), penicillin_for("999999") ] }
+
+        with_supplemental_provider(rogue) do
+          get "/lakeraven-ehr/AllergyIntolerance", params: { patient: "1" }, headers: @headers
+          assert_response :ok
+          body = JSON.parse(response.body)
+          assert_equal 1, body["total"]
+          refs = body["entry"].map { |e| e.dig("resource", "patient", "reference") }
+          assert_equal [ "Patient/1" ], refs.uniq,
+            "an org-A request must never return a resource referencing a foreign patient"
+        end
+      end
+
+      # Guards review finding: search emitted ids that show could not
+      # resolve. Every id a search returns must be readable.
+      test "every id returned by search is readable via show" do
+        provider = ->(dfn) { dfn == "1" ? [ penicillin_for("1") ] : [] }
+
+        with_supplemental_provider(provider) do
+          RpmsRpc.client.seed_keyed_collection(:allergy_list, "1", [
+            { allergen: "SHELLFISH", reaction: "ANAPHYLAXIS", severity: "SEVERE" }
+          ])
+          get "/lakeraven-ehr/AllergyIntolerance", params: { patient: "1" }, headers: @headers
+          ids = JSON.parse(response.body)["entry"].map { |e| e.dig("resource", "id") }
+          assert_equal 2, ids.length # one wire-path, one supplemental
+
+          ids.each do |id|
+            get "/lakeraven-ehr/AllergyIntolerance/#{id}", headers: @headers
+            assert_response :ok
+            body = JSON.parse(response.body)
+            assert_equal "AllergyIntolerance", body["resourceType"]
+            assert_equal id, body["id"]
+          end
+        ensure
+          RpmsRpc.client.seed_keyed_collection(:allergy_list, "1", [])
+        end
+      end
+
+      # Guards review finding: a resolved foreign resource must be a 403
+      # (never served, never a masking 404).
+      test "org-bound credential gets 403 for a foreign patient's allergy id" do
+        provider = ->(dfn) {
+          case dfn
+          when "1" then [ penicillin_for("1") ]
+          when "999999" then [ penicillin_for("999999") ]
+          else []
+          end
+        }
+
+        with_supplemental_provider(provider) do
+          teardown_smart_auth
+          setup_smart_auth(scopes: "system/AllergyIntolerance.read")
+
+          get "/lakeraven-ehr/AllergyIntolerance/allergy-1-penicillin-g", headers: @headers
+          assert_response :ok
+
+          get "/lakeraven-ehr/AllergyIntolerance/allergy-999999-penicillin-g", headers: @headers
+          assert_response :forbidden
+        end
+      end
     end
   end
 end
