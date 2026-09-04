@@ -24,6 +24,11 @@ module Lakeraven
       }.freeze
 
       attribute :ien, :integer
+      # FHIR resource id (optional; mirrors Provenance#fhir_id). Set when the
+      # encounter has no numeric IEN — appointment-derived encounters carry a
+      # deterministic derived id, fixture encounters a seeded one — so
+      # ids/fullUrls stay stable across requests. Wins over `ien` in to_fhir.
+      attribute :fhir_id, :string
       attribute :status, :string
       attribute :class_code, :string
       attribute :period_start, :datetime
@@ -56,6 +61,75 @@ module Lakeraven
 
       def self.for_patient(dfn)
         gateway.for_patient(dfn)
+      end
+
+      # RPMS appointment external statuses (ORWPT APPTLST piece 4) to FHIR
+      # Encounter.status. Unrecognized wire statuses map to "unknown" (a
+      # legal FHIR code) rather than being invented. "INPATIENT" on an
+      # appointment row says the patient was ADMITTED around that visit — it
+      # does not say the admission is still under way, so it maps to
+      # "unknown", never to "in-progress" (asserting an active encounter for
+      # a possibly long-past admission would fabricate clinical state).
+      APPOINTMENT_STATUS_MAP = {
+        "FUTURE" => "planned",
+        "SCHEDULED" => "planned",
+        "CHECKED IN" => "arrived",
+        "CHECKED OUT" => "finished",
+        "INPATIENT" => "unknown",
+        "NO-SHOW" => "cancelled",
+        "NO SHOW" => "cancelled",
+        "CANCELLED" => "cancelled"
+      }.freeze
+
+      # Encounter.class derives from the actual setting the wire reports:
+      # an INPATIENT row is an inpatient encounter (IMP); everything else on
+      # the appointment list is a clinic appointment (AMB).
+      APPOINTMENT_CLASS_MAP = {
+        "INPATIENT" => "IMP"
+      }.freeze
+      APPOINTMENT_DEFAULT_CLASS = "AMB"
+
+      # Build Encounter instances from raw ORWPT APPTLST appointment hashes
+      # ({ datetime:, location_ien:, location:, status: }).
+      #
+      # The wire carries no IEN, so the id derives DETERMINISTICALLY from
+      # dfn + appointment timestamp (mirroring Observation.vital_id) — never
+      # a random uuid.
+      def self.from_appointment_hashes(hashes, patient_dfn:)
+        Array(hashes).map do |h|
+          wire_status = h[:status].to_s.upcase
+          # Both owner fields carry the SAME patient (see #owner_patient_id).
+          new(
+            fhir_id: appointment_id(patient_dfn, h),
+            patient_identifier: patient_dfn.to_s,
+            patient_dfn: patient_dfn,
+            status: APPOINTMENT_STATUS_MAP[wire_status] || "unknown",
+            class_code: APPOINTMENT_CLASS_MAP.fetch(wire_status, APPOINTMENT_DEFAULT_CLASS),
+            period_start: h[:datetime],
+            location_ien: h[:location_ien]
+          )
+        end
+      end
+
+      def self.appointment_id(patient_dfn, hash)
+        id = "appt-#{patient_dfn}"
+        datetime = hash[:datetime]
+        id += "-#{datetime.strftime('%Y%m%d%H%M')}" if datetime.respond_to?(:strftime)
+        id
+      end
+      private_class_method :appointment_id
+
+      # -- Ownership -----------------------------------------------------------
+
+      # The ONE patient this encounter belongs to. `patient_identifier` (the
+      # FHIR subject id, set by the appointment path and fixture seeds) wins;
+      # `patient_dfn` is the fallback for records built with only the RPMS
+      # DFN. Every place ownership matters — store search, the FHIR subject
+      # reference, show authorization — keys on this value, so a record can
+      # never surface in one patient's search while referencing another
+      # (adversarial review finding: the two fields used to compete).
+      def owner_patient_id
+        (patient_identifier.presence || patient_dfn)&.to_s
       end
 
       # -- Display helpers ---------------------------------------------------
@@ -119,15 +193,17 @@ module Lakeraven
           resourceType: "Encounter",
           meta: { profile: [ US_CORE_PROFILE ] },
           status: status,
-          class: { system: ACT_CODE_SYSTEM, code: class_code, display: class_display }
+          class: { system: ACT_CODE_SYSTEM, code: class_code, display: class_display }.compact
         }
 
-        resource[:id] = ien.to_s if ien
+        resource[:id] = fhir_id.presence || ien&.to_s
+        resource.delete(:id) if resource[:id].blank?
         resource[:period] = build_period if period_start || period_end
         # Omit `coding` (never emit "code": null) when only display text exists.
         resource[:type] = [ { text: type_display, coding: type_code ? [ { code: type_code } ] : nil }.compact ] if type_display
         resource[:reasonCode] = [ { text: reason_display, coding: reason_code ? [ { code: reason_code } ] : nil }.compact ] if reason_display
-        resource[:subject] = { reference: "Patient/#{patient_identifier}" } if patient_identifier
+        owner = owner_patient_id
+        resource[:subject] = { reference: "Patient/#{owner}" } if owner
         if practitioner_identifier
           resource[:participant] = [ { individual: { reference: "Practitioner/#{practitioner_identifier}" } } ]
         elsif participant_practitioner_iens.is_a?(Array) && participant_practitioner_iens.any?

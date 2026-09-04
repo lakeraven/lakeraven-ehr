@@ -11,6 +11,32 @@ module Lakeraven
 
       included do
         attr_reader :current_token
+        # Per-action organization-scoping declarations (see .organization_scope).
+        class_attribute :organization_scope_rules, instance_writer: false, default: {}
+      end
+
+      class_methods do
+        # Declares how actions satisfy per-organization credential scoping
+        # (enforced by #enforce_organization_scope!). Rules:
+        #
+        #   :resolved_patient — resolve params[dfn_param] to a Patient and
+        #       require the credential's organization to manage that patient.
+        #       Fail closed: a blank or unresolvable patient reference is
+        #       denied (clinical gateways can hold records for a DFN the
+        #       Patient lookup cannot resolve).
+        #   :result_filtered — the action itself authorizes at the RESULT
+        #       level (filters resolved patients by organization, or enforces
+        #       resolved-resource ownership). Declare only alongside such code.
+        #   :not_patient_compartment — the resource carries no per-patient
+        #       PHI (directory/terminology data); allowed for any credential.
+        #
+        # Any action WITHOUT a declaration is denied to org-bound credentials
+        # outright, so a new endpoint cannot leak cross-organization data by
+        # omission.
+        def organization_scope(rule, only:, dfn_param: nil)
+          entries = Array(only).to_h { |a| [ a.to_sym, { rule: rule, dfn_param: dfn_param } ] }
+          self.organization_scope_rules = organization_scope_rules.merge(entries)
+        end
       end
 
       def authenticate_smart_token!
@@ -85,6 +111,83 @@ module Lakeraven
         end
 
         true
+      end
+
+      # -- Per-organization credential scoping --------------------------------
+      # Vardana source-system profile section 2 / conformance item 2: a
+      # credential bound to one organization must not reach another
+      # organization's patients. Binding lives on the Doorkeeper application
+      # (organization_id); a nil binding means the credential is not org-bound.
+
+      def current_organization_id
+        current_token&.application&.organization_id
+      end
+
+      def organization_bound?
+        current_organization_id.present?
+      end
+
+      # Before-action: fail-closed enforcement for org-bound credentials.
+      # Authorization binds to the RESOLVED patient / result set — never to a
+      # request parameter name (an earlier version inferred the patient from
+      # dfn/patient/_id params, which any differently-named parameter or
+      # unlisted endpoint bypassed; independent security review finding).
+      def enforce_organization_scope!
+        # A system/ credential is only ever legitimate when bound to exactly
+        # one organization (Vardana source-system profile section 2). The
+        # token endpoint refuses to mint tokens for unbound clients, but the
+        # authorization layer must fail closed too: a token whose application
+        # predates mandatory binding, was minted through another flow, or had
+        # its binding blanked (the column is nullable for interactive apps)
+        # reads NOTHING. (Independent security review finding: the earlier
+        # nil-org path fell open to unrestricted cross-organization reads.)
+        if system_scope? && !organization_bound?
+          render_forbidden("System credential is not bound to an organization")
+          return false
+        end
+        return true unless organization_bound?
+
+        entry = organization_scope_rules[action_name.to_sym]
+        case entry&.dig(:rule)
+        when :not_patient_compartment, :result_filtered
+          true
+        when :resolved_patient
+          authorize_resolved_patient!(params[entry[:dfn_param]])
+        else
+          render_forbidden("This endpoint is not available to organization-scoped credentials")
+          false
+        end
+      end
+
+      # Resolves the addressed patient and requires the credential's
+      # organization to manage them. Fail closed: a blank or unresolvable
+      # patient reference is denied — clinical gateways may hold records for
+      # a DFN the Patient lookup cannot resolve, and those must never be
+      # readable across organizations.
+      def authorize_resolved_patient!(raw_dfn)
+        dfn = raw_dfn.to_s.sub(%r{\APatient/}, "")
+        patient = dfn.present? ? Patient.find_by_dfn(dfn) : nil
+        return authorize_organization_for_patient!(patient) if patient
+
+        render_forbidden("Credential is not authorized for this patient's organization")
+        false
+      end
+
+      def authorize_organization_for_patient!(patient)
+        return true unless organization_bound?
+        return true if organization_permits_patient?(patient)
+
+        render_forbidden("Credential is not authorized for this patient's organization")
+        false
+      end
+
+      # Fail closed: a patient whose managing organization cannot be resolved
+      # is not readable by an org-bound credential.
+      def organization_permits_patient?(patient)
+        site_ien = patient.respond_to?(:site_ien) ? patient.site_ien : nil
+        return false if site_ien.blank?
+
+        [ site_ien.to_s, "rpms-organization-#{site_ien}" ].include?(current_organization_id.to_s)
       end
 
       private

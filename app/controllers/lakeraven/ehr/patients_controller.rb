@@ -3,6 +3,14 @@
 module Lakeraven
   module EHR
     class PatientsController < ApplicationController
+      # Org-bound credentials: #show authorizes the RESOLVED patient; #index
+      # filters the resolved result set by organization below. #create stays
+      # undeclared — DENIED to org-bound credentials — because registration
+      # would write into a site the credential's binding cannot vouch for;
+      # opening it needs an explicit org-match rule first.
+      organization_scope :resolved_patient, only: :show, dfn_param: :dfn
+      organization_scope :result_filtered, only: :index
+
       before_action :enforce_patient_context!, only: :show
       skip_before_action :authorize_fhir_scope!, only: :create
       before_action :authorize_fhir_write_scope!, only: :create
@@ -10,6 +18,9 @@ module Lakeraven
 
       def index
         patients = resolve_patient_search
+        # Org-bound backend credentials only see their own organization's
+        # patients (SmartAuthentication — Vardana conformance item 2).
+        patients = patients.select { |p| org_visible_patient?(p) } if organization_bound?
 
         entries = patients.map { |p| build_patient_entry(p) }
 
@@ -72,6 +83,18 @@ module Lakeraven
       end
 
       private
+
+      # The search projection (ORWPT LIST ALL) carries no site_ien, so an
+      # org-bound search would otherwise return nothing; resolve the full
+      # record before deciding. Fail closed: a patient whose managing site
+      # cannot be resolved is not visible to org-bound credentials.
+      def org_visible_patient?(patient)
+        return true if organization_permits_patient?(patient)
+        return false if patient.site_ien.present? || patient.dfn.blank?
+
+        resolved = Patient.find_by_dfn(patient.dfn)
+        resolved.present? && organization_permits_patient?(resolved)
+      end
 
       def enforce_patient_context!
         authorize_patient_context!(params[:dfn])

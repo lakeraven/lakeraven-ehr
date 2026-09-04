@@ -10,6 +10,10 @@ module Lakeraven
       VALID_ACTIVITIES = %w[CREATE UPDATE DELETE].freeze
       ACTIVITY_SYSTEM = "http://terminology.hl7.org/CodeSystem/v3-DataOperation"
 
+      # FHIR resource id (optional; set for provenance served over the API
+      # so bundle entries are addressable and stable across reads)
+      attribute :fhir_id, :string
+
       attribute :target_type, :string
       attribute :target_id, :string
       attribute :recorded, :datetime
@@ -60,6 +64,7 @@ module Lakeraven
       def to_fhir
         resource = {
           resourceType: "Provenance",
+          id: fhir_id,
           target: [ { reference: "#{target_type}/#{target_id}" } ],
           recorded: recorded&.iso8601,
           activity: build_activity,

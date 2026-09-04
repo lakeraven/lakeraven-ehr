@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_02_030000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_03_010000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -50,6 +50,15 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_02_030000) do
     t.index [ "created_at" ], name: "index_lakeraven_ehr_audit_events_on_created_at"
     t.index [ "entity_type" ], name: "index_lakeraven_ehr_audit_events_on_entity_type"
     t.index [ "tenant_identifier" ], name: "index_lakeraven_ehr_audit_events_on_tenant_identifier"
+  end
+
+  create_table "lakeraven_ehr_backend_assertion_jtis", force: :cascade do |t|
+    t.string "client_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "expires_at", null: false
+    t.string "jti", null: false
+    t.index [ "client_id", "jti" ], name: "idx_backend_assertion_jti_uniqueness", unique: true
+    t.index [ "expires_at" ], name: "index_lakeraven_ehr_backend_assertion_jtis_on_expires_at"
   end
 
   create_table "lakeraven_ehr_disclosures", force: :cascade do |t|
@@ -106,6 +115,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_02_030000) do
     t.datetime "created_at", null: false
     t.string "gender_identity"
     t.integer "patient_dfn", null: false
+    t.string "phone"
     t.string "sexual_orientation"
     t.datetime "updated_at", null: false
     t.index [ "patient_dfn" ], name: "index_lakeraven_ehr_patient_supplements_on_patient_dfn", unique: true
@@ -183,12 +193,15 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_02_030000) do
   create_table "oauth_applications", force: :cascade do |t|
     t.boolean "confidential", default: true, null: false
     t.datetime "created_at", null: false
+    t.string "jwks_uri"
     t.string "name", null: false
+    t.string "organization_id"
     t.text "redirect_uri", null: false
     t.string "scopes", default: "", null: false
     t.string "secret", null: false
     t.string "uid", null: false
     t.datetime "updated_at", null: false
+    t.index [ "organization_id" ], name: "index_oauth_applications_on_organization_id"
     t.index [ "uid" ], name: "index_oauth_applications_on_uid", unique: true
   end
 

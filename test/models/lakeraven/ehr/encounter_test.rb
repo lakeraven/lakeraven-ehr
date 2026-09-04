@@ -237,6 +237,25 @@ module Lakeraven
         assert_nil fhir[:period]
       end
 
+      # -- Single canonical owner ---------------------------------------------
+
+      test "owner_patient_id is the identifier when present, else the dfn, else nil" do
+        assert_equal "9001", Encounter.new(patient_identifier: "9001", patient_dfn: 1).owner_patient_id
+        assert_equal "1", Encounter.new(patient_dfn: 1).owner_patient_id
+        assert_equal "9001", Encounter.new(patient_identifier: "9001").owner_patient_id
+        assert_nil Encounter.new.owner_patient_id
+      end
+
+      test "subject references the canonical owner, even for a dfn-only encounter" do
+        split = Encounter.new(status: "finished", class_code: "AMB", patient_dfn: 1, patient_identifier: "999999")
+        assert_equal "Patient/999999", split.to_fhir.dig(:subject, :reference)
+
+        dfn_only = Encounter.new(status: "finished", class_code: "AMB", patient_dfn: 1)
+        assert_equal "Patient/1", dfn_only.to_fhir.dig(:subject, :reference)
+
+        refute Encounter.new(status: "finished", class_code: "AMB").to_fhir.key?(:subject)
+      end
+
       test "to_fhir includes subject reference" do
         enc = Encounter.new(status: "planned", class_code: "AMB", patient_identifier: "pt_1")
         fhir = enc.to_fhir
@@ -351,6 +370,86 @@ module Lakeraven
         parsed = Encounter.from_fhir(fhir)
         assert_equal "in-progress", parsed.status
         assert_equal "EMER", parsed.class_code
+      end
+
+      # =============================================================================
+      # FHIR ID + APPOINTMENT WIRE MAPPING (ORWPT APPTLST)
+      # =============================================================================
+
+      test "to_fhir prefers fhir_id over ien" do
+        enc = Encounter.new(fhir_id: "enc-9001-1", ien: 42, status: "finished", class_code: "AMB")
+        assert_equal "enc-9001-1", enc.to_fhir[:id]
+      end
+
+      test "to_fhir keeps ien as id when no fhir_id" do
+        enc = Encounter.new(ien: 42, status: "finished", class_code: "AMB")
+        assert_equal "42", enc.to_fhir[:id]
+      end
+
+      test "from_appointment_hashes derives deterministic ids and maps statuses" do
+        encounters = Encounter.from_appointment_hashes([ {
+          datetime: DateTime.new(2026, 8, 12, 9, 0, 0), location_ien: 1,
+          location: "Primary Care Clinic", status: "CHECKED OUT"
+        } ], patient_dfn: 9001)
+
+        enc = encounters.first
+        assert_equal "appt-9001-202608120900", enc.fhir_id
+        assert_equal "finished", enc.status
+        assert_equal "AMB", enc.class_code
+        assert_equal "9001", enc.patient_identifier
+        assert enc.valid?
+      end
+
+      test "from_appointment_hashes maps unrecognized statuses to unknown" do
+        encounters = Encounter.from_appointment_hashes(
+          [ { datetime: DateTime.new(2026, 8, 12, 9, 0, 0), status: "MYSTERY" } ],
+          patient_dfn: 1
+        )
+        assert_equal "unknown", encounters.first.status
+      end
+
+      # Guards review finding: an INPATIENT appointment row was mapped to an
+      # ACTIVE ("in-progress") AMBULATORY encounter pre-fix. The row says
+      # the patient was admitted, not that the admission is under way — and
+      # an admission is not ambulatory.
+      test "from_appointment_hashes maps INPATIENT to class IMP and does not assert in-progress" do
+        encounters = Encounter.from_appointment_hashes(
+          [ { datetime: DateTime.new(2026, 8, 12, 9, 0, 0), status: "INPATIENT" } ],
+          patient_dfn: 1
+        )
+        enc = encounters.first
+        assert_equal "IMP", enc.class_code
+        assert_equal "unknown", enc.status
+        refute enc.in_progress?
+      end
+    end
+
+    class EncounterStoreTest < ActiveSupport::TestCase
+      teardown { EncounterStore.reset_instance! }
+
+      test "for_patient matches on the canonical owner (identifier, else dfn)" do
+        EncounterStore.instance.add(Encounter.new(fhir_id: "enc-1", patient_identifier: "9001",
+                                                  status: "finished", class_code: "AMB"))
+        EncounterStore.instance.add(Encounter.new(fhir_id: "enc-2", patient_dfn: 9002,
+                                                  status: "finished", class_code: "AMB"))
+        assert_equal [ "enc-1" ], EncounterStore.instance.for_patient("9001").map(&:fhir_id)
+        assert_equal [ "enc-2" ], EncounterStore.instance.for_patient(9002).map(&:fhir_id)
+      end
+
+      # Adversarial review finding: matching EITHER owner field let one record
+      # surface in two patients' searches. Only the canonical owner matches.
+      test "for_patient never matches a record through its non-canonical owner field" do
+        EncounterStore.instance.add(Encounter.new(fhir_id: "enc-split", patient_dfn: 1,
+                                                  patient_identifier: "999999",
+                                                  status: "finished", class_code: "AMB"))
+        assert_equal [], EncounterStore.instance.for_patient("1").map(&:fhir_id)
+        assert_equal [ "enc-split" ], EncounterStore.instance.for_patient("999999").map(&:fhir_id)
+      end
+
+      test "find matches fhir_id" do
+        EncounterStore.instance.add(Encounter.new(fhir_id: "enc-1", status: "finished", class_code: "AMB"))
+        assert_equal "enc-1", EncounterStore.instance.find("enc-1").fhir_id
+        assert_nil EncounterStore.instance.find("enc-404")
       end
     end
   end

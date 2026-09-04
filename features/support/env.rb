@@ -19,3 +19,12 @@ World(CucumberRackHelpers)
 
 # Minitest requires this for World inclusion
 def mu_pp(obj) = obj.inspect
+
+# test_helper (required above for Minitest::Assertions) also installs
+# Minitest's at_exit autorun. Under cucumber there are no Minitest suites to
+# run, and Minitest's option parser rejects cucumber CLI flags (--tags,
+# --publish-quiet), turning a green cucumber run into exit status 1 — which
+# would make any CI gate on cucumber meaningless. Neutralize the autorun.
+def Minitest.run(_args = [])
+  true
+end

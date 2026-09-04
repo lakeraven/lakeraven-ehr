@@ -51,6 +51,14 @@ module Lakeraven
           telecoms = build_telecoms
           resource[:telecom] = telecoms if telecoms.any?
 
+          # Vardana source-system profile section 3: managingOrganization on
+          # Patient. The RPMS site (ORWPT ID INFO piece 5) is the managing
+          # organization; Organization/{site_ien} is servable via the
+          # Organization read endpoint.
+          if @p.respond_to?(:site_ien) && @p.site_ien.present?
+            resource[:managingOrganization] = { reference: "Organization/#{@p.site_ien}" }
+          end
+
           exts = build_extensions
           resource[:extension] = exts if exts.any?
 

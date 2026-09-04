@@ -3,12 +3,19 @@
 module Lakeraven
   module EHR
     class ConditionsController < ApplicationController
+      # Org-bound credentials: authorization binds to the patient RESOLVED
+      # from ?patient=, at the result level (SmartAuthentication).
+      organization_scope :resolved_patient, only: :index, dfn_param: :patient
       before_action :require_patient_param, only: :index
 
       def index
         dfn = extract_patient_dfn(params[:patient])
-        results = Condition.for_patient(dfn)
-        render_bundle(results.map { |r| { resourceType: "Condition" }.merge(r) })
+        conditions = Condition.from_problem_hashes(Condition.for_patient(dfn), patient_dfn: dfn)
+        if params[:"clinical-status"].present?
+          statuses = params[:"clinical-status"].split(",")
+          conditions = conditions.select { |c| statuses.include?(c.clinical_status) }
+        end
+        render_bundle(conditions.map(&:to_fhir))
       end
 
       def show

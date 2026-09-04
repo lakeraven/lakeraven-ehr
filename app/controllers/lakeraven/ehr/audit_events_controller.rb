@@ -3,6 +3,10 @@
 module Lakeraven
   module EHR
     class AuditEventsController < ApplicationController
+      # Deliberately NO organization_scope declaration: the audit log spans
+      # every organization (patient references, client ids, network metadata),
+      # so org-bound backend credentials are denied it outright (fail closed).
+      # Audit review is an administrative function, not a connector's.
       def index
         events = AuditEvent.recent.limit(100)
         render_bundle(events.map(&:to_fhir))
