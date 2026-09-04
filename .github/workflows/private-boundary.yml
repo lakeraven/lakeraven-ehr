@@ -5,10 +5,20 @@ name: private-boundary
 # never in the repo, and matched terms are never echoed — only file:line — so
 # the blocklist cannot leak through public CI logs. Until the secret is set
 # the job passes with a notice.
+#
+# Scope/limits (independent review): the token is read-only, so a PR that edits
+# this workflow cannot use it to write. Forked-PR runs receive no secret and so
+# skip the scan (GitHub withholds secrets from fork PRs) — boundary hygiene on
+# fork contributions is enforced at review time. Matching is literal and over
+# git-TRACKED files only (contents and paths); history/commit messages are not
+# scanned here.
 on:
   pull_request:
   push:
     branches: [main]
+
+permissions:
+  contents: read
 
 jobs:
   scan:
@@ -25,18 +35,20 @@ jobs:
             echo "::notice::LAKERAVEN_BOUNDARY_BLOCKLIST not set; skipping boundary scan."
             exit 0
           fi
+          tracked="$(git ls-files)"
           fail=0
           while IFS= read -r term; do
             term="${term%$'\r'}"
             if [ -z "$term" ]; then continue; fi
-            matches="$(grep -RIn -i --exclude-dir=.git -e "$term" . | cut -d: -f1,2 || true)"
-            if [ -n "$matches" ]; then
-              while IFS= read -r loc; do
-                if [ -z "$loc" ]; then continue; fi
-                echo "::error::private-boundary term matched at ${loc}"
-                fail=1
-              done <<< "$matches"
-            fi
+            # Literal (-F), case-insensitive (-i); git grep scans TRACKED files
+            # only — no .git, no untracked files, no symlink following.
+            content="$(git grep -I -i -n -F -e "$term" -- . | cut -d: -f1,2 || true)"
+            paths="$(printf '%s\n' "$tracked" | grep -i -F -e "$term" || true)"
+            for loc in $content $paths; do
+              [ -z "$loc" ] && continue
+              echo "::error::private-boundary term matched at ${loc}"
+              fail=1
+            done
           done <<< "${BLOCKLIST}"
           if [ "$fail" -ne 0 ]; then
             echo "A private-boundary term was found in this public repo. Remove it before merging."
