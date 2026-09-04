@@ -98,7 +98,7 @@ module Lakeraven
       # allergen_code is RxNorm when present (see #matching_key); the wire
       # path carries none, so text-only codes are the norm there.
       def build_code
-        result = { text: allergen }
+        result = { text: allergen }.compact # never emit "text": null
         if allergen_code.present?
           result[:coding] = [ { system: RXNORM_SYSTEM, code: allergen_code, display: allergen }.compact ]
         end

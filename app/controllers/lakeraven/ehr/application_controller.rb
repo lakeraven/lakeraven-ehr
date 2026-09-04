@@ -16,8 +16,22 @@ module Lakeraven
       # WITHOUT a declaration is denied to org-bound credentials (fail
       # closed) — see SmartAuthentication.
       before_action :enforce_organization_scope!
+      # Patient-context (SMART patient/-scoped) tokens are confined to their
+      # bound patient's compartment. Any action searching by ?patient= is
+      # checked here centrally, so no per-patient search endpoint can leak
+      # another patient's records to a patient-bound token by omission
+      # (authorize_patient_context! is a no-op for system/user tokens).
+      # Resource reads (#show) re-check against the RESOLVED resource's
+      # owner in each controller.
+      before_action :enforce_patient_compartment_on_search!
 
       private
+
+      def enforce_patient_compartment_on_search!
+        return true if params[:patient].blank?
+
+        authorize_patient_context!(params[:patient].to_s.delete_prefix("Patient/"))
+      end
 
       def fhir_resource_type
         self.class.name.demodulize.delete_suffix("Controller").singularize

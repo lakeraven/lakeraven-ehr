@@ -32,10 +32,14 @@ module Lakeraven
         encounter = EncounterStore.instance.find(params[:id]) || resolve_appointment_encounter(params[:id])
         return render_not_found("Encounter", params[:id]) unless encounter
 
-        # Result-level org enforcement: an org-bound credential reads an
-        # encounter only when its organization manages the owning patient.
+        # Patient-context tokens read only their own compartment (403 on a
+        # foreign patient's resource); org-bound credentials are authorized
+        # against the resolved owner's organization. Both key on the ONE
+        # canonical owner (Encounter#owner_patient_id) — the same value the
+        # search matches and the subject reference renders.
+        return unless authorize_patient_context!(encounter.owner_patient_id)
         if organization_bound?
-          return unless authorize_resolved_patient!(encounter.patient_identifier || encounter.patient_dfn)
+          return unless authorize_resolved_patient!(encounter.owner_patient_id)
         end
 
         render_fhir(encounter.to_fhir)

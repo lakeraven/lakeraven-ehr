@@ -223,6 +223,30 @@ module Lakeraven
         assert DiagnosticReport.new(patient_dfn: "1", code: "58410-2").code_present?
         refute DiagnosticReport.new(patient_dfn: "1").code_present?
       end
+
+      # Adversarial review finding: a code-only report emitted `"text": null`,
+      # which is invalid FHIR JSON (a null property must be omitted).
+      test "a code-only report emits code.coding with NO text key (not null)" do
+        fhir = DiagnosticReport.new(ien: "1", patient_dfn: "1", code: "58410-2").to_fhir
+        code = fhir[:code]
+        assert_equal "58410-2", code.dig(:coding, 0, :code)
+        refute code.key?(:text), "code must not carry a text key when code_display is blank: #{code.inspect}"
+        refute JSON.generate(fhir).include?("null"), "serialized resource must contain no null values"
+      end
+
+      test "a display-only report emits code.text with NO coding key" do
+        code = DiagnosticReport.new(ien: "1", patient_dfn: "1", code_display: "CBC").to_fhir[:code]
+        assert_equal "CBC", code[:text]
+        refute code.key?(:coding)
+      end
+
+      test "an unrecognized category emits coding without a null display" do
+        fhir = DiagnosticReport.new(ien: "1", patient_dfn: "1", category: "PATH", code: "1").to_fhir
+        coding = fhir.dig(:category, 0, :coding, 0)
+        assert_equal "PATH", coding[:code]
+        refute coding.key?(:display)
+        refute JSON.generate(fhir).include?("null")
+      end
     end
   end
 end

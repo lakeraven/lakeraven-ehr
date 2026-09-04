@@ -145,6 +145,26 @@ module Lakeraven
           assert_response :forbidden
         end
       end
+
+      # -- Patient compartment (SMART patient/-scoped tokens) --------------------
+      test "patient-bound token reads its own allergy but gets 403 on another patient's" do
+        provider = ->(dfn) { %w[1 2].include?(dfn) ? [ penicillin_for(dfn) ] : [] }
+
+        with_supplemental_provider(provider) do
+          teardown_smart_auth
+          setup_patient_smart_auth(patient: "1")
+
+          get "/lakeraven-ehr/AllergyIntolerance/allergy-1-penicillin-g", headers: @headers
+          assert_response :ok
+          get "/lakeraven-ehr/AllergyIntolerance/allergy-2-penicillin-g", headers: @headers
+          assert_response :forbidden
+
+          get "/lakeraven-ehr/AllergyIntolerance", params: { patient: "1" }, headers: @headers
+          assert_response :ok
+          get "/lakeraven-ehr/AllergyIntolerance", params: { patient: "2" }, headers: @headers
+          assert_response :forbidden
+        end
+      end
     end
   end
 end

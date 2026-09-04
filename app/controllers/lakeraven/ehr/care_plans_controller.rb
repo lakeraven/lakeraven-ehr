@@ -31,6 +31,10 @@ module Lakeraven
         care_plan = CarePlanStore.instance.find(params[:id])
         return render_not_found("CarePlan", params[:id]) unless care_plan
 
+        # Patient-context tokens read only their own compartment (403 on a
+        # foreign patient's resource); org-bound credentials are authorized
+        # against the resolved owner's organization.
+        return unless authorize_patient_context!(care_plan.patient_dfn)
         if organization_bound?
           return unless authorize_resolved_patient!(care_plan.patient_dfn)
         end

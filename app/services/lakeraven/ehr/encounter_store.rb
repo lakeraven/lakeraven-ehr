@@ -33,10 +33,11 @@ module Lakeraven
         @records.dup
       end
 
+      # Matches ONLY the canonical owner (Encounter#owner_patient_id) — never
+      # either owner field independently, so a record belongs to exactly one
+      # patient's search.
       def for_patient(dfn)
-        @records.select do |e|
-          [ e.patient_identifier, e.patient_dfn ].compact.map(&:to_s).include?(dfn.to_s)
-        end
+        @records.select { |e| e.owner_patient_id == dfn.to_s }
       end
 
       def find(id)

@@ -150,6 +150,25 @@ module Lakeraven
         get "/lakeraven-ehr/DiagnosticReport/80091", headers: @headers
         assert_response :forbidden
       end
+
+      # -- Patient compartment (SMART patient/-scoped tokens) --------------------
+      test "patient-bound token reads its own report but gets 403 on another patient's" do
+        DiagnosticReportStore.instance.add(DiagnosticReport.new(
+          ien: "80021", patient_dfn: "2", category: "LAB", code: "4548-4", code_display: "Hemoglobin A1c", status: "final"
+        ))
+        teardown_smart_auth
+        setup_patient_smart_auth(patient: "1")
+
+        get "/lakeraven-ehr/DiagnosticReport/80011", headers: @headers
+        assert_response :ok
+        get "/lakeraven-ehr/DiagnosticReport/80021", headers: @headers
+        assert_response :forbidden
+
+        get "/lakeraven-ehr/DiagnosticReport", params: { patient: "1" }, headers: @headers
+        assert_response :ok
+        get "/lakeraven-ehr/DiagnosticReport", params: { patient: "2" }, headers: @headers
+        assert_response :forbidden
+      end
     end
   end
 end

@@ -88,7 +88,10 @@ module Lakeraven
       def build_code
         return nil unless code_present?
 
-        result = { text: code_display }
+        # Never emit `"text": null` — a code-only report carries coding alone
+        # (FHIR JSON forbids null properties; adversarial review finding).
+        result = {}
+        result[:text] = code_display if code_display.present?
         if code.present?
           system = category == CATEGORY_RAD ? "http://www.ama-assn.org/go/cpt" : "http://loinc.org"
           result[:coding] = [ { code: code, system: system } ]
@@ -99,8 +102,8 @@ module Lakeraven
       def build_category
         return nil unless category
 
-        display = CATEGORY_DISPLAY[category]
-        [ { coding: [ { code: category, display: display } ] } ]
+        # Same nil-key rule: an unrecognized category has no display to emit.
+        [ { coding: [ { code: category, display: CATEGORY_DISPLAY[category] }.compact ] } ]
       end
 
       def build_performer

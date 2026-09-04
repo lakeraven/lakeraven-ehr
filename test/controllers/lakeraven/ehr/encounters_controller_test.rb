@@ -281,6 +281,135 @@ module Lakeraven
       ensure
         EncounterStore.reset_instance!
       end
+
+      # -- Patient compartment (SMART patient/-scoped tokens) --------------------
+      # Adversarial review finding: Encounter#show did the org check but not
+      # the patient-compartment check the other sandbox resources enforce, so
+      # a patient-bound token could read any patient's encounter by id.
+
+      def seed_two_patient_encounters
+        EncounterStore.instance.add(Encounter.new(
+          fhir_id: "enc-1-1", patient_identifier: "1", status: "finished", class_code: "AMB"
+        ))
+        EncounterStore.instance.add(Encounter.new(
+          fhir_id: "enc-2-1", patient_identifier: "2", status: "finished", class_code: "AMB"
+        ))
+      end
+
+      test "patient-bound token reads its own encounter but gets 403 on another patient's" do
+        seed_two_patient_encounters
+        teardown_smart_auth
+        setup_patient_smart_auth(patient: "1")
+
+        get "/lakeraven-ehr/Encounter/enc-1-1", headers: @headers
+        assert_response :ok
+
+        get "/lakeraven-ehr/Encounter/enc-2-1", headers: @headers
+        assert_response :forbidden
+        assert_equal "OperationOutcome", JSON.parse(response.body)["resourceType"]
+      ensure
+        EncounterStore.reset_instance!
+      end
+
+      test "patient-bound token gets 403 on a foreign appointment-derived encounter id" do
+        RpmsRpc.client.seed_keyed_collection(:patient_appointments, "2", [
+          { datetime: DateTime.new(2026, 8, 12, 9, 0, 0), status: "CHECKED OUT" }
+        ])
+        # Discover the emitted id with the internal credential, then prove
+        # the patient-bound credential cannot read it.
+        get "/lakeraven-ehr/Encounter", params: { patient: "2" }, headers: @headers
+        foreign_id = JSON.parse(response.body)["entry"]
+          .map { |e| e.dig("resource", "id") }.find { |id| id.start_with?("appt-2-") }
+        assert foreign_id
+
+        teardown_smart_auth
+        setup_patient_smart_auth(patient: "1")
+
+        get "/lakeraven-ehr/Encounter/#{foreign_id}", headers: @headers
+        assert_response :forbidden
+      ensure
+        RpmsRpc.client.seed_keyed_collection(:patient_appointments, "2", [])
+      end
+
+      test "patient-bound token is confined to its own compartment on search" do
+        seed_two_patient_encounters
+        teardown_smart_auth
+        setup_patient_smart_auth(patient: "1")
+
+        get "/lakeraven-ehr/Encounter", params: { patient: "1" }, headers: @headers
+        assert_response :ok
+        assert_equal [ "enc-1-1" ], JSON.parse(response.body)["entry"].map { |e| e.dig("resource", "id") }
+
+        get "/lakeraven-ehr/Encounter", params: { patient: "2" }, headers: @headers
+        assert_response :forbidden
+
+        get "/lakeraven-ehr/Encounter", params: { patient: "Patient/2" }, headers: @headers
+        assert_response :forbidden
+      ensure
+        EncounterStore.reset_instance!
+      end
+
+      # -- Single canonical owner ------------------------------------------------
+      # Adversarial review finding: a record with patient_dfn 1 and
+      # patient_identifier "999999" surfaced in Patient/1's search while its
+      # subject referenced Patient/999999. A record belongs to exactly one
+      # patient, everywhere ownership matters.
+
+      def seed_split_owner_encounter
+        EncounterStore.instance.add(Encounter.new(
+          fhir_id: "enc-split", patient_dfn: 1, patient_identifier: "999999",
+          status: "finished", class_code: "AMB"
+        ))
+      end
+
+      test "an encounter never appears in one patient's search while referencing another" do
+        seed_split_owner_encounter
+
+        get "/lakeraven-ehr/Encounter", params: { patient: "1" }, headers: @headers
+        assert_response :ok
+        ids = JSON.parse(response.body)["entry"].map { |e| e.dig("resource", "id") }
+        refute_includes ids, "enc-split"
+
+        get "/lakeraven-ehr/Encounter", params: { patient: "999999" }, headers: @headers
+        assert_response :ok
+        body = JSON.parse(response.body)
+        entry = body["entry"].map { |e| e["resource"] }.find { |r| r["id"] == "enc-split" }
+        assert entry, "the record belongs to its canonical owner"
+        assert_equal "Patient/999999", entry.dig("subject", "reference")
+      ensure
+        EncounterStore.reset_instance!
+      end
+
+      test "show authorizes a split-owner encounter against its canonical owner" do
+        seed_split_owner_encounter
+        teardown_smart_auth
+        setup_patient_smart_auth(patient: "1")
+
+        # Bound to Patient/1: the record's owner is 999999, so this is a 403.
+        get "/lakeraven-ehr/Encounter/enc-split", headers: @headers
+        assert_response :forbidden
+
+        teardown_smart_auth
+        setup_patient_smart_auth(patient: "999999")
+        get "/lakeraven-ehr/Encounter/enc-split", headers: @headers
+        assert_response :ok
+        assert_equal "Patient/999999", JSON.parse(response.body).dig("subject", "reference")
+      ensure
+        EncounterStore.reset_instance!
+      end
+
+      test "a dfn-only store encounter is owned by, searchable for, and referenced to that dfn" do
+        EncounterStore.instance.add(Encounter.new(
+          fhir_id: "enc-dfn-only", patient_dfn: 1, status: "finished", class_code: "AMB"
+        ))
+
+        get "/lakeraven-ehr/Encounter", params: { patient: "1" }, headers: @headers
+        entry = JSON.parse(response.body)["entry"].map { |e| e["resource"] }.find { |r| r["id"] == "enc-dfn-only" }
+        assert entry
+        assert_equal "Patient/1", entry.dig("subject", "reference")
+      ensure
+        EncounterStore.reset_instance!
+      end
     end
   end
 end

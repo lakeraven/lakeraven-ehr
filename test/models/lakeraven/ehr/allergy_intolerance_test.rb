@@ -180,6 +180,15 @@ module Lakeraven
         assert_equal "active", ai.clinical_status
         assert_equal "moderate", ai.to_fhir[:reaction].first[:severity]
       end
+
+      # Same nil-key rule as DiagnosticReport: a code-only allergy must not
+      # emit `"text": null`.
+      test "a code-only allergy emits code.coding with NO text key" do
+        fhir = AllergyIntolerance.new(ien: "a-1", patient_dfn: "1", allergen_code: "7980").to_fhir
+        refute fhir[:code].key?(:text), fhir[:code].inspect
+        assert_equal "7980", fhir.dig(:code, :coding, 0, :code)
+        refute JSON.generate(fhir).include?("null")
+      end
     end
   end
 end

@@ -33,6 +33,10 @@ module Lakeraven
         report = nil unless report&.code_present? # a codeless record is never served (it was never searchable either)
         return render_not_found("DiagnosticReport", params[:id]) unless report
 
+        # Patient-context tokens read only their own compartment (403 on a
+        # foreign patient's resource); org-bound credentials are authorized
+        # against the resolved owner's organization.
+        return unless authorize_patient_context!(report.patient_dfn)
         if organization_bound?
           return unless authorize_resolved_patient!(report.patient_dfn)
         end

@@ -98,9 +98,11 @@ module Lakeraven
       def self.from_appointment_hashes(hashes, patient_dfn:)
         Array(hashes).map do |h|
           wire_status = h[:status].to_s.upcase
+          # Both owner fields carry the SAME patient (see #owner_patient_id).
           new(
             fhir_id: appointment_id(patient_dfn, h),
             patient_identifier: patient_dfn.to_s,
+            patient_dfn: patient_dfn,
             status: APPOINTMENT_STATUS_MAP[wire_status] || "unknown",
             class_code: APPOINTMENT_CLASS_MAP.fetch(wire_status, APPOINTMENT_DEFAULT_CLASS),
             period_start: h[:datetime],
@@ -116,6 +118,19 @@ module Lakeraven
         id
       end
       private_class_method :appointment_id
+
+      # -- Ownership -----------------------------------------------------------
+
+      # The ONE patient this encounter belongs to. `patient_identifier` (the
+      # FHIR subject id, set by the appointment path and fixture seeds) wins;
+      # `patient_dfn` is the fallback for records built with only the RPMS
+      # DFN. Every place ownership matters — store search, the FHIR subject
+      # reference, show authorization — keys on this value, so a record can
+      # never surface in one patient's search while referencing another
+      # (adversarial review finding: the two fields used to compete).
+      def owner_patient_id
+        (patient_identifier.presence || patient_dfn)&.to_s
+      end
 
       # -- Display helpers ---------------------------------------------------
 
@@ -178,7 +193,7 @@ module Lakeraven
           resourceType: "Encounter",
           meta: { profile: [ US_CORE_PROFILE ] },
           status: status,
-          class: { system: ACT_CODE_SYSTEM, code: class_code, display: class_display }
+          class: { system: ACT_CODE_SYSTEM, code: class_code, display: class_display }.compact
         }
 
         resource[:id] = fhir_id.presence || ien&.to_s
@@ -187,7 +202,8 @@ module Lakeraven
         # Omit `coding` (never emit "code": null) when only display text exists.
         resource[:type] = [ { text: type_display, coding: type_code ? [ { code: type_code } ] : nil }.compact ] if type_display
         resource[:reasonCode] = [ { text: reason_display, coding: reason_code ? [ { code: reason_code } ] : nil }.compact ] if reason_display
-        resource[:subject] = { reference: "Patient/#{patient_identifier}" } if patient_identifier
+        owner = owner_patient_id
+        resource[:subject] = { reference: "Patient/#{owner}" } if owner
         if practitioner_identifier
           resource[:participant] = [ { individual: { reference: "Practitioner/#{practitioner_identifier}" } } ]
         elsif participant_practitioner_iens.is_a?(Array) && participant_practitioner_iens.any?

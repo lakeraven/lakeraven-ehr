@@ -239,6 +239,20 @@ module SmartAuthTestHelper
   def setup_internal_smart_auth(scopes: "user/*.*")
     setup_smart_auth(scopes: scopes, organization_id: nil)
   end
+
+  # Patient-context (SMART patient/-scoped) credential bound to one patient
+  # compartment via the token's resource_owner_id. Unbound to any
+  # organization so the tests isolate the compartment check itself.
+  def setup_patient_smart_auth(patient:, scopes: "patient/*.read")
+    @oauth_app = Doorkeeper::Application.create!(
+      name: "patient-app", redirect_uri: "https://example.test/callback",
+      scopes: scopes, confidential: true
+    )
+    token = Doorkeeper::AccessToken.create!(
+      application: @oauth_app, resource_owner_id: patient.to_s, scopes: scopes, expires_in: 3600
+    )
+    @headers = { "Authorization" => "Bearer #{token.plaintext_token || token.token}" }
+  end
 end
 
 # Load fixtures from the engine

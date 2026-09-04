@@ -119,6 +119,25 @@ module Lakeraven
         get "/lakeraven-ehr/CarePlan/cp-foreign-1", headers: @headers
         assert_response :forbidden
       end
+
+      # -- Patient compartment (SMART patient/-scoped tokens) --------------------
+      test "patient-bound token reads its own plan but gets 403 on another patient's" do
+        CarePlanStore.instance.add(CarePlan.new(
+          ien: "cp-2-1", patient_dfn: "2", title: "Other patient plan", status: "active", intent: "plan"
+        ))
+        teardown_smart_auth
+        setup_patient_smart_auth(patient: "1")
+
+        get "/lakeraven-ehr/CarePlan/cp-1-1", headers: @headers
+        assert_response :ok
+        get "/lakeraven-ehr/CarePlan/cp-2-1", headers: @headers
+        assert_response :forbidden
+
+        get "/lakeraven-ehr/CarePlan", params: { patient: "1" }, headers: @headers
+        assert_response :ok
+        get "/lakeraven-ehr/CarePlan", params: { patient: "2" }, headers: @headers
+        assert_response :forbidden
+      end
     end
   end
 end

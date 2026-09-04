@@ -24,6 +24,10 @@ module Lakeraven
         allergy = resolve_allergy(params[:id])
         return render_not_found("AllergyIntolerance", params[:id]) unless allergy
 
+        # Patient-context tokens read only their own compartment (403 on a
+        # foreign patient's resource); org-bound credentials are authorized
+        # against the resolved owner's organization.
+        return unless authorize_patient_context!(allergy.patient_dfn)
         if organization_bound?
           return unless authorize_resolved_patient!(allergy.patient_dfn)
         end
