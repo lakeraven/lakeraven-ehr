@@ -142,6 +142,52 @@ module Lakeraven
       test "persisted? false when ien blank" do
         refute CarePlan.new(patient_dfn: "1").persisted?
       end
+
+      # -- Activity serialization (fixture-served; no wire mapping) ------------
+
+      test "to_fhir uses the activity's own recorded status" do
+        cp = CarePlan.new(
+          ien: "cp-1", patient_dfn: "100", status: "active",
+          activities: [
+            { description: "Metformin 500mg BID", status: "in-progress" },
+            { description: "Quarterly HbA1c", status: "scheduled" }
+          ]
+        )
+        fhir = cp.to_fhir
+        assert_equal 2, fhir[:activity].length
+        assert_equal "in-progress", fhir.dig(:activity, 0, :detail, :status)
+        assert_equal "Metformin 500mg BID", fhir.dig(:activity, 0, :detail, :description)
+        assert_equal "scheduled", fhir.dig(:activity, 1, :detail, :status)
+      end
+
+      # Guards review finding: per-activity progress must NOT be fabricated
+      # from the plan's status. Pre-fix, an activity on an "active" plan was
+      # stamped "in-progress"; an activity on a "completed" plan "completed".
+      test "to_fhir never infers activity status from the plan status" do
+        active_plan = CarePlan.new(
+          ien: "cp-1", patient_dfn: "100", status: "active",
+          activities: [ "Quarterly HbA1c" ]
+        )
+        assert_equal "unknown", active_plan.to_fhir.dig(:activity, 0, :detail, :status)
+
+        completed_plan = CarePlan.new(
+          ien: "cp-2", patient_dfn: "100", status: "completed", activities: [ "X" ]
+        )
+        assert_equal "unknown", completed_plan.to_fhir.dig(:activity, 0, :detail, :status)
+      end
+
+      test "to_fhir maps an unrecognized activity status to unknown (required binding)" do
+        cp = CarePlan.new(
+          ien: "cp-1", patient_dfn: "100", status: "active",
+          activities: [ { description: "X", status: "WIP" } ]
+        )
+        assert_equal "unknown", cp.to_fhir.dig(:activity, 0, :detail, :status)
+      end
+
+      test "to_fhir omits activity when there are none (FHIR forbids empty arrays)" do
+        refute CarePlan.new(ien: "cp-1", patient_dfn: "100").to_fhir.key?(:activity)
+        refute CarePlan.new(ien: "cp-1", patient_dfn: "100", activities: []).to_fhir.key?(:activity)
+      end
     end
   end
 end

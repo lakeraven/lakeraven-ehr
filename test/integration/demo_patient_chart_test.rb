@@ -18,7 +18,7 @@ class DemoPatientChartTest < ActionDispatch::IntegrationTest
   setup do
     @original_client = RpmsRpc.configuration.client
     RpmsRpc.mock! { |m| LakeravenDemoSeeds.seed(m) }
-    setup_smart_auth(scopes: "system/*.read") # @headers => full read token
+    setup_internal_smart_auth(scopes: "user/*.read") # @headers => full read token
   end
 
   teardown do

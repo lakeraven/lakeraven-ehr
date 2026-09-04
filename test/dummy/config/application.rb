@@ -27,6 +27,14 @@ module Dummy
     # For compatibility with applications that use this config
     config.action_controller.include_all_helpers = false
 
+    # The engine's migrations are the dummy app's migrations. Declaring the
+    # path here (not only via the root Rakefile's engine.rake) makes every
+    # entry point coherent — `rails db:migrate`, maintain_test_schema!'s
+    # schema load (assume_migrated_upto_version), and the boot-time
+    # pending-migration check — so a fresh CI database doesn't abort
+    # cucumber with "migrations are pending" after loading the schema.
+    config.paths["db/migrate"] << File.expand_path("../../../db/migrate", __dir__)
+
     # Please, add to the `ignore` list any other `lib` subdirectories that do
     # not contain `.rb` files, or that should not be reloaded or eager loaded.
     # Common ones are `templates`, `generators`, or `middleware`, for example.

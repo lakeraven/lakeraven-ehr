@@ -3,18 +3,62 @@
 module Lakeraven
   module EHR
     class EncountersController < ApplicationController
+      include FHIRDateSearch
+
       # Org-bound credentials: authorization binds to the patient RESOLVED
-      # from ?patient=, at the result level (SmartAuthentication).
+      # from ?patient=, at the result level (SmartAuthentication). #show
+      # authorizes at the result level itself — the owning patient resolves
+      # from the found encounter, never from a request parameter.
       organization_scope :resolved_patient, only: :index, dfn_param: :patient
+      organization_scope :result_filtered, only: :show
       before_action :require_patient_param, only: :index
 
       def index
         dfn = params[:patient].to_s.delete_prefix("Patient/")
-        results = EncounterGateway.for_patient(dfn)
-        render_bundle(results.map { |r| { resourceType: "Encounter" }.merge(r) })
+        encounters = Encounter.from_appointment_hashes(Encounter.for_patient(dfn), patient_dfn: dfn)
+        encounters += EncounterStore.instance.for_patient(dfn)
+        # `date=ge{date}` + `_sort=-date` on period.start (FHIRDateSearch).
+        encounters = filter_by_fhir_date(encounters, &:period_start)
+        encounters = sort_by_fhir_date(encounters, &:period_start)
+        render_bundle(encounters.map(&:to_fhir))
+      end
+
+      # Resolves the same records the search emits — store-seeded encounters
+      # AND appointment-derived ones — so every id a search returns is
+      # readable. Org-bound credentials are authorized against the RESOLVED
+      # resource's owning patient: a foreign patient's encounter id is a 403
+      # (never disclosed), an unknown id a 404.
+      def show
+        encounter = EncounterStore.instance.find(params[:id]) || resolve_appointment_encounter(params[:id])
+        return render_not_found("Encounter", params[:id]) unless encounter
+
+        # Patient-context tokens read only their own compartment (403 on a
+        # foreign patient's resource); org-bound credentials are authorized
+        # against the resolved owner's organization. Both key on the ONE
+        # canonical owner (Encounter#owner_patient_id) — the same value the
+        # search matches and the subject reference renders.
+        return unless authorize_patient_context!(encounter.owner_patient_id)
+        if organization_bound?
+          return unless authorize_resolved_patient!(encounter.owner_patient_id)
+        end
+
+        render_fhir(encounter.to_fhir)
       end
 
       private
+
+      # Appointment-derived encounter ids are deterministic
+      # ("appt-<dfn>-<timestamp>", see Encounter.appointment_id), so the
+      # owning patient parses straight out of the id and the record resolves
+      # through the exact wire path the search serves.
+      def resolve_appointment_encounter(id)
+        match = id.to_s.match(/\Aappt-(\d+)/)
+        return nil unless match
+
+        dfn = match[1]
+        Encounter.from_appointment_hashes(Encounter.for_patient(dfn), patient_dfn: dfn)
+                 .find { |e| e.fhir_id == id.to_s }
+      end
 
       def require_patient_param
         return if params[:patient].present?

@@ -90,7 +90,20 @@ module Lakeraven
 
         def build_patient(patient, source: :rpc)
           patient.provenance = build_provenance(source)
+          apply_supplement(patient)
           patient
+        end
+
+        # Merge AR-persisted supplement fields the RPC surface doesn't carry
+        # (currently the contact phone). RPC-sourced values, when they ever
+        # arrive, win over the supplement.
+        def apply_supplement(patient)
+          return if patient.dfn.blank?
+
+          supplement = PatientSupplement.for_patient(patient.dfn)
+          return unless supplement
+
+          patient.phone ||= supplement.phone
         end
 
         def attach_provenance(patient, source: :rpc)

@@ -104,6 +104,19 @@ Given("the server is configured with token endpoint URL {string}") do |url|
   Lakeraven::EHR.configuration.token_endpoint_url = url
 end
 
+# The token is minted directly (not through the token endpoint, which
+# refuses unbound clients) to model a credential that predates mandatory
+# binding or whose binding was blanked after issuance.
+Given("a backend client with no organization binding holds a directly minted token with scope {string}") do |scopes|
+  app = Doorkeeper::Application.create!(
+    name: "Example Unbound Connector",
+    redirect_uri: "urn:ietf:wg:oauth:2.0:oob",
+    scopes: scopes, confidential: true, organization_id: nil
+  )
+  token = Doorkeeper::AccessToken.create!(application: app, scopes: scopes, expires_in: 300)
+  @fhir_headers = { "Authorization" => "Bearer #{token.plaintext_token || token.token}" }
+end
+
 Given("a backend client bound to organization {string} holds a token with scope {string}") do |org_id, scopes|
   vardana_register_client(name: "Example Connector #{org_id}", scopes: scopes, organization_id: org_id)
   token = Doorkeeper::AccessToken.create!(application: @vardana_app, scopes: scopes, expires_in: 300)
