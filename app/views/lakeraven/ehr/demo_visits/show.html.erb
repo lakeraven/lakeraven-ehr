@@ -1,0 +1,159 @@
+<%
+  finished = @visit["status"] == "finished"
+  base = patient_visit_path(@dfn)
+%><!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title><%= @patient_name %> — Walk-in Visit</title>
+  <style>
+    :root{--ink:#0f172a;--muted:#64748b;--line:#e2e8f0;--brand:#0369a1;--brand-bg:#eff6ff;
+      --ok:#047857;--ok-bg:#ecfdf5;--danger:#b91c1c;--warn-bg:#fffbeb}
+    *{box-sizing:border-box}
+    body{margin:0;background:#f1f5f9;color:var(--ink);
+      font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+    .wrap{max-width:760px;margin:0 auto;padding:22px 18px 60px}
+    a{color:var(--brand)}
+    .top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:6px}
+    h1{font-size:22px;margin:0}
+    h1 .demo-tag{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
+      color:var(--brand);background:var(--brand-bg);border:1px solid #bfdbfe;border-radius:999px;
+      padding:3px 9px;margin-left:8px;vertical-align:middle}
+    .status{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
+      border-radius:999px;padding:5px 12px}
+    .status.open{color:#b45309;background:var(--warn-bg);border:1px solid #fde68a}
+    .status.done{color:var(--ok);background:var(--ok-bg);border:1px solid #a7f3d0}
+    .sub{color:var(--muted);margin:0 0 16px;font-size:13.5px}
+    .flash{border-radius:10px;padding:10px 14px;margin:12px 0;font-weight:600;font-size:14px}
+    .flash.notice{color:var(--ok);background:var(--ok-bg);border:1px solid #a7f3d0}
+    .flash.alert{color:var(--danger);background:#fef2f2;border:1px solid #fecaca}
+    .card{background:#fff;border:1px solid var(--line);border-radius:13px;padding:16px 18px;margin:14px 0;
+      box-shadow:0 1px 2px rgba(15,23,42,.04)}
+    .card h2{font-size:15px;margin:0 0 12px;display:flex;align-items:center;gap:9px}
+    .card h2 .n{width:22px;height:22px;border-radius:50%;background:var(--brand);color:#fff;
+      font-size:12px;font-weight:700;display:inline-flex;align-items:center;justify-content:center}
+    .card.done h2 .n{background:var(--ok)}
+    .row{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
+    .fld{display:flex;flex-direction:column;gap:4px}
+    .fld label{font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:700}
+    input,textarea{font:inherit;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:#fbfdff}
+    input{width:120px}
+    input.wide{width:100%;min-width:220px;flex:1}
+    textarea{width:100%;min-height:78px;resize:vertical}
+    .full{flex:1 1 100%}
+    button{font:inherit;font-weight:700;border:0;border-radius:9px;padding:9px 16px;cursor:pointer;
+      background:var(--brand);color:#fff}
+    button.ghost{background:#fff;color:var(--brand);border:1px solid #bfdbfe}
+    button.close{background:var(--ok)}
+    button:disabled{opacity:.5;cursor:not-allowed}
+    .recorded{margin-top:12px;padding-top:12px;border-top:1px dashed var(--line)}
+    .vitals{display:grid;grid-template-columns:repeat(5,1fr);gap:9px}
+    @media(max-width:560px){.vitals{grid-template-columns:repeat(2,1fr)}}
+    .vital{border:1px solid var(--line);border-radius:9px;padding:9px 10px;background:#fbfdff}
+    .vital .lbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:700}
+    .vital .val{font-size:19px;font-weight:700;margin-top:2px;font-variant-numeric:tabular-nums}
+    .vital .val .u{font-size:11px;color:var(--muted);font-weight:500;margin-left:2px}
+    .kv{font-size:14px}.kv b{font-weight:700}
+    .note-body{white-space:pre-wrap;background:#f8fafc;border:1px solid var(--line);border-radius:9px;
+      padding:11px 13px;font-size:13.5px;margin-top:8px}
+    .sig{margin-top:8px;font-size:12.5px;font-weight:700;color:var(--ok)}
+    .sig.unsigned{color:var(--danger)}
+    .foot{margin-top:22px;display:flex;gap:14px;align-items:center;font-size:13.5px}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <h1><%= @patient_name %><span class="demo-tag">Synthetic demo</span></h1>
+    <span class="status <%= finished ? "done" : "open" %>"><%= finished ? "Visit finished" : "Visit in progress" %></span>
+  </div>
+  <p class="sub">Walk-in visit charted end to end — vitals, purpose of visit, a signed progress note, and close. Every action runs through the real service layer against demo gateways.</p>
+
+  <% if flash[:notice] %><div class="flash notice"><%= flash[:notice] %></div><% end %>
+  <% if flash[:alert] %><div class="flash alert"><%= flash[:alert] %></div><% end %>
+
+  <%# ---- 1. Vitals ---- %>
+  <div class="card <%= "done" if @visit["vitals"].present? %>">
+    <h2><span class="n">1</span> Vitals</h2>
+    <form method="post" action="<%= base %>/vitals">
+      <div class="vitals">
+        <% Lakeraven::EHR::DemoVisitsController::VITAL_FIELDS.each do |f| %>
+          <div class="fld">
+            <label><%= f[:label] %> <%= "(#{f[:units]})" %></label>
+            <input name="vitals[<%= f[:key] %>]" value="<%= f[:default] %>" style="width:100%">
+          </div>
+        <% end %>
+      </div>
+      <div class="row" style="margin-top:12px"><button type="submit">Record vitals</button></div>
+    </form>
+    <% if @visit["vitals"].present? %>
+      <div class="recorded vitals">
+        <% @visit["vitals"].each do |m| %>
+          <div class="vital"><div class="lbl"><%= m["label"] || m["abbreviation"] %></div>
+            <div class="val"><%= m["value"] %><span class="u"><%= m["units"] %></span></div></div>
+        <% end %>
+      </div>
+    <% end %>
+  </div>
+
+  <%# ---- 2. Purpose of visit ---- %>
+  <div class="card <%= "done" if @visit["pov"] %>">
+    <h2><span class="n">2</span> Purpose of visit</h2>
+    <form method="post" action="<%= base %>/pov">
+      <div class="row">
+        <div class="fld"><label>ICD-10</label><input name="pov_code" value="J06.9"></div>
+        <div class="fld" style="flex:1"><label>Narrative</label>
+          <input class="wide" name="pov_narrative" value="Acute upper respiratory infection"></div>
+        <button type="submit">Record POV</button>
+      </div>
+    </form>
+    <% if @visit["pov"] %>
+      <div class="recorded kv"><b><%= @visit["pov"]["code"] %></b> — <%= @visit["pov"]["narrative"] %></div>
+    <% end %>
+  </div>
+
+  <%# ---- 3. Progress note ---- %>
+  <div class="card <%= "done" if @visit.dig("note", "signed") %>">
+    <h2><span class="n">3</span> Progress note</h2>
+    <form method="post" action="<%= base %>/note">
+      <div class="fld full"><label>Note (SOAP)</label>
+        <textarea name="note_text">S: Sore throat and congestion x3 days.
+A/P: Acute URI; supportive care.</textarea></div>
+      <div class="row" style="margin-top:10px">
+        <div class="fld"><label>Signature code</label><input name="signature_code" value="DEMOPASS" style="width:180px"></div>
+        <button type="submit">Write &amp; sign note</button>
+      </div>
+    </form>
+    <% if @visit["note"] %>
+      <div class="recorded">
+        <div class="note-body"><%= @visit["note"]["text"] %></div>
+        <div class="sig <%= "unsigned" unless @visit["note"]["signed"] %>">
+          <%= @visit["note"]["signed"] ? "✓ Signed — note ##{@visit["note"]["note_ien"]}" : "Unsigned" %></div>
+      </div>
+    <% end %>
+  </div>
+
+  <%# ---- 4. Close visit ---- %>
+  <div class="card <%= "done" if finished %>">
+    <h2><span class="n">4</span> Close visit</h2>
+    <% if finished %>
+      <div class="kv">Encounter <b>finished</b> — <%= @visit.dig("close", "code") %> <%= @visit.dig("close", "display") %></div>
+    <% else %>
+      <form method="post" action="<%= base %>/close">
+        <input type="hidden" name="close_code" value="J06.9">
+        <input type="hidden" name="close_display" value="Acute upper respiratory infection">
+        <button type="submit" class="close">Close visit</button>
+      </form>
+    <% end %>
+  </div>
+
+  <div class="foot">
+    <a href="<%= patient_chart_path(@dfn) %>">← Back to chart</a>
+    <form method="post" action="<%= base %>/reset" style="margin:0">
+      <button type="submit" class="ghost">Reset demo</button>
+    </form>
+  </div>
+</div>
+</body>
+</html>

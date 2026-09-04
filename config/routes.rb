@@ -11,6 +11,18 @@ Lakeraven::EHR::Engine.routes.draw do
   # so it lives at /patients/:dfn (the FHIR API keeps /Patient per convention;
   # that resource also owns the patient_path helper, hence :patient_chart).
   get "patients/:dfn(.:format)", to: "charts#show", as: :patient_chart, constraints: { dfn: /\d+/ }
+  # Demo-only clickable walk-in visit (the UI counterpart of
+  # features/encounter/demo_visit.feature). Gated to dev + CHART_DEMO_OPEN +
+  # SPIKE_MOCK_RPC in the controller; 404s everywhere else.
+  get  "patients/:dfn/visit",        to: "demo_visits#show",   as: :patient_visit, constraints: { dfn: /\d+/ }
+  post "patients/:dfn/visit/vitals", to: "demo_visits#vitals", constraints: { dfn: /\d+/ }
+  post "patients/:dfn/visit/pov",    to: "demo_visits#pov",    constraints: { dfn: /\d+/ }
+  post "patients/:dfn/visit/note",   to: "demo_visits#note",   constraints: { dfn: /\d+/ }
+  post "patients/:dfn/visit/close",  to: "demo_visits#close",  constraints: { dfn: /\d+/ }
+  post "patients/:dfn/visit/reset",  to: "demo_visits#reset",  constraints: { dfn: /\d+/ }
+  # RESTful aliases: new visit form + saved-visit show page (HTML or FHIR .json)
+  get  "patients/:dfn/visits/new",           to: "demo_visits#new",     as: :new_patient_visit, constraints: { dfn: /\d+/ }
+  get  "patients/:dfn/visits/:id(.:format)", to: "demo_visits#summary", as: :patient_visit_summary, constraints: { dfn: /\d+/, id: /\d+/ }
 
   # Doorkeeper models (Application, AccessToken) are used directly;
   # routes are NOT mounted here because the engine provides its own
@@ -20,8 +32,11 @@ Lakeraven::EHR::Engine.routes.draw do
   resources :allergy_intolerances, path: "AllergyIntolerance", only: %i[index show]
   resources :conditions, path: "Condition", only: %i[index show]
   resources :medication_requests, path: "MedicationRequest", only: %i[index show]
+  resources :medications, path: "Medication", only: %i[index show]
   resources :observations, path: "Observation", only: %i[index show]
-  resources :encounters, path: "Encounter", only: %i[index]
+  resources :diagnostic_reports, path: "DiagnosticReport", only: %i[index show]
+  resources :care_plans, path: "CarePlan", only: %i[index show]
+  resources :encounters, path: "Encounter", only: %i[index show]
   resources :organizations, path: "Organization", only: %i[show], param: :ien
   resources :locations, path: "Location", only: %i[show], param: :ien
   resources :service_requests, path: "ServiceRequest", only: %i[index]

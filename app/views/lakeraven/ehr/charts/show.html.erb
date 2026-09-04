@@ -271,7 +271,7 @@
 
       <%# ---- Encounters / Appointments ---- %>
       <div class="card span">
-        <div class="card__head"><h2>Encounters &amp; Appointments</h2><span class="count"><%= @encounters.length %></span></div>
+        <div class="card__head"><h2>Encounters &amp; Appointments</h2><span class="count"><%= @encounters.length %></span><a href="<%= new_patient_visit_path(@patient.dfn) %>" style="margin-left:auto;background:#047857;color:#fff;font-weight:700;font-size:13px;line-height:1;text-decoration:none;border-radius:8px;padding:8px 13px">+ New visit</a></div>
         <div class="card__body">
           <% if @encounters.any? %>
             <table>
