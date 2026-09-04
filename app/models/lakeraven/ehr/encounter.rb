@@ -24,6 +24,10 @@ module Lakeraven
       }.freeze
 
       attribute :ien, :integer
+      # Deterministic fallback id for rows with no IEN (ORWPT APPTLST rows
+      # carry none): derived from dfn + timestamp so ids stay stable across
+      # reads (Vardana §5.3). Used only when `ien` is absent.
+      attribute :derived_id, :string
       attribute :status, :string
       attribute :class_code, :string
       attribute :period_start, :datetime
@@ -57,6 +61,36 @@ module Lakeraven
       def self.for_patient(dfn)
         gateway.for_patient(dfn)
       end
+
+      # ORWPT APPTLST status text -> FHIR Encounter.status (REQUIRED binding).
+      RPMS_APPOINTMENT_STATUS = {
+        "scheduled" => "planned", "checked in" => "arrived",
+        "checked out" => "finished", "cancelled" => "cancelled",
+        "no show" => "cancelled"
+      }.freeze
+
+      # Build Encounter instances from raw ORWPT APPTLST rows
+      # ({ datetime:, location_ien:, location:, status: }).
+      def self.from_appointment_hashes(hashes, patient_dfn:)
+        hashes.map do |h|
+          timestamp = h[:datetime]
+          new(
+            derived_id: appointment_id(patient_dfn, timestamp),
+            status: RPMS_APPOINTMENT_STATUS[h[:status].to_s.downcase] || "planned",
+            class_code: "AMB",
+            period_start: timestamp,
+            patient_identifier: patient_dfn.to_s,
+            location_ien: h[:location_ien]
+          )
+        end
+      end
+
+      def self.appointment_id(patient_dfn, timestamp)
+        id = "appt-#{patient_dfn}"
+        id += "-#{timestamp.strftime('%Y%m%d%H%M')}" if timestamp.respond_to?(:strftime)
+        id
+      end
+      private_class_method :appointment_id
 
       # -- Display helpers ---------------------------------------------------
 
@@ -122,7 +156,7 @@ module Lakeraven
           class: { system: ACT_CODE_SYSTEM, code: class_code, display: class_display }
         }
 
-        resource[:id] = ien.to_s if ien
+        resource[:id] = (ien || derived_id).to_s if ien || derived_id
         resource[:period] = build_period if period_start || period_end
         # Omit `coding` (never emit "code": null) when only display text exists.
         resource[:type] = [ { text: type_display, coding: type_code ? [ { code: type_code } ] : nil }.compact ] if type_display

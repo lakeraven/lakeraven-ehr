@@ -11,15 +11,19 @@
 #
 # SYNTHETIC DATA ONLY — invented patient "Anderson, Alice" (DFN 1) and an
 # invented facility. No PHI, no real person/tribe/org names.
+
+require "rpms_rpc/api/measurement"
+require "rpms_rpc/api/ddr_fileman"
+
 module LakeravenDemoSeeds
   module_function
 
   # Seed a MockClient (`m`) with demographics + clinical data for DFN 1.
   #
-  # Vital `type` codes use RPMS-native abbreviations (BP/P/T/WT) so the
-  # engine's Observation.from_vital_hashes VITAL_TYPE_MAP maps every reading
-  # into valid FHIR (the task's "HR"/"TMP" strings aren't in that map and
-  # would be dropped). Clinical values are preserved.
+  # Vital `type` codes use RPMS-native abbreviations (BP/P/T/WT on the
+  # ORQQVI index; canonical BP/PU/TMP/WT on the DDR read) so the engine's
+  # Observation.from_measurement_hashes VITAL_TYPE_MAP maps every reading
+  # into valid FHIR. Clinical values are preserved.
   def seed(m)
     seed_demographics(m)
     seed_clinical(m)
@@ -50,15 +54,30 @@ module LakeravenDemoSeeds
       [ { ien: 1, allergen: "Penicillin", reaction: "Hives", severity: "moderate" },
         { ien: 2, allergen: "Shellfish", reaction: "Anaphylaxis", severity: "severe" } ])
 
-    # Vitals (ORQQVI VITALS) — Observation. recorded_date feeds
-    # Observation.effectiveDateTime (required 1..1 by the vital-signs
-    # profile) and the deterministic per-vital FHIR id.
-    vitals_taken = DateTime.new(2026, 2, 1, 9, 30, 0)
+    # Vitals — Observation, via the full verified Measurement.history
+    # read graph: ORQQVI VITALS index (IEN^TYPE^DATETIME^VALUE, no units
+    # on that wire) + per-measurement DDR core read + visit SERVICE
+    # CATEGORY (BEHOENCX GETVISIT) + source units (BEHOVM2 VUNITS).
+    # recorded_date feeds Observation.effectiveDateTime (required 1..1 by
+    # the vital-signs profile); the V MEASUREMENT IEN is the FHIR id.
+    vitals_taken = Time.utc(2026, 2, 1, 9, 30, 0)
     m.seed_keyed_collection(:vitals, "1",
-      [ { type: "BP", value: "128/82", units: "mm[Hg]",   recorded_date: vitals_taken },
-        { type: "P",  value: "74",     units: "/min",     recorded_date: vitals_taken },
-        { type: "WT", value: "180",    units: "[lb_av]",  recorded_date: vitals_taken },
-        { type: "T",  value: "98.6",   units: "[degF]",   recorded_date: vitals_taken } ])
+      [ { measurement_ien: 7001, type: "BP", recorded_date: vitals_taken, value: "128/82" },
+        { measurement_ien: 7002, type: "P",  recorded_date: vitals_taken, value: "74" },
+        { measurement_ien: 7003, type: "WT", recorded_date: vitals_taken, value: "180" },
+        { measurement_ien: 7004, type: "T",  recorded_date: vitals_taken, value: "98.6" } ])
+    { 7001 => [ "BP", "128/82" ], 7002 => [ "PU", "74" ],
+      7003 => [ "WT", "180" ], 7004 => [ "TMP", "98.6" ] }.each do |ien, (type, value)|
+      seed_measurement_ddr(m, ien: ien, type: type, value: value,
+                           date_internal: "3260201.093", date_display: "FEB 01, 2026@09:30")
+    end
+    m.seed(:encounter_visit, "9101", {
+      location_ien: 1, datetime_raw: "3260201.093", service_category: "A",
+      patient_dfn: 1, visit_id: "9101A", locked: false
+    })
+    { "BP" => "mmHg", "PU" => "/min", "WT" => "lb", "TMP" => "F" }.each do |type, us_unit|
+      m.seed(:vital_units, type, { us_unit: us_unit, metric_unit: us_unit })
+    end
 
     # Medications (ORQQPS LIST) — MedicationRequest
     m.seed_collection(:medication_list,
@@ -84,5 +103,24 @@ module LakeravenDemoSeeds
           occurrence_datetime: DateTime.new(2026, 1, 15, 9, 0, 0), manufacturer: "Synthetic Bio" } ])
     m.seed(:immunization_text, "1",
       "01/15/2026  COVID-19 Vaccine  LOT-ABC  Site: Left Deltoid")
+  end
+
+  # Per-measurement DDR GETS ENTRY DATA reply (V MEASUREMENT #9000010.01:
+  # .01 type / .02 patient / .03 visit / .04 value / 2 EIE / 1201 event
+  # date-time) as GETSC^DDR2 formats it: "FILE^IEN^FIELD^INTERNAL^EXTERNAL".
+  def seed_measurement_ddr(m, ien:, type:, value:, date_internal:, date_display:)
+    key = RpmsRpc::DdrFileman.gets_entry_param(
+      file: "9000010.01", iens: "#{ien},",
+      fields: RpmsRpc::Measurement::CORE_FIELDS, flags: "IE"
+    ).to_s
+    m.seed(:ddr_gets_entry_data, key, <<~REPLY.chomp)
+      [Data]
+      9000010.01^#{ien}^.01^#{ien}^#{type}
+      9000010.01^#{ien}^.02^1^ANDERSON,ALICE
+      9000010.01^#{ien}^.03^9101^#{date_display}
+      9000010.01^#{ien}^.04^#{value}^#{value}
+      9000010.01^#{ien}^2^0^
+      9000010.01^#{ien}^1201^#{date_internal}^#{date_display}
+    REPLY
   end
 end

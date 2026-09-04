@@ -55,6 +55,38 @@ module Lakeraven
         gateway.for_patient(dfn)
       end
 
+      # ORQQPL LIST problem-status codes -> FHIR clinicalStatus. The wire
+      # carries #9000011 field .12 internal ("A"/"I" — LIST^GMPLUTL3); an
+      # unrecognized code yields NO clinicalStatus rather than a guessed
+      # "active" — an unproven status is never asserted.
+      RPMS_STATUS_MAP = { "A" => "active", "I" => "inactive" }.freeze
+
+      # Build Condition instances from verified ORQQPL LIST rows
+      # ({ ien:, description:, status:, icd_code:, onset_date:,
+      # last_modified:, ... } — see the rpms-rpc :problem_list mapping,
+      # LIST^ORQQPL). Honest-serialization notes:
+      #   * verificationStatus is OMITTED — the wire carries problem
+      #     status (active/inactive), not a verification assertion; RPMS
+      #     problems can be provisional, so "confirmed" is never invented.
+      #   * recordedDate is OMITTED — the wire's date at piece 6 is LAST
+      #     MODIFIED, not the recorded date.
+      # Ids prefer the real IEN and otherwise derive deterministically
+      # from dfn + code so they stay stable across reads (Vardana §5.3).
+      def self.from_problem_hashes(hashes, patient_dfn:)
+        hashes.map do |h|
+          new(
+            ien: h[:ien].to_s.presence || "problem-#{patient_dfn}-#{h[:icd_code].to_s.parameterize}",
+            patient_dfn: patient_dfn,
+            code: h[:icd_code],
+            code_system: "icd10",
+            display: h[:description],
+            clinical_status: RPMS_STATUS_MAP[h[:status].to_s.strip.upcase],
+            category: "problem-list-item",
+            onset_datetime: h[:onset_date]
+          )
+        end
+      end
+
       def self.resource_class
         "Condition"
       end
@@ -93,9 +125,12 @@ module Lakeraven
           id: ien&.to_s,
           subject: patient_dfn ? { reference: "Patient/#{patient_dfn}" } : nil,
           clinicalStatus: build_clinical_status,
+          verificationStatus: build_verification_status,
           code: build_code,
           category: category ? [ { coding: [ { system: CATEGORY_SYSTEM, code: category } ] } ] : nil,
-          severity: build_severity
+          severity: build_severity,
+          onsetDateTime: onset_datetime&.iso8601,
+          recordedDate: recorded_date&.iso8601
         }.compact
       end
 
@@ -108,6 +143,17 @@ module Lakeraven
           coding: [ {
             system: "http://terminology.hl7.org/CodeSystem/condition-clinical",
             code: clinical_status
+          } ]
+        }
+      end
+
+      def build_verification_status
+        return nil unless verification_status
+
+        {
+          coding: [ {
+            system: "http://terminology.hl7.org/CodeSystem/condition-ver-status",
+            code: verification_status
           } ]
         }
       end

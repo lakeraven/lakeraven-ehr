@@ -50,14 +50,61 @@ module Lakeraven
         )
       end
 
-      def render_bundle(entries, type: "searchset")
+      # Renders a searchset Bundle. Honours FHIR paging (Vardana §4 /
+      # checklist item 7): `_count` caps the page size and `Bundle.link`
+      # carries rel=self plus rel=next while more matches remain. The next
+      # link is this same URL with `_page` advanced — FHIR treats paging
+      # links as opaque, so the page parameter is server-defined.
+      # `_count=0` is the FHIR R4 summary-count form: the response carries
+      # the total and ZERO entries (never the full set).
+      # `total` is always the FULL match count, not the page size.
+      #
+      # Callers pass resources (wrapped as `{resource: ...}` entries), or
+      # prebuilt entry hashes via `entries:` when they need `search.mode`
+      # or _revinclude entries (Patient search) — every searchset goes
+      # through this one path so paging behaves identically everywhere.
+      def render_bundle(resources = [], type: "searchset", entries: nil, total: nil)
+        entries ||= resources.map { |e| { resource: e } }
+        page_entries, links = paginate_entries(entries)
         bundle = {
           resourceType: "Bundle",
           type: type,
-          total: entries.length,
-          entry: entries.map { |e| { resource: e } }
+          total: total || entries.length,
+          link: links,
+          entry: page_entries
         }
         render json: bundle, status: :ok, content_type: FHIR_CONTENT_TYPE
+      end
+
+      def paginate_entries(entries)
+        links = [ { relation: "self", url: request.original_url } ]
+        count = requested_count
+        return [ entries, links ] if count.nil?
+        return [ [], links ] if count.zero?
+
+        page = [ params[:_page].to_i, 1 ].max
+        offset = (page - 1) * count
+        page_entries = entries.slice(offset, count) || []
+        links << { relation: "next", url: url_for_page(page + 1) } if offset + count < entries.length
+        [ page_entries, links ]
+      end
+
+      # `_count` parsed as a non-negative integer; absent or malformed →
+      # nil (no paging). 0 is meaningful (summary count), so `.to_i` — which
+      # can't distinguish "0" from garbage — is not used.
+      def requested_count
+        raw = params[:_count]
+        return nil if raw.blank?
+
+        count = Integer(raw.to_s, exception: false)
+        count.nil? || count.negative? ? nil : count
+      end
+
+      def url_for_page(page)
+        uri = URI.parse(request.original_url)
+        query = Rack::Utils.parse_query(uri.query.to_s).merge("_page" => page.to_s)
+        uri.query = Rack::Utils.build_query(query)
+        uri.to_s
       end
     end
   end

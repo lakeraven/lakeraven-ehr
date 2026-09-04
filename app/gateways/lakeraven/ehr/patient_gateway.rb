@@ -10,6 +10,7 @@ module Lakeraven
           attrs = RpmsRpc::Patient.find(dfn.to_i)
           return nil unless attrs
 
+          merge_contact(attrs, dfn)
           build_patient(attrs)
         end
 
@@ -32,6 +33,19 @@ module Lakeraven
         end
 
         private
+
+        # Patient telecom (Vardana item 3): RpmsRpc::Patient.contact reads
+        # PATIENT #2 fields .131/.132/.134/.133 (home/work/cell phone +
+        # email) via the registered DDR GETS ENTRY DATA. The Patient model
+        # carries one phone — prefer residence, then cell, then work. A nil
+        # contact read (unreachable) leaves the phone unset rather than
+        # failing the whole demographic read.
+        def merge_contact(attrs, dfn)
+          contact = RpmsRpc::Patient.contact(dfn.to_i)
+          return unless contact
+
+          attrs[:phone] ||= contact[:phone_home] || contact[:phone_cell] || contact[:phone_work]
+        end
 
         # rpms-rpc returns fields beyond the Patient model's declared
         # attributes (race_code, site_ien, etc.); slice to model.attribute_names

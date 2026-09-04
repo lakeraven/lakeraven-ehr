@@ -7,8 +7,9 @@ module Lakeraven
 
       def index
         dfn = extract_patient_dfn(params[:patient])
-        results = Condition.for_patient(dfn)
-        render_bundle(results.map { |r| { resourceType: "Condition" }.merge(r) })
+        conditions = Condition.from_problem_hashes(Condition.for_patient(dfn), patient_dfn: dfn)
+        conditions = filter_by_clinical_status(conditions)
+        render_bundle(conditions.map(&:to_fhir))
       end
 
       def show
@@ -30,6 +31,14 @@ module Lakeraven
 
       def extract_patient_dfn(param)
         param.to_s.delete_prefix("Patient/")
+      end
+
+      # §4: Condition?patient=&clinical-status=active
+      def filter_by_clinical_status(conditions)
+        status = params["clinical-status"].presence || params[:clinical_status].presence
+        return conditions if status.blank?
+
+        conditions.select { |c| c.clinical_status == status }
       end
     end
   end
