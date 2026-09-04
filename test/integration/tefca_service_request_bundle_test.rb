@@ -6,7 +6,7 @@ class TefcaServiceRequestBundleTest < ActionDispatch::IntegrationTest
   include SmartAuthTestHelper
 
   setup do
-    setup_smart_auth
+    setup_internal_smart_auth
   end
 
   teardown do

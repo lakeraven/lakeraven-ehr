@@ -8,7 +8,7 @@ module Lakeraven
       include SmartAuthTestHelper
 
       setup do
-        setup_smart_auth
+        setup_internal_smart_auth
       end
 
       teardown do
@@ -98,7 +98,8 @@ module Lakeraven
       test "system/Encounter.read scope grants access" do
         app = Doorkeeper::Application.create!(
           name: "encounter-read", redirect_uri: "https://example.test/callback",
-          scopes: "system/Encounter.read", confidential: true
+          scopes: "system/Encounter.read", confidential: true,
+          organization_id: "rpms-organization-7819"
         )
         token = Doorkeeper::AccessToken.create!(application: app, scopes: "system/Encounter.read", expires_in: 3600)
         get "/lakeraven-ehr/Encounter", params: { patient: "1" },
@@ -154,6 +155,260 @@ module Lakeraven
       test "FHIR content type on 401 responses" do
         get "/lakeraven-ehr/Encounter", params: { patient: "1" }
         assert_equal "application/fhir+json", response.media_type
+      end
+
+      # -- Store-backed encounters: show, date search, sort ----------------------
+
+      def seed_store_encounters
+        EncounterStore.instance.add(Encounter.new(
+          fhir_id: "enc-1-1", patient_identifier: "1", status: "finished",
+          class_code: "AMB", period_start: DateTime.new(2026, 8, 12, 9, 0, 0),
+          practitioner_identifier: "101",
+          reason_code: "E11.9", reason_display: "Type 2 diabetes follow-up"
+        ))
+        EncounterStore.instance.add(Encounter.new(
+          fhir_id: "enc-1-2", patient_identifier: "1", status: "finished",
+          class_code: "AMB", period_start: DateTime.new(2026, 2, 10, 9, 0, 0)
+        ))
+      end
+
+      test "index serves store-backed encounters with class, period, participant, reasonCode" do
+        seed_store_encounters
+        get "/lakeraven-ehr/Encounter", params: { patient: "1" }, headers: @headers
+        body = JSON.parse(response.body)
+        enc = body["entry"].map { |e| e["resource"] }.find { |r| r["id"] == "enc-1-1" }
+        assert_equal "AMB", enc.dig("class", "code")
+        assert enc.dig("period", "start").start_with?("2026-08-12")
+        assert_equal "Practitioner/101", enc.dig("participant", 0, "individual", "reference")
+        assert_equal "Type 2 diabetes follow-up", enc.dig("reasonCode", 0, "text")
+      ensure
+        EncounterStore.reset_instance!
+      end
+
+      test "date=ge filter and _sort=-date order on period.start" do
+        seed_store_encounters
+        get "/lakeraven-ehr/Encounter",
+          params: { patient: "1", date: "ge2026-08-01", _sort: "-date" }, headers: @headers
+        body = JSON.parse(response.body)
+        assert_equal [ "enc-1-1" ], body["entry"].map { |e| e.dig("resource", "id") }
+
+        get "/lakeraven-ehr/Encounter", params: { patient: "1", _sort: "-date" }, headers: @headers
+        ids = JSON.parse(response.body)["entry"].map { |e| e.dig("resource", "id") }
+        assert_equal "enc-1-1", ids.first
+      ensure
+        EncounterStore.reset_instance!
+      end
+
+      test "show returns a store-backed encounter" do
+        seed_store_encounters
+        get "/lakeraven-ehr/Encounter/enc-1-1", headers: @headers
+        assert_response :ok
+        body = JSON.parse(response.body)
+        assert_equal "Encounter", body["resourceType"]
+        assert_equal "enc-1-1", body["id"]
+      ensure
+        EncounterStore.reset_instance!
+      end
+
+      test "show returns 404 for an unknown encounter" do
+        get "/lakeraven-ehr/Encounter/enc-404", headers: @headers
+        assert_response :not_found
+        assert_equal "OperationOutcome", JSON.parse(response.body)["resourceType"]
+      end
+
+      # Guards review finding: appointment-derived encounters emitted ids in
+      # search that show could not resolve. Every id a search returns must
+      # be readable.
+      test "every id returned by search is readable via show (store and appointment-derived)" do
+        seed_store_encounters
+        RpmsRpc.client.seed_keyed_collection(:patient_appointments, "1", [
+          { datetime: DateTime.new(2026, 8, 12, 9, 0, 0), location_ien: 1,
+            location: "Primary Care Clinic", status: "CHECKED OUT" }
+        ])
+
+        get "/lakeraven-ehr/Encounter", params: { patient: "1" }, headers: @headers
+        ids = JSON.parse(response.body)["entry"].map { |e| e.dig("resource", "id") }
+        assert ids.any? { |id| id.start_with?("appt-1-") }, "expected an appointment-derived id in #{ids}"
+        assert_includes ids, "enc-1-1"
+
+        ids.each do |id|
+          get "/lakeraven-ehr/Encounter/#{id}", headers: @headers
+          assert_response :ok
+          body = JSON.parse(response.body)
+          assert_equal "Encounter", body["resourceType"]
+          assert_equal id, body["id"]
+        end
+      ensure
+        RpmsRpc.client.seed_keyed_collection(:patient_appointments, "1", [])
+        EncounterStore.reset_instance!
+      end
+
+      # Guards review finding: a resolved foreign appointment-derived
+      # encounter must be a 403, like a store-backed one.
+      test "org-bound credential gets 403 for a foreign appointment-derived encounter id" do
+        RpmsRpc.client.seed_keyed_collection(:patient_appointments, "999999", [
+          { datetime: DateTime.new(2026, 8, 12, 9, 0, 0), status: "CHECKED OUT" }
+        ])
+        # Discover the emitted id with an unbound internal credential, then
+        # prove the org-bound credential cannot read it.
+        get "/lakeraven-ehr/Encounter", params: { patient: "999999" }, headers: @headers
+        foreign_id = JSON.parse(response.body)["entry"]
+          .map { |e| e.dig("resource", "id") }.find { |id| id.start_with?("appt-999999-") }
+        assert foreign_id
+
+        teardown_smart_auth
+        setup_smart_auth(scopes: "system/Encounter.read")
+
+        get "/lakeraven-ehr/Encounter/#{foreign_id}", headers: @headers
+        assert_response :forbidden
+      ensure
+        RpmsRpc.client.seed_keyed_collection(:patient_appointments, "999999", [])
+      end
+
+      test "org-bound credential reads its own patient's encounter but not a foreign one" do
+        seed_store_encounters
+        EncounterStore.instance.add(Encounter.new(
+          fhir_id: "enc-foreign", patient_identifier: "999999", status: "finished", class_code: "AMB"
+        ))
+        teardown_smart_auth
+        setup_smart_auth(scopes: "system/Encounter.read")
+
+        get "/lakeraven-ehr/Encounter/enc-1-1", headers: @headers
+        assert_response :ok
+
+        get "/lakeraven-ehr/Encounter/enc-foreign", headers: @headers
+        assert_response :forbidden
+      ensure
+        EncounterStore.reset_instance!
+      end
+
+      # -- Patient compartment (SMART patient/-scoped tokens) --------------------
+      # Adversarial review finding: Encounter#show did the org check but not
+      # the patient-compartment check the other sandbox resources enforce, so
+      # a patient-bound token could read any patient's encounter by id.
+
+      def seed_two_patient_encounters
+        EncounterStore.instance.add(Encounter.new(
+          fhir_id: "enc-1-1", patient_identifier: "1", status: "finished", class_code: "AMB"
+        ))
+        EncounterStore.instance.add(Encounter.new(
+          fhir_id: "enc-2-1", patient_identifier: "2", status: "finished", class_code: "AMB"
+        ))
+      end
+
+      test "patient-bound token reads its own encounter but gets 403 on another patient's" do
+        seed_two_patient_encounters
+        teardown_smart_auth
+        setup_patient_smart_auth(patient: "1")
+
+        get "/lakeraven-ehr/Encounter/enc-1-1", headers: @headers
+        assert_response :ok
+
+        get "/lakeraven-ehr/Encounter/enc-2-1", headers: @headers
+        assert_response :forbidden
+        assert_equal "OperationOutcome", JSON.parse(response.body)["resourceType"]
+      ensure
+        EncounterStore.reset_instance!
+      end
+
+      test "patient-bound token gets 403 on a foreign appointment-derived encounter id" do
+        RpmsRpc.client.seed_keyed_collection(:patient_appointments, "2", [
+          { datetime: DateTime.new(2026, 8, 12, 9, 0, 0), status: "CHECKED OUT" }
+        ])
+        # Discover the emitted id with the internal credential, then prove
+        # the patient-bound credential cannot read it.
+        get "/lakeraven-ehr/Encounter", params: { patient: "2" }, headers: @headers
+        foreign_id = JSON.parse(response.body)["entry"]
+          .map { |e| e.dig("resource", "id") }.find { |id| id.start_with?("appt-2-") }
+        assert foreign_id
+
+        teardown_smart_auth
+        setup_patient_smart_auth(patient: "1")
+
+        get "/lakeraven-ehr/Encounter/#{foreign_id}", headers: @headers
+        assert_response :forbidden
+      ensure
+        RpmsRpc.client.seed_keyed_collection(:patient_appointments, "2", [])
+      end
+
+      test "patient-bound token is confined to its own compartment on search" do
+        seed_two_patient_encounters
+        teardown_smart_auth
+        setup_patient_smart_auth(patient: "1")
+
+        get "/lakeraven-ehr/Encounter", params: { patient: "1" }, headers: @headers
+        assert_response :ok
+        assert_equal [ "enc-1-1" ], JSON.parse(response.body)["entry"].map { |e| e.dig("resource", "id") }
+
+        get "/lakeraven-ehr/Encounter", params: { patient: "2" }, headers: @headers
+        assert_response :forbidden
+
+        get "/lakeraven-ehr/Encounter", params: { patient: "Patient/2" }, headers: @headers
+        assert_response :forbidden
+      ensure
+        EncounterStore.reset_instance!
+      end
+
+      # -- Single canonical owner ------------------------------------------------
+      # Adversarial review finding: a record with patient_dfn 1 and
+      # patient_identifier "999999" surfaced in Patient/1's search while its
+      # subject referenced Patient/999999. A record belongs to exactly one
+      # patient, everywhere ownership matters.
+
+      def seed_split_owner_encounter
+        EncounterStore.instance.add(Encounter.new(
+          fhir_id: "enc-split", patient_dfn: 1, patient_identifier: "999999",
+          status: "finished", class_code: "AMB"
+        ))
+      end
+
+      test "an encounter never appears in one patient's search while referencing another" do
+        seed_split_owner_encounter
+
+        get "/lakeraven-ehr/Encounter", params: { patient: "1" }, headers: @headers
+        assert_response :ok
+        ids = JSON.parse(response.body)["entry"].map { |e| e.dig("resource", "id") }
+        refute_includes ids, "enc-split"
+
+        get "/lakeraven-ehr/Encounter", params: { patient: "999999" }, headers: @headers
+        assert_response :ok
+        body = JSON.parse(response.body)
+        entry = body["entry"].map { |e| e["resource"] }.find { |r| r["id"] == "enc-split" }
+        assert entry, "the record belongs to its canonical owner"
+        assert_equal "Patient/999999", entry.dig("subject", "reference")
+      ensure
+        EncounterStore.reset_instance!
+      end
+
+      test "show authorizes a split-owner encounter against its canonical owner" do
+        seed_split_owner_encounter
+        teardown_smart_auth
+        setup_patient_smart_auth(patient: "1")
+
+        # Bound to Patient/1: the record's owner is 999999, so this is a 403.
+        get "/lakeraven-ehr/Encounter/enc-split", headers: @headers
+        assert_response :forbidden
+
+        teardown_smart_auth
+        setup_patient_smart_auth(patient: "999999")
+        get "/lakeraven-ehr/Encounter/enc-split", headers: @headers
+        assert_response :ok
+        assert_equal "Patient/999999", JSON.parse(response.body).dig("subject", "reference")
+      ensure
+        EncounterStore.reset_instance!
+      end
+
+      test "a dfn-only store encounter is owned by, searchable for, and referenced to that dfn" do
+        EncounterStore.instance.add(Encounter.new(
+          fhir_id: "enc-dfn-only", patient_dfn: 1, status: "finished", class_code: "AMB"
+        ))
+
+        get "/lakeraven-ehr/Encounter", params: { patient: "1" }, headers: @headers
+        entry = JSON.parse(response.body)["entry"].map { |e| e["resource"] }.find { |r| r["id"] == "enc-dfn-only" }
+        assert entry
+        assert_equal "Patient/1", entry.dig("subject", "reference")
+      ensure
+        EncounterStore.reset_instance!
       end
     end
   end

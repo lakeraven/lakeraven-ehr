@@ -133,6 +133,18 @@ module Lakeraven
       # dfn/patient/_id params, which any differently-named parameter or
       # unlisted endpoint bypassed; independent security review finding).
       def enforce_organization_scope!
+        # A system/ credential is only ever legitimate when bound to exactly
+        # one organization (Vardana source-system profile section 2). The
+        # token endpoint refuses to mint tokens for unbound clients, but the
+        # authorization layer must fail closed too: a token whose application
+        # predates mandatory binding, was minted through another flow, or had
+        # its binding blanked (the column is nullable for interactive apps)
+        # reads NOTHING. (Independent security review finding: the earlier
+        # nil-org path fell open to unrestricted cross-organization reads.)
+        if system_scope? && !organization_bound?
+          render_forbidden("System credential is not bound to an organization")
+          return false
+        end
         return true unless organization_bound?
 
         entry = organization_scope_rules[action_name.to_sym]

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_02_020000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_03_010000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -115,6 +115,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_02_020000) do
     t.datetime "created_at", null: false
     t.string "gender_identity"
     t.integer "patient_dfn", null: false
+    t.string "phone"
     t.string "sexual_orientation"
     t.datetime "updated_at", null: false
     t.index [ "patient_dfn" ], name: "index_lakeraven_ehr_patient_supplements_on_patient_dfn", unique: true

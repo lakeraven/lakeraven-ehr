@@ -55,6 +55,36 @@ module Lakeraven
         gateway.for_patient(dfn)
       end
 
+      # RPMS problem-list status codes (ORQQPL LIST piece 1) to FHIR
+      # Condition.clinicalStatus. Unmapped codes yield no clinicalStatus
+      # rather than an invented one.
+      PROBLEM_STATUS_MAP = {
+        "A" => "active",
+        "I" => "inactive"
+      }.freeze
+
+      # Build Condition instances from raw ORQQPL LIST hashes
+      # ({ ien:, status:, description:, icd_code:, onset_date:, recorded_date: }).
+      #
+      # verification_status is "confirmed": an RPMS problem-list entry is a
+      # clinician-entered diagnosis; the IPL carries no unconfirmed states.
+      def self.from_problem_hashes(hashes, patient_dfn:)
+        Array(hashes).map do |h|
+          new(
+            ien: h[:ien]&.to_s,
+            patient_dfn: patient_dfn.to_s,
+            code: h[:icd_code],
+            code_system: "icd10",
+            display: h[:description],
+            clinical_status: PROBLEM_STATUS_MAP[h[:status].to_s.upcase],
+            verification_status: "confirmed",
+            category: "problem-list-item",
+            onset_datetime: h[:onset_date],
+            recorded_date: h[:recorded_date]
+          )
+        end
+      end
+
       def self.resource_class
         "Condition"
       end
@@ -93,9 +123,12 @@ module Lakeraven
           id: ien&.to_s,
           subject: patient_dfn ? { reference: "Patient/#{patient_dfn}" } : nil,
           clinicalStatus: build_clinical_status,
+          verificationStatus: build_verification_status,
           code: build_code,
           category: category ? [ { coding: [ { system: CATEGORY_SYSTEM, code: category } ] } ] : nil,
-          severity: build_severity
+          severity: build_severity,
+          onsetDateTime: onset_datetime&.iso8601,
+          recordedDate: recorded_date&.iso8601
         }.compact
       end
 
@@ -108,6 +141,17 @@ module Lakeraven
           coding: [ {
             system: "http://terminology.hl7.org/CodeSystem/condition-clinical",
             code: clinical_status
+          } ]
+        }
+      end
+
+      def build_verification_status
+        return nil unless verification_status
+
+        {
+          coding: [ {
+            system: "http://terminology.hl7.org/CodeSystem/condition-ver-status",
+            code: verification_status
           } ]
         }
       end

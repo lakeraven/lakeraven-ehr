@@ -1,9 +1,9 @@
 GIT
   remote: https://github.com/lakeraven/rpms-rpc.git
-  revision: 2aaf3d5bf107755c353f6bc5a6086c1c76e4d71e
-  branch: scheduling-reg-adt-rpc-wrappers
+  revision: 4063bc25f304bca9eab16a1e3988cd7cf897c38d
+  branch: main
   specs:
-    rpms-rpc (0.1.0)
+    rpms-rpc (0.2.0)
       rexml (~> 3.2)
 
 PATH
