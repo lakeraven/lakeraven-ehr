@@ -17,8 +17,8 @@ module Lakeraven
         assert_equal "All values within normal limits", dr.conclusion
       end
 
-      test "defaults status to final" do
-        assert_equal "final", DiagnosticReport.new.status
+      test "defaults status to unknown (never presumes final)" do
+        assert_equal "unknown", DiagnosticReport.new.status
       end
 
       test "final? for final status" do
@@ -82,7 +82,7 @@ module Lakeraven
       end
 
       test "allows valid status values" do
-        %w[registered partial preliminary final amended corrected appended cancelled entered-in-error].each do |s|
+        %w[registered partial preliminary final amended corrected appended cancelled entered-in-error unknown].each do |s|
           dr = DiagnosticReport.new(patient_dfn: "1", code_display: "CBC", status: s)
           assert dr.valid?, "Expected #{s} to be valid"
         end
@@ -187,6 +187,65 @@ module Lakeraven
 
       test "persisted? false when ien blank" do
         refute DiagnosticReport.new(patient_dfn: "1", code_display: "CBC").persisted?
+      end
+
+      # -- Status honesty (fixture-served; no wire mapping) --------------------
+
+      # Guards review finding: an absent or unrecognized source status was
+      # promoted to "final" pre-fix. "final" asserts clinical verification;
+      # only a genuinely-final source may claim it.
+      test "a report with no status serializes as unknown, never final" do
+        dr = DiagnosticReport.new(ien: "1", patient_dfn: "1", code_display: "CBC")
+        assert_equal "unknown", dr.status
+        assert_equal "unknown", dr.to_fhir[:status]
+      end
+
+      test "an unrecognized status serializes as unknown, never final" do
+        dr = DiagnosticReport.new(ien: "1", patient_dfn: "1", code_display: "CBC", status: "VERIFIED")
+        assert_equal "unknown", dr.to_fhir[:status]
+        refute dr.valid? # inclusion validation still flags the bad source value
+      end
+
+      test "a genuinely final source status stays final" do
+        dr = DiagnosticReport.new(ien: "1", patient_dfn: "1", code_display: "CBC", status: "final")
+        assert_equal "final", dr.to_fhir[:status]
+      end
+
+      test "unknown is a valid stored status" do
+        dr = DiagnosticReport.new(ien: "1", patient_dfn: "1", code_display: "CBC", status: "unknown")
+        assert dr.valid?
+      end
+
+      # -- Code presence (DiagnosticReport.code is 1..1) -----------------------
+
+      test "code_present? is false only when both code and code_display are absent" do
+        assert DiagnosticReport.new(patient_dfn: "1", code_display: "CBC").code_present?
+        assert DiagnosticReport.new(patient_dfn: "1", code: "58410-2").code_present?
+        refute DiagnosticReport.new(patient_dfn: "1").code_present?
+      end
+
+      # Adversarial review finding: a code-only report emitted `"text": null`,
+      # which is invalid FHIR JSON (a null property must be omitted).
+      test "a code-only report emits code.coding with NO text key (not null)" do
+        fhir = DiagnosticReport.new(ien: "1", patient_dfn: "1", code: "58410-2").to_fhir
+        code = fhir[:code]
+        assert_equal "58410-2", code.dig(:coding, 0, :code)
+        refute code.key?(:text), "code must not carry a text key when code_display is blank: #{code.inspect}"
+        refute JSON.generate(fhir).include?("null"), "serialized resource must contain no null values"
+      end
+
+      test "a display-only report emits code.text with NO coding key" do
+        code = DiagnosticReport.new(ien: "1", patient_dfn: "1", code_display: "CBC").to_fhir[:code]
+        assert_equal "CBC", code[:text]
+        refute code.key?(:coding)
+      end
+
+      test "an unrecognized category emits coding without a null display" do
+        fhir = DiagnosticReport.new(ien: "1", patient_dfn: "1", category: "PATH", code: "1").to_fhir
+        coding = fhir.dig(:category, 0, :coding, 0)
+        assert_equal "PATH", coding[:code]
+        refute coding.key?(:display)
+        refute JSON.generate(fhir).include?("null")
       end
     end
   end

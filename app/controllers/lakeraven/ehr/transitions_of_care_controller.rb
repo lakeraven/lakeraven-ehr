@@ -5,6 +5,10 @@ module Lakeraven
     # ONC §170.315(b)(1) — Transitions of Care (send path)
     # Generates C-CDA documents for patient care transitions.
     class TransitionsOfCareController < ApplicationController
+      # Org-bound credentials: the C-CDA aggregates one patient's clinical
+      # record — authorize the patient RESOLVED from patient_dfn.
+      organization_scope :resolved_patient, only: :create, dfn_param: :patient_dfn
+
       # POST /transitions_of_care
       def create
         patient = Patient.find_by_dfn(params[:patient_dfn])

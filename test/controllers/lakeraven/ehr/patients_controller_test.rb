@@ -9,7 +9,7 @@ module Lakeraven
       include BrokerStubbing
 
       setup do
-        setup_smart_auth
+        setup_internal_smart_auth
       end
 
       teardown do
@@ -168,7 +168,7 @@ module Lakeraven
       end
 
       test "POST Patient registers and returns 201 with Location" do
-        setup_smart_auth(scopes: "system/Patient.write")
+        setup_internal_smart_auth(scopes: "user/Patient.write")
         fake = FakeBroker.new.on(RegistrationGateway::REGISTER_RPC, "1^12345^")
         use_broker(fake) do
           post "/lakeraven-ehr/Patient", params: patient_fhir.to_json, headers: fhir_headers
@@ -182,7 +182,7 @@ module Lakeraven
       end
 
       test "POST Patient without write scope is forbidden" do
-        setup_smart_auth(scopes: "system/Patient.read")
+        setup_internal_smart_auth(scopes: "user/Patient.read")
         post "/lakeraven-ehr/Patient", params: patient_fhir.to_json, headers: fhir_headers
         assert_response :forbidden
       end
@@ -194,7 +194,7 @@ module Lakeraven
       end
 
       test "POST Patient missing name is unprocessable" do
-        setup_smart_auth(scopes: "system/Patient.write")
+        setup_internal_smart_auth(scopes: "user/Patient.write")
         use_broker(FakeBroker.new) do
           post "/lakeraven-ehr/Patient",
             params: { resourceType: "Patient", gender: "female" }.to_json, headers: fhir_headers
@@ -203,7 +203,7 @@ module Lakeraven
       end
 
       test "POST Patient maps FHIR fields into the registration payload" do
-        setup_smart_auth(scopes: "system/Patient.write")
+        setup_internal_smart_auth(scopes: "user/Patient.write")
         fake = FakeBroker.new.on(RegistrationGateway::REGISTER_RPC, "1^12345^")
         use_broker(fake) do
           post "/lakeraven-ehr/Patient", params: patient_fhir.to_json, headers: fhir_headers
@@ -216,7 +216,7 @@ module Lakeraven
       end
 
       test "POST Patient surfaces a broker outage as 503" do
-        setup_smart_auth(scopes: "system/Patient.write")
+        setup_internal_smart_auth(scopes: "user/Patient.write")
         fake = FakeBroker.new.raise_with(RpmsRpc::Client::ConnectionError.new("broker down"))
         use_broker(fake) do
           post "/lakeraven-ehr/Patient", params: patient_fhir.to_json, headers: fhir_headers
@@ -225,20 +225,20 @@ module Lakeraven
       end
 
       test "POST Patient rejects invalid JSON with a distinct 400" do
-        setup_smart_auth(scopes: "system/Patient.write")
+        setup_internal_smart_auth(scopes: "user/Patient.write")
         post "/lakeraven-ehr/Patient", params: "not json", headers: fhir_headers
         assert_response :bad_request
         assert_includes response.body, "not valid JSON"
       end
 
       test "POST Patient rejects a non-Patient resource" do
-        setup_smart_auth(scopes: "system/Patient.write")
+        setup_internal_smart_auth(scopes: "user/Patient.write")
         post "/lakeraven-ehr/Patient", params: { resourceType: "Observation" }.to_json, headers: fhir_headers
         assert_response :bad_request
       end
 
       test "POST Patient returns 502 when the gateway reports success but no DFN" do
-        setup_smart_auth(scopes: "system/Patient.write")
+        setup_internal_smart_auth(scopes: "user/Patient.write")
         fake = FakeBroker.new.on(RegistrationGateway::REGISTER_RPC, "1^^")
         use_broker(fake) do
           post "/lakeraven-ehr/Patient", params: patient_fhir.to_json, headers: fhir_headers
@@ -247,7 +247,7 @@ module Lakeraven
       end
 
       test "POST Patient reads the SSN identifier even when it is not first" do
-        setup_smart_auth(scopes: "system/Patient.write")
+        setup_internal_smart_auth(scopes: "user/Patient.write")
         body = patient_fhir.merge(identifier: [
           { system: "http://hospital.example/mrn", value: "MRN-999" },
           { system: "http://hl7.org/fhir/sid/us-ssn", value: "222-22-2222" }
@@ -261,7 +261,7 @@ module Lakeraven
       end
 
       test "POST Patient does not echo an unsupported gender as accepted" do
-        setup_smart_auth(scopes: "system/Patient.write")
+        setup_internal_smart_auth(scopes: "user/Patient.write")
         body = patient_fhir.merge(gender: "other")
         fake = FakeBroker.new.on(RegistrationGateway::REGISTER_RPC, "1^12345^")
         use_broker(fake) do
@@ -278,7 +278,7 @@ module Lakeraven
       end
 
       test "POST Patient accepts the SMART v2 create (.c) scope" do
-        setup_smart_auth(scopes: "system/Patient.c")
+        setup_internal_smart_auth(scopes: "user/Patient.c")
         fake = FakeBroker.new.on(RegistrationGateway::REGISTER_RPC, "1^12345^")
         use_broker(fake) do
           post "/lakeraven-ehr/Patient", params: patient_fhir.to_json, headers: fhir_headers
