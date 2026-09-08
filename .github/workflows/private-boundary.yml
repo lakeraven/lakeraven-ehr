@@ -3,8 +3,9 @@ name: private-boundary
 # appears in this public repo. The blocklist lives ONLY in the encrypted
 # `LAKERAVEN_BOUNDARY_BLOCKLIST` secret (newline-delimited, case-insensitive),
 # never in the repo, and matched terms are never echoed — only file:line — so
-# the blocklist cannot leak through public CI logs. Until the secret is set
-# the job passes with a notice.
+# the blocklist cannot leak through public CI logs. If the secret is unset
+# the job FAILS (fork PRs excepted — secrets are unavailable there; the scan
+# runs again on merge to main).
 #
 # Scope/limits (independent review): the token is read-only, so a PR that edits
 # this workflow cannot use it to write. Forked-PR runs receive no secret and so
@@ -29,11 +30,16 @@ jobs:
         shell: bash
         env:
           BLOCKLIST: ${{ secrets.LAKERAVEN_BOUNDARY_BLOCKLIST }}
+          IS_FORK_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
         run: |
           set -euo pipefail
           if [ -z "${BLOCKLIST:-}" ]; then
-            echo "::notice::LAKERAVEN_BOUNDARY_BLOCKLIST not set; skipping boundary scan."
-            exit 0
+            if [ "${IS_FORK_PR}" = "true" ]; then
+              echo "::notice::Fork PR: secrets unavailable; boundary scan runs on merge."
+              exit 0
+            fi
+            echo "::error::LAKERAVEN_BOUNDARY_BLOCKLIST is unset — the boundary guard is inert. Set the org secret."
+            exit 1
           fi
           tracked="$(git ls-files)"
           fail=0
