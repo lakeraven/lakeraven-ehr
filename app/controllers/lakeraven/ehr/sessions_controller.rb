@@ -3,28 +3,32 @@
 module Lakeraven
   module EHR
     class SessionsController < WebController
-      # The canned-credential branch must never be reachable outside test, even
-      # if the route gate is loosened by mistake (#401 interim; real sign-on: #332).
-      before_action :ensure_test_environment!, only: :create
+      # Scopes granted to a signed-in clinician's browser session. The SMART
+      # API layer (SmartAuthentication) already enforces these; the session just
+      # carries a token it understands.
+      SMART_SESSION_SCOPES = "user/*.read user/*.write"
+      BROWSER_SSO_APP_NAME = "Lakeraven EHR Browser SSO"
 
       def new
         # login form
       end
 
+      # Real RPMS sign-on (#332, replacing the #401 canned interim): validate the
+      # clinician's access/verify against RPMS, establish the browser session,
+      # and mint a SMART token the API layer accepts via its session fallback.
       def create
-        username = params[:username].to_s
-        password = params[:password].to_s
+        result = AuthenticationService.new.authenticate(
+          access_code: params[:username].to_s,
+          verify_code: params[:password].to_s
+        )
 
-        if username == "testprovider" && password == "test"
-          reset_session
-          session[:duz] = "99999"
-          session[:user_type] = "provider"
-          session[:user_name] = "Test Provider"
-          redirect_to dashboard_path
-        else
+        unless result.success?
           flash.now[:alert] = "Invalid username or password"
-          render :new, status: :unprocessable_entity
+          return render :new, status: :unprocessable_entity
         end
+
+        establish_session(result.value)
+        redirect_to dashboard_path
       end
 
       def destroy
@@ -34,8 +38,31 @@ module Lakeraven
 
       private
 
-      def ensure_test_environment!
-        raise ActionController::RoutingError, "Not Found" unless Rails.env.test?
+      def establish_session(provider)
+        reset_session
+        session[:duz] = provider[:duz]
+        session[:user_name] = provider[:name]
+        session[:user_type] = provider[:user_type].to_s
+        session[:security_keys] = Array(provider[:security_keys]).map(&:to_s)
+        session[:smart_token] = mint_smart_token
+      end
+
+      # Mint a user-scoped SMART token for this session. DUZ is kept in the
+      # session (not the token) to avoid overloading Doorkeeper's
+      # resource_owner_id, which SmartAuthentication binds to patient dfn.
+      def mint_smart_token
+        app = Doorkeeper::Application.find_or_create_by!(name: BROWSER_SSO_APP_NAME) do |a|
+          a.redirect_uri = "urn:ietf:wg:oauth:2.0:oob"
+          a.scopes = SMART_SESSION_SCOPES
+          a.confidential = true
+        end
+
+        token = Doorkeeper::AccessToken.create!(
+          application: app,
+          scopes: SMART_SESSION_SCOPES,
+          expires_in: 12.hours.to_i
+        )
+        token.plaintext_token || token.token
       end
     end
   end
