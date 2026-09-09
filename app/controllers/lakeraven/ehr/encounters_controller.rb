@@ -3,12 +3,16 @@
 module Lakeraven
   module EHR
     class EncountersController < ApplicationController
+      include FHIRDateSearch
+
       before_action :require_patient_param, only: :index
 
       def index
         dfn = params[:patient].to_s.delete_prefix("Patient/")
-        results = EncounterGateway.for_patient(dfn)
-        render_bundle(results.map { |r| { resourceType: "Encounter" }.merge(r) })
+        encounters = Encounter.from_appointment_hashes(EncounterGateway.for_patient(dfn), patient_dfn: dfn)
+        encounters = apply_date_param(encounters, params[:date], &:period_start)
+        encounters = apply_date_sort(encounters, params[:_sort], &:period_start)
+        render_bundle(encounters.map(&:to_fhir))
       end
 
       private
