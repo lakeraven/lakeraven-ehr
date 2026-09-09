@@ -3,6 +3,9 @@
 module Lakeraven
   module EHR
     class ConsentsController < ApplicationController
+      # Org-bound credentials: authorization binds to the patient RESOLVED
+      # from ?patient=, at the result level (SmartAuthentication).
+      organization_scope :resolved_patient, only: :index, dfn_param: :patient
       def index
         consents = Consent.for_patient(params[:patient])
         render_bundle(consents.map(&:to_fhir))

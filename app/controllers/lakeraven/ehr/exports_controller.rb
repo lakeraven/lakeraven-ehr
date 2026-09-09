@@ -3,6 +3,15 @@
 module Lakeraven
   module EHR
     class ExportsController < ApplicationController
+      include ExportClientOwnership
+
+      # Org-bound credentials: an export is one patient's record — authorize
+      # the patient RESOLVED from patient_dfn (blank => denied, fail closed).
+      # Status/cancel authorize the RESOLVED export by client ownership
+      # (authorize_export_client!, enforced for every token).
+      organization_scope :resolved_patient, only: :create, dfn_param: :patient_dfn
+      organization_scope :result_filtered, only: %i[show destroy]
+
       # POST /exports
       def create
         export = BulkExport.new(
@@ -29,14 +38,7 @@ module Lakeraven
       def show
         export = self.class.store[params[:id]]
         return render_not_found("Export", params[:id]) unless export
-
-        if export.client_id && current_token&.application&.uid != export.client_id
-          render_operation_outcome(
-            status: :forbidden, severity: "error",
-            code: "forbidden", diagnostics: "Export belongs to a different client"
-          )
-          return
-        end
+        return unless authorize_export_client!(export)
 
         resp = export.status_response
         if resp[:status] == 202
@@ -49,8 +51,12 @@ module Lakeraven
 
       # DELETE /exports/:id
       def destroy
-        export = self.class.store.delete(params[:id])
-        export ? head(:accepted) : render_not_found("Export", params[:id])
+        export = self.class.store[params[:id]]
+        return render_not_found("Export", params[:id]) unless export
+        return unless authorize_export_client!(export)
+
+        self.class.store.delete(params[:id])
+        head :accepted
       end
 
       def self.store
