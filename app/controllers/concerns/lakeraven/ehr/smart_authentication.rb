@@ -91,10 +91,33 @@ module Lakeraven
 
       def extract_bearer_token
         auth = request.headers["Authorization"]
-        return nil if auth.blank?
+        if auth.present?
+          match = auth.match(/\ABearer\s+(.+)\z/i)
+          return match&.captures&.first
+        end
 
-        match = auth.match(/\ABearer\s+(.+)\z/i)
-        match&.captures&.first
+        # Browser session fallback: the sign-on bridge (SessionsController) mints
+        # a SMART token and stashes it here, since a browser won't send an
+        # Authorization header. API/system callers always use the header above,
+        # so this only applies to the logged-in human flow.
+        session_smart_token
+      end
+
+      # SMART token minted for the current browser session, if any. Guarded
+      # because this concern is also included by header-only API controllers
+      # that may not have session middleware.
+      def session_smart_token
+        session[:smart_token].presence
+      rescue StandardError
+        nil
+      end
+
+      # DUZ of the signed-in provider (browser session). Write RPCs sign under
+      # this, not a shared service account. Header/system tokens carry no DUZ.
+      def current_duz
+        session[:duz].presence
+      rescue StandardError
+        nil
       end
 
       def patient_context_scope?
