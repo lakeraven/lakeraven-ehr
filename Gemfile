@@ -7,7 +7,10 @@ gemspec
 if ENV["RPMS_RPC_PATH"]
   gem "rpms-rpc", path: ENV["RPMS_RPC_PATH"]
 else
-  gem "rpms-rpc", github: "lakeraven/rpms-rpc", branch: "scheduling-reg-adt-rpc-wrappers"
+  # rpms-rpc PR #188 (feat/provenance-phone-reads): verified measurement /
+  # problem-list / patient-contact wire reads this branch builds on.
+  # Final merge sequences after #188 lands; then repoint at main.
+  gem "rpms-rpc", github: "lakeraven/rpms-rpc", branch: "feat/provenance-phone-reads"
 end
 
 gem "puma"

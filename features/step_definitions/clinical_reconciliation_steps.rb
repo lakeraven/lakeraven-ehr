@@ -325,18 +325,19 @@ end
 # MATCHING
 # =============================================================================
 
+# stub_gateway restores the production method after the scenario — a bare
+# define_singleton_method here used to leak model objects into every later
+# scenario that reads allergies.
 Given("the patient has existing allergies in the system") do
-  Lakeraven::EHR::AllergyIntolerance.define_singleton_method(:for_patient) do |_dfn|
-    [
-      Lakeraven::EHR::AllergyIntolerance.new(
-        ien: "1001",
-        patient_dfn: "12345",
-        allergen: "Penicillin",
-        allergen_code: "7980",
-        clinical_status: "active"
-      )
-    ]
-  end
+  stub_gateway(Lakeraven::EHR::AllergyIntolerance, :for_patient, [
+    Lakeraven::EHR::AllergyIntolerance.new(
+      ien: "1001",
+      patient_dfn: "12345",
+      allergen: "Penicillin",
+      allergen_code: "7980",
+      clinical_status: "active"
+    )
+  ])
 end
 
 Given("a FHIR Bundle containing a duplicate allergy and a new allergy") do

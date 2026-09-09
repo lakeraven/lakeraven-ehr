@@ -7,8 +7,12 @@ module Lakeraven
 
       def index
         dfn = extract_patient_dfn(params[:patient])
-        results = MedicationRequest.for_patient(dfn)
-        render_bundle(results.map { |r| { resourceType: "MedicationRequest" }.merge(r) })
+        medications = MedicationRequest.from_medication_hashes(
+          MedicationRequest.for_patient(dfn), patient_dfn: dfn
+        )
+        # §4: MedicationRequest?patient=&status=active
+        medications = medications.select { |m| m.status == params[:status] } if params[:status].present?
+        render_bundle(medications.map(&:to_fhir))
       end
 
       def show

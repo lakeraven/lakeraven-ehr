@@ -31,11 +31,18 @@ Given("a blood pressure observation with value {string} for patient {string}") d
 end
 
 Given("vital sign hashes for patient {string} with type {string} value {string} and type {string} value {string}") do |dfn, t1, v1, t2, v2|
+  # Real decorated-measurement shape (rpms-rpc Measurement reads): the
+  # V MEASUREMENT IEN is the identity and units are source-supplied
+  # (BEHOVM2 VUNITS) — a row without either would be dropped.
+  units = { "P" => "/min", "PU" => "/min", "T" => "F", "TMP" => "F",
+            "R" => "/min", "RS" => "/min", "BP" => "mmHg", "WT" => "lb", "HT" => "in" }
   hashes = [
-    { type: t1, value: v1 },
-    { type: t2, value: v2 }
+    { measurement_ien: 9101, type: t1, value: v1, units: units.fetch(t1, "unit"),
+      date: Time.utc(2025, 1, 15, 8, 0), entered_in_error: false },
+    { measurement_ien: 9102, type: t2, value: v2, units: units.fetch(t2, "unit"),
+      date: Time.utc(2025, 1, 15, 8, 0), entered_in_error: false }
   ]
-  @observations = Lakeraven::EHR::Observation.from_vital_hashes(hashes, patient_dfn: dfn)
+  @observations = Lakeraven::EHR::Observation.from_measurement_hashes(hashes, patient_dfn: dfn)
 end
 
 When("I serialize the observation to FHIR") do

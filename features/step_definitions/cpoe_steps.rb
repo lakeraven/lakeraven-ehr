@@ -173,9 +173,10 @@ Then("the imaging order status should be {string}") do |status|
   assert_equal status, @order_result.order.status
 end
 
+# Uses stub_gateway (features/support/gateway_stubs.rb) so the overrides are
+# restored after the scenario — a bare define_singleton_method here used to
+# leak into every later scenario that reads medications or allergies.
 def ensure_cpoe_medication_stubs!
-  meds = @patient_medications || []
-  allergies = @patient_allergies || []
-  Lakeraven::EHR::MedicationRequest.define_singleton_method(:for_patient) { |_dfn, **_opts| meds }
-  Lakeraven::EHR::AllergyIntolerance.define_singleton_method(:for_patient) { |_dfn| allergies }
+  stub_gateway(Lakeraven::EHR::MedicationRequest, :for_patient, @patient_medications || [])
+  stub_gateway(Lakeraven::EHR::AllergyIntolerance, :for_patient, @patient_allergies || [])
 end
