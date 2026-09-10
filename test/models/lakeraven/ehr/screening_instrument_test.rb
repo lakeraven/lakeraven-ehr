@@ -44,9 +44,14 @@ module Lakeraven
         end
       end
 
-      test "total score codes are the ones the issue specifies" do
-        assert_equal "44249-1", PHQ9.total_score_code
+      test "total score codes are LOINC TOTAL SCORE codes, not panel codes" do
+        # 44249-1 is the PHQ-9 panel; 44261-6 is the total score. Issue #474
+        # originally named the panel code — corrected here and in the issue.
+        assert_equal "44261-6", PHQ9.total_score_code
+        assert_not_equal PHQ9.panel_code, PHQ9.total_score_code
+        # 70274-6 is genuinely the GAD-7 total score, distinct from panel 69737-5.
         assert_equal "70274-6", GAD7.total_score_code
+        assert_not_equal GAD7.panel_code, GAD7.total_score_code
       end
 
       test "questionnaire canonical is the LOINC panel URI" do
