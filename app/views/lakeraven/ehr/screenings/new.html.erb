@@ -63,6 +63,13 @@
     </div>
   <% end %>
 
+  <%# TODO(#480): this free-text visit number is INTERIM, not a finished
+      design. There is no encounter picker in the web UI yet, so the clinician
+      retypes a number they can already see elsewhere — error-prone on a
+      tablet, and it lets a screening be attached to the wrong visit. The
+      scheduling surface (#480, Sprint 3) is where the picker comes from;
+      replace this input with it, and keep the free-text path only as a
+      fallback if #480 lands without one. %>
   <div class="screening-visit">
     <label for="encounter_ien">Visit (encounter) number</label>
     <input type="text" id="encounter_ien" name="encounter_ien" inputmode="numeric"

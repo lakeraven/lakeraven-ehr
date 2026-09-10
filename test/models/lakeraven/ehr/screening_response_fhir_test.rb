@@ -35,7 +35,8 @@ module Lakeraven
         assert_equal "Observation", fhir[:resourceType]
         assert_equal "final", fhir[:status]
         assert_equal "Patient/1", fhir.dig(:subject, :reference)
-        assert_equal "44249-1", fhir.dig(:code, :coding, 0, :code)
+        # The TOTAL SCORE code (44261-6), not the panel code (44249-1).
+        assert_equal "44261-6", fhir.dig(:code, :coding, 0, :code)
         assert_equal "http://loinc.org", fhir.dig(:code, :coding, 0, :system)
         assert_equal "2026-03-01T14:30:00Z", fhir[:effectiveDateTime]
       end

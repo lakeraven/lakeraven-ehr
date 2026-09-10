@@ -26,6 +26,10 @@ module Lakeraven
         @responses = ScreeningResponse.for_patient(@dfn)
       end
 
+      # TODO(#480): `encounter_ien` arrives as a query param and is rendered as
+      # a free-text field because there is no encounter picker in the web UI
+      # yet. The scheduling surface (#480, Sprint 3) supplies it; until then
+      # this is interim, not a finished design. See the note in new.html.erb.
       def new
         @answers = {}
         @encounter_ien = params[:encounter_ien]

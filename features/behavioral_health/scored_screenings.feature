@@ -23,7 +23,7 @@ Feature: Scored PHQ-9 and GAD-7 instruments
     Then the screening should be recorded
     And the total score should be 12
     And the severity band should be "moderate"
-    And the score should be retrievable as an Observation with LOINC code "44249-1"
+    And the score should be retrievable as an Observation with LOINC code "44261-6"
     And the answers should be retrievable as a QuestionnaireResponse with 9 items
 
   Scenario: Administering a GAD-7 in clinic

@@ -22,14 +22,17 @@ module Lakeraven
     # days / More than half the days / Nearly every day), shared by both
     # instruments.
     #
-    # NOTE ON THE PHQ-9 TOTAL CODE (see PR discussion): issue #474 specifies
-    # 44249-1 for the PHQ-9 total, and that is what is emitted here so the
-    # trending work has a stable contract. In LOINC, 44249-1 is the PHQ-9
-    # *panel* and 44261-6 is the *total score*; 70274-6 (GAD-7) is genuinely a
-    # total score. This is flagged rather than silently "corrected" because the
-    # code is an interface other issues are being written against. There is no
-    # LOINC lookup in this engine to verify against: TerminologyService only
-    # expands ValueSets (VSAC / local JSON), it cannot resolve a single code.
+    # PHQ-9 total score code: issue #474 originally specified 44249-1, which is
+    # the PHQ-9 *panel*, not a score. The total score is 44261-6 ("Patient
+    # Health Questionnaire 9 item (PHQ-9) total score [Reported]"), and that is
+    # what the Observation carries; 44249-1 remains the `panel_code` behind the
+    # questionnaire canonical, where it belongs. 70274-6 (GAD-7) is genuinely a
+    # total score and is used as-is. The issue text has been corrected.
+    #
+    # None of this could be checked programmatically: TerminologyService only
+    # expands ValueSets (VSAC / local JSON) and cannot resolve a single code, so
+    # every LOINC code here is hard-coded. They are concentrated in this one
+    # class so a future terminology backend has a single seam to validate.
     class ScreeningInstrument
       # One question. `link_id` is the item's LOINC code; `position` is the
       # 1-based number the clinician sees ("9. Thoughts that you would be…").
@@ -95,7 +98,7 @@ module Lakeraven
         short_title: "PHQ-9",
         preamble: "Over the last 2 weeks, how often have you been bothered by any of the following problems?",
         panel_code: "44249-1",
-        total_score_code: "44249-1",
+        total_score_code: "44261-6",
         total_score_display: "PHQ-9 total score",
         items: [
           Item.new(link_id: "44250-9", position: 1, text: "Little interest or pleasure in doing things"),
