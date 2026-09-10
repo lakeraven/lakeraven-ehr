@@ -150,6 +150,23 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_15_000000) do
     t.index [ "status" ], name: "index_lakeraven_ehr_reconciliation_sessions_on_status"
   end
 
+  create_table "lakeraven_ehr_screening_responses", force: :cascade do |t|
+    t.string "administered_by"
+    t.jsonb "answers", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "effective_at", null: false
+    t.string "encounter_ien"
+    t.string "instrument_key", null: false
+    t.integer "patient_dfn", null: false
+    t.boolean "safety_flagged", default: false, null: false
+    t.string "severity_band", null: false
+    t.string "source", default: "clinician", null: false
+    t.integer "total_score", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "encounter_ien" ], name: "index_lakeraven_ehr_screening_responses_on_encounter_ien"
+    t.index [ "patient_dfn", "instrument_key", "effective_at" ], name: "index_lakeraven_ehr_screenings_on_patient_instrument_time"
+  end
+
   create_table "oauth_access_grants", force: :cascade do |t|
     t.integer "application_id", null: false
     t.datetime "created_at", null: false
