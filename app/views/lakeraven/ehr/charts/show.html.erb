@@ -223,6 +223,30 @@
         </div>
       </div>
 
+      <%# ---- Behavioral health screenings (#474) — trended scores ---- %>
+      <div class="card span">
+        <div class="card__head"><h2>Behavioral Health Screenings</h2><span class="count"><%= @screenings.length %></span></div>
+        <div class="card__body">
+          <% if @screenings.any? %>
+            <table>
+              <thead><tr><th>Date</th><th>Instrument</th><th>Score</th><th>Severity</th></tr></thead>
+              <tbody>
+                <% @screenings.each do |s| %>
+                  <tr>
+                    <td class="mono"><%= s.effective_at.strftime("%b %-d, %Y") %></td>
+                    <td><%= s.instrument.short_title %></td>
+                    <td class="mono"><%= s.total_score %> / <%= s.instrument.max_score %></td>
+                    <td><span class="badge <%= "sev-#{s.severity_band.split.first}" %>"><%= s.severity_band %></span></td>
+                  </tr>
+                <% end %>
+              </tbody>
+            </table>
+          <% else %>
+            <p class="empty">No screenings recorded.</p>
+          <% end %>
+        </div>
+      </div>
+
       <%# ---- Allergies (detail) ---- %>
       <div class="card">
         <div class="card__head"><h2>Allergies</h2><span class="count"><%= @allergies.length %></span></div>

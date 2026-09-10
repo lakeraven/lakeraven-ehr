@@ -1,0 +1,110 @@
+<%#
+  Server-rendered screening form. NO JavaScript: validation, the missing-item
+  callout and the item-9 safety prompt are all produced by re-rendering this
+  template from ScreeningsController#create, so the form behaves identically
+  with scripting disabled.
+
+  Accessibility: one <fieldset>/<legend> per question groups its four radios,
+  every input has an explicit <label for>, error and safety regions are
+  role="alert" with in-page links to the offending question, and DOM order is
+  question order so keyboard tabbing walks the instrument top to bottom.
+%>
+<% content_for :title, "#{@instrument.short_title} | Lakeraven EHR" %>
+<%
+  missing = @result&.missing_link_ids || []
+  safety_prompt = @result&.safety_prompt_required?
+  answered = (@answers || {}).transform_values(&:to_s)
+%>
+
+<div class="page-header">
+  <h1><%= @instrument.title %></h1>
+  <p>Patient #<%= @dfn %> &middot; <%= @instrument.items.length %> items,
+     scored 0&ndash;<%= @instrument.max_score %></p>
+</div>
+
+<%= form_with url: patient_screenings_path(@dfn), method: :post, class: "screening-form" do %>
+  <input type="hidden" name="instrument" value="<%= @instrument.key %>">
+
+  <% if safety_prompt %>
+    <%# Clinical-safety gate. The submission is NOT stored until this is
+        acknowledged; the service enforces it, this only presents it. %>
+    <div class="screening-safety" role="alert" aria-labelledby="safety-heading">
+      <h2 id="safety-heading">Safety check required before this screening can be saved</h2>
+      <p><%= @instrument.safety_guidance %></p>
+      <p><a href="#item-<%= @instrument.safety_link_id %>">Review item
+        <%= @instrument.safety_item.position %></a></p>
+      <div class="screening-safety__ack">
+        <input type="checkbox" id="safety_acknowledged" name="safety_acknowledged" value="1" autofocus>
+        <label for="safety_acknowledged">
+          I have reviewed the self-harm response with the patient and taken the
+          appropriate safety steps.
+        </label>
+      </div>
+    </div>
+  <% end %>
+
+  <% if missing.any? %>
+    <div class="screening-errors" role="alert" aria-labelledby="missing-heading">
+      <h2 id="missing-heading">This screening was not scored</h2>
+      <p>Answer every item, then submit again. No score has been recorded.</p>
+      <ul>
+        <% missing.each do |link_id| %>
+          <% item = @instrument.item_for(link_id) %>
+          <li><a href="#item-<%= link_id %>">Item <%= item.position %>: <%= item.text %></a></li>
+        <% end %>
+      </ul>
+    </div>
+  <% end %>
+
+  <% if @result && @result.error == :missing_encounter %>
+    <div class="screening-errors" role="alert">
+      <h2>Visit required</h2>
+      <p>A screening is recorded against the patient&rsquo;s open visit. Enter the visit number and submit again.</p>
+    </div>
+  <% end %>
+
+  <div class="screening-visit">
+    <label for="encounter_ien">Visit (encounter) number</label>
+    <input type="text" id="encounter_ien" name="encounter_ien" inputmode="numeric"
+           value="<%= @encounter_ien %>" required
+           aria-describedby="encounter_ien_hint">
+    <p id="encounter_ien_hint" class="hint">The open encounter this screening is being administered against.</p>
+  </div>
+
+  <p class="screening-preamble"><%= @instrument.preamble %></p>
+
+  <ol class="screening-items">
+    <% @instrument.items.each do |item| %>
+      <% item_missing = missing.include?(item.link_id) %>
+      <li>
+        <fieldset id="item-<%= item.link_id %>"
+                  class="screening-item<%= " screening-item--missing" if item_missing %>"
+                  aria-invalid="<%= item_missing %>"
+                  <% if item_missing %>aria-describedby="item-<%= item.link_id %>-error"<% end %>>
+          <legend><span class="screening-item__n"><%= item.position %>.</span> <%= item.text %></legend>
+          <% if item_missing %>
+            <p class="screening-item__error" id="item-<%= item.link_id %>-error">Not answered.</p>
+          <% end %>
+          <div class="screening-choices">
+            <% Lakeraven::EHR::ScreeningInstrument::CHOICES.each do |choice| %>
+              <% input_id = "answer-#{item.link_id}-#{choice.value}" %>
+              <div class="screening-choice">
+                <input type="radio" id="<%= input_id %>"
+                       name="answers[<%= item.link_id %>]" value="<%= choice.value %>"
+                       <%= "checked" if answered[item.link_id] == choice.value.to_s %>>
+                <label for="<%= input_id %>">
+                  <%= choice.text %> <span class="screening-choice__score">(<%= choice.value %>)</span>
+                </label>
+              </div>
+            <% end %>
+          </div>
+        </fieldset>
+      </li>
+    <% end %>
+  </ol>
+
+  <div class="screening-actions">
+    <button type="submit">Score and save <%= @instrument.short_title %></button>
+    <a href="<%= patient_screenings_path(@dfn) %>">Previous screenings</a>
+  </div>
+<% end %>
