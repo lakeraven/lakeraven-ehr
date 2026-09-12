@@ -14,7 +14,10 @@ module Lakeraven
       VISIT = "2090061"
 
       setup { sign_in }
-      teardown { ScreeningResponse.delete_all }
+      teardown do
+        ScreeningResponse.delete_all
+        AuditEvent.delete_all
+      end
 
       def sign_in
         post "/lakeraven-ehr/login", params: { username: "testprovider", password: "test" }
@@ -210,6 +213,47 @@ module Lakeraven
         submit(instrument: GAD7, answers: all_answered(GAD7, 3))
 
         assert_equal 21, ScreeningResponse.last.total_score
+      end
+
+      # -- Audit (the policy every FHIR controller and the chart follow) --------
+
+      test "reading a screening result is audited against the clinician and the patient" do
+        submit
+        id = ScreeningResponse.last.id
+        AuditEvent.delete_all
+
+        assert_difference -> { AuditEvent.count }, 1 do
+          get "#{BASE}/#{id}"
+        end
+
+        event = AuditEvent.recent.first
+        assert_equal "R", event.action
+        assert_equal "0", event.outcome
+        assert_equal "99999", event.agent_who_identifier, "the acting DUZ must be on the audit row"
+        assert_equal "1", event.entity_identifier
+      end
+
+      test "listing a patient's screenings is audited" do
+        assert_difference -> { AuditEvent.count }, 1 do
+          get BASE
+        end
+
+        assert_equal "1", AuditEvent.recent.first.entity_identifier
+      end
+
+      test "recording a screening is audited as a create" do
+        assert_difference -> { AuditEvent.count }, 1 do
+          submit
+        end
+
+        assert_equal "C", AuditEvent.recent.first.action
+      end
+
+      test "a refused read is audited with a failure outcome" do
+        get "#{BASE}/999999"
+
+        assert_response :not_found
+        assert_equal "4", AuditEvent.recent.first.outcome
       end
 
       # -- Trending ------------------------------------------------------------

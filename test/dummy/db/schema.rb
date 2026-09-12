@@ -158,6 +158,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_15_000000) do
     t.string "encounter_ien"
     t.string "instrument_key", null: false
     t.integer "patient_dfn", null: false
+    t.datetime "safety_acknowledged_at"
+    t.string "safety_acknowledged_by"
     t.boolean "safety_flagged", default: false, null: false
     t.string "severity_band", null: false
     t.string "source", default: "clinician", null: false

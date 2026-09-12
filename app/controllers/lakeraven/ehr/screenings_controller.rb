@@ -16,6 +16,12 @@ module Lakeraven
     # persistence live in ScreeningEntryService, which reads no session — the
     # tokenized pre-visit link (#471) will call the same service.
     class ScreeningsController < WebController
+      # Every FHIR controller and ChartsController audit clinical access; this
+      # is the engine's first session-authenticated PHI-reading web surface, and
+      # the one that renders self-harm disclosures, so it follows the same
+      # policy rather than being the exception to it.
+      include AuditableClinicalAccess
+
       before_action :require_authentication
       before_action :load_patient
       before_action :load_instrument, only: %i[new create]
@@ -67,6 +73,33 @@ module Lakeraven
       end
 
       private
+
+      # -- Audit (AuditableClinicalAccess hooks) --------------------------------
+      #
+      # This surface authenticates a CLINICIAN SESSION rather than a Doorkeeper
+      # token, so the concern's token branch does not apply. The overrides stay
+      # in the controller — the concern itself is shared with the FHIR
+      # controllers and PR #486 is editing it.
+
+      def current_token = nil
+
+      # Fixed marker, per the concern's contract: it only answers "is this
+      # request auditable at all?". The acting identity goes in the agent
+      # attributes below.
+      def unauthenticated_audit_actor = ("clinician-session" if session[:duz].present?)
+
+      # The agent is the signed-in clinician (DUZ from the session established
+      # at sign-on), not an OAuth application.
+      def audit_agent_attributes
+        { agent_who_type: "Practitioner", agent_who_identifier: session[:duz] }
+      end
+
+      # Recording a screening is a write; everything else on this surface reads.
+      def audit_action = action_name == "create" ? "C" : "R"
+
+      # The item-level answers are the sensitive half of this surface, and they
+      # are what `show` renders.
+      def fhir_resource_type = "QuestionnaireResponse"
 
       def load_patient
         @dfn = params[:dfn]
