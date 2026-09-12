@@ -47,9 +47,24 @@ module Lakeraven
           end
         end
 
-        # A sign-on that succeeded clears the counters it would have tripped.
-        def clear(*identifiers)
-          identifiers.compact_blank.each { |id| attempts.delete(key(id)) }
+        # A sign-on that succeeded clears the counter for THAT ACCOUNT only.
+        #
+        # It must never clear the client-IP counter. The IP limb exists to stop
+        # spraying — many accounts, few attempts each — and clearing it on any
+        # success handed the whole protection to anyone holding ONE valid
+        # credential: 24 failures across four accounts from one address,
+        # interleaved with the attacker's own good login, never reached the
+        # limit. That also removes the guard against tripping RPMS's shared
+        # broker-IP three-strike lock, which locks out every clinician at once.
+        #
+        # Consequence worth stating: a sprayed-from address stays limited for
+        # the window even for its legitimate users, so a clinic behind one NAT
+        # can be denied sign-on by an attacker sharing it. That is the correct
+        # trade against a site-wide RPMS lockout, but it is a real cost.
+        def clear_account(access_code)
+          return if access_code.blank?
+
+          attempts.delete(key(access_code))
         end
 
         def retry_after

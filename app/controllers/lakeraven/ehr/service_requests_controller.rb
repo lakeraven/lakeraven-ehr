@@ -5,6 +5,8 @@ module Lakeraven
     class ServiceRequestsController < ApplicationController
       include PatientCompartment
 
+      compartment_bound :index, param: :patient, require_param: true
+
       def index
         results = ServiceRequest.for_patient(patient_compartment_dfn)
         render_bundle(results.map { |r| { resourceType: "ServiceRequest" }.merge(r) })

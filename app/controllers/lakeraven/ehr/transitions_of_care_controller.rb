@@ -5,6 +5,14 @@ module Lakeraven
     # ONC §170.315(b)(1) — Transitions of Care (send path)
     # Generates C-CDA documents for patient care transitions.
     class TransitionsOfCareController < ApplicationController
+      include PatientCompartment
+
+      # This POST RETURNS the patient's chart as a C-CDA, so it needs read
+      # scope as well as write, and it is bound to the patient compartment
+      # like any other read of that patient.
+      discloses_clinical_data :create
+      compartment_bound :create, param: :patient_dfn
+
       # POST /transitions_of_care
       def create
         patient = Patient.find_by_dfn(params[:patient_dfn])
@@ -39,10 +47,30 @@ module Lakeraven
           allergies: allergies,
           conditions: conditions,
           medications: medications,
-          author: { name: params[:author_name], npi: params[:author_npi] }
+          author: ccda_author
         )
 
         render xml: ccda_xml, status: :created, content_type: "application/xml"
+      end
+
+      private
+
+      # WHO authored this document.
+      #
+      # A C-CDA is a clinical-legal artifact, so its author is an attestation,
+      # and an attestation read off a request parameter is a forgery waiting to
+      # happen — `author_name=FORGED,AUTHOR` landed in the artifact verbatim.
+      # It also contradicted this PR's own H5 decision, which is that the
+      # identity a request acts under comes from the TOKEN.
+      #
+      # A session-derived token names its clinician (DUZ). A system token has
+      # no human behind it, so the document is authored by the authenticated
+      # CLIENT — non-forgeable either way, and never caller-supplied.
+      def ccda_author
+        duz = current_duz
+        return { name: current_user_name, npi: nil, duz: duz } if duz.present?
+
+        { name: nil, npi: nil, institution: nil, device: current_token&.application&.name }
       end
     end
   end

@@ -5,6 +5,8 @@ module Lakeraven
     class AllergyIntolerancesController < ApplicationController
       include PatientCompartment
 
+      compartment_bound :index, param: :patient, require_param: true
+
       def index
         dfn = patient_compartment_dfn
         results = AllergyIntolerance.for_patient(dfn)

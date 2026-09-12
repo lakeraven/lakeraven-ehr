@@ -3,6 +3,15 @@
 module Lakeraven
   module EHR
     class ExportsController < ApplicationController
+      include PatientCompartment
+      include ExportOwnership
+
+      # A bulk export IS a read of the patient's record; it needs read scope as
+      # well as write, and it is bound to the compartment.
+      discloses_clinical_data :create
+      compartment_bound :create, param: :patient_dfn
+      before_action :authorize_export_owner!, only: %i[show destroy]
+
       # POST /exports
       def create
         export = BulkExport.new(
@@ -30,14 +39,6 @@ module Lakeraven
         export = self.class.store[params[:id]]
         return render_not_found("Export", params[:id]) unless export
 
-        if export.client_id && export_owner_identity != export.client_id
-          render_operation_outcome(
-            status: :forbidden, severity: "error",
-            code: "forbidden", diagnostics: "Export belongs to a different client"
-          )
-          return
-        end
-
         resp = export.status_response
         if resp[:status] == 202
           resp[:headers]&.each { |k, v| response.headers[k] = v }
@@ -63,20 +64,7 @@ module Lakeraven
 
       private
 
-      # WHO owns this export.
-      #
-      # `application.uid` alone is not an owner: every browser session shares
-      # ONE Doorkeeper application, so one clinician's uid compared equal to
-      # every other clinician's and the isolation guard passed for the wrong
-      # human. A session-derived token names its clinician (DUZ); a system
-      # token has no human behind it and the application IS the client.
-      #
-      # No security key currently maps to an Export scope, so a browser
-      # session cannot reach these endpoints at all — this keeps the control
-      # correct for the day one does, rather than leaving it wrong by default.
-      def export_owner_identity
-        current_duz.presence || current_token&.application&.uid
-      end
+      def stored_export = self.class.store[params[:id]]
 
       def run_export(export)
         export.start_processing!

@@ -11,14 +11,39 @@ module Lakeraven
     module AuditableClinicalAccess
       extend ActiveSupport::Concern
 
+      # AROUND, not after. Rails skips after-callbacks when a before-callback
+      # halts the chain — so every refusal was invisible: 200 wrote a row,
+      # 403 and 401 wrote nothing. This PR CREATES most of those 403 paths
+      # (compartment binding, verb-aware scope, deny-by-default scopes), so
+      # tightening authorization without this would have made the audit log
+      # quieter, not safer: a clinician probing charts outside their own
+      # compartment left no trace at all.
+      #
+      # Registered at include time, which is before each controller declares
+      # its own before_actions, so this wraps them.
       included do
-        after_action :record_audit_event
+        around_action :audit_clinical_access
       end
 
       private
 
+      def audit_clinical_access
+        yield
+      ensure
+        record_audit_event
+      end
+
+      # Record WHY a request was refused, for the audit trail. Called from the
+      # refusal renderers; a denial that does not say what it denied is not
+      # much of a record.
+      def note_audit_denial(reason)
+        @audit_denial_reason = reason
+      end
+
       def record_audit_event
-        return unless current_token || unauthenticated_audit_actor
+        # A rejected credential has no token, but it is exactly the event worth
+        # recording. Audit it as an unidentified actor rather than not at all.
+        return if current_token.nil? && unauthenticated_audit_actor.nil? && !audit_refusal?
 
         AuditEvent.create!(
           event_type: "rest",
@@ -27,6 +52,7 @@ module Lakeraven
           entity_type: fhir_resource_type,
           entity_identifier: audit_entity_identifier,
           **audit_agent_attributes,
+          outcome_desc: @audit_denial_reason,
           agent_network_address: request.remote_ip,
           tenant_identifier: request.headers["X-Tenant-Identifier"],
           facility_identifier: request.headers["X-Facility-Identifier"]
@@ -56,6 +82,10 @@ module Lakeraven
       # A session-derived token carries the clinician's DUZ, so it is recorded
       # as a Practitioner agent. Header/system tokens have no human behind
       # them and keep the application identity they already had.
+      def audit_refusal?
+        response.status >= 400
+      end
+
       def audit_agent_attributes
         duz = (current_duz if respond_to?(:current_duz, true))
 
@@ -64,8 +94,12 @@ module Lakeraven
             agent_name: (current_user_name if respond_to?(:current_user_name, true)) }
         elsif current_token
           { agent_who_type: "Application", agent_who_identifier: current_token.application&.uid }
-        else
+        elsif unauthenticated_audit_actor
           { agent_who_type: "Service", agent_who_identifier: unauthenticated_audit_actor }
+        else
+          # A refused credential names nobody. Record the attempt anyway — the
+          # network address is on the row regardless.
+          { agent_who_type: "Unknown", agent_who_identifier: "unauthenticated" }
         end
       end
 

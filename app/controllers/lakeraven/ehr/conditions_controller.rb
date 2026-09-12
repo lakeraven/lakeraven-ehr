@@ -5,6 +5,8 @@ module Lakeraven
     class ConditionsController < ApplicationController
       include PatientCompartment
 
+      compartment_bound :index, param: :patient, require_param: true
+
       def index
         dfn = patient_compartment_dfn
         results = Condition.for_patient(dfn)

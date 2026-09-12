@@ -75,9 +75,12 @@ module Lakeraven
         bh_provider: { read: BEHAVIORAL_HEALTH_TYPES, write: BEHAVIORAL_HEALTH_TYPES },
         bh_supervisor: { read: BEHAVIORAL_HEALTH_TYPES, write: BEHAVIORAL_HEALTH_TYPES },
 
-        # Dental
-        dental_provider: { read: %w[Procedure Condition Encounter], write: %w[Procedure Condition] },
-        dental_supervisor: { read: %w[Procedure Condition Encounter], write: %w[Procedure Condition] }
+        # Dental. NOT Condition: this engine cannot distinguish a dental
+        # diagnosis from any other, so granting Condition here would hand a
+        # dental provider the whole problem list — read AND write — on a key
+        # that names one clinic. Procedures are dental-coded and safe to grant.
+        dental_provider: { read: %w[Procedure Encounter], write: %w[Procedure] },
+        dental_supervisor: { read: %w[Procedure Encounter], write: %w[Procedure] }
       }.freeze
 
       class << self

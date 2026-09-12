@@ -54,6 +54,21 @@ module Lakeraven
           return
         end
 
+        # A cookie is sent by the browser on cross-site requests too, and
+        # ActionController::API has NO CSRF protection — `SameSite=Lax` is a
+        # browser courtesy, not an application control. Reproduced with no
+        # Authorization header, no CSRF token and `Origin: https://evil.example`.
+        #
+        # So a session-derived token authorizes READS on this API and nothing
+        # else. The browser chart is a read surface; browser writes are a
+        # later feature and must arrive with real CSRF protection rather than
+        # inherit this hole. Header/system callers are unaffected — they do not
+        # ride a cookie and cannot be driven cross-site.
+        if source == :session && browser_sso_token?(token) && !read_request?
+          render_unauthorized("A browser session may not drive a state-changing API request")
+          return
+        end
+
         @current_token = token
         true
       end
@@ -80,8 +95,12 @@ module Lakeraven
       # care.
       READ_METHODS = %w[GET HEAD OPTIONS].freeze
 
+      def read_request?
+        READ_METHODS.include?(request.request_method)
+      end
+
       def can_perform?(resource_type)
-        if READ_METHODS.include?(request.request_method)
+        if read_request?
           can_read?(resource_type)
         else
           can_write?(resource_type)
@@ -189,8 +208,10 @@ module Lakeraven
       # that may not have session middleware.
       def session_smart_token
         if session_idle_expired?
-          session.delete(:smart_token)
-          session.delete(:duz)
+          # Clearing the session is not revocation: CookieStore means the
+          # client still holds a self-contained, still-valid cookie. The
+          # credential itself has to die.
+          revoke_session_smart_token!
           return nil
         end
 
@@ -206,6 +227,26 @@ module Lakeraven
         return false if last_seen.blank?
 
         Time.current.to_i - last_seen.to_i > SESSION_IDLE_TIMEOUT.to_i
+      end
+
+      # Revoke whatever SMART token this session is carrying, then clear it.
+      #
+      # Every path that ends a session goes through here — sign-out, idle
+      # expiry, a failed sign-on, a broker outage, and a DIFFERENT human
+      # signing in at the same workstation. reset_session alone invalidated
+      # nothing: the previous clinician's saved cookie kept working and was
+      # audited as the new one.
+      def revoke_session_smart_token!
+        raw = session[:smart_token].presence
+        if raw
+          token = Doorkeeper::AccessToken.by_token(raw)
+          token.revoke if token && !token.revoked?
+        end
+        session.delete(:smart_token)
+        session.delete(:duz)
+        session.delete(:last_seen_at)
+      rescue StandardError => e
+        Rails.logger.error("Session token revocation failed: #{e.class}")
       end
 
       # Display name of the signed-in clinician, for the audit trail. Guarded
@@ -245,6 +286,7 @@ module Lakeraven
       end
 
       def render_unauthorized(message = "Unauthorized")
+        note_audit_denial(message) if respond_to?(:note_audit_denial, true)
         render json: {
           resourceType: "OperationOutcome",
           issue: [ { severity: "error", code: "login", diagnostics: message } ]
@@ -252,6 +294,7 @@ module Lakeraven
       end
 
       def render_forbidden(message = "Forbidden")
+        note_audit_denial(message) if respond_to?(:note_audit_denial, true)
         render json: {
           resourceType: "OperationOutcome",
           issue: [ { severity: "error", code: "forbidden", diagnostics: message } ]

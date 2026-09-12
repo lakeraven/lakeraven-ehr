@@ -27,6 +27,15 @@ module Lakeraven
       def create
         access_code = params[:username].to_s
 
+        # Whatever credential this browser is already carrying dies here,
+        # before anything else happens. A sign-on at a workstation ends the
+        # previous occupant's session whether it succeeds, fails, is throttled,
+        # or the broker is down — and "ends" means REVOKED, because CookieStore
+        # leaves the client holding a still-valid cookie that reset_session
+        # cannot reach. Clinician B signing in used to leave clinician A's
+        # saved cookie working, audited as B.
+        terminate_session!
+
         if LoginThrottle.throttled?(access_code, request.remote_ip)
           # Refused BEFORE the credential is checked, and refused even when it
           # is correct: RPMS's own three-strike lock keys on the broker client
@@ -47,19 +56,18 @@ module Lakeraven
         # so does this. Establishing no session is the fail-closed answer
         # until the change flow exists (#493 tracks building it).
         if provider[:verify_needs_change]
-          reset_session
+          terminate_session!
           flash.now[:alert] = "Your verify code must be changed before you can sign in."
           return render :new, status: :forbidden
         end
 
-        LoginThrottle.clear(access_code, request.remote_ip)
+        LoginThrottle.clear_account(access_code)
         establish_session(provider)
         redirect_to dashboard_path
       end
 
       def destroy
-        revoke_session_token!
-        reset_session
+        terminate_session!
         redirect_to login_path, notice: "Signed out"
       end
 
@@ -82,8 +90,6 @@ module Lakeraven
       # shared workstation, which is the situation this feature exists for.
       def render_rejected(access_code, _error)
         LoginThrottle.record_failure(access_code, request.remote_ip)
-        revoke_session_token!
-        reset_session
         # One message for every failure mode — no enumeration oracle.
         flash.now[:alert] = "Invalid username or password"
         render :new, status: :unprocessable_entity
@@ -96,7 +102,6 @@ module Lakeraven
       end
 
       def render_broker_unavailable
-        reset_session
         flash.now[:alert] = "RPMS is not reachable right now. Try again shortly."
         render :new, status: :service_unavailable
       end
@@ -159,16 +164,6 @@ module Lakeraven
         end
       end
 
-      # Signing out revokes the credential, not just the cookie that carried
-      # it. Clearing the session alone left a live 12-hour token behind — three
-      # sign-ins left three of them, none revocable by the human who owned them.
-      def revoke_session_token!
-        raw = session[:smart_token].presence
-        return if raw.nil?
-
-        token = Doorkeeper::AccessToken.by_token(raw)
-        token&.revoke unless token&.revoked?
-      end
     end
   end
 end

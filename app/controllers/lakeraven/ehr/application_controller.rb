@@ -11,7 +11,28 @@ module Lakeraven
       before_action :authenticate_smart_token!
       before_action :authorize_fhir_scope!
 
+      # Actions that DISCLOSE clinical data even though they are shaped as
+      # writes — generating a C-CDA, running a bulk export, requesting an
+      # eligibility determination. Dispatching on the HTTP verb alone gets
+      # these exactly backwards: round 2's verb fix made them require write and
+      # stop requiring read, so a `system/*.write` token with no read scope
+      # anywhere could pull a patient's name and DOB out of a transition of
+      # care while being refused `GET /Patient`.
+      #
+      # They need BOTH: read for what they hand back, write for what they make.
+      def self.discloses_clinical_data(*actions)
+        before_action(only: actions) { authorize_disclosing_write! }
+      end
+
       private
+
+      # Read AND write, regardless of verb.
+      def authorize_disclosing_write!
+        return if can_read?(fhir_resource_type) && can_write?(fhir_resource_type)
+
+        missing = can_read?(fhir_resource_type) ? "writing" : "reading"
+        render_forbidden("Insufficient scope for #{missing} #{fhir_resource_type}")
+      end
 
       def fhir_resource_type
         self.class.name.demodulize.delete_suffix("Controller").singularize
@@ -39,6 +60,7 @@ module Lakeraven
       end
 
       def render_operation_outcome(status:, severity:, code:, diagnostics: nil)
+        note_audit_denial(diagnostics) if diagnostics && severity == "error"
         outcome = {
           resourceType: "OperationOutcome",
           issue: [ { severity: severity, code: code, diagnostics: diagnostics }.compact ]
