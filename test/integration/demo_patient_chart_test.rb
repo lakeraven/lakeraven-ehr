@@ -221,12 +221,21 @@ class DemoPatientChartTest < ActionDispatch::IntegrationTest
   end
 
   def seed_screening(band: "moderately severe", total: 18)
-    Lakeraven::EHR::ScreeningResponse.create!(
+    answers = answers_summing_to(total)
+    safety = Lakeraven::EHR::ScreeningInstrument::PHQ9.safety_link_id
+    # A row whose answers disclose self-harm may only exist with
+    # acknowledgement evidence: derive it rather than assert it.
+    acknowledged = answers[safety].to_i.positive? ?
+      { safety_flagged: true, safety_acknowledged_at: Time.utc(2026, 3, 1),
+        safety_acknowledged_by: "99999" } : {}
+
+    Lakeraven::EHR::ScreeningResponse.create!({
       patient_dfn: 1, encounter_ien: "2090061", instrument_key: "phq-9",
-      answers: answers_summing_to(total),
+      answers: answers,
       total_score: total, severity_band: band,
-      effective_at: Time.utc(2026, 3, 1), source: "clinician"
-    )
+      effective_at: Time.utc(2026, 3, 1), source: "clinician",
+      administered_by: "99999"
+    }.merge(acknowledged))
   end
 
   # The chart also emits VITALS as Observations, so asserting on the bare

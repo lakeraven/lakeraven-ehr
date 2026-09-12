@@ -24,16 +24,39 @@ module Lakeraven
       SOURCE_PRE_VISIT = "pre-visit"
       SOURCES = [ SOURCE_CLINICIAN, SOURCE_PRE_VISIT ].freeze
 
+      # A visit number is an identifier, and " 2090061 " is the same visit as
+      # "2090061" — leaving the padding in makes two visits out of one and
+      # defeats any dedupe or lookup keyed on it.
+      before_validation :normalize_encounter_ien
+      before_validation :assign_administration_digest
+
       validates :patient_dfn, presence: true
+      validates :administration_digest, presence: true
       validates :instrument_key, presence: true, inclusion: { in: ScreeningInstrument.keys }
       validates :total_score, presence: true, numericality: { only_integer: true }
       validates :severity_band, presence: true
       validates :effective_at, presence: true
       validates :source, inclusion: { in: SOURCES }
-      # A safety-flagged row is, by construction, one that passed the
-      # acknowledgement gate — so it must carry the trace. An acknowledging DUZ
-      # is NOT required: a pre-visit self-report (#471) has no clinician.
+      # THE SAFETY INVARIANT — enforced here and in a database CHECK, not in
+      # one service.
+      #
+      # A row whose ANSWERS disclose self-harm cannot exist without
+      # acknowledgement evidence, whoever writes it: a console, an import, a
+      # future caller, a restore, a second service. The service-level gate is a
+      # UX affordance (it re-presents the prompt); it is not the enforcement
+      # point, and while it was, a validated `create!` could store a positive
+      # item 9 with `safety_flagged: false` and the dedupe window would then
+      # hand that row back as a legitimate prior administration.
+      #
+      # The flag must MATCH the answers in both directions — an unflagged
+      # disclosure hides it, and a flag with no disclosure behind it misreports
+      # a patient as having disclosed self-harm.
+      validate :safety_flag_matches_the_answers
       validates :safety_acknowledged_at, presence: true, if: :safety_flagged?
+      # And for a clinician administration, WHO acknowledged. A pre-visit
+      # self-report (#471) has no clinician by definition and is exempt.
+      validates :safety_acknowledged_by, presence: true,
+                if: -> { safety_flagged? && source == SOURCE_CLINICIAN }
       # The row is the source of truth for BOTH FHIR projections, so it may not
       # disagree with itself: the answers must cover the instrument, every value
       # must be a choice the instrument defines, and the stored total and band
@@ -47,6 +70,39 @@ module Lakeraven
       scope :for_instrument, ->(key) { where(instrument_key: key) }
       scope :safety_flagged, -> { where(safety_flagged: true) }
 
+      # THE identity of an administration, and therefore THE dedupe rule —
+      # computed here so it belongs to the row rather than to whichever service
+      # happened to write it, and enforced by a UNIQUE INDEX so that two
+      # identical requests racing past each other's lookups cannot both land.
+      # A check-then-insert is not atomic; a unique index is.
+      #
+      # (patient, instrument, visit, administering clinician, answers, day):
+      #
+      #   * the CLINICIAN is in the key because two clinicians reassessing the
+      #     same patient on the same visit is ordinary practice, and collapsing
+      #     the second into the first would file one clinician's assessment
+      #     under the other's name;
+      #   * the ANSWERS are in it because a different set is a correction or a
+      #     genuine second administration, and silently discarding clinical
+      #     data is worse than a duplicate row;
+      #   * the DAY (UTC) bounds it: a double-tap, a back-button resubmit and a
+      #     retried POST are the same administration, while the identical
+      #     instrument re-administered another day is not. One rule, not a
+      #     window in the service disagreeing with an index in the database.
+      def self.administration_digest_for(patient_dfn:, instrument_key:, encounter_ien:,
+                                         administered_by:, answers:, effective_at:)
+        material = [
+          patient_dfn.to_s,
+          instrument_key.to_s,
+          encounter_ien.to_s.strip,
+          administered_by.to_s.strip,
+          (answers || {}).map { |k, v| [ k.to_s, v.to_s ] }.sort.to_s,
+          effective_at&.utc&.to_date.to_s
+        ].join("|")
+
+        Digest::SHA256.hexdigest(material)
+      end
+
       def instrument = ScreeningInstrument.find!(instrument_key)
 
       # True when this row can still be rendered and serialized at all. A row
@@ -54,6 +110,18 @@ module Lakeraven
       # a retired instrument) is skipped by aggregate surfaces rather than
       # taking the whole page down with it.
       def renderable? = !ScreeningInstrument.find(instrument_key).nil?
+
+      # Validation runs on WRITE. Reading is the other half of the contract: a
+      # row can reach this table without ever meeting these invariants — a
+      # direct write, a restore, an import, a release older than the
+      # validations — and such a row must not be published as a `completed`
+      # QuestionnaireResponse or a `final` Observation. Those statuses are
+      # assertions about data, and this data disagrees with itself.
+      #
+      # Aggregate surfaces skip an unpublishable row and say so in the log;
+      # they never repair it, because inventing the missing half is exactly
+      # the failure mode being guarded against.
+      def publishable? = renderable? && valid?
 
       # { link_id => ordinal }; jsonb round-trips values as strings under some
       # adapters, so PARSE on the way out — but a nil, blank or unparseable
@@ -129,7 +197,41 @@ module Lakeraven
       # most. Defined here so the view and the stylesheet share one vocabulary.
       def severity_slug = severity_band.to_s.parameterize
 
+      # True when the stored answers themselves disclose self-harm — the same
+      # rule the instrument applies when scoring, read off the persisted row
+      # rather than off whatever the caller passed.
+      def answers_disclose_self_harm?
+        definition = ScreeningInstrument.find(instrument_key)
+        return false if definition.nil? || definition.safety_link_id.nil?
+
+        ordinals[definition.safety_link_id].to_i.positive?
+      end
+
       private
+
+      def normalize_encounter_ien
+        self.encounter_ien = encounter_ien.to_s.strip.presence unless encounter_ien.nil?
+      end
+
+      def assign_administration_digest
+        self.administration_digest = self.class.administration_digest_for(
+          patient_dfn: patient_dfn, instrument_key: instrument_key,
+          encounter_ien: encounter_ien, administered_by: administered_by,
+          answers: ordinals, effective_at: effective_at
+        )
+      end
+
+      def safety_flag_matches_the_answers
+        return if ScreeningInstrument.find(instrument_key).nil?
+        return if safety_flagged? == answers_disclose_self_harm?
+
+        if answers_disclose_self_harm?
+          errors.add(:safety_flagged,
+                     "must be set: these answers disclose self-harm and may only be stored acknowledged")
+        else
+          errors.add(:safety_flagged, "is set on answers that disclose no self-harm")
+        end
+      end
 
       def answers_agree_with_the_score
         definition = ScreeningInstrument.find(instrument_key)

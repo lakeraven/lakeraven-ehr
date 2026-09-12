@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_11_000000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_09_000000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -152,6 +152,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_11_000000) do
 
   create_table "lakeraven_ehr_screening_responses", force: :cascade do |t|
     t.string "administered_by"
+    t.string "administration_digest", null: false
     t.jsonb "answers", default: {}, null: false
     t.datetime "created_at", null: false
     t.datetime "effective_at", null: false
@@ -165,8 +166,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_11_000000) do
     t.string "source", default: "clinician", null: false
     t.integer "total_score", null: false
     t.datetime "updated_at", null: false
+    t.index [ "administration_digest" ], name: "index_lakeraven_ehr_screenings_on_administration_digest", unique: true
     t.index [ "encounter_ien" ], name: "index_lakeraven_ehr_screening_responses_on_encounter_ien"
     t.index [ "patient_dfn", "instrument_key", "effective_at" ], name: "index_lakeraven_ehr_screenings_on_patient_instrument_time"
+    t.check_constraint "NOT safety_flagged OR safety_acknowledged_at IS NOT NULL", name: "screening_flagged_requires_acknowledgement"
   end
 
   create_table "oauth_access_grants", force: :cascade do |t|

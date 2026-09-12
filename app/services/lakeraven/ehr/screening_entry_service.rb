@@ -30,18 +30,22 @@ module Lakeraven
     # double-tap or a back-button resubmit returns the administration that is
     # already there instead of trending the same screening twice.
     class ScreeningEntryService
-      # Acknowledgement is CAST HERE, never trusted from the caller. Plain Ruby
-      # truthiness accepts the strings "false" and "0", the integer 0, and any
-      # array or hash — so `?safety_acknowledged=false` or the array param form
-      # `safety_acknowledged[]=` would open a clinical-safety gate. The gate is
-      # only opened by a SCALAR that casts to boolean true: a collection is
-      # never an acknowledgement, whatever it contains.
-      ACKNOWLEDGEMENT_TYPES = [ TrueClass, FalseClass, NilClass, String, Symbol, Integer ].freeze
+      # An ALLOWLIST, not a cast. This gate was wrong three review rounds
+      # running — raw truthiness, then the string `"false"`, then any string at
+      # all — because each fix rejected the bad values someone had thought of.
+      # `ActiveModel::Type::Boolean` returns false only for its own fixed falsy
+      # set (`false, 0, "0", "f", "false", "off", ""`), so `banana`, `no`,
+      # `null` and `-1` all cast TRUE and would persist a self-harm disclosure
+      # as acknowledged.
+      #
+      # So: nothing is cast, coerced, downcased or stripped. Exactly these
+      # three values acknowledge; EVERYTHING else — including values that
+      # happen to cast true — does not. The checkbox posts `"1"`; a
+      # programmatic caller (the pre-visit link, #471) passes `true`.
+      ACKNOWLEDGEMENT_VALUES = [ true, "true", "1" ].freeze
 
       def self.acknowledged?(value)
-        return false unless ACKNOWLEDGEMENT_TYPES.any? { |type| value.is_a?(type) }
-
-        ActiveModel::Type::Boolean.new.cast(value) == true
+        ACKNOWLEDGEMENT_VALUES.any? { |allowed| allowed.eql?(value) }
       end
 
       # A refusal reports EVERY reason it refused, not the first one found:
@@ -87,6 +91,14 @@ module Lakeraven
         reasons << :missing_encounter if clinician? && @encounter_ien.blank?
         reasons << :incomplete unless score.complete?
         reasons << :safety_unacknowledged if safety_required
+        # An acknowledgement is a clinical act by a named person. A clinician
+        # administration carrying a self-harm disclosure with no DUZ has no
+        # one standing behind the risk assessment, which is the whole point of
+        # the trace. (A pre-visit self-report, #471, has no clinician by
+        # definition and is not held to this.)
+        if score.safety_triggered? && clinician? && @administered_by.blank?
+          reasons << :missing_administered_by
+        end
 
         if reasons.any?
           return failure(*reasons, score: score, missing_link_ids: score.missing_link_ids,
@@ -100,33 +112,68 @@ module Lakeraven
 
       def clinician? = @source == ScreeningResponse::SOURCE_CLINICIAN
 
-      # A double-tap on a tablet, or a back-button resubmit, must not put two
-      # administrations into the record — #483 would trend the same screening
-      # twice. An administration is identified by (patient, instrument, visit,
-      # effective window); the ANSWERS are part of the match because a
-      # DIFFERENT set inside the window is a correction or a genuine second
-      # administration, and silently discarding clinical data is worse than a
-      # duplicate row.
-      DEDUPE_WINDOW = 5.minutes
+      # Recording is IDEMPOTENT, and the dedupe rule lives in the model as the
+      # administration's identity (ScreeningResponse.administration_digest_for)
+      # with a UNIQUE INDEX behind it. This service does not keep a second,
+      # slightly different rule of its own: it looks the administration up,
+      # inserts if it is not there, and treats a unique violation — the lost
+      # side of a race — as the same duplicate answer rather than an error.
+      def existing_administration(digest)
+        return nil unless @repository.respond_to?(:find_by)
 
-      def existing_administration(score, effective_at)
-        return nil unless @repository.respond_to?(:where)
+        @repository.find_by(administration_digest: digest)
+      end
 
-        @repository
-          .where(patient_dfn: @patient_dfn, instrument_key: @instrument.key,
-                 encounter_ien: @encounter_ien.presence)
-          .where(effective_at: (effective_at - DEDUPE_WINDOW)..(effective_at + DEDUPE_WINDOW))
-          .find { |candidate| candidate.ordinals == score.answers }
+      def normalized_encounter_ien = @encounter_ien.to_s.strip.presence
+
+      def administration_digest(score, effective_at)
+        ScreeningResponse.administration_digest_for(
+          patient_dfn: @patient_dfn, instrument_key: @instrument.key,
+          encounter_ien: normalized_encounter_ien, administered_by: @administered_by.presence,
+          answers: score.answers, effective_at: effective_at
+        )
       end
 
       def persist(score)
         effective_at = @effective_at || Time.current
-        existing = existing_administration(score, effective_at)
-        return Result.new(success: true, record: existing, score: score, duplicate: true) if existing
+        digest = administration_digest(score, effective_at)
 
+        duplicate = duplicate_result(existing_administration(digest), score)
+        return duplicate if duplicate
+
+        insert(score, effective_at)
+      rescue ActiveRecord::RecordNotUnique
+        # The lost side of a race: the winner's row is now there. Returning it
+        # is the idempotent answer — the same one the caller would have got had
+        # it arrived a millisecond later.
+        duplicate_result(existing_administration(digest), score) ||
+          failure(:conflicting_record, score: score)
+      rescue ActiveRecord::ActiveRecordError => e
+        Rails.logger.warn("[screening] persist failed: #{e.class}")
+        failure(:persistence_error, score: score)
+      end
+
+      # An existing administration is only handed back as a duplicate if it is
+      # PUBLISHABLE. A row that fails its own invariants (written around the
+      # model, restored, imported) is not a prior administration, and returning
+      # it would launder it into the clinical record as if a clinician had just
+      # confirmed it. It also cannot simply be written over, so this fails
+      # closed and names the reason rather than silently doing either.
+      def duplicate_result(existing, score)
+        return nil if existing.nil?
+
+        unless existing.publishable?
+          Rails.logger.warn("[screening] conflicting unpublishable row #{existing.id}")
+          return failure(:conflicting_record, score: score)
+        end
+
+        Result.new(success: true, record: existing, score: score, duplicate: true)
+      end
+
+      def insert(score, effective_at)
         record = @repository.create!(
           patient_dfn: @patient_dfn,
-          encounter_ien: @encounter_ien.presence,
+          encounter_ien: normalized_encounter_ien,
           instrument_key: @instrument.key,
           answers: score.answers,
           total_score: score.total,
@@ -144,9 +191,6 @@ module Lakeraven
         )
 
         Result.new(success: true, record: record, score: score)
-      rescue ActiveRecord::ActiveRecordError => e
-        Rails.logger.warn("[screening] persist failed: #{e.class}")
-        failure(:persistence_error, score: score)
       end
 
       def failure(*reasons, score: nil, missing_link_ids: nil, safety_prompt_required: false)
