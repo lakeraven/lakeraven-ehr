@@ -46,7 +46,10 @@ module Lakeraven
           answers: @answers,
           administered_by: session[:duz],
           source: ScreeningResponse::SOURCE_CLINICIAN,
-          safety_acknowledged: params[:safety_acknowledged].present?
+          # Raw, uncoerced: the service casts it. A controller-side `.present?`
+          # would make the clinical-safety gate depend on caller coercion, and
+          # every other caller (the pre-visit link, #471) would need its own.
+          safety_acknowledged: params[:safety_acknowledged]
         ).save
 
         return render :new, status: :unprocessable_entity unless @result.success?

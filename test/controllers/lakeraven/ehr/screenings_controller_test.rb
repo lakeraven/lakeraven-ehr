@@ -179,6 +179,33 @@ module Lakeraven
         assert_select ".screening-safety h2", /Self-harm response recorded/
       end
 
+      # At HTTP, on the FIRST submission, with the prompt never shown: a
+      # hand-crafted (or mis-rendered) acknowledgement value must not persist a
+      # self-harm disclosure.
+      [ "false", "0", "" ].each do |value|
+        test "safety_acknowledged=#{value.inspect} over HTTP does not bypass the prompt" do
+          submit(answers: all_answered(PHQ9, 0).merge(PHQ9.safety_link_id => 3),
+                 safety_acknowledged: value)
+
+          assert_response :unprocessable_entity
+          assert_equal 0, ScreeningResponse.count
+          assert_select ".screening-safety[role=alert]"
+        end
+      end
+
+      test "the array param form of safety_acknowledged does not bypass the prompt" do
+        post BASE, params: {
+          instrument: PHQ9.key,
+          encounter_ien: VISIT,
+          answers: all_answered(PHQ9, 0).merge(PHQ9.safety_link_id => 3),
+          safety_acknowledged: [ "false" ]
+        }
+
+        assert_response :unprocessable_entity
+        assert_equal 0, ScreeningResponse.count
+        assert_select ".screening-safety[role=alert]"
+      end
+
       test "a GAD-7 with every item maxed needs no safety acknowledgement" do
         submit(instrument: GAD7, answers: all_answered(GAD7, 3))
 

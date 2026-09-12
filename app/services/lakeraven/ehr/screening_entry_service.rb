@@ -24,6 +24,20 @@ module Lakeraven
     # and no request. That is the seam #471 needs: a tokenized pre-visit
     # submission is the same call with `source: "pre-visit"`.
     class ScreeningEntryService
+      # Acknowledgement is CAST HERE, never trusted from the caller. Plain Ruby
+      # truthiness accepts the strings "false" and "0", the integer 0, and any
+      # array or hash — so `?safety_acknowledged=false` or the array param form
+      # `safety_acknowledged[]=` would open a clinical-safety gate. The gate is
+      # only opened by a SCALAR that casts to boolean true: a collection is
+      # never an acknowledgement, whatever it contains.
+      ACKNOWLEDGEMENT_TYPES = [ TrueClass, FalseClass, NilClass, String, Symbol, Integer ].freeze
+
+      def self.acknowledged?(value)
+        return false unless ACKNOWLEDGEMENT_TYPES.any? { |type| value.is_a?(type) }
+
+        ActiveModel::Type::Boolean.new.cast(value) == true
+      end
+
       Result = Struct.new(:success, :record, :score, :error, :missing_link_ids,
                           :safety_prompt_required, keyword_init: true) do
         def success? = success
@@ -42,7 +56,7 @@ module Lakeraven
         @administered_by = administered_by
         @source = source.to_s
         @effective_at = effective_at
-        @safety_acknowledged = safety_acknowledged
+        @safety_acknowledged = self.class.acknowledged?(safety_acknowledged)
         @repository = repository
       end
 
