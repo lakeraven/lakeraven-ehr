@@ -197,6 +197,61 @@ module Lakeraven
         assert_equal :invalid_input, result.error
       end
 
+      # "We could not determine" must name every reason it could not, or the
+      # clinician fixes the visit number, resubmits, and only then learns eight
+      # items are unanswered.
+      test "a submission missing both a visit and answers reports both reasons" do
+        missing = [ PHQ9.items[2].link_id, PHQ9.items[7].link_id ]
+        result = save(encounter_ien: nil, answers: all_answered(PHQ9, 1).except(*missing))
+
+        assert_includes result.errors, :missing_encounter
+        assert_includes result.errors, :incomplete
+        assert_equal missing.sort, result.missing_link_ids.sort
+        assert_equal 0, ScreeningResponse.count
+      end
+
+      test "a submission missing a visit, answers and acknowledgement reports all three" do
+        answers = { PHQ9.safety_link_id => 3 }
+        result = save(encounter_ien: nil, answers: answers)
+
+        assert_equal %i[missing_encounter incomplete safety_unacknowledged].sort,
+                     result.errors.sort
+        assert result.safety_prompt_required?
+      end
+
+      # -- Idempotency ---------------------------------------------------------
+
+      test "an identical resubmission returns the first record rather than a second" do
+        first = save(answers: complete_without_safety_flag(PHQ9))
+        second = save(answers: complete_without_safety_flag(PHQ9))
+
+        assert second.success?
+        assert second.duplicate?
+        assert_equal first.record.id, second.record.id
+        assert_equal 1, ScreeningResponse.count
+      end
+
+      test "a different answer set inside the window is a genuine second administration" do
+        save(answers: complete_without_safety_flag(PHQ9))
+        save(answers: all_answered(PHQ9, 0))
+
+        assert_equal 2, ScreeningResponse.count
+      end
+
+      test "the same answers against a different visit are separate administrations" do
+        save(answers: complete_without_safety_flag(PHQ9))
+        save(answers: complete_without_safety_flag(PHQ9), encounter_ien: "2090062")
+
+        assert_equal 2, ScreeningResponse.count
+      end
+
+      test "the same answers outside the window are separate administrations" do
+        save(answers: complete_without_safety_flag(PHQ9), effective_at: Time.utc(2026, 3, 1))
+        save(answers: complete_without_safety_flag(PHQ9), effective_at: Time.utc(2026, 4, 1))
+
+        assert_equal 2, ScreeningResponse.count
+      end
+
       test "an unrecognised source is rejected" do
         assert_equal :invalid_source, save(source: "anonymous-internet").error
       end

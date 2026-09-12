@@ -151,6 +151,28 @@ module Lakeraven
         assert_select ".screening-errors", /Visit required/
       end
 
+      test "a submission missing both the visit and answers names both" do
+        missing = [ PHQ9.items[2].link_id, PHQ9.items[7].link_id ]
+        post BASE, params: { instrument: "phq-9", answers: all_answered(PHQ9, 1).except(*missing) }
+
+        assert_response :unprocessable_entity
+        assert_select ".screening-errors", /Visit required/
+        assert_select ".screening-errors", /not scored/i
+        assert_select ".screening-errors[role=alert] li", 2
+      end
+
+      # -- Idempotency ---------------------------------------------------------
+
+      test "a resubmitted form does not create a second administration" do
+        submit
+        first_id = ScreeningResponse.last.id
+
+        assert_no_difference -> { ScreeningResponse.count } do
+          submit
+        end
+        assert_redirected_to "#{BASE}/#{first_id}"
+      end
+
       # -- Item 9 safety prompt ------------------------------------------------
 
       test "a positive item 9 surfaces the safety prompt and blocks the save" do
