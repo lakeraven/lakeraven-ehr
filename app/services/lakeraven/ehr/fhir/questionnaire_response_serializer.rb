@@ -53,8 +53,15 @@ module Lakeraven
           end
         end
 
+        # `answered_items` already drops an ordinal the instrument does not
+        # define, but this is the boundary that publishes PHI: filter_map here
+        # too, so a choice that is somehow nil is omitted rather than
+        # dereferenced (`choice.link_id` on nil took down the whole chart
+        # bundle, not merely this resource).
         def items
-          @r.answered_items.map do |item, choice|
+          @r.answered_items.filter_map do |item, choice|
+            next if choice.nil?
+
             {
               linkId: item.link_id,
               text: item.text,

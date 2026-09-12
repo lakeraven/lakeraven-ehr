@@ -212,10 +212,18 @@ class DemoPatientChartTest < ActionDispatch::IntegrationTest
   # authorized independently — NEITHER may be reachable only via the other's
   # scope. All four scope combinations are pinned.
 
+  # Answers that genuinely sum to `total` — the row is validated for internal
+  # consistency now (a score that disagrees with its own answers is not
+  # storable), so a seed may not assert a total its answers do not support.
+  def answers_summing_to(total, instrument = Lakeraven::EHR::ScreeningInstrument::PHQ9)
+    base, extra = total.divmod(instrument.items.length)
+    instrument.link_ids.each_with_index.to_h { |link_id, i| [ link_id, base + (i < extra ? 1 : 0) ] }
+  end
+
   def seed_screening(band: "moderately severe", total: 18)
     Lakeraven::EHR::ScreeningResponse.create!(
       patient_dfn: 1, encounter_ien: "2090061", instrument_key: "phq-9",
-      answers: Lakeraven::EHR::ScreeningInstrument::PHQ9.link_ids.index_with { 2 },
+      answers: answers_summing_to(total),
       total_score: total, severity_band: band,
       effective_at: Time.utc(2026, 3, 1), source: "clinician"
     )
@@ -286,6 +294,62 @@ class DemoPatientChartTest < ActionDispatch::IntegrationTest
 
     assert_not_nil item9, "the self-harm item is what this scope exists to protect"
     assert_equal "More than half the days", item9.dig("answer", 0, "valueCoding", "display")
+  end
+
+  # -- One bad engine-owned row must not take the chart down --------------------
+  #
+  # The screenings table is the engine's own side table. A row in it that no
+  # longer serializes must cost at most that row — never the Patient, the
+  # Conditions, the Medications, the Allergies or the Vitals, all of which come
+  # from RPMS and are what the chart is FOR.
+
+  def assert_chart_bundle_intact
+    assert_response :ok
+    bundle = JSON.parse(response.body)
+    types = bundle["entry"].map { |e| e.dig("resource", "resourceType") }
+    %w[Patient Condition MedicationRequest AllergyIntolerance Observation].each do |type|
+      assert_includes types, type, "a malformed screening row cost the chart its #{type} resources"
+    end
+    bundle
+  end
+
+  test "an unserializable screening row does not 500 the chart bundle" do
+    seed_screening
+    broken = seed_screening(band: "minimal", total: 2)
+    # Reachable by a direct write, a restore, or a row written before the
+    # consistency validation existed.
+    broken.update_column(:answers, broken.answers.merge(
+      Lakeraven::EHR::ScreeningInstrument::PHQ9.link_ids.first => 9))
+
+    get "/patients/1.json", headers: @headers
+    bundle = assert_chart_bundle_intact
+
+    questionnaires = bundle["entry"].map { |e| e["resource"] }
+                                    .select { |r| r["resourceType"] == "QuestionnaireResponse" }
+    assert_equal 2, questionnaires.length, "the healthy screenings must still be published"
+  end
+
+  test "a screening row naming an unknown instrument does not 500 the chart" do
+    seed_screening
+    orphan = seed_screening(band: "minimal", total: 2)
+    orphan.update_column(:instrument_key, "phq-2")
+
+    get "/patients/1.json", headers: @headers
+    bundle = assert_chart_bundle_intact
+
+    scores = bundle["entry"].map { |e| e["resource"] }
+                            .select { |r| r.dig("code", "coding", 0, "code") == PHQ9_TOTAL_CODE }
+    assert_equal 1, scores.length, "the healthy screening must still carry its score"
+  end
+
+  test "a screening row naming an unknown instrument does not 500 the HTML chart" do
+    seed_screening
+    seed_screening(band: "minimal", total: 2).update_column(:instrument_key, "phq-2")
+
+    get "/patients/1", headers: @headers
+
+    assert_response :ok
+    assert_includes response.body, "Alice Anderson"
   end
 
   # -- Authorization: patient context ------------------------------------------
