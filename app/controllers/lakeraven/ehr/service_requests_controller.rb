@@ -3,25 +3,11 @@
 module Lakeraven
   module EHR
     class ServiceRequestsController < ApplicationController
-      before_action :require_patient_param, only: :index
+      include PatientCompartment
 
       def index
-        dfn = params[:patient].to_s.delete_prefix("Patient/")
-        results = ServiceRequest.for_patient(dfn)
+        results = ServiceRequest.for_patient(patient_compartment_dfn)
         render_bundle(results.map { |r| { resourceType: "ServiceRequest" }.merge(r) })
-      end
-
-      private
-
-      def require_patient_param
-        return if params[:patient].present?
-
-        render_operation_outcome(
-          status: :bad_request,
-          severity: "error",
-          code: "required",
-          diagnostics: "Search parameter 'patient' is required"
-        )
       end
     end
   end

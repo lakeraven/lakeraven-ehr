@@ -74,11 +74,10 @@ Lakeraven::EHR::Engine.routes.draw do
 
   # Web UI — login, dashboard (accessibility / ops surface)
   get "login" => "sessions#new", as: :login
-  # Test-only canned-credential login (#401 interim); the real VistA sign-on
-  # gateway (#332) will replace this and open the route in all environments.
-  if Rails.env.test?
-    post "login" => "sessions#create"
-  end
+  # Real VistA sign-on (#332): validates access/verify against RPMS and mints a
+  # SMART session token. Open in all environments (replaces the #401 test-only
+  # canned login).
+  post "login" => "sessions#create"
   delete "logout" => "sessions#destroy", as: :logout
   get "dashboard" => "dashboards#show", as: :dashboard
 end

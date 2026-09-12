@@ -3,10 +3,10 @@
 module Lakeraven
   module EHR
     class ObservationsController < ApplicationController
-      before_action :require_patient_param, only: :index
+      include PatientCompartment
 
       def index
-        dfn = extract_patient_dfn(params[:patient])
+        dfn = patient_compartment_dfn
         raw = Observation.for_patient(dfn)
         observations = Observation.from_vital_hashes(raw, patient_dfn: dfn)
         observations = filter_observations(observations)
@@ -18,21 +18,6 @@ module Lakeraven
       end
 
       private
-
-      def require_patient_param
-        return if params[:patient].present?
-
-        render_operation_outcome(
-          status: :bad_request,
-          severity: "error",
-          code: "required",
-          diagnostics: "Search parameter 'patient' is required"
-        )
-      end
-
-      def extract_patient_dfn(param)
-        param.to_s.delete_prefix("Patient/")
-      end
 
       def filter_observations(observations)
         observations = observations.select { |o| o.category == params[:category] } if params[:category].present?

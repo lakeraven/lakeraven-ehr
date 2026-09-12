@@ -4,8 +4,7 @@ module Lakeraven
   module EHR
     class PatientsController < ApplicationController
       before_action :enforce_patient_context!, only: :show
-      skip_before_action :authorize_fhir_scope!, only: :create
-      before_action :authorize_fhir_write_scope!, only: :create
+      before_action :enforce_patient_search_context!, only: :index
       before_action :require_registration_scope!, only: :create
 
       def index
@@ -13,7 +12,11 @@ module Lakeraven
 
         entries = patients.map { |p| build_patient_entry(p) }
 
-        if params[:_revinclude] == "Provenance:target"
+        # _revinclude hands the caller resources of ANOTHER type, so it needs
+        # that type's read scope like any other read. A `user/Patient.read`
+        # token used to receive Provenance entries — including their agent
+        # references — because the inclusion was never authorized.
+        if params[:_revinclude] == "Provenance:target" && readable_included_types(%w[Provenance]).any?
           patients.each do |p|
             ProvenanceStore.instance.for_target("Patient", "rpms-#{p.dfn}").each do |prov|
               entries << { resource: prov.to_fhir, search: { mode: "include" } }
@@ -75,6 +78,14 @@ module Lakeraven
 
       def enforce_patient_context!
         authorize_patient_context!(params[:dfn])
+      end
+
+      # A patient-bound token may search only within its own compartment. An
+      # unqualified search (by name, by SSN, or with no parameter at all) is a
+      # cross-patient read, so a bound token cannot issue one: it must name
+      # its own DFN in `_id`. Unbound (user/ or system/) tokens are unaffected.
+      def enforce_patient_search_context!
+        authorize_patient_search!(params[:_id])
       end
 
       def require_registration_scope!

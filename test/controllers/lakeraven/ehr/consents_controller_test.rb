@@ -16,14 +16,14 @@ module Lakeraven
       end
 
       test "GET /Consent returns 200 with FHIR Bundle" do
-        get "/lakeraven-ehr/Consent", headers: @headers
+        get "/lakeraven-ehr/Consent", params: { patient: "1" }, headers: @headers
         assert_response :ok
         body = JSON.parse(response.body)
         assert_equal "Bundle", body["resourceType"]
       end
 
       test "GET /Consent returns FHIR content type" do
-        get "/lakeraven-ehr/Consent", headers: @headers
+        get "/lakeraven-ehr/Consent", params: { patient: "1" }, headers: @headers
         assert_equal "application/fhir+json", response.media_type
       end
 
@@ -33,7 +33,7 @@ module Lakeraven
       end
 
       test "GET /Consent returns searchset bundle" do
-        get "/lakeraven-ehr/Consent", headers: @headers
+        get "/lakeraven-ehr/Consent", params: { patient: "1" }, headers: @headers
         body = JSON.parse(response.body)
         assert_equal "searchset", body["type"]
       end

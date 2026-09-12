@@ -3,24 +3,11 @@
 module Lakeraven
   module EHR
     class ImmunizationsController < ApplicationController
-      before_action :require_patient_param, only: :index
+      include PatientCompartment
 
       def index
-        dfn = params[:patient].to_s.delete_prefix("Patient/")
+        dfn = patient_compartment_dfn
         render_bundle(Immunization.for_patient(dfn).map(&:to_fhir))
-      end
-
-      private
-
-      def require_patient_param
-        return if params[:patient].present?
-
-        render_operation_outcome(
-          status: :bad_request,
-          severity: "error",
-          code: "required",
-          diagnostics: "Search parameter 'patient' is required"
-        )
       end
     end
   end
