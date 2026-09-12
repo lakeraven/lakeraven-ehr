@@ -8,7 +8,10 @@ module Lakeraven
       include SmartAuthTestHelper
 
       setup do
-        setup_smart_auth
+        # These endpoints CHANGE STATE, so they need a write scope. They used
+        # to pass on the default read-only token because the base filter
+        # called can_read? for every verb (review finding H4).
+        setup_smart_auth(scopes: "system/*.read system/*.write")
       end
 
       teardown do
