@@ -14,17 +14,29 @@ module Lakeraven
 
       def record(instrument: PHQ9, ordinals: nil, **overrides)
         values = ordinals || Array.new(instrument.items.length, 1)
+        answers = instrument.link_ids.zip(values).to_h
         ScreeningResponse.create!({
           patient_dfn: 1,
           encounter_ien: "2090061",
           instrument_key: instrument.key,
-          answers: instrument.link_ids.zip(values).to_h,
+          answers: answers,
           total_score: values.sum,
           severity_band: instrument.band_label_for(values.sum),
           effective_at: Time.utc(2026, 3, 1, 14, 30),
           administered_by: "99999",
           source: ScreeningResponse::SOURCE_CLINICIAN
-        }.merge(overrides))
+        }.merge(safety_attributes(instrument, answers)).merge(overrides))
+      end
+
+      # A row whose answers disclose self-harm may only exist with
+      # acknowledgement evidence, so seeds DERIVE the flag from the answers
+      # rather than asserting one — the same rule the model enforces.
+      def safety_attributes(instrument, answers)
+        return {} unless instrument.safety_item?
+        return {} unless answers[instrument.safety_link_id].to_i.positive?
+
+        { safety_flagged: true, safety_acknowledged_at: Time.utc(2026, 3, 1, 14, 30),
+          safety_acknowledged_by: "99999" }
       end
 
       # -- Observation (the trendable total) -----------------------------------
@@ -143,7 +155,10 @@ module Lakeraven
 
       test "every severity band of both instruments slugs to a distinct token" do
         bands = ScreeningInstrument::ALL.flat_map { |i| i.bands.map(&:label) }.uniq
-        slugs = bands.index_with { |band| record(instrument: PHQ9).tap { |r| r.severity_band = band }.severity_slug }
+        # Unpersisted: the slug is a pure function of the band, and storing one
+        # administration per band would be storing the same administration
+        # five times.
+        slugs = bands.index_with { |band| ScreeningResponse.new(severity_band: band).severity_slug }
 
         assert_equal({
           "minimal" => "minimal",

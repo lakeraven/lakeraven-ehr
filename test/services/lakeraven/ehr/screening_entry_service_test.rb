@@ -107,7 +107,7 @@ module Lakeraven
 
       test "acknowledging the safety prompt lets the same answers through" do
         answers = all_answered(PHQ9, 0).merge(PHQ9.safety_link_id => 2)
-        result = save(answers: answers, safety_acknowledged: true)
+        result = save(answers: answers, safety_acknowledged: true, administered_by: "99999")
 
         assert result.success?, result.error.inspect
         assert_equal 2, result.record.total_score
@@ -133,11 +133,18 @@ module Lakeraven
         assert_not result.record.safety_flagged?
       end
 
-      # The gate is a clinical-safety control, so it casts its own input rather
-      # than trusting a caller to have coerced it. Ruby truthiness would let
-      # every one of these through — `"false"` and `"0"` are truthy objects,
-      # and an array/hash param form is truthy no matter what it contains.
-      FALSY_ACKNOWLEDGEMENTS = [ false, nil, "false", "0", "", 0, [], {}, [ "" ], [ "false" ] ].freeze
+      # The gate is a clinical-safety control, so it decides for itself what an
+      # acknowledgement is rather than trusting a caller to have coerced one.
+      # An ALLOWLIST, not a cast. `ActiveModel::Type::Boolean` returns false
+      # only for its own fixed falsy set, so every one of "banana", "no",
+      # "off-duty", "0.0" and "null" casts TRUE — a cast can only reject the
+      # bad values someone thought of, and this gate was wrong three rounds
+      # running for exactly that reason.
+      FALSY_ACKNOWLEDGEMENTS = [
+        false, nil, "false", "0", "", 0, [], {}, [ "" ], [ "false" ],
+        "banana", "no", "null", "0.0", "off-duty", "-1", "acknowledged?",
+        1, "on", "yes", "t", "T", "TRUE", "True", " 1", "1 ", :true, 1.0
+      ].freeze
 
       FALSY_ACKNOWLEDGEMENTS.each do |value|
         test "safety_acknowledged: #{value.inspect} does not acknowledge the gate" do
@@ -151,16 +158,42 @@ module Lakeraven
         end
       end
 
-      [ true, "true", "1", 1, "on", "yes" ].each do |value|
+      # The whole allowlist, and nothing else. Kept small on purpose: the form
+      # posts "1", a programmatic caller passes `true`.
+      [ true, "true", "1" ].each do |value|
         test "safety_acknowledged: #{value.inspect} acknowledges the gate" do
           answers = all_answered(PHQ9, 0).merge(PHQ9.safety_link_id => 2)
-          result = save(answers: answers, safety_acknowledged: value)
+          result = save(answers: answers, safety_acknowledged: value, administered_by: "99999")
 
           assert result.success?, "#{value.inspect} should acknowledge: #{result.error.inspect}"
         end
       end
 
       # -- Acknowledgement leaves a durable trace -------------------------------
+
+      # A clinician administration that reaches the table with a self-harm
+      # disclosure must name the clinician who acknowledged it. Round 2 added
+      # the column and left it optional in exactly the case it was added for.
+      test "a clinician acknowledgement with no clinician is refused" do
+        answers = all_answered(PHQ9, 0).merge(PHQ9.safety_link_id => 2)
+        result = save(answers: answers, safety_acknowledged: true, administered_by: nil)
+
+        assert_not result.success?, "an anonymous clinician acknowledgement must not persist"
+        assert_includes result.errors, :missing_administered_by
+        assert_equal 0, ScreeningResponse.count
+      end
+
+      test "a pre-visit self-report still needs no clinician" do
+        answers = all_answered(PHQ9, 0).merge(PHQ9.safety_link_id => 2)
+        result = ScreeningEntryService.new(
+          instrument: PHQ9, patient_dfn: DFN, answers: answers,
+          source: ScreeningResponse::SOURCE_PRE_VISIT, safety_acknowledged: true
+        ).save
+
+        assert result.success?, result.errors.inspect
+        assert_not_nil result.record.safety_acknowledged_at
+        assert_nil result.record.safety_acknowledged_by
+      end
 
       test "an acknowledged self-harm disclosure records when and by whom" do
         answers = all_answered(PHQ9, 0).merge(PHQ9.safety_link_id => 2)
@@ -210,11 +243,11 @@ module Lakeraven
         assert_equal 0, ScreeningResponse.count
       end
 
-      test "a submission missing a visit, answers and acknowledgement reports all three" do
+      test "a submission missing a visit, answers, a clinician and acknowledgement reports all four" do
         answers = { PHQ9.safety_link_id => 3 }
         result = save(encounter_ien: nil, answers: answers)
 
-        assert_equal %i[missing_encounter incomplete safety_unacknowledged].sort,
+        assert_equal %i[missing_encounter incomplete safety_unacknowledged missing_administered_by].sort,
                      result.errors.sort
         assert result.safety_prompt_required?
       end
@@ -243,6 +276,78 @@ module Lakeraven
         save(answers: complete_without_safety_flag(PHQ9), encounter_ien: "2090062")
 
         assert_equal 2, ScreeningResponse.count
+      end
+
+      # Two clinicians reassessing the same patient on the same visit is a
+      # normal thing to do — and the second one's reassessment must not be
+      # silently collapsed into the first one's row, under the first one's name.
+      test "a different clinician's identical reassessment is its own administration" do
+        first = save(answers: complete_without_safety_flag(PHQ9), administered_by: "99999")
+        second = save(answers: complete_without_safety_flag(PHQ9), administered_by: "12345")
+
+        assert_not second.duplicate?, "a second clinician's reassessment is not a duplicate"
+        assert_not_equal first.record.id, second.record.id
+        assert_equal "12345", second.record.administered_by
+        assert_equal 2, ScreeningResponse.count
+      end
+
+      test "a visit number with stray whitespace is the same visit, not a new one" do
+        save(answers: complete_without_safety_flag(PHQ9), administered_by: "99999")
+        again = save(answers: complete_without_safety_flag(PHQ9), administered_by: "99999",
+                     encounter_ien: " #{VISIT}\t")
+
+        assert again.duplicate?, "a padded visit number must not create a second administration"
+        assert_equal 1, ScreeningResponse.count
+      end
+
+      test "the stored visit number is normalized" do
+        record = save(answers: complete_without_safety_flag(PHQ9), encounter_ien: "  #{VISIT} ").record
+
+        assert_equal VISIT, record.encounter_ien
+      end
+
+      # An unacknowledged or self-contradicting row must never be handed back as
+      # a legitimate prior administration — that would let a row written around
+      # the model launder itself into the clinical record on a clinician's
+      # next submission. It cannot be overwritten either, so the refusal names
+      # the reason instead of silently doing one or the other.
+      test "a corrupt row occupying this administration is refused, not laundered" do
+        first = save(answers: complete_without_safety_flag(PHQ9), administered_by: "99999").record
+        first.update_column(:total_score, 999)
+
+        again = save(answers: complete_without_safety_flag(PHQ9), administered_by: "99999")
+
+        assert_not again.success?, "a row that fails its own invariants is not a prior administration"
+        assert_equal :conflicting_record, again.error
+        assert_nil again.record
+      end
+
+      # The lost side of a race: the winning request has already inserted, and
+      # this one's lookup could not see it. The unique index refuses the second
+      # insert and the caller gets the SAME administration back, which is what
+      # it would have got a millisecond later.
+      test "a submission that loses the insert race still gets one administration back" do
+        first = save(answers: complete_without_safety_flag(PHQ9), administered_by: "99999").record
+
+        # The interleaving itself: this request's pre-insert lookup runs BEFORE
+        # the winner commits and sees nothing, so it goes on to insert. Every
+        # later lookup sees the committed row, as a real connection would.
+        blind = Class.new(SimpleDelegator) do
+          def find_by(...)
+            return super if @looked_up
+
+            @looked_up = true
+            nil
+          end
+        end.new(ScreeningResponse)
+
+        racing = save(answers: complete_without_safety_flag(PHQ9), administered_by: "99999",
+                      repository: blind)
+
+        assert racing.success?, racing.error.inspect
+        assert racing.duplicate?
+        assert_equal first.id, racing.record.id
+        assert_equal 1, ScreeningResponse.count
       end
 
       test "the same answers outside the window are separate administrations" do
