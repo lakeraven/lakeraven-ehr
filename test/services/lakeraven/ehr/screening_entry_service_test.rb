@@ -160,6 +160,26 @@ module Lakeraven
         end
       end
 
+      # -- Acknowledgement leaves a durable trace -------------------------------
+
+      test "an acknowledged self-harm disclosure records when and by whom" do
+        answers = all_answered(PHQ9, 0).merge(PHQ9.safety_link_id => 2)
+        record = save(answers: answers, safety_acknowledged: true, administered_by: "99999").record
+
+        assert record.safety_flagged?
+        assert_not_nil record.safety_acknowledged_at,
+                       "an acknowledged row must be distinguishable from one that bypassed the gate"
+        assert_equal "99999", record.safety_acknowledged_by
+      end
+
+      test "a screening with no safety flag carries no acknowledgement trace" do
+        record = save(administered_by: "99999").record
+
+        assert_not record.safety_flagged?
+        assert_nil record.safety_acknowledged_at
+        assert_nil record.safety_acknowledged_by
+      end
+
       # -- Guards --------------------------------------------------------------
 
       test "a clinician administration requires an open encounter" do

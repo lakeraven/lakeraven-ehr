@@ -22,7 +22,7 @@ module Lakeraven
 
         AuditEvent.create!(
           event_type: "rest",
-          action: "R",
+          action: audit_action,
           outcome: audit_outcome,
           entity_type: fhir_resource_type,
           entity_identifier: audit_entity_identifier,
@@ -51,6 +51,13 @@ module Lakeraven
         else
           { agent_who_type: "Service", agent_who_identifier: unauthenticated_audit_actor }
         end
+      end
+
+      # FHIR reads are the common case; a controller that also writes (the
+      # server-rendered screening surface) overrides this per action so a
+      # creation is not logged as a read.
+      def audit_action
+        "R"
       end
 
       def audit_outcome

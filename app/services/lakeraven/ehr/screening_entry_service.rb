@@ -100,7 +100,13 @@ module Lakeraven
           effective_at: @effective_at || Time.current,
           administered_by: @administered_by.presence,
           source: @source,
-          safety_flagged: score.safety_triggered?
+          safety_flagged: score.safety_triggered?,
+          # A flagged row only reaches the table because someone acknowledged
+          # the prompt: record WHEN and by WHOM, so a row from a clinician who
+          # did the risk assessment is distinguishable from one that did not.
+          # A pre-visit self-report (#471) has no DUZ; the timestamp still lands.
+          safety_acknowledged_at: score.safety_triggered? ? Time.current : nil,
+          safety_acknowledged_by: score.safety_triggered? ? @administered_by.presence : nil
         )
 
         Result.new(success: true, record: record, score: score)

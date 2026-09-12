@@ -30,6 +30,10 @@ module Lakeraven
       validates :severity_band, presence: true
       validates :effective_at, presence: true
       validates :source, inclusion: { in: SOURCES }
+      # A safety-flagged row is, by construction, one that passed the
+      # acknowledgement gate — so it must carry the trace. An acknowledging DUZ
+      # is NOT required: a pre-visit self-report (#471) has no clinician.
+      validates :safety_acknowledged_at, presence: true, if: :safety_flagged?
 
       scope :for_patient, ->(dfn) { where(patient_dfn: dfn).order(:effective_at, :id) }
       scope :for_instrument, ->(key) { where(instrument_key: key) }
