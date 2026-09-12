@@ -133,6 +133,33 @@ module Lakeraven
         assert_not result.record.safety_flagged?
       end
 
+      # The gate is a clinical-safety control, so it casts its own input rather
+      # than trusting a caller to have coerced it. Ruby truthiness would let
+      # every one of these through — `"false"` and `"0"` are truthy objects,
+      # and an array/hash param form is truthy no matter what it contains.
+      FALSY_ACKNOWLEDGEMENTS = [ false, nil, "false", "0", "", 0, [], {}, [ "" ], [ "false" ] ].freeze
+
+      FALSY_ACKNOWLEDGEMENTS.each do |value|
+        test "safety_acknowledged: #{value.inspect} does not acknowledge the gate" do
+          answers = all_answered(PHQ9, 0).merge(PHQ9.safety_link_id => 2)
+          result = save(answers: answers, safety_acknowledged: value)
+
+          assert_equal :safety_unacknowledged, result.error,
+                       "#{value.inspect} opened the item-9 safety gate"
+          assert_equal 0, ScreeningResponse.count,
+                       "#{value.inspect} persisted an unacknowledged self-harm disclosure"
+        end
+      end
+
+      [ true, "true", "1", 1, "on", "yes" ].each do |value|
+        test "safety_acknowledged: #{value.inspect} acknowledges the gate" do
+          answers = all_answered(PHQ9, 0).merge(PHQ9.safety_link_id => 2)
+          result = save(answers: answers, safety_acknowledged: value)
+
+          assert result.success?, "#{value.inspect} should acknowledge: #{result.error.inspect}"
+        end
+      end
+
       # -- Guards --------------------------------------------------------------
 
       test "a clinician administration requires an open encounter" do
