@@ -141,6 +141,56 @@ module Lakeraven
         @procedures    = readable?("Procedure") ? build_procedures(dfn) : []
         @encounters    = readable?("Encounter") ? safe { EncounterGateway.for_patient(dfn) } : []
         @encounter_resources = build_encounter_resources(dfn)
+        load_screenings(dfn)
+      end
+
+      # Scored screening instruments (#474). Engine-owned records rather than an
+      # RPMS read, and they yield TWO resource families with different
+      # sensitivities:
+      #
+      #   * the total score        -> Observation           (Observation scope)
+      #   * the item-level answers -> QuestionnaireResponse  (QR scope)
+      #
+      # The two are authorized INDEPENDENTLY. A token with QuestionnaireResponse
+      # scope but no Observation scope still gets the answers, and vice versa —
+      # neither family may be reachable only via the other's scope. One query
+      # feeds both; it is skipped entirely when neither scope is held.
+      # A screening row is engine-owned side data. If one of them cannot be
+      # rendered or serialized, that must cost AT MOST that row — never the
+      # Patient, Conditions, Medications, Allergies and Vitals that the chart
+      # exists for. `safe` wrapped only the QUERY, so a single out-of-range
+      # ordinal (serializer -> nil choice -> NoMethodError) 500'd the whole
+      # bundle. Rows whose instrument no longer exists are dropped up front;
+      # anything else that raises is dropped per row by `safe_map`.
+      def load_screenings(dfn)
+        wants_scores  = readable?("Observation")
+        wants_answers = readable?("QuestionnaireResponse")
+        screenings = if wants_scores || wants_answers
+                       publishable_screenings(safe { ScreeningResponse.for_patient(dfn) })
+        else
+                       []
+        end
+
+        @screenings = wants_scores ? screenings : []
+        @screening_observations = safe_map(@screenings, &:to_observation)
+        @screening_answers = wants_answers ? screenings : []
+      end
+
+      # Validation runs on WRITE; this is the read side of the same contract.
+      # A row that does not satisfy its own invariants — a total that is not
+      # its answers' sum, a self-harm disclosure with no acknowledgement, an
+      # instrument that no longer exists — is SKIPPED rather than published as
+      # a `completed` QuestionnaireResponse or a `final` Observation. Those
+      # statuses are assertions, and this row cannot support them. It is never
+      # repaired here: inventing the missing half is the failure being guarded
+      # against.
+      def publishable_screenings(screenings)
+        screenings.select do |screening|
+          next true if screening.publishable?
+
+          Rails.logger.warn("[chart] screening #{screening.id} withheld: fails its own invariants")
+          false
+        end
       end
 
       def build_conditions(dfn)
@@ -228,6 +278,20 @@ module Lakeraven
         []
       end
 
+      # Per-record projection boundary: one record that cannot be projected is
+      # skipped, the rest of the collection survives, and the request does not
+      # 500. Used where the projection is derived from stored data rather than
+      # fetched (screenings), since a bad row is otherwise indistinguishable
+      # from a bad chart.
+      def safe_map(records)
+        records.filter_map do |record|
+          yield record
+        rescue => e
+          Rails.logger.warn("[chart] record #{record.class}##{record.id} skipped: #{e.class}: #{e.message}")
+          nil
+        end
+      end
+
       # -- FHIR Bundle ----------------------------------------------------------
 
       def fhir_bundle
@@ -236,6 +300,8 @@ module Lakeraven
         resources.concat(@medications.map(&:to_fhir))
         resources.concat(@allergies.map(&:to_fhir))
         resources.concat(@observations.map(&:to_fhir))
+        resources.concat(safe_map(@screening_observations, &:to_fhir))
+        resources.concat(safe_map(@screening_answers, &:to_questionnaire_response))
         resources.concat(@immunizations.map(&:to_fhir))
         resources.concat(@procedures.map(&:to_fhir))
         resources.concat(@encounter_resources.map { |e| encounter_to_fhir(e) })

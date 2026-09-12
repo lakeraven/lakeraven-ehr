@@ -1,0 +1,24 @@
+<% content_for :title, "Open patient record | Lakeraven EHR" %>
+
+<div class="page-header">
+  <h1>Open this patient's record?</h1>
+  <p>Patient #<%= @dfn %></p>
+</div>
+
+<div class="screening-errors" role="alert">
+  <h2>This record is not open in your session</h2>
+  <p>
+    You are signed in, but you have not opened patient #<%= @dfn %>. Behavioral
+    health screenings include what the patient said about self-harm, so the
+    record has to be opened deliberately.
+  </p>
+  <p>Opening it is recorded in the audit log against your user.</p>
+</div>
+
+<%= form_with url: patient_context_path(@dfn), method: :post do %>
+  <button type="submit">Open record for patient #<%= @dfn %></button>
+<% end %>
+
+<div class="screening-actions">
+  <a href="<%= dashboard_path %>">Back to dashboard</a>
+</div>

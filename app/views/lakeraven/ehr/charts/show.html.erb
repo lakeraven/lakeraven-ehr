@@ -101,6 +101,11 @@
     .badge.sev-severe{background:var(--danger-bg);color:var(--danger)}
     .badge.sev-moderate{background:var(--warn-bg);color:var(--warn)}
     .badge.sev-mild{background:#eff6ff;color:#1d4ed8}
+    /* Screening severity bands (#474). `sev-moderately-severe` needs its own
+       rule: class matching is per-token, so `.sev-moderate` does NOT match it,
+       and it must read as distinct from both neighbouring bands. */
+    .badge.sev-minimal{background:#f1f5f9;color:var(--muted)}
+    .badge.sev-moderately-severe{background:#ffedd5;color:#c2410c}
     .empty{color:var(--muted);font-size:13px;padding:10px 2px}
 
     .vitals{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:8px 2px}
@@ -219,6 +224,30 @@
             </div>
           <% else %>
             <p class="empty">No vitals recorded.</p>
+          <% end %>
+        </div>
+      </div>
+
+      <%# ---- Behavioral health screenings (#474) — trended scores ---- %>
+      <div class="card span">
+        <div class="card__head"><h2>Behavioral Health Screenings</h2><span class="count"><%= @screenings.length %></span></div>
+        <div class="card__body">
+          <% if @screenings.any? %>
+            <table>
+              <thead><tr><th>Date</th><th>Instrument</th><th>Score</th><th>Severity</th></tr></thead>
+              <tbody>
+                <% @screenings.each do |s| %>
+                  <tr>
+                    <td class="mono"><%= s.effective_at.strftime("%b %-d, %Y") %></td>
+                    <td><%= s.instrument.short_title %></td>
+                    <td class="mono"><%= s.total_score %> / <%= s.instrument.max_score %></td>
+                    <td><span class="badge <%= "sev-#{s.severity_slug}" %>"><%= s.severity_band %></span></td>
+                  </tr>
+                <% end %>
+              </tbody>
+            </table>
+          <% else %>
+            <p class="empty">No screenings recorded.</p>
           <% end %>
         </div>
       </div>

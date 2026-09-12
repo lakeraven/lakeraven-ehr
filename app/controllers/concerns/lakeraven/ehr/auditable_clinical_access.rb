@@ -17,12 +17,22 @@ module Lakeraven
 
       private
 
+      # Best-effort form: a failed audit write is logged and the request is
+      # served anyway. Surfaces that must not serve an unrecorded access use
+      # `record_audit_event!` directly (FailClosedClinicalAudit).
       def record_audit_event
-        return unless current_token || unauthenticated_audit_actor
+        record_audit_event!
+      rescue => e
+        Rails.logger.error("AuditEvent write failed: #{e.message}")
+      end
+
+      # Raises if the access could not be recorded.
+      def record_audit_event!
+        return unless auditable_access?
 
         AuditEvent.create!(
           event_type: "rest",
-          action: "R",
+          action: audit_action,
           outcome: audit_outcome,
           entity_type: fhir_resource_type,
           entity_identifier: audit_entity_identifier,
@@ -31,8 +41,12 @@ module Lakeraven
           tenant_identifier: request.headers["X-Tenant-Identifier"],
           facility_identifier: request.headers["X-Facility-Identifier"]
         )
-      rescue => e
-        Rails.logger.error("AuditEvent write failed: #{e.message}")
+      end
+
+      # Tokenless requests are 401s with no identity to record; a controller
+      # with a deliberate unauthenticated path declares an actor instead.
+      def auditable_access?
+        current_token || unauthenticated_audit_actor
       end
 
       # Tokenless requests are unaudited by default (they are 401s). A
@@ -51,6 +65,13 @@ module Lakeraven
         else
           { agent_who_type: "Service", agent_who_identifier: unauthenticated_audit_actor }
         end
+      end
+
+      # FHIR reads are the common case; a controller that also writes (the
+      # server-rendered screening surface) overrides this per action so a
+      # creation is not logged as a read.
+      def audit_action
+        "R"
       end
 
       def audit_outcome

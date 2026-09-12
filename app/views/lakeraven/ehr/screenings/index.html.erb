@@ -1,0 +1,41 @@
+<% content_for :title, "Screenings | Lakeraven EHR" %>
+
+<div class="page-header">
+  <h1>Behavioral health screenings</h1>
+  <p>Patient #<%= @dfn %></p>
+</div>
+
+<div class="screening-actions">
+  <% Lakeraven::EHR::ScreeningInstrument::ALL.each do |instrument| %>
+    <a href="<%= new_patient_screening_path(@dfn, instrument: instrument.key) %>">
+      Administer <%= instrument.short_title %>
+    </a>
+  <% end %>
+</div>
+
+<% if @responses.any? %>
+  <table class="screening-history">
+    <caption class="sr-only">Scored screenings for this patient, oldest first</caption>
+    <thead>
+      <tr>
+        <th scope="col">Date</th><th scope="col">Instrument</th>
+        <th scope="col">Score</th><th scope="col">Severity</th><th scope="col"></th>
+      </tr>
+    </thead>
+    <tbody>
+      <% @responses.each do |response| %>
+        <tr>
+          <td><%= response.effective_at.strftime("%b %-d, %Y") %></td>
+          <td><%= response.instrument.short_title %></td>
+          <td><%= response.total_score %> / <%= response.instrument.max_score %></td>
+          <td><%= response.severity_band.capitalize %></td>
+          <td><a href="<%= patient_screening_path(@dfn, response.id) %>">
+            View<span class="sr-only"> <%= response.instrument.short_title %> from
+            <%= response.effective_at.strftime("%b %-d, %Y") %></span></a></td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+<% else %>
+  <p>No screenings recorded for this patient.</p>
+<% end %>
