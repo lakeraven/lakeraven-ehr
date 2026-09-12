@@ -20,10 +20,18 @@ module Lakeraven
       # is the engine's first session-authenticated PHI-reading web surface, and
       # the one that renders self-harm disclosures, so it follows the same
       # policy rather than being the exception to it.
-      include AuditableClinicalAccess
+      include SessionAuditedClinicalAccess
+      include ClinicianPatientContext
 
       before_action :require_authentication
+      before_action :require_clinical_access
       before_action :load_patient
+      # Being signed in is not authorization to read a named patient: the
+      # session must have OPENED this patient's record. Without this, the
+      # deterministic id this feature publishes in the chart bundle
+      # (`screening-phq-9-68`) is a walkable index into every patient's
+      # item-level self-harm disclosures.
+      before_action :enforce_patient_context!
       before_action :load_instrument, only: %i[new create]
 
       # Trend view: every scored screening for this patient, oldest first.
@@ -74,25 +82,10 @@ module Lakeraven
 
       private
 
-      # -- Audit (AuditableClinicalAccess hooks) --------------------------------
+      # -- Audit (SessionAuditedClinicalAccess hooks) ---------------------------
       #
-      # This surface authenticates a CLINICIAN SESSION rather than a Doorkeeper
-      # token, so the concern's token branch does not apply. The overrides stay
-      # in the controller — the concern itself is shared with the FHIR
-      # controllers and PR #486 is editing it.
-
-      def current_token = nil
-
-      # Fixed marker, per the concern's contract: it only answers "is this
-      # request auditable at all?". The acting identity goes in the agent
-      # attributes below.
-      def unauthenticated_audit_actor = ("clinician-session" if session[:duz].present?)
-
-      # The agent is the signed-in clinician (DUZ from the session established
-      # at sign-on), not an OAuth application.
-      def audit_agent_attributes
-        { agent_who_type: "Practitioner", agent_who_identifier: session[:duz] }
-      end
+      # The session-surface agent attributes live in the concern; only the
+      # per-action shape is specific to this controller.
 
       # Recording a screening is a write; everything else on this surface reads.
       def audit_action = action_name == "create" ? "C" : "R"

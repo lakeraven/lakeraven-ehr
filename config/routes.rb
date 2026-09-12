@@ -24,6 +24,12 @@ Lakeraven::EHR::Engine.routes.draw do
   get  "patients/:dfn/visits/new",           to: "demo_visits#new",     as: :new_patient_visit, constraints: { dfn: /\d+/ }
   get  "patients/:dfn/visits/:id(.:format)", to: "demo_visits#summary", as: :patient_visit_summary, constraints: { dfn: /\d+/, id: /\d+/ }
 
+  # Opening a patient's record in the clinician SESSION (the web surface's
+  # counterpart of a patient-scoped token's compartment binding). A deliberate,
+  # audited POST — everything session-authenticated that reads a patient's
+  # clinical data requires it.
+  post "patients/:dfn/context", to: "patient_contexts#create", as: :patient_context, constraints: { dfn: /\d+/ }
+
   # Scored behavioural-health instruments (PHQ-9 / GAD-7, issue #474).
   # Server-rendered, no JavaScript. `new` carries the instrument key as a
   # query param (?instrument=phq-9); the :id constraint keeps the digits-only
