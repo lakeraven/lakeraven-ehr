@@ -12,6 +12,7 @@
 SCREENING_PHQ9 = Lakeraven::EHR::ScreeningInstrument::PHQ9
 SCREENING_GAD7 = Lakeraven::EHR::ScreeningInstrument::GAD7
 SCREENING_MOUNT = "/lakeraven-ehr"
+SCREENING_SCOPES = "user/QuestionnaireResponse.read user/QuestionnaireResponse.write"
 
 module ScreeningStepHelpers
   def instrument_named(name)
@@ -207,9 +208,19 @@ end
 # -- The rendered form (HTTP, no JavaScript) ----------------------------------
 
 Given("the clinician is signed in") do
-  post "#{SCREENING_MOUNT}/login", username: "testprovider", password: "test"
-  # Being signed in is not access to a named patient: the clinician opens the
-  # record explicitly, and that open is audited.
+  # The credential for this surface is the SMART token — the same one the chart
+  # runs on (#486's sign-on bridge mints it for a browser; here it is minted
+  # directly). Being signed in is not access to a named patient either: the
+  # clinician opens the record explicitly, and that open is audited.
+  app = Doorkeeper::Application.create!(
+    name: "cucumber-screening", redirect_uri: "https://example.test/callback",
+    scopes: SCREENING_SCOPES, confidential: true
+  )
+  token = Doorkeeper::AccessToken.create!(
+    application: app, scopes: SCREENING_SCOPES, resource_owner_id: "99999", expires_in: 3600
+  )
+  header "Authorization", "Bearer #{token.plaintext_token || token.token}"
+
   post "#{SCREENING_MOUNT}/patients/#{@dfn}/context"
 end
 

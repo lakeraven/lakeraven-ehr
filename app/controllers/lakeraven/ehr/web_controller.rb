@@ -13,13 +13,6 @@ module Lakeraven
 
       layout "lakeraven/ehr/application"
 
-      # The session-surface analogue of the FHIR token scope check: a session
-      # that is not a clinical one may not reach clinical data at all. The
-      # real RPMS sign-on (#332) resolves `user_type` from the AV CODE
-      # response's user class plus security keys, so this gate refuses the
-      # sign-ons RPMS itself does not consider clinical.
-      CLINICAL_USER_TYPES = %w[provider].freeze
-
       private
 
       # This base authenticates by the browser session (`require_authentication`
@@ -81,14 +74,6 @@ module Lakeraven
         token.revoke if token && !token.revoked?
       rescue StandardError => e
         Rails.logger.error("Session token revocation failed: #{e.class}")
-      end
-
-      def require_clinical_access
-        return if CLINICAL_USER_TYPES.include?(session[:user_type].to_s)
-
-        note_audit_denial("browser access refused: sign-on carries no clinical access")
-        render plain: "Forbidden: this sign-on does not carry clinical access",
-               status: :forbidden
       end
 
       def current_security_keys
