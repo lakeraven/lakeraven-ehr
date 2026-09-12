@@ -45,8 +45,24 @@ module Lakeraven
         nil
       end
 
+      # WHO opened this chart.
+      #
+      # Every browser session shares ONE Doorkeeper application, so recording
+      # `application.uid` made two different clinicians reading the same record
+      # byte-identical in the audit log — and "which staff member opened this
+      # behavioral-health record" unanswerable, which is the first question
+      # asked after a Part 2 incident (§170.315(d)(2)/(d)(3), §164.312(b)).
+      #
+      # A session-derived token carries the clinician's DUZ, so it is recorded
+      # as a Practitioner agent. Header/system tokens have no human behind
+      # them and keep the application identity they already had.
       def audit_agent_attributes
-        if current_token
+        duz = (current_duz if respond_to?(:current_duz, true))
+
+        if duz.present?
+          { agent_who_type: "Practitioner", agent_who_identifier: duz,
+            agent_name: (current_user_name if respond_to?(:current_user_name, true)) }
+        elsif current_token
           { agent_who_type: "Application", agent_who_identifier: current_token.application&.uid }
         else
           { agent_who_type: "Service", agent_who_identifier: unauthenticated_audit_actor }

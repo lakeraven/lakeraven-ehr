@@ -11,7 +11,7 @@ module Lakeraven
           status: "pending",
           request_url: request.original_url,
           output_format: "application/fhir+ndjson",
-          client_id: current_token&.application&.uid,
+          client_id: export_owner_identity,
           since_timestamp: params[:since],
           type_filters: params[:type]
         )
@@ -30,7 +30,7 @@ module Lakeraven
         export = self.class.store[params[:id]]
         return render_not_found("Export", params[:id]) unless export
 
-        if export.client_id && current_token&.application&.uid != export.client_id
+        if export.client_id && export_owner_identity != export.client_id
           render_operation_outcome(
             status: :forbidden, severity: "error",
             code: "forbidden", diagnostics: "Export belongs to a different client"
@@ -62,6 +62,21 @@ module Lakeraven
       end
 
       private
+
+      # WHO owns this export.
+      #
+      # `application.uid` alone is not an owner: every browser session shares
+      # ONE Doorkeeper application, so one clinician's uid compared equal to
+      # every other clinician's and the isolation guard passed for the wrong
+      # human. A session-derived token names its clinician (DUZ); a system
+      # token has no human behind it and the application IS the client.
+      #
+      # No security key currently maps to an Export scope, so a browser
+      # session cannot reach these endpoints at all — this keeps the control
+      # correct for the day one does, rather than leaving it wrong by default.
+      def export_owner_identity
+        current_duz.presence || current_token&.application&.uid
+      end
 
       def run_export(export)
         export.start_processing!

@@ -17,10 +17,19 @@ module Lakeraven
         self.class.name.demodulize.delete_suffix("Controller").singularize
       end
 
+      # Verb-aware. A read scope authorizes reads; anything that changes state
+      # needs a write scope. This used to call can_read? for every verb, so a
+      # `system/*.read` token could POST a C-CDA import, create and delete a
+      # bulk export, run an eligibility check, and generate a transition of
+      # care — all of them state changes behind a read-only credential.
       def authorize_fhir_scope!
-        return if can_read?(fhir_resource_type)
+        return if can_perform?(fhir_resource_type)
 
-        render_forbidden("Insufficient scope for reading #{fhir_resource_type}")
+        if READ_METHODS.include?(request.request_method)
+          render_forbidden("Insufficient scope for reading #{fhir_resource_type}")
+        else
+          render_forbidden("Insufficient scope for writing #{fhir_resource_type}")
+        end
       end
 
       def authorize_fhir_write_scope!

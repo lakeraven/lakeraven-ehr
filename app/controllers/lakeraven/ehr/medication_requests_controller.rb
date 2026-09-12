@@ -3,33 +3,16 @@
 module Lakeraven
   module EHR
     class MedicationRequestsController < ApplicationController
-      before_action :require_patient_param, only: :index
+      include PatientCompartment
 
       def index
-        dfn = extract_patient_dfn(params[:patient])
+        dfn = patient_compartment_dfn
         results = MedicationRequest.for_patient(dfn)
         render_bundle(results.map { |r| { resourceType: "MedicationRequest" }.merge(r) })
       end
 
       def show
         render_not_found("MedicationRequest", params[:id])
-      end
-
-      private
-
-      def require_patient_param
-        return if params[:patient].present?
-
-        render_operation_outcome(
-          status: :bad_request,
-          severity: "error",
-          code: "required",
-          diagnostics: "Search parameter 'patient' is required"
-        )
-      end
-
-      def extract_patient_dfn(param)
-        param.to_s.delete_prefix("Patient/")
       end
     end
   end
