@@ -120,10 +120,23 @@ module Lakeraven
         assert_nil fhir[:encounter]
       end
 
-      test "both resources are available together" do
-        types = record.to_fhir_resources.map { |r| r[:resourceType] }
+      # The resourceTypes alone would pass with every resource stripped of its
+      # content, so this asserts what each half actually carries: the answers
+      # in one, the total in the other, both naming the same patient.
+      test "both resources are available together, each carrying its own half" do
+        answers, observation = record(ordinals: [ 3, 2, 2, 2, 1, 1, 1, 0, 0 ]).to_fhir_resources
 
-        assert_equal %w[QuestionnaireResponse Observation], types
+        assert_equal "QuestionnaireResponse", answers[:resourceType]
+        assert_equal 9, answers[:item].length
+        assert_equal "Nearly every day", answers.dig(:item, 0, :answer, 0, :valueCoding, :display)
+        assert_nil observation[:item], "the score must not carry item-level answers"
+
+        assert_equal "Observation", observation[:resourceType]
+        assert_equal "44261-6", observation.dig(:code, :coding, 0, :code)
+        assert_equal 12.0, observation.dig(:valueQuantity, :value)
+
+        assert_equal "Patient/1", answers.dig(:subject, :reference)
+        assert_equal "Patient/1", observation.dig(:subject, :reference)
       end
 
       # -- Severity slug (CSS hook) --------------------------------------------

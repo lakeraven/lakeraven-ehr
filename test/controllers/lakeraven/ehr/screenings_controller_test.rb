@@ -108,7 +108,17 @@ module Lakeraven
         follow_redirect!
         assert_response :ok
         assert_select ".screening-score__number", "12"
-        assert_select ".screening-score__band", /Moderate/
+        # Anchored: /Moderate/ also matches "Moderately severe", the band this
+        # feature most needs to tell apart from "Moderate".
+        assert_select ".screening-score__band", text: /\ASeverity band: Moderate\z/
+      end
+
+      test "the result page names the moderately severe band in full" do
+        submit(answers: answers(PHQ9, [ 3, 3, 3, 3, 2, 2, 2, 0, 0 ]))
+        follow_redirect!
+
+        assert_equal 18, ScreeningResponse.last.total_score
+        assert_select ".screening-score__band", text: /\ASeverity band: Moderately severe\z/
       end
 
       test "the result page lists the item level responses" do
@@ -189,6 +199,11 @@ module Lakeraven
       test "the safety prompt is server-rendered, needing no JavaScript" do
         submit(answers: all_answered(PHQ9, 0).merge(PHQ9.safety_link_id => 1))
 
+        # The page shape is only half the claim: the prompt must also have
+        # BLOCKED the save, or a scriptless client is being shown a warning
+        # about a record that is already in the table.
+        assert_response :unprocessable_entity
+        assert_equal 0, ScreeningResponse.count
         assert_no_match(/<script/i, response.body)
         assert_select "form input[name=safety_acknowledged]"
       end
@@ -344,7 +359,10 @@ module Lakeraven
         assert_response :forbidden
       end
 
-      test "a screening belonging to another patient is not reachable by id" do
+      # Names what it actually proves: the query is scoped by dfn. The
+      # AUTHORIZATION claim is the test above it — this one would pass with
+      # none at all, which is how it read before.
+      test "a screening id from one patient is not served under another patient's dfn" do
         submit
         id = ScreeningResponse.last.id
 
