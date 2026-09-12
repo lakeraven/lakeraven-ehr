@@ -141,16 +141,28 @@ module Lakeraven
         @procedures    = readable?("Procedure") ? build_procedures(dfn) : []
         @encounters    = readable?("Encounter") ? safe { EncounterGateway.for_patient(dfn) } : []
         @encounter_resources = build_encounter_resources(dfn)
-        # Scored screening instruments (#474). Engine-owned records rather than
-        # an RPMS read, but they carry Observation read semantics — a total
-        # score with a LOINC code and an effective date — so they follow the
-        # Observation scope and trend alongside vitals (#483 charts them).
-        @screenings = readable?("Observation") ? safe { ScreeningResponse.for_patient(dfn) } : []
+        load_screenings(dfn)
+      end
+
+      # Scored screening instruments (#474). Engine-owned records rather than an
+      # RPMS read, and they yield TWO resource families with different
+      # sensitivities:
+      #
+      #   * the total score        -> Observation           (Observation scope)
+      #   * the item-level answers -> QuestionnaireResponse  (QR scope)
+      #
+      # The two are authorized INDEPENDENTLY. A token with QuestionnaireResponse
+      # scope but no Observation scope still gets the answers, and vice versa —
+      # neither family may be reachable only via the other's scope. One query
+      # feeds both; it is skipped entirely when neither scope is held.
+      def load_screenings(dfn)
+        wants_scores  = readable?("Observation")
+        wants_answers = readable?("QuestionnaireResponse")
+        screenings = (wants_scores || wants_answers) ? safe { ScreeningResponse.for_patient(dfn) } : []
+
+        @screenings = wants_scores ? screenings : []
         @screening_observations = @screenings.map(&:to_observation)
-        # Item-level answers are a DIFFERENT resource type and are gated on
-        # their own scope — an Observation-scoped token sees the total score,
-        # not what the patient said about item 9.
-        @screening_answers = readable?("QuestionnaireResponse") ? @screenings : []
+        @screening_answers = wants_answers ? screenings : []
       end
 
       def build_conditions(dfn)

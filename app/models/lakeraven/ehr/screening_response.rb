@@ -84,6 +84,13 @@ module Lakeraven
       def observation_id = "screening-#{instrument_key}-#{id}"
 
       def safety_flagged? = safety_flagged
+
+      # CSS-safe slug for the severity band. Bands are multi-word ("moderately
+      # severe"), so this must parameterize the WHOLE label — taking the first
+      # token collapses "moderately severe" onto "moderate", which is both the
+      # wrong style hook and a misleading one, on the band where it matters
+      # most. Defined here so the view and the stylesheet share one vocabulary.
+      def severity_slug = severity_band.to_s.parameterize
     end
   end
 end

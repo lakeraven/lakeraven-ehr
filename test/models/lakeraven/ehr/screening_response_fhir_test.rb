@@ -126,6 +126,32 @@ module Lakeraven
         assert_equal %w[QuestionnaireResponse Observation], types
       end
 
+      # -- Severity slug (CSS hook) --------------------------------------------
+
+      test "every severity band of both instruments slugs to a distinct token" do
+        bands = ScreeningInstrument::ALL.flat_map { |i| i.bands.map(&:label) }.uniq
+        slugs = bands.index_with { |band| record(instrument: PHQ9).tap { |r| r.severity_band = band }.severity_slug }
+
+        assert_equal({
+          "minimal" => "minimal",
+          "mild" => "mild",
+          "moderate" => "moderate",
+          "moderately severe" => "moderately-severe",
+          "severe" => "severe"
+        }, slugs)
+        assert_equal slugs.values.uniq.length, slugs.values.length, "slugs must not collide"
+      end
+
+      test "a multi-word band keeps both words rather than collapsing onto its neighbour" do
+        stored = record
+        stored.severity_band = "moderately severe"
+
+        # Regression: taking the first token produced "moderate" — the wrong
+        # style hook, on the band where it matters most clinically.
+        assert_equal "moderately-severe", stored.severity_slug
+        assert_not_equal PHQ9.bands.find { |b| b.label == "moderate" }.label, stored.severity_slug
+      end
+
       # -- Validation ----------------------------------------------------------
 
       test "an unscored screening cannot be stored" do
