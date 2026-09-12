@@ -166,7 +166,7 @@ module Lakeraven
         wants_scores  = readable?("Observation")
         wants_answers = readable?("QuestionnaireResponse")
         screenings = if wants_scores || wants_answers
-                       safe { ScreeningResponse.for_patient(dfn) }.select(&:renderable?)
+                       publishable_screenings(safe { ScreeningResponse.for_patient(dfn) })
         else
                        []
         end
@@ -174,6 +174,23 @@ module Lakeraven
         @screenings = wants_scores ? screenings : []
         @screening_observations = safe_map(@screenings, &:to_observation)
         @screening_answers = wants_answers ? screenings : []
+      end
+
+      # Validation runs on WRITE; this is the read side of the same contract.
+      # A row that does not satisfy its own invariants — a total that is not
+      # its answers' sum, a self-harm disclosure with no acknowledgement, an
+      # instrument that no longer exists — is SKIPPED rather than published as
+      # a `completed` QuestionnaireResponse or a `final` Observation. Those
+      # statuses are assertions, and this row cannot support them. It is never
+      # repaired here: inventing the missing half is the failure being guarded
+      # against.
+      def publishable_screenings(screenings)
+        screenings.select do |screening|
+          next true if screening.publishable?
+
+          Rails.logger.warn("[chart] screening #{screening.id} withheld: fails its own invariants")
+          false
+        end
       end
 
       def build_conditions(dfn)

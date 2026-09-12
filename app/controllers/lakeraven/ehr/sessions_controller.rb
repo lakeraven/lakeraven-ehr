@@ -21,15 +21,6 @@ module Lakeraven
           session[:user_type] = "provider"
           session[:user_name] = "Test Provider"
           redirect_to dashboard_path
-        elsif username == "testclerk" && password == "test"
-          # A signed-in, NON-clinical session. It exists so the clinical-access
-          # gate on the web surface has something to refuse: a gate that no test
-          # can make fire is a comfort, not a control.
-          reset_session
-          session[:duz] = "99998"
-          session[:user_type] = "clerk"
-          session[:user_name] = "Test Clerk"
-          redirect_to dashboard_path
         else
           flash.now[:alert] = "Invalid username or password"
           render :new, status: :unprocessable_entity

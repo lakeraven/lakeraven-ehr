@@ -30,6 +30,10 @@ module Lakeraven
         session[SESSION_KEY] = dfn.to_s
       end
 
+      def close_patient_context!
+        session.delete(SESSION_KEY)
+      end
+
       def patient_context_open?(dfn)
         dfn.present? && session[SESSION_KEY].to_s == dfn.to_s
       end

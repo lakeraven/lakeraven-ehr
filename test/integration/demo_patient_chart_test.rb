@@ -335,7 +335,8 @@ class DemoPatientChartTest < ActionDispatch::IntegrationTest
 
     questionnaires = bundle["entry"].map { |e| e["resource"] }
                                     .select { |r| r["resourceType"] == "QuestionnaireResponse" }
-    assert_equal 2, questionnaires.length, "the healthy screenings must still be published"
+    assert_equal 1, questionnaires.length,
+                 "the healthy screening is published and the malformed one is withheld, not partially published"
   end
 
   test "a screening row naming an unknown instrument does not 500 the chart" do
@@ -349,6 +350,42 @@ class DemoPatientChartTest < ActionDispatch::IntegrationTest
     scores = bundle["entry"].map { |e| e["resource"] }
                             .select { |r| r.dig("code", "coding", 0, "code") == PHQ9_TOTAL_CODE }
     assert_equal 1, scores.length, "the healthy screening must still carry its score"
+  end
+
+  # Validation runs on WRITE. A row can reach the table without ever meeting
+  # it — a direct write, a restore, an import, a release older than the
+  # validations — and publishing such a row as a `completed` QuestionnaireResponse
+  # or a `final` Observation asserts something about data that disagrees with
+  # itself.
+  test "a row that contradicts its own answers is not published as a final score" do
+    seed_screening
+    contradictory = seed_screening(band: "minimal", total: 2)
+    contradictory.update_column(:total_score, 999)
+
+    get "/patients/1.json", headers: @headers
+    bundle = assert_chart_bundle_intact
+
+    scores = bundle["entry"].map { |e| e["resource"] }
+                            .select { |r| r.dig("code", "coding", 0, "code") == PHQ9_TOTAL_CODE }
+    assert_equal 1, scores.length, "only the row that agrees with itself may be published"
+    assert_equal 18.0, scores.first.dig("valueQuantity", "value")
+    assert_not_includes bundle["entry"].map { |e| e.dig("resource", "valueQuantity", "value") }, 999.0
+  end
+
+  test "a row whose answers disclose self-harm with no acknowledgement is not published" do
+    seed_screening
+    unacknowledged = seed_screening(band: "minimal", total: 2)
+    safety = Lakeraven::EHR::ScreeningInstrument::PHQ9.safety_link_id
+    unacknowledged.update_column(:answers, unacknowledged.answers.merge(safety => 3))
+
+    get "/patients/1.json",
+        headers: bearer(token_with(scopes: "system/Patient.read system/QuestionnaireResponse.read"))
+
+    assert_response :ok
+    answers = JSON.parse(response.body)["entry"].map { |e| e["resource"] }
+                  .select { |r| r["resourceType"] == "QuestionnaireResponse" }
+    assert_equal 1, answers.length,
+                 "an unacknowledged disclosure must not be published as a completed response"
   end
 
   test "a screening row naming an unknown instrument does not 500 the HTML chart" do
