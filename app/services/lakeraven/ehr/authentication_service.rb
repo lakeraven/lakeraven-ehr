@@ -33,7 +33,12 @@ module Lakeraven
             duz: duz_s,
             name: user_info&.dig(:name) || auth[:name].to_s,
             user_type: RpmsRpc::UserRoles.resolve(user_class: user_class, security_keys: symbolic_keys),
-            security_keys: symbolic_keys
+            security_keys: symbolic_keys,
+            # RPMS said this verify code must be changed (admin reset, or aged
+            # out). Dropping the flag granted a full session on a temporary
+            # credential where CPRS would force the change first; the caller
+            # decides, but it can only decide if it is told.
+            verify_needs_change: auth[:verify_needs_change] == true
           }
         )
       end
