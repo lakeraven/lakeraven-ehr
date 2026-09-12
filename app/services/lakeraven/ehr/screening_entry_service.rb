@@ -5,7 +5,9 @@ module Lakeraven
     # Scores a screening instrument and records the result against an open
     # encounter.
     #
-    # Three refusals, all before anything is written:
+    # Three refusals, all before anything is written, and ALL of the ones that
+    # apply are reported together (`Result#errors`) rather than the first one
+    # found:
     #
     #   :missing_encounter  — a clinician administration has no visit context.
     #   :incomplete         — unanswered items; the caller gets the missing
@@ -23,6 +25,10 @@ module Lakeraven
     # The service takes plain arguments and reads no session, no current_user
     # and no request. That is the seam #471 needs: a tokenized pre-visit
     # submission is the same call with `source: "pre-visit"`.
+    #
+    # Recording is idempotent within a short window (see DEDUPE_WINDOW): a
+    # double-tap or a back-button resubmit returns the administration that is
+    # already there instead of trending the same screening twice.
     class ScreeningEntryService
       # Acknowledgement is CAST HERE, never trusted from the caller. Plain Ruby
       # truthiness accepts the strings "false" and "0", the integer 0, and any
@@ -38,11 +44,19 @@ module Lakeraven
         ActiveModel::Type::Boolean.new.cast(value) == true
       end
 
-      Result = Struct.new(:success, :record, :score, :error, :missing_link_ids,
-                          :safety_prompt_required, keyword_init: true) do
+      # A refusal reports EVERY reason it refused, not the first one found:
+      # `errors` is the full list, `error` the primary one (callers that only
+      # branch on a single reason keep working). Fixing the visit number should
+      # not be how a clinician discovers eight items are unanswered.
+      Result = Struct.new(:success, :record, :score, :error, :errors, :missing_link_ids,
+                          :safety_prompt_required, :duplicate, keyword_init: true) do
         def success? = success
         def safety_prompt_required? = !!safety_prompt_required
         def missing_link_ids = self[:missing_link_ids] || []
+        def errors = self[:errors] || [ self[:error] ].compact
+        # True when this administration already existed and was returned
+        # unchanged rather than written again.
+        def duplicate? = !!duplicate
       end
 
       def initialize(instrument:, patient_dfn:, answers:, encounter_ien: nil,
@@ -67,19 +81,16 @@ module Lakeraven
         score = @instrument.score(@answers)
         safety_required = score.safety_triggered? && !@safety_acknowledged
 
+        reasons = []
         # A clinician records against the open visit. A pre-visit self-report
         # legitimately precedes one, so it is not held to that (#471).
-        if clinician? && @encounter_ien.blank?
-          return failure(:missing_encounter, score: score, safety_prompt_required: safety_required)
-        end
+        reasons << :missing_encounter if clinician? && @encounter_ien.blank?
+        reasons << :incomplete unless score.complete?
+        reasons << :safety_unacknowledged if safety_required
 
-        unless score.complete?
-          return failure(:incomplete, score: score, missing_link_ids: score.missing_link_ids,
-                                      safety_prompt_required: safety_required)
-        end
-
-        if safety_required
-          return failure(:safety_unacknowledged, score: score, safety_prompt_required: true)
+        if reasons.any?
+          return failure(*reasons, score: score, missing_link_ids: score.missing_link_ids,
+                                   safety_prompt_required: safety_required)
         end
 
         persist(score)
@@ -89,7 +100,30 @@ module Lakeraven
 
       def clinician? = @source == ScreeningResponse::SOURCE_CLINICIAN
 
+      # A double-tap on a tablet, or a back-button resubmit, must not put two
+      # administrations into the record — #483 would trend the same screening
+      # twice. An administration is identified by (patient, instrument, visit,
+      # effective window); the ANSWERS are part of the match because a
+      # DIFFERENT set inside the window is a correction or a genuine second
+      # administration, and silently discarding clinical data is worse than a
+      # duplicate row.
+      DEDUPE_WINDOW = 5.minutes
+
+      def existing_administration(score, effective_at)
+        return nil unless @repository.respond_to?(:where)
+
+        @repository
+          .where(patient_dfn: @patient_dfn, instrument_key: @instrument.key,
+                 encounter_ien: @encounter_ien.presence)
+          .where(effective_at: (effective_at - DEDUPE_WINDOW)..(effective_at + DEDUPE_WINDOW))
+          .find { |candidate| candidate.ordinals == score.answers }
+      end
+
       def persist(score)
+        effective_at = @effective_at || Time.current
+        existing = existing_administration(score, effective_at)
+        return Result.new(success: true, record: existing, score: score, duplicate: true) if existing
+
         record = @repository.create!(
           patient_dfn: @patient_dfn,
           encounter_ien: @encounter_ien.presence,
@@ -97,7 +131,7 @@ module Lakeraven
           answers: score.answers,
           total_score: score.total,
           severity_band: score.band,
-          effective_at: @effective_at || Time.current,
+          effective_at: effective_at,
           administered_by: @administered_by.presence,
           source: @source,
           safety_flagged: score.safety_triggered?,
@@ -115,8 +149,8 @@ module Lakeraven
         failure(:persistence_error, score: score)
       end
 
-      def failure(reason, score: nil, missing_link_ids: nil, safety_prompt_required: false)
-        Result.new(success: false, error: reason, score: score,
+      def failure(*reasons, score: nil, missing_link_ids: nil, safety_prompt_required: false)
+        Result.new(success: false, error: reasons.first, errors: reasons, score: score,
                    missing_link_ids: missing_link_ids,
                    safety_prompt_required: safety_prompt_required)
       end

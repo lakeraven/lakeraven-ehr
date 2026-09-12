@@ -56,7 +56,9 @@
     </div>
   <% end %>
 
-  <% if @result && @result.error == :missing_encounter %>
+  <%# Every reason the submission was refused is shown, not just the first:
+      the visit AND the unanswered items, in one pass. %>
+  <% if @result&.errors&.include?(:missing_encounter) %>
     <div class="screening-errors" role="alert">
       <h2>Visit required</h2>
       <p>A screening is recorded against the patient&rsquo;s open visit. Enter the visit number and submit again.</p>
