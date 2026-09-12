@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "test_helper"
+require "rpms_rpc/api/authentication"
 
 # Reproductions for the adversarial review of the SSO session->token bridge
 # (PR #486, rounds 1 and 2). Every test here failed before the corresponding
@@ -223,6 +224,48 @@ class SsoSessionTokenBridgeSecurityTest < ActionDispatch::IntegrationTest
     delete "/lakeraven-ehr/logout"
 
     assert token.reload.revoked?, "the token outlived the session that minted it"
+  end
+
+  # -- C2 (rpms-rpc#235) — the EHR half of the concurrency fix --------------
+
+  # The gem now serializes the RPCs it issues itself, but this app's sign-on
+  # spans SEVERAL calls into it: authenticate, then user_info, then
+  # ORWU USERKEYS. A second sign-on landing between them hands this one the
+  # other clinician's name and security keys — i.e. their scopes. The whole
+  # sequence has to be one unit, not three locked ones.
+  test "sign-on holds the broker wire lock across its whole sequence" do
+    held = []
+    locked = false
+
+    fake = Object.new
+    fake.define_singleton_method(:synchronize_wire) do |&blk|
+      locked = true
+      begin
+        blk.call
+      ensure
+        locked = false
+      end
+    end
+
+    RpmsRpc.singleton_class.define_method(:synchronize_wire) do |&blk|
+      fake.synchronize_wire(&blk)
+    end
+
+    original = RpmsRpc::Authentication.method(:user_security_keys)
+    RpmsRpc::Authentication.define_singleton_method(:user_security_keys) do |duz|
+      held << locked
+      original.call(duz)
+    end
+
+    Lakeraven::EHR::AuthenticationService.new.authenticate(
+      access_code: "lindarodriguez", verify_code: "test123"
+    )
+
+    assert_equal [ true ], held,
+      "the security-key lookup ran outside the sign-on's lock"
+  ensure
+    RpmsRpc::Authentication.singleton_class.send(:remove_method, :user_security_keys)
+    RpmsRpc.singleton_class.send(:remove_method, :synchronize_wire)
   end
 
   # -- M6: unbounded token growth -------------------------------------------
