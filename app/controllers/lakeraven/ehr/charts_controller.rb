@@ -155,13 +155,24 @@ module Lakeraven
       # scope but no Observation scope still gets the answers, and vice versa —
       # neither family may be reachable only via the other's scope. One query
       # feeds both; it is skipped entirely when neither scope is held.
+      # A screening row is engine-owned side data. If one of them cannot be
+      # rendered or serialized, that must cost AT MOST that row — never the
+      # Patient, Conditions, Medications, Allergies and Vitals that the chart
+      # exists for. `safe` wrapped only the QUERY, so a single out-of-range
+      # ordinal (serializer -> nil choice -> NoMethodError) 500'd the whole
+      # bundle. Rows whose instrument no longer exists are dropped up front;
+      # anything else that raises is dropped per row by `safe_map`.
       def load_screenings(dfn)
         wants_scores  = readable?("Observation")
         wants_answers = readable?("QuestionnaireResponse")
-        screenings = (wants_scores || wants_answers) ? safe { ScreeningResponse.for_patient(dfn) } : []
+        screenings = if wants_scores || wants_answers
+                       safe { ScreeningResponse.for_patient(dfn) }.select(&:renderable?)
+        else
+                       []
+        end
 
         @screenings = wants_scores ? screenings : []
-        @screening_observations = @screenings.map(&:to_observation)
+        @screening_observations = safe_map(@screenings, &:to_observation)
         @screening_answers = wants_answers ? screenings : []
       end
 
@@ -250,6 +261,20 @@ module Lakeraven
         []
       end
 
+      # Per-record projection boundary: one record that cannot be projected is
+      # skipped, the rest of the collection survives, and the request does not
+      # 500. Used where the projection is derived from stored data rather than
+      # fetched (screenings), since a bad row is otherwise indistinguishable
+      # from a bad chart.
+      def safe_map(records)
+        records.filter_map do |record|
+          yield record
+        rescue => e
+          Rails.logger.warn("[chart] record #{record.class}##{record.id} skipped: #{e.class}: #{e.message}")
+          nil
+        end
+      end
+
       # -- FHIR Bundle ----------------------------------------------------------
 
       def fhir_bundle
@@ -258,8 +283,8 @@ module Lakeraven
         resources.concat(@medications.map(&:to_fhir))
         resources.concat(@allergies.map(&:to_fhir))
         resources.concat(@observations.map(&:to_fhir))
-        resources.concat(@screening_observations.map(&:to_fhir))
-        resources.concat(@screening_answers.map(&:to_questionnaire_response))
+        resources.concat(safe_map(@screening_observations, &:to_fhir))
+        resources.concat(safe_map(@screening_answers, &:to_questionnaire_response))
         resources.concat(@immunizations.map(&:to_fhir))
         resources.concat(@procedures.map(&:to_fhir))
         resources.concat(@encounter_resources.map { |e| encounter_to_fhir(e) })
