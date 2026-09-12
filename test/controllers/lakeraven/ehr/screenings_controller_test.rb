@@ -13,14 +13,23 @@ module Lakeraven
       BASE = "/lakeraven-ehr/patients/1/screenings"
       VISIT = "2090061"
 
-      setup { sign_in }
+      setup do
+        sign_in
+        open_patient(1)
+      end
       teardown do
         ScreeningResponse.delete_all
         AuditEvent.delete_all
       end
 
-      def sign_in
-        post "/lakeraven-ehr/login", params: { username: "testprovider", password: "test" }
+      def sign_in(username: "testprovider")
+        post "/lakeraven-ehr/login", params: { username: username, password: "test" }
+      end
+
+      # The clinician's session is bound to a patient by an explicit, audited
+      # act — reading a record is not what opens it.
+      def open_patient(dfn)
+        post "/lakeraven-ehr/patients/#{dfn}/context"
       end
 
       def answers(instrument, values) = instrument.link_ids.zip(values).to_h
@@ -269,12 +278,108 @@ module Lakeraven
         assert_select "table.screening-history tbody tr td", /GAD-7/
       end
 
+      # -- Authorization -------------------------------------------------------
+
+      # The item text and the chosen answers are the most sensitive content in
+      # the feature, and this route's :id is published in the chart bundle as
+      # part of the deterministic Observation id (`screening-phq-9-68`), so a
+      # signed-in session must not be able to walk it.
+      SELF_HARM_ITEM_TEXT = "better off dead"
+
+      test "a signed-in clinician cannot read a screening for a patient the session never opened" do
+        submit(answers: all_answered(PHQ9, 0).merge(PHQ9.safety_link_id => 3),
+               safety_acknowledged: "1")
+        id = ScreeningResponse.last.id
+
+        # A second, freshly signed-in session that never opened patient 1.
+        reset!
+        sign_in
+        get "#{BASE}/#{id}"
+
+        assert_response :forbidden
+        assert_no_match(/#{SELF_HARM_ITEM_TEXT}/i, response.body)
+        assert_no_match(/Nearly every day/i, response.body)
+      end
+
+      test "the screening history is closed to a patient the session never opened" do
+        submit
+        reset!
+        sign_in
+        get BASE
+
+        assert_response :forbidden
+        assert_no_match(/PHQ-9/, response.body)
+      end
+
+      test "opening one patient does not open another" do
+        submit
+        id = ScreeningResponse.last.id
+        reset!
+        sign_in
+        open_patient(2)
+        get "/lakeraven-ehr/patients/1/screenings/#{id}"
+
+        assert_response :forbidden
+      end
+
       test "a screening belonging to another patient is not reachable by id" do
         submit
         id = ScreeningResponse.last.id
 
+        open_patient(2)
         get "/lakeraven-ehr/patients/2/screenings/#{id}"
+
         assert_response :not_found
+        assert_no_match(/#{SELF_HARM_ITEM_TEXT}/i, response.body)
+      end
+
+      test "recording a screening for an unopened patient is refused" do
+        reset!
+        sign_in
+
+        assert_no_difference -> { ScreeningResponse.count } do
+          submit
+        end
+        assert_response :forbidden
+      end
+
+      test "opening a patient record is an explicit act, and it is audited" do
+        reset!
+        sign_in
+
+        assert_difference -> { AuditEvent.count }, 1 do
+          open_patient(1)
+        end
+
+        event = AuditEvent.recent.first
+        assert_equal "99999", event.agent_who_identifier
+        assert_equal "1", event.entity_identifier
+      end
+
+      # A gate that opens itself is not a gate: the refused read must not be
+      # what establishes the context.
+      test "a refused read does not itself open the record" do
+        submit
+        id = ScreeningResponse.last.id
+        reset!
+        sign_in
+
+        get "#{BASE}/#{id}"
+        assert_response :forbidden
+        get "#{BASE}/#{id}"
+        assert_response :forbidden
+      end
+
+      test "a non-clinical session cannot read screenings at all" do
+        submit
+        id = ScreeningResponse.last.id
+        reset!
+        sign_in(username: "testclerk")
+        open_patient(1)
+        get "#{BASE}/#{id}"
+
+        assert_response :forbidden
+        assert_no_match(/#{SELF_HARM_ITEM_TEXT}/i, response.body)
       end
     end
   end

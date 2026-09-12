@@ -208,6 +208,9 @@ end
 
 Given("the clinician is signed in") do
   post "#{SCREENING_MOUNT}/login", username: "testprovider", password: "test"
+  # Being signed in is not access to a named patient: the clinician opens the
+  # record explicitly, and that open is audited.
+  post "#{SCREENING_MOUNT}/patients/#{@dfn}/context"
 end
 
 When("the clinician submits a PHQ-9 with item {int} answered {string}") do |position, response|
