@@ -253,10 +253,20 @@ module Lakeraven
       end
 
       # -- Idempotency ---------------------------------------------------------
+      #
+      # The thing that must be idempotent is a SUBMISSION, not an
+      # administration: a double-tap, a back-button replay and a retried POST
+      # are one submission arriving twice, while the same instrument
+      # re-administered later that day is a second clinical event that happens
+      # to look identical. Only the caller can tell those apart, and the
+      # rendered form does: it carries a submission token.
 
-      test "an identical resubmission returns the first record rather than a second" do
-        first = save(answers: complete_without_safety_flag(PHQ9))
-        second = save(answers: complete_without_safety_flag(PHQ9))
+      def token = SecureRandom.uuid
+
+      test "the same submission token twice records one administration" do
+        t = token
+        first = save(answers: complete_without_safety_flag(PHQ9), submission_token: t)
+        second = save(answers: complete_without_safety_flag(PHQ9), submission_token: t)
 
         assert second.success?
         assert second.duplicate?
@@ -264,40 +274,68 @@ module Lakeraven
         assert_equal 1, ScreeningResponse.count
       end
 
-      test "a different answer set inside the window is a genuine second administration" do
-        save(answers: complete_without_safety_flag(PHQ9))
-        save(answers: all_answered(PHQ9, 0))
+      # The event this feature exists to trend. An 08:00 screen and a 16:00
+      # re-screen with identical answers are two administrations — common at
+      # the band extremes, and discarding the second while reporting success
+      # loses a real clinical event.
+      test "a re-screen later the same day is its own administration" do
+        save(answers: complete_without_safety_flag(PHQ9), submission_token: token,
+             effective_at: Time.zone.parse("2026-03-01 08:00"))
+        second = save(answers: complete_without_safety_flag(PHQ9), submission_token: token,
+                      effective_at: Time.zone.parse("2026-03-01 16:00"))
 
+        assert_not second.duplicate?
         assert_equal 2, ScreeningResponse.count
       end
 
-      test "the same answers against a different visit are separate administrations" do
-        save(answers: complete_without_safety_flag(PHQ9))
-        save(answers: complete_without_safety_flag(PHQ9), encounter_ien: "2090062")
+      # And if the repeat re-discloses self-harm, the afternoon acknowledgement
+      # must exist in its own right — not be collapsed into the morning's.
+      test "a re-disclosure of self-harm keeps its own acknowledgement" do
+        disclosing = all_answered(PHQ9, 0).merge(PHQ9.safety_link_id => 2)
+        morning = save(answers: disclosing, submission_token: token, safety_acknowledged: true,
+                       administered_by: "99999", effective_at: Time.zone.parse("2026-03-01 08:00"))
+        afternoon = save(answers: disclosing, submission_token: token, safety_acknowledged: true,
+                         administered_by: "99999", effective_at: Time.zone.parse("2026-03-01 16:00"))
 
-        assert_equal 2, ScreeningResponse.count
+        assert_not afternoon.duplicate?
+        assert_equal 2, ScreeningResponse.safety_flagged.count
+        assert_not_equal morning.record.safety_acknowledged_at,
+                         afternoon.record.safety_acknowledged_at
       end
 
-      # Two clinicians reassessing the same patient on the same visit is a
-      # normal thing to do — and the second one's reassessment must not be
-      # silently collapsed into the first one's row, under the first one's name.
-      test "a different clinician's identical reassessment is its own administration" do
-        first = save(answers: complete_without_safety_flag(PHQ9), administered_by: "99999")
-        second = save(answers: complete_without_safety_flag(PHQ9), administered_by: "12345")
+      # A resubmission of the same form with CHANGED answers is not the retry
+      # the token stands for. Refuse and say so rather than returning the old
+      # row as though the correction had been recorded.
+      test "a submission token cannot be reused for different answers" do
+        t = token
+        save(answers: complete_without_safety_flag(PHQ9), submission_token: t)
+        again = save(answers: all_answered(PHQ9, 0), submission_token: t)
 
-        assert_not second.duplicate?, "a second clinician's reassessment is not a duplicate"
-        assert_not_equal first.record.id, second.record.id
-        assert_equal "12345", second.record.administered_by
-        assert_equal 2, ScreeningResponse.count
-      end
-
-      test "a visit number with stray whitespace is the same visit, not a new one" do
-        save(answers: complete_without_safety_flag(PHQ9), administered_by: "99999")
-        again = save(answers: complete_without_safety_flag(PHQ9), administered_by: "99999",
-                     encounter_ien: " #{VISIT}\t")
-
-        assert again.duplicate?, "a padded visit number must not create a second administration"
+        assert_not again.success?
+        assert_equal :already_submitted, again.error
         assert_equal 1, ScreeningResponse.count
+      end
+
+      # A token is an idempotency key, never an authorization one: presenting
+      # someone else's cannot hand you their record.
+      test "a submission token from another patient is refused, not returned" do
+        t = token
+        save(answers: complete_without_safety_flag(PHQ9), submission_token: t)
+        other = ScreeningEntryService.new(
+          instrument: PHQ9, patient_dfn: 2, encounter_ien: VISIT,
+          answers: complete_without_safety_flag(PHQ9), submission_token: t
+        ).save
+
+        assert_not other.success?
+        assert_equal :already_submitted, other.error
+        assert_nil other.record
+      end
+
+      test "a caller that supplies no token gets no deduplication" do
+        save(answers: complete_without_safety_flag(PHQ9))
+        save(answers: complete_without_safety_flag(PHQ9))
+
+        assert_equal 2, ScreeningResponse.count
       end
 
       test "the stored visit number is normalized" do
@@ -309,15 +347,15 @@ module Lakeraven
       # An unacknowledged or self-contradicting row must never be handed back as
       # a legitimate prior administration — that would let a row written around
       # the model launder itself into the clinical record on a clinician's
-      # next submission. It cannot be overwritten either, so the refusal names
-      # the reason instead of silently doing one or the other.
-      test "a corrupt row occupying this administration is refused, not laundered" do
-        first = save(answers: complete_without_safety_flag(PHQ9), administered_by: "99999").record
+      # next submission.
+      test "a corrupt row behind this token is refused, not laundered" do
+        t = token
+        first = save(answers: complete_without_safety_flag(PHQ9), submission_token: t).record
         first.update_column(:total_score, 999)
 
-        again = save(answers: complete_without_safety_flag(PHQ9), administered_by: "99999")
+        again = save(answers: complete_without_safety_flag(PHQ9), submission_token: t)
 
-        assert_not again.success?, "a row that fails its own invariants is not a prior administration"
+        assert_not again.success?, "a row that fails its own invariants is not a prior submission"
         assert_equal :conflicting_record, again.error
         assert_nil again.record
       end
@@ -327,7 +365,8 @@ module Lakeraven
       # insert and the caller gets the SAME administration back, which is what
       # it would have got a millisecond later.
       test "a submission that loses the insert race still gets one administration back" do
-        first = save(answers: complete_without_safety_flag(PHQ9), administered_by: "99999").record
+        t = token
+        first = save(answers: complete_without_safety_flag(PHQ9), submission_token: t).record
 
         # The interleaving itself: this request's pre-insert lookup runs BEFORE
         # the winner commits and sees nothing, so it goes on to insert. Every
@@ -341,20 +380,13 @@ module Lakeraven
           end
         end.new(ScreeningResponse)
 
-        racing = save(answers: complete_without_safety_flag(PHQ9), administered_by: "99999",
+        racing = save(answers: complete_without_safety_flag(PHQ9), submission_token: t,
                       repository: blind)
 
         assert racing.success?, racing.error.inspect
         assert racing.duplicate?
         assert_equal first.id, racing.record.id
         assert_equal 1, ScreeningResponse.count
-      end
-
-      test "the same answers outside the window are separate administrations" do
-        save(answers: complete_without_safety_flag(PHQ9), effective_at: Time.utc(2026, 3, 1))
-        save(answers: complete_without_safety_flag(PHQ9), effective_at: Time.utc(2026, 4, 1))
-
-        assert_equal 2, ScreeningResponse.count
       end
 
       test "an unrecognised source is rejected" do

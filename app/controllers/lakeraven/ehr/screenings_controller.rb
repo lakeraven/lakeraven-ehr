@@ -67,11 +67,19 @@ module Lakeraven
       def new
         @answers = {}
         @encounter_ien = params[:encounter_ien]
+        # Minted when the form is RENDERED: it identifies this submission, so a
+        # double-tap or a back-button replay of the same form is one
+        # administration, while a second screening later the same day comes
+        # from a second form and is its own.
+        @submission_token = SecureRandom.uuid
       end
 
       def create
         @answers = submitted_answers
         @encounter_ien = params[:encounter_ien]
+        # Carried through a re-render (an incomplete form, the safety prompt) so
+        # that acknowledging and resubmitting is still the SAME submission.
+        @submission_token = params[:submission_token].presence
 
         @result = ScreeningEntryService.new(
           instrument: @instrument,
@@ -84,14 +92,13 @@ module Lakeraven
           # controller-side `.present?` would make the clinical-safety gate
           # depend on caller coercion, and every other caller (the pre-visit
           # link, #471) would need its own.
-          safety_acknowledged: params[:safety_acknowledged]
+          safety_acknowledged: params[:safety_acknowledged],
+          submission_token: @submission_token
         ).save
 
         return render :new, status: :unprocessable_entity unless @result.success?
 
-        redirect_to patient_screening_path(@dfn, @result.record.id),
-                    notice: "#{@instrument.short_title} recorded — " \
-                            "score #{@result.record.total_score}, #{@result.record.severity_band}."
+        redirect_to patient_screening_path(@dfn, @result.record.id), notice: outcome_notice
       end
 
       def show
@@ -103,6 +110,20 @@ module Lakeraven
       end
 
       private
+
+      # A replay wrote nothing. Saying "PHQ-9 recorded — score N" for a
+      # submission that recorded nothing is how a discarded administration goes
+      # unnoticed, so a collapse is reported as a collapse.
+      def outcome_notice
+        record = @result.record
+        if @result.duplicate?
+          "#{@instrument.short_title} was already recorded — " \
+            "score #{record.total_score}, #{record.severity_band}. Nothing was recorded again."
+        else
+          "#{@instrument.short_title} recorded — " \
+            "score #{record.total_score}, #{record.severity_band}."
+        end
+      end
 
       # -- Authorization --------------------------------------------------------
 

@@ -152,7 +152,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_15_000000) do
 
   create_table "lakeraven_ehr_screening_responses", force: :cascade do |t|
     t.string "administered_by"
-    t.string "administration_digest", null: false
     t.jsonb "answers", default: {}, null: false
     t.datetime "created_at", null: false
     t.datetime "effective_at", null: false
@@ -164,9 +163,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_15_000000) do
     t.boolean "safety_flagged", default: false, null: false
     t.string "severity_band", null: false
     t.string "source", default: "clinician", null: false
+    t.string "submission_token"
     t.integer "total_score", null: false
     t.datetime "updated_at", null: false
-    t.index [ "administration_digest" ], name: "index_lakeraven_ehr_screenings_on_administration_digest", unique: true
+    t.index [ "submission_token" ], name: "index_lakeraven_ehr_screenings_on_submission_token", unique: true
     t.index [ "encounter_ien" ], name: "index_lakeraven_ehr_screening_responses_on_encounter_ien"
     t.index [ "patient_dfn", "instrument_key", "effective_at" ], name: "index_lakeraven_ehr_screenings_on_patient_instrument_time"
     t.check_constraint "NOT (safety_flagged AND source = 'clinician') OR safety_acknowledged_by IS NOT NULL", name: "screening_clinician_flag_requires_acknowledger"

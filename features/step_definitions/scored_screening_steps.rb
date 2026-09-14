@@ -212,8 +212,12 @@ Given("the clinician is signed in") do
   # runs on (#486's sign-on bridge mints it for a browser; here it is minted
   # directly). Being signed in is not access to a named patient either: the
   # clinician opens the record explicitly, and that open is audited.
+  # A CLINICIAN credential specifically: recording a screening is a clinical
+  # act, so it takes a sign-on token (whose resource_owner_id is a DUZ), never
+  # a patient-context or backend one.
   app = Doorkeeper::Application.create!(
-    name: "cucumber-screening", redirect_uri: "https://example.test/callback",
+    name: Lakeraven::EHR::BrowserSmartAuthentication::BROWSER_SSO_APP_NAME,
+    redirect_uri: "https://example.test/callback",
     scopes: SCREENING_SCOPES, confidential: true
   )
   token = Doorkeeper::AccessToken.create!(

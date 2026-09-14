@@ -351,16 +351,60 @@ module Lakeraven
         assert_select ".screening-errors[role=alert] li", 2
       end
 
-      # -- Idempotency ---------------------------------------------------------
+      # -- Idempotency -----------------------------------------------------------
 
-      test "a resubmitted form does not create a second administration" do
-        submit
+      test "the form carries a submission token" do
+        get "#{BASE}/new", params: { instrument: "phq-9" }, headers: auth_headers
+
+        assert_select "input[type=hidden][name=submission_token]" do |inputs|
+          assert_predicate inputs.first["value"].to_s, :present?
+        end
+      end
+
+      test "the same form submitted twice does not create a second administration" do
+        token = SecureRandom.uuid
+        submit(submission_token: token)
         first_id = ScreeningResponse.last.id
 
         assert_no_difference -> { ScreeningResponse.count } do
-          submit
+          submit(submission_token: token)
         end
         assert_redirected_to "#{BASE}/#{first_id}"
+      end
+
+      # A collapse is not a recording. Telling the clinician "PHQ-9 recorded —
+      # score N" for a submission that wrote nothing is how a discarded
+      # administration goes unnoticed.
+      test "a replayed submission is reported as already recorded, not as recorded" do
+        token = SecureRandom.uuid
+        submit(submission_token: token)
+        submit(submission_token: token)
+        follow_redirect_authorized!
+
+        assert_match(/already recorded/i, response.body)
+        assert_no_match(/PHQ-9 recorded —/i, response.body)
+      end
+
+      # Two separately rendered forms are two submissions, even with identical
+      # answers: an 08:00 screen and a 16:00 re-screen are two administrations.
+      test "a second form with identical answers is its own administration" do
+        submit(submission_token: SecureRandom.uuid)
+
+        assert_difference -> { ScreeningResponse.count }, 1 do
+          submit(submission_token: SecureRandom.uuid)
+        end
+      end
+
+      test "a form resubmitted with changed answers is refused, not silently collapsed" do
+        token = SecureRandom.uuid
+        submit(submission_token: token)
+
+        assert_no_difference -> { ScreeningResponse.count } do
+          submit(answers: all_answered(PHQ9, 0), submission_token: token)
+        end
+
+        assert_response :unprocessable_entity
+        assert_match(/already been submitted/i, response.body)
       end
 
       # -- Item 9 safety prompt ------------------------------------------------

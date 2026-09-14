@@ -137,7 +137,7 @@ module Lakeraven
           patient_dfn: 1, instrument_key: "'phq-9'", answers: "'{}'", total_score: 0,
           severity_band: "'minimal'", effective_at: "NOW()", source: "'clinician'",
           safety_flagged: "FALSE", safety_acknowledged_at: "NULL",
-          safety_acknowledged_by: "NULL", administration_digest: "'#{SecureRandom.hex(8)}'",
+          safety_acknowledged_by: "NULL", submission_token: "'#{SecureRandom.hex(8)}'",
           created_at: "NOW()", updated_at: "NOW()"
         }.merge(overrides)
 
