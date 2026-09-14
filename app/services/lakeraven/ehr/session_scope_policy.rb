@@ -6,12 +6,19 @@ module Lakeraven
   module EHR
     # Translates a clinician's RPMS security keys into SMART scopes.
     #
-    # DENY BY DEFAULT. The table below is the ONLY source of privilege: a key
-    # that is not listed grants nothing, and a user holding no listed key gets
-    # an EMPTY scope string — a session, a dashboard, and no clinical data.
-    # Absence of a key must never confer privilege (the defect this replaces
-    # minted `user/*.read user/*.write` for every authenticated human,
-    # including a clerk with no keys at all).
+    # DENY BY DEFAULT. A key that is not listed grants nothing, and a user
+    # holding no listed key gets an EMPTY scope string — a session, a
+    # dashboard, and no clinical data. Absence of a key must never confer
+    # privilege (the defect this replaces minted `user/*.read user/*.write` for
+    # every authenticated human, including a clerk with no keys at all).
+    #
+    # SCOPE OF THAT CLAIM — this table governs the scopes a BROWSER SESSION is
+    # minted with. It is NOT the only source of privilege in the engine, and
+    # saying so would be false while #496 stands: `/oauth/token` verifies no
+    # JWT signature and grants caller-supplied scopes, so anyone who can reach
+    # that endpoint can mint any scope they like and this table is decoration
+    # to them. Closing #496 is what makes the stronger statement true; until
+    # then this constrains the browser path only.
     #
     # Keys are the symbolic names in RpmsRpc::SecurityKeys::REGISTRY, resolved
     # from ORWU USERKEYS at sign-on. Each entry grants only the resource types
@@ -19,16 +26,26 @@ module Lakeraven
     # chart, the CHS approval key grants acting on a referral, and neither
     # grants the other.
     #
-    # 42 CFR PART 2 — READ THIS BEFORE EXTENDING THE TABLE.
-    # Gating whole FHIR resource types on `bh_provider`/`bh_supervisor` does
-    # NOT segregate Part 2 content in this engine: the same `Observation`
-    # endpoint returns a PHQ-9 item-9 answer and a blood pressure, and the
-    # same `Condition` endpoint returns a substance-use diagnosis and asthma.
-    # Resource-type scopes are the wrong granularity for a record-level rule,
-    # and a scope table that *looked* like it segregated Part 2 would be worse
-    # than none — it would be a control nobody re-examines. So: BH keys grant
-    # the BH-specific types this engine routes, and record-level Part 2
-    # segmentation is tracked separately as real work, not simulated here (#494).
+    # 42 CFR PART 2 — READ THIS BEFORE EXTENDING THE TABLE, AND BEFORE
+    # DEPLOYING ANYWHERE THAT HOLDS PART 2 CONTENT.
+    #
+    # State the shipped position plainly, because it is not neutral:
+    # `cprs_gui_chart` — the most widely held key in an RPMS site, the one that
+    # means "may open a chart" — grants `user/Observation.read` and
+    # `user/Condition.read`, which is to say the PHQ-9 item-9 answer and the
+    # substance-use diagnosis. `bh_provider` and `bh_supervisor` grant NOTHING.
+    # So the effect today is not "no Part 2 control": it is that Part 2 content
+    # travels with ordinary chart access while the keys named for it are inert.
+    #
+    # That is deliberate, and it is not a solution. Gating whole FHIR resource
+    # types on the BH keys cannot segregate Part 2 content here — the same
+    # `Observation` endpoint returns a PHQ-9 item-9 answer and a blood
+    # pressure, the same `Condition` endpoint a substance-use diagnosis and
+    # asthma. Resource-type scopes are the wrong granularity for a
+    # record-level rule, and a table that merely LOOKED like it segregated
+    # Part 2 would be worse than an honest gap: it would be a control nobody
+    # re-examines. Record-level segmentation is real work, tracked as #494 and
+    # blocking for any deployment holding Part 2 content.
     class SessionScopePolicy
       # Reading a chart. `OR CPRS GUI CHART` is literally the RPMS option that
       # says "this user may open a patient chart", so it maps to the chart's
