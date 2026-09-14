@@ -3,8 +3,12 @@
 module Lakeraven
   module EHR
     class ConsentsController < ApplicationController
+      include PatientCompartment
+
+      compartment_bound :index, param: :patient, require_param: true
+
       def index
-        consents = Consent.for_patient(params[:patient])
+        consents = Consent.for_patient(patient_compartment_dfn)
         render_bundle(consents.map(&:to_fhir))
       rescue => e
         render_bundle([])
