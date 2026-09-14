@@ -398,6 +398,54 @@ class DemoPatientChartTest < ActionDispatch::IntegrationTest
     assert_includes response.body, "Alice Anderson"
   end
 
+  # -- The context gate is a WEB-SURFACE control, not a system-wide one ---------
+  #
+  # Pinned deliberately, because the PR used to imply more. The clinician web
+  # surface requires a patient's record to be OPENED — a deliberate, audited
+  # act — before it will render item-level answers. The FHIR chart is a
+  # different surface with different callers (apps, not browsers), and it is
+  # governed by token scope and patient compartment; it has no session to bind
+  # and requires no such open. Unifying the two on one CREDENTIAL (round 3, H2)
+  # did not merge them into one SURFACE.
+  #
+  # So the honest claim is: the context gate makes CLINICIAN cross-patient
+  # access deliberate and attributable. It is not a second lock on the data,
+  # and a token holding QuestionnaireResponse scope reaches the answers through
+  # the chart without it.
+  test "the FHIR chart serves screening answers without a clinician context open" do
+    seed_screening
+    token = token_with(scopes: "system/Patient.read system/QuestionnaireResponse.read")
+
+    get "/patients/1.json", headers: bearer(token)
+
+    assert_response :ok
+    answers = JSON.parse(response.body)["entry"].map { |e| e["resource"] }
+                  .select { |r| r["resourceType"] == "QuestionnaireResponse" }
+    assert_equal 1, answers.length,
+                 "the chart is scope-governed; if this ever requires a session context, " \
+                 "say so in the PR rather than leaving the two surfaces looking identical"
+  end
+
+  # The other half of the same honest accounting: the chart's audit is
+  # best-effort, while the clinician surface's fails closed. Widening
+  # FailClosedClinicalAudit to the FHIR controllers is #486's audit work, not
+  # this PR's, and until then the difference is documented rather than implied
+  # away.
+  test "the FHIR chart still serves when its audit cannot be written" do
+    seed_screening
+    original = Lakeraven::EHR::AuditEvent.method(:create!)
+    Lakeraven::EHR::AuditEvent.define_singleton_method(:create!) do |*|
+      raise ActiveRecord::StatementInvalid, "audit down"
+    end
+
+    get "/patients/1.json", headers: @headers
+
+    assert_response :ok, "best-effort audit on the chart — documented residue, not a claim"
+  ensure
+    Lakeraven::EHR::AuditEvent.singleton_class.send(:remove_method, :create!)
+    assert_equal original.owner, Lakeraven::EHR::AuditEvent.method(:create!).owner
+  end
+
   # -- Authorization: patient context ------------------------------------------
 
   test "patient-scoped token bound to a DIFFERENT patient -> 403" do
