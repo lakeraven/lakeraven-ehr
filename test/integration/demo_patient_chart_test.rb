@@ -372,20 +372,20 @@ class DemoPatientChartTest < ActionDispatch::IntegrationTest
     assert_not_includes bundle["entry"].map { |e| e.dig("resource", "valueQuantity", "value") }, 999.0
   end
 
-  test "a row whose answers disclose self-harm with no acknowledgement is not published" do
-    seed_screening
-    unacknowledged = seed_screening(band: "minimal", total: 2)
+  # An unacknowledged disclosure can no longer reach the table at all — the
+  # database refuses it (`screening_disclosure_requires_flag`), which is better
+  # than withholding it on read, where the disclosure would be invisible rather
+  # than flagged. Withholding still has to work for the corruptions that ARE
+  # storable; that is the test above.
+  test "an unacknowledged disclosure cannot be stored, not merely withheld" do
+    row = seed_screening(band: "minimal", total: 2)
     safety = Lakeraven::EHR::ScreeningInstrument::PHQ9.safety_link_id
-    unacknowledged.update_column(:answers, unacknowledged.answers.merge(safety => 3))
 
-    get "/patients/1.json",
-        headers: bearer(token_with(scopes: "system/Patient.read system/QuestionnaireResponse.read"))
-
-    assert_response :ok
-    answers = JSON.parse(response.body)["entry"].map { |e| e["resource"] }
-                  .select { |r| r["resourceType"] == "QuestionnaireResponse" }
-    assert_equal 1, answers.length,
-                 "an unacknowledged disclosure must not be published as a completed response"
+    assert_raises(ActiveRecord::StatementInvalid) do
+      Lakeraven::EHR::ScreeningResponse.transaction(requires_new: true) do
+        row.update_column(:answers, row.answers.merge(safety => 3))
+      end
+    end
   end
 
   test "a screening row naming an unknown instrument does not 500 the HTML chart" do

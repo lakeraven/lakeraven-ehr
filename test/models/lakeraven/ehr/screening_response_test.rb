@@ -127,6 +127,74 @@ module Lakeraven
         assert_not record.valid?, "flagging a screening whose item 9 is 'not at all' misreports it too"
       end
 
+      # Every one of these goes around the model entirely — raw SQL, or
+      # `update_column`, which is how a console, an import, a restore or a
+      # future service reaches this table. The PR claims the invariant holds
+      # "whoever writes it"; that claim is only true if the DATABASE says so.
+
+      def raw_insert(**overrides)
+        columns = {
+          patient_dfn: 1, instrument_key: "'phq-9'", answers: "'{}'", total_score: 0,
+          severity_band: "'minimal'", effective_at: "NOW()", source: "'clinician'",
+          safety_flagged: "FALSE", safety_acknowledged_at: "NULL",
+          safety_acknowledged_by: "NULL", administration_digest: "'#{SecureRandom.hex(8)}'",
+          created_at: "NOW()", updated_at: "NOW()"
+        }.merge(overrides)
+
+        ScreeningResponse.transaction(requires_new: true) do
+          ScreeningResponse.connection.execute(
+            "INSERT INTO lakeraven_ehr_screening_responses (#{columns.keys.join(', ')}) " \
+            "VALUES (#{columns.values.join(', ')})"
+          )
+        end
+      end
+
+      DISCLOSING_JSON = %q('{"44260-8": 2}')
+
+      test "the database refuses a disclosure stored without the flag" do
+        assert_raises(ActiveRecord::StatementInvalid) do
+          raw_insert(answers: DISCLOSING_JSON, total_score: 2, safety_flagged: "FALSE")
+        end
+      end
+
+      test "the database refuses a flagged clinician row with no acknowledger" do
+        assert_raises(ActiveRecord::StatementInvalid) do
+          raw_insert(answers: DISCLOSING_JSON, total_score: 2, safety_flagged: "TRUE",
+                     safety_acknowledged_at: "NOW()", source: "'clinician'")
+        end
+      end
+
+      test "the database accepts a flagged pre-visit row with no acknowledger" do
+        assert_nothing_raised do
+          raw_insert(answers: DISCLOSING_JSON, total_score: 2, safety_flagged: "TRUE",
+                     safety_acknowledged_at: "NOW()", source: "'pre-visit'")
+        end
+      end
+
+      test "the database refuses answers updated into a disclosure on a clean row" do
+        record = valid_record
+
+        assert_raises(ActiveRecord::StatementInvalid) do
+          ScreeningResponse.transaction(requires_new: true) do
+            record.update_column(:answers, record.answers.merge(SAFETY => 3))
+          end
+        end
+      end
+
+      # A new instrument with a safety item must extend the constraint, or the
+      # invariant silently stops covering it. This is the forcing function.
+      test "every instrument with a safety item is covered by the database constraint" do
+        covered = ScreeningResponse.connection
+                                   .check_constraints("lakeraven_ehr_screening_responses")
+                                   .map(&:expression).join(" ")
+
+        ScreeningInstrument::ALL.select(&:safety_item?).each do |instrument|
+          assert_includes covered, instrument.safety_link_id,
+                          "#{instrument.key}'s safety item is not in any CHECK constraint"
+          assert_includes covered, instrument.key
+        end
+      end
+
       test "the database refuses a flagged row with no acknowledgement even around the model" do
         # Savepoint so the failed statement does not poison the test transaction.
         assert_raises(ActiveRecord::StatementInvalid) do
@@ -146,17 +214,49 @@ module Lakeraven
       # `.to_i` turned nil and "banana" into 0, which on PHQ-9 item 9 is a
       # NEGATIVE self-harm screen manufactured out of absence of data.
 
-      [ nil, "banana", "" ].each do |stored|
+      # What must hold for ANY item-9 value the instrument does not define: it
+      # is never published, and above all never published as "Not at all" — a
+      # negative self-harm screen manufactured out of absence of data.
+      def assert_item9_unanswered(record, stored)
+        assert_not_equal 0, record.ordinals[SAFETY], "#{stored.inspect} must not read as ordinal 0"
+        assert_empty record.answered_items.select { |item, _| item.link_id == SAFETY }
+
+        item9 = record.to_questionnaire_response[:item].find { |i| i[:linkId] == SAFETY }
+        assert_nil item9, "an unanswered self-harm item must not be published as an answer"
+      end
+
+      # Absent or blank: storable (the database reads these as "no disclosure"
+      # too), so the read path is exercised against a real persisted row.
+      [ nil, "" ].each do |stored|
         test "a stored item-9 value of #{stored.inspect} is unanswered, not Not at all" do
           record = valid_record
           record.update_column(:answers, record.answers.merge(SAFETY => stored))
           record.reload
 
-          assert_nil record.ordinals[SAFETY], "#{stored.inspect} must not read as ordinal 0"
-          assert_empty record.answered_items.select { |item, _| item.link_id == SAFETY }
+          assert_nil record.ordinals[SAFETY], "#{stored.inspect} must not read as an ordinal at all"
+          assert_item9_unanswered(record, stored)
+        end
+      end
 
-          item9 = record.to_questionnaire_response[:item].find { |i| i[:linkId] == SAFETY }
-          assert_nil item9, "an unanswered self-harm item must not be published as an answer"
+      # Junk: NO LONGER STORABLE at all — the disclosure constraint treats an
+      # item-9 value it cannot read as zero as a disclosure and refuses the row
+      # unflagged. The read-side rule still has to hold for a row that arrives
+      # some other way (a restore, a replica, a release older than the
+      # constraint), so it is exercised on an unpersisted record.
+      [ "banana", 9, "-1" ].each do |stored|
+        test "an item-9 value of #{stored.inspect} is unanswered, not Not at all" do
+          record = build(answers: NO_DISCLOSURE.merge(SAFETY => stored))
+
+          assert_item9_unanswered(record, stored)
+          assert_not record.valid?, "a value the instrument does not define is not an answer"
+        end
+
+        test "an item-9 value of #{stored.inspect} cannot be stored unflagged" do
+          assert_raises(ActiveRecord::StatementInvalid) do
+            ScreeningResponse.transaction(requires_new: true) do
+              valid_record.update_column(:answers, NO_DISCLOSURE.merge(SAFETY => stored))
+            end
+          end
         end
       end
 
@@ -179,10 +279,10 @@ module Lakeraven
 
       # -- A malformed row degrades, it does not raise (#6) --------------------
 
-      test "an out-of-range stored ordinal is omitted rather than raising" do
-        record = valid_record
-        record.update_column(:answers, record.answers.merge(SAFETY => 9))
-        record.reload
+      test "an out-of-range ordinal is omitted rather than raising" do
+        # Unpersisted for the same reason as above: the database now refuses to
+        # hold this row unflagged at all.
+        record = build(answers: NO_DISCLOSURE.merge(SAFETY => 9))
 
         resource = nil
         assert_nothing_raised { resource = record.to_questionnaire_response }

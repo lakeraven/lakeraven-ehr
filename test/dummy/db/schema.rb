@@ -169,7 +169,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_09_000000) do
     t.index [ "administration_digest" ], name: "index_lakeraven_ehr_screenings_on_administration_digest", unique: true
     t.index [ "encounter_ien" ], name: "index_lakeraven_ehr_screening_responses_on_encounter_ien"
     t.index [ "patient_dfn", "instrument_key", "effective_at" ], name: "index_lakeraven_ehr_screenings_on_patient_instrument_time"
+    t.check_constraint "NOT (safety_flagged AND source = 'clinician') OR safety_acknowledged_by IS NOT NULL", name: "screening_clinician_flag_requires_acknowledger"
     t.check_constraint "NOT safety_flagged OR safety_acknowledged_at IS NOT NULL", name: "screening_flagged_requires_acknowledgement"
+    t.check_constraint "safety_flagged OR NOT (instrument_key = 'phq-9' AND answers ? '44260-8' AND COALESCE(answers ->> '44260-8', '') !~ '^\\s*[+-]?0*\\s*$')", name: "screening_disclosure_requires_flag"
   end
 
   create_table "oauth_access_grants", force: :cascade do |t|

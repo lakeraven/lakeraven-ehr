@@ -36,11 +36,41 @@ class CreateScreeningResponses < ActiveRecord::Migration[8.1]
       t.string   :administration_digest, null: false
       t.timestamps
 
-      # The invariant in the database, not only in the model: a flagged row
-      # without acknowledgement evidence cannot exist, whoever writes it —
-      # a console, an import, a future service, a restore.
+      # ALL THREE invariants in the database, not only in the model, because
+      # "whoever writes it — a console, an import, a future service, a restore"
+      # is a claim only the database can make good on.
+      #
+      # 1. A flagged row carries WHEN it was acknowledged.
       t.check_constraint "NOT safety_flagged OR safety_acknowledged_at IS NOT NULL",
                          name: "screening_flagged_requires_acknowledgement"
+      # 2. A flagged CLINICIAN administration carries WHO acknowledged it. A
+      #    pre-visit self-report (#471) has no clinician by definition.
+      t.check_constraint "NOT (safety_flagged AND source = 'clinician') " \
+                         "OR safety_acknowledged_by IS NOT NULL",
+                         name: "screening_clinician_flag_requires_acknowledger"
+      # 3. Answers that DISCLOSE self-harm cannot be stored unflagged — the
+      #    direction that matters, since an unflagged disclosure is invisible
+      #    rather than merely unattributed.
+      #
+      #    Fail-closed by construction: the item counts as disclosing unless it
+      #    is absent, blank or a plain zero, so junk ("banana", "-1") is treated
+      #    as a disclosure by the database and rejected. The model is stricter
+      #    still — it requires a value the instrument actually defines.
+      #
+      #    The instrument key and safety item are LITERAL here (app constants
+      #    do not belong in a migration); they mirror
+      #    ScreeningInstrument::PHQ9.safety_link_id, and
+      #    ScreeningResponseTest#"every instrument with a safety item is
+      #    covered by the database constraint" fails if a new safety-bearing
+      #    instrument is added without extending this.
+      t.check_constraint <<~SQL.squish, name: "screening_disclosure_requires_flag"
+        safety_flagged
+        OR NOT (
+          instrument_key = 'phq-9'
+          AND answers ? '44260-8'
+          AND COALESCE(answers ->> '44260-8', '') !~ '^\\s*[+-]?0*\\s*$'
+        )
+      SQL
     end
 
     # Trending reads are always "this patient, this instrument, over time".
