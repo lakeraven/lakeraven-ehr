@@ -28,10 +28,8 @@ module Lakeraven
       # "2090061" — leaving the padding in makes two visits out of one and
       # defeats any dedupe or lookup keyed on it.
       before_validation :normalize_encounter_ien
-      before_validation :assign_administration_digest
 
       validates :patient_dfn, presence: true
-      validates :administration_digest, presence: true
       validates :instrument_key, presence: true, inclusion: { in: ScreeningInstrument.keys }
       validates :total_score, presence: true, numericality: { only_integer: true }
       validates :severity_band, presence: true
@@ -70,38 +68,24 @@ module Lakeraven
       scope :for_instrument, ->(key) { where(instrument_key: key) }
       scope :safety_flagged, -> { where(safety_flagged: true) }
 
-      # THE identity of an administration, and therefore THE dedupe rule —
-      # computed here so it belongs to the row rather than to whichever service
-      # happened to write it, and enforced by a UNIQUE INDEX so that two
-      # identical requests racing past each other's lookups cannot both land.
-      # A check-then-insert is not atomic; a unique index is.
+      # A submission token identifies the SUBMISSION this row came from, and a
+      # unique index makes one submission at most one administration. It is
+      # deliberately NOT an identity derived from the clinical content:
       #
-      # (patient, instrument, visit, administering clinician, answers, day):
+      #   * a double-tap, a back-button replay and a retried POST are one
+      #     submission arriving twice — same token, one row, and the unique
+      #     index settles the race a check-then-insert cannot;
+      #   * an instrument re-administered later the same day is a SECOND
+      #     clinical event that happens to look identical, and comes from a
+      #     newly rendered form, so it carries a new token and lands. Keying on
+      #     the answers instead discarded it — common at the band extremes, and
+      #     worse when the repeat re-disclosed self-harm, because only the
+      #     first acknowledgement survived.
       #
-      #   * the CLINICIAN is in the key because two clinicians reassessing the
-      #     same patient on the same visit is ordinary practice, and collapsing
-      #     the second into the first would file one clinician's assessment
-      #     under the other's name;
-      #   * the ANSWERS are in it because a different set is a correction or a
-      #     genuine second administration, and silently discarding clinical
-      #     data is worse than a duplicate row;
-      #   * the DAY (UTC) bounds it: a double-tap, a back-button resubmit and a
-      #     retried POST are the same administration, while the identical
-      #     instrument re-administered another day is not. One rule, not a
-      #     window in the service disagreeing with an index in the database.
-      def self.administration_digest_for(patient_dfn:, instrument_key:, encounter_ien:,
-                                         administered_by:, answers:, effective_at:)
-        material = [
-          patient_dfn.to_s,
-          instrument_key.to_s,
-          encounter_ien.to_s.strip,
-          administered_by.to_s.strip,
-          (answers || {}).map { |k, v| [ k.to_s, v.to_s ] }.sort.to_s,
-          effective_at&.utc&.to_date.to_s
-        ].join("|")
-
-        Digest::SHA256.hexdigest(material)
-      end
+      # Only the caller can tell a retry from a re-administration; the rendered
+      # form is what knows. A caller that supplies no token is simply not
+      # deduplicated (null, and Postgres treats nulls as distinct) rather than
+      # having the distinction guessed for it.
 
       def instrument = ScreeningInstrument.find!(instrument_key)
 
@@ -211,14 +195,6 @@ module Lakeraven
 
       def normalize_encounter_ien
         self.encounter_ien = encounter_ien.to_s.strip.presence unless encounter_ien.nil?
-      end
-
-      def assign_administration_digest
-        self.administration_digest = self.class.administration_digest_for(
-          patient_dfn: patient_dfn, instrument_key: instrument_key,
-          encounter_ien: encounter_ien, administered_by: administered_by,
-          answers: ordinals, effective_at: effective_at
-        )
       end
 
       def safety_flag_matches_the_answers

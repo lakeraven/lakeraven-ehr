@@ -24,6 +24,10 @@
 
 <%= form_with url: patient_screenings_path(@dfn), method: :post, class: "screening-form" do %>
   <input type="hidden" name="instrument" value="<%= @instrument.key %>">
+  <%# Identifies THIS submission. A double-tap or a back-button replay carries
+      the same token and records one administration; a screening administered
+      again later comes from a newly rendered form and is its own. %>
+  <input type="hidden" name="submission_token" value="<%= @submission_token %>">
 
   <% if safety_prompt %>
     <%# Clinical-safety gate. The submission is NOT stored until this is
@@ -53,6 +57,26 @@
           <li><a href="#item-<%= link_id %>">Item <%= item.position %>: <%= item.text %></a></li>
         <% end %>
       </ul>
+    </div>
+  <% end %>
+
+  <% if @result&.errors&.include?(:already_submitted) %>
+    <div class="screening-errors" role="alert">
+      <h2>This form has already been submitted</h2>
+      <p>
+        A screening was recorded from this form, and the answers have since
+        changed, so this is not a repeat of that submission. Nothing has been
+        recorded. To correct the recorded screening, or to record a new one,
+        start a fresh screening from the patient&rsquo;s history.
+      </p>
+      <p><a href="<%= patient_screenings_path(@dfn) %>">Previous screenings</a></p>
+    </div>
+  <% end %>
+
+  <% if @result&.errors&.include?(:missing_administered_by) %>
+    <div class="screening-errors" role="alert">
+      <h2>Clinician sign-on required</h2>
+      <p>A self-harm response must be acknowledged by a named clinician. Nothing has been recorded.</p>
     </div>
   <% end %>
 

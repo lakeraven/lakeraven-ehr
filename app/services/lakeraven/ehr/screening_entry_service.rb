@@ -26,9 +26,11 @@ module Lakeraven
     # and no request. That is the seam #471 needs: a tokenized pre-visit
     # submission is the same call with `source: "pre-visit"`.
     #
-    # Recording is idempotent within a short window (see DEDUPE_WINDOW): a
-    # double-tap or a back-button resubmit returns the administration that is
-    # already there instead of trending the same screening twice.
+    # Recording is idempotent on the SUBMISSION, not on the clinical content:
+    # a caller that passes the `submission_token` of a submission already
+    # recorded gets that administration back rather than a second one, while an
+    # instrument genuinely re-administered later the same day is a new
+    # submission and lands. See ScreeningResponse#submission_token.
     class ScreeningEntryService
       # An ALLOWLIST, not a cast. This gate was wrong three review rounds
       # running — raw truthiness, then the string `"false"`, then any string at
@@ -66,7 +68,7 @@ module Lakeraven
       def initialize(instrument:, patient_dfn:, answers:, encounter_ien: nil,
                      administered_by: nil, source: ScreeningResponse::SOURCE_CLINICIAN,
                      effective_at: nil, safety_acknowledged: false,
-                     repository: ScreeningResponse)
+                     submission_token: nil, repository: ScreeningResponse)
         @instrument = instrument.is_a?(ScreeningInstrument) ? instrument : ScreeningInstrument.find!(instrument)
         @patient_dfn = patient_dfn
         @answers = answers
@@ -75,6 +77,7 @@ module Lakeraven
         @source = source.to_s
         @effective_at = effective_at
         @safety_acknowledged = self.class.acknowledged?(safety_acknowledged)
+        @submission_token = submission_token.presence
         @repository = repository
       end
 
@@ -112,33 +115,25 @@ module Lakeraven
 
       def clinician? = @source == ScreeningResponse::SOURCE_CLINICIAN
 
-      # Recording is IDEMPOTENT, and the dedupe rule lives in the model as the
-      # administration's identity (ScreeningResponse.administration_digest_for)
-      # with a UNIQUE INDEX behind it. This service does not keep a second,
-      # slightly different rule of its own: it looks the administration up,
-      # inserts if it is not there, and treats a unique violation — the lost
-      # side of a race — as the same duplicate answer rather than an error.
-      def existing_administration(digest)
+      # Recording is IDEMPOTENT ON THE SUBMISSION. The token identifies the
+      # submission; a unique index on it makes one submission at most one
+      # administration and settles the race that a check-then-insert cannot.
+      # A caller with no token is not deduplicated at all — see the note on
+      # ScreeningResponse#submission_token for why that is deliberate rather
+      # than a gap.
+      def existing_submission
+        return nil if @submission_token.blank?
         return nil unless @repository.respond_to?(:find_by)
 
-        @repository.find_by(administration_digest: digest)
+        @repository.find_by(submission_token: @submission_token)
       end
 
       def normalized_encounter_ien = @encounter_ien.to_s.strip.presence
 
-      def administration_digest(score, effective_at)
-        ScreeningResponse.administration_digest_for(
-          patient_dfn: @patient_dfn, instrument_key: @instrument.key,
-          encounter_ien: normalized_encounter_ien, administered_by: @administered_by.presence,
-          answers: score.answers, effective_at: effective_at
-        )
-      end
-
       def persist(score)
         effective_at = @effective_at || Time.current
-        digest = administration_digest(score, effective_at)
 
-        duplicate = duplicate_result(existing_administration(digest), score)
+        duplicate = duplicate_result(existing_submission, score)
         return duplicate if duplicate
 
         insert(score, effective_at)
@@ -146,19 +141,25 @@ module Lakeraven
         # The lost side of a race: the winner's row is now there. Returning it
         # is the idempotent answer — the same one the caller would have got had
         # it arrived a millisecond later.
-        duplicate_result(existing_administration(digest), score) ||
+        duplicate_result(existing_submission, score) ||
           failure(:conflicting_record, score: score)
       rescue ActiveRecord::ActiveRecordError => e
         Rails.logger.warn("[screening] persist failed: #{e.class}")
         failure(:persistence_error, score: score)
       end
 
-      # An existing administration is only handed back as a duplicate if it is
-      # PUBLISHABLE. A row that fails its own invariants (written around the
-      # model, restored, imported) is not a prior administration, and returning
-      # it would launder it into the clinical record as if a clinician had just
-      # confirmed it. It also cannot simply be written over, so this fails
-      # closed and names the reason rather than silently doing either.
+      # What an already-used token means depends on what is behind it:
+      #
+      #   * the SAME submission (same patient, instrument and answers) — this
+      #     is the retry the token exists for, so return that row;
+      #   * DIFFERENT answers, or another patient's or instrument's row — this
+      #     is not a retry. A corrected form resubmitted under its original
+      #     token is a new intent, and a token from elsewhere is not a key to
+      #     anything. Refuse and name it rather than returning a record the
+      #     caller did not just produce;
+      #   * a row that fails its own invariants — never handed back, or a row
+      #     written around the model would launder itself into the clinical
+      #     record as though a clinician had just confirmed it.
       def duplicate_result(existing, score)
         return nil if existing.nil?
 
@@ -167,7 +168,15 @@ module Lakeraven
           return failure(:conflicting_record, score: score)
         end
 
+        return failure(:already_submitted, score: score) unless same_submission?(existing, score)
+
         Result.new(success: true, record: existing, score: score, duplicate: true)
+      end
+
+      def same_submission?(existing, score)
+        existing.patient_dfn.to_s == @patient_dfn.to_s &&
+          existing.instrument_key == @instrument.key &&
+          existing.ordinals == score.answers
       end
 
       # The insert gets its own SAVEPOINT so that losing the unique-index race
@@ -190,6 +199,7 @@ module Lakeraven
           effective_at: effective_at,
           administered_by: @administered_by.presence,
           source: @source,
+          submission_token: @submission_token,
           safety_flagged: score.safety_triggered?,
           # A flagged row only reaches the table because someone acknowledged
           # the prompt: record WHEN and by WHOM, so a row from a clinician who

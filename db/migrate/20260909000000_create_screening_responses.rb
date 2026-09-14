@@ -29,11 +29,13 @@ class CreateScreeningResponses < ActiveRecord::Migration[8.1]
       # no acknowledgement trace and no way to acquire one.
       t.datetime :safety_acknowledged_at
       t.string   :safety_acknowledged_by
-      # Identity of the administration, so a duplicate cannot be inserted even
-      # when two identical requests race past each other's lookups. Derived
-      # from (patient, instrument, visit, administering clinician, answers,
-      # calendar day) — see ScreeningResponse.administration_digest_for.
-      t.string   :administration_digest, null: false
+      # The SUBMISSION this row came from, so that one submission arriving
+      # twice — a double-tap, a back-button replay, a retried POST — cannot
+      # become two administrations, while an instrument genuinely
+      # re-administered later the same day still can. Null for callers that
+      # supply no token; Postgres treats nulls as distinct, so those are simply
+      # never deduplicated.
+      t.string   :submission_token
       t.timestamps
 
       # ALL THREE invariants in the database, not only in the model, because
@@ -80,7 +82,7 @@ class CreateScreeningResponses < ActiveRecord::Migration[8.1]
     add_index :lakeraven_ehr_screening_responses, :encounter_ien
     # THE dedupe rule, enforced by the database rather than by a check-then-
     # insert that two concurrent requests can both pass.
-    add_index :lakeraven_ehr_screening_responses, :administration_digest,
-              unique: true, name: "index_lakeraven_ehr_screenings_on_administration_digest"
+    add_index :lakeraven_ehr_screening_responses, :submission_token,
+              unique: true, name: "index_lakeraven_ehr_screenings_on_submission_token"
   end
 end
