@@ -170,7 +170,16 @@ module Lakeraven
         Result.new(success: true, record: existing, score: score, duplicate: true)
       end
 
+      # The insert gets its own SAVEPOINT so that losing the unique-index race
+      # is recoverable. Without it, a RecordNotUnique inside an enclosing
+      # transaction (the controller now wraps every action in one) aborts that
+      # whole transaction, and the recovery below would raise instead of
+      # returning the winner's row.
       def insert(score, effective_at)
+        @repository.transaction(requires_new: true) { insert!(score, effective_at) }
+      end
+
+      def insert!(score, effective_at)
         record = @repository.create!(
           patient_dfn: @patient_dfn,
           encounter_ien: normalized_encounter_ien,
