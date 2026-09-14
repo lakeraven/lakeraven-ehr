@@ -103,6 +103,64 @@ class ClinicalAuditFailsClosedTest < ActionDispatch::IntegrationTest
     assert_equal 1, Lakeraven::EHR::AuditEvent.count
   end
 
+  # The suite could not tell a joined transaction from a real one: Rails opens
+  # the transactional-test wrapper with `joinable: false`, which silently
+  # promotes any inner `transaction` to a savepoint. So the fail-closed
+  # rollback "worked" in every test and would NOT have worked for a caller
+  # that owns its own transaction — a service object wrapping a write, a
+  # bulk importer. This test owns a joinable transaction, the way such a
+  # caller does.
+  test "an audited write inside a caller-owned transaction still rolls back when the audit fails" do
+    setup_auth(scopes: "system/*.read system/*.write")
+    before = Lakeraven::EHR::ReconciliationSession.count
+
+    with_broken_audit do
+      ActiveRecord::Base.transaction do
+        post "/audited_writer", params: { patient_dfn: "1" }, headers: @headers
+      end
+    end
+
+    assert_response :service_unavailable
+    assert_equal before, Lakeraven::EHR::ReconciliationSession.count,
+      "the write survived inside a caller-owned transaction, so the audit rollback was a no-op"
+  end
+
+  # -- a write is recorded as a write -------------------------------------
+
+  # Everything was logged as a Read, so the log could not answer "what did
+  # this person CHANGE" — the question a records request actually asks.
+  test "a write is audited as a write, not a read" do
+    setup_auth(scopes: "system/*.read system/*.write")
+
+    post "/audited_writer", params: { patient_dfn: "1" }, headers: @headers
+    assert_response :created
+
+    event = Lakeraven::EHR::AuditEvent.order(:id).last
+    assert_equal "C", event.action, "a create was recorded as a read"
+  end
+
+  # -- a refusal discloses nothing ----------------------------------------
+
+  # A sibling PR refused an access with 503 and the patient name still reached
+  # the browser: not in the body, which was discarded, but in the FLASH, which
+  # the 503 response carried out in the session cookie. Headers are the same
+  # class of leak.
+  test "a refused access discloses nothing in the body, the headers, or the flash" do
+    setup_auth(scopes: "system/*.read")
+    label = AuditedBrowserController::PATIENT_LABEL
+
+    with_broken_audit { get "/audited_browser/1", headers: @headers }
+
+    assert_response :service_unavailable
+    refute_includes response.body, label, "the refusal disclosed the patient in its body"
+    assert_nil response.headers["Location"], "the refusal kept the redirect it was refusing"
+    assert_nil response.headers["X-Patient-Name"], "the refusal disclosed the patient in a header"
+    refute_includes response.headers.to_h.values.join(" "), label,
+      "the refusal disclosed the patient in a response header"
+    assert_empty flash.to_h, "the refusal carried the patient out in the flash"
+    refute_includes response.headers["Set-Cookie"].to_s, label
+  end
+
   # -- exactly one row per request ----------------------------------------
 
   # A controller that mixes in both this concern and a fail-closed variant
