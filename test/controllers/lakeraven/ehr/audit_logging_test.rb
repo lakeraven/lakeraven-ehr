@@ -41,10 +41,19 @@ module Lakeraven
         assert_equal "4", event.outcome
       end
 
-      test "401 auth failure does NOT produce an AuditEvent" do
-        assert_no_difference -> { AuditEvent.count } do
+      # This used to assert the opposite, and the opposite was the defect: a
+      # rejected credential is exactly the event §164.312(b) wants on the
+      # record. It is audited as UNATTRIBUTED — there is no identity to name —
+      # which is worth more than either silence or a misattribution.
+      test "401 auth failure produces an unattributed AuditEvent" do
+        assert_difference -> { AuditEvent.count }, 1 do
           get "/lakeraven-ehr/Patient/1"
         end
+
+        event = AuditEvent.recent.first
+        assert_equal "4", event.outcome
+        assert_equal "Unknown", event.agent_who_type
+        assert_nil event.agent_who_identifier
       end
     end
   end
