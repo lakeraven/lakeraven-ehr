@@ -515,6 +515,37 @@ module Lakeraven
         assert_response :forbidden, "an unrecorded open must not leave the record open"
       end
 
+      # The write path is the one that matters here: a read that is not audited
+      # costs a log line, but an unaudited WRITE leaves a durable clinical
+      # record — a self-harm-flagged one — that the audit log has never heard
+      # of, while the clinician is told the opposite.
+      test "no screening is written when the access cannot be recorded" do
+        AuditEvent.delete_all # the patient-context open in setup left one
+
+        assert_no_difference -> { ScreeningResponse.count } do
+          with_broken_audit do
+            submit(answers: all_answered(PHQ9, 0).merge(PHQ9.safety_link_id => 3),
+                   safety_acknowledged: "1")
+          end
+        end
+
+        assert_response :service_unavailable
+        assert_equal 0, AuditEvent.count
+      end
+
+      test "the score does not survive a refused write in the flash" do
+        with_broken_audit do
+          submit(answers: answers(PHQ9, [ 3, 3, 3, 3, 3, 3, 3, 3, 0 ]))
+        end
+        assert_response :service_unavailable
+
+        get BASE, headers: auth_headers
+
+        assert_response :ok
+        assert_no_match(/recorded — score/i, response.body)
+        assert_no_match(/severe/i, response.body)
+      end
+
       test "a refusal is audited, not only a success" do
         reset!
         sign_in

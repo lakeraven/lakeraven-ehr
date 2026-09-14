@@ -31,20 +31,46 @@ module Lakeraven
 
       private
 
+      # The action's work and its audit row commit TOGETHER or not at all.
+      #
+      # Auditing after the action, outside a transaction, is fail-open on any
+      # action that writes: a self-harm-flagged administration landed durably
+      # with zero audit rows while the clinician was told it had not been
+      # completed. A read that goes unaudited costs a log line; an unaudited
+      # WRITE leaves a clinical record the audit log has never heard of.
+      #
+      # `requires_new: true` is deliberate: a plain nested `transaction` joins
+      # its parent, and `ActiveRecord::Rollback` inside a joined transaction is
+      # silently discarded — the rollback would not happen under an enclosing
+      # transaction (and every test runs inside one).
       def audit_clinical_access
         @audit_failure = nil
-        begin
-          yield
-        rescue StandardError => e
-          @audit_failure = e
+        recorded = false
+
+        ActiveRecord::Base.transaction(requires_new: true) do
+          begin
+            yield
+          rescue StandardError => e
+            # Roll back whatever the action wrote before it failed; the attempt
+            # is recorded below, outside the transaction, so the failure itself
+            # does not become invisible.
+            @audit_failure = e
+            raise ActiveRecord::Rollback
+          end
+
+          recorded = recorded_clinical_access?
+          raise ActiveRecord::Rollback unless recorded
         end
 
-        if recorded_clinical_access?
-          raise @audit_failure if @audit_failure
-        else
-          rollback_unrecorded_access
-          deny_unrecorded_access
+        if @audit_failure
+          recorded_clinical_access?
+          raise @audit_failure
         end
+
+        return if recorded
+
+        rollback_unrecorded_access
+        deny_unrecorded_access
       end
 
       def recorded_clinical_access?
@@ -59,15 +85,23 @@ module Lakeraven
       # here: state the audit log has no record of must not survive the request.
       def rollback_unrecorded_access; end
 
-      # Throws away whatever the action produced — a rendered page, a redirect
-      # — and answers 503 instead. `response_body = nil` resets the response
-      # but leaves ActionController::Metal's own `@_response_body` set, which
-      # `render` reads to decide it is being called twice; and a discarded
-      # redirect would otherwise leave its Location header behind.
+      # Throws away EVERYTHING the action produced — a rendered page, a
+      # redirect, and the flash that redirect set — and answers 503 instead.
+      #
+      # `response_body = nil` resets the response but leaves
+      # ActionController::Metal's own `@_response_body` set, which `render`
+      # reads to decide it is being called twice; a discarded redirect would
+      # otherwise leave its Location header behind; and the flash is written to
+      # the SESSION COOKIE rather than the response body, so without clearing
+      # it "PHQ-9 recorded — score 24, severe" survived the refusal and
+      # rendered on the clinician's next page — a score for a record that was
+      # never written.
       def deny_unrecorded_access
         self.response_body = nil
         @_response_body = nil
         response.delete_header("Location")
+        flash.clear
+        flash.discard
         render plain: "Service Unavailable: this access could not be recorded, so it was not completed",
                status: :service_unavailable
       end
