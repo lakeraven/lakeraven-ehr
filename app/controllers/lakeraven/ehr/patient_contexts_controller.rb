@@ -47,8 +47,10 @@ module Lakeraven
       def audit_action = "E"
       def fhir_resource_type = "Patient"
 
+      # Only a clinician credential names a Practitioner; on a patient-scoped
+      # token `resource_owner_id` is the patient.
       def audit_agent_attributes
-        duz = current_token&.resource_owner_id.to_s.presence
+        duz = current_duz
         return super if duz.blank?
 
         { agent_who_type: "Practitioner", agent_who_identifier: duz }

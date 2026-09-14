@@ -30,16 +30,33 @@ module Lakeraven
       # THE credential for this surface is the SMART token — the same one the
       # chart runs on, carrying scopes, expiry, revocation and the clinician's
       # DUZ. The session is where the patient context lives; it is not what
-      # authorizes the read. (#486's sign-on bridge mints this token for a
-      # browser session; here it is minted directly.)
-      def token_for(scopes: FULL_SCOPES, duz: DUZ)
+      # authorizes the read.
+      #
+      # A CLINICIAN credential is specifically a browser sign-on token (#486
+      # mints these; the application name is how they are recognised), whose
+      # `resource_owner_id` is a DUZ. That field is polymorphic in this
+      # codebase — on a `patient/` token it is a patient dfn — so the two are
+      # minted by different helpers here and must never be interchangeable.
+      def token_for(scopes: FULL_SCOPES, duz: DUZ,
+                    app_name: BrowserSmartAuthentication::BROWSER_SSO_APP_NAME)
         app = Doorkeeper::Application.create!(
-          name: "screening-test", redirect_uri: "https://example.test/callback",
+          name: app_name, redirect_uri: "https://example.test/callback",
           scopes: scopes, confidential: true
         )
         Doorkeeper::AccessToken.create!(
           application: app, scopes: scopes, resource_owner_id: duz, expires_in: 3600
         )
+      end
+
+      # A patient-context credential: `resource_owner_id` is the PATIENT, not a
+      # clinician, and it is not minted by the sign-on bridge.
+      def patient_token(dfn: "1", scopes: "patient/QuestionnaireResponse.read patient/QuestionnaireResponse.write")
+        token_for(scopes: scopes, duz: dfn, app_name: "smart-patient-app")
+      end
+
+      # A backend/system credential: no human behind it at all.
+      def system_token(scopes: "system/QuestionnaireResponse.read system/QuestionnaireResponse.write")
+        token_for(scopes: scopes, duz: nil, app_name: "backend-service")
       end
 
       def auth_headers(token = nil)
@@ -207,9 +224,52 @@ module Lakeraven
       test "a patient-scoped token bound to another patient cannot read this one" do
         submit
         id = ScreeningResponse.last.id
-        other = token_for(scopes: "patient/QuestionnaireResponse.read", duz: "2")
+        other = patient_token(dfn: "2", scopes: "patient/QuestionnaireResponse.read")
 
         get "#{BASE}/#{id}", headers: auth_headers(other)
+
+        assert_response :forbidden
+      end
+
+      # `resource_owner_id` is a PATIENT dfn on a patient-scoped token and a
+      # clinician DUZ on a sign-on token. Reading it blind attributes the
+      # self-harm risk assessment — the record, the acknowledgement trace and
+      # the audit log — to the patient who disclosed it.
+      test "a patient-scoped token cannot record a screening at all" do
+        patient = patient_token(dfn: "1")
+
+        assert_no_difference -> { ScreeningResponse.count } do
+          post BASE, params: {
+            instrument: PHQ9.key, encounter_ien: VISIT,
+            answers: complete_without_safety_flag(PHQ9)
+          }, headers: auth_headers(patient)
+        end
+
+        assert_response :forbidden
+      end
+
+      test "a patient-scoped token is never audited as a practitioner" do
+        patient = patient_token(dfn: "1")
+        AuditEvent.delete_all
+
+        get BASE, headers: auth_headers(patient)
+
+        event = AuditEvent.recent.first
+        assert_not_nil event
+        assert_not_equal "Practitioner", event.agent_who_type,
+                         "a patient credential must not be recorded as the clinician"
+        assert_not_equal "1", event.agent_who_identifier
+      end
+
+      # F6: a backend credential has no human behind it, so it cannot author a
+      # clinician administration — the row would name nobody.
+      test "a system token cannot record an unauthored clinician administration" do
+        assert_no_difference -> { ScreeningResponse.count } do
+          post BASE, params: {
+            instrument: PHQ9.key, encounter_ien: VISIT,
+            answers: complete_without_safety_flag(PHQ9)
+          }, headers: auth_headers(system_token)
+        end
 
         assert_response :forbidden
       end

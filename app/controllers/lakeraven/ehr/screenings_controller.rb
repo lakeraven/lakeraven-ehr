@@ -44,6 +44,8 @@ module Lakeraven
 
       before_action :authenticate_smart_token!
       before_action :authorize_screening_scope!
+      # Recording is a CLINICAL ACT, so it needs a clinician behind it.
+      before_action :require_clinician_credential!, only: :create
       before_action :load_patient
       # Two separate questions, both asked: may this CREDENTIAL leave its
       # patient compartment (token), and has this SESSION deliberately opened
@@ -121,10 +123,26 @@ module Lakeraven
       # The DUZ follows the TOKEN, never the ambient session: the identity a
       # write is signed under has to come from the same credential the
       # authorization was decided by, or the record disagrees with the
-      # authorization. (#486 generalizes this as
-      # SmartAuthentication#current_duz, which additionally requires the token
-      # to be a browser-session one; this call site adopts it on merge.)
-      def screening_duz = current_token&.resource_owner_id.to_s.presence
+      # authorization.
+      #
+      # It comes from `current_duz`, which is nil unless the token is a
+      # clinician credential — reading `resource_owner_id` blind attributed
+      # the administration, the acknowledgement trace and the audit log to the
+      # PATIENT whenever the caller held a patient-scoped token, because that
+      # field carries a patient dfn there.
+      def screening_duz = current_duz
+
+      # A screening is administered BY somebody. A credential with no clinician
+      # behind it — a patient's own token, a backend/system token, anything not
+      # minted by the sign-on bridge — cannot record one: the row would either
+      # name nobody or name the wrong person, and the acknowledgement trace on
+      # a self-harm disclosure is worth nothing if it can name the discloser.
+      def require_clinician_credential!
+        return true if clinician_credential?
+
+        render_forbidden("Recording a screening requires a clinician sign-on")
+        false
+      end
 
       # -- Audit (FailClosedClinicalAudit hooks) --------------------------------
 
@@ -136,7 +154,7 @@ module Lakeraven
       # Opening a patient record is state; a screening read is not. Nothing to
       # undo here — see PatientContextsController.
       def audit_agent_attributes
-        duz = screening_duz
+        duz = current_duz
         return super if duz.blank?
 
         { agent_who_type: "Practitioner", agent_who_identifier: duz }
