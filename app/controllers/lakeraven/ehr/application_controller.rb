@@ -11,16 +11,46 @@ module Lakeraven
       before_action :authenticate_smart_token!
       before_action :authorize_fhir_scope!
 
+      # Actions that DISCLOSE clinical data even though they are shaped as
+      # writes — generating a C-CDA, running a bulk export, requesting an
+      # eligibility determination.
+      #
+      # Verb dispatch alone gets these exactly backwards. Once POST means
+      # "needs write", a `system/*.write` token with no read scope anywhere
+      # can pull a patient's name and DOB out of a transition of care while
+      # being refused `GET /Patient`. They need BOTH: read for what they hand
+      # back, write for what they make.
+      def self.discloses_clinical_data(*actions)
+        before_action(only: actions) { authorize_disclosing_write! }
+      end
+
       private
+
+      # Read AND write, regardless of verb.
+      def authorize_disclosing_write!
+        return if can_read?(fhir_resource_type) && can_write?(fhir_resource_type)
+
+        missing = can_read?(fhir_resource_type) ? "writing" : "reading"
+        render_forbidden("Insufficient scope for #{missing} #{fhir_resource_type}")
+      end
 
       def fhir_resource_type
         self.class.name.demodulize.delete_suffix("Controller").singularize
       end
 
+      # Verb-aware. A read scope authorizes reads; anything that changes state
+      # needs a write scope. This used to call can_read? for every verb, so a
+      # `system/*.read` token could POST a C-CDA import, create and delete a
+      # bulk export, run an eligibility check, and generate a transition of
+      # care — all state changes behind a read-only credential.
       def authorize_fhir_scope!
-        return if can_read?(fhir_resource_type)
+        return if can_perform?(fhir_resource_type)
 
-        render_forbidden("Insufficient scope for reading #{fhir_resource_type}")
+        if read_request?
+          render_forbidden("Insufficient scope for reading #{fhir_resource_type}")
+        else
+          render_forbidden("Insufficient scope for writing #{fhir_resource_type}")
+        end
       end
 
       def authorize_fhir_write_scope!

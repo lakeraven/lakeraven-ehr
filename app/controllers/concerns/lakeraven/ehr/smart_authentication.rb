@@ -149,32 +149,34 @@ module Lakeraven
       def can_read?(resource_type)
         return false unless current_token
 
-        token_scopes = current_token.scopes.to_s.split
-        allowed = [
-          "patient/#{resource_type}.read", "patient/#{resource_type}.*",
-          "patient/*.read", "patient/*.*",
-          "user/#{resource_type}.read", "user/#{resource_type}.*",
-          "user/*.read", "user/*.*",
-          "system/#{resource_type}.read", "system/#{resource_type}.*",
-          "system/*.read", "system/*.*"
-        ]
-        (token_scopes & allowed).any?
+        scope_permits?(resource_type, %w[read *])
+      end
+
+      # Authorization for the CURRENT request's HTTP verb. A read scope must
+      # never authorize a write: GET/HEAD/OPTIONS need read, everything else
+      # needs write.
+      READ_METHODS = %w[GET HEAD OPTIONS].freeze
+
+      def read_request?
+        READ_METHODS.include?(request.request_method)
+      end
+
+      def can_perform?(resource_type)
+        read_request? ? can_read?(resource_type) : can_write?(resource_type)
+      end
+
+      # Resource types pulled into a bundle by _include / _revinclude are
+      # resources the caller is being handed, so they need the caller's scope
+      # like any other read. Returns the subset the token may actually read.
+      def readable_included_types(types)
+        Array(types).select { |t| can_read?(t) }
       end
 
       # Check if token can write the given FHIR resource type (SMART v2).
       def can_write?(resource_type)
         return false unless current_token
 
-        token_scopes = current_token.scopes.to_s.split
-        allowed = [
-          "patient/#{resource_type}.write", "patient/#{resource_type}.c", "patient/#{resource_type}.*",
-          "patient/*.write", "patient/*.c", "patient/*.*",
-          "user/#{resource_type}.write", "user/#{resource_type}.c", "user/#{resource_type}.*",
-          "user/*.write", "user/*.c", "user/*.*",
-          "system/#{resource_type}.write", "system/#{resource_type}.c", "system/#{resource_type}.*",
-          "system/*.write", "system/*.c", "system/*.*"
-        ]
-        (token_scopes & allowed).any?
+        scope_permits?(resource_type, %w[write c *])
       end
 
       # Enforce patient compartment for patient-context tokens.
@@ -196,7 +198,36 @@ module Lakeraven
         true
       end
 
+      # Compartment enforcement for INDEXES, SEARCHES and declared writes —
+      # not just #show.
+      #
+      # A patient-bound token asking for a collection, or naming a patient in
+      # a write, must either name its own compartment or be refused. Requiring
+      # a parameter is not a control — `?patient=1` from a token bound to 999
+      # returned patient 1's observations, and `patient_dfn=1` on a POST
+      # returned patient 1's entire C-CDA. An operation that names no patient
+      # at all is a cross-patient operation by definition, so a bound token
+      # cannot issue one.
+      def authorize_patient_search!(patient_id)
+        return true unless patient_context_scope?
+
+        if patient_id.blank?
+          render_forbidden("A patient-scoped token must act within its own patient compartment")
+          return false
+        end
+
+        authorize_patient_context!(patient_id)
+      end
+
       private
+
+      def scope_permits?(resource_type, actions)
+        token_scopes = current_token.scopes.to_s.split
+        allowed = %w[patient user system].flat_map do |context|
+          actions.flat_map { |a| [ "#{context}/#{resource_type}.#{a}", "#{context}/*.#{a}" ] }
+        end
+        (token_scopes & allowed).any?
+      end
 
       def extract_bearer_token
         # Returns [token_string, :header | :session] — the SOURCE matters, and
