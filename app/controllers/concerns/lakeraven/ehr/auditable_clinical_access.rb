@@ -74,9 +74,14 @@ module Lakeraven
         "R"
       end
 
+      # FHIR AuditEvent.outcome. A REDIRECT is a success: the screening surface
+      # answers a successful create with a 302, and mapping 3xx to "8" logged
+      # every recorded PHQ-9 — self-harm-flagged ones included — as a *serious
+      # failure*, indistinguishable from a real one, since the fail-closed path
+      # emits "8" as well.
       def audit_outcome
         case response.status
-        when 200..299 then "0"   # success
+        when 200..399 then "0"   # success (2xx, and 3xx: the work was done)
         when 400..499 then "4"   # minor failure
         else "8"                 # serious failure
         end
