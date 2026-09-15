@@ -97,12 +97,27 @@ module Lakeraven
       # rendered on the clinician's next page — a score for a record that was
       # never written.
       def deny_unrecorded_access
+        discard_unrecorded_response
+        render_unrecorded_access_denial
+      end
+
+      def discard_unrecorded_response
         self.response_body = nil
         @_response_body = nil
         response.delete_header("Location")
+        return unless respond_to?(:flash, true)
+
         flash.clear
         flash.discard
-        render plain: "Service Unavailable: this access could not be recorded, so it was not completed",
+      end
+
+      UNRECORDED_ACCESS_MESSAGE =
+        "this access could not be recorded, so it was not completed"
+
+      # Overridden by controllers that owe a caller some other representation —
+      # a FHIR client gets an OperationOutcome, not plain text.
+      def render_unrecorded_access_denial
+        render plain: "Service Unavailable: #{UNRECORDED_ACCESS_MESSAGE}",
                status: :service_unavailable
       end
 

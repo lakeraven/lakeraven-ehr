@@ -36,7 +36,12 @@ module Lakeraven
     # test/dummy/lib/lakeraven_demo_seeds.rb).
     class ChartsController < ActionController::Base
       include SmartAuthentication
-      include AuditableClinicalAccess
+      # FAIL-CLOSED audit, the same terms the clinician screening surface is
+      # held to. The chart now carries scored screenings (#474), so it serves
+      # the same item-level self-harm disclosures — and a sibling route to the
+      # same bytes must not be the one with the weaker audit. If the access
+      # cannot be recorded, it is not completed.
+      include FailClosedClinicalAudit
 
       FHIR_CONTENT_TYPE = "application/fhir+json"
 
@@ -386,6 +391,22 @@ module Lakeraven
           }, status: status, content_type: FHIR_CONTENT_TYPE
         else
           render plain: "#{status.to_s.titleize}: #{message}", status: status
+        end
+      end
+
+      # FailClosedClinicalAudit hook: a FHIR caller gets an OperationOutcome
+      # rather than plain text, like every other refusal on this controller.
+      # The chart establishes no state, so there is nothing to roll back.
+      def render_unrecorded_access_denial
+        if fhir_requested?
+          render json: {
+            resourceType: "OperationOutcome",
+            issue: [ { severity: "error", code: "transient",
+                       diagnostics: UNRECORDED_ACCESS_MESSAGE } ]
+          }, status: :service_unavailable, content_type: FHIR_CONTENT_TYPE
+        else
+          render plain: "Service Unavailable: #{UNRECORDED_ACCESS_MESSAGE}",
+                 status: :service_unavailable
         end
       end
 
