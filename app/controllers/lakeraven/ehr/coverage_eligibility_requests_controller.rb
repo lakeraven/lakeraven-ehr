@@ -7,7 +7,8 @@ module Lakeraven
 
       # Returns the patient's coverage, so: read as well as write, and bound
       # to the compartment.
-      discloses_clinical_data :create
+      # The response names the patient and their coverage.
+      discloses_clinical_data :create, reads: %w[Patient Coverage]
       compartment_bound :create, param: :patient_dfn
 
       def create

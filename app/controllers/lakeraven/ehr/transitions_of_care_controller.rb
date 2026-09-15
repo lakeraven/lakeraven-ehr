@@ -10,7 +10,9 @@ module Lakeraven
       # This POST RETURNS the patient's chart as a C-CDA, so it needs read
       # scope as well as write, and it is bound to the patient compartment
       # like any other read of that patient.
-      discloses_clinical_data :create
+      # The C-CDA carries demographics, allergies, problems and medications.
+      discloses_clinical_data :create,
+        reads: %w[Patient AllergyIntolerance Condition MedicationRequest]
       compartment_bound :create, param: :patient_dfn
 
       # POST /transitions_of_care
