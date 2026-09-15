@@ -110,6 +110,7 @@ module Lakeraven
       end
 
       def render_unauthorized(message = "Unauthorized")
+        note_audit_denial(message) if respond_to?(:note_audit_denial, true)
         render json: {
           resourceType: "OperationOutcome",
           issue: [ { severity: "error", code: "login", diagnostics: message } ]
@@ -117,6 +118,7 @@ module Lakeraven
       end
 
       def render_forbidden(message = "Forbidden")
+        note_audit_denial(message) if respond_to?(:note_audit_denial, true)
         render json: {
           resourceType: "OperationOutcome",
           issue: [ { severity: "error", code: "forbidden", diagnostics: message } ]
