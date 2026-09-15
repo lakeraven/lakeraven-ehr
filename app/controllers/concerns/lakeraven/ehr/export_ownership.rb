@@ -68,17 +68,28 @@ module Lakeraven
         export.client_id == export_owner_identity
       end
 
-      # Refuse before the export's existence is revealed, so these endpoints
-      # are not an existence oracle for other clients' export ids either.
+      # An export that is not yours is indistinguishable on the wire from one
+      # that does not exist.
+      #
+      # This previously answered 404 for missing and 403 for existing-but-not-
+      # yours, which IS an existence oracle — while carrying a comment claiming
+      # it was not. Exploitability is low (ids are UUIDs), but a comment
+      # asserting the opposite is worse than the oracle: it gets trusted later.
+      #
+      # Both now answer 404. The distinction survives in the log, where an
+      # operator can act on it and an attacker cannot see it — which is how
+      # "we could not determine" stays distinguishable from "we determined no"
+      # without putting the answer on the wire.
       def authorize_export_owner!
         export = find_owned_export
-        return render_not_found("Export", export_id_param) if export.nil?
-        return if owns_export?(export)
+        return if export && owns_export?(export)
 
-        render_operation_outcome(
-          status: :forbidden, severity: "error",
-          code: "forbidden", diagnostics: "Export belongs to a different client"
-        )
+        if export
+          Rails.logger.info(
+            "[export] refusing #{export_id_param}: owned by another client"
+          )
+        end
+        render_not_found("Export", export_id_param)
       end
 
       def export_id_param
