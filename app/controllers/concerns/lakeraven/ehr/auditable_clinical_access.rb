@@ -67,7 +67,7 @@ module Lakeraven
             end
 
             record_audit_event!
-            raise ActiveRecord::Rollback unless @audit_recorded
+            raise ActiveRecord::Rollback unless audit_settled?
           end
         rescue StandardError => e
           # The audit insert itself failed, taking the action's writes with it.
@@ -77,12 +77,26 @@ module Lakeraven
         # audit row written inside it. Record the attempt in its own.
         record_attempt_after_rollback if action_error
 
-        unless @audit_recorded
+        unless audit_settled?
           rollback_unrecorded_access
           return deny_unrecorded_access
         end
 
         raise action_error if action_error
+      end
+
+      # "Recorded" and "needed no record" are both settled; only "should have
+      # been recorded and could not be" is a refusal.
+      #
+      # The distinction exists because this concern is mixed into whole
+      # controller bases, and a browser base serves pages that touch no
+      # patient data at all — the sign-in form most of all. Treating those as
+      # unrecordable would answer 503 to the login page. Every surface that
+      # touches PHI arrives here either holding a credential, declaring a
+      # service actor, or refusing — all three of which are auditable — so
+      # this widens what needs no row, never what may go unrecorded.
+      def audit_settled?
+        @audit_recorded || !auditable_access?
       end
 
       # Best-effort form, kept for callers that record outside the around
@@ -276,6 +290,14 @@ module Lakeraven
 
       def audit_entity_identifier
         params[:dfn] || params[:ien] || params[:id]
+      end
+
+      # WHAT KIND of record, derived from the controller, so this concern can
+      # be mixed into a browser surface that never defined one. An audit row
+      # whose insert raises NoMethodError on a missing helper is a fail-closed
+      # 503 on a page that was working — coverage has to be safe to add.
+      def fhir_resource_type
+        self.class.name.demodulize.delete_suffix("Controller").singularize
       end
 
       # An action that established non-database state undoes it here: state

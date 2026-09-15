@@ -15,6 +15,11 @@ module Lakeraven
     # (development? && CHART_DEMO_OPEN=1 && SPIKE_MOCK_RPC=1); it 404s
     # everywhere else, so it can never front a real backend or ship to prod.
     class DemoVisitsController < ActionController::Base
+      # Dev-only and synthetic, and audited anyway. A charting surface that
+      # records vitals, a purpose of visit and a signed note is the shape of
+      # thing that must never be able to run unaudited — the day it is pointed
+      # at a real backend must not also be the day auditing gets added.
+      include AuditableClinicalAccess
       # Deterministic demo gateways: they mirror the production gateway
       # interfaces the services call, and always report success. Nothing is
       # persisted here — the controller records what the provider entered in
@@ -194,6 +199,13 @@ module Lakeraven
           ENV["SPIKE_MOCK_RPC"] == "1"
         head :not_found unless demo
       end
+
+      # The demo has no sign-on, so it names a fixed service actor rather than
+      # leaving the rows attributed to nobody. It is a Patient-centric
+      # surface, keyed on the route dfn — no extra PHI enters the log.
+      def unauthenticated_audit_actor = "demo-visit"
+
+      def fhir_resource_type = "Patient"
 
       def visit_state(dfn)
         (session[:demo_visits] ||= {})[dfn.to_s] ||= {

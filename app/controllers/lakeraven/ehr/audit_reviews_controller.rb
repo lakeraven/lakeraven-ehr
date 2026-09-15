@@ -17,8 +17,6 @@ module Lakeraven
     # Reading this screen is ITSELF an audited access, filed under the human
     # who read it. Who-saw-what is exactly as sensitive as what they saw.
     class AuditReviewsController < WebController
-      include AuditableClinicalAccess
-
       PAGE_SIZE = 200
       CSV_LIMIT = 10_000
       CSV_COLUMNS = %w[
