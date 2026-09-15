@@ -426,24 +426,52 @@ class DemoPatientChartTest < ActionDispatch::IntegrationTest
                  "say so in the PR rather than leaving the two surfaces looking identical"
   end
 
-  # The other half of the same honest accounting: the chart's audit is
-  # best-effort, while the clinician surface's fails closed. Widening
-  # FailClosedClinicalAudit to the FHIR controllers is #486's audit work, not
-  # this PR's, and until then the difference is documented rather than implied
-  # away.
-  test "the FHIR chart still serves when its audit cannot be written" do
-    seed_screening
-    original = Lakeraven::EHR::AuditEvent.method(:create!)
+  # This PR put screening answers into the chart bundle, so the chart now
+  # serves the same self-harm disclosures the clinician surface does — and it
+  # must not serve them on weaker terms. A sibling route to the same bytes
+  # under a best-effort audit is the defect the fail-closed concern exists to
+  # prevent, left open on the route this PR itself opened.
+  def with_broken_audit
     Lakeraven::EHR::AuditEvent.define_singleton_method(:create!) do |*|
       raise ActiveRecord::StatementInvalid, "audit down"
     end
-
-    get "/patients/1.json", headers: @headers
-
-    assert_response :ok, "best-effort audit on the chart — documented residue, not a claim"
+    yield
   ensure
     Lakeraven::EHR::AuditEvent.singleton_class.send(:remove_method, :create!)
-    assert_equal original.owner, Lakeraven::EHR::AuditEvent.method(:create!).owner
+  end
+
+  SELF_HARM_ITEM_TEXT = "better off dead"
+  DISCLOSING_ANSWER_CODE = "LA6571-9" # "Nearly every day"
+
+  test "the FHIR chart serves nothing when its audit cannot be written" do
+    seed_screening
+
+    with_broken_audit { get "/patients/1.json", headers: @headers }
+
+    assert_response :service_unavailable
+    assert_no_match(/#{SELF_HARM_ITEM_TEXT}/i, response.body)
+    assert_no_match(/#{DISCLOSING_ANSWER_CODE}/, response.body)
+    assert_equal "application/fhir+json", response.media_type,
+                 "a FHIR caller gets a FHIR refusal"
+  end
+
+  test "the HTML chart serves nothing when its audit cannot be written" do
+    seed_screening
+
+    with_broken_audit { get "/patients/1", headers: @headers }
+
+    assert_response :service_unavailable
+    assert_no_match(/Alice Anderson/, response.body)
+  end
+
+  test "a chart read that IS recorded still serves" do
+    seed_screening
+
+    assert_difference -> { Lakeraven::EHR::AuditEvent.count }, 1 do
+      get "/patients/1.json", headers: @headers
+    end
+
+    assert_response :ok
   end
 
   # -- Authorization: patient context ------------------------------------------
