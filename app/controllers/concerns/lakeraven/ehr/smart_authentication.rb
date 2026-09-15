@@ -60,18 +60,33 @@ module Lakeraven
           return
         end
 
-        # A cookie rides cross-site requests too, and ActionController::API has
-        # NO CSRF protection — SameSite=Lax is a browser courtesy, not an
-        # application control. Reproduced with no Authorization header, no CSRF
-        # token and `Origin: https://evil.example`.
+        # THE LANDING CONTRACT (see also #491).
         #
-        # So a session-derived token authorizes READS and nothing else. The
-        # browser chart is a read surface; browser writes are a later feature
-        # and must arrive with real CSRF protection rather than inherit this
-        # hole. Header/system callers are unaffected — they do not ride a
-        # cookie and cannot be driven cross-site.
-        if source == :session && browser_sso_token?(token) && !read_request?
-          render_unauthorized("A browser session may not drive a state-changing API request")
+        # A cookie rides cross-site requests, so a session-derived token can be
+        # driven by a hostile page — reproduced with no Authorization header,
+        # no CSRF token and `Origin: https://evil.example`. What stops that is
+        # forgery protection, and `ActionController::API` has none.
+        #
+        # So the rule is NOT "session tokens cannot write". It is:
+        #
+        #   A SESSION-DERIVED TOKEN MAY NOT WRITE WHERE FORGERY PROTECTION IS
+        #   NOT ACTUALLY ENFORCED FOR THIS REQUEST.
+        #
+        # Reads are unaffected everywhere. On a CSRF-protected route — a
+        # WebController descendant that really runs verify_authenticity_token —
+        # a browser session may write, and still has to satisfy everything else
+        # it already satisfies: scope, patient compartment, DUZ binding,
+        # revocation, idle timeout. Header/system callers are unaffected
+        # throughout; they do not ride a cookie and cannot be driven cross-site.
+        #
+        # The discriminator is the PROTECTION, never the class name — a
+        # subclass that skips verify_authenticity_token must not inherit write
+        # capability from its parent (see #forgery_protection_enforced?).
+        if source == :session && browser_sso_token?(token) &&
+           !read_request? && !forgery_protection_enforced?
+          render_unauthorized(
+            "A browser session may not drive a state-changing request without CSRF protection"
+          )
           return
         end
 
@@ -81,6 +96,31 @@ module Lakeraven
 
       def read_request?
         READ_METHODS.include?(request.request_method)
+      end
+
+      # Is Rails' forgery protection GENUINELY active for this request?
+      #
+      # Three things have to be true, and all three are checked rather than
+      # assumed:
+      #
+      #   1. the controller mixes in RequestForgeryProtection at all —
+      #      ActionController::API does not;
+      #   2. `protect_against_forgery?` is on (the app-level config);
+      #   3. `verify_authenticity_token` is ACTUALLY in this controller's
+      #      callback chain — a subclass that skips it has no protection, and
+      #      must not inherit write capability from a parent that does.
+      #
+      # Deliberately conservative: anything unexpected answers false, which
+      # costs a browser a write and never grants one.
+      def forgery_protection_enforced?
+        return false unless respond_to?(:protect_against_forgery?, true)
+        return false unless protect_against_forgery?
+
+        self.class._process_action_callbacks.any? do |callback|
+          callback.kind == :before && callback.filter == :verify_authenticity_token
+        end
+      rescue StandardError
+        false
       end
 
       # Check if token can read the given FHIR resource type.
@@ -277,6 +317,12 @@ module Lakeraven
       # callers must not inherit a human's signature.
       def current_duz
         return nil unless current_token && browser_sso_token?(current_token)
+        # resource_owner_id carries the DUZ for a browser token and the patient
+        # DFN for a patient-context token — two identifier namespaces in one
+        # column, compared with ==. SessionsController refuses to mint a
+        # browser token with a patient/ scope, and this refuses to READ one as
+        # a DUZ, so the namespaces cannot meet even if minting is bypassed.
+        return nil if patient_context_scope?
 
         current_token.resource_owner_id&.to_s.presence
       end
