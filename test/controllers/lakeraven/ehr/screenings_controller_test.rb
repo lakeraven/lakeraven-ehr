@@ -519,6 +519,32 @@ module Lakeraven
         assert_equal "C", AuditEvent.recent.first.action
       end
 
+      # A successful write REDIRECTS, and 302 fell outside the success range —
+      # so every recorded PHQ-9, self-harm-flagged ones included, was logged
+      # `outcome: "8"`: *serious failure* in the FHIR value set, and
+      # indistinguishable from a genuine one, since the fail-closed path emits
+      # "8" too. Asserting the action and not the outcome is what hid it.
+      test "a successful screening create is audited as a success, not a failure" do
+        submit
+
+        assert_response :redirect
+        event = AuditEvent.recent.first
+        assert_equal "C", event.action
+        assert_equal "0", event.outcome, "a recorded screening is not a serious failure"
+        assert_predicate event, :success?
+      end
+
+      test "a successful patient-context open is audited as a success" do
+        reset!
+        sign_in
+        open_patient(1)
+
+        assert_response :redirect
+        event = AuditEvent.recent.first
+        assert_equal "E", event.action
+        assert_equal "0", event.outcome
+      end
+
       test "a refused read is audited with a failure outcome" do
         get "#{BASE}/999999", headers: auth_headers
 
