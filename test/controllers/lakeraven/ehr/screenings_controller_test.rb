@@ -261,6 +261,23 @@ module Lakeraven
         assert_not_equal "1", event.agent_who_identifier
       end
 
+      # `clinician_credential?` and `current_duz` were different predicates, so
+      # a token on an app NAMED like the sign-on app but carrying no
+      # resource_owner_id — a client_credentials grant — passed the credential
+      # check and then recorded a screening authored by nobody.
+      test "a sign-on-shaped token with no DUZ cannot record a screening" do
+        anonymous = token_for(duz: nil)
+
+        assert_no_difference -> { ScreeningResponse.count } do
+          post BASE, params: {
+            instrument: PHQ9.key, encounter_ien: VISIT,
+            answers: complete_without_safety_flag(PHQ9)
+          }, headers: auth_headers(anonymous)
+        end
+
+        assert_response :forbidden
+      end
+
       # F6: a backend credential has no human behind it, so it cannot author a
       # clinician administration — the row would name nobody.
       test "a system token cannot record an unauthored clinician administration" do
@@ -743,6 +760,33 @@ module Lakeraven
         assert_response :forbidden
         get "#{BASE}/#{id}", headers: auth_headers
         assert_response :forbidden
+      end
+
+      # -- Fail closed AND SAY WHY ---------------------------------------------
+      #
+      # A 422 that re-renders the form with the answers still selected and no
+      # statement that anything was refused reads as "the page reloaded".
+
+      test "a refusal caused by a corrupt prior row says so on the form" do
+        token = SecureRandom.uuid
+        submit(submission_token: token)
+        ScreeningResponse.last.update_column(:total_score, 999)
+
+        submit(submission_token: token)
+
+        assert_response :unprocessable_entity
+        assert_select ".screening-errors[role=alert]", /could not be recorded/i
+      end
+
+      test "a refusal caused by a storage failure says so on the form" do
+        with_failing(ScreeningResponse, :create!,
+                     ->(*) { raise ActiveRecord::StatementInvalid, "disk full" }) do
+          submit
+        end
+
+        assert_response :unprocessable_entity
+        assert_equal 0, ScreeningResponse.count
+        assert_select ".screening-errors[role=alert]", /could not be recorded/i
       end
 
       # -- Legacy rows must not take the clinician surface down ----------------

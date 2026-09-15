@@ -73,6 +73,32 @@
     </div>
   <% end %>
 
+  <%# Fail closed AND SAY WHY: without these, a refusal re-rendered the form
+      with the answers still selected and no statement that anything had been
+      refused — which reads as "the page reloaded". %>
+  <% if @result&.errors&.include?(:conflicting_record) %>
+    <div class="screening-errors" role="alert">
+      <h2>This screening could not be recorded</h2>
+      <p>
+        An existing record for this submission does not agree with itself, so
+        it cannot be treated as a previous recording of this screening, and it
+        has not been altered. Nothing has been recorded. Report this to support
+        with the patient number and today&rsquo;s date.
+      </p>
+    </div>
+  <% end %>
+
+  <% if @result&.errors&.include?(:persistence_error) %>
+    <div class="screening-errors" role="alert">
+      <h2>This screening could not be recorded</h2>
+      <p>
+        The record could not be saved. Nothing has been recorded. Your answers
+        are still on this form — submit again, and if it fails a second time,
+        record the screening on paper and report the failure.
+      </p>
+    </div>
+  <% end %>
+
   <% if @result&.errors&.include?(:missing_administered_by) %>
     <div class="screening-errors" role="alert">
       <h2>Clinician sign-on required</h2>

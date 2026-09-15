@@ -22,14 +22,16 @@ module Lakeraven
         answers
       end
 
+      # A clinician administration is performed BY someone, so the default
+      # carries a DUZ; tests about its absence pass `administered_by: nil`.
       def save(instrument: PHQ9, answers: nil, **overrides)
-        ScreeningEntryService.new(
+        ScreeningEntryService.new(**{
           instrument: instrument,
           patient_dfn: DFN,
           encounter_ien: VISIT,
           answers: answers || complete_without_safety_flag(instrument),
-          **overrides
-        ).save
+          administered_by: "99999"
+        }.merge(overrides)).save
       end
 
       # -- Happy path ----------------------------------------------------------
@@ -183,6 +185,16 @@ module Lakeraven
         assert_equal 0, ScreeningResponse.count
       end
 
+      # Not only when safety triggers: a clinician administration recorded by
+      # nobody is unattributable either way.
+      test "any clinician administration with no clinician is refused" do
+        result = save(administered_by: nil)
+
+        assert_not result.success?
+        assert_includes result.errors, :missing_administered_by
+        assert_equal 0, ScreeningResponse.count
+      end
+
       test "a pre-visit self-report still needs no clinician" do
         answers = all_answered(PHQ9, 0).merge(PHQ9.safety_link_id => 2)
         result = ScreeningEntryService.new(
@@ -224,7 +236,8 @@ module Lakeraven
 
       test "a missing patient is rejected" do
         result = ScreeningEntryService.new(
-          instrument: PHQ9, patient_dfn: nil, encounter_ien: VISIT, answers: all_answered(PHQ9, 1)
+          instrument: PHQ9, patient_dfn: nil, encounter_ien: VISIT,
+          answers: all_answered(PHQ9, 1), administered_by: "99999"
         ).save
 
         assert_equal :invalid_input, result.error
@@ -245,7 +258,7 @@ module Lakeraven
 
       test "a submission missing a visit, answers, a clinician and acknowledgement reports all four" do
         answers = { PHQ9.safety_link_id => 3 }
-        result = save(encounter_ien: nil, answers: answers)
+        result = save(encounter_ien: nil, answers: answers, administered_by: nil)
 
         assert_equal %i[missing_encounter incomplete safety_unacknowledged missing_administered_by].sort,
                      result.errors.sort
@@ -322,7 +335,7 @@ module Lakeraven
         t = token
         save(answers: complete_without_safety_flag(PHQ9), submission_token: t)
         other = ScreeningEntryService.new(
-          instrument: PHQ9, patient_dfn: 2, encounter_ien: VISIT,
+          instrument: PHQ9, patient_dfn: 2, encounter_ien: VISIT, administered_by: "99999",
           answers: complete_without_safety_flag(PHQ9), submission_token: t
         ).save
 
@@ -395,7 +408,8 @@ module Lakeraven
 
       test "the instrument may be named by key" do
         result = ScreeningEntryService.new(
-          instrument: "gad-7", patient_dfn: DFN, encounter_ien: VISIT, answers: all_answered(GAD7, 1)
+          instrument: "gad-7", patient_dfn: DFN, encounter_ien: VISIT,
+          answers: all_answered(GAD7, 1), administered_by: "99999"
         ).save
 
         assert result.success?

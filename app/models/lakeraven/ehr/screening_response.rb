@@ -55,6 +55,9 @@ module Lakeraven
       # self-report (#471) has no clinician by definition and is exempt.
       validates :safety_acknowledged_by, presence: true,
                 if: -> { safety_flagged? && source == SOURCE_CLINICIAN }
+      # A clinician administration recorded by nobody is unattributable —
+      # whether or not it disclosed self-harm, and whatever wrote it.
+      validates :administered_by, presence: true, if: -> { source == SOURCE_CLINICIAN }
       # The row is the source of truth for BOTH FHIR projections, so it may not
       # disagree with itself: the answers must cover the instrument, every value
       # must be a choice the instrument defines, and the stored total and band

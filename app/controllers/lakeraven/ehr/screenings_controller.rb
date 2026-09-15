@@ -158,8 +158,13 @@ module Lakeraven
       # minted by the sign-on bridge — cannot record one: the row would either
       # name nobody or name the wrong person, and the acknowledgement trace on
       # a self-harm disclosure is worth nothing if it can name the discloser.
+      # Keyed on the DUZ itself, not on a second predicate that merely implies
+      # it: `clinician_credential?` and `current_duz` could disagree, and a
+      # token on an app NAMED like the sign-on app but carrying no
+      # resource_owner_id (a client_credentials grant) passed the first and
+      # then recorded a screening authored by nobody.
       def require_clinician_credential!
-        return true if clinician_credential?
+        return true if current_duz.present?
 
         render_forbidden("Recording a screening requires a clinician sign-on")
         false

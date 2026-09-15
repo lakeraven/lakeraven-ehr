@@ -24,7 +24,8 @@ module Lakeraven
           patient_dfn: 1, encounter_ien: "2090061", instrument_key: "phq-9",
           answers: NO_DISCLOSURE.dup,
           total_score: 16, severity_band: "moderately severe",
-          effective_at: Time.utc(2026, 3, 1), source: "clinician"
+          effective_at: Time.utc(2026, 3, 1), source: "clinician",
+          administered_by: "99999"
         }.merge(overrides)
       end
 
@@ -70,6 +71,22 @@ module Lakeraven
         record = build(answers: NO_DISCLOSURE.merge("99999-9" => 2), total_score: 18, severity_band: "moderately severe")
 
         assert_not record.valid?
+      end
+
+      # A clinician administration recorded by nobody is unattributable, whether
+      # or not it disclosed self-harm.
+      test "a clinician administration must name who administered it" do
+        assert_not build(administered_by: nil).valid?
+      end
+
+      test "a pre-visit self-report needs no administrator" do
+        assert build(source: ScreeningResponse::SOURCE_PRE_VISIT, administered_by: nil).valid?
+      end
+
+      test "the database refuses an unattributed clinician administration" do
+        assert_raises(ActiveRecord::StatementInvalid) do
+          raw_insert(source: "'clinician'", administered_by: "NULL")
+        end
       end
 
       test "a safety flagged row must carry its acknowledgement timestamp" do
@@ -138,6 +155,7 @@ module Lakeraven
           severity_band: "'minimal'", effective_at: "NOW()", source: "'clinician'",
           safety_flagged: "FALSE", safety_acknowledged_at: "NULL",
           safety_acknowledged_by: "NULL", submission_token: "'#{SecureRandom.hex(8)}'",
+          administered_by: "'99999'",
           created_at: "NOW()", updated_at: "NOW()"
         }.merge(overrides)
 
