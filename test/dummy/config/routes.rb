@@ -32,4 +32,12 @@ Rails.application.routes.draw do
   # session), for the S8 rollback-completeness contract. Adopted from the
   # round-2 gate's probe.
   get "probe_cookies/:dfn" => "probe_cookies#show", constraints: { dfn: /\d+/ } if Rails.env.test?
+
+  # Test-only probes for the session-write landing contract (#486/#491): one
+  # route where forgery protection is genuinely enforced, one where it is
+  # skipped. Never routed outside the test environment.
+  if Rails.env.test?
+    post "csrf_probe" => "csrf_probe#create"
+    post "csrf_disabled_probe" => "csrf_disabled_probe#create"
+  end
 end
