@@ -11,7 +11,7 @@
 #   - CDC NNDSS Notifiable Conditions (2026)
 #   - CSTE Position Statements
 #
-# Ulster County relevance: STI/HIV, TB, Hep B, lead, communicable disease
+# County public-health relevance: STI/HIV, TB, Hep B, lead, communicable disease
 
 # ---------------------------------------------------------------------------
 # Tuberculosis
@@ -182,7 +182,7 @@
   reporting_timeframe: "5 days"
 
 # ---------------------------------------------------------------------------
-# Lead Poisoning (Ulster County relevance)
+# Lead Poisoning (county public-health relevance)
 # ---------------------------------------------------------------------------
 - code: "T56.0"
   display: "Toxic effects of lead and its compounds"

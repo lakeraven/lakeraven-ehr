@@ -15,12 +15,12 @@ Feature: Accounting of Disclosures (ONC § 170.315(d)(11))
 
   Scenario: Record a PHI disclosure to an external party
     When a disclosure is recorded for patient "1" with:
-      | field               | value                              |
-      | recipient_name      | Ulster County Health Department    |
-      | recipient_type      | Public Health Authority             |
-      | purpose             | public_health                      |
-      | data_disclosed      | Laboratory results, Demographics   |
-      | disclosed_by        | 789                                |
+      | field          | value                            |
+      | recipient_name | Example County Health Department |
+      | recipient_type | Public Health Authority          |
+      | purpose        | public_health                    |
+      | data_disclosed | Laboratory results, Demographics |
+      | disclosed_by   | 789                              |
     Then the disclosure should be recorded successfully
     And the disclosure should be immutable
     And the disclosure should have an audit trail entry
@@ -35,10 +35,10 @@ Feature: Accounting of Disclosures (ONC § 170.315(d)(11))
 
   Scenario: Patient requests accounting of disclosures
     Given patient "1" has the following recent disclosure history:
-      | recipient_name                   | purpose        | months_ago |
-      | Ulster County Health Department  | public_health  | 3          |
-      | NYS ECLRS                       | public_health  | 2          |
-      | External Lab Corp               | treatment      | 1          |
+      | recipient_name                   | purpose       | months_ago |
+      | Example County Health Department | public_health | 3          |
+      | NYS ECLRS                        | public_health | 2          |
+      | External Lab Corp                | treatment     | 1          |
     When patient "1" requests their accounting of disclosures
     Then the report should contain 3 disclosures
     And each disclosure should include the date, recipient, and purpose
@@ -57,8 +57,8 @@ Feature: Accounting of Disclosures (ONC § 170.315(d)(11))
 
   Scenario: Export disclosure report as structured data
     Given patient "1" has the following recent disclosure history:
-      | recipient_name                   | purpose        | months_ago |
-      | Ulster County Health Department  | public_health  | 1          |
+      | recipient_name                   | purpose       | months_ago |
+      | Example County Health Department | public_health | 1          |
     When the disclosure report is exported for patient "1"
     Then the export should include patient identifier
     And the export should include disclosure details

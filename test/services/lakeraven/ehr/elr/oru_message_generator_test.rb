@@ -19,10 +19,10 @@ module Lakeraven
             dfn: "12345",
             name: { given: "Alice", family: "Anderson" },
             dob: "1975-06-15", sex: "F",
-            address: { street: "123 Main St", city: "Kingston", state: "NY", zip: "12401" }
+            address: { street: "123 Main St", city: "Example City", state: "NY", zip: "99999" }
           }
           @ordering_provider = { duz: "789", name: "Dr. Smith", npi: "1234567890" }
-          @performing_lab = { name: "Ulster County Lab", clia: "33D1234567" }
+          @performing_lab = { name: "Example County Lab", clia: "33D1234567" }
           @specimen = { type: "BLD", type_display: "Blood", collected_at: Time.current }
         end
 
