@@ -1,4 +1,4 @@
-Feature: State Immunization Information System Exchange (Ulster County RFP §2.2.4, §2.2.18)
+Feature: State Immunization Information System Exchange (county public-health RFP §2.2.4, §2.2.18)
   As a healthcare provider
   I need bidirectional immunization data exchange with the state IIS
   So that patient vaccination records stay synchronized with the state registry

@@ -16,7 +16,7 @@ Feature: Accounting of Disclosures (ONC § 170.315(d)(11))
   Scenario: Record a PHI disclosure to an external party
     When a disclosure is recorded for patient "1" with:
       | field               | value                              |
-      | recipient_name      | Ulster County Health Department    |
+      | recipient_name      | Example County Health Department    |
       | recipient_type      | Public Health Authority             |
       | purpose             | public_health                      |
       | data_disclosed      | Laboratory results, Demographics   |
@@ -36,7 +36,7 @@ Feature: Accounting of Disclosures (ONC § 170.315(d)(11))
   Scenario: Patient requests accounting of disclosures
     Given patient "1" has the following recent disclosure history:
       | recipient_name                   | purpose        | months_ago |
-      | Ulster County Health Department  | public_health  | 3          |
+      | Example County Health Department  | public_health  | 3          |
       | NYS ECLRS                       | public_health  | 2          |
       | External Lab Corp               | treatment      | 1          |
     When patient "1" requests their accounting of disclosures
@@ -58,7 +58,7 @@ Feature: Accounting of Disclosures (ONC § 170.315(d)(11))
   Scenario: Export disclosure report as structured data
     Given patient "1" has the following recent disclosure history:
       | recipient_name                   | purpose        | months_ago |
-      | Ulster County Health Department  | public_health  | 1          |
+      | Example County Health Department  | public_health  | 1          |
     When the disclosure report is exported for patient "1"
     Then the export should include patient identifier
     And the export should include disclosure details

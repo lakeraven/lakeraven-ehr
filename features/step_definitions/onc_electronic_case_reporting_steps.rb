@@ -37,7 +37,7 @@ Given("the patient has clinical data for the case report") do
       date: Time.current.strftime("%Y-%m-%d"),
       type_code: "99213",
       type_display: "Office visit",
-      facility: "Ulster County Health Department"
+      facility: "Example County Health Department"
     },
     provider: {
       duz: "789", name: "Dr. Smith", npi: "1234567890"

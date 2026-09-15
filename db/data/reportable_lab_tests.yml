@@ -11,7 +11,7 @@
 #   - CDC NNDSS Notifiable Conditions (2026)
 #   - APHL/CDC ELR Implementation Guide
 #
-# Ulster County relevance: STI/HIV, TB, Hep B, lead, communicable disease
+# county public-health relevance: STI/HIV, TB, Hep B, lead, communicable disease
 
 # ---------------------------------------------------------------------------
 # Hepatitis B
@@ -143,7 +143,7 @@
   reporting_timeframe: "24 hours"
 
 # ---------------------------------------------------------------------------
-# Lead (Ulster County relevance)
+# Lead (county public-health relevance)
 # ---------------------------------------------------------------------------
 - loinc: "5671-3"
   display: "Lead [Mass/volume] in Blood"
@@ -190,7 +190,7 @@
   reporting_timeframe: "24 hours"
 
 # ---------------------------------------------------------------------------
-# Tick-borne (Ulster County relevance)
+# Tick-borne (county public-health relevance)
 # ---------------------------------------------------------------------------
 - loinc: "23867-8"
   display: "Borrelia burgdorferi IgM Ab [Presence] in Serum"
