@@ -45,6 +45,9 @@ class CreateScreeningResponses < ActiveRecord::Migration[8.1]
       # 1. A flagged row carries WHEN it was acknowledged.
       t.check_constraint "NOT safety_flagged OR safety_acknowledged_at IS NOT NULL",
                          name: "screening_flagged_requires_acknowledgement"
+      # 0. A clinician administration names WHO administered it.
+      t.check_constraint "source <> 'clinician' OR administered_by IS NOT NULL",
+                         name: "screening_clinician_requires_administrator"
       # 2. A flagged CLINICIAN administration carries WHO acknowledged it. A
       #    pre-visit self-report (#471) has no clinician by definition.
       t.check_constraint "NOT (safety_flagged AND source = 'clinician') " \

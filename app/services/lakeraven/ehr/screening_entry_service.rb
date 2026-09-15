@@ -94,14 +94,12 @@ module Lakeraven
         reasons << :missing_encounter if clinician? && @encounter_ien.blank?
         reasons << :incomplete unless score.complete?
         reasons << :safety_unacknowledged if safety_required
-        # An acknowledgement is a clinical act by a named person. A clinician
-        # administration carrying a self-harm disclosure with no DUZ has no
-        # one standing behind the risk assessment, which is the whole point of
-        # the trace. (A pre-visit self-report, #471, has no clinician by
-        # definition and is not held to this.)
-        if score.safety_triggered? && clinician? && @administered_by.blank?
-          reasons << :missing_administered_by
-        end
+        # A clinician administration is performed BY someone. Recorded by
+        # nobody it is unattributable, and a self-harm acknowledgement with no
+        # one standing behind the risk assessment is worth nothing at all.
+        # (A pre-visit self-report, #471, has no clinician by definition and is
+        # not held to this.)
+        reasons << :missing_administered_by if clinician? && @administered_by.blank?
 
         if reasons.any?
           return failure(*reasons, score: score, missing_link_ids: score.missing_link_ids,
