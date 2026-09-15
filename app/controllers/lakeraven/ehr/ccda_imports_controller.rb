@@ -6,6 +6,14 @@ module Lakeraven
     # ONC §170.315(b)(2) — Clinical Information Reconciliation (import)
     # Receives external C-CDA documents for reconciliation.
     class CcdaImportsController < ApplicationController
+      include PatientCompartment
+
+      # The one patient-naming write that had no compartment declaration. It
+      # moves no data today only because ClinicalReconciliationService's
+      # persistence is still a stub — but the 201 is already a false
+      # attestation, and it becomes a cross-patient clinical write the day that
+      # stub is implemented.
+      compartment_bound :create, param: :patient_dfn
       # POST /ccda_imports
       # Import a C-CDA document for clinical reconciliation
       def create
