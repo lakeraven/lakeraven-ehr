@@ -16,22 +16,40 @@ module Lakeraven
       # eligibility determination.
       #
       # Verb dispatch alone gets these exactly backwards. Once POST means
-      # "needs write", a `system/*.write` token with no read scope anywhere
-      # can pull a patient's name and DOB out of a transition of care while
-      # being refused `GET /Patient`. They need BOTH: read for what they hand
-      # back, write for what they make.
-      def self.discloses_clinical_data(*actions)
-        before_action(only: actions) { authorize_disclosing_write! }
+      # "needs write", a token with no read scope anywhere can pull a patient's
+      # name and DOB out of a transition of care while being refused
+      # `GET /Patient`. They need BOTH: write for what they make, read for what
+      # they hand back.
+      #
+      # `reads:` NAMES THE TYPES IN THE PAYLOAD, and is mandatory. An earlier
+      # version checked `can_read?(fhir_resource_type)`, and that type comes
+      # from the CONTROLLER CLASS NAME — "TransitionsOfCare", "Export" — which
+      # is not a FHIR resource and is not what is being handed back. A token
+      # scoped `system/TransitionsOfCare.read+write` satisfied it and still
+      # extracted a patient's name and DOB. Only a token with no read scope at
+      # all was caught.
+      #
+      # ChartsController has the same shape: it requires Patient read for the
+      # whole request and gates each section on its own type.
+      def self.discloses_clinical_data(*actions, reads:)
+        types = Array(reads).freeze
+        raise ArgumentError, "discloses_clinical_data needs the types it discloses" if types.empty?
+
+        before_action(only: actions) { authorize_disclosing_write!(types) }
       end
 
       private
 
-      # Read AND write, regardless of verb.
-      def authorize_disclosing_write!
-        return if can_read?(fhir_resource_type) && can_write?(fhir_resource_type)
+      # Write scope for the operation, read scope for EVERY type it discloses.
+      def authorize_disclosing_write!(disclosed_types)
+        unless can_write?(fhir_resource_type)
+          return render_forbidden("Insufficient scope for writing #{fhir_resource_type}")
+        end
 
-        missing = can_read?(fhir_resource_type) ? "writing" : "reading"
-        render_forbidden("Insufficient scope for #{missing} #{fhir_resource_type}")
+        missing = disclosed_types.reject { |type| can_read?(type) }
+        return if missing.empty?
+
+        render_forbidden("Insufficient scope for reading #{missing.join(', ')}")
       end
 
       def fhir_resource_type

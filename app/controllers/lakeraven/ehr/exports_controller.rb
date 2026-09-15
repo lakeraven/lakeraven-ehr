@@ -8,7 +8,9 @@ module Lakeraven
 
       # A bulk export IS a read of the patient's record; it needs read scope as
       # well as write, and it is bound to the compartment.
-      discloses_clinical_data :create
+      # A bulk export dumps the patient's record; EhiExportService::FHIR_RESOURCE_TYPES
+      # is what actually lands in the files.
+      discloses_clinical_data :create, reads: EhiExportService::FHIR_RESOURCE_TYPES
       compartment_bound :create, param: :patient_dfn
       before_action :authorize_export_owner!, only: %i[show destroy]
 

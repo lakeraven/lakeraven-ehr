@@ -76,6 +76,94 @@ class FhirApiAuthorizationTest < ActionDispatch::IntegrationTest
     assert_response :forbidden
   end
 
+  # This route's declaration was covered by nothing: deleting it left the suite
+  # green, while the same deletion on the other two correctly reddened tests.
+  test "a write-only token cannot request an eligibility determination" do
+    setup_auth(scopes: "system/*.write")
+
+    post "/lakeraven-ehr/CoverageEligibilityRequest",
+      params: { patient_dfn: "1", coverage_type: "medicaid" }, headers: @headers
+    assert_response :forbidden
+  end
+
+  # B1: the disclosed types are what must be readable — not a pseudo-resource
+  # named after the controller class. A token scoped to the route's own name
+  # satisfied the old check and still extracted the patient's demographics.
+  test "a token scoped to the route name cannot extract a chart through it" do
+    setup_auth(scopes: "system/TransitionsOfCare.read system/TransitionsOfCare.write")
+
+    post "/lakeraven-ehr/transitions_of_care", params: { patient_dfn: "1" }, headers: @headers
+
+    assert_response :forbidden
+    refute_includes response.body, "Anderson"
+  end
+
+  test "a token scoped to the route name cannot extract coverage through it" do
+    setup_auth(scopes: "system/CoverageEligibilityRequest.read " \
+                       "system/CoverageEligibilityRequest.write")
+
+    post "/lakeraven-ehr/CoverageEligibilityRequest",
+      params: { patient_dfn: "1", coverage_type: "medicaid" }, headers: @headers
+
+    assert_response :forbidden
+  end
+
+  test "a token that can read the disclosed types may still use the route" do
+    setup_auth(scopes: "system/Patient.read system/AllergyIntolerance.read " \
+                       "system/Condition.read system/MedicationRequest.read " \
+                       "system/TransitionsOfCare.write")
+
+    post "/lakeraven-ehr/transitions_of_care", params: { patient_dfn: "1" }, headers: @headers
+    assert_response :created
+  end
+
+  # B2: the one patient-naming write with no compartment declaration.
+  test "a patient-bound token cannot import a C-CDA for another patient" do
+    setup_auth(scopes: "patient/*.read patient/*.write", resource_owner_id: 999)
+
+    post "/lakeraven-ehr/ccda_imports", params: { patient_dfn: "1" },
+      headers: @headers.merge("CONTENT_TYPE" => "application/xml"),
+      env: { "RAW_POST_DATA" => "<ClinicalDocument/>" }
+
+    assert_response :forbidden
+  end
+
+  # B3: AuditEvent is the accounting-of-disclosures record, and was unbound.
+  test "a patient-bound token cannot read another patient's access trail" do
+    Lakeraven::EHR::AuditEvent.create!(
+      event_type: "rest", action: "R", outcome: "0",
+      entity_type: "Patient", entity_identifier: "1",
+      agent_who_type: "Application", agent_who_identifier: "someone"
+    )
+    setup_auth(scopes: "patient/*.read", resource_owner_id: 999)
+
+    get "/lakeraven-ehr/AuditEvent", params: { patient: "999" }, headers: @headers
+
+    assert_response :ok
+    refute_includes response.body, "Patient/1",
+      "the access trail of another patient came back"
+  end
+
+  test "an unqualified AuditEvent search is refused to a patient-bound token" do
+    setup_auth(scopes: "patient/*.read", resource_owner_id: 999)
+
+    get "/lakeraven-ehr/AuditEvent", headers: @headers
+    assert_response :forbidden
+  end
+
+  test "an unbound token still reads the facility-wide access trail" do
+    Lakeraven::EHR::AuditEvent.create!(
+      event_type: "rest", action: "R", outcome: "0",
+      entity_type: "Patient", entity_identifier: "1",
+      agent_who_type: "Application", agent_who_identifier: "someone"
+    )
+    setup_auth(scopes: "system/*.read")
+
+    get "/lakeraven-ehr/AuditEvent", headers: @headers
+    assert_response :ok
+    assert_includes response.body, "Patient/1"
+  end
+
   test "a read-and-write token can still use the read-as-POST routes" do
     setup_auth(scopes: "system/*.read system/*.write")
 
@@ -181,7 +269,7 @@ class FhirApiAuthorizationTest < ActionDispatch::IntegrationTest
 
     get "/lakeraven-ehr/exports/victim-export/files/PatientNdjson", headers: @headers
 
-    assert_response :forbidden
+    assert_response :not_found
     refute_includes response.body, "111-11-1111"
   end
 
@@ -191,9 +279,24 @@ class FhirApiAuthorizationTest < ActionDispatch::IntegrationTest
 
     delete "/lakeraven-ehr/exports/victim-export", headers: @headers
 
-    assert_response :forbidden
+    assert_response :not_found
     assert Lakeraven::EHR::ExportsController.store.key?("victim-export"),
       "the export was removed anyway"
+  end
+
+  # An export that is not yours must be indistinguishable from one that does
+  # not exist; the refusal used to be an existence oracle (403 vs 404).
+  test "a foreign export and a missing export are indistinguishable" do
+    seed_victim_export
+    setup_auth(scopes: "system/*.read system/*.write")
+
+    delete "/lakeraven-ehr/exports/victim-export", headers: @headers
+    foreign = [ response.status, response.body ]
+
+    delete "/lakeraven-ehr/exports/no-such-export-id", headers: @headers
+    missing = [ response.status, response.body ]
+
+    assert_equal foreign.first, missing.first
   end
 
   test "a client can still reach its own export files" do
@@ -217,7 +320,7 @@ class FhirApiAuthorizationTest < ActionDispatch::IntegrationTest
 
     get "/lakeraven-ehr/exports/victim-export/files/PatientNdjson", headers: @headers
 
-    assert_response :forbidden
+    assert_response :not_found
     refute_includes response.body, "111-11-1111"
   end
 
@@ -233,6 +336,33 @@ class FhirApiAuthorizationTest < ActionDispatch::IntegrationTest
     assert_response :created
     refute_includes response.body, "FORGED,AUTHOR"
     refute_includes response.body, "9999999999"
+  end
+
+  # The degraded author has to actually REACH the artifact. It previously did
+  # not: the generator read only :name and :institution, dropped :device, :npi
+  # and :duz, and emitted an assignedAuthor with neither an assignedPerson nor
+  # an assignedAuthoringDevice — C-CDA-invalid, while still asserting a
+  # hardcoded extension="provider". Silent, not honest.
+  test "a C-CDA with no human author names the authoring device instead" do
+    setup_auth(scopes: "system/*.read system/*.write")
+
+    post "/lakeraven-ehr/transitions_of_care", params: { patient_dfn: "1" }, headers: @headers
+
+    assert_response :created
+    assert_includes response.body, "assignedAuthoringDevice"
+    refute_includes response.body, "assignedPerson"
+    refute_includes response.body, 'extension="provider"',
+      "the document asserted a provider id for a document no provider authored"
+  end
+
+  test "the C-CDA author block is valid whichever branch it takes" do
+    setup_auth(scopes: "system/*.read system/*.write")
+    post "/lakeraven-ehr/transitions_of_care", params: { patient_dfn: "1" }, headers: @headers
+
+    author = response.body[%r{<author>.*?</author>}m]
+    refute_nil author
+    assert author.include?("assignedPerson") || author.include?("assignedAuthoringDevice"),
+      "assignedAuthor with neither assignedPerson nor assignedAuthoringDevice is invalid"
   end
 
   private

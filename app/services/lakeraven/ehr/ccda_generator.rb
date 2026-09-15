@@ -89,22 +89,45 @@ module Lakeraven
         end
       end
 
+      # WHO authored this document.
+      #
+      # `assignedAuthor` must carry either an `assignedPerson` or an
+      # `assignedAuthoringDevice` — one with neither is C-CDA-invalid, and that
+      # is what this emitted whenever no display name was supplied, while still
+      # asserting a hardcoded `extension="provider"` id. So the degraded state
+      # was not honest-but-empty, it was a silent false attestation.
+      #
+      # Now: a human author is identified by DUZ (and NPI where known) and gets
+      # an assignedPerson; with no human, the document says so explicitly with
+      # an assignedAuthoringDevice naming the client that generated it.
       def build_author(xml)
         xml.author do
           xml.time(value: Time.current.strftime("%Y%m%d%H%M%S"))
           xml.assignedAuthor do
-            xml.id(root: "2.16.840.1.113883.19.5", extension: "provider")
-            if @author[:name]
-              xml.assignedPerson do
-                xml.name { xml.text(@author[:name]) }
+            build_author_id(xml)
+            if @author[:name].present?
+              xml.assignedPerson { xml.name { xml.text(@author[:name]) } }
+            else
+              xml.assignedAuthoringDevice do
+                xml.softwareName(@author[:device].presence || "Lakeraven EHR")
               end
             end
             if @author[:institution]
-              xml.representedOrganization do
-                xml.name(@author[:institution])
-              end
+              xml.representedOrganization { xml.name(@author[:institution]) }
             end
           end
+        end
+      end
+
+      # NPI when we have one, else the DUZ in the local provider namespace,
+      # else the authoring system. Never a hardcoded "provider".
+      def build_author_id(xml)
+        if @author[:npi].present?
+          xml.id(root: "2.16.840.1.113883.4.6", extension: @author[:npi])
+        elsif @author[:duz].present?
+          xml.id(root: "2.16.840.1.113883.19.5", extension: @author[:duz].to_s)
+        else
+          xml.id(root: "2.16.840.1.113883.19.5", nullFlavor: "NA")
         end
       end
 
