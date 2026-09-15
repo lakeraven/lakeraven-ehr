@@ -154,8 +154,19 @@ module Lakeraven
       #
       # A rejected credential carries no identity, but it is exactly the event
       # worth recording — so a refusal is auditable even with no token at all.
+      # A surface that refused FOR A REASON is auditable whatever status it
+      # ended up with: a redirect to a sign-in page is a refusal too, and an
+      # attempt to read the audit log is exactly the attempt worth keeping.
       def auditable_access?
-        current_token || unauthenticated_audit_actor || refused_access?
+        audit_current_token || unauthenticated_audit_actor || refused_access? ||
+          @audit_denial_reason.present? || resolved_clinician_duz.present?
+      end
+
+      # SmartAuthentication is not on every audited surface — the compliance
+      # review screen authenticates against the browser session instead. Ask
+      # rather than assume, so this concern wraps both kinds.
+      def audit_current_token
+        respond_to?(:current_token, true) ? current_token : nil
       end
 
       def refused_access?
@@ -198,8 +209,8 @@ module Lakeraven
 
         if unauthenticated_audit_actor
           { agent_who_type: "Service", agent_who_identifier: unauthenticated_audit_actor }
-        elsif current_token && !shared_browser_credential?
-          { agent_who_type: "Application", agent_who_identifier: current_token.application&.uid }
+        elsif audit_current_token && !shared_browser_credential?
+          { agent_who_type: "Application", agent_who_identifier: audit_current_token.application&.uid }
         else
           { agent_who_type: "Unknown", agent_who_identifier: nil }
         end
@@ -239,7 +250,7 @@ module Lakeraven
       def shared_browser_credential?
         return false unless respond_to?(:browser_sso_token?, true)
 
-        current_token && browser_sso_token?(current_token)
+        audit_current_token && browser_sso_token?(audit_current_token)
       end
 
       # WHAT WAS DONE, from the HTTP verb. Everything used to be recorded as a

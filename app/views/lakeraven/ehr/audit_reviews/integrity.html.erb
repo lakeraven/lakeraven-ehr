@@ -1,0 +1,41 @@
+<% content_for :title, "Audit integrity | Lakeraven EHR" %>
+
+<div class="page-header">
+  <h1>Audit log integrity</h1>
+  <p>Whether these records still say what they said when they were written.</p>
+</div>
+
+<dl class="audit-integrity">
+  <dt>Digest</dt>
+  <dd><%= Lakeraven::EHR::AuditEvent.integrity_mode %></dd>
+
+  <dt>Database enforcement</dt>
+  <dd>
+    <% if @append_only %>
+      Append-only: the database refuses to update an audit row, for every client.
+    <% else %>
+      Not available on this database adapter — the digest detects an edit, but nothing prevents one.
+    <% end %>
+  </dd>
+
+  <dt>Retention</dt>
+  <dd><%= Lakeraven::EHR::AuditRetention.retention_period.inspect %>, purgeable before
+      <%= Lakeraven::EHR::AuditRetention.cutoff.to_date.iso8601 %></dd>
+
+  <dt>Unverified or altered rows</dt>
+  <dd>
+    <% if @unverified.empty? %>
+      None. Every record matches its digest.
+    <% else %>
+      <strong><%= @unverified.size %></strong> record(s) do not match their digest, or carry none at
+      all. A row with no digest is not a clean row — it is an unverified one.
+      <ul>
+        <% @unverified.first(50).each do |event| %>
+          <li>#<%= event.id %> — recorded <%= event.created_at&.iso8601 %></li>
+        <% end %>
+      </ul>
+    <% end %>
+  </dd>
+</dl>
+
+<p><%= link_to "Back to the access log", audit_review_path %></p>
