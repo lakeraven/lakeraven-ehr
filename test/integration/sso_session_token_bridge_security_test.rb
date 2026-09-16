@@ -126,6 +126,33 @@ class SsoSessionTokenBridgeSecurityTest < ActionDispatch::IntegrationTest
     assert_response :unauthorized
   end
 
+  # F3: a legacy browser token (browser_session=false, minted before the flag
+  # migration) demotes to the name fallback, so an application rename would let
+  # it replay from an Authorization header for its remaining lifetime. The
+  # migration REVOKES such tokens rather than backfilling the flag; a revoked
+  # token cannot be replayed no matter how it is later classified.
+  test "the flag migration revokes legacy browser-SSO tokens" do
+    require Lakeraven::EHR::Engine.root.join(
+      "db", "migrate", "20260915000000_add_browser_session_to_oauth_access_tokens"
+    ).to_s
+
+    app = Doorkeeper::Application.create!(
+      name: Lakeraven::EHR::SessionsController::BROWSER_SSO_APP_NAME,
+      redirect_uri: "urn:ietf:wg:oauth:2.0:oob", scopes: "user/*.read", confidential: true
+    )
+    legacy = Doorkeeper::AccessToken.create!(
+      application: app, scopes: "user/*.read", expires_in: 12.hours.to_i,
+      resource_owner_id: 304
+    )
+    legacy.update_columns(browser_session: false, revoked_at: nil)
+
+    AddBrowserSessionToOauthAccessTokens.revoke_legacy_browser_tokens!(
+      ActiveRecord::Base.connection
+    )
+
+    assert legacy.reload.revoked?, "a legacy browser token survived the migration"
+  end
+
   test "a header token is not mistaken for a browser credential" do
     app = Doorkeeper::Application.create!(
       name: "system-client", redirect_uri: "https://example.test/cb",

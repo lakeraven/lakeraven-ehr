@@ -109,19 +109,67 @@ class SessionWriteContractTest < ActionDispatch::IntegrationTest
     end
   end
 
-  # -- the discriminator is the PROTECTION, not the class name ------------
+  # -- F1: a FORGED write is refused however the controller weakens CSRF ---
 
-  # Same superclass, forgery protection skipped. It must not inherit write
-  # capability from a parent that has it.
-  test "a WebController subclass that skips forgery protection cannot write" do
+  # The invariant is per-REQUEST verification, not the controller's callback
+  # configuration: a forged write (no authenticity token — which a hostile
+  # cross-site page cannot obtain) is refused on every controller, whatever
+  # strategy it declares.
+  #
+  #   * :null_session / :reset_session — non-rejecting strategies; the callback
+  #     "runs" but lets an unverified request proceed;
+  #   * conditional skip — the callback object stays on the class but is inert
+  #     for :create, so a membership test still sees it;
+  #   * unconditional skip — the callback object is removed entirely.
+  #
+  # A membership test got only the last one right, which is the one case the
+  # old negative control tested — so the suite stayed green over the other
+  # three (both review seats, F1).
+  %w[
+    null_session_probe reset_session_probe conditional_skip_probe csrf_disabled_probe
+  ].each do |probe|
+    test "a forged write is refused on #{probe}" do
+      with_csrf do
+        sign_in
+        before = Lakeraven::EHR::ReconciliationSession.count
+
+        post "/#{probe}", params: { patient_dfn: "1" } # no authenticity_token
+
+        refute_includes 200..299, response.status,
+          "#{probe} let a forged session-derived write through (#{response.status})"
+        assert_equal before, Lakeraven::EHR::ReconciliationSession.count
+      end
+    end
+  end
+
+  # The genuine browser request — valid token — still writes on the rejecting
+  # (exception) strategy. This is the #491 case; it must not regress to a
+  # blanket denial.
+  test "a token-bearing write still lands on the rejecting strategy" do
+    with_csrf do
+      sign_in
+      before = Lakeraven::EHR::ReconciliationSession.count
+
+      post "/csrf_probe", params: { patient_dfn: "1", authenticity_token: csrf_token }
+
+      assert_response :created
+      assert_equal before + 1, Lakeraven::EHR::ReconciliationSession.count
+    end
+  end
+
+  # A valid authenticity token IS proof of first-party origin, so a verified
+  # write is allowed even on a controller that weakened Rails' own enforcement
+  # — the gate is stricter than that controller, never looser. What it can
+  # never do is let a *forged* request through, which the loop above pins.
+  test "a verified write is allowed even where the callback was skipped" do
     with_csrf do
       sign_in
       before = Lakeraven::EHR::ReconciliationSession.count
 
       post "/csrf_disabled_probe", params: { patient_dfn: "1", authenticity_token: csrf_token }
 
-      assert_response :unauthorized
-      assert_equal before, Lakeraven::EHR::ReconciliationSession.count
+      assert_response :created
+      assert_equal before + 1, Lakeraven::EHR::ReconciliationSession.count
     end
   end
 
