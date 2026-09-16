@@ -155,7 +155,13 @@ module Lakeraven
       # Authorization for the CURRENT request's HTTP verb. A read scope must
       # never authorize a write: GET/HEAD/OPTIONS need read, everything else
       # needs write.
-      READ_METHODS = %w[GET HEAD OPTIONS].freeze
+      #
+      # #486 defines this same constant in this same module. The guard keeps
+      # each PR correct alone AND silences the `already initialized constant`
+      # warning when the two are merged (git concatenates rather than
+      # conflicts, since the definitions sit at different offsets) — so the
+      # dedupe needs no manual merge step and no landing-order rule to remember.
+      READ_METHODS = %w[GET HEAD OPTIONS].freeze unless defined?(READ_METHODS)
 
       def read_request?
         READ_METHODS.include?(request.request_method)
