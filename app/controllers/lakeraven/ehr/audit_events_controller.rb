@@ -64,8 +64,17 @@ module Lakeraven
       # Applied to the QUERY, not checked against a parameter — otherwise the
       # binding would govern which patient is named and not which rows return.
       def scoped_events
+        return AuditEvent.all unless patient_context_scope?
+
+        # A patient-scoped token with NO bound patient (resource_owner_id nil —
+        # mintable today via client_credentials) has an EMPTY compartment, not
+        # an unlimited one. Falling through to .all here was a fail-open on
+        # #show: #index is refused earlier by authorize_patient_search!, but
+        # #show reached this scope directly and returned any foreign row.
+        # An unanswerable compartment question is an empty result — rendered as
+        # 404 by #show, consistent with B6's uniform not-found posture.
         dfn = bound_patient_dfn
-        return AuditEvent.all if dfn.blank?
+        return AuditEvent.none if dfn.blank?
 
         AuditEvent.where(entity_type: PATIENT_ENTITY_TYPE, entity_identifier: dfn)
       end
