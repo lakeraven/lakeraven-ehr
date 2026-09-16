@@ -24,7 +24,7 @@ module Lakeraven
           event_type: "rest",
           action: "R",
           outcome: audit_outcome,
-          entity_type: fhir_resource_type,
+          entity_type: audit_entity_type,
           entity_identifier: audit_entity_identifier,
           **audit_agent_attributes,
           agent_network_address: request.remote_ip,
@@ -63,6 +63,15 @@ module Lakeraven
 
       def audit_entity_identifier
         params[:dfn] || params[:ien] || params[:id]
+      end
+
+      # The recorded entity is a REFERENCE, `<audit_entity_type>/<audit_entity_identifier>`,
+      # and the halves must agree — a controller whose identifier names a
+      # record of a DIFFERENT type (a patient-scoped search, the export-files
+      # endpoint) overrides BOTH so the row never points at the wrong record
+      # (S11 on #507).
+      def audit_entity_type
+        fhir_resource_type
       end
     end
   end
