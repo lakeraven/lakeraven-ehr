@@ -153,6 +153,64 @@ class SsoSessionTokenBridgeSecurityTest < ActionDispatch::IntegrationTest
     assert legacy.reload.revoked?, "a legacy browser token survived the migration"
   end
 
+  # R2-1: the revoke must not key on the mutable name it was chosen to escape.
+  # The round-2 gate reproduced a pre-flag token under an ALREADY-RENAMED
+  # application surviving a name-keyed revoke and replaying from a header for
+  # a 200. The revoke matches by shape as well — resource owner present, no
+  # patient/ scope — which every browser token has regardless of what its
+  # application is called.
+  test "the revoke catches a legacy token whose application was already renamed" do
+    require Lakeraven::EHR::Engine.root.join(
+      "db", "migrate", "20260915000000_add_browser_session_to_oauth_access_tokens"
+    ).to_s
+
+    app = Doorkeeper::Application.create!(
+      name: "Renamed Before Migration", redirect_uri: "urn:ietf:wg:oauth:2.0:oob",
+      scopes: "user/*.read", confidential: true
+    )
+    legacy = Doorkeeper::AccessToken.create!(
+      application: app, scopes: "user/*.read", expires_in: 12.hours.to_i,
+      resource_owner_id: 304
+    )
+    legacy.update_columns(browser_session: false, revoked_at: nil)
+    raw = legacy.plaintext_token || legacy.token
+
+    AddBrowserSessionToOauthAccessTokens.revoke_legacy_browser_tokens!(
+      ActiveRecord::Base.connection
+    )
+
+    assert legacy.reload.revoked?,
+      "a legacy browser token of a renamed application survived the revoke"
+    get "/lakeraven-ehr/Patient", params: { _id: "1" },
+      headers: { "Authorization" => "Bearer #{raw}" }
+    assert_response :unauthorized
+  end
+
+  # The other half of R2-1's bar: over-breadth must not log integrations out.
+  # System/backend tokens have no resource owner and survive the revoke.
+  test "the revoke does not touch system tokens" do
+    require Lakeraven::EHR::Engine.root.join(
+      "db", "migrate", "20260915000000_add_browser_session_to_oauth_access_tokens"
+    ).to_s
+
+    sys_app = Doorkeeper::Application.create!(
+      name: "backend-integration", redirect_uri: "https://example.test/cb",
+      scopes: "system/*.read", confidential: true
+    )
+    sys_token = Doorkeeper::AccessToken.create!(
+      application: sys_app, scopes: "system/*.read", expires_in: 3600
+    )
+
+    AddBrowserSessionToOauthAccessTokens.revoke_legacy_browser_tokens!(
+      ActiveRecord::Base.connection
+    )
+
+    refute sys_token.reload.revoked?, "the migration logged a backend integration out"
+    get "/lakeraven-ehr/Patient", params: { _id: "1" },
+      headers: { "Authorization" => "Bearer #{sys_token.plaintext_token || sys_token.token}" }
+    assert_response :ok
+  end
+
   test "a header token is not mistaken for a browser credential" do
     app = Doorkeeper::Application.create!(
       name: "system-client", redirect_uri: "https://example.test/cb",
