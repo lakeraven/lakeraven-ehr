@@ -17,6 +17,34 @@ module Lakeraven
         self.class.name.demodulize.delete_suffix("Controller").singularize
       end
 
+      # WHICH RECORD the audit row points at (S11 on #507).
+      #
+      # A FHIR search names its patient with `?patient=…` — Observation,
+      # Condition, MedicationRequest, all of them — and the first version of
+      # this method looked only at :dfn/:ien/:id, so every clinical search
+      # was recorded with a NULL entity: `/audit-review?entity=<dfn>` came
+      # back empty, and empty reads as "nobody opened this chart". Absence
+      # of data presented as determination.
+      #
+      # The entity is recorded as a COHERENT reference: with a direct :id or
+      # :ien the row names this controller's own resource; with only a
+      # `?patient=` search parameter it names the PATIENT whose record was
+      # searched — never `<Type>/<dfn>`, which would point at a different
+      # record of the wrong type.
+      def audit_entity_identifier
+        params[:id].presence || params[:ien].presence || params[:dfn].presence || params[:patient].presence
+      end
+
+      def audit_entity_type
+        return "Patient" if patient_scoped_search?
+
+        fhir_resource_type
+      end
+
+      def patient_scoped_search?
+        params[:id].blank? && params[:ien].blank? && params[:dfn].blank? && params[:patient].present?
+      end
+
       def authorize_fhir_scope!
         return if can_read?(fhir_resource_type)
 

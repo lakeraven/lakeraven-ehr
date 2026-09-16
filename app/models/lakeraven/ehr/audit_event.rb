@@ -40,6 +40,38 @@ module Lakeraven
 
       scope :recent, -> { order(created_at: :desc) }
 
+      # -- Compliance review ---------------------------------------------------
+      #
+      # The questions a privacy officer actually asks, as scopes, so the
+      # review surface is a composition of them rather than hand-written SQL.
+
+      scope :by_agent, ->(identifier) { where(agent_who_identifier: identifier) }
+      scope :about_entity, ->(identifier) { where(entity_identifier: identifier) }
+      scope :of_type, ->(entity_type) { where(entity_type: entity_type) }
+      scope :with_action, ->(value) { where(action: value) }
+      scope :with_outcome, ->(value) { where(outcome: value) }
+      scope :refusals, -> { where.not(outcome: "0") }
+      scope :unattributed, -> { where(agent_who_type: "Unknown").or(where(agent_who_identifier: nil)) }
+      scope :occurring_after, ->(time) { where(created_at: time..) }
+      scope :occurring_before, ->(time) { where(created_at: ..time) }
+      scope :for_tenant, ->(identifier) { where(tenant_identifier: identifier) }
+
+      # One filter hash in, one relation out. Blank values are IGNORED rather
+      # than matched as NULL, so a half-filled review form widens the search
+      # instead of silently returning nothing.
+      FILTERS = {
+        agent: :by_agent, entity: :about_entity, entity_type: :of_type,
+        action: :with_action, outcome: :with_outcome, tenant: :for_tenant,
+        from: :occurring_after, to: :occurring_before
+      }.freeze
+
+      def self.review(filters = {})
+        FILTERS.reduce(all) do |relation, (key, scope_name)|
+          value = filters[key].presence || filters[key.to_s].presence
+          value ? relation.public_send(scope_name, value) : relation
+        end.recent
+      end
+
       def readonly?
         persisted?
       end

@@ -1,0 +1,112 @@
+<% content_for :title, "PHI Access Audit | Lakeraven EHR" %>
+
+<div class="page-header">
+  <h1>PHI access audit</h1>
+  <p>Who read or changed patient data, when, from where, and whether it was refused.</p>
+</div>
+
+<% if @filter_errors.present? %>
+  <div class="flash flash--alert" role="alert">
+    <ul>
+      <% @filter_errors.each do |message| %>
+        <li><%= message %></li>
+      <% end %>
+    </ul>
+  </div>
+<% end %>
+
+<%= form_with url: audit_review_path, method: :get, local: true, class: "audit-filters" do %>
+  <div class="audit-filters__row">
+    <label for="agent">Who (identifier)</label>
+    <%= text_field_tag :agent, params[:agent], id: "agent" %>
+
+    <label for="entity">Record (identifier)</label>
+    <%= text_field_tag :entity, params[:entity], id: "entity" %>
+
+    <label for="entity_type">Record type</label>
+    <%= text_field_tag :entity_type, params[:entity_type], id: "entity_type" %>
+
+    <label for="tenant">Tenant</label>
+    <%= text_field_tag :tenant, params[:tenant], id: "tenant" %>
+  </div>
+
+  <div class="audit-filters__row">
+    <label for="action_code">Action</label>
+    <%= select_tag :action_code,
+          options_for_select([ [ "Any", "" ] ] + Lakeraven::EHR::AuditEvent::ACTIONS.map { |code, label| [ label, code ] },
+                             params[:action_code]),
+          id: "action_code" %>
+
+    <label for="outcome">Outcome</label>
+    <%= select_tag :outcome,
+          options_for_select([ [ "Any", "" ] ] + Lakeraven::EHR::AuditEvent::OUTCOMES.map { |code, label| [ label, code ] },
+                             params[:outcome]),
+          id: "outcome" %>
+
+    <label for="from">From</label>
+    <%= text_field_tag :from, params[:from], id: "from", placeholder: "2026-01-01" %>
+
+    <label for="to">To</label>
+    <%= text_field_tag :to, params[:to], id: "to", placeholder: "2026-12-31" %>
+  </div>
+
+  <div class="audit-filters__actions">
+    <%= submit_tag "Search" %>
+    <%= link_to "Download CSV", audit_review_path(request.query_parameters.merge(format: :csv)) %>
+    <%# The integrity screen ships with the tamper-evidence PR of the #507
+        split; link it only when that route exists on this build. %>
+    <% if respond_to?(:audit_review_integrity_path) %>
+      <%= link_to "Integrity check", audit_review_integrity_path %>
+    <% end %>
+  </div>
+<% end %>
+
+<p class="audit-summary">
+  <strong><%= @total %></strong> matching access record(s).
+  <% if @total > Lakeraven::EHR::AuditReviewsController::PAGE_SIZE %>
+    Showing the most recent <%= Lakeraven::EHR::AuditReviewsController::PAGE_SIZE %>; narrow the
+    filters or download the CSV for the rest.
+  <% end %>
+</p>
+
+<table class="audit-table">
+  <caption class="sr-only">PHI access audit records, most recent first</caption>
+  <thead>
+    <tr>
+      <th scope="col">When</th>
+      <th scope="col">Who</th>
+      <th scope="col">Action</th>
+      <th scope="col">Record</th>
+      <th scope="col">Outcome</th>
+      <th scope="col">Reason</th>
+      <th scope="col">From</th>
+      <th scope="col">Facility</th>
+    </tr>
+  </thead>
+  <tbody>
+    <% @events.each do |event| %>
+      <tr>
+        <td><%= event.created_at&.iso8601 %></td>
+        <td>
+          <% if event.agent_who_identifier.present? %>
+            <%= event.agent_who_type %>/<%= event.agent_who_identifier %>
+            <%= " (#{event.agent_name})" if event.agent_name.present? %>
+          <% else %>
+            <span class="audit-unattributed">unattributed</span>
+          <% end %>
+        </td>
+        <td><%= event.action_display %></td>
+        <td><%= event.entity_type %><%= "/#{event.entity_identifier}" if event.entity_identifier.present? %></td>
+        <td><%= event.outcome_display %></td>
+        <td><%= event.outcome_desc %></td>
+        <td><%= event.agent_network_address %></td>
+        <td><%= event.facility_identifier %></td>
+      </tr>
+    <% end %>
+  </tbody>
+</table>
+
+<% if @events.empty? %>
+  <p class="audit-empty">No access records match these filters. That is not the same as no access
+  having happened — widen the filters before concluding anything from it.</p>
+<% end %>

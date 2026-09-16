@@ -81,4 +81,14 @@ Lakeraven::EHR::Engine.routes.draw do
   end
   delete "logout" => "sessions#destroy", as: :logout
   get "dashboard" => "dashboards#show", as: :dashboard
+
+  # PHI access audit review — the compliance officer's surface (#488, split
+  # from #507). Gated on a site-configured reviewer security key; with none
+  # configured it refuses everyone.
+  get "audit-review(.:format)" => "audit_reviews#index", as: :audit_review
+
+  # Test-only session seeding for cucumber/admin scenarios. The controller
+  # refuses to exist outside the test environment; this keeps the route from
+  # existing there either, which is what its own header asks for.
+  post "test_session" => "test_sessions#create" if Rails.env.test?
 end
