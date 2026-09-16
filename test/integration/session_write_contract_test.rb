@@ -185,11 +185,20 @@ class SessionWriteContractTest < ActionDispatch::IntegrationTest
     assert_response :unauthorized
   end
 
-  test "a session token still authorizes API reads" do
+  # The session token authorizes the HTML CHART surface (ChartsController,
+  # ActionController::Base) — the browser reaches it with no Authorization
+  # header — but NOT the FHIR API (ActionController::API), which is bearer-only.
+  # The FHIR fallback was overreach a cross-site Lax GET could ride (#512 F1 /
+  # #525); the chart is the only surface that opts into session auth.
+  test "a session token authorizes the HTML chart, not the FHIR API" do
     sign_in
 
-    get "/lakeraven-ehr/Patient", params: { _id: "1" }
+    get "/lakeraven-ehr/patients/1" # HTML chart — session fallback allowed
     assert_response :ok
+    assert_includes response.body, "Anderson"
+
+    get "/lakeraven-ehr/Patient", params: { _id: "1" } # FHIR API — bearer only
+    assert_response :unauthorized
   end
 
   # A header token is not driven by a cookie, so the contract never touches it.

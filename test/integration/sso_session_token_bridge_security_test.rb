@@ -567,11 +567,17 @@ class SsoSessionTokenBridgeSecurityTest < ActionDispatch::IntegrationTest
     assert_response :unauthorized
   end
 
-  test "a session-derived token still authorizes reads" do
+  # The session token reads the HTML CHART (its only surface), not the FHIR API
+  # (bearer-only). The FHIR fallback was overreach a cross-site Lax GET could
+  # ride (#512 F1 / #525).
+  test "a session-derived token reads the HTML chart but not the FHIR API" do
     sign_in
 
-    get "/lakeraven-ehr/Patient", params: { _id: "1" }
+    get "/lakeraven-ehr/patients/1" # HTML chart
     assert_response :ok
+
+    get "/lakeraven-ehr/Patient", params: { _id: "1" } # FHIR API — bearer only
+    assert_response :unauthorized
   end
 
   # -- M: the C-CDA author must not be caller-supplied --------------------

@@ -28,6 +28,13 @@ class CsrfProbeController < Lakeraven::EHR::WebController
 
   private
 
+  # Models #491's screening surface: a CSRF-protected WebController that opts
+  # into browser-session auth. The FHIR API (ActionController::API) never does
+  # — that scoping is exactly what #512 F1 / #525 require.
+  def session_token_fallback_allowed?
+    true
+  end
+
   def authorize_probe_scope!
     return if can_write?(fhir_resource_type)
 
