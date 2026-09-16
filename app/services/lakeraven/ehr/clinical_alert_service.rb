@@ -9,7 +9,7 @@ module Lakeraven
     # Does NOT call DrugInteractionService — drug checks happen at prescribing time,
     # not on background page load.
     #
-    # Ported from rpms_redux ClinicalAlertService.
+    # Ported from the predecessor app ClinicalAlertService.
     class ClinicalAlertService
       Alert = Struct.new(:type, :description, :severity, keyword_init: true)
 

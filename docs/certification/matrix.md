@@ -17,7 +17,7 @@ Sources: [45 CFR 170.102](https://www.ecfr.gov/current/title-45/subtitle-A/subch
 Feature/step inventory audited 2026-07-25: every `features/onc/*.feature` has
 substantive step definitions running in the default CI cucumber profile (no `@wip`).
 "Spec gap" = no feature file exists yet. Legacy note: Epic #251's phase tables cite
-**rpms_redux issue/PR numbers** (that repo's history); the issue numbers in THIS matrix
+**predecessor-app issue/PR numbers** (that repo's history); the issue numbers in THIS matrix
 are lakeraven-ehr's. Some redux-era work needs restoration here (#367).
 
 Evidence artifacts land under `evidence/<criterion>/` via the harness (#404); test

@@ -3,7 +3,7 @@
 module Lakeraven
   module EHR
     # CoverageSummaryService - Summarizes patient coverage for PRC determination.
-    # Ported from rpms_redux CoverageSummaryService.
+    # Ported from the predecessor app CoverageSummaryService.
     class CoverageSummaryService
       PAYER_PRIORITY = {
         "workers_comp" => 1,

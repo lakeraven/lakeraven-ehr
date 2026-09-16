@@ -11,7 +11,7 @@ module Lakeraven
     #
     # Trigger matching uses exact LOINC code comparison.
     #
-    # Ported from rpms_redux ReportableLabService.
+    # Ported from the predecessor app ReportableLabService.
     class ReportableLabService
       REPORTABLE_LAB_TESTS_PATH = Engine.root.join("db/data/reportable_lab_tests.yml")
 

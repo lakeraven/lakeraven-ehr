@@ -3,7 +3,7 @@
 module Lakeraven
   module EHR
     # Terminology Service - Abstraction for ValueSet Operations
-    # Ported from rpms_redux TerminologyService.
+    # Ported from the predecessor app TerminologyService.
     #
     # Provides a unified interface for terminology operations backed by:
     #   1. VSAC (NLM's Value Set Authority Center) - production

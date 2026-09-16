@@ -14,7 +14,7 @@ module Lakeraven
     #
     # DEA Schedules II-V require EPCS; non-controlled substances do not.
     #
-    # Ported from rpms_redux EpcsValidator.
+    # Ported from the predecessor app EpcsValidator.
     class EpcsValidator
       CONTROLLED_SCHEDULES = %w[II III IV V].freeze
 

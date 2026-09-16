@@ -94,7 +94,7 @@ module Lakeraven
         end
 
         def normalize_coverage_type(type)
-          # Map rpms_redux coverage types to FHIR coverage types
+          # Map predecessor-app coverage types to FHIR coverage types
           case type
           when "IHS" then "tribal_program"
           when /Medicare/i then "medicare_a"

@@ -9,7 +9,7 @@ module Lakeraven
     # 2. Match imported items against existing patient data
     # 3. Create reconciliation session with items for clinician review
     #
-    # Ported from rpms_redux ClinicalReconciliationService.
+    # Ported from the predecessor app ClinicalReconciliationService.
     class ClinicalReconciliationService
       include StructuredLogging
 

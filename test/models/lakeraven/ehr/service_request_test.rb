@@ -7,7 +7,7 @@ module Lakeraven
   module EHR
     class ServiceRequestTest < ActiveSupport::TestCase
       # =========================================================================
-      # VALIDATION TESTS (ported from rpms_redux)
+      # VALIDATION TESTS (ported from the predecessor app)
       # =========================================================================
 
       def valid_sr_attributes
@@ -80,7 +80,7 @@ module Lakeraven
       end
 
       # =========================================================================
-      # PERSISTENCE TESTS (ported from rpms_redux)
+      # PERSISTENCE TESTS (ported from the predecessor app)
       # =========================================================================
 
       test "persisted? true when ien is set" do
@@ -99,7 +99,7 @@ module Lakeraven
       end
 
       # =========================================================================
-      # STATUS PREDICATE TESTS (ported from rpms_redux)
+      # STATUS PREDICATE TESTS (ported from the predecessor app)
       # =========================================================================
 
       test "pending? when status is draft" do
@@ -123,7 +123,7 @@ module Lakeraven
       end
 
       # =========================================================================
-      # BUSINESS LOGIC TESTS (ported from rpms_redux)
+      # BUSINESS LOGIC TESTS (ported from the predecessor app)
       # =========================================================================
 
       test "priority returns 1 for emergent" do
@@ -339,7 +339,7 @@ module Lakeraven
       end
 
       # =========================================================================
-      # FHIR MAPPING TESTS (ported from rpms_redux)
+      # FHIR MAPPING TESTS (ported from the predecessor app)
       # =========================================================================
 
       test "map_status_to_fhir returns active for draft" do

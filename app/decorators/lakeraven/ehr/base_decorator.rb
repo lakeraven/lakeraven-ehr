@@ -4,7 +4,7 @@ module Lakeraven
   module EHR
     # Base decorator — wraps an ActiveModel with AR supplement data.
     #
-    # Adapted from rpms_redux's BaseRpmsDecorator. In rpms_redux, AR models
+    # Adapted from the predecessor app's BaseRpmsDecorator. There, AR models
     # are decorated with RPMS data. Here, RPMS-backed ActiveModel objects
     # are decorated with AR-persisted supplement data.
     #

@@ -116,7 +116,7 @@ module Lakeraven
       end
 
       # =============================================================================
-      # VALIDATION TESTS (ported from rpms_redux)
+      # VALIDATION TESTS (ported from the predecessor app)
       # =============================================================================
 
       test "should be valid with required attributes" do
@@ -168,7 +168,7 @@ module Lakeraven
       end
 
       # =============================================================================
-      # STATUS HELPER TESTS (ported from rpms_redux)
+      # STATUS HELPER TESTS (ported from the predecessor app)
       # =============================================================================
 
       test "active? returns true for active status" do
@@ -204,7 +204,7 @@ module Lakeraven
       end
 
       # =============================================================================
-      # TYPE HELPER TESTS (ported from rpms_redux)
+      # TYPE HELPER TESTS (ported from the predecessor app)
       # =============================================================================
 
       test "type_display returns human-readable type" do
@@ -236,7 +236,7 @@ module Lakeraven
       end
 
       # =============================================================================
-      # ADDRESS HELPER TESTS (ported from rpms_redux)
+      # ADDRESS HELPER TESTS (ported from the predecessor app)
       # =============================================================================
 
       test "full_address combines address parts" do
@@ -259,7 +259,7 @@ module Lakeraven
       end
 
       # =============================================================================
-      # FHIR SERIALIZATION TESTS (ported from rpms_redux, hash-based)
+      # FHIR SERIALIZATION TESTS (ported from the predecessor app, hash-based)
       # =============================================================================
 
       test "to_fhir includes status" do
@@ -378,7 +378,7 @@ module Lakeraven
       end
 
       # =============================================================================
-      # US CORE / TEFCA COMPLIANCE TESTS (ported from rpms_redux)
+      # US CORE / TEFCA COMPLIANCE TESTS (ported from the predecessor app)
       # =============================================================================
 
       test "location FHIR is US Core compliant" do

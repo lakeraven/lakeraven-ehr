@@ -6,7 +6,7 @@ module Lakeraven
   module EHR
     class PatientSogiTest < ActiveSupport::TestCase
       # =============================================================================
-      # SOGI Attributes (ONC 170.315(a)(15)) — ported from rpms_redux
+      # SOGI Attributes (ONC 170.315(a)(15)) — ported from the predecessor app
       # =============================================================================
 
       test "patient accepts sexual_orientation attribute" do

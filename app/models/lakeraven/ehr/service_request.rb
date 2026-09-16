@@ -13,7 +13,7 @@ module Lakeraven
       attribute :requesting_provider_ien, :integer
       attribute :performer_name, :string
 
-      # Clinical fields (ported from rpms_redux)
+      # Clinical fields (ported from the predecessor app)
       attribute :service_requested, :string
       attribute :reason_for_referral, :string
       attribute :urgency, :string
@@ -23,7 +23,7 @@ module Lakeraven
       attribute :procedure_codes, :string
       attribute :medical_priority_level, :integer
 
-      # Validations (ported from rpms_redux)
+      # Validations (ported from the predecessor app)
       validates :patient_dfn, presence: true, numericality: { greater_than: 0 }
       validates :requesting_provider_ien, presence: true, numericality: { greater_than: 0 }
       validates :service_requested, presence: true
@@ -68,7 +68,7 @@ module Lakeraven
         status == "cancelled"
       end
 
-      # -- Business logic (ported from rpms_redux) -----------------------------
+      # -- Business logic (ported from the predecessor app) -----------------------------
 
       def priority
         if emergent? then 1

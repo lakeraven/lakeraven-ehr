@@ -73,7 +73,7 @@ module Lakeraven
         assert_equal "active", fhir[:status]
       end
 
-      # -- Validations (ported from rpms_redux) ----------------------------------
+      # -- Validations (ported from the predecessor app) ----------------------------------
 
       test "validates patient_dfn presence" do
         d = Device.new(device_name: "Pacemaker")
@@ -100,7 +100,7 @@ module Lakeraven
         end
       end
 
-      # -- FHIR extras (ported from rpms_redux) ----------------------------------
+      # -- FHIR extras (ported from the predecessor app) ----------------------------------
 
       test "to_fhir includes manufacturer info" do
         d = Device.new(

@@ -13,7 +13,7 @@ module Lakeraven
     #     - Expiration date — (17)
     #
     # Supports GS1 Human Readable Form (HRF) with parenthesized AIs.
-    # Ported from rpms_redux UdiParser.
+    # Ported from the predecessor app UdiParser.
     class UdiParser
       # GS1 Application Identifiers relevant to UDI
       AI_PATTERNS = {

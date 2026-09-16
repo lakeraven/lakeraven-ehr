@@ -71,7 +71,7 @@ module Lakeraven
         assert_equal "Patient/100", fhir.dig(:subject, :reference)
       end
 
-      # -- Validations (ported from rpms_redux) ----------------------------------
+      # -- Validations (ported from the predecessor app) ----------------------------------
 
       test "validates patient_dfn presence" do
         g = Goal.new(description: "Health goal")
@@ -98,7 +98,7 @@ module Lakeraven
         end
       end
 
-      # -- FHIR extras (ported from rpms_redux) ----------------------------------
+      # -- FHIR extras (ported from the predecessor app) ----------------------------------
 
       test "to_fhir includes achievement status" do
         g = Goal.new(ien: "1", patient_dfn: "100", description: "Goal", achievement_status: "in-progress")
