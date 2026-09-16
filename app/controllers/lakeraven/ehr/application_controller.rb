@@ -35,6 +35,13 @@ module Lakeraven
           issue: [ { severity: severity, code: code, diagnostics: diagnostics }.compact ]
         }
         render json: outcome, status: status, content_type: FHIR_CONTENT_TYPE
+        # The audit gets the STABLE outcome code and status, never the
+        # diagnostics: several callers build diagnostics from
+        # request-controlled values and rescued exception MESSAGES — free
+        # text that can carry PHI into a log built to hold none (review
+        # finding on #512). The full diagnostics stay in the HTTP response,
+        # which is where the caller needs them.
+        note_audit_denial("fhir operation refused: #{code} (HTTP #{response.status})") if severity == "error"
       end
 
       def render_fhir(resource, status: :ok)

@@ -189,7 +189,34 @@ class FakeBroker
     queue.shift
   end
 
+  # The REAL clients (BmxClient, CiaClient) expose a public `call_rpc_raw`
+  # that executes an RPC without response parsing. The fake models it so a
+  # wrapper that forwards it can be SEEN doing so — a mock without the real
+  # client's surface cannot express the bypass (SOFTWARE-FACTORY: a mock that
+  # cannot express a failure is not evidence against it).
+  def call_rpc_raw(rpc, *params)
+    call_rpc(rpc, *params)
+  end
+
+  # Also on the real clients' public surface; must never be reachable
+  # through an audited wrapper.
+  def read_response = @default
+
+  # The REST of the production clients' public surface (BmxClient/CiaClient:
+  # connection, credential and raw-execution methods), as LOUD stubs. They
+  # exist so `respond_to?` is true — a wrapper regression back to
+  # "forward anything the client answers" then reaches them and fails the
+  # suite audibly for EVERY method, not just call_rpc_raw.
+  %i[connect disconnect authenticate signon_setup authenticated? duz
+     call_rpc_global_array create_context set_authenticated].each do |name|
+    define_method(name) do |*_args, **_options|
+      raise "GATE: #{name} reached the fake through a wrapper that should refuse to forward it"
+    end
+  end
+
   def supports?(_feature) = true
+  def connected? = true
+  def hostname = "fake-broker.test"
   def received_calls = @calls
   def calls_for(rpc) = @calls.select { |c| c[:rpc] == rpc }
   def last_call = @calls.last

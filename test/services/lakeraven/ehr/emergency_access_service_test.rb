@@ -19,6 +19,60 @@ module Lakeraven
       # GRANTING ACCESS
       # =============================================================================
 
+      # The model callback only covers `EmergencyAccess.create!`, but THIS
+      # service is the public break-glass workflow — and its grants appended
+      # a hash to the caller's in-memory `audit_log` and touched no shared
+      # AuditEvent at all. Break-glass is the access most worth a row.
+      test "granting through the service leaves a shared AuditEvent row" do
+        AuditEvent.delete_all
+
+        assert_difference -> { AuditEvent.count }, 1 do
+          EmergencyAccessService.grant(**@attrs, audit_log: @audit_log)
+        end
+
+        event = AuditEvent.order(:id).last
+        assert_equal "security", event.event_type
+        assert_equal [ "Patient", "12345" ], [ event.entity_type, event.entity_identifier ]
+        assert_equal [ "Practitioner", "789" ], [ event.agent_who_type, event.agent_who_identifier ]
+        assert_match(/break-glass/i, event.outcome_desc.to_s)
+      end
+
+      test "the service's shared row carries the reason code, never the justification" do
+        AuditEvent.delete_all
+        EmergencyAccessService.grant(**@attrs, justification: "Patient SYNTHETIC,NAME collapsed in the lobby",
+                                     audit_log: @audit_log)
+
+        event = AuditEvent.order(:id).last
+        refute_includes event.attributes.values.compact.map(&:to_s).join(" "), "SYNTHETIC,NAME",
+          "the free-text justification reached the shared audit log"
+      end
+
+      test "a grant whose shared audit cannot be written raises instead of granting silently" do
+        AuditEvent.define_singleton_method(:create!) do |*|
+          raise ActiveRecord::StatementInvalid, "audit store unavailable"
+        end
+
+        assert_raises(ActiveRecord::StatementInvalid) do
+          EmergencyAccessService.grant(**@attrs, audit_log: @audit_log)
+        end
+      ensure
+        AuditEvent.singleton_class.send(:remove_method, :create!)
+      end
+
+      test "reviewing through the service leaves a shared AuditEvent row" do
+        AuditEvent.delete_all
+        access = EmergencyAccessService.grant(**@attrs, audit_log: @audit_log)
+
+        assert_difference -> { AuditEvent.count }, 1 do
+          EmergencyAccessService.review(emergency_access: access, reviewer_duz: "456",
+                                        outcome: "appropriate", audit_log: @audit_log)
+        end
+
+        event = AuditEvent.order(:id).last
+        assert_equal "456", event.agent_who_identifier
+        assert_match(/review/i, event.outcome_desc.to_s)
+      end
+
       test "grant creates an emergency access record" do
         access = EmergencyAccessService.grant(**@attrs, audit_log: @audit_log)
 

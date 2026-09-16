@@ -22,6 +22,10 @@ module Lakeraven
           session[:user_name] = "Test Provider"
           redirect_to dashboard_path
         else
+          # F6: a determined credential refusal says so on its row —
+          # otherwise it is indistinguishable from a 4xx that forgot to note
+          # its denial.
+          note_audit_denial("browser sign-in refused: invalid credentials")
           flash.now[:alert] = "Invalid username or password"
           render :new, status: :unprocessable_entity
         end
