@@ -38,10 +38,3 @@ class CsrfProbeController < Lakeraven::EHR::WebController
   # exercises the contract rather than tripping on scope first.
   def fhir_resource_type = "ServiceRequest"
 end
-
-# Unprotected: same superclass, forgery protection skipped. The discriminator
-# is the PROTECTION, not the class name, so this must NOT inherit write
-# capability from its parent.
-class CsrfDisabledProbeController < CsrfProbeController
-  skip_before_action :verify_authenticity_token
-end
