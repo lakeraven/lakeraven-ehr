@@ -103,6 +103,44 @@ class SsoSessionTokenBridgeSecurityTest < ActionDispatch::IntegrationTest
     assert_response :unauthorized
   end
 
+  # -- the browser/system discriminator must not hang on a display string ---
+
+  test "a session token is marked intrinsically, not by its application name" do
+    sign_in
+
+    assert session_token.browser_session, "the mint did not stamp the token"
+  end
+
+  # The hazard this closes: a browser token that stops being recognised stops
+  # being BOUND, and becomes replayable from an Authorization header.
+  test "renaming the SSO application does not unbind a live session token" do
+    sign_in
+    token = session_token
+    plaintext = token.plaintext_token || token.token
+    Doorkeeper::Application.find_by(name: Lakeraven::EHR::SessionsController::BROWSER_SSO_APP_NAME)
+      &.update!(name: "Renamed By An Admin")
+
+    reset!
+    get "/lakeraven-ehr/patients/1", headers: { "Authorization" => "Bearer #{plaintext}" }
+
+    assert_response :unauthorized
+  end
+
+  test "a header token is not mistaken for a browser credential" do
+    app = Doorkeeper::Application.create!(
+      name: "system-client", redirect_uri: "https://example.test/cb",
+      scopes: "system/*.read", confidential: true
+    )
+    token = Doorkeeper::AccessToken.create!(
+      application: app, scopes: "system/*.read", expires_in: 3600
+    )
+
+    get "/lakeraven-ehr/Patient", params: { _id: "1" },
+      headers: { "Authorization" => "Bearer #{token.plaintext_token || token.token}" }
+
+    assert_response :ok
+  end
+
   # -- B3: sign-out must revoke ---------------------------------------------
 
   test "sign-out revokes the token server-side, not just the cookie" do
