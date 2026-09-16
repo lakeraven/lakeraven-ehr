@@ -30,6 +30,7 @@ module Lakeraven
       end
 
       def render_operation_outcome(status:, severity:, code:, diagnostics: nil)
+        note_audit_denial(diagnostics) if diagnostics && severity == "error"
         outcome = {
           resourceType: "OperationOutcome",
           issue: [ { severity: severity, code: code, diagnostics: diagnostics }.compact ]

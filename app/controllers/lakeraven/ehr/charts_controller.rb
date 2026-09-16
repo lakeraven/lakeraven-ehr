@@ -302,6 +302,7 @@ module Lakeraven
       end
 
       def render_auth_outcome(status, code, message)
+        note_audit_denial(message)
         if fhir_requested?
           render json: {
             resourceType: "OperationOutcome",
