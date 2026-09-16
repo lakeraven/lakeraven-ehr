@@ -87,8 +87,25 @@ module Lakeraven
         end
       end
 
+      # The audit entity is a REFERENCE — `<entity_type>/<entity_identifier>` —
+      # so the identifier has to be an id OF THAT TYPE.
+      #
+      # Preferring the route's patient dfn unconditionally emitted
+      # `QuestionnaireResponse/1` for screening 100 on a route nested under
+      # `patients/:dfn`: syntactically valid, resolvable, and pointing at a
+      # DIFFERENT patient's screening. A false reference in an
+      # accounting-of-disclosures record is worse than a missing one, so a
+      # non-Patient entity never falls back to the patient id — it names its
+      # own resource or it names nothing, and `has_entity?` then omits the
+      # reference rather than publishing a lie.
       def audit_entity_identifier
-        params[:dfn] || params[:ien] || params[:id]
+        return params[:dfn] || params[:ien] || params[:id] if patient_entity?
+
+        params[:id] || params[:ien]
+      end
+
+      def patient_entity?
+        fhir_resource_type.to_s == "Patient"
       end
     end
   end
