@@ -9,6 +9,13 @@ module Lakeraven
     class AuthenticationService
       Result = Data.define(:success?, :value, :error)
 
+      # Process-local serialization for the shared broker client, used until
+      # the gem ships its own wire lock (rpms-rpc#235). It is a correct
+      # DEGRADED serialization: the failure mode is two sign-ons in ONE process
+      # sharing one global client, and one process holds one of these.
+      BROKER_WIRE_MUTEX = Mutex.new
+      private_constant :BROKER_WIRE_MUTEX
+
       # Sign on and resolve everything the session is built from.
       #
       # This spans SEVERAL calls into the gem — authenticate, then the user
@@ -18,10 +25,8 @@ module Lakeraven
       # name and security keys, which is to say their scopes. The whole
       # sequence is therefore one unit (rpms-rpc#235).
       #
-      # Guarded because the lock is newer than this call site; against a gem
-      # without it the sequence simply runs unsynchronized, as it did before.
-      # NOTE: even with it, one global client still holds one broker identity —
-      # this narrows the window, it does not close it (rpms-rpc#234).
+      # NOTE: even serialized, one global client still holds one broker
+      # identity — this narrows the window, it does not close it (rpms-rpc#234).
       def authenticate(access_code:, verify_code:)
         return failure("Password required") if verify_code.to_s.empty?
 
@@ -30,10 +35,17 @@ module Lakeraven
 
       private
 
+      # Prefer the gem's cross-client wire lock when present; otherwise fall
+      # back to a process-local mutex rather than running unsynchronized. Do
+      # NOT invert the guard — RpmsRpc.synchronize_wire is ABSENT on the gem
+      # this branch pins, so requiring it would take login down. When
+      # rpms-rpc#235 lands and the gem bumps, the first branch takes over
+      # automatically.
       def with_broker_wire_lock(&block)
-        return yield unless RpmsRpc.respond_to?(:synchronize_wire)
+        return RpmsRpc.synchronize_wire(&block) if RpmsRpc.respond_to?(:synchronize_wire)
 
-        RpmsRpc.synchronize_wire(&block)
+        Rails.logger.warn("[auth] broker wire lock unavailable (rpms-rpc#235); serialising in-process")
+        BROKER_WIRE_MUTEX.synchronize(&block)
       end
 
       def resolve_signon(access_code, verify_code)
