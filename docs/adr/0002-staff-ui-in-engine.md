@@ -21,7 +21,7 @@ A prior framing said "staff UI lives in the SaaS shell." That was incorrect for 
 
 The host repository (`lakeraven-ehr-saas`) is **limited to SaaS-framework functions**: account management, authentication, MFA, sessions, subscription/billing, marketing pages, multi-tenant onboarding, password-reset, the public landing page. It mounts the engine; it does not duplicate clinical UI.
 
-**Guiding principle: let the host SaaS template do what it does best; keep as much core clinical logic in the engine as possible.** The host is built on a commercial SaaS template — accounts, authentication, MFA/2FA, sessions, teams/multi-tenancy, billing, subscriptions, and admin are framework concerns it already solves; the engine must not reimplement them. The engine owns clinical logic and its UI. Every placement question resolves to a single test: **is this a the host template framework concern (→ host) or clinical (→ engine)?** In particular, **MFA is out of scope for the engine** — the host template provides 2FA, and the engine must not carry its own.
+**Guiding principle: let the host SaaS template do what it does best; keep as much core clinical logic in the engine as possible.** The host is built on a commercial SaaS template — accounts, authentication, MFA/2FA, sessions, teams/multi-tenancy, billing, subscriptions, and admin are framework concerns it already solves; the engine must not reimplement them. The engine owns clinical logic and its UI. Every placement question resolves to a single test: **is this a host-template framework concern (→ host) or clinical (→ engine)?** In particular, **MFA is out of scope for the engine** — the host template provides 2FA, and the engine must not carry its own.
 
 Specific port placements:
 
@@ -59,7 +59,7 @@ Existing host-app port issues (#48–55) that targeted "host app" are retargeted
 
 The patient portal is an exception — it lives in `lakeraven-self` (a separate consumer-DPI host), with its own ADR. Authentication, MFA, sessions, and admin are host-template concerns (above), with their own ADR in `lakeraven-ehr-saas`.
 
-**Migration debt (as of this ADR):** the engine currently carries auth/session/MFA and admin UI that predate this decision — e.g. `SessionsController`, `WebController`, `authentication.feature`, `mfa_authentication.feature`, `admin/*` views. Per the guiding principle these belong in the host template and should migrate out of the engine. The permanent VistA sign-on (the real replacement for any interim engine login) must be built on the host's host-template authentication with a VistA strategy, **not** a hand-rolled engine `SessionsController`.
+**Migration debt (as of this ADR):** the engine currently carries auth/session/MFA and admin UI that predate this decision — e.g. `SessionsController`, `WebController`, `authentication.feature`, `mfa_authentication.feature`, `admin/*` views. Per the guiding principle these belong in the host template and should migrate out of the engine. The permanent VistA sign-on (the real replacement for any interim engine login) must be built on the host template's authentication with a VistA strategy, **not** a hand-rolled engine `SessionsController`.
 
 ## References
 
