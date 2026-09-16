@@ -151,6 +151,69 @@ module Lakeraven
         assert_equal "Patient/1", observation.dig(:subject, :reference)
       end
 
+      # -- Safety projection (the flag must survive into the Observation) ------
+      #
+      # The stakes case: items 1-8 at 0, item 9 at 3. Total 3, band "minimal" —
+      # and the patient endorsed self-harm ideation. Without projection the
+      # score-only consumer reads a NEGATIVE screen.
+      def flagged_minimal
+        ordinals = Array.new(PHQ9.items.length, 0)
+        ordinals[PHQ9.items.index(PHQ9.safety_item)] = 3
+        record(ordinals: ordinals)
+      end
+
+      test "the stakes fixture is what it claims to be" do
+        r = flagged_minimal
+
+        assert_equal 3, r.total_score
+        assert_equal "minimal", r.severity_band
+        assert r.safety_flagged?
+      end
+
+      test "a flagged screening's Observation carries an abnormal interpretation" do
+        fhir = flagged_minimal.to_observation.to_fhir
+
+        interpretation = fhir[:interpretation]
+        assert_not_nil interpretation, "a flagged screen must not serialize as a clean score"
+        coding = interpretation.first[:coding].first
+        assert_equal "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation", coding[:system]
+        assert_equal "A", coding[:code]
+        assert_match(/self-harm/i, interpretation.first[:text])
+      end
+
+      test "a flagged screening's Observation carries the item-9 component" do
+        fhir = flagged_minimal.to_observation.to_fhir
+
+        component = (fhir[:component] || []).find do |c|
+          c.dig(:code, :coding, 0, :code) == "44260-8"
+        end
+        assert_not_nil component, "the safety item must be identifiable by LOINC 44260-8"
+        assert_equal "http://loinc.org", component.dig(:code, :coding, 0, :system)
+        assert_equal 3, component.dig(:valueCodeableConcept, :coding, 0)&.then { LL358_ORDINALS[_1[:code]] }
+        assert_equal "Nearly every day", component.dig(:valueCodeableConcept, :coding, 0, :display)
+      end
+
+      LL358_ORDINALS = { "LA6568-5" => 0, "LA6569-3" => 1, "LA6570-1" => 2, "LA6571-9" => 3 }.freeze
+
+      test "an unflagged screening's Observation carries neither" do
+        # Genuinely unflagged: item 9 at zero (the default fixture answers 1
+        # everywhere, which flags).
+        ordinals = Array.new(PHQ9.items.length, 1)
+        ordinals[PHQ9.items.index(PHQ9.safety_item)] = 0
+        fhir = record(ordinals: ordinals).to_observation.to_fhir
+
+        assert_nil fhir[:interpretation]
+        assert_nil fhir[:component],
+                   "projecting item answers off an UNFLAGGED screen widens the Observation scope for nothing"
+      end
+
+      test "a flagged GAD-7 cannot exist, so its Observation never carries the projection" do
+        fhir = record(instrument: GAD7, ordinals: Array.new(GAD7.items.length, 3)).to_observation.to_fhir
+
+        assert_nil fhir[:interpretation]
+        assert_nil fhir[:component]
+      end
+
       # -- Severity slug (CSS hook) --------------------------------------------
 
       test "every severity band of both instruments slugs to a distinct token" do

@@ -158,8 +158,53 @@ module Lakeraven
           unit: "{score}",
           category: "survey",
           status: "final",
-          effective_datetime: effective_at
+          effective_datetime: effective_at,
+          interpretation: safety_interpretation,
+          components: safety_components
         )
+      end
+
+      # -- Safety projection ---------------------------------------------------
+      #
+      # The flag must survive into the SCORE, because the score is what most
+      # consumers read: items 1-8 at zero with item 9 at 3 totals 3, bands
+      # "minimal", and without this a patient who endorsed self-harm ideation
+      # presents as a NEGATIVE screen to every Observation-scoped consumer.
+      #
+      # Deliberate privacy decision, stated rather than smuggled: this projects
+      # the item-9 answer into the Observation, which the scope split otherwise
+      # reserves for QuestionnaireResponse scope. It is emitted ONLY on a
+      # flagged row — one that by database invariant already contains the
+      # disclosure — so an unflagged screening exposes nothing new, and the
+      # widening is exactly the fact the flag exists to convey. The false
+      # negative is the worse harm.
+      INTERPRETATION_SYSTEM = "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation"
+
+      def safety_interpretation
+        return nil unless safety_flagged?
+
+        [ {
+          coding: [ { system: INTERPRETATION_SYSTEM, code: "A", display: "Abnormal" } ],
+          text: "Positive self-harm item (#{instrument.safety_item&.link_id}): " \
+                "requires safety follow-up regardless of total score"
+        } ]
+      end
+
+      def safety_components
+        return nil unless safety_flagged?
+
+        item = instrument.safety_item
+        choice = item && instrument.choice_for(ordinals[item.link_id])
+        return nil unless choice
+
+        [ {
+          code: { coding: [ { system: ScreeningInstrument::LOINC_SYSTEM,
+                              code: item.link_id, display: item.text } ] },
+          valueCodeableConcept: {
+            coding: [ { system: ScreeningInstrument::LOINC_SYSTEM,
+                        code: choice.link_id, display: choice.text } ]
+          }
+        } ]
       end
 
       def to_questionnaire_response

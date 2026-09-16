@@ -130,6 +130,21 @@
   border: 2px solid #b3261e;
 }
 
+/* Inline marker on a history row whose answers disclosed self-harm. Appears
+   exactly when the band under-states the situation (a flagged screen can band
+   "Minimal"), so it must be louder than the band text beside it. */
+.screening-flag {
+  background: #fdf1f0;
+  border: 1px solid #b3261e;
+  border-radius: 6px;
+  color: #b3261e;
+  font-size: 0.85rem;
+  font-weight: 700;
+  margin-left: 0.4rem;
+  padding: 0.1rem 0.45rem;
+  white-space: nowrap;
+}
+
 .screening-errors {
   background: #fdf1f0;
   border: 2px solid #b3261e;

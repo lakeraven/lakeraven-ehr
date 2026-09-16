@@ -73,6 +73,11 @@ module Lakeraven
       attribute :category, :string
       attribute :status, :string
       attribute :effective_datetime, :datetime
+      # FHIR Observation.interpretation / Observation.component, prebuilt by
+      # the producer (e.g. a safety-flagged screening projects an abnormal
+      # interpretation and its item-9 component). Emitted verbatim.
+      attribute :interpretation
+      attribute :components
 
       # -- Gateway DI -----------------------------------------------------------
 
@@ -152,7 +157,9 @@ module Lakeraven
           effectiveDateTime: effective_datetime&.iso8601,
           valueQuantity: build_value_quantity,
           valueString: sdoh? && value_quantity.blank? ? value : nil,
-          category: category ? [ { coding: [ { code: category, system: CATEGORY_SYSTEM } ] } ] : nil
+          category: category ? [ { coding: [ { code: category, system: CATEGORY_SYSTEM } ] } ] : nil,
+          interpretation: interpretation.presence,
+          component: components.presence
         }.compact
       end
 

@@ -28,7 +28,14 @@
           <td><%= response.effective_at.strftime("%b %-d, %Y") %></td>
           <td><%= response.instrument.short_title %></td>
           <td><%= response.total_score %> / <%= response.instrument.max_score %></td>
-          <td><%= response.severity_band.capitalize %></td>
+          <td>
+            <%= response.severity_band.capitalize %>
+            <%# Rides with the band for the same reason as on the chart: a
+                flagged screen may band "Minimal", and must never read clean. %>
+            <% if response.safety_flagged? %>
+              <span class="screening-flag" role="note">Self-harm item positive</span>
+            <% end %>
+          </td>
           <td><a href="<%= patient_screening_path(@dfn, response.id) %>">
             View<span class="sr-only"> <%= response.instrument.short_title %> from
             <%= response.effective_at.strftime("%b %-d, %Y") %></span></a></td>

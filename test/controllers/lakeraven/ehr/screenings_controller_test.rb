@@ -804,6 +804,35 @@ module Lakeraven
         assert_equal "8", AuditEvent.recent.first.outcome
       end
 
+      # -- Safety projection on the history ------------------------------------
+
+      test "the history marks a flagged screening even when the band is minimal" do
+        submit(answers: all_answered(PHQ9, 0).merge(PHQ9.safety_link_id => 3),
+               safety_acknowledged: "1")
+
+        get BASE, headers: auth_headers
+
+        assert_response :ok
+        record = ScreeningResponse.last
+        assert_equal 3, record.total_score
+        assert_equal "minimal", record.severity_band
+        assert record.safety_flagged?, "guard: the fixture must be the stakes case"
+        assert_select "table.screening-history .screening-flag", text: /self-harm/i
+        # The class must have a rule behind it, or the marker renders as plain
+        # text and disappears into the row (the sev-moderately lesson).
+        stylesheet = File.read(Lakeraven::EHR::Engine.root.join(
+                                 "app/assets/stylesheets/lakeraven/ehr/application.css"))
+        assert_includes stylesheet, ".screening-flag {"
+      end
+
+      test "the history carries no safety marker for unflagged rows" do
+        submit
+
+        get BASE, headers: auth_headers
+
+        assert_select ".screening-flag", false
+      end
+
       # -- Trending ------------------------------------------------------------
 
       test "the index lists a patient's screenings oldest first" do
