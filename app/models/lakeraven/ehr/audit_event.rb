@@ -6,7 +6,31 @@ module Lakeraven
     # Immutable once written (ReadOnlyRecord on update).
     # No PHI in the row itself — only identifiers per ADR 0002.
     class AuditEvent < ApplicationRecord
+      include TamperEvident
+
       self.table_name = "lakeraven_ehr_audit_events"
+
+      # EXPLICIT, and frozen. Deriving this from `column_names` would mean a
+      # later migration adding any column silently invalidated the digest of
+      # every row already written — the whole log would read as tampered.
+      # Guarded by a test: adding a column to the digest input is a DECISION
+      # (it re-scopes what "unaltered" means), never drift.
+      DIGESTED_ATTRIBUTES = %w[
+        event_type action outcome outcome_desc entity_type entity_identifier
+        entity_id agent_who_type agent_who_identifier agent_name
+        agent_network_address tenant_identifier facility_identifier created_at
+      ].freeze
+
+      def self.digested_attributes
+        DIGESTED_ATTRIBUTES & column_names
+      end
+
+      def self.tampered_events
+        tampered_records
+      end
+
+      # Used by AuditRetention; time-inclusive upper bound.
+      scope :occurring_before, ->(time) { where(created_at: ..time) }
 
       EVENT_TYPES = {
         "rest" => "RESTful Operation",
