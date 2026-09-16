@@ -156,7 +156,10 @@ class ClinicalAuditFailsClosedTest < ActionDispatch::IntegrationTest
     assert_response :ok, "attacker-influencable input turned a working search into a 503"
     event = Lakeraven::EHR::AuditEvent.order(:id).last
     refute_nil event, "the probing request left no audit trail"
-    assert_nil event.entity_identifier, "the malformed identifier was recorded as if real"
+    refute_equal "Observation/9", event.entity_identifier, "the malformed identifier was recorded as if real"
+    # The garbage param DEGRADES to the patient scope, it does not erase it —
+    # see audit_entity_identity_test for the full contract.
+    assert_equal [ "Patient", "1" ], [ event.entity_type, event.entity_identifier ]
   end
 
   test "a non-DFN query id on a Patient search records a row, not a 503" do

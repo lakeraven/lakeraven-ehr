@@ -478,12 +478,27 @@ module Lakeraven
       # cannot name a record of the audited type is OMITTED: a row with no
       # entity beats no row, and never a row that lies.
       def audit_entity_type
-        patient_scoped_search? ? "Patient" : fhir_resource_type
+        audit_entity_reference.first
       end
 
       def audit_entity_identifier
-        raw = patient_scoped_search? ? patient_search_param : direct_audit_identifier
-        sanitize_audit_entity_identifier(raw)
+        audit_entity_reference.last
+      end
+
+      # Both halves derived TOGETHER, and degradation runs toward the
+      # patient, never away from it: a direct identifier that sanitizes to
+      # nothing falls back to the `?patient=` scope when one is present
+      # (round-2 close-out) — otherwise appending one garbage `?id=` param
+      # would strip patient attribution from the §164.528 trail while the
+      # search still served the patient's data.
+      def audit_entity_reference
+        direct = sanitize_identifier_for(fhir_resource_type, direct_audit_identifier)
+        return [ fhir_resource_type, direct ] if direct
+
+        patient = sanitize_identifier_for("Patient", patient_search_param)
+        return [ "Patient", patient ] if patient
+
+        [ fhir_resource_type, nil ]
       end
 
       def direct_audit_identifier
@@ -494,21 +509,17 @@ module Lakeraven
         end
       end
 
-      def patient_scoped_search?
-        direct_audit_identifier.blank? && params[:patient].present?
-      end
-
       # FHIR allows both `?patient=1` and `?patient=Patient/1`; the gateways
       # accept both (`extract_patient_dfn`), so the audit records both.
       def patient_search_param
         params[:patient].to_s.delete_prefix("Patient/")
       end
 
-      def sanitize_audit_entity_identifier(value)
+      def sanitize_identifier_for(entity_type, value)
         value = value.to_s.presence
         return nil unless value
         return nil if value.include?("/")
-        return nil if audit_entity_type.to_s == "Patient" && !value.match?(/\A\d+\z/)
+        return nil if entity_type.to_s == "Patient" && !value.match?(/\A\d+\z/)
 
         value
       end

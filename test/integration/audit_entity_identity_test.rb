@@ -49,6 +49,18 @@ class AuditEntityIdentityTest < ActionDispatch::IntegrationTest
       "a ?_id= search recorded a null entity (patients_controller searches on _id)"
   end
 
+  # Round-2 close-out item: a garbage direct identifier must DEGRADE to the
+  # patient scope, not erase it — otherwise any client can strip patient
+  # attribution from the §164.528 trail by appending one query param.
+  test "an appended garbage id cannot strip patient attribution from a search" do
+    get "/lakeraven-ehr/Observation", params: { patient: "1", id: "Observation/9" }, headers: @headers
+    assert_response :ok
+
+    event = Lakeraven::EHR::AuditEvent.order(:id).last
+    assert_equal [ "Patient", "1" ], [ event.entity_type, event.entity_identifier ],
+      "an appended garbage param stripped the patient from the audit trail"
+  end
+
   test "a direct resource read still records its own resource entity" do
     get "/lakeraven-ehr/Patient/1", headers: @headers
 
