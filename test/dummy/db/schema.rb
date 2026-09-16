@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_02_030000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_14_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -45,9 +45,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_02_030000) do
     t.string "facility_identifier"
     t.string "outcome", null: false
     t.text "outcome_desc"
+    t.string "record_digest"
     t.string "tenant_identifier"
     t.datetime "updated_at", null: false
+    t.index [ "agent_who_identifier" ], name: "index_lakeraven_ehr_audit_events_on_agent_who_identifier"
     t.index [ "created_at" ], name: "index_lakeraven_ehr_audit_events_on_created_at"
+    t.index [ "entity_identifier" ], name: "index_lakeraven_ehr_audit_events_on_entity_identifier"
     t.index [ "entity_type" ], name: "index_lakeraven_ehr_audit_events_on_entity_type"
     t.index [ "tenant_identifier" ], name: "index_lakeraven_ehr_audit_events_on_tenant_identifier"
   end

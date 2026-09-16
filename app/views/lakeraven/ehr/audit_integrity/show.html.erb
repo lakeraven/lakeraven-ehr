@@ -1,0 +1,74 @@
+<% content_for :title, "Audit integrity | Lakeraven EHR" %>
+
+<div class="page-header">
+  <h1>Audit log integrity</h1>
+  <p>Whether these records still say what they said when they were written —
+     reported as what is <em>installed on this database right now</em>, never
+     as what the software could do in principle.</p>
+</div>
+
+<dl class="audit-integrity">
+  <dt>Tamper-evidence</dt>
+  <dd>
+    <% if @tamper_evident %>
+      <strong>Claimed.</strong> The digest is keyed and the append-only trigger is installed and enabled.
+    <% else %>
+      <strong>NOT claimed.</strong> Do not cite this log as tamper-evident in a compliance review:
+      <ul>
+        <% unless @digest_keyed %>
+          <li>No digest key is configured (<code>audit_digest_key</code> /
+              <code>LAKERAVEN_EHR_AUDIT_DIGEST_KEY</code>). An unkeyed digest is publicly
+              recomputable — whoever can rewrite a row can re-seal it — so it detects
+              corruption and careless edits, <em>not</em> forgery.</li>
+        <% end %>
+        <% unless @append_only_installed %>
+          <li>The append-only trigger is not installed (or is disabled) on this database.</li>
+        <% end %>
+      </ul>
+    <% end %>
+  </dd>
+
+  <dt>Digest</dt>
+  <dd><%= @integrity_mode %></dd>
+
+  <dt>Database enforcement</dt>
+  <dd>
+    <% if @append_only_installed %>
+      Append-only trigger installed and enabled: this database refuses <code>UPDATE</code>
+      on an audit row.
+      <p><strong>Limits, stated plainly:</strong> a role that owns the table — which the
+      application role does — can still <code>ALTER TABLE … DISABLE TRIGGER</code>,
+      <code>TRUNCATE</code>, or <code>DELETE</code>. A disabled trigger shows on this screen
+      as “not installed”; deletion is permitted by design (the retention purge needs it),
+      detected only by the receipt trail, and is the subject of the periodic-sealing
+      follow-up (#506). This control constrains applications and mistakes, not a
+      table owner.</p>
+    <% elsif @append_only_capable %>
+      <strong>NOT INSTALLED.</strong> This database could enforce append-only, but the
+      trigger is absent or disabled — a schema load (<code>db:schema:load</code>) does not
+      install it. Run <code>bin/rails lakeraven_ehr:audit:enforce_append_only</code>.
+    <% else %>
+      Not available on this database adapter — the digest can detect an edit, but nothing
+      prevents one.
+    <% end %>
+  </dd>
+
+  <dt>Retention</dt>
+  <dd><%= Lakeraven::EHR::AuditRetention.retention_period.inspect %>, purgeable before
+      <%= Lakeraven::EHR::AuditRetention.cutoff.to_date.iso8601 %></dd>
+
+  <dt>Unverified or altered rows</dt>
+  <dd>
+    <% if @unverified.empty? %>
+      None. Every record matches its digest<%= " — but see the digest mode above for what that is worth" unless @digest_keyed %>.
+    <% else %>
+      <strong><%= @unverified.size %></strong> record(s) do not match their digest, or carry none at
+      all. A row with no digest is not a clean row — it is an unverified one.
+      <ul>
+        <% @unverified.first(50).each do |event| %>
+          <li>#<%= event.id %> — recorded <%= event.created_at&.iso8601 %></li>
+        <% end %>
+      </ul>
+    <% end %>
+  </dd>
+</dl>
