@@ -29,11 +29,22 @@ class AddBrowserSessionToOauthAccessTokens < ActiveRecord::Migration[8.0]
     # were already renamed (the attack precondition) it would silently miss
     # them and stamp them as non-browser — the fail-open, migrated in.
     #
-    # Revoking is unconditional. A revoked token cannot be replayed no matter
-    # how it is later classified, so the window closes completely rather than
-    # depending on a correct guess about which tokens are browser tokens. The
-    # cost is one re-login on a short-lived session credential; nothing is
-    # lost. Fail closed.
+    # Revocation cannot key on the name either, for the same reason — the
+    # round-2 gate reproduced a pre-flag token under an already-renamed
+    # application surviving a name-keyed revoke and replaying from a header.
+    # So the revoke matches by name OR BY SHAPE: browser tokens are the only
+    # tokens this engine mints with a resource owner (the clinician's DUZ —
+    # always set) and no patient/ scope (minting raises on one). The shape
+    # clause therefore catches every browser token REGARDLESS of what the
+    # application is called; the name clause is redundant belt.
+    #
+    # Deliberately over-broad, never under-: system/backend tokens have no
+    # resource owner and survive (verified — the migration must not log
+    # integrations out); patient-context tokens are excluded by scope. A HOST
+    # app running its own non-patient authorization-code flow through the same
+    # Doorkeeper tables would have those user tokens revoked too — a one-time
+    # re-auth at migration, accepted as the fail-closed direction and stated
+    # here rather than discovered.
     self.class.revoke_legacy_browser_tokens!(connection)
   end
 
@@ -44,9 +55,16 @@ class AddBrowserSessionToOauthAccessTokens < ActiveRecord::Migration[8.0]
       UPDATE oauth_access_tokens
          SET revoked_at = CURRENT_TIMESTAMP
        WHERE revoked_at IS NULL
-         AND application_id IN (
-           SELECT id FROM oauth_applications
-            WHERE name = #{conn.quote(BROWSER_SSO_APP_NAME)}
+         AND (
+           application_id IN (
+             SELECT id FROM oauth_applications
+              WHERE name = #{conn.quote(BROWSER_SSO_APP_NAME)}
+           )
+           OR (
+             browser_session = #{conn.quoted_false}
+             AND resource_owner_id IS NOT NULL
+             AND scopes NOT LIKE '%patient/%'
+           )
          )
     SQL
   end
