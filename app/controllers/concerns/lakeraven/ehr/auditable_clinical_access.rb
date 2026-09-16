@@ -113,7 +113,7 @@ module Lakeraven
       # At most ONE row per request: the guard makes a double registration of
       # this concern (a controller that also mixes in a fail-closed variant)
       # record once rather than twice.
-      def record_audit_event!
+      def record_audit_event!(detached: false)
         return if @audit_recorded
         return unless auditable_access?
 
@@ -122,6 +122,7 @@ module Lakeraven
         agent = audit_agent_attributes
 
         persist_audit_row!(
+          detached: detached,
           event_type: "rest",
           action: audit_action,
           outcome: audit_outcome,
@@ -142,12 +143,18 @@ module Lakeraven
       # retried once with the entity omitted, and the omission is stated on
       # the row. A store failure (StatementInvalid, connectivity) is NOT
       # rescued: that is the genuine fail-closed case.
-      def persist_audit_row!(attrs)
-        AuditEvent.create!(**attrs)
+      # `detached:` writes on a connection of its own (see
+      # AuditEvent.create_detached!): the exception path's row must survive a
+      # caller-owned parent transaction rolling back on the re-raised error
+      # (F3) — the normal path stays INSIDE the wrapper's transaction, which
+      # is what makes the action's writes and their audit row atomic.
+      def persist_audit_row!(detached: false, **attrs)
+        write = detached ? AuditEvent.method(:create_detached!) : AuditEvent.method(:create!)
+        write.call(**attrs)
       rescue ActiveRecord::RecordInvalid => e
         entity_errors = e.record.errors.map(&:full_message).join("; ")
         Rails.logger.warn("[audit] entity omitted from an audit row: #{entity_errors}")
-        AuditEvent.create!(**attrs.merge(
+        write.call(**attrs.merge(
           entity_identifier: nil,
           outcome_desc: [ attrs[:outcome_desc],
                           "entity identifier omitted: failed audit-row validation" ].compact.join("; ")
@@ -181,8 +188,13 @@ module Lakeraven
         AuditContext.inside_audited_request = true
       end
 
+      # Detached (F3): the wrapper's own transaction has already rolled back
+      # here, but a CALLER-OWNED parent (a service, an importer, a test
+      # harness owning its transaction) will still roll back when the
+      # exception is re-raised — and a plain insert would join it and vanish.
+      # The action truly ran and truly failed; its record survives.
       def record_attempt_after_rollback
-        record_audit_event!
+        record_audit_event!(detached: true)
       rescue StandardError => e
         Rails.logger.error("[audit] could not record a failed access: #{e.message}")
       end

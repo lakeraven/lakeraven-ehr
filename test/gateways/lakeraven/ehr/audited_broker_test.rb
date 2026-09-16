@@ -96,6 +96,11 @@ module Lakeraven
         assert_equal "10.0.0.9", event.agent_network_address
       end
 
+      # F3's survival tests live in AuditedBrokerDetachedTest — they must run
+      # OUTSIDE the transactional-test wrapper, because the wrapper pins the
+      # connection and the detached write deliberately degrades to inline
+      # there (see AuditEvent.create_detached!).
+
       test "wrapping an already-wrapped broker does not double-record" do
         fake = FakeBroker.new.on("ORWPT ID INFO", "1^ok")
 

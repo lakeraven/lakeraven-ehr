@@ -46,6 +46,40 @@ module Lakeraven
 
       scope :recent, -> { order(created_at: :desc) }
 
+      # A row that SURVIVES any transaction open on the calling thread (F3
+      # on the #512 gate). For records of things that already irreversibly
+      # happened — an RPC executed against RPMS, an action that raised inside
+      # a caller-owned transaction: rolling the caller back cannot undo the
+      # remote effect, so it must not erase the record of it either.
+      #
+      # `requires_new: true` is NOT enough here: inside an open transaction
+      # it is a savepoint, and releasing a savepoint into a parent that later
+      # rolls back discards it. Surviving requires a write the caller's
+      # connection cannot take down — a fresh thread leasing its own pooled
+      # connection, joined synchronously so a failure still surfaces to the
+      # caller (fail closed). Costs one extra pool connection for the
+      # duration of the insert.
+      #
+      # Attribute resolution must happen on the CALLING thread before this is
+      # invoked (AuditContext is thread-local): pass fully-resolved values.
+      #
+      # Under the TRANSACTIONAL-TEST harness the pool pins one thread-locked
+      # connection and hands it to every checkout from any thread — a
+      # detached thread deadlocks against the test thread by design, and its
+      # write would join the test transaction anyway. So a pinned connection
+      # writes inline; the survival property is proven by dedicated tests
+      # that opt out of the transactional wrapper (production never pins).
+      def self.create_detached!(attributes)
+        conn = connection
+        return create!(**attributes) unless conn.transaction_open?
+        return create!(**attributes) if conn.respond_to?(:pinned) && conn.pinned
+
+        Thread.new do
+          Thread.current.report_on_exception = false
+          connection_pool.with_connection { create!(**attributes) }
+        end.value
+      end
+
       def readonly?
         persisted?
       end

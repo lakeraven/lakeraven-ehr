@@ -88,8 +88,14 @@ module Lakeraven
 
       private
 
+      # DETACHED from any open local transaction (F3): the RPC executed
+      # against RPMS whatever happens next — the concern's fail-closed
+      # rollback (or a caller-owned transaction aborting) cannot undo the
+      # remote effect and must not erase the record of it. AuditContext is
+      # thread-local, so every attribute is resolved HERE, on the calling
+      # thread, before the detached write.
       def record!(rpc_name, outcome:, reason: nil)
-        AuditEvent.create!(
+        AuditEvent.create_detached!(
           event_type: "application",
           action: AUDIT_ACTION,
           outcome: outcome,

@@ -208,6 +208,11 @@ class ClinicalAuditFailsClosedTest < ActionDispatch::IntegrationTest
       "the raising action's write survived"
   end
 
+  # (F3's second half — the failure row surviving a caller-owned
+  #  transaction's rollback — lives in AuditFailureRowSurvivalTest, which
+  #  opts out of the transactional wrapper; under the wrapper the pinned
+  #  connection makes the detached write degrade to inline by design.)
+
   test "the failure row never carries the exception message" do
     setup_auth(scopes: "system/*.read system/*.write")
 
