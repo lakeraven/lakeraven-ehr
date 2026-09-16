@@ -31,13 +31,13 @@ Given("the patient has clinical data for the case report") do
       dfn: @patient_dfn || "12345",
       name: { given: "Alice", family: "Anderson" },
       dob: "1975-06-15", sex: "F",
-      address: { street: "123 Main St", city: "Kingston", state: "NY", zip: "12401" }
+      address: { street: "123 Main St", city: "Example City", state: "NY", zip: "99999" }
     },
     encounter: {
       date: Time.current.strftime("%Y-%m-%d"),
       type_code: "99213",
       type_display: "Office visit",
-      facility: "Ulster County Health Department"
+      facility: "Example County Health Department"
     },
     provider: {
       duz: "789", name: "Dr. Smith", npi: "1234567890"

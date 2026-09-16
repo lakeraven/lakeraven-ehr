@@ -9,8 +9,8 @@ module Lakeraven
         @patient_with_enrollment = Patient.new(
           dfn: 1,
           name: "Anderson,Alice",
-          tribal_enrollment_number: "ANLC-12345",
-          tribal_affiliation: "Alaska Native - Anchorage (ANLC)",
+          tribal_enrollment_number: "EXNH-12345",
+          tribal_affiliation: "Example Native Health (EXNH)",
           service_area: "Anchorage"
         )
 
@@ -37,15 +37,15 @@ module Lakeraven
         details = @patient_with_enrollment.tribal_enrollment_details
 
         assert_not_nil details
-        assert_equal "ANLC-12345", details[:enrollment_number]
-        assert_equal "Alaska Native - Anchorage (ANLC)", details[:tribe_name]
+        assert_equal "EXNH-12345", details[:enrollment_number]
+        assert_equal "Example Native Health (EXNH)", details[:tribe_name]
         assert_equal "ACTIVE", details[:status]
         assert_equal "Anchorage", details[:service_unit]
-        assert_equal "ANLC", details[:tribe_code]
+        assert_equal "EXNH", details[:tribe_code]
       end
 
       test "tribal_enrollment_details returns nil for unsaved patient" do
-        patient = Patient.new(tribal_enrollment_number: "ANLC-12345")
+        patient = Patient.new(tribal_enrollment_number: "EXNH-12345")
         details = patient.tribal_enrollment_details
         assert_nil details
       end
@@ -58,7 +58,7 @@ module Lakeraven
         result = @patient_with_enrollment.validate_tribal_enrollment
 
         assert result[:valid]
-        assert_equal "ANLC", result[:tribe_code]
+        assert_equal "EXNH", result[:tribe_code]
         assert_equal "12345", result[:enrollment_number]
         assert_equal "ACTIVE", result[:status]
       end
@@ -114,7 +114,7 @@ module Lakeraven
       end
 
       test "tribal_enrollment_eligibility returns default for unsaved patient" do
-        patient = Patient.new(tribal_enrollment_number: "ANLC-12345")
+        patient = Patient.new(tribal_enrollment_number: "EXNH-12345")
         eligibility = patient.tribal_enrollment_eligibility
 
         refute eligibility[:active]
@@ -151,7 +151,7 @@ module Lakeraven
       end
 
       test "enrollment_service_unit returns nil for unsaved patient" do
-        patient = Patient.new(tribal_enrollment_number: "ANLC-12345")
+        patient = Patient.new(tribal_enrollment_number: "EXNH-12345")
         service_unit = patient.enrollment_service_unit
         assert_nil service_unit
       end
@@ -164,15 +164,15 @@ module Lakeraven
         tribe_info = @patient_with_enrollment.tribe_information
 
         assert_not_nil tribe_info
-        assert_equal "ANLC", tribe_info[:code]
-        assert_equal "Alaska Native - Anchorage (ANLC)", tribe_info[:name]
+        assert_equal "EXNH", tribe_info[:code]
+        assert_equal "Example Native Health (EXNH)", tribe_info[:name]
         assert_equal "Anchorage", tribe_info[:service_unit]
         assert_equal "Alaska", tribe_info[:region]
       end
 
       test "tribe_information extracts tribe code from enrollment number" do
         tribe_info = @patient_with_enrollment.tribe_information
-        assert_equal "ANLC", tribe_info[:code]
+        assert_equal "EXNH", tribe_info[:code]
       end
 
       test "tribe_information returns nil for missing enrollment" do
@@ -229,8 +229,8 @@ module Lakeraven
       # =============================================================================
 
       test "tribal_enrollment_number attribute is accessible" do
-        patient = Patient.new(tribal_enrollment_number: "ANLC-12345")
-        assert_equal "ANLC-12345", patient.tribal_enrollment_number
+        patient = Patient.new(tribal_enrollment_number: "EXNH-12345")
+        assert_equal "EXNH-12345", patient.tribal_enrollment_number
       end
 
       test "tribal_affiliation attribute is accessible" do
@@ -249,7 +249,7 @@ module Lakeraven
 
       test "handles enrollment number with different formats" do
         valid_patients = [
-          Patient.new(dfn: 1, tribal_enrollment_number: "ANLC-12345"),
+          Patient.new(dfn: 1, tribal_enrollment_number: "EXNH-12345"),
           Patient.new(dfn: 2, tribal_enrollment_number: "CN-67890"),
           Patient.new(dfn: 3, tribal_enrollment_number: "NN-11111")
         ]

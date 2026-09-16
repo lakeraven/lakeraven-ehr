@@ -157,12 +157,12 @@ module Lakeraven
       test "to_fhir includes managing organization" do
         team = CareTeam.new(
           ien: "123", patient_dfn: "456",
-          managing_organization: "Alaska Native Medical Center"
+          managing_organization: "Example Health Center"
         )
         fhir = team.to_fhir
 
         assert_not_nil fhir[:managingOrganization]
-        assert_equal "Alaska Native Medical Center", fhir[:managingOrganization].first[:display]
+        assert_equal "Example Health Center", fhir[:managingOrganization].first[:display]
       end
 
       # =============================================================================

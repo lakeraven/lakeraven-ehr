@@ -4,7 +4,7 @@ Feature: Organization FHIR resource
   So that facility and provider organization data is interoperable
 
   Scenario: Create a valid organization
-    Given an organization with name "Alaska Native Medical Center"
+    Given an organization with name "Example Health Center"
     Then the organization should be valid
 
   Scenario: Organization requires name
@@ -21,9 +21,9 @@ Feature: Organization FHIR resource
     Then the FHIR resourceType should be "Organization"
 
   Scenario: FHIR Organization includes name
-    Given an organization with name "Alaska Native Medical Center"
+    Given an organization with name "Example Health Center"
     When I serialize the organization to FHIR
-    Then the FHIR organization name should be "Alaska Native Medical Center"
+    Then the FHIR organization name should be "Example Health Center"
 
   Scenario: FHIR Organization includes identifiers
     Given an organization with name "ANMC" and station number "463"

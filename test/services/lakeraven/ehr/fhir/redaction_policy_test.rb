@@ -63,7 +63,7 @@ module Lakeraven
 
         test "external view removes tribal enrollment extension" do
           policy = RedactionPolicy.new(view: :external)
-          resource = build_patient_resource(tribal: "ANLC-12345")
+          resource = build_patient_resource(tribal: "EXNH-12345")
 
           result = policy.apply(resource)
 

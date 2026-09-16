@@ -179,11 +179,11 @@ module Lakeraven
         # =============================================================================
 
         test "includes tribal enrollment extension when present" do
-          result = serialize(build_patient(tribal_enrollment_number: "ANLC-12345"))
+          result = serialize(build_patient(tribal_enrollment_number: "EXNH-12345"))
 
           tribal_ext = result[:extension].find { |e| e[:url]&.include?("tribal") }
           refute_nil tribal_ext
-          assert_equal "ANLC-12345", tribal_ext[:valueString]
+          assert_equal "EXNH-12345", tribal_ext[:valueString]
         end
 
         test "omits tribal extension when enrollment blank" do

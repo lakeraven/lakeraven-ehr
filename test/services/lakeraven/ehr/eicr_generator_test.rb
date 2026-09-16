@@ -16,7 +16,7 @@ module Lakeraven
           dfn: "12345",
           name: { given: "Alice", family: "Anderson" },
           dob: "1975-06-15", sex: "F",
-          address: { street: "123 Main St", city: "Kingston", state: "NY", zip: "12401" }
+          address: { street: "123 Main St", city: "Example City", state: "NY", zip: "99999" }
         }
         @encounter = {
           date: "2026-03-16", type_code: "99213",

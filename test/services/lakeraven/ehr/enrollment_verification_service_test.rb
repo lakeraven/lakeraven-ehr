@@ -10,7 +10,7 @@ module Lakeraven
           dfn: 1,
           name: "TEST,PATIENT",
           sex: "M",
-          tribal_enrollment_number: "ANLC-12345",
+          tribal_enrollment_number: "EXNH-12345",
           service_area: "Anchorage"
         )
       end
@@ -156,7 +156,7 @@ module Lakeraven
 
         assert_instance_of EnrollmentVerificationService::VerificationResult, result
         assert result.enrolled?
-        assert_equal "ANLC-12345", result.policy_number
+        assert_equal "EXNH-12345", result.policy_number
       end
 
       test "tribal adapter detects no enrollment when missing" do

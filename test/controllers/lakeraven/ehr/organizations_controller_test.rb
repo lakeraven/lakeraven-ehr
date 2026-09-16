@@ -21,7 +21,7 @@ module Lakeraven
         body = JSON.parse(response.body)
         assert_equal "Organization", body["resourceType"]
         assert_equal "1", body["id"]
-        assert_equal "Alaska Native Medical Center", body["name"]
+        assert_equal "Example Health Center", body["name"]
       end
 
       test "unknown Organization returns 404" do
