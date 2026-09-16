@@ -44,3 +44,8 @@ jobs:
           bundler-cache: true
       - run: bundle exec rails db:create db:migrate
       - run: bundle exec rails test
+      # partner source-system clinical conformance (docs/PARTNER_CONFORMANCE.md)
+      # — enforced in CI, not just locally green.
+      - run: bundle exec cucumber -t @partner_conformance
+        env:
+          CUCUMBER_PUBLISH_QUIET: "true"

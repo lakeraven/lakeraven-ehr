@@ -47,6 +47,39 @@ module Lakeraven
         gateway.for_patient(dfn)
       end
 
+      # RPMS pharmacy status text -> FHIR MedicationRequest.status (REQUIRED
+      # binding). Legal FHIR codes pass through; known RPMS vocabulary maps
+      # explicitly; anything else falls back to "active" rather than passing
+      # through raw.
+      RPMS_STATUS_MAP = {
+        "discontinued" => "stopped",
+        "expired" => "completed",
+        "hold" => "on-hold",
+        "suspended" => "on-hold"
+      }.freeze
+
+      def self.normalize_status(raw)
+        normalized = raw.to_s.strip.downcase
+        return normalized if VALID_STATUSES.include?(normalized)
+
+        RPMS_STATUS_MAP.fetch(normalized, "active")
+      end
+
+      # Build MedicationRequest instances from raw ORQQPS LIST rows
+      # ({ ien:, drug_name:, sig:, status: }).
+      def self.from_medication_hashes(hashes, patient_dfn:)
+        hashes.map do |h|
+          new(
+            ien: h[:ien]&.to_s,
+            patient_dfn: patient_dfn,
+            medication_display: h[:drug_name],
+            dosage_instruction: h[:sig],
+            status: normalize_status(h[:status]),
+            intent: "order"
+          )
+        end
+      end
+
       def self.resource_class
         "MedicationRequest"
       end
@@ -93,6 +126,7 @@ module Lakeraven
           status: status,
           intent: intent,
           subject: patient_dfn ? { reference: "Patient/#{patient_dfn}" } : nil,
+          authoredOn: authored_on&.iso8601,
           medicationCodeableConcept: build_medication_code,
           dosageInstruction: build_dosage_instructions,
           dispenseRequest: build_dispense_request,

@@ -205,11 +205,13 @@ module Lakeraven
         assert_includes codes, Observation::VITAL_SIGNS_CODES[:diastolic]
       end
 
-      test "blood pressure components have mm[Hg] unit" do
+      test "blood pressure components carry the source-supplied mm[Hg] unit" do
+        # Units are source-supplied (BEHOVM2 VUNITS), never guessed from the
+        # type — so the builder sets `unit` and the components carry it.
         bp = Observation.new(
           ien: "bp-1", patient_dfn: "1", category: "vital-signs",
           code: Observation::VITAL_SIGNS_CODES[:blood_pressure],
-          display: "Blood Pressure", value: "120/80", status: "final"
+          display: "Blood Pressure", value: "120/80", unit: "mm[Hg]", status: "final"
         )
         fhir = bp.to_fhir
         fhir[:component].each do |component|

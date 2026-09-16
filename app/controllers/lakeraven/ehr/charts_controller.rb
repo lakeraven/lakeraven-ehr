@@ -136,7 +136,7 @@ module Lakeraven
         @medications   = readable?("MedicationRequest") ? build_medications(dfn) : []
         @allergies     = readable?("AllergyIntolerance") ? build_allergies(dfn) : []
         @vitals        = readable?("Observation") ? safe { ObservationGateway.for_patient(dfn) } : []
-        @observations  = Observation.from_vital_hashes(@vitals, patient_dfn: dfn)
+        @observations  = Observation.from_measurement_hashes(@vitals, patient_dfn: dfn)
         @immunizations = readable?("Immunization") ? safe { Immunization.for_patient(dfn) } : []
         @procedures    = readable?("Procedure") ? build_procedures(dfn) : []
         @encounters    = readable?("Encounter") ? safe { EncounterGateway.for_patient(dfn) } : []

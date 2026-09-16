@@ -12,7 +12,7 @@ module Lakeraven
 
       test "for_patient returns the seeded problem list" do
         RpmsRpc.client.seed_keyed_collection(:problem_list, "1", [
-          { icd_code: "E11.9", description: "Type 2 diabetes", status: "A" }
+          { ien: "11", icd_code: "E11.9", description: "Type 2 diabetes", status: "A" }
         ])
 
         result = ConditionGateway.for_patient(1)

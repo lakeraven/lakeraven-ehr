@@ -36,6 +36,10 @@ Lakeraven::EHR::Engine.routes.draw do
   resources :observations, path: "Observation", only: %i[index show]
   resources :diagnostic_reports, path: "DiagnosticReport", only: %i[index show]
   resources :care_plans, path: "CarePlan", only: %i[index show]
+  # Provenance — office-measured vs remote/historical capture (partner
+  # item 10). Ids are prov-{measurement-ien}; the constraint keeps any
+  # dotted id portion out of the :format segment.
+  resources :provenances, path: "Provenance", only: %i[index show], constraints: { id: /[^\/]+/ }
   resources :encounters, path: "Encounter", only: %i[index show]
   resources :organizations, path: "Organization", only: %i[show], param: :ien
   resources :locations, path: "Location", only: %i[show], param: :ien

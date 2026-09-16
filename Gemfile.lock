@@ -1,9 +1,9 @@
 GIT
   remote: https://github.com/lakeraven/rpms-rpc.git
-  revision: 2aaf3d5bf107755c353f6bc5a6086c1c76e4d71e
-  branch: scheduling-reg-adt-rpc-wrappers
+  revision: 1bbeba15832f5adebba295a0601bc3838d3902d6
+  branch: feat/provenance-phone-reads
   specs:
-    rpms-rpc (0.1.0)
+    rpms-rpc (0.2.0)
       rexml (~> 3.2)
 
 PATH

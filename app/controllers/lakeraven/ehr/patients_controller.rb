@@ -21,10 +21,9 @@ module Lakeraven
           end
         end
 
-        render json: {
-          resourceType: "Bundle", type: "searchset",
-          total: entries.length, entry: entries
-        }, status: :ok, content_type: FHIR_CONTENT_TYPE
+        # Shared searchset path (paging, _count, links) — total counts the
+        # match entries; _revinclude entries ride along but don't count.
+        render_bundle(entries: entries, total: patients.length)
       end
 
       def show
