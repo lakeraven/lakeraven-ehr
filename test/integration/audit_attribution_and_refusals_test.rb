@@ -53,6 +53,61 @@ class AuditAttributionAndRefusalsTest < ActionDispatch::IntegrationTest
                  "a token/session disagreement was silently resolved instead of recorded")
   end
 
+  # F1 (round-2 gate, both seats): the sibling of S2. "No token OBJECT" is
+  # not "the session authenticated this" — a FHIR surface is NEVER
+  # session-authenticated, so its refusals must not name the browser's
+  # bystanding human. With SameSite=Lax cookies, any cross-site top-level
+  # GET mints these rows against an innocent signed-in clinician.
+  test "a tokenless FHIR refusal is not attributed to a bystanding browser session" do
+    sign_in_browser_session # session[:duz] = "99999"
+
+    get "/lakeraven-ehr/Patient/1" # no Authorization header at all
+    assert_response :unauthorized
+
+    event = Lakeraven::EHR::AuditEvent.order(:id).last
+    refute_nil event, "the tokenless refusal left no audit trail"
+    refute_equal [ "Practitioner", "99999" ],
+                 [ event.agent_who_type, event.agent_who_identifier ],
+                 "a refusal the session did not make was filed under the session's human"
+    assert_equal "Unknown", event.agent_who_type
+    assert_match(/bystanding browser session/i, event.outcome_desc.to_s,
+                 "the bystanding session was silently ignored instead of recorded as an anomaly")
+  end
+
+  test "a garbage bearer token with a bystanding session is not attributed to the session" do
+    sign_in_browser_session
+
+    get "/lakeraven-ehr/Patient/1", headers: { "Authorization" => "Bearer not-a-real-token" }
+    assert_response :unauthorized
+
+    event = Lakeraven::EHR::AuditEvent.order(:id).last
+    refute_nil event, "the garbage-token refusal left no audit trail"
+    refute_equal "99999", event.agent_who_identifier,
+                 "an unknown token string fell through to the bystanding session's human"
+    assert_equal "Unknown", event.agent_who_type
+  end
+
+  # The #486 landmine, pinned (round-2 gate item 5): if a sibling branch ever
+  # defines `current_duz` as "whatever is in the session", the token
+  # mechanism must STILL win — a session-derived current_duz beating token
+  # identity silently reopens S2. SessionShadowedApiController models
+  # exactly that hazardous future implementation.
+  test "a session-derived current_duz cannot beat token identity" do
+    sign_in_browser_session
+    setup_auth(scopes: "system/*.read")
+
+    get "/session_shadowed_api/1", headers: @headers
+    assert_response :ok
+
+    event = Lakeraven::EHR::AuditEvent.order(:id).last
+    refute_nil event
+    refute_equal [ "Practitioner", "99999" ],
+                 [ event.agent_who_type, event.agent_who_identifier ],
+                 "a session-derived current_duz overrode the token that actually authenticated the request"
+    assert_equal "Application", event.agent_who_type
+    assert_equal @application.uid, event.agent_who_identifier
+  end
+
   # The half that must KEEP working: a page authenticated by the session
   # itself is correctly filed under the session's human.
   test "a session-authenticated page is attributed to the session's human" do

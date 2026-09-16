@@ -214,6 +214,41 @@ class ClinicalAuditFailsClosedTest < ActionDispatch::IntegrationTest
       "the refusal carried the patient out in the session"
   end
 
+  # Adopted from the round-2 gate's probe (P5): the rollback must hold for
+  # EVERY cookie-write path an action has, not just the plain jar —
+  # signed/encrypted/permanent jars, a pending cookie DELETE (a delete is a
+  # write), a raw Set-Cookie header, and response.set_cookie.
+  test "a refused access leaks nothing through any cookie-write path" do
+    setup_auth(scopes: "system/*.read")
+    label = ProbeCookiesController::LABEL
+
+    with_broken_audit { get "/probe_cookies/1", headers: @headers }
+
+    assert_response :service_unavailable
+    set_cookie = Array(response.headers["Set-Cookie"]).join("\n")
+    refute_includes CGI.unescape(set_cookie), label, "a cookie path carried the patient out"
+    %w[plain_patient signed_patient encrypted_patient permanent_patient
+       raw_header_patient response_api_patient].each do |name|
+      refute_includes set_cookie, name, "cookie #{name} survived the rollback"
+    end
+    refute_match(/preexisting_cookie=;/, set_cookie, "the pending cookie DELETE survived the rollback")
+    refute_includes session.to_hash.values.map(&:to_s).join(" "), label
+  end
+
+  # The control that keeps the probe honest: on success those cookies ARE
+  # written, so the refusal test above cannot pass vacuously.
+  test "the cookie probe surface is live on the success path" do
+    setup_auth(scopes: "system/*.read")
+
+    get "/probe_cookies/1", headers: @headers
+
+    assert_response :ok
+    set_cookie = Array(response.headers["Set-Cookie"]).join("\n")
+    %w[plain_patient signed_patient encrypted_patient raw_header_patient].each do |name|
+      assert_includes set_cookie, name, "probe controller inert — the refusal test would be vacuous"
+    end
+  end
+
   # The rollback must not destroy session state the action did NOT write —
   # throwing away a clinician's sign-in on every audit outage would make the
   # 503 a logout button.

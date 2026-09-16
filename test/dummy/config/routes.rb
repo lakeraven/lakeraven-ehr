@@ -22,4 +22,14 @@ Rails.application.routes.draw do
     get "staff" => "staff_pages#index"
     get "worklists" => "worklist_pages#index"
   end
+
+  # Test-only: the #486 landmine modeled — a token-authenticated API surface
+  # with a session-derived current_duz, for the mechanism-wins guard test.
+  get "session_shadowed_api/:id" => "session_shadowed_api#show" if Rails.env.test?
+
+  # Test-only: every cookie-write path an action has (plain/signed/encrypted/
+  # permanent jars, pending deletes, raw Set-Cookie, response.set_cookie,
+  # session), for the S8 rollback-completeness contract. Adopted from the
+  # round-2 gate's probe.
+  get "probe_cookies/:dfn" => "probe_cookies#show", constraints: { dfn: /\d+/ } if Rails.env.test?
 end

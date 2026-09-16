@@ -203,8 +203,12 @@ module Lakeraven
       # Something about this request does not add up — a token and a session
       # arriving together, most of all. An anomaly is RECORDED, never silently
       # resolved: the row that quietly picks a winner is the row that lies.
+      # Deduplicated: the resolver runs more than once per request (once for
+      # `auditable_access?`, once for the row itself), and an anomaly noted
+      # twice reads like two anomalies.
       def note_audit_anomaly(description)
-        (@audit_anomalies ||= []) << description
+        @audit_anomalies ||= []
+        @audit_anomalies << description unless @audit_anomalies.include?(description)
       end
 
       # Tokenless requests are unaudited by default unless refused. A
@@ -243,49 +247,83 @@ module Lakeraven
         end
       end
 
-      # A human, if one can be named — but ONLY from the identity that
-      # actually authenticated this request.
+      # A human, if one can be named — but ONLY from the MECHANISM that
+      # authenticated (or refused) this request. Round 2 of the gate proved
+      # the first version's rule — "no token object means the session
+      # authenticated this" — false in both directions:
       #
-      #   * `current_duz` — the session-bridge work (#486). Not on this
-      #     branch, hence `respond_to?`.
-      #   * `session[:duz]` — the browser sign-on that exists TODAY, and it
-      #     may attribute the request ONLY when the request was authenticated
-      #     BY that session. The first version of this method fell back to the
-      #     session unconditionally, ahead of the token — so a system client's
-      #     bearer-token read arriving from a browser that also carried a
-      #     session was filed under the session's human. That is
-      #     MISATTRIBUTION, worse than the unattributed row it replaced (S2).
+      #   * A FHIR surface is NEVER session-authenticated. A tokenless or
+      #     garbage-token request to it is a REFUSAL, and filing that refusal
+      #     under a bystanding browser session names an innocent clinician on
+      #     an attempt they never made (F1; with SameSite=Lax any cross-site
+      #     link can mint such rows).
+      #   * `current_duz` (#486, not on this branch) may only name a human
+      #     when the token itself resolves to one — a session-derived
+      #     `current_duz` beating token identity would silently reopen S2
+      #     (the landmine test pins this).
       #
-      # Concretely, the session may answer only when:
-      #   * the surface did not authenticate some other way — no bearer token,
-      #     no declared unauthenticated (bypass) actor; or
-      #   * the token IS the session-bound browser token, which only #486's
-      #     `browser_sso_token?` can establish. Without that predicate the
-      #     question is unanswerable, and an unanswerable attribution question
-      #     is answered "unattributed", never "probably the session" (PR #486).
+      # So the resolver branches on mechanism, and each branch may consult
+      # only that mechanism's identity:
       #
-      # A token and a session that disagree are an auditable ANOMALY, recorded
-      # on the row, not a precedence question.
+      #   token present  -> the token's human, and only via #486's
+      #                     `browser_sso_token?` proof that the token is the
+      #                     session-bound browser token; otherwise the
+      #                     token's application answers (in
+      #                     audit_agent_attributes) and any session is an
+      #                     ANOMALY on the row, never the actor.
+      #   no token, and the SURFACE authenticates by session
+      #                  -> `current_duz` / `session[:duz]`.
+      #   no token, token-authenticated surface
+      #                  -> nobody. The refusal is recorded unattributed,
+      #                     with any bystanding session noted as an anomaly.
+      #
+      # Anomalies are RECORDED, never silently resolved — and never invented:
+      # a bypass surface (`unauthenticated_audit_actor`) was authenticated by
+      # its own gate, so it never consults the session at all.
       def resolved_clinician_duz
-        return current_duz.presence if respond_to?(:current_duz, true) && current_duz.present?
-
-        session_duz = session_value(:duz)
-        return nil if session_duz.blank?
-
-        # A bypass surface (the demo) was authenticated by its gate, not by
-        # whatever session the browser happens to carry.
         return nil if unauthenticated_audit_actor
 
         token = audit_current_token
-        return session_duz if token.nil?
+        session_duz = session_value(:duz)
 
-        return session_duz if session_bound_browser_token?(token)
+        if token
+          if session_bound_browser_token?(token)
+            human = current_duz_if_defined || session_duz
+            return human if human.present?
+          end
+          if session_duz.present? || current_duz_if_defined.present?
+            note_audit_anomaly(
+              "identity anomaly: bearer token (application #{token.application&.uid}) and a browser " \
+              "session (DUZ #{session_duz || current_duz_if_defined}) arrived on one request; recorded under the token"
+            )
+          end
+          nil
+        elsif session_authenticated_surface?
+          current_duz_if_defined || session_duz
+        else
+          if session_duz.present?
+            note_audit_anomaly(
+              "identity anomaly: a bystanding browser session (DUZ #{session_duz}) accompanied an " \
+              "unauthenticated request to a token-authenticated surface; not used for attribution"
+            )
+          end
+          nil
+        end
+      end
 
-        note_audit_anomaly(
-          "identity anomaly: bearer token (application #{token.application&.uid}) and a browser " \
-          "session (DUZ #{session_duz}) arrived on one request; recorded under the token"
-        )
-        nil
+      # Does this SURFACE authenticate by the browser session? Declared, not
+      # inferred: token-object absence is a refusal on an API surface, not a
+      # session sign-on (F1). WebController — the browser base whose
+      # `require_authentication` gates on `session[:duz]` — declares true;
+      # everything else defaults to false.
+      def session_authenticated_surface?
+        false
+      end
+
+      def current_duz_if_defined
+        return nil unless respond_to?(:current_duz, true)
+
+        current_duz.presence
       end
 
       # #486's predicate, behind `respond_to?` because it is a sibling branch.

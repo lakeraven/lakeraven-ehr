@@ -15,6 +15,13 @@ module Lakeraven
 
       private
 
+      # This base authenticates by the browser session (`require_authentication`
+      # gates on `session[:duz]`), so — uniquely — its pages may be attributed
+      # from the session. API/token surfaces never declare this (F1).
+      def session_authenticated_surface?
+        true
+      end
+
       # The base refusal EVERY inheriting page uses — so the denial is noted
       # HERE, not in per-controller overrides. The first version of this fix
       # noted the denial only in one subclass's override, which left every
