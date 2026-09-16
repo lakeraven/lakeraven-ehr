@@ -39,5 +39,9 @@ Rails.application.routes.draw do
   if Rails.env.test?
     post "csrf_probe" => "csrf_probe#create"
     post "csrf_disabled_probe" => "csrf_disabled_probe#create"
+    # F1 attack configurations: non-rejecting strategies and a per-action skip.
+    post "null_session_probe" => "null_session_probe#create"
+    post "reset_session_probe" => "reset_session_probe#create"
+    post "conditional_skip_probe" => "conditional_skip_probe#create"
   end
 end

@@ -98,27 +98,45 @@ module Lakeraven
         READ_METHODS.include?(request.request_method)
       end
 
-      # Is Rails' forgery protection GENUINELY active for this request?
+      # Was THIS request actually protected against forgery?
       #
-      # Three things have to be true, and all three are checked rather than
-      # assumed:
+      # An earlier version scanned the callback chain for a
+      # `verify_authenticity_token` object. That is callback PRESENCE, not
+      # per-request enforcement, and it is wrong in two idiomatic cases that
+      # both review seats reproduced independently:
       #
-      #   1. the controller mixes in RequestForgeryProtection at all —
-      #      ActionController::API does not;
-      #   2. `protect_against_forgery?` is on (the app-level config);
-      #   3. `verify_authenticity_token` is ACTUALLY in this controller's
-      #      callback chain — a subclass that skips it has no protection, and
-      #      must not inherit write capability from a parent that does.
+      #   * a NON-REJECTING strategy — `protect_from_forgery with: :null_session`
+      #     (the standard idiom for a JSON controller) or `:reset_session`. The
+      #     callback exists and "runs", but an unverified request proceeds, so a
+      #     forged write lands.
+      #   * a PER-ACTION skip — `skip_before_action :verify_authenticity_token,
+      #     only: :create`. Rails keeps the callback object on the class, so
+      #     `.any?` is true, but it does not run for this action.
+      #
+      # The only case presence got right was an UNCONDITIONAL skip, which
+      # removes the object entirely — exactly the one case the old negative
+      # control tested, so the suite stayed green over the hole.
+      #
+      # Ask Rails its own per-request question instead. `verified_request?`
+      # recomputes the answer from the request's origin and token every time,
+      # independent of whether any callback is scheduled — so a per-action skip
+      # of Rails' callback cannot bypass this gate, and a non-rejecting strategy
+      # answers false for a forged (tokenless) request.
+      #
+      # It must be COMBINED with the enabled check, never substituted:
+      # `verified_request?` returns TRUE when `protect_against_forgery?` is
+      # false (its first clause is `!protect_against_forgery?`), which is
+      # exactly where the test environment lives — so on its own it fails open
+      # precisely where it would do the most damage.
       #
       # Deliberately conservative: anything unexpected answers false, which
       # costs a browser a write and never grants one.
       def forgery_protection_enforced?
         return false unless respond_to?(:protect_against_forgery?, true)
         return false unless protect_against_forgery?
+        return false unless respond_to?(:verified_request?, true)
 
-        self.class._process_action_callbacks.any? do |callback|
-          callback.kind == :before && callback.filter == :verify_authenticity_token
-        end
+        verified_request?
       rescue StandardError
         false
       end
