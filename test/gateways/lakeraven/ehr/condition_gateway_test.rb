@@ -24,7 +24,8 @@ module Lakeraven
       # --- write: add / update / delete ---
 
       test "add returns success with the saved IEN" do
-        RpmsRpc.client.seed_scalar(:problem_edit, "1", "55")
+        # rpms-rpc 0.3.0: Problem.add/update write via :problem_set (was :problem_edit).
+        RpmsRpc.client.seed_scalar(:problem_set, "1", "55")
 
         result = ConditionGateway.add(1, { icd_code: "E11.9", description: "Type 2 diabetes" })
 
@@ -33,7 +34,7 @@ module Lakeraven
       end
 
       test "update returns success with the saved IEN" do
-        RpmsRpc.client.seed_scalar(:problem_edit, "1", "55")
+        RpmsRpc.client.seed_scalar(:problem_set, "1", "55")
 
         result = ConditionGateway.update(1, 55, { status: "I" })
 
@@ -42,8 +43,8 @@ module Lakeraven
       end
 
       test "delete requires a reason and returns success" do
-        RpmsRpc.client.seed_scalar(:problem_edit, "1", "55")
-
+        # 0.3.0: delete calls DEL^BGOPROB (:problem_remove); a non-"-N^" reply
+        # is success, which the mock's default empty reply satisfies.
         result = ConditionGateway.delete(1, 55, reason: "Entered in error")
 
         assert result[:success]

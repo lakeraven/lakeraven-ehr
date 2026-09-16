@@ -163,8 +163,9 @@ module Lakeraven
           result = SchedulingGateway.check_in(7001, at: "2026-08-20 08:55")
 
           assert_equal "checked-in", result[:appointment_status]
-          # BSDX_APPOINTMENT_IEN^CHECKIN_DATETIME^CLINIC_CODE^PROVIDER
-          assert_equal [ "7001", "3260820.0855", "", "" ], broker.last_call[:params]
+          # 0.3.0 sends the full BSDX CHECKIN param list: IEN, checkin datetime,
+          # clinic code, provider, then four trailing positional blanks.
+          assert_equal [ "7001", "3260820.0855", "", "", "", "", "", "" ], broker.last_call[:params]
         end
       end
 
