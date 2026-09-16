@@ -23,9 +23,13 @@ module Lakeraven
       SESSION_IDLE_TIMEOUT = 30.minutes
 
       # GET/HEAD/OPTIONS are reads. Defined here rather than assumed from a
-      # sibling branch: #501 introduces the same helper for its verb-aware
-      # authorization, and this file must be correct without it.
-      READ_METHODS = %w[GET HEAD OPTIONS].freeze
+      # sibling branch: #501 introduces the same constant in this same module
+      # for its verb-aware authorization, and this file must be correct without
+      # it. The `unless defined?` guard keeps each PR correct alone AND silences
+      # the `already initialized constant` warning when the two are merged (git
+      # concatenates rather than conflicts) — no manual dedupe, no landing-order
+      # rule to remember.
+      READ_METHODS = %w[GET HEAD OPTIONS].freeze unless defined?(READ_METHODS)
 
       included do
         attr_reader :current_token
