@@ -139,12 +139,17 @@ module Lakeraven
         )
         raise "browser session tokens must never carry a patient/ scope" if scopes.include?("patient/")
 
-        token = Doorkeeper::AccessToken.create!(
+        token = Doorkeeper::AccessToken.new(
           application: browser_sso_application,
           scopes: scopes,
           resource_owner_id: provider[:duz].to_i,
           expires_in: TOKEN_LIFETIME.to_i
         )
+        # Intrinsic marker: what makes this a BROWSER credential travels on the
+        # token itself, not on a renameable application label. See
+        # SmartAuthentication#browser_sso_token?.
+        token.browser_session = true if token.has_attribute?(:browser_session)
+        token.save!
         token.plaintext_token || token.token
       end
 

@@ -163,8 +163,35 @@ module Lakeraven
         duz.present? && token.resource_owner_id.to_s == duz
       end
 
-      def browser_sso_token?(token)
-        token&.application&.name == BROWSER_SSO_APP_NAME
+      # PUBLIC PREDICATE (#491 calls this rather than keeping its own).
+      #
+      # Is this token a BROWSER credential — minted by the sign-on bridge for a
+      # cookie-carrying session — as opposed to a bearer credential held by a
+      # system client?
+      #
+      # Keyed on an intrinsic, immutable flag stamped on the TOKEN at mint
+      # time. It used to compare `application.name`, which is a mutable display
+      # string with no unique index: two applications can share it, and a
+      # rename silently re-classifies every live token. That is not a cosmetic
+      # problem — a browser token that stops being recognised stops being
+      # BOUND, so it becomes replayable from an Authorization header, which is
+      # exactly what the binding exists to prevent. An authorization decision
+      # must not hang off an editable label.
+      #
+      # FAILS TOWARD "BROWSER", deliberately, and this is the one place I read
+      # the gate's suggestion the other way round. Misclassifying a system
+      # token as a browser token costs that client a 401 — an availability
+      # failure, loud and immediate. Misclassifying a browser token as a system
+      # token unbinds it — a silent security failure. Ambiguity therefore
+      # resolves to "browser": where several applications share the SSO name
+      # they are all SSO applications, so nothing legitimate is caught by it.
+      def browser_sso_token?(token = current_token)
+        return false if token.nil?
+        return true if browser_session_flag(token)
+
+        # Tokens minted before the flag existed, and installs that have not run
+        # the migration yet.
+        legacy_browser_sso_token?(token)
       end
 
       # SMART token minted for the current browser session, if any. Guarded
@@ -214,6 +241,26 @@ module Lakeraven
         session[:duz].presence
       rescue StandardError
         nil
+      end
+
+      # The intrinsic marker. Absent column (migration not yet run) answers
+      # false and lets the legacy path decide.
+      def browser_session_flag(token)
+        return false unless token.respond_to?(:has_attribute?)
+        return false unless token.has_attribute?(:browser_session)
+
+        token.browser_session == true
+      rescue StandardError
+        false
+      end
+
+      # Pre-flag fallback. Resolves by application NAME, which is why it is the
+      # fallback and not the rule; any match counts, per the ambiguity note on
+      # #browser_sso_token?.
+      def legacy_browser_sso_token?(token)
+        token.application&.name == BROWSER_SSO_APP_NAME
+      rescue StandardError
+        false
       end
 
       # DUZ of the clinician this request acts as, or nil.
