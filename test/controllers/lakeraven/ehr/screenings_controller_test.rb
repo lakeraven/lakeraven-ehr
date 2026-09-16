@@ -13,6 +13,7 @@ module Lakeraven
       BASE = "/lakeraven-ehr/patients/1/screenings"
       VISIT = "2090061"
       DUZ = "99999"
+      DFN_PARAM = "1"
       FULL_SCOPES = "user/QuestionnaireResponse.read user/QuestionnaireResponse.write"
 
       setup do
@@ -504,7 +505,7 @@ module Lakeraven
 
       # -- Audit (the policy every FHIR controller and the chart follow) --------
 
-      test "reading a screening result is audited against the clinician and the patient" do
+      test "reading a screening result is audited against the clinician and that screening" do
         submit
         id = ScreeningResponse.last.id
         AuditEvent.delete_all
@@ -517,15 +518,18 @@ module Lakeraven
         assert_equal "R", event.action
         assert_equal "0", event.outcome
         assert_equal "99999", event.agent_who_identifier, "the acting DUZ must be on the audit row"
-        assert_equal "1", event.entity_identifier
+        # The RESOURCE that was read, not the patient whose route it hung off.
+        assert_equal id.to_s, event.entity_identifier
       end
 
-      test "listing a patient's screenings is audited" do
+      test "listing a patient's screenings is audited against the patient" do
         assert_difference -> { AuditEvent.count }, 1 do
           get BASE, headers: auth_headers
         end
 
-        assert_equal "1", AuditEvent.recent.first.entity_identifier
+        event = AuditEvent.recent.first
+        assert_equal "Patient", event.entity_type
+        assert_equal DFN_PARAM, event.entity_identifier
       end
 
       test "recording a screening is audited as a create" do
@@ -549,6 +553,60 @@ module Lakeraven
         assert_equal "C", event.action
         assert_equal "0", event.outcome, "a recorded screening is not a serious failure"
         assert_predicate event, :success?
+      end
+
+      # The audit entity is a REFERENCE — `<type>/<identifier>` — so the two
+      # halves have to agree. Preferring the route's patient dfn emitted
+      # `QuestionnaireResponse/1` for screening 100: syntactically valid,
+      # resolvable, and pointing at a DIFFERENT patient's screening. Worse
+      # than a null, and invisible to a test that asserts only the type.
+      def assert_audit_reference(expected)
+        event = AuditEvent.recent.first
+        assert_not_nil event
+        assert_equal expected, "#{event.entity_type}/#{event.entity_identifier}"
+        assert_equal expected, event.to_fhir[:entity].first.dig(:what, :reference)
+      end
+
+      test "the create audit names the screening that was created" do
+        submit
+        record = ScreeningResponse.last
+
+        assert_not_equal DFN_PARAM, record.id.to_s,
+                         "guard: with id == dfn this test would pass vacuously"
+        assert_audit_reference("QuestionnaireResponse/#{record.id}")
+      end
+
+      test "the read audit names the screening that was read" do
+        submit
+        record = ScreeningResponse.last
+        AuditEvent.delete_all
+
+        get "#{BASE}/#{record.id}", headers: auth_headers
+
+        assert_response :ok
+        assert_audit_reference("QuestionnaireResponse/#{record.id}")
+      end
+
+      # Actions with no single resource of their own are audited against the
+      # PATIENT — the pattern the chart already uses for a patient-centric
+      # aggregate — never as a QuestionnaireResponse carrying a patient id.
+      test "the history audit names the patient, not a screening" do
+        submit
+        AuditEvent.delete_all
+
+        get BASE, headers: auth_headers
+
+        assert_audit_reference("Patient/#{DFN_PARAM}")
+      end
+
+      test "a refused create names the patient rather than a screening that does not exist" do
+        AuditEvent.delete_all
+
+        post BASE, params: { instrument: "phq-9", answers: all_answered(PHQ9, 1) },
+             headers: auth_headers
+
+        assert_response :unprocessable_entity
+        assert_audit_reference("Patient/#{DFN_PARAM}")
       end
 
       test "a successful patient-context open is audited as a success" do

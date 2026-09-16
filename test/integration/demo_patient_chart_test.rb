@@ -505,6 +505,21 @@ class DemoPatientChartTest < ActionDispatch::IntegrationTest
 
   # -- Audit -------------------------------------------------------------------
 
+  # The chart is a patient-centric aggregate, so its reference is the patient —
+  # and it must be a reference that AGREES with itself. Pinned on a second
+  # audited surface because the ordering that produced `QuestionnaireResponse/1`
+  # for screening 100 lives in shared code.
+  test "the chart audit reference names the patient it served" do
+    Lakeraven::EHR::AuditEvent.delete_all
+
+    get "/patients/1.json", headers: @headers
+
+    event = Lakeraven::EHR::AuditEvent.recent.first
+    assert_equal "Patient", event.entity_type
+    assert_equal "1", event.entity_identifier
+    assert_equal "Patient/1", event.to_fhir[:entity].first.dig(:what, :reference)
+  end
+
   test "successful access records an AuditEvent" do
     assert_difference -> { Lakeraven::EHR::AuditEvent.count }, 1 do
       get "/patients/1.json", headers: @headers

@@ -175,7 +175,28 @@ module Lakeraven
       # Recording a screening is a write; everything else on this surface reads.
       def audit_action = action_name == "create" ? "C" : "R"
 
-      def fhir_resource_type = SCREENING_RESOURCE
+      # What this access actually touched, so that type and identifier agree:
+      #
+      #   * one screening (a read, or a create that produced one) is audited as
+      #     QuestionnaireResponse/<its own id>. The patient is one unambiguous
+      #     hop away, through the resource's own subject;
+      #   * an action with no single resource of its own — the history, a
+      #     refused create — is audited against Patient/<dfn>, the same pattern
+      #     ChartsController uses for a patient-centric aggregate.
+      #
+      # Never QuestionnaireResponse/<dfn>, which resolves to some other
+      # patient's screening.
+      def fhir_resource_type = audited_screening_id ? SCREENING_RESOURCE : "Patient"
+
+      def audit_entity_identifier = audited_screening_id || params[:dfn]
+
+      # On a create the id exists only once the action has run — and the audit
+      # runs after it, so the new record can name itself.
+      def audited_screening_id
+        return @result.record.id.to_s if @result&.record
+
+        params[:id].presence
+      end
 
       # Opening a patient record is state; a screening read is not. Nothing to
       # undo here — see PatientContextsController.
