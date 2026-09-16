@@ -209,9 +209,28 @@ module Lakeraven
 
         # Browser session fallback: the sign-on bridge (SessionsController) mints
         # a SMART token and stashes it here, since a browser won't send an
-        # Authorization header. API/system callers always use the header above,
-        # so this only applies to the logged-in human flow.
+        # Authorization header.
+        #
+        # SCOPED TO THE HTML CHART SURFACE ONLY (see
+        # #session_token_fallback_allowed?). The FHIR API descends from
+        # ActionController::API — it has no cookie-auth intent, Doorkeeper has no
+        # cookie method, and the browser chart renders HTML server-side and never
+        # calls it — so applying the cookie fallback there was overreach: a
+        # cross-site SameSite=Lax GET would session-authenticate a FHIR read
+        # against a bystanding clinician (#512 F1 / security seat #525). The FHIR
+        # API is bearer-only; only ChartsController opts in.
+        return [ nil, :none ] unless session_token_fallback_allowed?
+
         [ session_smart_token, :session ]
+      end
+
+      # Whether THIS controller may authenticate a browser SESSION token (the
+      # cookie-borne SMART token the sign-on bridge stashes). Default: NO. Only
+      # the server-rendered HTML chart (ChartsController, an
+      # ActionController::Base) overrides this to true; every FHIR API
+      # controller (ActionController::API) stays bearer-only.
+      def session_token_fallback_allowed?
+        false
       end
 
       # A browser-session token is valid ONLY when it arrives through the

@@ -53,35 +53,30 @@ class AuditAttributionAndRefusalsTest < ActionDispatch::IntegrationTest
                  "a token/session disagreement was silently resolved instead of recorded")
   end
 
-  # SUPERSEDED by #486's converged landing contract: a browser session-derived
-  # token DOES authorize FHIR READS (the session→token bridge), so a same-session
-  # tokenless GET is authenticated — not refused — and is correctly attributed to
-  # the session's human (they are the authenticated user). Only WRITES are gated
-  # on CSRF. #512's original assertion ("a FHIR surface is never
-  # session-authenticated") no longer holds; the residual it worried about (a
-  # cross-site Lax GET creating a row under a bystanding clinician) is tracked in
-  # #525. A genuinely tokenless request (NO session) is still refused and
-  # attributed to Unknown — covered below.
-  test "a same-session FHIR read is authenticated and attributed to the session's human" do
+  # F1 (round-2 gate, both seats): the sibling of S2. "No token OBJECT" is
+  # not "the session authenticated this" — a FHIR surface is NEVER
+  # session-authenticated, so its refusals must not name the browser's
+  # bystanding human. With SameSite=Lax cookies, any cross-site top-level
+  # GET mints these rows against an innocent signed-in clinician.
+  #
+  # #486's session→token fallback is scoped to the HTML chart surface only
+  # (ChartsController); the FHIR API (ActionController::API) is bearer-only, so
+  # this holds. Restored verbatim after the security seat (#525) rejected the
+  # rebase that had inverted it to a 200.
+  test "a tokenless FHIR refusal is not attributed to a bystanding browser session" do
     sign_in_browser_session # session[:duz] = "304"
 
-    get "/lakeraven-ehr/Patient/1" # no Authorization header — session token fallback
-    assert_response :ok
-
-    event = Lakeraven::EHR::AuditEvent.order(:id).last
-    refute_nil event, "the session-authenticated read left no audit trail"
-    assert_equal [ "Practitioner", "304" ],
-                 [ event.agent_who_type, event.agent_who_identifier ],
-                 "a session-authenticated read must be attributed to the session's human"
-  end
-
-  test "a genuinely tokenless FHIR refusal (no session) is attributed to Unknown" do
-    get "/lakeraven-ehr/Patient/1" # no session, no Authorization header
+    get "/lakeraven-ehr/Patient/1" # no Authorization header at all
     assert_response :unauthorized
 
     event = Lakeraven::EHR::AuditEvent.order(:id).last
     refute_nil event, "the tokenless refusal left no audit trail"
+    refute_equal [ "Practitioner", "304" ],
+                 [ event.agent_who_type, event.agent_who_identifier ],
+                 "a refusal the session did not make was filed under the session's human"
     assert_equal "Unknown", event.agent_who_type
+    assert_match(/bystanding browser session/i, event.outcome_desc.to_s,
+                 "the bystanding session was silently ignored instead of recorded as an anomaly")
   end
 
   test "a garbage bearer token with a bystanding session is not attributed to the session" do
