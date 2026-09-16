@@ -23,9 +23,15 @@ module Lakeraven
 
       # The configured broker (real BmxClient/CiaClient in production, a mock
       # or FakeBroker in tests). Kept behind a helper so gateways never reach
-      # for RpmsRpc.client directly.
+      # for RpmsRpc.client directly — which is also what makes it the one
+      # place an audit can be fastened to every backend action.
+      #
+      # Wrapped fresh each call rather than memoized: tests swap the
+      # configured client mid-run, and a cached wrapper would keep calling
+      # the old one. `wrap` is idempotent, so an already-audited broker is
+      # returned as-is and never records twice.
       def broker
-        RpmsRpc.client
+        AuditedBroker.wrap(RpmsRpc.client)
       end
 
       # Run a broker interaction, translating a broker-unreachable condition

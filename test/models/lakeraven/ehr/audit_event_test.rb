@@ -482,6 +482,52 @@ module Lakeraven
         assert_equal "R", attrs[:action]
         assert_equal "0", attrs[:outcome]
       end
+
+      # =============================================================================
+      # ENTITY PAIR AGREEMENT
+      # =============================================================================
+      #
+      # The entity is a REFERENCE, <entity_type>/<entity_identifier>, and the
+      # halves can disagree when a caller assembles them from two different
+      # params — a dfn filed under a non-Patient type resolves to a DIFFERENT
+      # patient's record: a false statement in an accounting-of-disclosures
+      # answer, worse than a missing one. The model is the one place every
+      # writer passes through, so the invariant lives here.
+
+      test "an entity identifier that is itself a reference is refused" do
+        event = AuditEvent.new(
+          event_type: "rest", action: "R", outcome: "0",
+          entity_type: "Patient", entity_identifier: "Patient/12"
+        )
+        refute event.valid?, "an identifier carrying a reference separator was stored"
+        assert event.errors[:entity_identifier].any?
+      end
+
+      test "a Patient entity requires a DFN-shaped identifier" do
+        event = AuditEvent.new(
+          event_type: "rest", action: "R", outcome: "0",
+          entity_type: "Patient", entity_identifier: "SR-DRAFT-001"
+        )
+        refute event.valid?,
+               "an identifier that cannot be a DFN was filed under Patient — the reference points nowhere, or at the wrong record"
+        assert event.errors[:entity_identifier].any?
+      end
+
+      test "a Patient entity with a DFN is valid" do
+        event = AuditEvent.new(
+          event_type: "rest", action: "R", outcome: "0",
+          entity_type: "Patient", entity_identifier: "12"
+        )
+        assert event.valid?, event.errors.full_messages.join(", ")
+      end
+
+      test "a non-Patient entity accepts its own identifier shapes" do
+        event = AuditEvent.new(
+          event_type: "application", action: "E", outcome: "0",
+          entity_type: "RemoteProcedure", entity_identifier: "ORWPT ID INFO"
+        )
+        assert event.valid?, event.errors.full_messages.join(", ")
+      end
     end
   end
 end

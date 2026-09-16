@@ -37,11 +37,40 @@ module Lakeraven
       validates :action, presence: true, inclusion: { in: ACTIONS.keys }
       validates :outcome, presence: true, inclusion: { in: OUTCOMES.keys }
       validates :entity_type, presence: true
+      validate :entity_pair_agreement
+
+      # A Patient is identified by a DFN — digits, nothing else. Anything
+      # else filed under Patient is a reference that points nowhere or, worse,
+      # at a different patient.
+      PATIENT_IDENTIFIER_PATTERN = /\A\d+\z/
 
       scope :recent, -> { order(created_at: :desc) }
 
       def readonly?
         persisted?
+      end
+
+      # The entity is a REFERENCE — `<entity_type>/<entity_identifier>` — and
+      # its halves can be assembled from two different request params by any
+      # caller building a row by hand. A dfn filed under a non-Patient type
+      # resolves to a DIFFERENT patient's record: a false statement in an
+      # accounting-of-disclosures answer, worse than a missing one. The model
+      # is the one gate every writer passes through, so the agreement check
+      # lives here rather than in each controller path (found on #491; the
+      # controller-side rule is `audit_entity_identifier`).
+      def entity_pair_agreement
+        return if entity_identifier.blank?
+
+        if entity_identifier.to_s.include?("/")
+          errors.add(:entity_identifier,
+                     "is a reference, not an identifier — pass the bare identifier and let entity_type carry the type")
+        end
+
+        if entity_type == "Patient" && !entity_identifier.to_s.match?(PATIENT_IDENTIFIER_PATTERN)
+          errors.add(:entity_identifier,
+                     "cannot identify a Patient — a Patient entity takes a DFN; a non-DFN here usually means " \
+                     "the type and the identifier came from different params")
+        end
       end
 
       # -- Event type helpers --------------------------------------------------
