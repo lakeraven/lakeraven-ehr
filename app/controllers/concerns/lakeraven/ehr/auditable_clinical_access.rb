@@ -59,7 +59,7 @@ module Lakeraven
       def audit_clinical_access
         @audit_recorded = false
         @audit_anomalies = []
-        @audit_header_baseline = response.headers.to_h.keys.freeze
+        @audit_header_baseline = capture_header_baseline
         @audit_session_baseline = capture_session_baseline
         publish_audit_context
         action_error = nil
@@ -82,7 +82,13 @@ module Lakeraven
             raise ActiveRecord::Rollback unless audit_settled?
           end
         rescue StandardError => e
-          # The audit insert itself failed, taking the action's writes with it.
+          # The audit insert failed — or the TRANSACTION failed while
+          # committing AFTER the insert succeeded and set the recorded flag
+          # (lost connection, deferred constraint). Either way the row did
+          # not survive, so the flag must not either: a stale true here would
+          # serve a response whose audit row rolled back (review finding on
+          # #512).
+          @audit_recorded = false
           Rails.logger.error("[audit] refusing to serve an unrecorded clinical access: #{e.message}")
         end
         # The action raised, so its transaction rolled back — including any
@@ -126,9 +132,13 @@ module Lakeraven
         return if @audit_recorded
         return unless auditable_access?
 
-        # Resolved BEFORE outcome_desc: attribution can surface an identity
-        # anomaly that the description must carry.
+        # Everything that can NOTE AN ANOMALY resolves BEFORE outcome_desc,
+        # or the description would miss it: attribution, the entity pair,
+        # and the bounded tenant/facility values.
         agent = audit_agent_attributes
+        entity_type_value, entity_identifier_value = audit_entity_reference
+        tenant = audit_tenant_identifier
+        facility = audit_facility_identifier
 
         persist_audit_row!(
           detached: detached,
@@ -136,12 +146,12 @@ module Lakeraven
           action: audit_action,
           outcome: audit_outcome,
           outcome_desc: audit_outcome_desc,
-          entity_type: audit_entity_type,
-          entity_identifier: audit_entity_identifier,
+          entity_type: entity_type_value,
+          entity_identifier: entity_identifier_value,
           **agent,
           agent_network_address: request.remote_ip,
-          tenant_identifier: audit_tenant_identifier,
-          facility_identifier: audit_facility_identifier
+          tenant_identifier: tenant,
+          facility_identifier: facility
         )
         @audit_recorded = true
       end
@@ -173,15 +183,34 @@ module Lakeraven
       # UNDER WHICH CONTEXT. Through the host's configured resolvers, so a
       # deployment that carries tenancy somewhere other than a header (a
       # subdomain, the token) is recorded correctly rather than blank.
+      #
+      # BOUNDED (review finding on #512): the default resolvers return raw
+      # request headers, which are attacker-writable — persisting hundreds
+      # of bytes of garbage verbatim into the compliance log is a bloat
+      # vector here, and a row-suppressing insert failure on any host whose
+      # columns carry length limits. Overlong output is OMITTED and the
+      # omission recorded as an anomaly; an audit write must never fail
+      # because of request input.
+      AUDIT_CONTEXT_VALUE_LIMIT = 255
+
       def audit_tenant_identifier
-        Lakeraven::EHR.configuration.tenant_resolver&.call(request)
+        bounded_context_value("tenant", Lakeraven::EHR.configuration.tenant_resolver&.call(request))
       rescue StandardError
         nil
       end
 
       def audit_facility_identifier
-        Lakeraven::EHR.configuration.facility_resolver&.call(request)
+        bounded_context_value("facility", Lakeraven::EHR.configuration.facility_resolver&.call(request))
       rescue StandardError
+        nil
+      end
+
+      def bounded_context_value(label, value)
+        value = value.to_s.presence
+        return nil unless value
+        return value if value.length <= AUDIT_CONTEXT_VALUE_LIMIT
+
+        note_audit_anomaly("#{label} identifier omitted: exceeds #{AUDIT_CONTEXT_VALUE_LIMIT} characters")
         nil
       end
 
@@ -515,10 +544,21 @@ module Lakeraven
         params[:patient].to_s.delete_prefix("Patient/")
       end
 
+      # FHIR R4's "id" grammar. Anything outside it — a reference, markup,
+      # hundreds of digits — cannot name a record, so it is never treated as
+      # an identifier (review finding on #512: unbounded input reached the
+      # log verbatim, and would suppress the row outright on a host schema
+      # with column limits).
+      FHIR_ID_PATTERN = /\A[A-Za-z0-9\-.]{1,64}\z/
+
       def sanitize_identifier_for(entity_type, value)
         value = value.to_s.presence
         return nil unless value
-        return nil if value.include?("/")
+
+        unless value.match?(FHIR_ID_PATTERN)
+          note_audit_anomaly("entity identifier omitted: not a valid FHIR id")
+          return nil
+        end
         return nil if entity_type.to_s == "Patient" && !value.match?(/\A\d+\z/)
 
         value
@@ -568,9 +608,22 @@ module Lakeraven
                status: :service_unavailable
       end
 
+      # NAMES AND VALUES, both (review finding on #512): snapshotting only
+      # names let an action OVERWRITE a pre-existing header — a default
+      # security header, most likely — and the PHI-bearing value survived a
+      # deletion-by-difference that only knew names. Anything the action
+      # added is deleted; anything that predated it is restored to the value
+      # it had.
+      def capture_header_baseline
+        response.headers.to_h.transform_values { |value| value.dup }.freeze
+      rescue StandardError
+        response.headers.to_h.freeze
+      end
+
       def discard_unrecorded_headers!
-        baseline = @audit_header_baseline || []
-        (response.headers.to_h.keys - baseline).each { |name| response.delete_header(name) }
+        baseline = @audit_header_baseline || {}
+        (response.headers.to_h.keys - baseline.keys).each { |name| response.delete_header(name) }
+        baseline.each { |name, value| response.set_header(name, value) }
       end
 
       # The flash outlives the response it was set on — that is its whole

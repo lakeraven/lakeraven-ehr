@@ -63,6 +63,14 @@ module Lakeraven
         )
 
         record_grant_audit(access, audit_log)
+        # The SHARED, persisted trail (review finding on #512): the hash
+        # appended above is the predecessor app's in-memory contract and
+        # reaches no reviewer. Break-glass is the access most worth a row,
+        # so the grant also writes into the same AuditEvent log everything
+        # else uses — the reason CODE only, never the free-text
+        # justification (ADR 0002) — and FAILS CLOSED: if the glass cannot
+        # be broken audibly, it is not broken.
+        record_shared_grant_audit!(access)
         access
       end
 
@@ -80,6 +88,9 @@ module Lakeraven
         emergency_access.review_notes = notes
 
         record_review_audit(emergency_access, reviewer_duz, outcome, audit_log)
+        # Same rule as the grant: the review lands in the shared log too —
+        # outcome is a closed enum word, the free-text notes stay off it.
+        record_shared_review_audit!(emergency_access, reviewer_duz, outcome)
       end
 
       def self.pending_reviews(accesses)
@@ -123,6 +134,42 @@ module Lakeraven
         }
       end
       private_class_method :record_review_audit
+
+      def self.record_shared_grant_audit!(access)
+        AuditEvent.create!(
+          event_type: "security",
+          action: "E",
+          outcome: "0",
+          outcome_desc: "Emergency access (break-glass): #{access.reason}, expires #{access.expires_at&.iso8601}",
+          entity_type: "Patient",
+          entity_identifier: access.patient_dfn,
+          agent_who_type: "Practitioner",
+          agent_who_identifier: access.accessed_by,
+          agent_name: access.accessed_by_name,
+          agent_network_address: AuditContext.network_address,
+          tenant_identifier: AuditContext.tenant_identifier,
+          facility_identifier: AuditContext.facility_identifier
+        )
+      end
+      private_class_method :record_shared_grant_audit!
+
+      def self.record_shared_review_audit!(access, reviewer_duz, outcome)
+        AuditEvent.create!(
+          event_type: "security",
+          action: "U",
+          outcome: "0",
+          outcome_desc: "Emergency access review: #{outcome}",
+          entity_type: "Patient",
+          entity_identifier: access.patient_dfn,
+          agent_who_type: "Practitioner",
+          agent_who_identifier: reviewer_duz,
+          agent_name: access.reviewed_by_name,
+          agent_network_address: AuditContext.network_address,
+          tenant_identifier: AuditContext.tenant_identifier,
+          facility_identifier: AuditContext.facility_identifier
+        )
+      end
+      private_class_method :record_shared_review_audit!
     end
   end
 end

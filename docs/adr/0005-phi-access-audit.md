@@ -54,10 +54,29 @@ controller bases, and a browser base serves pages that touch no patient data and
 
 ### 2. Attribution names a human where one exists, and says so when one does not
 
-Order of resolution: `current_duz` (the #486 session bridge, behind `respond_to?` because it
-is not on this branch) → `session[:duz]` → a declared service actor → the OAuth application
-uid, but **only for a credential that is not the shared browser application** → `Unknown`
-with a null identifier.
+**Attribution is keyed on the MECHANISM that authenticated (or refused) the request — never
+on a precedence chain over whatever identities happen to be present.** An earlier draft of
+this section ordered `current_duz` → `session[:duz]` → token; following that chain
+reintroduces the central misattribution defect, because a session (and a session-derived
+`current_duz`) can be *present* on a request it did not authenticate — a bearer-token API
+call from a signed-in browser, a tokenless cross-site GET riding a SameSite=Lax cookie.
+
+The shipped rule, per mechanism:
+
+- **Bearer token present** → the token's human, and only via `browser_sso_token?` (#486)
+  proving the token is the session-bound browser token. Any other token records its
+  **application uid** (unless it is the shared browser application, which records
+  `Unknown`), and a co-present session or `current_duz` is written to the row as an
+  **identity anomaly** — recorded, never silently resolved, never the actor.
+- **No token, on a surface that declares `session_authenticated_surface?`** (the browser
+  base, whose `require_authentication` gates on the session) → `current_duz` /
+  `session[:duz]`.
+- **No token, on a token-authenticated surface** → nobody: the refusal records
+  `Unknown`, with any bystanding session noted as an anomaly.
+- **A bypass surface** (`unauthenticated_audit_actor`) was authenticated by its own gate
+  and never consults the session at all.
+
+**`current_duz` and `session[:duz]` never outrank a bearer token by mere presence.**
 
 **An unattributed row is worth more than a misattributed one.** Filing a browser access under
 the shared OAuth application uid makes every clinician in the building look like the same
@@ -79,6 +98,17 @@ actor, which is precisely the question "who opened this chart" is asked to answe
 whether the call completed — **never the parameters**, which is where the PHI is. It fails
 closed: an RPC whose audit cannot be written does not return its result.
 
+**A stated asymmetry of that guarantee (honesty ledger):** the RPC executes *before* its row
+is written, so for a **mutating** RPC whose audit insert then fails, the remote change has
+already committed — withholding the Ruby result cannot undo RPMS. Fail-closed is therefore
+complete for reads (the data never reaches the caller) and **best-effort for writes** (the
+caller is refused, but the backend effect stands unrecorded except in server logs). Closing
+it needs a pre-execution reservation — and because audit rows are immutable, that means a
+two-row dispatch/result protocol per RPC (doubling log volume and changing what the review
+surface counts) or a mutating-RPC classification list, which this broker deliberately
+refuses to maintain (a wrong entry is a row that lies). That is a design decision for the
+log's consumers, not a patch — filed as a follow-up issue alongside #505/#506.
+
 **Not covered:** gateways that call the `RpmsRpc::*` API modules directly reach the configured
 client without passing through `RpcSupport.broker`. In a request those are covered at the HTTP
 boundary; outside one they are not covered at all. Closing that needs a client-level hook in
@@ -92,9 +122,18 @@ so someone who can write the rows cannot re-seal them. `integrity_mode` states w
 force; a reviewer who assumes the keyed answer on an unkeyed log is being misled by omission.
 A row carrying **no** digest is reported, not forgiven.
 
-On PostgreSQL a trigger refuses `UPDATE` on the table for every client, psql included. It
-cannot live in `schema.rb`, so it is a model call (`AuditEvent.enforce_append_only!`) that the
-migration makes and a schema-loading host can make itself.
+On PostgreSQL a trigger refuses `UPDATE` on the table. **Its limits, stated plainly rather
+than rounded up:** the application role owns the table, and a table owner can
+`ALTER TABLE … DISABLE TRIGGER`, `TRUNCATE`, or `DELETE` — the trigger constrains
+applications and mistakes, not an owner. It prevents neither `DELETE` nor `TRUNCATE`
+(deletion is *permitted by design* — the retention purge needs it — detected only by the
+purge-receipt trail, with cryptographic ordering deferred to the periodic-seal follow-up,
+#506). An integrity screen must therefore report whether the trigger is *actually installed
+and enabled* (a capability probe is not an installation fact — see the tamper-evidence PR of
+this split), and this ADR must not be read as claiming database-enforced immutability
+against a table owner. The trigger cannot live in `schema.rb`, so it is a model call
+(`AuditEvent.enforce_append_only!`) that the migration makes and a schema-loading host can
+make itself.
 
 The digested field list is **explicit and frozen**. Deriving it from `column_names` would mean
 any later migration adding a column silently invalidated every digest already written, and the
@@ -103,10 +142,11 @@ whole log would read as tampered.
 **We did not implement a hash chain.** Chaining each row to its predecessor needs a
 serialization point at insert, and the only honest one is a lock held for the whole enclosing
 transaction — which would put every PHI access in the system behind a single audit writer.
-Deletion and reordering, which a chain is for, are held off at the database instead. If the
-pilot's risk assessment wants cryptographic ordering, the cheaper shape is a **periodic seal**
+That leaves deletion and reordering — the things a chain is for — **detectable only through
+the purge-receipt trail, not prevented** (see the trigger's limits above). If the pilot's
+risk assessment wants cryptographic ordering, the cheaper shape is a **periodic seal**
 (a signed digest over a time range, written by a job) rather than a per-row chain; that is
-filed as a follow-up.
+filed as #506.
 
 ### 5. Retention
 

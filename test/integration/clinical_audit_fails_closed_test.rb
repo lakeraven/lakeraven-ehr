@@ -185,7 +185,119 @@ class ClinicalAuditFailsClosedTest < ActionDispatch::IntegrationTest
     refute_nil event, "the probe of a malformed Patient id left no audit trail"
     assert_equal "4", event.outcome
     assert_nil event.entity_identifier
-    assert_match(/not found/i, event.outcome_desc.to_s)
+    assert_match(/not-found/i, event.outcome_desc.to_s)
+  end
+
+  # -- request input is BOUNDED before it reaches the log ------------------
+  #
+  # Review threads on #512 claimed oversized input FAILS the insert against
+  # a 255-char column and suppresses the row. REFUTED on this schema: the
+  # columns are unlimited varchar, the insert succeeds — which is its own
+  # defect: attacker-controlled garbage persisted verbatim into the
+  # compliance log (bloat, and identifiers that can never match a record),
+  # and a latent suppression on any host whose columns DO carry limits.
+  # Identifiers are held to the FHIR id grammar; resolver output is bounded;
+  # omissions are recorded as anomalies.
+
+  test "an oversized tenant header is omitted with an anomaly, not persisted or fatal" do
+    get "/lakeraven-ehr/Patient/1", headers: { "X-Tenant-Identifier" => "t" * 300 }
+
+    assert_response :unauthorized, "an oversized header changed the refusal itself"
+    event = Lakeraven::EHR::AuditEvent.order(:id).last
+    refute_nil event, "an oversized header suppressed the refusal row"
+    assert_nil event.tenant_identifier,
+      "300 bytes of attacker-controlled header were persisted into the audit log"
+    assert_match(/tenant identifier omitted/i, event.outcome_desc.to_s,
+      "the omission was silent")
+  end
+
+  test "an oversized ?patient= is omitted from the entity, not persisted or fatal" do
+    setup_auth(scopes: "system/*.read")
+
+    get "/lakeraven-ehr/Observation", params: { patient: "1" * 300 }, headers: @headers
+
+    assert_response :ok
+    event = Lakeraven::EHR::AuditEvent.order(:id).last
+    refute_nil event, "the oversized-identifier request left no audit trail"
+    assert_nil event.entity_identifier,
+      "a 300-char identifier (FHIR ids are 64 max) was recorded as if real"
+    assert_match(/entity identifier omitted/i, event.outcome_desc.to_s)
+  end
+
+  test "an oversized ?_id= is omitted from the entity, not persisted or fatal" do
+    setup_auth(scopes: "system/*.read")
+
+    get "/lakeraven-ehr/Patient", params: { _id: "9" * 300 }, headers: @headers
+
+    assert_response :ok
+    event = Lakeraven::EHR::AuditEvent.order(:id).last
+    refute_nil event
+    assert_nil event.entity_identifier
+  end
+
+  # -- the audit reason is a stable code, never request-derived text -------
+
+  # `render_operation_outcome` fed its `diagnostics` into the audit row, and
+  # several callers derive diagnostics from request-controlled values and
+  # rescued exception MESSAGES — arbitrary PHI in `outcome_desc`, against
+  # the log's no-PHI contract. The audit gets the stable outcome code and
+  # status; the diagnostics stay in the HTTP response, where they belong.
+  test "request-derived diagnostics never reach the audit row" do
+    setup_auth(scopes: "system/*.write system/*.read")
+    # A name-shaped, request-controlled value that the import service
+    # interpolates into its error message — the exact PHI-shaped text that
+    # must never land in the log.
+    smuggled = "SYNTHETIC,PATIENT"
+
+    post "/lakeraven-ehr/Measure/$import",
+         params: { resourceType: smuggled }.to_json,
+         headers: @headers.merge("Content-Type" => "application/fhir+json")
+
+    assert_response :unprocessable_entity
+    body = JSON.parse(response.body)
+    assert_includes body["issue"].first["diagnostics"].to_s, smuggled,
+      "the HTTP response should keep its full diagnostics"
+    event = Lakeraven::EHR::AuditEvent.order(:id).last
+    refute_nil event
+    refute_includes event.outcome_desc.to_s, smuggled,
+      "request-controlled diagnostics reached the audit row"
+    assert_match(/invalid/i, event.outcome_desc.to_s,
+      "the refusal row lost its stable reason code")
+  end
+
+  # -- a commit-time failure also fails closed -----------------------------
+
+  # `record_audit_event!` can succeed and set the recorded flag, and the
+  # TRANSACTION then fail at commit (lost connection, deferred constraint) —
+  # rolling the row back while the flag still says recorded. The rescue must
+  # reset the flag so `audit_settled?` refuses instead of serving a response
+  # whose audit row no longer exists.
+  test "a transaction failure after the audit row is written still fails closed" do
+    setup_auth(scopes: "system/*.read")
+    original = ActiveRecord::Base.method(:transaction)
+    ActiveRecord::Base.define_singleton_method(:transaction) do |**kwargs, &block|
+      if kwargs[:requires_new]
+        original.call(**kwargs) do
+          block.call
+          # The audit row is written and the flag set; the transaction now
+          # dies before commit, taking the row with it.
+          raise ActiveRecord::StatementInvalid, "simulated commit-time failure"
+        end
+      else
+        original.call(**kwargs, &block)
+      end
+    end
+
+    begin
+      get "/lakeraven-ehr/Observation", params: { patient: "1" }, headers: @headers
+    ensure
+      ActiveRecord::Base.singleton_class.send(:remove_method, :transaction)
+    end
+
+    assert_response :service_unavailable,
+      "a commit-time audit failure served the response with no surviving row"
+    refute_includes response.body, "Anderson", "the unrecorded response disclosed patient data"
+    assert_equal 0, Lakeraven::EHR::AuditEvent.count
   end
 
   # -- an access that raises is a failure, not a success -------------------
@@ -275,6 +387,9 @@ class ClinicalAuditFailsClosedTest < ActionDispatch::IntegrationTest
   test "a refused access leaks nothing through any cookie-write path" do
     setup_auth(scopes: "system/*.read")
     label = ProbeCookiesController::LABEL
+    # Learn the pre-action value of the default header the probe overwrites.
+    get "/lakeraven-ehr/login"
+    @default_frame_options = response.headers["X-Frame-Options"]
 
     with_broken_audit { get "/probe_cookies/1", headers: @headers }
 
@@ -287,6 +402,14 @@ class ClinicalAuditFailsClosedTest < ActionDispatch::IntegrationTest
     end
     refute_match(/preexisting_cookie=;/, set_cookie, "the pending cookie DELETE survived the rollback")
     refute_includes session.to_hash.values.map(&:to_s).join(" "), label
+
+    # A pre-existing header whose VALUE the action overwrote: the name is in
+    # the baseline, so delete-by-difference never touches it — the value has
+    # to be RESTORED, not merely spared deletion.
+    refute_equal label, response.headers["X-Frame-Options"],
+      "the refusal carried the patient out in an overwritten pre-existing header"
+    assert_equal @default_frame_options, response.headers["X-Frame-Options"],
+      "the pre-action header value was not restored"
   end
 
   # The control that keeps the probe honest: on success those cookies ARE
