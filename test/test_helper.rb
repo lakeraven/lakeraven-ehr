@@ -208,11 +208,16 @@ module BrokerStubbing
 end
 
 # Shared auth helper for integration tests.
+#
+# System credentials are org-bound by default (the authorization layer fails
+# closed on unbound system tokens — SmartAuthentication). The default binding
+# matches the seeded patients' site_ien (7819) so in-organization reads work;
+# pass organization_id: nil to model the denied unbound case explicitly.
 module SmartAuthTestHelper
-  def setup_smart_auth(scopes: "system/*.read")
+  def setup_smart_auth(scopes: "system/*.read", organization_id: "rpms-organization-7819")
     @oauth_app = Doorkeeper::Application.create!(
       name: "test", redirect_uri: "https://example.test/callback",
-      scopes: scopes, confidential: true
+      scopes: scopes, confidential: true, organization_id: organization_id
     )
     token = Doorkeeper::AccessToken.create!(
       application: @oauth_app, scopes: scopes, expires_in: 3600
@@ -223,6 +228,30 @@ module SmartAuthTestHelper
   def teardown_smart_auth
     Doorkeeper::AccessToken.delete_all
     Doorkeeper::Application.delete_all
+  end
+
+  # Internal (EHR-staff-style) credential: user-context scopes with no
+  # organization binding. Backend org-scoping rules do not apply to it, so
+  # API-shape tests (400/404 rendering, non-clinical endpoints, registration
+  # flows) keep their direct semantics. Note the deployed FHIR surface can
+  # only MINT org-bound system tokens (BackendServicesController); user
+  # tokens exist for interactive flows and tests.
+  def setup_internal_smart_auth(scopes: "user/*.*")
+    setup_smart_auth(scopes: scopes, organization_id: nil)
+  end
+
+  # Patient-context (SMART patient/-scoped) credential bound to one patient
+  # compartment via the token's resource_owner_id. Unbound to any
+  # organization so the tests isolate the compartment check itself.
+  def setup_patient_smart_auth(patient:, scopes: "patient/*.read")
+    @oauth_app = Doorkeeper::Application.create!(
+      name: "patient-app", redirect_uri: "https://example.test/callback",
+      scopes: scopes, confidential: true
+    )
+    token = Doorkeeper::AccessToken.create!(
+      application: @oauth_app, resource_owner_id: patient.to_s, scopes: scopes, expires_in: 3600
+    )
+    @headers = { "Authorization" => "Bearer #{token.plaintext_token || token.token}" }
   end
 end
 

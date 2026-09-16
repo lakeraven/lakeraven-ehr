@@ -6,7 +6,7 @@ module Lakeraven
       include ActiveModel::Model
       include ActiveModel::Attributes
 
-      VALID_STATUSES = %w[active on-hold cancelled completed stopped draft entered-in-error].freeze
+      VALID_STATUSES = %w[active on-hold cancelled completed stopped draft entered-in-error unknown].freeze
       VALID_INTENTS = %w[proposal plan order original-order reflex-order filler-order instance-order option].freeze
 
       attribute :ien, :string
@@ -49,6 +49,40 @@ module Lakeraven
 
       def self.resource_class
         "MedicationRequest"
+      end
+
+      # RPMS medication statuses (ORQQPS LIST piece 3) to FHIR
+      # MedicationRequest.status.
+      RPC_STATUS_MAP = {
+        "ACTIVE" => "active",
+        "PENDING" => "draft",
+        "HOLD" => "on-hold",
+        "SUSPENDED" => "on-hold",
+        "DISCONTINUED" => "stopped",
+        "DELETED" => "entered-in-error",
+        "EXPIRED" => "completed"
+      }.freeze
+
+      # Build MedicationRequest instances from raw ORQQPS LIST hashes
+      # ({ ien:, drug_name:, sig:, status:, last_fill:, refills:, provider: }).
+      #
+      # intent is "order": every RPMS medication-list entry is an authorized
+      # prescription/order, not a proposal or plan. The wire carries no
+      # RxNorm code and no authoredOn — medication is conveyed as
+      # CodeableConcept.text, and authoredOn is omitted rather than invented
+      # from last_fill (which is a dispense date, not an authoring date).
+      def self.from_rpc_hashes(hashes, patient_dfn:)
+        Array(hashes).map do |h|
+          new(
+            ien: h[:ien]&.to_s,
+            patient_dfn: patient_dfn.to_s,
+            medication_display: h[:drug_name],
+            status: RPC_STATUS_MAP[h[:status].to_s.upcase] || "unknown",
+            intent: "order",
+            dosage_instruction: h[:sig],
+            refills: h[:refills]
+          )
+        end
       end
 
       def self.from_fhir_attributes(fhir_resource)

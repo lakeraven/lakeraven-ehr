@@ -3,6 +3,9 @@
 module Lakeraven
   module EHR
     class ImmunizationsController < ApplicationController
+      # Org-bound credentials: authorization binds to the patient RESOLVED
+      # from ?patient=, at the result level (SmartAuthentication).
+      organization_scope :resolved_patient, only: :index, dfn_param: :patient
       before_action :require_patient_param, only: :index
 
       def index

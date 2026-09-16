@@ -40,9 +40,18 @@ module Lakeraven
 
       FHIR_CONTENT_TYPE = "application/fhir+json"
 
+      # Org-bound backend credentials: the chart aggregates one patient's
+      # demographics + clinical record, so authorize the patient RESOLVED
+      # from :dfn (SmartAuthentication#enforce_organization_scope!). This
+      # controller does not inherit the engine's FHIR ApplicationController,
+      # so the guard is wired here explicitly — an earlier version omitted it
+      # and leaked cross-organization charts (security review finding).
+      organization_scope :resolved_patient, only: :show, dfn_param: :dfn
+
       before_action :authenticate_chart_request!
       before_action :require_patient_scope!
       before_action :enforce_patient_context!
+      before_action :enforce_organization_scope!
 
       # RPMS problem-list status codes -> FHIR clinical-status
       PROBLEM_STATUS = { "A" => "active", "I" => "inactive" }.freeze
