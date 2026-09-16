@@ -567,6 +567,33 @@ module Lakeraven
         assert_equal expected, event.to_fhir[:entity].first.dig(:what, :reference)
       end
 
+      # The reviewer's reproduction, pinned with its own numbers: screening 100
+      # on patient 1. With incidental ids a regression could hide behind
+      # `record.id` happening to be small; here the two are unmistakable, and
+      # the pre-fix value ("QuestionnaireResponse/1") is asserted against
+      # directly.
+      test "screening 100 on patient 1 audits as QuestionnaireResponse/100" do
+        ScreeningResponse.connection.execute(
+          "ALTER SEQUENCE lakeraven_ehr_screening_responses_id_seq RESTART WITH 100"
+        )
+        AuditEvent.delete_all
+
+        submit
+        record = ScreeningResponse.last
+        assert_equal 100, record.id
+
+        create_reference = "#{AuditEvent.recent.first.entity_type}/" \
+                           "#{AuditEvent.recent.first.entity_identifier}"
+        assert_equal "QuestionnaireResponse/100", create_reference
+        assert_not_equal "QuestionnaireResponse/#{DFN_PARAM}", create_reference
+
+        AuditEvent.delete_all
+        get "#{BASE}/100", headers: auth_headers
+
+        assert_response :ok
+        assert_audit_reference("QuestionnaireResponse/100")
+      end
+
       test "the create audit names the screening that was created" do
         submit
         record = ScreeningResponse.last
@@ -678,17 +705,32 @@ module Lakeraven
         assert_equal 0, AuditEvent.count
       end
 
+      # The flash rides in the SESSION COOKIE, not the response body, so a
+      # refused write can leak a score onto the clinician's next page.
+      #
+      # Asserting that on a page which never renders a flash would be vacuous —
+      # `show` is the only one that does, so the leak is chased to where it
+      # would actually surface, and the carrier itself is asserted in its
+      # DECODED form rather than as cookie bytes.
       test "the score does not survive a refused write in the flash" do
-        with_broken_audit do
-          submit(answers: answers(PHQ9, [ 3, 3, 3, 3, 3, 3, 3, 3, 0 ]))
-        end
-        assert_response :service_unavailable
+        submit(submission_token: SecureRandom.uuid)
+        landing_page = "#{BASE}/#{ScreeningResponse.last.id}"
+        follow_redirect_authorized! # consume this submission's own notice
+        assert_match(/recorded — score 8/i, response.body, "guard: show renders the flash")
 
-        get BASE, headers: auth_headers
+        with_broken_audit do
+          submit(answers: answers(PHQ9, [ 3, 3, 3, 3, 3, 3, 3, 3, 0 ]),
+                 submission_token: SecureRandom.uuid)
+        end
+
+        assert_response :service_unavailable
+        assert_nil flash[:notice], "a refused write must leave nothing in the flash"
+
+        get landing_page, headers: auth_headers
 
         assert_response :ok
-        assert_no_match(/recorded — score/i, response.body)
-        assert_no_match(/severe/i, response.body)
+        assert_no_match(/recorded — score 24/i, response.body)
+        assert_no_match(/Severe/, response.body)
       end
 
       test "a refusal is audited, not only a success" do
