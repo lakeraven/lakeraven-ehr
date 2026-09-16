@@ -17,12 +17,22 @@ module Lakeraven
 
       private
 
+      # Best-effort form: a failed audit write is logged and the request is
+      # served anyway. Surfaces that must not serve an unrecorded access use
+      # `record_audit_event!` directly (FailClosedClinicalAudit).
       def record_audit_event
-        return unless current_token || unauthenticated_audit_actor
+        record_audit_event!
+      rescue => e
+        Rails.logger.error("AuditEvent write failed: #{e.message}")
+      end
+
+      # Raises if the access could not be recorded.
+      def record_audit_event!
+        return unless auditable_access?
 
         AuditEvent.create!(
           event_type: "rest",
-          action: "R",
+          action: audit_action,
           outcome: audit_outcome,
           entity_type: fhir_resource_type,
           entity_identifier: audit_entity_identifier,
@@ -31,8 +41,12 @@ module Lakeraven
           tenant_identifier: request.headers["X-Tenant-Identifier"],
           facility_identifier: request.headers["X-Facility-Identifier"]
         )
-      rescue => e
-        Rails.logger.error("AuditEvent write failed: #{e.message}")
+      end
+
+      # Tokenless requests are 401s with no identity to record; a controller
+      # with a deliberate unauthenticated path declares an actor instead.
+      def auditable_access?
+        current_token || unauthenticated_audit_actor
       end
 
       # Tokenless requests are unaudited by default (they are 401s). A
@@ -53,16 +67,45 @@ module Lakeraven
         end
       end
 
+      # FHIR reads are the common case; a controller that also writes (the
+      # server-rendered screening surface) overrides this per action so a
+      # creation is not logged as a read.
+      def audit_action
+        "R"
+      end
+
+      # FHIR AuditEvent.outcome. A REDIRECT is a success: the screening surface
+      # answers a successful create with a 302, and mapping 3xx to "8" logged
+      # every recorded PHQ-9 — self-harm-flagged ones included — as a *serious
+      # failure*, indistinguishable from a real one, since the fail-closed path
+      # emits "8" as well.
       def audit_outcome
         case response.status
-        when 200..299 then "0"   # success
+        when 200..399 then "0"   # success (2xx, and 3xx: the work was done)
         when 400..499 then "4"   # minor failure
         else "8"                 # serious failure
         end
       end
 
+      # The audit entity is a REFERENCE — `<entity_type>/<entity_identifier>` —
+      # so the identifier has to be an id OF THAT TYPE.
+      #
+      # Preferring the route's patient dfn unconditionally emitted
+      # `QuestionnaireResponse/1` for screening 100 on a route nested under
+      # `patients/:dfn`: syntactically valid, resolvable, and pointing at a
+      # DIFFERENT patient's screening. A false reference in an
+      # accounting-of-disclosures record is worse than a missing one, so a
+      # non-Patient entity never falls back to the patient id — it names its
+      # own resource or it names nothing, and `has_entity?` then omits the
+      # reference rather than publishing a lie.
       def audit_entity_identifier
-        params[:dfn] || params[:ien] || params[:id]
+        return params[:dfn] || params[:ien] || params[:id] if patient_entity?
+
+        params[:id] || params[:ien]
+      end
+
+      def patient_entity?
+        fhir_resource_type.to_s == "Patient"
       end
     end
   end

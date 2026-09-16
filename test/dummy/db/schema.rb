@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_02_030000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_09_000000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -148,6 +148,31 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_02_030000) do
     t.index [ "clinician_duz" ], name: "index_lakeraven_ehr_reconciliation_sessions_on_clinician_duz"
     t.index [ "patient_dfn" ], name: "index_lakeraven_ehr_reconciliation_sessions_on_patient_dfn"
     t.index [ "status" ], name: "index_lakeraven_ehr_reconciliation_sessions_on_status"
+  end
+
+  create_table "lakeraven_ehr_screening_responses", force: :cascade do |t|
+    t.string "administered_by"
+    t.jsonb "answers", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "effective_at", null: false
+    t.string "encounter_ien"
+    t.string "instrument_key", null: false
+    t.integer "patient_dfn", null: false
+    t.datetime "safety_acknowledged_at"
+    t.string "safety_acknowledged_by"
+    t.boolean "safety_flagged", default: false, null: false
+    t.string "severity_band", null: false
+    t.string "source", default: "clinician", null: false
+    t.string "submission_token"
+    t.integer "total_score", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "submission_token" ], name: "index_lakeraven_ehr_screenings_on_submission_token", unique: true
+    t.index [ "encounter_ien" ], name: "index_lakeraven_ehr_screening_responses_on_encounter_ien"
+    t.index [ "patient_dfn", "instrument_key", "effective_at" ], name: "index_lakeraven_ehr_screenings_on_patient_instrument_time"
+    t.check_constraint "NOT (safety_flagged AND source = 'clinician') OR safety_acknowledged_by IS NOT NULL", name: "screening_clinician_flag_requires_acknowledger"
+    t.check_constraint "source <> 'clinician' OR administered_by IS NOT NULL", name: "screening_clinician_requires_administrator"
+    t.check_constraint "NOT safety_flagged OR safety_acknowledged_at IS NOT NULL", name: "screening_flagged_requires_acknowledgement"
+    t.check_constraint "safety_flagged OR NOT (instrument_key = 'phq-9' AND answers ? '44260-8' AND COALESCE(answers ->> '44260-8', '') !~ '^\\s*[+-]?0*\\s*$')", name: "screening_disclosure_requires_flag"
   end
 
   create_table "oauth_access_grants", force: :cascade do |t|
