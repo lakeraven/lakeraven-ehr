@@ -189,6 +189,19 @@ class FakeBroker
     queue.shift
   end
 
+  # The REAL clients (BmxClient, CiaClient) expose a public `call_rpc_raw`
+  # that executes an RPC without response parsing. The fake models it so a
+  # wrapper that forwards it can be SEEN doing so — a mock without the real
+  # client's surface cannot express the bypass (SOFTWARE-FACTORY: a mock that
+  # cannot express a failure is not evidence against it).
+  def call_rpc_raw(rpc, *params)
+    call_rpc(rpc, *params)
+  end
+
+  # Also on the real clients' public surface; must never be reachable
+  # through an audited wrapper.
+  def read_response = @default
+
   def supports?(_feature) = true
   def received_calls = @calls
   def calls_for(rpc) = @calls.select { |c| c[:rpc] == rpc }
