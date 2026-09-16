@@ -279,52 +279,23 @@ class SsoSessionTokenBridgeSecurityTest < ActionDispatch::IntegrationTest
   # ORWU USERKEYS. A second sign-on landing between them hands this one the
   # other clinician's name and security keys — i.e. their scopes. The whole
   # sequence has to be one unit, not three locked ones.
-  test "sign-on holds the broker wire lock across its whole sequence" do
-    held = []
-    locked = false
-
-    fake = Object.new
-    fake.define_singleton_method(:synchronize_wire) do |&blk|
-      locked = true
-      begin
-        blk.call
-      ensure
-        locked = false
-      end
-    end
-
-    RpmsRpc.singleton_class.define_method(:synchronize_wire) do |&blk|
-      fake.synchronize_wire(&blk)
-    end
-
-    original = RpmsRpc::Authentication.method(:user_security_keys)
-    RpmsRpc::Authentication.define_singleton_method(:user_security_keys) do |duz|
-      held << locked
-      original.call(duz)
-    end
-
-    Lakeraven::EHR::AuthenticationService.new.authenticate(
-      access_code: "lindarodriguez", verify_code: "test123"
-    )
-
-    assert_equal [ true ], held,
-      "the security-key lookup ran outside the sign-on's lock"
-  ensure
-    RpmsRpc::Authentication.singleton_class.send(:remove_method, :user_security_keys)
-    RpmsRpc.singleton_class.send(:remove_method, :synchronize_wire)
-  end
-
-  # P0: the process-local fallback must actually serialize.
+  # The whole sign-on sequence runs under the broker wire lock.
   #
-  # The gem pinned by this branch does NOT define RpmsRpc.synchronize_wire
-  # (rpms-rpc#235 is not merged), so the shipped path is the fallback — and it
-  # had none: two sign-ons in one process shared one global broker client and
-  # interleaved. The previous lock test stubbed synchronize_wire IN, so it
-  # never exercised this. Here it is genuinely absent, and two concurrent
-  # sign-ons must not overlap on the wire.
-  test "concurrent sign-ons are serialized even without the gem wire lock" do
-    skip "gem provides its own lock" if RpmsRpc.respond_to?(:synchronize_wire)
-
+  # Behavioral, against the REAL gem lock (rpms-rpc 0.3.0 provides
+  # RpmsRpc.synchronize_wire and its MockClient models it): two concurrent
+  # sign-ons must not interleave on the process-global broker client. If the
+  # sequence — authenticate, user_info, ORWU USERKEYS — is one locked unit,
+  # thread 2 cannot enter its own `authenticate` until thread 1 releases, so
+  # the in-flight count never exceeds one.
+  #
+  # Spies on RpmsRpc::Authentication.authenticate, which is safe to restore:
+  # it is exposed via `extend self`, so removing a singleton override reveals
+  # the gem's instance method again. (The old version of this test stubbed
+  # RpmsRpc.synchronize_wire and remove_method'd it in ensure — which, now
+  # that the gem defines it directly on the singleton, DELETED the real method
+  # for the rest of the process and cascaded 11 failures. That is the
+  # blind-mock archetype: it never exercised the real lock.)
+  test "concurrent sign-ons cannot interleave on the shared broker client" do
     in_flight = 0
     max_seen = 0
     monitor = Monitor.new
@@ -332,7 +303,7 @@ class SsoSessionTokenBridgeSecurityTest < ActionDispatch::IntegrationTest
     original = RpmsRpc::Authentication.method(:authenticate)
     RpmsRpc::Authentication.define_singleton_method(:authenticate) do |**kwargs|
       monitor.synchronize { in_flight += 1; max_seen = [ max_seen, in_flight ].max }
-      sleep 0.05 # widen the window a bare send/read would leave open
+      sleep 0.05 # widen the window; this runs INSIDE synchronize_wire
       monitor.synchronize { in_flight -= 1 }
       original.call(**kwargs)
     end
@@ -350,6 +321,47 @@ class SsoSessionTokenBridgeSecurityTest < ActionDispatch::IntegrationTest
       "two sign-ons ran through the shared broker client at once"
   ensure
     RpmsRpc::Authentication.singleton_class.send(:remove_method, :authenticate)
+  end
+
+  # The app-level process-local fallback still serializes when a gem WITHOUT
+  # RpmsRpc.synchronize_wire is in play (an older gem, or a future regression).
+  # 0.3.0 always provides the lock, so this forces the fallback branch by
+  # making RpmsRpc report the method absent, and asserts the BROKER_WIRE_MUTEX
+  # still prevents interleave.
+  test "sign-on falls back to a process-local lock when the gem lacks one" do
+    in_flight = 0
+    max_seen = 0
+    monitor = Monitor.new
+
+    real_respond = RpmsRpc.method(:respond_to?)
+    RpmsRpc.singleton_class.send(:define_method, :respond_to?) do |name, *args|
+      next false if name.to_sym == :synchronize_wire
+
+      real_respond.call(name, *args)
+    end
+
+    original = RpmsRpc::Authentication.method(:authenticate)
+    RpmsRpc::Authentication.define_singleton_method(:authenticate) do |**kwargs|
+      monitor.synchronize { in_flight += 1; max_seen = [ max_seen, in_flight ].max }
+      sleep 0.05
+      monitor.synchronize { in_flight -= 1 }
+      original.call(**kwargs)
+    end
+
+    threads = 2.times.map do
+      Thread.new do
+        Lakeraven::EHR::AuthenticationService.new.authenticate(
+          access_code: "lindarodriguez", verify_code: "test123"
+        )
+      end
+    end
+    threads.each(&:join)
+
+    assert_equal 1, max_seen,
+      "the process-local fallback let two sign-ons interleave"
+  ensure
+    RpmsRpc::Authentication.singleton_class.send(:remove_method, :authenticate)
+    RpmsRpc.singleton_class.send(:remove_method, :respond_to?)
   end
 
   # -- M6: unbounded token growth -------------------------------------------
