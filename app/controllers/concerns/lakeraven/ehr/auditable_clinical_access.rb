@@ -121,7 +121,7 @@ module Lakeraven
         # anomaly that the description must carry.
         agent = audit_agent_attributes
 
-        AuditEvent.create!(
+        persist_audit_row!(
           event_type: "rest",
           action: audit_action,
           outcome: audit_outcome,
@@ -134,6 +134,24 @@ module Lakeraven
           facility_identifier: audit_facility_identifier
         )
         @audit_recorded = true
+      end
+
+      # The belt behind the sanitizer (F2): a VALIDATION failure is
+      # input-shaped — some feeder let a value through that cannot be a
+      # lawful entity — and must never become an unrecorded 503. The row is
+      # retried once with the entity omitted, and the omission is stated on
+      # the row. A store failure (StatementInvalid, connectivity) is NOT
+      # rescued: that is the genuine fail-closed case.
+      def persist_audit_row!(attrs)
+        AuditEvent.create!(**attrs)
+      rescue ActiveRecord::RecordInvalid => e
+        entity_errors = e.record.errors.map(&:full_message).join("; ")
+        Rails.logger.warn("[audit] entity omitted from an audit row: #{entity_errors}")
+        AuditEvent.create!(**attrs.merge(
+          entity_identifier: nil,
+          outcome_desc: [ attrs[:outcome_desc],
+                          "entity identifier omitted: failed audit-row validation" ].compact.join("; ")
+        ))
       end
 
       # UNDER WHICH CONTEXT. Through the host's configured resolvers, so a
@@ -410,13 +428,32 @@ module Lakeraven
       # route's `:dfn` under a non-Patient type produced references like
       # `QuestionnaireResponse/<dfn>` that resolve to a DIFFERENT patient's
       # record (#491's finding; the rule is kept in agreement with that
-      # branch, and the model refuses a mismatched pair besides).
+      # branch; the model additionally refuses reference-shaped and
+      # non-DFN-under-Patient identifiers — a SHAPE check, see the model).
+      #
+      # SANITIZED, because these params are attacker-influencable request
+      # input (F2): a query-string `?id=Observation/9` on a search must not
+      # make the audit row invalid — which the fail-closed wrapper would turn
+      # into a 503 with NO row, letting any client 5xx every search and
+      # letting malformed-identifier probes go unrecorded. An identifier that
+      # cannot name a record of the audited type is OMITTED: a row with no
+      # entity beats no row, and never a row that lies.
       def audit_entity_identifier
-        if fhir_resource_type.to_s == "Patient"
+        raw = if fhir_resource_type.to_s == "Patient"
           params[:dfn] || params[:ien] || params[:id]
         else
           params[:id] || params[:ien]
         end
+        sanitize_audit_entity_identifier(raw)
+      end
+
+      def sanitize_audit_entity_identifier(value)
+        value = value.to_s.presence
+        return nil unless value
+        return nil if value.include?("/")
+        return nil if fhir_resource_type.to_s == "Patient" && !value.match?(/\A\d+\z/)
+
+        value
       end
 
       # WHAT KIND of record, derived from the controller, so this concern can

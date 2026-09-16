@@ -37,7 +37,7 @@ module Lakeraven
       validates :action, presence: true, inclusion: { in: ACTIONS.keys }
       validates :outcome, presence: true, inclusion: { in: OUTCOMES.keys }
       validates :entity_type, presence: true
-      validate :entity_pair_agreement
+      validate :entity_identifier_shape
 
       # A Patient is identified by a DFN — digits, nothing else. Anything
       # else filed under Patient is a reference that points nowhere or, worse,
@@ -50,15 +50,17 @@ module Lakeraven
         persisted?
       end
 
-      # The entity is a REFERENCE — `<entity_type>/<entity_identifier>` — and
-      # its halves can be assembled from two different request params by any
-      # caller building a row by hand. A dfn filed under a non-Patient type
-      # resolves to a DIFFERENT patient's record: a false statement in an
-      # accounting-of-disclosures answer, worse than a missing one. The model
-      # is the one gate every writer passes through, so the agreement check
-      # lives here rather than in each controller path (found on #491; the
-      # controller-side rule is `audit_entity_identifier`).
-      def entity_pair_agreement
+      # A SHAPE check, and honestly no more than that (round-2 gate on #512):
+      # it refuses an identifier that is itself a reference, and a non-DFN
+      # filed under Patient. It CANNOT establish type/identifier AGREEMENT —
+      # `entity_type: "QuestionnaireResponse", entity_identifier: "12"` (a
+      # DFN) passes, because a bare numeric is also a legitimate IEN for most
+      # types, and rejecting it would refuse true rows. The protection
+      # against a mismatched pair is the CONTROLLER feeder
+      # (`audit_entity_identifier`, per #491): only a param that names a
+      # record of the audited type reaches the row. Do not cite this
+      # validation as agreement enforcement.
+      def entity_identifier_shape
         return if entity_identifier.blank?
 
         if entity_identifier.to_s.include?("/")

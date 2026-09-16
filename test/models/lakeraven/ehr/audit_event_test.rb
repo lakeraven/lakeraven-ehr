@@ -484,15 +484,16 @@ module Lakeraven
       end
 
       # =============================================================================
-      # ENTITY PAIR AGREEMENT
+      # ENTITY IDENTIFIER SHAPE
       # =============================================================================
       #
-      # The entity is a REFERENCE, <entity_type>/<entity_identifier>, and the
-      # halves can disagree when a caller assembles them from two different
-      # params — a dfn filed under a non-Patient type resolves to a DIFFERENT
-      # patient's record: a false statement in an accounting-of-disclosures
-      # answer, worse than a missing one. The model is the one place every
-      # writer passes through, so the invariant lives here.
+      # The entity is a REFERENCE, <entity_type>/<entity_identifier>. This
+      # model check refuses only two SHAPES — a reference-carrying identifier
+      # and a non-DFN under Patient. It is deliberately NOT an agreement
+      # check: QuestionnaireResponse/"12" passes, because a bare numeric is
+      # a legitimate IEN for most types. Agreement is enforced at the
+      # controller feeder (`audit_entity_identifier`); the last test here
+      # pins the limit so nobody cites this validation as more than it is.
 
       test "an entity identifier that is itself a reference is refused" do
         event = AuditEvent.new(
@@ -527,6 +528,20 @@ module Lakeraven
           entity_type: "RemoteProcedure", entity_identifier: "ORWPT ID INFO"
         )
         assert event.valid?, event.errors.full_messages.join(", ")
+      end
+
+      # The LIMIT of the model check, pinned (round-2 gate on #512): a DFN
+      # under a non-Patient type is ACCEPTED here, because it is
+      # indistinguishable from a legitimate IEN. If this test starts failing,
+      # someone tightened the model into rejecting true rows — the mismatch
+      # protection belongs at the controller feeder, not here.
+      test "the shape check is not an agreement check: a numeric id under any type passes" do
+        event = AuditEvent.new(
+          event_type: "rest", action: "R", outcome: "0",
+          entity_type: "QuestionnaireResponse", entity_identifier: "12"
+        )
+        assert event.valid?,
+               "a numeric identifier under a non-Patient type was rejected — that also rejects legitimate IENs"
       end
     end
   end

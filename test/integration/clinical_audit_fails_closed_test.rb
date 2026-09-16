@@ -139,6 +139,52 @@ class ClinicalAuditFailsClosedTest < ActionDispatch::IntegrationTest
     assert_equal "C", event.action, "a create was recorded as a read"
   end
 
+  # -- request input can never break the audit write (F2) ------------------
+
+  # The entity validation is sound; feeding it raw request params was not:
+  # a reference-shaped ?id= on a search made every row invalid, which the
+  # fail-closed wrapper turned into a 503 with ZERO rows — any client could
+  # 5xx every FHIR search by appending a param, and malformed-identifier
+  # PROBES (exactly the §164.312(b) events) left no trace. The identifier is
+  # OMITTED when it cannot name a record of the audited type: a row with no
+  # entity beats no row, and never a row that lies.
+  test "a reference-shaped query id cannot 503 a search or suppress its row" do
+    setup_auth(scopes: "system/*.read")
+
+    get "/lakeraven-ehr/Observation", params: { patient: "1", id: "Observation/9" }, headers: @headers
+
+    assert_response :ok, "attacker-influencable input turned a working search into a 503"
+    event = Lakeraven::EHR::AuditEvent.order(:id).last
+    refute_nil event, "the probing request left no audit trail"
+    assert_nil event.entity_identifier, "the malformed identifier was recorded as if real"
+  end
+
+  test "a non-DFN query id on a Patient search records a row, not a 503" do
+    setup_auth(scopes: "system/*.read")
+
+    get "/lakeraven-ehr/Patient", params: { id: "abc" }, headers: @headers
+
+    assert_response :ok
+    refute_nil Lakeraven::EHR::AuditEvent.order(:id).last,
+      "the malformed-identifier probe left no audit trail"
+  end
+
+  # The determined 404 must stay a recorded 404: on main this probe got 404
+  # plus a row; the first fail-closed version got 503 plus NO row — "we
+  # determined no" rewritten as "we could not determine", unrecorded.
+  test "a probe of a non-DFN Patient id is a recorded 404, not an unrecorded 503" do
+    setup_auth(scopes: "system/*.read")
+
+    get "/lakeraven-ehr/Patient/SR-DRAFT-001", headers: @headers
+
+    assert_response :not_found
+    event = Lakeraven::EHR::AuditEvent.order(:id).last
+    refute_nil event, "the probe of a malformed Patient id left no audit trail"
+    assert_equal "4", event.outcome
+    assert_nil event.entity_identifier
+    assert_match(/not found/i, event.outcome_desc.to_s)
+  end
+
   # -- an access that raises is a failure, not a success -------------------
 
   # `audit_outcome` used to read `response.status`, which is still 200 when
