@@ -32,10 +32,16 @@ module Lakeraven
       extend ActiveSupport::Concern
 
       included do
-        # Registered at include time, which is before each controller declares
-        # its own before_actions — so this wraps them, and a halted chain is
-        # still audited.
-        around_action :audit_clinical_access
+        # PREPENDED, not merely registered early (F4, round-2 gate on #512):
+        # include-time registration beats every before_action the controller
+        # declares later, but Rails installed `verify_authenticity_token` on
+        # ActionController::Base long before this concern arrived — so a
+        # plain `around_action` ran INSIDE it, and a CSRF-refused cross-site
+        # POST halted unrecorded on every browser surface. Prepending puts
+        # the wrapper outside the whole chain; the CSRF exception is then
+        # recorded as a determined refusal (see `csrf_refusal?`). The
+        # ordering is pinned by a guard test.
+        prepend_around_action :audit_clinical_access
       end
 
       private
@@ -64,6 +70,9 @@ module Lakeraven
               yield
             rescue StandardError => e
               action_error = e
+              # A CSRF rejection is "we determined no", with a reason — not
+              # an anonymous serious failure (F4).
+              note_audit_denial("cross-site request refused: #{e.class.name}") if csrf_refusal?(e)
               # Undo the action's writes; the attempt is recorded below, on
               # its own, so a failed action still leaves a trail.
               raise ActiveRecord::Rollback
@@ -127,7 +136,7 @@ module Lakeraven
           action: audit_action,
           outcome: audit_outcome,
           outcome_desc: audit_outcome_desc,
-          entity_type: fhir_resource_type,
+          entity_type: audit_entity_type,
           entity_identifier: audit_entity_identifier,
           **agent,
           agent_network_address: request.remote_ip,
@@ -413,6 +422,8 @@ module Lakeraven
       #     redirect carries its `note_audit_denial` reason and is filed as a
       #     determined refusal.
       def audit_outcome
+        # A CSRF rejection is a determined refusal, not a serious failure.
+        return "4" if csrf_refusal?(@audit_action_failure)
         return "8" if @audit_action_failure
 
         case response.status
@@ -428,20 +439,36 @@ module Lakeraven
       # carry record identifiers and worse), and any identity anomaly.
       def audit_outcome_desc
         parts = [ @audit_denial_reason ]
-        parts << "action raised #{@audit_action_failure.class.name}" if @audit_action_failure
+        # The CSRF denial reason already names the class; don't say it twice.
+        if @audit_action_failure && !csrf_refusal?(@audit_action_failure)
+          parts << "action raised #{@audit_action_failure.class.name}"
+        end
         parts.concat(Array(@audit_anomalies))
         combined = parts.compact.join("; ")
         combined.presence
       end
 
+      def csrf_refusal?(error)
+        defined?(ActionController::InvalidAuthenticityToken) &&
+          error.is_a?(ActionController::InvalidAuthenticityToken)
+      end
+
       # WHAT RECORD the row points at. The entity is a REFERENCE —
-      # `<entity_type>/<entity_identifier>` — so the identifier may only come
-      # from a param that identifies a record OF THAT TYPE. Feeding a nested
-      # route's `:dfn` under a non-Patient type produced references like
-      # `QuestionnaireResponse/<dfn>` that resolve to a DIFFERENT patient's
-      # record (#491's finding; the rule is kept in agreement with that
-      # branch; the model additionally refuses reference-shaped and
-      # non-DFN-under-Patient identifiers — a SHAPE check, see the model).
+      # `<audit_entity_type>/<audit_entity_identifier>` — and this concern is
+      # the ONE owner of the rule (round-2 consolidated review): the halves
+      # are derived together so they cannot disagree.
+      #
+      #   * A direct read names the controller's own resource, from a param
+      #     that identifies a record OF THAT TYPE — a nested route's `:dfn`
+      #     under a non-Patient type produced references like
+      #     `QuestionnaireResponse/<dfn>` that resolve to a DIFFERENT
+      #     patient's record (#491). `?_id=` is FHIR's search-by-id and
+      #     counts as direct.
+      #   * A patient-scoped search (`?patient=…`, reference form included)
+      #     names the PATIENT whose chart was read. Recording nothing there
+      #     made `/audit-review?entity=<dfn>` and the §164.528 export read
+      #     EMPTY for a chart that was just opened — absence of data as
+      #     determination.
       #
       # SANITIZED, because these params are attacker-influencable request
       # input (F2): a query-string `?id=Observation/9` on a search must not
@@ -450,20 +477,38 @@ module Lakeraven
       # letting malformed-identifier probes go unrecorded. An identifier that
       # cannot name a record of the audited type is OMITTED: a row with no
       # entity beats no row, and never a row that lies.
+      def audit_entity_type
+        patient_scoped_search? ? "Patient" : fhir_resource_type
+      end
+
       def audit_entity_identifier
-        raw = if fhir_resource_type.to_s == "Patient"
-          params[:dfn] || params[:ien] || params[:id]
-        else
-          params[:id] || params[:ien]
-        end
+        raw = patient_scoped_search? ? patient_search_param : direct_audit_identifier
         sanitize_audit_entity_identifier(raw)
+      end
+
+      def direct_audit_identifier
+        if fhir_resource_type.to_s == "Patient"
+          params[:dfn] || params[:ien] || params[:id] || params[:_id]
+        else
+          params[:id] || params[:ien] || params[:_id]
+        end
+      end
+
+      def patient_scoped_search?
+        direct_audit_identifier.blank? && params[:patient].present?
+      end
+
+      # FHIR allows both `?patient=1` and `?patient=Patient/1`; the gateways
+      # accept both (`extract_patient_dfn`), so the audit records both.
+      def patient_search_param
+        params[:patient].to_s.delete_prefix("Patient/")
       end
 
       def sanitize_audit_entity_identifier(value)
         value = value.to_s.presence
         return nil unless value
         return nil if value.include?("/")
-        return nil if fhir_resource_type.to_s == "Patient" && !value.match?(/\A\d+\z/)
+        return nil if audit_entity_type.to_s == "Patient" && !value.match?(/\A\d+\z/)
 
         value
       end

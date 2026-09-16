@@ -202,7 +202,21 @@ class FakeBroker
   # through an audited wrapper.
   def read_response = @default
 
+  # The REST of the production clients' public surface (BmxClient/CiaClient:
+  # connection, credential and raw-execution methods), as LOUD stubs. They
+  # exist so `respond_to?` is true — a wrapper regression back to
+  # "forward anything the client answers" then reaches them and fails the
+  # suite audibly for EVERY method, not just call_rpc_raw.
+  %i[connect disconnect authenticate signon_setup authenticated? duz
+     call_rpc_global_array create_context set_authenticated].each do |name|
+    define_method(name) do |*_args, **_options|
+      raise "GATE: #{name} reached the fake through a wrapper that should refuse to forward it"
+    end
+  end
+
   def supports?(_feature) = true
+  def connected? = true
+  def hostname = "fake-broker.test"
   def received_calls = @calls
   def calls_for(rpc) = @calls.select { |c| c[:rpc] == rpc }
   def last_call = @calls.last

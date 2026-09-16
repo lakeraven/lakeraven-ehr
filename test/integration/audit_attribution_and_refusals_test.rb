@@ -145,6 +145,54 @@ class AuditAttributionAndRefusalsTest < ActionDispatch::IntegrationTest
     end
   end
 
+  # F4 (round-2 gate, both seats): Rails registers `verify_authenticity_token`
+  # on ActionController::Base BEFORE the engine's concern is included, so a
+  # plain `around_action` runs inside it and a CSRF-refused cross-site POST
+  # was an UNRECORDED refusal on every browser surface. The wrapper is
+  # prepended, so it sees the CSRF exception — recorded as a determined
+  # refusal with its reason, not an anonymous serious failure.
+  test "a cross-site POST refused by CSRF leaves a refusal row with the reason" do
+    original = ActionController::Base.allow_forgery_protection
+    ActionController::Base.allow_forgery_protection = true
+
+    post "/lakeraven-ehr/login", params: { username: "x", password: "y" }
+    # InvalidAuthenticityToken is rescuable: the middleware renders it 422.
+    assert_response :unprocessable_entity
+
+    event = Lakeraven::EHR::AuditEvent.order(:id).last
+    refute_nil event, "a CSRF-refused browser POST left no audit trail"
+    assert_equal "4", event.outcome, "a determined CSRF refusal was not filed as a refusal"
+    assert_match(/cross-site|authenticity/i, event.outcome_desc.to_s,
+                 "the CSRF refusal row does not say why")
+  ensure
+    ActionController::Base.allow_forgery_protection = original
+  end
+
+  # The ordering fact itself, pinned (adopted from the gate's P6 probe): on
+  # every audited browser surface the audit wrapper must be OUTSIDE the CSRF
+  # check, or the refusal above becomes invisible again.
+  test "the audit wrapper precedes verify_authenticity_token on every audited browser surface" do
+    [
+      Lakeraven::EHR::DashboardsController,
+      Lakeraven::EHR::SessionsController,
+      Lakeraven::EHR::ChartsController,
+      StaffPagesController,
+      WorklistPagesController,
+      AuditedBrowserController,
+      ProbeCookiesController
+    ].each do |klass|
+      chain = klass.__callbacks[:process_action].to_a.map(&:filter)
+      audit_index = chain.index(:audit_clinical_access)
+      csrf_index = chain.index(:verify_authenticity_token)
+      refute_nil audit_index, "#{klass} lost the audit wrapper"
+      next if csrf_index.nil? # no CSRF callback registered on this class
+
+      assert_operator audit_index, :<, csrf_index,
+        "#{klass}: verify_authenticity_token runs before the audit wrapper — " \
+        "a CSRF refusal there halts unrecorded"
+    end
+  end
+
   test "twenty anonymous probes leave twenty rows, not zero" do
     20.times { get "/lakeraven-ehr/dashboard" }
 
@@ -166,6 +214,20 @@ class AuditAttributionAndRefusalsTest < ActionDispatch::IntegrationTest
     refute_nil event, "signing in left no audit trail"
     assert_equal "0", event.outcome,
                  "a successful redirect was recorded as a failure"
+  end
+
+  # F6 (round-2 gate): a determined credential refusal must say so — a
+  # reason-less outcome-4 row is indistinguishable from a 4xx that forgot
+  # `note_audit_denial`.
+  test "a failed browser sign-in records its refusal reason" do
+    post "/lakeraven-ehr/login", params: { username: "wrong", password: "wrong" }
+    assert_response :unprocessable_entity
+
+    event = Lakeraven::EHR::AuditEvent.order(:id).last
+    refute_nil event, "a failed sign-in left no audit trail"
+    refute_equal "0", event.outcome
+    assert_match(/invalid credentials/i, event.outcome_desc.to_s,
+                 "the credential refusal row does not say why")
   end
 
   test "a refusal redirect is recorded as a failure" do

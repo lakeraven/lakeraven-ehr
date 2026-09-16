@@ -149,6 +149,38 @@ module Lakeraven
         end
       end
 
+      # The production clients' WHOLE public surface, refused method by
+      # method. The fake answers each of these with a loud raise, so a
+      # wrapper regression back to "forward anything the client answers"
+      # fails audibly here for every method, not just call_rpc_raw.
+      test "every connection, credential, and raw-execution method is refused by the wrapper" do
+        fake = FakeBroker.new
+
+        use_broker(fake) do
+          broker = RpcSupport.broker
+          %i[call_rpc_raw read_response connect disconnect authenticate signon_setup
+             authenticated? duz call_rpc_global_array create_context set_authenticated].each do |name|
+            assert fake.respond_to?(name), "the fake stopped modeling ##{name}"
+            error = assert_raises(NoMethodError, "##{name} passed through the audited wrapper") do
+              broker.public_send(name)
+            end
+            refute_match(/GATE:/, error.message,
+              "##{name} reached the client through the wrapper before being refused")
+          end
+        end
+      end
+
+      test "the allowlisted capability questions still answer" do
+        fake = FakeBroker.new
+
+        use_broker(fake) do
+          broker = RpcSupport.broker
+          assert broker.supports?(:anything)
+          assert broker.connected?
+          assert_equal "fake-broker.test", broker.hostname
+        end
+      end
+
       private
 
       def with_broken_audit
