@@ -136,8 +136,9 @@ module Lakeraven
 
       private
 
-      # Returns [token_string, :header | :session].
       def extract_bearer_token
+        # Returns [token_string, :header | :session] — the SOURCE matters, and
+        # is what the browser-credential rules below are decided on.
         auth = request.headers["Authorization"]
         if auth.present?
           match = auth.match(/\ABearer\s+(.+)\z/i)
