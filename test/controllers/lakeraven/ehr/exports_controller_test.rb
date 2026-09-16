@@ -8,7 +8,11 @@ module Lakeraven
       include SmartAuthTestHelper
 
       setup do
-        setup_smart_auth
+        # Creating/serving a bulk export is a WRITE; it needs write scope now
+        # that ExportsController#create gates on authorize_fhir_write_scope!.
+        # These tests used to pass on the default read-only token because the
+        # route had no scope gate at all (the P0 this branch closes).
+        setup_smart_auth(scopes: "system/*.read system/*.write")
         ExportsController.reset_store!
       end
 
@@ -92,7 +96,11 @@ module Lakeraven
       include SmartAuthTestHelper
 
       setup do
-        setup_smart_auth
+        # Creating/serving a bulk export is a WRITE; it needs write scope now
+        # that ExportsController#create gates on authorize_fhir_write_scope!.
+        # These tests used to pass on the default read-only token because the
+        # route had no scope gate at all (the P0 this branch closes).
+        setup_smart_auth(scopes: "system/*.read system/*.write")
         ExportsController.reset_store!
       end
 

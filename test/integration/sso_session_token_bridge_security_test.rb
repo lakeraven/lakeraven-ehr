@@ -103,6 +103,41 @@ class SsoSessionTokenBridgeSecurityTest < ActionDispatch::IntegrationTest
     assert_response :unauthorized
   end
 
+  # P0: this branch must pass the merged-alone test. A `system/*.read` token
+  # could POST /exports and bulk-export a record — authorize_fhir_write_scope!
+  # existed but was invoked only on Patient#create. #501 supersedes this with
+  # discloses_clinical_data + compartment binding; this gate exists so #486 is
+  # safe without #501, in either landing order.
+  test "a read-only header token cannot create a bulk export" do
+    app = Doorkeeper::Application.create!(
+      name: "ro-#{SecureRandom.hex(4)}", redirect_uri: "https://example.test/cb",
+      scopes: "system/*.read", confidential: true
+    )
+    token = Doorkeeper::AccessToken.create!(
+      application: app, scopes: "system/*.read", expires_in: 3600
+    )
+
+    post "/lakeraven-ehr/exports", params: { export_type: "patient" },
+      headers: { "Authorization" => "Bearer #{token.plaintext_token || token.token}" }
+
+    assert_response :forbidden
+  end
+
+  test "a write-scoped header token can still create a bulk export" do
+    app = Doorkeeper::Application.create!(
+      name: "rw-#{SecureRandom.hex(4)}", redirect_uri: "https://example.test/cb",
+      scopes: "system/*.read system/*.write", confidential: true
+    )
+    token = Doorkeeper::AccessToken.create!(
+      application: app, scopes: "system/*.read system/*.write", expires_in: 3600
+    )
+
+    post "/lakeraven-ehr/exports", params: { export_type: "patient" },
+      headers: { "Authorization" => "Bearer #{token.plaintext_token || token.token}" }
+
+    assert_response :accepted
+  end
+
   # -- the browser/system discriminator must not hang on a display string ---
 
   test "a session token is marked intrinsically, not by its application name" do
@@ -277,6 +312,44 @@ class SsoSessionTokenBridgeSecurityTest < ActionDispatch::IntegrationTest
   ensure
     RpmsRpc::Authentication.singleton_class.send(:remove_method, :user_security_keys)
     RpmsRpc.singleton_class.send(:remove_method, :synchronize_wire)
+  end
+
+  # P0: the process-local fallback must actually serialize.
+  #
+  # The gem pinned by this branch does NOT define RpmsRpc.synchronize_wire
+  # (rpms-rpc#235 is not merged), so the shipped path is the fallback — and it
+  # had none: two sign-ons in one process shared one global broker client and
+  # interleaved. The previous lock test stubbed synchronize_wire IN, so it
+  # never exercised this. Here it is genuinely absent, and two concurrent
+  # sign-ons must not overlap on the wire.
+  test "concurrent sign-ons are serialized even without the gem wire lock" do
+    skip "gem provides its own lock" if RpmsRpc.respond_to?(:synchronize_wire)
+
+    in_flight = 0
+    max_seen = 0
+    monitor = Monitor.new
+
+    original = RpmsRpc::Authentication.method(:authenticate)
+    RpmsRpc::Authentication.define_singleton_method(:authenticate) do |**kwargs|
+      monitor.synchronize { in_flight += 1; max_seen = [ max_seen, in_flight ].max }
+      sleep 0.05 # widen the window a bare send/read would leave open
+      monitor.synchronize { in_flight -= 1 }
+      original.call(**kwargs)
+    end
+
+    threads = 2.times.map do
+      Thread.new do
+        Lakeraven::EHR::AuthenticationService.new.authenticate(
+          access_code: "lindarodriguez", verify_code: "test123"
+        )
+      end
+    end
+    threads.each(&:join)
+
+    assert_equal 1, max_seen,
+      "two sign-ons ran through the shared broker client at once"
+  ensure
+    RpmsRpc::Authentication.singleton_class.send(:remove_method, :authenticate)
   end
 
   # -- M6: unbounded token growth -------------------------------------------
