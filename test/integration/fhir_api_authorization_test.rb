@@ -184,6 +184,23 @@ class FhirApiAuthorizationTest < ActionDispatch::IntegrationTest
     refute_includes response.body, "AmendmentRequest/7"
   end
 
+  # R2-2: a patient-scoped token with NO resource_owner_id (mintable today via
+  # client_credentials — nothing blocks registering an application with
+  # patient/ scopes) made bound_patient_dfn blank, and scoped_events fell open
+  # to AuditEvent.all. #index was already closed by authorize_patient_search!;
+  # #show was the second door — 200 on any foreign audit row.
+  test "a patient-scoped token with no bound patient cannot show any audit row" do
+    foreign = Lakeraven::EHR::AuditEvent.create!(event_type: "rest", action: "R", outcome: "0",
+      entity_type: "Patient", entity_identifier: "1",
+      agent_who_type: "Application", agent_who_identifier: "someone")
+    setup_auth(scopes: "patient/*.read", resource_owner_id: nil)
+
+    get "/lakeraven-ehr/AuditEvent/#{foreign.id}", headers: @headers
+
+    assert_response :not_found
+    refute_includes response.body, "Patient/1"
+  end
+
   test "an unqualified AuditEvent search is refused to a patient-bound token" do
     setup_auth(scopes: "patient/*.read", resource_owner_id: 999)
 
