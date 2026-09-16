@@ -6,7 +6,7 @@ Feature: FHIR R4 Interoperability
   Background:
     Given the following patients exist:
       | dfn | first_name | last_name | dob        | sex | ssn         | tribal_enrollment |
-      | 1   | Alice      | Anderson  | 1980-05-15 | F   | 111-11-1111 | ANLC-12345        |
+      | 1   | Alice      | Anderson  | 1980-05-15 | F   | 111-11-1111 | EXNH-12345        |
 
   Scenario: Retrieve patient as FHIR Patient resource
     When I request patient "1" in FHIR format
@@ -21,7 +21,7 @@ Feature: FHIR R4 Interoperability
   Scenario: FHIR Patient includes tribal enrollment extension
     When I request patient "1" in FHIR format
     Then the FHIR Patient should have a tribal enrollment number in the identifiers
-    And the tribal enrollment identifier should contain "ANLC-12345"
+    And the tribal enrollment identifier should contain "EXNH-12345"
 
   Scenario: FHIR Patient supports US Core Profile requirements
     When I request patient "1" in FHIR format

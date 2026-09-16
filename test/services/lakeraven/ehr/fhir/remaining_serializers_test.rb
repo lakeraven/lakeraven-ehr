@@ -59,17 +59,17 @@ module Lakeraven
         # =============================================================================
 
         test "organization serializes resourceType" do
-          org = Organization.new(ien: 1, name: "Alaska Native Medical Center", station_number: "463")
+          org = Organization.new(ien: 1, name: "Example Health Center", station_number: "463")
           result = OrganizationSerializer.new(org).to_h
 
           assert_equal "Organization", result[:resourceType]
         end
 
         test "organization includes name" do
-          org = Organization.new(ien: 1, name: "Alaska Native Medical Center")
+          org = Organization.new(ien: 1, name: "Example Health Center")
           result = OrganizationSerializer.new(org).to_h
 
-          assert_equal "Alaska Native Medical Center", result[:name]
+          assert_equal "Example Health Center", result[:name]
         end
 
         test "organization includes identifiers" do

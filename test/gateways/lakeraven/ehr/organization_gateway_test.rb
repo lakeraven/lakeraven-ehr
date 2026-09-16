@@ -10,7 +10,7 @@ module Lakeraven
 
         refute_nil org, "Should find seeded organization"
         name = org.respond_to?(:name) ? org.name : org[:name]
-        assert_equal "Alaska Native Medical Center", name
+        assert_equal "Example Health Center", name
       end
 
       test "find returns nil for non-existent organization" do

@@ -10,14 +10,14 @@ module Lakeraven
       # =========================================================================
 
       test "tribal enrollment check passes with valid enrollment number" do
-        patient = build_patient(tribal_enrollment_number: "ANLC-12345")
+        patient = build_patient(tribal_enrollment_number: "EXNH-12345")
         sr = build_sr(patient: patient)
 
         result = EligibilityService.check(sr)
 
         assert_equal "PASS", result.check_status(:tribal_enrollment)
         assert result.check_message(:tribal_enrollment).include?("Valid tribal enrollment")
-        assert result.check_message(:tribal_enrollment).include?("ANLC-12345")
+        assert result.check_message(:tribal_enrollment).include?("EXNH-12345")
       end
 
       test "tribal enrollment check fails with invalid format" do
@@ -238,7 +238,7 @@ module Lakeraven
 
       test "eligibility result reports eligible when all checks pass" do
         patient = build_patient(
-          tribal_enrollment_number: "ANLC-12345",
+          tribal_enrollment_number: "EXNH-12345",
           service_area: "Anchorage",
           coverage_type: "IHS"
         )
@@ -306,14 +306,14 @@ module Lakeraven
       end
 
       test "eligibility result provides access to individual check messages" do
-        patient = build_patient(tribal_enrollment_number: "ANLC-12345")
+        patient = build_patient(tribal_enrollment_number: "EXNH-12345")
         sr = build_sr(patient: patient)
 
         result = EligibilityService.check(sr)
 
         message = result.check_message(:tribal_enrollment)
         assert message.present?
-        assert message.include?("ANLC-12345")
+        assert message.include?("EXNH-12345")
       end
 
       # =========================================================================
@@ -322,7 +322,7 @@ module Lakeraven
 
       test "complete eligibility check for CHS-eligible patient" do
         patient = build_patient(
-          tribal_enrollment_number: "ANLC-99999",
+          tribal_enrollment_number: "EXNH-99999",
           service_area: "Anchorage",
           coverage_type: "IHS"
         )
@@ -344,7 +344,7 @@ module Lakeraven
 
       test "complete eligibility check for Medicare dual-eligible patient" do
         patient = build_patient(
-          tribal_enrollment_number: "ANLC-88888",
+          tribal_enrollment_number: "EXNH-88888",
           service_area: "Fairbanks",
           coverage_type: "Medicare/IHS"
         )
@@ -363,7 +363,7 @@ module Lakeraven
 
       test "eligibility check fails for patient outside service area" do
         patient = build_patient(
-          tribal_enrollment_number: "ANLC-77777",
+          tribal_enrollment_number: "EXNH-77777",
           service_area: "Portland",
           coverage_type: "IHS"
         )
@@ -387,7 +387,7 @@ module Lakeraven
           dfn: 1,
           name: "TEST,PATIENT",
           sex: "M",
-          tribal_enrollment_number: "ANLC-12345",
+          tribal_enrollment_number: "EXNH-12345",
           service_area: "Anchorage",
           coverage_type: "IHS"
         }

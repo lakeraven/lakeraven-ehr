@@ -63,9 +63,9 @@ RpmsRpc.mock! do |m|
     filter_field: :name)
 
   # Institutions (IEN 1)
-  m.seed(:institution, "1", { ien: 1, name: "Alaska Native Medical Center", station_number: "463",
-                               address: "4315 Diplomacy Dr", city: "Anchorage", state: "AK",
-                               zip_code: "99508", phone: "907-729-1900" })
+  m.seed(:institution, "1", { ien: 1, name: "Example Health Center", station_number: "463",
+                               address: "500 Example Way", city: "Anchorage", state: "AK",
+                               zip_code: "99508", phone: "555-0100" })
 
   # Locations (IEN 1)
   m.seed(:hospital_location, "1", { ien: 1, name: "Primary Care Clinic", abbreviation: "PCC",
@@ -85,10 +85,10 @@ RpmsRpc.mock! do |m|
 
   # Tribal enrollment (BHDPTRPC* — placeholder wire names, no known server
   # implementation; see rpms-rpc docs/RPC_COVERAGE.md, "BHDPTRPC provenance")
-  m.seed(:tribal_enrollment, "1", { enrollment_number: "ANLC-12345", tribe_name: "Alaska Native - Anchorage (ANLC)",
+  m.seed(:tribal_enrollment, "1", { enrollment_number: "EXNH-12345", tribe_name: "Example Native Health (EXNH)",
                                      enrollment_date: Date.new(2020, 1, 1), status: "ACTIVE",
-                                     service_unit: "Anchorage", tribe_code: "ANLC" })
-  m.seed(:tribal_validation, "ANLC-12345", { valid: true, tribe_code: "ANLC", enrollment_number: "12345",
+                                     service_unit: "Anchorage", tribe_code: "EXNH" })
+  m.seed(:tribal_validation, "EXNH-12345", { valid: true, tribe_code: "EXNH", enrollment_number: "12345",
                                               status: "ACTIVE", message: "Valid enrollment" })
   m.seed(:tribal_validation, "CN-67890", { valid: true, tribe_code: "CN", enrollment_number: "67890",
                                             status: "ACTIVE", message: "Valid enrollment" })
@@ -110,7 +110,7 @@ RpmsRpc.mock! do |m|
   m.seed(:enrollment_eligibility, "8", { active: false, eligible_for_ihs: false,
                                           service_unit: nil, message: nil, benefit_package: nil })
   m.seed(:service_unit, "1", { ien: 1, name: "Anchorage", region: "Alaska" })
-  m.seed(:tribe_info, "ANLC", { ien: 100, name: "Alaska Native - Anchorage (ANLC)", code: "ANLC",
+  m.seed(:tribe_info, "EXNH", { ien: 100, name: "Example Native Health (EXNH)", code: "EXNH",
                                   service_unit: "Anchorage", region: "Alaska", area: "Alaska Area" })
   m.seed(:tribe_info, "CN", { ien: 101, name: "Painted Sky Nation", code: "CN",
                                 service_unit: "Painted Sky", region: "Oklahoma", area: "Central Area" })

@@ -37,7 +37,7 @@ Given("the patient has clinical data for a care summary") do
     encounters: [
       { date: "2026-03-01", type_code: "99213", type_display: "Office visit", performer: "Dr. Smith" }
     ],
-    author: { name: "Dr. Smith", institution: "IHS Anchorage Facility" }
+    author: { name: "Dr. Smith", institution: "Example Health Center" }
   }
 end
 

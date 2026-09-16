@@ -129,7 +129,7 @@ module Lakeraven
       test "find_by_ien returns Organization for known IEN" do
         org = Organization.find_by_ien(1)
         assert_not_nil org
-        assert_equal "Alaska Native Medical Center", org.name
+        assert_equal "Example Health Center", org.name
         assert_equal "463", org.station_number
       end
 
@@ -160,8 +160,8 @@ module Lakeraven
       end
 
       test "full_address with all parts" do
-        org = Organization.new(address: "4315 Diplomacy Dr", city: "Anchorage", state: "AK", zip_code: "99508")
-        assert_equal "4315 Diplomacy Dr, Anchorage, AK, 99508", org.full_address
+        org = Organization.new(address: "500 Example Way", city: "Anchorage", state: "AK", zip_code: "99508")
+        assert_equal "500 Example Way, Anchorage, AK, 99508", org.full_address
       end
 
       test "full_address with only city and state" do
@@ -184,7 +184,7 @@ module Lakeraven
 
         assert_equal "Organization", fhir[:resourceType]
         assert_equal "1", fhir[:id]
-        assert_equal "Alaska Native Medical Center", fhir[:name]
+        assert_equal "Example Health Center", fhir[:name]
       end
 
       test "to_fhir includes address" do

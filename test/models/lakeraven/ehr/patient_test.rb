@@ -129,10 +129,10 @@ module Lakeraven
         patient = Patient.new(
           first_name: "John", last_name: "Doe",
           born_on: Date.new(1980, 1, 15),
-          tribal_enrollment_number: "ANLC-12345",
+          tribal_enrollment_number: "EXNH-12345",
           service_area: "Anchorage", coverage_type: "IHS"
         )
-        assert_equal "ANLC-12345", patient.tribal_enrollment_number
+        assert_equal "EXNH-12345", patient.tribal_enrollment_number
         assert_equal "Anchorage", patient.service_area
         assert_equal "IHS", patient.coverage_type
       end
@@ -326,7 +326,7 @@ module Lakeraven
 
       test "to_fhir includes tribal enrollment extension for TEFCA" do
         patient = Patient.new(dfn: 1, name: "TEST,TEFCA", sex: "M",
-                              tribal_enrollment_number: "ANLC-12345")
+                              tribal_enrollment_number: "EXNH-12345")
         fhir = patient.to_fhir
         extensions = fhir[:extension] || []
         tribal_ext = extensions.find { |e| e[:url]&.include?("tribal") }

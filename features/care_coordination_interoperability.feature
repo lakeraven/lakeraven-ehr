@@ -6,7 +6,7 @@ Feature: Care Coordination with External Systems
   Background:
     Given the following patients exist:
       | dfn | first_name | last_name | dob        | sex | ssn         | tribal_enrollment | tribal_affiliation                    | service_area |
-      | 1   | Alice      | Anderson  | 1980-05-15 | F   | 111-11-1111 | ANLC-12345       | Alaska Native - Anchorage (ANLC)      | Anchorage    |
+      | 1   | Alice      | Anderson  | 1980-05-15 | F   | 111-11-1111 | EXNH-12345       | Example Native Health (EXNH)      | Anchorage    |
 
   Scenario: External system requests patient information
     Given patient "Anderson, Alice" has consented to data sharing
