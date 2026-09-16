@@ -36,15 +36,38 @@ module Lakeraven
 
       private
 
-      # A patient-bound token sees only rows about its own patient. The
-      # compartment filter is applied to the QUERY, not just checked against a
-      # parameter — otherwise the binding would govern which patient is named
-      # and not which rows come back.
+      # FHIR type these rows are attributed to for a patient. Audit writes set
+      # entity_type from the accessed resource's FHIR type, so a row directly
+      # about a patient carries "Patient".
+      PATIENT_ENTITY_TYPE = "Patient"
+
+      # A patient-bound token sees only rows PROVABLY about its own patient.
+      #
+      # entity_identifier is a promiscuous column — patient DFNs, amendment
+      # ids, encounter iens and class names all live in it — so keying on the
+      # value alone let foreign-namespace rows leak by numeric collision
+      # (AmendmentRequest/5, Encounter/5 for a patient-5 token). A value in a
+      # column is not a security boundary; that is the exact defect this PR
+      # exists to close, and it recurred inside the fix. The compartment keys
+      # on entity TYPE as well.
+      #
+      # Deliberately the PROVABLY-attributable subset: a row of some other
+      # resource type ABOUT this patient (an Observation read, say) is not
+      # reliably linked to the patient DFN by this schema — entity_identifier
+      # there is the resource's own id or nil. Rather than guess and risk
+      # leaking a foreign row, the patient-facing view returns only rows it can
+      # prove belong to them. Completing the §164.528 accounting with a real
+      # patient reference on every clinical audit row is a schema change that
+      # belongs with the audit-model work (#507 Part 1 / #510), not a looser
+      # filter here.
+      #
+      # Applied to the QUERY, not checked against a parameter — otherwise the
+      # binding would govern which patient is named and not which rows return.
       def scoped_events
         dfn = bound_patient_dfn
         return AuditEvent.all if dfn.blank?
 
-        AuditEvent.where(entity_identifier: dfn)
+        AuditEvent.where(entity_type: PATIENT_ENTITY_TYPE, entity_identifier: dfn)
       end
 
       def bound_patient_dfn

@@ -144,6 +144,46 @@ class FhirApiAuthorizationTest < ActionDispatch::IntegrationTest
       "the access trail of another patient came back"
   end
 
+  # F2: entity_identifier is a promiscuous column — patient DFNs, amendment
+  # ids, encounter iens, class names all share it. Filtering on the bare
+  # identifier lets rows from OTHER namespaces leak into a patient's disclosure
+  # accounting by numeric collision. The compartment has to key on entity
+  # TYPE, not just the value.
+  test "an AuditEvent search does not leak rows that collide on the identifier" do
+    same_id = "5"
+    Lakeraven::EHR::AuditEvent.create!(event_type: "rest", action: "R", outcome: "0",
+      entity_type: "Patient", entity_identifier: same_id,
+      agent_who_type: "Application", agent_who_identifier: "legit")
+    Lakeraven::EHR::AuditEvent.create!(event_type: "rest", action: "U", outcome: "0",
+      entity_type: "AmendmentRequest", entity_identifier: same_id,
+      agent_who_type: "Application", agent_who_identifier: "other")
+    Lakeraven::EHR::AuditEvent.create!(event_type: "rest", action: "R", outcome: "0",
+      entity_type: "Encounter", entity_identifier: same_id,
+      agent_who_type: "Application", agent_who_identifier: "other")
+    setup_auth(scopes: "patient/*.read", resource_owner_id: same_id)
+
+    get "/lakeraven-ehr/AuditEvent", params: { patient: same_id }, headers: @headers
+
+    assert_response :ok
+    refute_includes response.body, "AmendmentRequest/#{same_id}",
+      "a foreign namespace row leaked by numeric collision"
+    refute_includes response.body, "Encounter/#{same_id}"
+    assert_includes response.body, "Patient/#{same_id}",
+      "the patient's own Patient-typed row must still be returned"
+  end
+
+  test "AuditEvent#show does not disclose a colliding foreign row" do
+    foreign = Lakeraven::EHR::AuditEvent.create!(event_type: "rest", action: "U", outcome: "0",
+      entity_type: "AmendmentRequest", entity_identifier: "7",
+      agent_who_type: "Application", agent_who_identifier: "other")
+    setup_auth(scopes: "patient/*.read", resource_owner_id: 7)
+
+    get "/lakeraven-ehr/AuditEvent/#{foreign.id}", headers: @headers
+
+    assert_response :not_found
+    refute_includes response.body, "AmendmentRequest/7"
+  end
+
   test "an unqualified AuditEvent search is refused to a patient-bound token" do
     setup_auth(scopes: "patient/*.read", resource_owner_id: 999)
 
