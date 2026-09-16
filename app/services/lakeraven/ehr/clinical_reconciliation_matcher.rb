@@ -13,7 +13,7 @@ module Lakeraven
     #   - Medications: RxNorm code match, then normalized drug name
     #
     # ONC § 170.315(b)(2) - Clinical Information Reconciliation
-    # Ported from rpms_redux ClinicalReconciliationMatcher.
+    # Ported from the predecessor app ClinicalReconciliationMatcher.
     class ClinicalReconciliationMatcher
       # Match imported items against existing records
       #

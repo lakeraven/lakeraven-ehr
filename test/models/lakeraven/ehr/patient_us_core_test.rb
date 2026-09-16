@@ -6,7 +6,7 @@ module Lakeraven
   module EHR
     class PatientUsCoreTest < ActiveSupport::TestCase
       # =============================================================================
-      # US Core Patient Profile Compliance (ported from rpms_redux)
+      # US Core Patient Profile Compliance (ported from the predecessor app)
       # =============================================================================
 
       test "to_fhir includes meta.profile with us-core-patient URL" do

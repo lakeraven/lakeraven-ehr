@@ -7,7 +7,7 @@ module Lakeraven
     # Maintains frozen templates for public health programs and creates
     # Case + milestone Task records in a single transaction.
     #
-    # Ported from rpms_redux ProgramTemplateService.
+    # Ported from the predecessor app ProgramTemplateService.
     class ProgramTemplateService
       TEMPLATES = {
         "immunization" => [

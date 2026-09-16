@@ -221,7 +221,7 @@ module Lakeraven
         assert_equal "99", fhir[:id]
       end
 
-      # -- clinical data accessors (ported from rpms_redux) ----------------------
+      # -- clinical data accessors (ported from the predecessor app) ----------------------
 
       test "service_requests returns referrals for patient" do
         patient = Patient.find_by_dfn(1)
@@ -286,7 +286,7 @@ module Lakeraven
         assert_equal Date.new(1980, 5, 15), patient.birth_date
       end
 
-      # -- tribal enrollment (ported from rpms_redux) ----------------------------
+      # -- tribal enrollment (ported from the predecessor app) ----------------------------
 
       test "validate_tribal_enrollment returns invalid when no enrollment number" do
         patient = Patient.new(dfn: 1, name: "DOE,JOHN", sex: "M")
@@ -299,7 +299,7 @@ module Lakeraven
         refute patient.tribal_enrollment_valid?
       end
 
-      # -- from_fhir_attributes (ported from rpms_redux) -------------------------
+      # -- from_fhir_attributes (ported from the predecessor app) -------------------------
 
       test "from_fhir_attributes parses FHIR resource" do
         fhir = OpenStruct.new(
@@ -322,7 +322,7 @@ module Lakeraven
         assert_equal "M", attrs[:sex]
       end
 
-      # -- FHIR US Core / TEFCA (ported from rpms_redux) -------------------------
+      # -- FHIR US Core / TEFCA (ported from the predecessor app) -------------------------
 
       test "to_fhir includes tribal enrollment extension for TEFCA" do
         patient = Patient.new(dfn: 1, name: "TEST,TEFCA", sex: "M",
@@ -358,7 +358,7 @@ module Lakeraven
         assert fhir[:identifier]&.any?, "QHIN requires identifiers"
       end
 
-      # -- providers association (ported from rpms_redux) ------------------------
+      # -- providers association (ported from the predecessor app) ------------------------
 
       test "providers returns empty array when no service requests" do
         patient = Patient.new(dfn: 99999, name: "NOREFS,PATIENT", sex: "M")
@@ -405,7 +405,7 @@ module Lakeraven
       end
 
       # =========================================================================
-      # PERSISTENCE VIA DI GATEWAY (ported from rpms_redux)
+      # PERSISTENCE VIA DI GATEWAY (ported from the predecessor app)
       # =========================================================================
 
       # In-memory mock gateway for persistence tests

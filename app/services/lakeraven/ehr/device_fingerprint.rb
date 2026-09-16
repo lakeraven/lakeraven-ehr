@@ -9,7 +9,7 @@ module Lakeraven
     # Used for session tracking and anomaly detection (HIPAA session management).
     # Fingerprint is a SHA256 hash of normalized browser characteristics.
     #
-    # Ported from rpms_redux DeviceFingerprint.
+    # Ported from the predecessor app DeviceFingerprint.
     class DeviceFingerprint
       LOOKBACK_DAYS = 90
 

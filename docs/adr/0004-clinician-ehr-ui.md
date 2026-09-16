@@ -66,7 +66,7 @@ Two placements were weighed:
 the engine, mounted by any host.
 
 - *For:* engine remains a complete product (ADR 0002's core argument); one repo for
-  clinical domain + its UI; host session/auth (Jumpstart Pro) is already solved;
+  clinical domain + its UI; host session/auth (the host SaaS template) is already solved;
   server-side rendering suits RPC-latency-bound data.
 - *Against:* couples UI release cadence to engine releases; tempts controllers to
   bypass the FHIR layer and reach into gateways directly, forking the data path.
@@ -92,7 +92,7 @@ screen we build hardens the API those apps rely on. If a second host or non-RPMS
 backend later makes a standalone SPA worthwhile, the API-first discipline makes that
 extraction cheap instead of a rewrite.
 
-Auth: the host (Jumpstart Pro) owns login/MFA/session per ADR 0002; the engine UI
+Auth: the host (SaaS template) owns login/MFA/session per ADR 0002; the engine UI
 authorizes via the host session carrying DUZ + RPC context, and via Doorkeeper/SMART
 scopes for anything app-launched. No engine-local sign-on is built (ADR 0002's
 migration-debt note stands).

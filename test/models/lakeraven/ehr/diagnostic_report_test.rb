@@ -61,7 +61,7 @@ module Lakeraven
         assert_equal "Normal", fhir[:conclusion]
       end
 
-      # -- Validations (ported from rpms_redux) ----------------------------------
+      # -- Validations (ported from the predecessor app) ----------------------------------
 
       test "validates patient_dfn presence" do
         dr = DiagnosticReport.new(code_display: "CBC")
@@ -106,7 +106,7 @@ module Lakeraven
         assert dr.valid?
       end
 
-      # -- FHIR extras (ported from rpms_redux) ----------------------------------
+      # -- FHIR extras (ported from the predecessor app) ----------------------------------
 
       test "to_fhir includes performer when performer_duz present" do
         dr = DiagnosticReport.new(

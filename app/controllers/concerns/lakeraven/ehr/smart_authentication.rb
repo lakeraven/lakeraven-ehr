@@ -3,7 +3,7 @@
 # SMART on FHIR Authentication Concern
 # ONC § 170.315(g)(10) — Bearer token auth + scope-based authorization.
 #
-# Ported from rpms_redux SmartAuthentication.
+# Ported from the predecessor app SmartAuthentication.
 module Lakeraven
   module EHR
     module SmartAuthentication

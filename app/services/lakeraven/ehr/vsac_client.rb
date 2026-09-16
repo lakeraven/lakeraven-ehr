@@ -13,7 +13,7 @@ module Lakeraven
     #
     # API Documentation: https://www.nlm.nih.gov/vsac/support/usingvsac/vsacfhirapi.html
     #
-    # Ported from rpms_redux VsacClient.
+    # Ported from the predecessor app VsacClient.
     #
     # Usage:
     #   client = Lakeraven::EHR::VsacClient.new(api_key: ENV["UMLS_API_KEY"])

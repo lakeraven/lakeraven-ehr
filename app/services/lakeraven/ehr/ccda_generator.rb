@@ -4,7 +4,7 @@ module Lakeraven
   module EHR
     # CcdaGenerator - Generate C-CDA (Consolidated Clinical Document Architecture) XML
     # ONC 170.315(b)(1) - Transitions of Care (send path)
-    # Ported from rpms_redux CcdaGenerator.
+    # Ported from the predecessor app CcdaGenerator.
     class CcdaGenerator
       NS = "urn:hl7-org:v3"
       XSI = "http://www.w3.org/2001/XMLSchema-instance"

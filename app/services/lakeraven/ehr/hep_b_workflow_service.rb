@@ -7,7 +7,7 @@ module Lakeraven
     # Wraps ProgramTemplateService with Hep B-specific workflow:
     # HBIG administration, birth dose, vaccine series, and PVST recording.
     #
-    # Ported from rpms_redux HepBWorkflowService.
+    # Ported from the predecessor app HepBWorkflowService.
     class HepBWorkflowService
       class << self
         def create_perinatal_case(infant_dfn:, maternal_dfn:, facility:, birth_date:)

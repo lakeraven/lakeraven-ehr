@@ -11,7 +11,7 @@ lakeraven-ehr needs an authorization layer to control what authenticated users c
 ### Constraints
 
 - **RPMS is the source of truth** for roles and security keys. The authorization library must consume externally-defined roles, not manage its own role storage.
-- **Rails engine architecture.** lakeraven-ehr is a mountable engine. The host app (Jumpstart Pro) handles authentication (Devise). Authorization must compose cleanly — the engine defines policies for its resources, the host app can override or extend them.
+- **Rails engine architecture.** lakeraven-ehr is a mountable engine. The host app (a commercial SaaS template) handles authentication (Devise). Authorization must compose cleanly — the engine defines policies for its resources, the host app can override or extend them.
 - **Multiple engines.** corvid and rook are independent engines that need the same RPMS role/key data. Authorization logic must not couple engines to each other.
 - **rpms-rpc owns RPMS details.** RPMS key strings (`"PRCFA SUPERVISOR"`), user class numbers (`"4"` = nurse), and key-to-capability mappings belong in rpms-rpc, not in engine code.
 
@@ -35,7 +35,7 @@ lakeraven-ehr needs an authorization layer to control what authenticated users c
 
 2. **No role storage.** Pundit doesn't manage roles — it receives a `current_user` object and checks whatever attributes it has. RPMS roles and security keys flow through rpms-rpc into `CurrentUser`, and Pundit policies query that object. RPMS stays the source of truth.
 
-3. **Host app override.** Jumpstart Pro (or any host) can define its own policies that override or extend engine defaults. Standard Pundit resolution order handles this.
+3. **Host app override.** The host app (any host) can define its own policies that override or extend engine defaults. Standard Pundit resolution order handles this.
 
 4. **Rails standard.** Most commonly paired with Devise. Contributors will recognize the pattern. Extensive documentation and ecosystem support.
 

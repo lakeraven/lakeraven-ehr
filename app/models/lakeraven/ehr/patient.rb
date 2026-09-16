@@ -4,7 +4,7 @@ module Lakeraven
   module EHR
     # Patient model — ActiveModel-based, backed by RPMS via PatientGateway.
     #
-    # Faithful port from rpms_redux Patient. All data flows through RPC;
+    # Faithful port from the predecessor app Patient. All data flows through RPC;
     # no database tables.
     class Patient
       include ActiveModel::Model
@@ -162,7 +162,7 @@ module Lakeraven
         dfn.present? && dfn.to_i.positive?
       end
 
-      # -- Clinical data accessors (ported from rpms_redux) ------------------
+      # -- Clinical data accessors (ported from the predecessor app) ------------------
 
       def service_requests
         return [] unless dfn
@@ -237,7 +237,7 @@ module Lakeraven
         TribalEnrollmentGateway.tribe_info(tribe_code)
       end
 
-      # -- Providers (ported from rpms_redux) ----------------------------------
+      # -- Providers (ported from the predecessor app) ----------------------------------
 
       def providers
         all_srs = service_requests || []

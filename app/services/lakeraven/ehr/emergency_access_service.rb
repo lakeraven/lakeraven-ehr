@@ -9,7 +9,7 @@ module Lakeraven
     # Provides a service layer for granting emergency access to patient data,
     # enhanced audit logging, and post-access supervisor review.
     #
-    # Ported from rpms_redux EmergencyAccessService.
+    # Ported from the predecessor app EmergencyAccessService.
     class EmergencyAccessService
       class AlreadyReviewedError < StandardError; end
       class InvalidReviewOutcomeError < StandardError; end

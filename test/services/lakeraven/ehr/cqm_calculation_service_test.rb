@@ -107,7 +107,7 @@ module Lakeraven
       end
 
       # =============================================================================
-      # ADDITIONAL SCENARIOS (ported from rpms_redux)
+      # ADDITIONAL SCENARIOS (ported from the predecessor app)
       # =============================================================================
 
       test "observation outside period is not counted in numerator" do

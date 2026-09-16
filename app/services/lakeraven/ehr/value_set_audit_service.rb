@@ -8,7 +8,7 @@ module Lakeraven
     # Uses an in-memory ProvenanceStore to track access, expansion, and
     # modifications to ValueSets for compliance and security auditing.
     #
-    # Ported from rpms_redux ValueSetAuditService.
+    # Ported from the predecessor app ValueSetAuditService.
     class ValueSetAuditService
       # Activity codes for ValueSet operations
       ACTIVITY_ACCESS = "EXECUTE"

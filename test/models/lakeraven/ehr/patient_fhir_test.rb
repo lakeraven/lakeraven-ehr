@@ -7,7 +7,7 @@ module Lakeraven
   module EHR
     class PatientFhirTest < ActiveSupport::TestCase
       # =============================================================================
-      # FHIR Serialization — detailed output tests (ported from rpms_redux)
+      # FHIR Serialization — detailed output tests (ported from the predecessor app)
       # =============================================================================
 
       test "to_fhir serializes patient correctly" do
@@ -88,7 +88,7 @@ module Lakeraven
       end
 
       # =============================================================================
-      # from_fhir_attributes — round-trip tests (ported from rpms_redux)
+      # from_fhir_attributes — round-trip tests (ported from the predecessor app)
       # =============================================================================
 
       test "from_fhir_attributes maps FHIR gender to VistA" do

@@ -12,7 +12,7 @@ module Lakeraven
     # Trigger matching uses ICD-10-CM prefix matching: a trigger code of "A15"
     # matches A15.0, A15.1, etc.
     #
-    # Ported from rpms_redux ReportableConditionService.
+    # Ported from the predecessor app ReportableConditionService.
     class ReportableConditionService
       REPORTABLE_CONDITIONS_PATH = Engine.root.join("db/data/reportable_conditions.yml")
 

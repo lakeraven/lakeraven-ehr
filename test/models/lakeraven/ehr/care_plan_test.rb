@@ -69,7 +69,7 @@ module Lakeraven
         assert_equal "Patient/100", fhir.dig(:subject, :reference)
       end
 
-      # -- Validations (ported from rpms_redux) ----------------------------------
+      # -- Validations (ported from the predecessor app) ----------------------------------
 
       test "validates patient_dfn presence" do
         cp = CarePlan.new(title: "Care Plan")
@@ -103,7 +103,7 @@ module Lakeraven
         end
       end
 
-      # -- FHIR extras (ported from rpms_redux) ----------------------------------
+      # -- FHIR extras (ported from the predecessor app) ----------------------------------
 
       test "to_fhir includes category coding" do
         cp = CarePlan.new(ien: "1", patient_dfn: "100", category: "assess-plan")
