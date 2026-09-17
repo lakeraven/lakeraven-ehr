@@ -39,9 +39,10 @@ module Lakeraven
       # FAIL-CLOSED audit, the same terms the clinician screening surface is
       # held to. The chart now carries scored screenings (#474), so it serves
       # the same item-level self-harm disclosures — and a sibling route to the
-      # same bytes must not be the one with the weaker audit. If the access
-      # cannot be recorded, it is not completed.
-      include FailClosedClinicalAudit
+      # same bytes must not be the one with the weaker audit. Since #512 the
+      # shared concern IS the fail-closed one: if the access cannot be
+      # recorded, it is not completed.
+      include AuditableClinicalAccess
 
       FHIR_CONTENT_TYPE = "application/fhir+json"
 
@@ -394,7 +395,7 @@ module Lakeraven
         end
       end
 
-      # FailClosedClinicalAudit hook: a FHIR caller gets an OperationOutcome
+      # AuditableClinicalAccess hook: a FHIR caller gets an OperationOutcome
       # rather than plain text, like every other refusal on this controller.
       # The chart establishes no state, so there is nothing to roll back.
       def render_unrecorded_access_denial

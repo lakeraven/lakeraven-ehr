@@ -21,20 +21,21 @@ module Lakeraven
     # an empty-scope token could read self-harm answers. There is no second
     # scheme now: no token, no screening.
     #
-    # A browser gets that token from the sign-on bridge in #486; until that
-    # merges this surface is reachable only with a token, exactly like
-    # ChartsController. The session still carries the patient CONTEXT (which
-    # record the clinician deliberately opened) — that is a different question
-    # from what the credential may do, and both are asked.
+    # A browser gets that token from the sign-on bridge (#486, on this base).
+    # The session still carries the patient CONTEXT (which record the
+    # clinician deliberately opened) — that is a different question from what
+    # the credential may do, and both are asked.
     #
     # This controller is only the CLINICIAN surface. All scoring and
     # persistence live in ScreeningEntryService, which reads no session — the
     # tokenized pre-visit link (#471) will call the same service.
     class ScreeningsController < WebController
       include BrowserSmartAuthentication
-      # Fails closed: an access that cannot be recorded is not completed, and
-      # a refusal is recorded too.
-      include FailClosedClinicalAudit
+      # Fail-closed audit — an access that cannot be recorded is not
+      # completed, and a refusal is recorded too — comes from WebController's
+      # AuditableClinicalAccess, which since #512 audits AROUND the action in
+      # the action's own transaction. This controller only supplies the
+      # audit hooks below.
       include ClinicianPatientContext
 
       # The item-level answers are what this surface reads and writes, and they
@@ -170,10 +171,10 @@ module Lakeraven
         false
       end
 
-      # -- Audit (FailClosedClinicalAudit hooks) --------------------------------
-
-      # Recording a screening is a write; everything else on this surface reads.
-      def audit_action = action_name == "create" ? "C" : "R"
+      # -- Audit (AuditableClinicalAccess hooks) --------------------------------
+      # The verb map covers the action (create is a POST -> "C"), and
+      # Practitioner attribution comes from the shared resolver via #486's
+      # `browser_sso_token?`/`current_duz` — no per-controller overrides.
 
       # What this access actually touched, so that type and identifier agree:
       #
@@ -185,26 +186,20 @@ module Lakeraven
       #     ChartsController uses for a patient-centric aggregate.
       #
       # Never QuestionnaireResponse/<dfn>, which resolves to some other
-      # patient's screening.
+      # patient's screening. The reference rule itself (both halves derived
+      # together, sanitized) lives in the shared concern since #512; this
+      # surface only supplies the identifier a create cannot put in params.
       def fhir_resource_type = audited_screening_id ? SCREENING_RESOURCE : "Patient"
 
-      def audit_entity_identifier = audited_screening_id || params[:dfn]
+      def direct_audit_identifier = audited_screening_id || super
 
-      # On a create the id exists only once the action has run — and the audit
-      # runs after it, so the new record can name itself.
+      # On a create the id exists only once the action has run — the audit row
+      # is written after `yield`, inside the same transaction, so the new
+      # record can name itself.
       def audited_screening_id
         return @result.record.id.to_s if @result&.record
 
         params[:id].presence
-      end
-
-      # Opening a patient record is state; a screening read is not. Nothing to
-      # undo here — see PatientContextsController.
-      def audit_agent_attributes
-        duz = current_duz
-        return super if duz.blank?
-
-        { agent_who_type: "Practitioner", agent_who_identifier: duz }
       end
 
       # -- Loading --------------------------------------------------------------

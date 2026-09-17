@@ -12,8 +12,9 @@ module Lakeraven
     # record is itself a clinical access, so a credential that may not read
     # screenings may not open the record either.
     class PatientContextsController < WebController
+      # Fail-closed audit comes from WebController's AuditableClinicalAccess
+      # (#512): an open that cannot be recorded is not completed.
       include BrowserSmartAuthentication
-      include FailClosedClinicalAudit
       include ClinicianPatientContext
 
       before_action :authenticate_smart_token!
@@ -44,17 +45,11 @@ module Lakeraven
         close_patient_context!
       end
 
+      # Opening a record is an Execute, not the Create the verb map would
+      # infer from the POST. Practitioner attribution comes from the shared
+      # resolver via #486's `browser_sso_token?`/`current_duz`.
       def audit_action = "E"
       def fhir_resource_type = "Patient"
-
-      # Only a clinician credential names a Practitioner; on a patient-scoped
-      # token `resource_owner_id` is the patient.
-      def audit_agent_attributes
-        duz = current_duz
-        return super if duz.blank?
-
-        { agent_who_type: "Practitioner", agent_who_identifier: duz }
-      end
     end
   end
 end
