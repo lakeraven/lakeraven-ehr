@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_02_030000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_15_000000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -166,6 +166,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_02_030000) do
 
   create_table "oauth_access_tokens", force: :cascade do |t|
     t.integer "application_id", null: false
+    t.boolean "browser_session", default: false, null: false
     t.datetime "created_at", null: false
     t.integer "expires_in"
     t.string "previous_refresh_token", default: "", null: false
@@ -175,6 +176,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_02_030000) do
     t.string "scopes"
     t.string "token", null: false
     t.index [ "application_id" ], name: "index_oauth_access_tokens_on_application_id"
+    t.index [ "browser_session" ], name: "index_oauth_access_tokens_on_browser_session"
     t.index [ "refresh_token" ], name: "index_oauth_access_tokens_on_refresh_token", unique: true
     t.index [ "resource_owner_id" ], name: "index_oauth_access_tokens_on_resource_owner_id"
     t.index [ "token" ], name: "index_oauth_access_tokens_on_token", unique: true

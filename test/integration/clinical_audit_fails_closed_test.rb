@@ -430,14 +430,14 @@ class ClinicalAuditFailsClosedTest < ActionDispatch::IntegrationTest
   # throwing away a clinician's sign-in on every audit outage would make the
   # 503 a logout button.
   test "refusing an unrecorded access preserves the pre-existing session" do
-    post "/lakeraven-ehr/login", params: { username: "testprovider", password: "test" }
-    assert_equal "99999", session[:duz]
+    post "/lakeraven-ehr/login", params: { username: "lindarodriguez", password: "test123" }
+    assert_equal "304", session[:duz]
     setup_auth(scopes: "system/*.read")
 
     with_broken_audit { get "/audited_browser/1", headers: @headers }
 
     assert_response :service_unavailable
-    assert_equal "99999", session[:duz],
+    assert_equal "304", session[:duz],
       "refusing an unrecorded access destroyed the signed-in session"
   end
 
