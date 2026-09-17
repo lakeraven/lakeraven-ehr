@@ -17,6 +17,15 @@ module Lakeraven
 
       private
 
+      # The surfaces this concern serves are server-rendered HTML: their
+      # credential arrives in the session the sign-on bridge minted, never in
+      # an Authorization header (#486 binds browser tokens to their session
+      # and scopes the fallback to HTML surfaces that opt in, like the
+      # chart; the FHIR API stays bearer-only).
+      def session_token_fallback_allowed?
+        true
+      end
+
       # True when this credential stands for a CLINICIAN — a browser sign-on
       # token, whose `resource_owner_id` is a DUZ.
       #

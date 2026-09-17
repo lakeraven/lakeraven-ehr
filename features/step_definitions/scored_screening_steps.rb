@@ -210,22 +210,42 @@ end
 Given("the clinician is signed in") do
   # The credential for this surface is the SMART token — the same one the chart
   # runs on (#486's sign-on bridge mints it for a browser; here it is minted
-  # directly). Being signed in is not access to a named patient either: the
-  # clinician opens the record explicitly, and that open is audited.
+  # directly). #486 binds a browser token to the SESSION that minted it —
+  # presented from an Authorization header it is refused — so the token rides
+  # the session, the way a browser actually carries it. Being signed in is not
+  # access to a named patient either: the clinician opens the record
+  # explicitly, and that open is audited.
   # A CLINICIAN credential specifically: recording a screening is a clinical
   # act, so it takes a sign-on token (whose resource_owner_id is a DUZ), never
   # a patient-context or backend one.
   app = Doorkeeper::Application.create!(
-    name: Lakeraven::EHR::BrowserSmartAuthentication::BROWSER_SSO_APP_NAME,
+    name: Lakeraven::EHR::SmartAuthentication::BROWSER_SSO_APP_NAME,
     redirect_uri: "https://example.test/callback",
     scopes: SCREENING_SCOPES, confidential: true
   )
   token = Doorkeeper::AccessToken.create!(
     application: app, scopes: SCREENING_SCOPES, resource_owner_id: "99999", expires_in: 3600
   )
-  header "Authorization", "Bearer #{token.plaintext_token || token.token}"
+  token.update_column(:browser_session, true) if token.has_attribute?(:browser_session)
+  post "#{SCREENING_MOUNT}/test_session",
+       duz: "99999", user_type: "provider",
+       smart_token: token.plaintext_token || token.token
 
-  post "#{SCREENING_MOUNT}/patients/#{@dfn}/context"
+  # #486's landing contract: a session-derived credential writes only where
+  # CSRF protection is actually enforced — so it is ON for this scenario
+  # (restored by the After hook below) and every POST carries a real token,
+  # exactly as the surface runs in production.
+  @forgery_was = ActionController::Base.allow_forgery_protection
+  ActionController::Base.allow_forgery_protection = true
+  get "#{SCREENING_MOUNT}/login"
+  @authenticity_token = last_response.body[/name="csrf-token" content="([^"]+)"/, 1]
+
+  post "#{SCREENING_MOUNT}/patients/#{@dfn}/context",
+       authenticity_token: @authenticity_token
+end
+
+After do
+  ActionController::Base.allow_forgery_protection = @forgery_was unless @forgery_was.nil?
 end
 
 When("the clinician submits a PHQ-9 with item {int} answered {string}") do |position, response|
@@ -233,7 +253,8 @@ When("the clinician submits a PHQ-9 with item {int} answered {string}") do |posi
   answers[link_id_at(SCREENING_PHQ9, position)] = ordinal_for(response)
   post "#{SCREENING_MOUNT}/patients/#{@dfn}/screenings",
     instrument: SCREENING_PHQ9.key, encounter_ien: @visit_ien.to_s,
-    answers: answers.transform_values(&:to_s)
+    answers: answers.transform_values(&:to_s),
+    authenticity_token: @authenticity_token
 end
 
 Then("the form is redisplayed with a safety prompt") do

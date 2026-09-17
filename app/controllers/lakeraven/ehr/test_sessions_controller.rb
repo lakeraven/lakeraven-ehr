@@ -15,6 +15,11 @@ module Lakeraven
         session[:duz] = params[:duz].presence || "99996"
         session[:user_type] = params[:user_type].presence || "case_manager"
         session[:security_keys] = normalized_security_keys(params[:security_keys])
+        # Tests exercising token-authenticated browser surfaces stash the
+        # SMART token where the sign-on bridge does (#486): a browser token
+        # is session-bound, so a header cannot present it.
+        session[:smart_token] = params[:smart_token] if params[:smart_token].present?
+        session[:user_name] = params[:user_name] if params[:user_name].present?
         head :ok
       end
 

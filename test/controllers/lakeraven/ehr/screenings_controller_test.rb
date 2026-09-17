@@ -17,11 +17,20 @@ module Lakeraven
       FULL_SCOPES = "user/QuestionnaireResponse.read user/QuestionnaireResponse.write"
 
       setup do
+        # #486's landing contract: a session-derived credential may only
+        # write where CSRF protection is actually enforced. The test
+        # environment disables forgery protection globally, which would turn
+        # every session write into a refusal — so it is ON for this class,
+        # and every POST carries a real authenticity token, exactly as the
+        # surface runs in production.
+        @forgery_was = ActionController::Base.allow_forgery_protection
+        ActionController::Base.allow_forgery_protection = true
         sign_in
         open_patient(1)
       end
 
       teardown do
+        ActionController::Base.allow_forgery_protection = @forgery_was
         ScreeningResponse.delete_all
         AuditEvent.delete_all
         Doorkeeper::AccessToken.delete_all
@@ -30,23 +39,30 @@ module Lakeraven
 
       # THE credential for this surface is the SMART token — the same one the
       # chart runs on, carrying scopes, expiry, revocation and the clinician's
-      # DUZ. The session is where the patient context lives; it is not what
-      # authorizes the read.
+      # DUZ. The session is where the patient context lives AND how a browser
+      # token travels: #486 binds a browser credential to the session that
+      # minted it, so presenting one from an Authorization header is refused
+      # by design. These tests authenticate the way a browser actually does.
       #
       # A CLINICIAN credential is specifically a browser sign-on token (#486
-      # mints these; the application name is how they are recognised), whose
-      # `resource_owner_id` is a DUZ. That field is polymorphic in this
-      # codebase — on a `patient/` token it is a patient dfn — so the two are
-      # minted by different helpers here and must never be interchangeable.
+      # mints these; the intrinsic `browser_session` flag is how they are
+      # recognised), whose `resource_owner_id` is a DUZ. That field is
+      # polymorphic in this codebase — on a `patient/` token it is a patient
+      # dfn — so the two are minted by different helpers here and must never
+      # be interchangeable.
       def token_for(scopes: FULL_SCOPES, duz: DUZ,
-                    app_name: BrowserSmartAuthentication::BROWSER_SSO_APP_NAME)
+                    app_name: SmartAuthentication::BROWSER_SSO_APP_NAME)
         app = Doorkeeper::Application.create!(
           name: app_name, redirect_uri: "https://example.test/callback",
           scopes: scopes, confidential: true
         )
-        Doorkeeper::AccessToken.create!(
+        token = Doorkeeper::AccessToken.create!(
           application: app, scopes: scopes, resource_owner_id: duz, expires_in: 3600
         )
+        if app_name == SmartAuthentication::BROWSER_SSO_APP_NAME && token.has_attribute?(:browser_session)
+          token.update_column(:browser_session, true)
+        end
+        token
       end
 
       # A patient-context credential: `resource_owner_id` is the PATIENT, not a
@@ -60,25 +76,46 @@ module Lakeraven
         token_for(scopes: scopes, duz: nil, app_name: "backend-service")
       end
 
+      # Non-browser credentials (patient- and system-scoped) are bearer
+      # credentials and still arrive in a header. The signed-in clinician's
+      # browser credential rides the session, so it needs no header at all.
       def auth_headers(token = nil)
-        token ||= (@token ||= token_for)
+        return {} if token.nil?
+
         { "Authorization" => "Bearer #{token.plaintext_token || token.token}" }
       end
 
+      # Establish the browser session the way the sign-on bridge does (#486):
+      # the SMART token is stashed in the session, bound to the session's DUZ.
       def sign_in(scopes: FULL_SCOPES, duz: DUZ)
         @token = token_for(scopes: scopes, duz: duz)
+        post "/lakeraven-ehr/test_session", params: {
+          duz: duz, user_type: "provider",
+          smart_token: @token.plaintext_token || @token.token
+        }
+        @csrf = nil
+        csrf_param # scrape eagerly, so audit-count assertions see no extra GET
+      end
+
+      # A session-valid authenticity token, scraped from the login page's META
+      # tag (per-form tokens are bound to one form; the meta token is the
+      # session-wide one) — forgery protection is ON for this class.
+      def csrf_param
+        @csrf ||= begin
+          get "/lakeraven-ehr/login"
+          { authenticity_token: css_select("meta[name=csrf-token]").first&.[]("content") }
+        end
       end
 
       # The clinician's session is bound to a patient by an explicit, audited
       # act — reading a record is not what opens it.
       def open_patient(dfn)
-        post "/lakeraven-ehr/patients/#{dfn}/context", headers: auth_headers
+        post "/lakeraven-ehr/patients/#{dfn}/context", params: csrf_param
       end
 
-      # `follow_redirect!` replays the request WITHOUT headers, and the
-      # credential for this surface lives in one.
+      # The credential rides the session, which `follow_redirect!` keeps.
       def follow_redirect_authorized!
-        get response.location, headers: auth_headers
+        get response.location
       end
 
       # Minitest 6 dropped `minitest/mock`, so a failure is injected by
@@ -117,7 +154,7 @@ module Lakeraven
           instrument: instrument.key,
           encounter_ien: VISIT,
           answers: answers || complete_without_safety_flag(instrument)
-        }.merge(extra), headers: auth_headers
+        }.merge(csrf_param).merge(extra)
       end
 
       # -- The form ------------------------------------------------------------
@@ -165,26 +202,35 @@ module Lakeraven
       # It now runs on the SAME credential as the chart.
 
       test "no token closes the surface" do
+        reset! # a fresh browser: no session, no credential
+
         get "#{BASE}/new", params: { instrument: "phq-9" }
 
         assert_response :unauthorized
         assert_no_match(/Little interest or pleasure/, response.body)
       end
 
-      test "a revoked token closes the surface" do
+      test "a browser token presented from a header is refused (#486 binding)" do
         token = token_for
-        token.update!(revoked_at: Time.current)
+        reset!
 
         get "#{BASE}/new", params: { instrument: "phq-9" }, headers: auth_headers(token)
 
         assert_response :unauthorized
       end
 
-      test "an expired token closes the surface" do
-        token = token_for
-        token.update!(created_at: 2.days.ago, expires_in: 60)
+      test "a revoked token closes the surface" do
+        @token.update!(revoked_at: Time.current)
 
-        get "#{BASE}/new", params: { instrument: "phq-9" }, headers: auth_headers(token)
+        get "#{BASE}/new", params: { instrument: "phq-9" }
+
+        assert_response :unauthorized
+      end
+
+      test "an expired token closes the surface" do
+        @token.update!(created_at: 2.days.ago, expires_in: 60)
+
+        get "#{BASE}/new", params: { instrument: "phq-9" }
 
         assert_response :unauthorized
       end
@@ -192,9 +238,9 @@ module Lakeraven
       test "a token with no QuestionnaireResponse scope cannot read the answers" do
         submit
         id = ScreeningResponse.last.id
-        keyless = token_for(scopes: "user/Patient.read")
+        sign_in(scopes: "user/Patient.read") # a keyless provider's session
 
-        get "#{BASE}/#{id}", headers: auth_headers(keyless)
+        get "#{BASE}/#{id}"
 
         assert_response :forbidden
         assert_no_match(/#{SELF_HARM_ITEM_TEXT}/i, response.body)
@@ -203,21 +249,21 @@ module Lakeraven
       test "an empty-scope token — a keyless provider — reads nothing" do
         submit
         id = ScreeningResponse.last.id
-        keyless = token_for(scopes: "")
+        sign_in(scopes: "")
 
-        get "#{BASE}/#{id}", headers: auth_headers(keyless)
+        get "#{BASE}/#{id}"
 
         assert_response :forbidden
       end
 
       test "a read scope does not authorize recording a screening" do
-        read_only = token_for(scopes: "user/QuestionnaireResponse.read")
+        sign_in(scopes: "user/QuestionnaireResponse.read")
 
         assert_no_difference -> { ScreeningResponse.count } do
           post BASE, params: {
             instrument: PHQ9.key, encounter_ien: VISIT,
             answers: complete_without_safety_flag(PHQ9)
-          }, headers: auth_headers(read_only)
+          }.merge(csrf_param)
         end
         assert_response :forbidden
       end
@@ -243,7 +289,7 @@ module Lakeraven
           post BASE, params: {
             instrument: PHQ9.key, encounter_ien: VISIT,
             answers: complete_without_safety_flag(PHQ9)
-          }, headers: auth_headers(patient)
+          }.merge(csrf_param), headers: auth_headers(patient)
         end
 
         assert_response :forbidden
@@ -266,6 +312,12 @@ module Lakeraven
       # a token on an app NAMED like the sign-on app but carrying no
       # resource_owner_id — a client_credentials grant — passed the credential
       # check and then recorded a screening authored by nobody.
+      #
+      # Under #486's binding this is refused even earlier: a browser-shaped
+      # token in a header is not a valid presentation at all (401), and via
+      # the session the empty DUZ fails the session⇄token binding. Either
+      # way, no screening is recorded — the 403 clinician-credential gate
+      # remains as defense in depth behind it.
       test "a sign-on-shaped token with no DUZ cannot record a screening" do
         anonymous = token_for(duz: nil)
 
@@ -273,10 +325,10 @@ module Lakeraven
           post BASE, params: {
             instrument: PHQ9.key, encounter_ien: VISIT,
             answers: complete_without_safety_flag(PHQ9)
-          }, headers: auth_headers(anonymous)
+          }.merge(csrf_param), headers: auth_headers(anonymous)
         end
 
-        assert_response :forbidden
+        assert_response :unauthorized
       end
 
       # F6: a backend credential has no human behind it, so it cannot author a
@@ -286,7 +338,7 @@ module Lakeraven
           post BASE, params: {
             instrument: PHQ9.key, encounter_ien: VISIT,
             answers: complete_without_safety_flag(PHQ9)
-          }, headers: auth_headers(system_token)
+          }.merge(csrf_param), headers: auth_headers(system_token)
         end
 
         assert_response :forbidden
@@ -351,7 +403,7 @@ module Lakeraven
       end
 
       test "a submission without a visit re-renders rather than saving" do
-        post BASE, params: { instrument: "phq-9", answers: all_answered(PHQ9, 1) }, headers: auth_headers
+        post BASE, params: { instrument: "phq-9", answers: all_answered(PHQ9, 1) }.merge(csrf_param)
 
         assert_response :unprocessable_entity
         assert_equal 0, ScreeningResponse.count
@@ -360,8 +412,7 @@ module Lakeraven
 
       test "a submission missing both the visit and answers names both" do
         missing = [ PHQ9.items[2].link_id, PHQ9.items[7].link_id ]
-        post BASE, params: { instrument: "phq-9", answers: all_answered(PHQ9, 1).except(*missing) },
-             headers: auth_headers
+        post BASE, params: { instrument: "phq-9", answers: all_answered(PHQ9, 1).except(*missing) }.merge(csrf_param)
 
         assert_response :unprocessable_entity
         assert_select ".screening-errors", /Visit required/
@@ -490,7 +541,7 @@ module Lakeraven
           encounter_ien: VISIT,
           answers: all_answered(PHQ9, 0).merge(PHQ9.safety_link_id => 3),
           safety_acknowledged: [ "false" ]
-        }, headers: auth_headers
+        }.merge(csrf_param)
 
         assert_response :unprocessable_entity
         assert_equal 0, ScreeningResponse.count
@@ -629,8 +680,7 @@ module Lakeraven
       test "a refused create names the patient rather than a screening that does not exist" do
         AuditEvent.delete_all
 
-        post BASE, params: { instrument: "phq-9", answers: all_answered(PHQ9, 1) },
-             headers: auth_headers
+        post BASE, params: { instrument: "phq-9", answers: all_answered(PHQ9, 1) }.merge(csrf_param)
 
         assert_response :unprocessable_entity
         assert_audit_reference("Patient/#{DFN_PARAM}")

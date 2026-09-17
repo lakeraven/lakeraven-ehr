@@ -95,4 +95,10 @@ Lakeraven::EHR::Engine.routes.draw do
   post "login" => "sessions#create"
   delete "logout" => "sessions#destroy", as: :logout
   get "dashboard" => "dashboards#show", as: :dashboard
+
+  # Test-only: seed the browser session (DUZ, user type, security keys, and
+  # the session-bound SMART token) without the RPMS sign-on flow. The
+  # controller refuses to exist outside the test environment; the route guard
+  # is the second belt.
+  post "test_session" => "test_sessions#create" if Rails.env.test?
 end
