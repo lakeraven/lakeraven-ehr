@@ -42,12 +42,30 @@ module Lakeraven
         assert_equal 55, result[:ien]
       end
 
-      test "delete requires a reason and returns success" do
-        # 0.3.0: delete calls DEL^BGOPROB (:problem_remove); a non-"-N^" reply
-        # is success, which the mock's default empty reply satisfies.
+      test "delete issues BGOPROB DEL with the IEN and reason, and returns success" do
+        # 0.3.0: delete calls DEL^BGOPROB (:problem_remove), whose success
+        # reply is "" — the same value the mock returns for ANY unseeded RPC.
+        # Asserting result[:success] alone is therefore vacuous (a regression
+        # to another RPC, or to no RPC at all, would ride the default green),
+        # so pin the recorded wire call: name and IEN^TYPE^REASON param.
         result = ConditionGateway.delete(1, 55, reason: "Entered in error")
 
         assert result[:success]
+        assert_equal 55, result[:ien]
+        call = RpmsRpc.client.received_calls.last
+        assert_equal "BGOPROB DEL", call[:rpc]
+        assert_equal [ "55^^Entered in error" ], call[:params]
+      end
+
+      test "delete surfaces a server error reply as failure" do
+        # The mock CAN express this failure: an error reply is "-CODE^text",
+        # keyed (like every scalar seed) by the RPC's first param.
+        RpmsRpc.client.seed_scalar(:problem_remove, "55^^Entered in error", "-1^Cannot delete")
+
+        result = ConditionGateway.delete(1, 55, reason: "Entered in error")
+
+        refute result[:success]
+        assert_nil result[:ien]
       end
 
       test "add returns failure for invalid dfn" do

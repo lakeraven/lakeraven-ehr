@@ -1,22 +1,51 @@
 # frozen_string_literal: true
 
+# Migrated for rpms-rpc 0.3.0 (#235): tribal reads are real DDR FileMan reads,
+# stubbed here at the TribalEnrollmentGateway boundary (stub_gateway,
+# features/support/gateway_stubs.rb) exactly as the model tests do. The
+# fail-closed contract under test lives in Patient: an undetermined
+# eligibility_status NEVER resolves to "eligible" (see #520 for the parked
+# I/D/C/P → determination mapping).
+
+TRIBAL_GW = Lakeraven::EHR::TribalEnrollmentGateway
+
+def tribal_patient(dfn, enrollment: "EXNH-12345")
+  Lakeraven::EHR::Patient.new(dfn: dfn.to_i, name: "TEST,PATIENT", sex: "F",
+                              tribal_enrollment_number: enrollment)
+end
+
+# -- enrollment details ------------------------------------------------------
+
+Given("the enrollment read for patient {string} returns:") do |dfn, table|
+  projection = table.rows_hash.transform_keys(&:to_sym)
+  projection[:tribe_ien] = projection[:tribe_ien].to_i if projection[:tribe_ien]
+  stub_gateway(TRIBAL_GW, :enrollment_details, projection)
+  @patient = tribal_patient(dfn)
+end
+
 When("I request tribal enrollment details for patient {string}") do |dfn|
-  @tribal_details = Lakeraven::EHR::TribalEnrollmentGateway.enrollment_details(dfn)
+  @patient ||= tribal_patient(dfn)
+  @tribal_details = @patient.tribal_enrollment_details
 end
 
 Then("I should see tribal enrollment information:") do |table|
-  expected = table.rows_hash
-  expected.each do |key, value|
+  table.rows_hash.each do |key, value|
     assert_equal value, @tribal_details[key.to_sym].to_s, "Mismatch on #{key}"
   end
 end
 
-Then("the enrollment date should be present") do
-  assert @tribal_details[:enrollment_date].present?
+# -- validation (syntactic) --------------------------------------------------
+
+Given("the server accepts enrollment number {string} as internal {string}") do |number, internal|
+  stub_gateway(TRIBAL_GW, :validate, { valid: true, internal: internal, external: number })
+end
+
+Given("the server rejects enrollment number {string}") do |_number|
+  stub_gateway(TRIBAL_GW, :validate, { valid: false, internal: nil, external: nil })
 end
 
 When("I validate tribal enrollment number {string}") do |number|
-  @validation = Lakeraven::EHR::TribalEnrollmentGateway.validate(number)
+  @validation = tribal_patient(1, enrollment: number).validate_tribal_enrollment
 end
 
 Then("the enrollment should be valid") do
@@ -27,146 +56,108 @@ Then("the enrollment should not be valid") do
   refute @validation[:valid]
 end
 
-Then("the tribe code should be {string}") do |code|
-  assert_equal code, @validation[:tribe_code]
+# -- eligibility (FAIL CLOSED) -----------------------------------------------
+
+Given("the eligibility read for patient {string} returns status {string} classified {string}") do |dfn, status, classification|
+  stub_gateway(TRIBAL_GW, :eligibility,
+               { eligibility_status: status, eligibility_status_name: nil,
+                 classification_ien: nil, classification: classification })
+  @patient = tribal_patient(dfn)
 end
 
-Then("the status should be {string}") do |status|
-  assert_equal status, @validation[:status]
+Given("the eligibility read for patient {string} returns nothing") do |dfn|
+  stub_gateway(TRIBAL_GW, :eligibility, nil)
+  @patient = tribal_patient(dfn)
 end
 
-Then("I should see the message {string}") do |message|
-  assert_equal message, @validation[:message]
+Given("patient {string} has no enrollment number on file") do |dfn|
+  @patient = tribal_patient(dfn, enrollment: nil)
 end
 
-When("I check IHS eligibility for patient {string}") do |dfn|
-  @eligibility = Lakeraven::EHR::TribalEnrollmentGateway.eligibility(dfn)
+When("I check IHS eligibility for patient {string}") do |_dfn|
+  @eligibility = @patient.tribal_enrollment_eligibility
 end
 
-Then("the patient should be eligible for IHS services") do
-  assert @eligibility[:active] && @eligibility[:eligible_for_ihs]
+Then("the eligibility determination should be undetermined") do
+  assert_equal :undetermined, @eligibility[:determination]
+  refute @eligibility[:eligible]
+end
+
+Then("the raw eligibility status should be {string}") do |status|
+  assert_equal status, @eligibility[:eligibility_status]
 end
 
 Then("the patient should not be eligible for IHS services") do
-  refute @eligibility[:active] && @eligibility[:eligible_for_ihs]
+  refute @patient.eligible_for_ihs_services?
 end
 
-Then("the eligibility should show:") do |table|
-  expected = table.rows_hash
-  expected.each do |key, value|
-    actual = @eligibility[key.to_sym]
-    expected_val = case value
-    when "true" then true
-    when "false" then false
-    else value
-    end
-    assert_equal expected_val, actual, "Mismatch on #{key}: expected #{expected_val.inspect}, got #{actual.inspect}"
-  end
+# PARKED on #520 — mirrors the model test's skip: no I/D/C/P code may be
+# asserted eligible until the compliance mapping is signed off.
+When("the signed-off eligibility mapping is required") do
+  skip_this_scenario("eligibility_status (I/D/C/P) → IHS-eligibility mapping is a " \
+                     "compliance decision tracked in #520; fail-closed until signed off")
 end
 
-When("I request the service unit for patient {string}") do |dfn|
-  @service_unit = Lakeraven::EHR::TribalEnrollmentGateway.service_unit(dfn)
+Then("the patient can be determined eligible for IHS services") do
+  raise "unreachable until #520 lands the signed-off mapping"
+end
+
+# -- service unit (table lookup by IEN) --------------------------------------
+
+Given("service unit {int} is named {string}") do |ien, name|
+  stub_gateway(TRIBAL_GW, :service_unit, { ien: ien, name: name })
+end
+
+When("I look up service unit {int}") do |ien|
+  @service_unit = TRIBAL_GW.service_unit(ien)
 end
 
 Then("I should see service unit information:") do |table|
-  expected = table.rows_hash
-  expected.each do |key, value|
+  table.rows_hash.each do |key, value|
     assert_equal value, @service_unit[key.to_sym].to_s
   end
 end
 
-When("I request tribe information for {string}") do |code|
-  @tribe_info = Lakeraven::EHR::TribalEnrollmentGateway.tribe_info(code)
+# -- tribe information (via the enrollment's TRIBE pointer) ------------------
+
+Given("the enrollment read for patient {string} returns tribe pointer {int}") do |dfn, tribe_ien|
+  stub_gateway(TRIBAL_GW, :enrollment_details, { tribe_ien: tribe_ien })
+  @patient = tribal_patient(dfn)
+end
+
+Given("the enrollment read for patient {string} returns no tribe pointer") do |dfn|
+  stub_gateway(TRIBAL_GW, :enrollment_details, { tribe_ien: nil })
+  @patient = tribal_patient(dfn)
+end
+
+Given("tribe {int} is {string} with code {string}") do |ien, name, code|
+  stub_gateway(TRIBAL_GW, :tribe_info, { ien: ien, name: name, code: code })
+end
+
+When("I request tribe information for patient {string}") do |_dfn|
+  @tribe_info = @patient.tribe_information
 end
 
 Then("I should see tribe details:") do |table|
-  expected = table.rows_hash
-  expected.each do |key, value|
+  table.rows_hash.each do |key, value|
     assert_equal value, @tribe_info[key.to_sym].to_s
   end
 end
 
-Given("I have patient {string} with enrollment {string}") do |dfn, enrollment|
-  @patient = Lakeraven::EHR::Patient.find_by_dfn(dfn)
-  @patient.tribal_enrollment_number = enrollment if @patient
+Then("no tribe information should be available") do
+  assert_nil @tribe_info
 end
 
-Given("I have patient {string} with no enrollment number") do |dfn|
-  @patient = Lakeraven::EHR::Patient.new(dfn: dfn.to_i, name: "TEST,PATIENT", sex: "F")
-  @patient.tribal_enrollment_number = nil
-end
-
-When("I check if the patient's tribal enrollment is valid") do
-  @enrollment_valid = @patient.tribal_enrollment_valid?
-end
-
-Then("the enrollment validation should return true") do
-  assert @enrollment_valid
-end
-
-When("I check if the patient is eligible for IHS services") do
-  @ihs_eligible = @patient.eligible_for_ihs_services?
-end
-
-Then("the patient eligibility should return true") do
-  assert @ihs_eligible
-end
-
-When("I request tribe information for the following codes:") do |table|
-  @tribe_results = table.hashes.map do |row|
-    Lakeraven::EHR::TribalEnrollmentGateway.tribe_info(row["tribe_code"])
-  end
-end
-
-Then("I should receive tribe information for all codes") do
-  @tribe_results.each { |r| assert r.present?, "Expected tribe info" }
-end
-
-Then("each tribe should have:") do |table|
-  fields = table.hashes.map { |r| r.values.first.to_sym }
-  @tribe_results.each do |tribe|
-    fields.each { |f| assert tribe[f].present?, "Missing #{f} in tribe info" }
-  end
-end
-
-When("I request tribe information for the patient") do
-  @tribe_info = @patient.tribe_information
-  @extracted_code = @patient.tribal_enrollment_number&.split("-")&.first
-end
-
-Then("the tribe code should be extracted as {string}") do |code|
-  assert_equal code, @extracted_code
-end
-
-Then("I should see the full tribe information") do
-  assert @tribe_info.present?
-  assert @tribe_info[:name].present?
-end
+# -- validation error path ---------------------------------------------------
 
 When("I attempt to validate the patient's tribal enrollment") do
   @validation = @patient.validate_tribal_enrollment
 end
 
 Then("I should see an error message {string}") do |message|
-  assert_equal message, @validation[:message]
+  assert_includes @validation[:message], message
 end
 
 Then("the validation should indicate invalid") do
   refute @validation[:valid]
-end
-
-Given("I create a service request for specialty care") do
-  @service_request_created = true
-end
-
-When("the eligibility service checks tribal enrollment") do
-  @tribal_check_passed = @patient.tribal_enrollment_valid?
-end
-
-Then("the tribal enrollment check should pass") do
-  assert @tribal_check_passed
-end
-
-Then("the service request should proceed to next eligibility step") do
-  assert @tribal_check_passed && @service_request_created
 end
