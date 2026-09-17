@@ -305,6 +305,57 @@ class DemoPatientChartTest < ActionDispatch::IntegrationTest
     assert_equal "More than half the days", item9.dig("answer", 0, "valueCoding", "display")
   end
 
+  # -- Safety projection: the flag must be visible everywhere the score is -----
+  #
+  # The stakes case: items 1-8 at 0, item 9 at 3 — total 3, band "minimal",
+  # flagged. Before projection this rendered as a NEGATIVE screen on every
+  # score-only surface.
+  def seed_flagged_minimal
+    safety = Lakeraven::EHR::ScreeningInstrument::PHQ9.safety_link_id
+    answers = Lakeraven::EHR::ScreeningInstrument::PHQ9.link_ids.index_with { 0 }.merge(safety => 3)
+    Lakeraven::EHR::ScreeningResponse.create!(
+      patient_dfn: 1, encounter_ien: "2090061", instrument_key: "phq-9",
+      answers: answers, total_score: 3, severity_band: "minimal",
+      effective_at: Time.utc(2026, 3, 1), source: "clinician",
+      administered_by: "99999", safety_flagged: true,
+      safety_acknowledged_at: Time.utc(2026, 3, 1), safety_acknowledged_by: "99999"
+    )
+  end
+
+  test "the chart table marks a flagged screening even when the band is minimal" do
+    seed_flagged_minimal
+
+    get "/patients/1", headers: @headers
+
+    assert_response :ok
+    assert_select "table td .screening-flag", text: /self-harm/i
+    # And an UNMARKED minimal row must remain distinguishable from it.
+    assert_select "span.badge.sev-minimal", text: "minimal"
+  end
+
+  test "an unflagged screening row carries no safety marker" do
+    seed_screening(band: "minimal", total: 2)
+
+    get "/patients/1", headers: @headers
+
+    assert_select ".screening-flag", false
+  end
+
+  test "the bundle's flagged score Observation is not a clean score" do
+    seed_flagged_minimal
+
+    get "/patients/1.json", headers: @headers
+    assert_response :ok
+
+    score = JSON.parse(response.body)["entry"].map { |e| e["resource"] }
+                .find { |r| r.dig("code", "coding", 0, "code") == PHQ9_TOTAL_CODE }
+    assert_equal 3.0, score.dig("valueQuantity", "value")
+    assert_equal "A", score.dig("interpretation", 0, "coding", 0, "code"),
+                 "an Observation-scoped consumer must see the flag, or total 3 reads as a negative screen"
+    item9 = (score["component"] || []).find { |c| c.dig("code", "coding", 0, "code") == "44260-8" }
+    assert_not_nil item9
+  end
+
   # -- One bad engine-owned row must not take the chart down --------------------
   #
   # The screenings table is the engine's own side table. A row in it that no
