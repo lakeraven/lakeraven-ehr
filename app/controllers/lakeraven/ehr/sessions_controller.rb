@@ -9,6 +9,10 @@ module Lakeraven
       # SmartAuthentication too — a token of this application is a browser
       # credential and is refused anywhere except the session that minted it.
       BROWSER_SSO_APP_NAME = SmartAuthentication::BROWSER_SSO_APP_NAME
+      # A fixed, deterministic Doorkeeper uid for the single browser SSO
+      # application, so its creation is guarded by the `uid` unique index rather
+      # than the un-indexed `name` (race-safety — see #browser_sso_application).
+      BROWSER_SSO_APP_UID = "lakeraven-ehr-browser-sso"
 
       # How long a session may sit idle before it is signed out. RPMS sessions
       # are not 12-hour credentials and neither is this one; the token's own
@@ -163,12 +167,38 @@ module Lakeraven
           .find_each(&:revoke)
       end
 
+      # Race-safe lookup/creation of the one browser SSO Doorkeeper application.
+      #
+      # find_or_create_by!(name:) was NOT race-safe: oauth_applications is
+      # unique on `uid`, not `name`, so two concurrent first-logins both see no
+      # app and both create one — duplicate apps sharing the name (Copilot
+      # PRRT_kwDOR8fnY86gjRXD). Pinning a FIXED uid makes the DB unique index
+      # the arbiter: the loser's INSERT raises RecordNotUnique and falls back to
+      # the winner.
       def browser_sso_application
-        Doorkeeper::Application.find_or_create_by!(name: BROWSER_SSO_APP_NAME) do |a|
-          a.redirect_uri = "urn:ietf:wg:oauth:2.0:oob"
-          a.scopes = SessionScopePolicy.all_scopes.join(" ")
-          a.confidential = true
-        end
+        Doorkeeper::Application.find_by(uid: BROWSER_SSO_APP_UID) ||
+          Doorkeeper::Application.find_by(name: BROWSER_SSO_APP_NAME) ||
+          create_browser_sso_application
+      end
+
+      def create_browser_sso_application
+        Doorkeeper::Application.create!(
+          name: BROWSER_SSO_APP_NAME,
+          uid: BROWSER_SSO_APP_UID,
+          redirect_uri: "urn:ietf:wg:oauth:2.0:oob",
+          scopes: SessionScopePolicy.all_scopes.join(" "),
+          confidential: true
+        )
+      rescue ActiveRecord::RecordNotUnique, ActiveRecord::RecordInvalid => e
+        # A concurrent creator won the fixed uid — rejected either by the DB
+        # unique index (RecordNotUnique) or by the model's uid-uniqueness
+        # validation (RecordInvalid, when their row committed before our
+        # validation query). Reuse the winner. If none exists, the failure was
+        # something else (bad scopes, etc.) — do not mask it.
+        existing = Doorkeeper::Application.find_by(uid: BROWSER_SSO_APP_UID)
+        raise e unless existing
+
+        existing
       end
     end
   end

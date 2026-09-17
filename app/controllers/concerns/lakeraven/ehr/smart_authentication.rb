@@ -204,7 +204,13 @@ module Lakeraven
         auth = request.headers["Authorization"]
         if auth.present?
           match = auth.match(/\ABearer\s+(.+)\z/i)
-          return [ match&.captures&.first, :header ]
+          # A present-but-non-Bearer header (a proxy-injected `Basic`, say) is
+          # "no bearer token FOUND", not "a header arrived, so refuse" — so it
+          # falls through to the session path below rather than short-circuiting.
+          # Option 3 is preserved: that path is gated on
+          # session_token_fallback_allowed? (false on the FHIR API), so a
+          # non-Bearer header there still refuses.
+          return [ match.captures.first, :header ] if match
         end
 
         # Browser session fallback: the sign-on bridge (SessionsController) mints

@@ -25,6 +25,59 @@ class SsoSessionTokenBridgeSecurityTest < ActionDispatch::IntegrationTest
     Doorkeeper::AccessToken.order(:id).last
   end
 
+  # -- Copilot PRRT_kwDOR8fnY86gjRWf: a non-Bearer header must not short-
+  #    circuit the session fallback on opt-in surfaces --------------------
+
+  # A present-but-non-Bearer Authorization header (a proxy-injected `Basic`,
+  # say) is "no bearer token found", not "a header was supplied so refuse":
+  # on the HTML chart (an opt-in surface) a valid session must still authorize.
+  test "a non-Bearer header does not block the session on the HTML chart" do
+    sign_in
+
+    get "/lakeraven-ehr/patients/1",
+      headers: { "Authorization" => "Basic #{Base64.strict_encode64('proxy:secret')}" }
+
+    assert_response :ok
+    assert_includes response.body, "Anderson"
+  end
+
+  # ...but option 3 holds: the FHIR API never opts into the session, so a
+  # non-Bearer header there still refuses (no fallthrough to session).
+  test "a non-Bearer header on the FHIR API still refuses" do
+    sign_in
+
+    get "/lakeraven-ehr/Patient", params: { _id: "1" },
+      headers: { "Authorization" => "Basic #{Base64.strict_encode64('proxy:secret')}" }
+
+    assert_response :unauthorized
+  end
+
+  # -- Copilot PRRT_kwDOR8fnY86gjRXD: the browser SSO application create must
+  #    be race-safe. The unique index is on `uid`, not `name`, so
+  #    find_or_create_by!(name:) lets concurrent first-logins mint duplicate
+  #    apps. Fixed uid ⇒ the DB catches the race. -------------------------
+
+  test "the browser SSO application has a fixed uid so concurrent creates collide on the index" do
+    sign_in
+
+    apps = Doorkeeper::Application.where(name: Lakeraven::EHR::SessionsController::BROWSER_SSO_APP_NAME)
+    assert_equal 1, apps.count
+    assert_equal Lakeraven::EHR::SessionsController::BROWSER_SSO_APP_UID, apps.first.uid
+  end
+
+  test "the browser SSO application create rescues the uid race and reuses the winner" do
+    controller = Lakeraven::EHR::SessionsController.new
+    winner = controller.send(:browser_sso_application) # creates it with the fixed uid
+
+    # A caller that lost the find-by-name race and tries to create the same uid
+    # hits the unique index and falls back to the winner — no duplicate.
+    loser = controller.send(:create_browser_sso_application)
+
+    assert_equal winner.id, loser.id
+    assert_equal 1,
+      Doorkeeper::Application.where(name: Lakeraven::EHR::SessionsController::BROWSER_SSO_APP_NAME).count
+  end
+
   # -- B2: the token is bound to nothing ------------------------------------
 
   # Capture the token minted for a browser session, throw the cookie jar away,
