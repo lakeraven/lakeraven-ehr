@@ -59,10 +59,12 @@ module Lakeraven
 
       test "delete surfaces a server error reply as failure" do
         # The mock CAN express this failure: an error reply is "-CODE^text",
-        # keyed (like every scalar seed) by the RPC's first param.
-        RpmsRpc.client.seed_scalar(:problem_remove, "55^^Entered in error", "-1^Cannot delete")
+        # keyed (like every scalar seed) by the RPC's first param. The mock is
+        # process-global, so this seed uses its own IEN/reason key to avoid
+        # bleeding into the success-path test in other run orders.
+        RpmsRpc.client.seed_scalar(:problem_remove, "66^^Wrong patient", "-1^Cannot delete")
 
-        result = ConditionGateway.delete(1, 55, reason: "Entered in error")
+        result = ConditionGateway.delete(1, 66, reason: "Wrong patient")
 
         refute result[:success]
         assert_nil result[:ien]
