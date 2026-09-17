@@ -195,6 +195,23 @@ module Lakeraven
       end
 
       # -- Tribal enrollment -------------------------------------------------
+      #
+      # Migrated to rpms-rpc 0.3.0 (#235), which rebuilt RpmsRpc::Tribal on real
+      # DDR FileMan reads over #9000001 / #9999999.03 / #9999999.22 and DELETED
+      # the invented placeholder shapes. The removed placeholders fabricated
+      # three things this code relied on: an ACTIVE/INACTIVE enrollment
+      # "status", per-patient service-unit reads, and a tribe code encoded in
+      # the enrollment number. None has an RPMS source, so none is reconstructed
+      # here.
+      #
+      # ELIGIBILITY FAILS CLOSED. The new read returns an eligibility_status set
+      # code (I/D/C/P); mapping those to an IHS-services eligibility
+      # DETERMINATION is a compliance decision (OCAP / eligibility-determination
+      # territory) tracked in #520 and out of Sprint 1 (BH-only) scope. Until it
+      # is signed off, every status is treated as UNDETERMINED, and an
+      # undetermined determination is NOT eligible — never "eligible" (the
+      # SOFTWARE-FACTORY non-negotiable: absence of a determination may not
+      # confer eligibility).
 
       def tribal_enrollment_details
         return nil unless dfn
@@ -205,36 +222,55 @@ module Lakeraven
       def validate_tribal_enrollment
         return { valid: false, message: "No enrollment number" } if tribal_enrollment_number.blank?
 
+        # 0.3.0 validate is a SYNTACTIC check of #9000001 field .07 (VAL^DIE via
+        # DDR VALIDATOR) → { valid:, internal:, external: }. It no longer claims
+        # tribe-membership or active-status validation; no such server check
+        # exists.
         TribalEnrollmentGateway.validate(tribal_enrollment_number)
       end
 
       def tribal_enrollment_valid?
         result = validate_tribal_enrollment
-        result && result[:valid] && result[:status] == "ACTIVE"
+        !!(result && result[:valid])
       end
 
+      # Fail-closed eligibility. Returns the raw status for transparency but
+      # never derives "eligible" from it until #520 maps the set codes.
       def tribal_enrollment_eligibility
-        return { active: false, eligible_for_ihs: false } unless persisted?
+        undetermined = { eligible: false, determination: :undetermined,
+                         eligibility_status: nil, classification: nil }
+        return undetermined unless persisted?
 
-        TribalEnrollmentGateway.eligibility(dfn)
+        read = TribalEnrollmentGateway.eligibility(dfn)
+        return undetermined if read.nil?
+
+        undetermined.merge(
+          eligibility_status: read[:eligibility_status],
+          classification: read[:classification]
+        )
       end
 
       def eligible_for_ihs_services?
-        eligibility = tribal_enrollment_eligibility
-        eligibility[:active] && eligibility[:eligible_for_ihs]
+        tribal_enrollment_eligibility[:determination] == :eligible
       end
 
+      # No per-patient service-unit read exists in 0.3.0 (it derives from
+      # community linkage, not a patient-file field). Undetermined until that
+      # path is built (#520).
       def enrollment_service_unit
-        return nil unless dfn
-
-        TribalEnrollmentGateway.service_unit(dfn)
+        nil
       end
 
+      # The tribe now comes from the enrollment's TRIBE-OF-MEMBERSHIP pointer
+      # (#9000001 field 1108 → tribe IEN), read as a real #9999999.03 entry —
+      # not by splitting a tribe code out of the enrollment number, which the
+      # placeholder fabricated.
       def tribe_information
-        return nil if tribal_enrollment_number.blank?
+        details = tribal_enrollment_details
+        ien = details && details[:tribe_ien]
+        return nil if ien.blank?
 
-        tribe_code = tribal_enrollment_number.split("-").first
-        TribalEnrollmentGateway.tribe_info(tribe_code)
+        TribalEnrollmentGateway.tribe_info(ien)
       end
 
       # -- Providers (ported from the predecessor app) ----------------------------------

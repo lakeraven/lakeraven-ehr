@@ -17,12 +17,15 @@ module Lakeraven
         RpmsRpc::Tribal.eligibility(dfn)
       end
 
-      def self.service_unit(dfn)
-        RpmsRpc::Tribal.service_unit(dfn)
+      # 0.3.0 signatures: these are TABLE lookups by IEN over #9999999.22 /
+      # #9999999.03, not per-patient or by-code reads (the placeholder's dfn /
+      # tribe-code arguments were fabricated).
+      def self.service_unit(ien)
+        RpmsRpc::Tribal.service_unit(ien)
       end
 
-      def self.tribe_info(code)
-        RpmsRpc::Tribal.tribe_info(code)
+      def self.tribe_info(ien)
+        RpmsRpc::Tribal.tribe_info(ien)
       end
     end
   end

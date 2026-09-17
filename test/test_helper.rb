@@ -83,51 +83,25 @@ RpmsRpc.mock! do |m|
     { code: "V07", label: "VFC eligible - Local specific" }
   ])
 
-  # Tribal enrollment (BHDPTRPC* — placeholder wire names, no known server
-  # implementation; see rpms-rpc docs/RPC_COVERAGE.md, "BHDPTRPC provenance")
-  m.seed(:tribal_enrollment, "1", { enrollment_number: "EXNH-12345", tribe_name: "Example Native Health (EXNH)",
-                                     enrollment_date: Date.new(2020, 1, 1), status: "ACTIVE",
-                                     service_unit: "Anchorage", tribe_code: "EXNH" })
-  m.seed(:tribal_validation, "EXNH-12345", { valid: true, tribe_code: "EXNH", enrollment_number: "12345",
-                                              status: "ACTIVE", message: "Valid enrollment" })
-  m.seed(:tribal_validation, "CN-67890", { valid: true, tribe_code: "CN", enrollment_number: "67890",
-                                            status: "ACTIVE", message: "Valid enrollment" })
-  m.seed(:tribal_validation, "NN-67890", { valid: true, tribe_code: "NN", enrollment_number: "67890",
-                                            status: "ACTIVE", message: "Valid enrollment" })
-  m.seed(:tribal_validation, "NN-11111", { valid: true, tribe_code: "NN", enrollment_number: "11111",
-                                            status: "ACTIVE", message: "Valid enrollment" })
-  m.seed(:tribal_validation, "12345", { valid: false, tribe_code: nil, enrollment_number: nil,
-                                         status: "INACTIVE", message: "Invalid enrollment format" })
-  m.seed(:tribal_validation, "INVALID", { valid: false, tribe_code: nil, enrollment_number: nil,
-                                           status: "INACTIVE", message: "Enrollment not found or inactive" })
-  m.seed(:enrollment_eligibility, "1", { active: true, eligible_for_ihs: true,
-                                          service_unit: "Anchorage", message: "Eligible for IHS services",
-                                          benefit_package: "BASIC" })
-  m.seed(:enrollment_eligibility, "4", { active: false, eligible_for_ihs: false,
-                                          service_unit: nil, message: nil, benefit_package: nil })
-  m.seed(:enrollment_eligibility, "7", { active: false, eligible_for_ihs: false,
-                                          service_unit: nil, message: nil, benefit_package: nil })
-  m.seed(:enrollment_eligibility, "8", { active: false, eligible_for_ihs: false,
-                                          service_unit: nil, message: nil, benefit_package: nil })
-  m.seed(:service_unit, "1", { ien: 1, name: "Anchorage", region: "Alaska" })
-  m.seed(:tribe_info, "EXNH", { ien: 100, name: "Example Native Health (EXNH)", code: "EXNH",
-                                  service_unit: "Anchorage", region: "Alaska", area: "Alaska Area" })
-  m.seed(:tribe_info, "CN", { ien: 101, name: "Painted Sky Nation", code: "CN",
-                                service_unit: "Painted Sky", region: "Oklahoma", area: "Central Area" })
-  m.seed(:tribe_info, "NN", { ien: 102, name: "Tallgrass Nation", code: "NN",
-                                service_unit: "Tallgrass Post", region: "Arizona", area: "Tallgrass Area" })
-  m.seed(:tribe_info, "OST", { ien: 104, name: "Redwater Band", code: "OST",
-                                 service_unit: "Redwater", region: "South Dakota", area: "Northern Area" })
+  # Tribal enrollment / eligibility seeds REMOVED with the rpms-rpc 0.3.0 bump.
+  # #235 deleted the invented placeholder mappings these seeded against
+  # (:tribal_enrollment, :tribal_validation, :enrollment_eligibility,
+  # :service_unit, :tribe_info — "no known server implementation") and rebuilt
+  # RpmsRpc::Tribal on real DDR FileMan reads. The tribal tests now stub
+  # TribalEnrollmentGateway / RpmsRpc::Tribal at the API boundary rather than
+  # seeding removed wire mappings. Interim eligibility behaviour is fail-closed
+  # (undetermined ⇒ not eligible); the eligibility_status (I/D/C/P) product
+  # mapping is tracked in #520 and is out of Sprint 1 (BH-only) scope.
 
   # Vitals (ORQQVI VITALS) for patient DFN 1
   m.seed_keyed_collection(:vitals, "1", [
-    { type: "BP",  value: "120/80", units: "mm[Hg]", recorded_date: Date.new(2025, 1, 15) },
-    { type: "P",   value: "72",     units: "/min",   recorded_date: Date.new(2025, 1, 15) },
-    { type: "T",   value: "98.6",   units: "[degF]", recorded_date: Date.new(2025, 1, 15) },
-    { type: "R",   value: "16",     units: "/min",   recorded_date: Date.new(2025, 1, 15) },
-    { type: "POX", value: "98",     units: "%",      recorded_date: Date.new(2025, 1, 15) },
-    { type: "WT",  value: "150",    units: "[lb_av]", recorded_date: Date.new(2025, 1, 15) },
-    { type: "HT",  value: "65",     units: "[in_i]", recorded_date: Date.new(2025, 1, 15) }
+    { type: "BP",  value: "120/80", units: "mm[Hg]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
+    { type: "P",   value: "72",     units: "/min",   recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
+    { type: "T",   value: "98.6",   units: "[degF]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
+    { type: "R",   value: "16",     units: "/min",   recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
+    { type: "POX", value: "98",     units: "%",      recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
+    { type: "WT",  value: "150",    units: "[lb_av]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
+    { type: "HT",  value: "65",     units: "[in_i]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) }
   ])
 
   # Test users

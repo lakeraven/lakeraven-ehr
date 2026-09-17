@@ -4,273 +4,195 @@ require "test_helper"
 
 module Lakeraven
   module EHR
+    # Migrated for rpms-rpc 0.3.0 (#235). The gem removed the invented tribal
+    # placeholder shapes (ACTIVE/INACTIVE "status", per-patient service-unit
+    # reads, tribe-code-in-enrollment-number) and rebuilt RpmsRpc::Tribal on
+    # real DDR FileMan reads. These tests now stub TribalEnrollmentGateway at
+    # the API boundary and assert the model's NEW, fail-closed contract:
+    #
+    #   * eligibility is UNDETERMINED (never "eligible") until the
+    #     eligibility_status (I/D/C/P) → determination mapping is signed off (#520);
+    #   * validate is a syntactic format check ({ valid:, internal:, external: });
+    #   * the tribe comes from the enrollment's TRIBE pointer (tribe_ien), not
+    #     from splitting the enrollment number.
     class PatientTribalEnrollmentTest < ActiveSupport::TestCase
       def setup
-        @patient_with_enrollment = Patient.new(
-          dfn: 1,
-          name: "Anderson,Alice",
-          tribal_enrollment_number: "EXNH-12345",
-          tribal_affiliation: "Example Native Health (EXNH)",
-          service_area: "Anchorage"
-        )
-
-        @patient_without_enrollment = Patient.new(
-          dfn: 8,
-          name: "Harris,Henry",
-          tribal_enrollment_number: nil,
-          service_area: "Portland"
-        )
-
-        @patient_invalid_enrollment = Patient.new(
-          dfn: 7,
-          name: "Garcia,George",
-          tribal_enrollment_number: "INVALID",
-          service_area: "Seattle"
-        )
+        @enrolled = Patient.new(dfn: 1, name: "Anderson,Alice",
+                                tribal_enrollment_number: "EXNH-12345")
+        @unenrolled = Patient.new(dfn: 8, name: "Harris,Henry", tribal_enrollment_number: nil)
       end
 
-      # =============================================================================
-      # TRIBAL ENROLLMENT DETAILS
-      # =============================================================================
-
-      test "tribal_enrollment_details returns hash with enrollment information" do
-        details = @patient_with_enrollment.tribal_enrollment_details
-
-        assert_not_nil details
-        assert_equal "EXNH-12345", details[:enrollment_number]
-        assert_equal "Example Native Health (EXNH)", details[:tribe_name]
-        assert_equal "ACTIVE", details[:status]
-        assert_equal "Anchorage", details[:service_unit]
-        assert_equal "EXNH", details[:tribe_code]
+      # Non-destructively override TribalEnrollmentGateway class methods for the
+      # block, restoring the real methods (saved as Method objects) afterward —
+      # remove_method would delete the `def self.` methods permanently.
+      def with_gateway(**stubs)
+        gw = TribalEnrollmentGateway
+        originals = stubs.keys.to_h { |name| [ name, gw.method(name) ] }
+        stubs.each { |name, value| gw.define_singleton_method(name) { |*| value } }
+        yield
+      ensure
+        originals.each { |name, meth| gw.define_singleton_method(name, meth) }
       end
 
-      test "tribal_enrollment_details returns nil for unsaved patient" do
-        patient = Patient.new(tribal_enrollment_number: "EXNH-12345")
-        details = patient.tribal_enrollment_details
-        assert_nil details
+      # -- details -----------------------------------------------------------
+
+      test "tribal_enrollment_details surfaces the new enrollment projection" do
+        projection = { enrollment_number: "EXNH-12345", tribe_ien: 100,
+                       tribe_name: "Example Native Health (EXNH)",
+                       eligibility_status: "I", classification: "Direct",
+                       community: "Anchorage" }
+        with_gateway(enrollment_details: projection) do
+          details = @enrolled.tribal_enrollment_details
+          assert_equal "EXNH-12345", details[:enrollment_number]
+          assert_equal "Example Native Health (EXNH)", details[:tribe_name]
+          assert_equal 100, details[:tribe_ien]
+        end
       end
 
-      # =============================================================================
-      # VALIDATE TRIBAL ENROLLMENT
-      # =============================================================================
-
-      test "validate_tribal_enrollment returns valid for correct enrollment" do
-        result = @patient_with_enrollment.validate_tribal_enrollment
-
-        assert result[:valid]
-        assert_equal "EXNH", result[:tribe_code]
-        assert_equal "12345", result[:enrollment_number]
-        assert_equal "ACTIVE", result[:status]
+      test "tribal_enrollment_details returns nil for an unsaved patient" do
+        assert_nil Patient.new(tribal_enrollment_number: "EXNH-12345").tribal_enrollment_details
       end
 
-      test "validate_tribal_enrollment returns invalid for incorrect enrollment" do
-        result = @patient_invalid_enrollment.validate_tribal_enrollment
+      # -- validate (syntactic) ----------------------------------------------
 
-        refute result[:valid]
-        assert_equal "INACTIVE", result[:status]
+      test "validate_tribal_enrollment surfaces the syntactic result" do
+        with_gateway(validate: { valid: true, internal: "12345", external: "EXNH-12345" }) do
+          result = @enrolled.validate_tribal_enrollment
+          assert result[:valid]
+          assert_equal "EXNH-12345", result[:external]
+        end
       end
 
-      test "validate_tribal_enrollment returns error for missing enrollment" do
-        result = @patient_without_enrollment.validate_tribal_enrollment
+      test "validate_tribal_enrollment reports invalid for a malformed number" do
+        with_gateway(validate: { valid: false, internal: nil, external: nil }) do
+          refute @enrolled.validate_tribal_enrollment[:valid]
+        end
+      end
 
+      test "validate_tribal_enrollment returns a reason for a missing number" do
+        result = @unenrolled.validate_tribal_enrollment
         refute result[:valid]
         assert_includes result[:message], "No enrollment number"
       end
 
-      # =============================================================================
-      # TRIBAL ENROLLMENT VALID?
-      # =============================================================================
-
-      test "tribal_enrollment_valid? returns true for valid enrollment" do
-        assert @patient_with_enrollment.tribal_enrollment_valid?
+      test "tribal_enrollment_valid? reflects syntactic validity only" do
+        with_gateway(validate: { valid: true }) { assert @enrolled.tribal_enrollment_valid? }
+        with_gateway(validate: { valid: false }) { refute @enrolled.tribal_enrollment_valid? }
       end
 
-      test "tribal_enrollment_valid? returns false for invalid enrollment" do
-        refute @patient_invalid_enrollment.tribal_enrollment_valid?
+      test "tribal_enrollment_valid? is false for a missing number" do
+        refute @unenrolled.tribal_enrollment_valid?
       end
 
-      test "tribal_enrollment_valid? returns false for missing enrollment" do
-        refute @patient_without_enrollment.tribal_enrollment_valid?
-      end
+      # -- eligibility (FAIL CLOSED) -----------------------------------------
 
-      # =============================================================================
-      # TRIBAL ENROLLMENT ELIGIBILITY
-      # =============================================================================
-
-      test "tribal_enrollment_eligibility returns eligibility status" do
-        eligibility = @patient_with_enrollment.tribal_enrollment_eligibility
-
-        assert eligibility[:active]
-        assert eligibility[:eligible_for_ihs]
-        assert_equal "Anchorage", eligibility[:service_unit]
-        assert_equal "BASIC", eligibility[:benefit_package]
-      end
-
-      test "tribal_enrollment_eligibility returns ineligible for patient without enrollment" do
-        eligibility = @patient_without_enrollment.tribal_enrollment_eligibility
-
-        refute eligibility[:active]
-        refute eligibility[:eligible_for_ihs]
-      end
-
-      test "tribal_enrollment_eligibility returns default for unsaved patient" do
-        patient = Patient.new(tribal_enrollment_number: "EXNH-12345")
-        eligibility = patient.tribal_enrollment_eligibility
-
-        refute eligibility[:active]
-        refute eligibility[:eligible_for_ihs]
-      end
-
-      # =============================================================================
-      # ELIGIBLE FOR IHS SERVICES
-      # =============================================================================
-
-      test "eligible_for_ihs_services? returns true for valid enrollment" do
-        assert @patient_with_enrollment.eligible_for_ihs_services?
-      end
-
-      test "eligible_for_ihs_services? returns false for invalid enrollment" do
-        refute @patient_invalid_enrollment.eligible_for_ihs_services?
-      end
-
-      test "eligible_for_ihs_services? returns false for no enrollment" do
-        refute @patient_without_enrollment.eligible_for_ihs_services?
-      end
-
-      # =============================================================================
-      # ENROLLMENT SERVICE UNIT
-      # =============================================================================
-
-      test "enrollment_service_unit returns service unit details" do
-        service_unit = @patient_with_enrollment.enrollment_service_unit
-
-        assert_not_nil service_unit
-        assert service_unit[:ien] > 0
-        assert_equal "Anchorage", service_unit[:name]
-        assert_equal "Alaska", service_unit[:region]
-      end
-
-      test "enrollment_service_unit returns nil for unsaved patient" do
-        patient = Patient.new(tribal_enrollment_number: "EXNH-12345")
-        service_unit = patient.enrollment_service_unit
-        assert_nil service_unit
-      end
-
-      # =============================================================================
-      # TRIBE INFORMATION
-      # =============================================================================
-
-      test "tribe_information returns tribe details from enrollment number" do
-        tribe_info = @patient_with_enrollment.tribe_information
-
-        assert_not_nil tribe_info
-        assert_equal "EXNH", tribe_info[:code]
-        assert_equal "Example Native Health (EXNH)", tribe_info[:name]
-        assert_equal "Anchorage", tribe_info[:service_unit]
-        assert_equal "Alaska", tribe_info[:region]
-      end
-
-      test "tribe_information extracts tribe code from enrollment number" do
-        tribe_info = @patient_with_enrollment.tribe_information
-        assert_equal "EXNH", tribe_info[:code]
-      end
-
-      test "tribe_information returns nil for missing enrollment" do
-        tribe_info = @patient_without_enrollment.tribe_information
-        assert_nil tribe_info
-      end
-
-      test "tribe_information works for different tribe codes" do
-        patient_cn = Patient.new(dfn: 2, tribal_enrollment_number: "CN-67890")
-        tribe_info = patient_cn.tribe_information
-
-        assert_equal "CN", tribe_info[:code]
-        assert_equal "Painted Sky Nation", tribe_info[:name]
-      end
-
-      # =============================================================================
-      # INTEGRATION TESTS
-      # =============================================================================
-
-      test "complete eligibility workflow" do
-        assert @patient_with_enrollment.tribal_enrollment_valid?
-
-        details = @patient_with_enrollment.tribal_enrollment_details
-        assert_equal "ACTIVE", details[:status]
-
-        assert @patient_with_enrollment.eligible_for_ihs_services?
-
-        service_unit = @patient_with_enrollment.enrollment_service_unit
-        assert_equal details[:service_unit], service_unit[:name]
-
-        tribe_info = @patient_with_enrollment.tribe_information
-        assert_equal details[:tribe_code], tribe_info[:code]
-      end
-
-      test "ineligible patient workflow" do
-        refute @patient_without_enrollment.tribal_enrollment_valid?
-        refute @patient_without_enrollment.eligible_for_ihs_services?
-
-        eligibility = @patient_without_enrollment.tribal_enrollment_eligibility
-        refute eligibility[:active]
-        refute eligibility[:eligible_for_ihs]
-      end
-
-      test "invalid enrollment patient workflow" do
-        refute @patient_invalid_enrollment.tribal_enrollment_valid?
-
-        validation = @patient_invalid_enrollment.validate_tribal_enrollment
-        refute validation[:valid]
-        assert_equal "INACTIVE", validation[:status]
-      end
-
-      # =============================================================================
-      # ATTRIBUTE TESTS
-      # =============================================================================
-
-      test "tribal_enrollment_number attribute is accessible" do
-        patient = Patient.new(tribal_enrollment_number: "EXNH-12345")
-        assert_equal "EXNH-12345", patient.tribal_enrollment_number
-      end
-
-      test "tribal_affiliation attribute is accessible" do
-        patient = Patient.new(tribal_affiliation: "Painted Sky Nation")
-        assert_equal "Painted Sky Nation", patient.tribal_affiliation
-      end
-
-      test "service_area attribute is accessible" do
-        patient = Patient.new(service_area: "Anchorage")
-        assert_equal "Anchorage", patient.service_area
-      end
-
-      # =============================================================================
-      # EDGE CASES
-      # =============================================================================
-
-      test "handles enrollment number with different formats" do
-        valid_patients = [
-          Patient.new(dfn: 1, tribal_enrollment_number: "EXNH-12345"),
-          Patient.new(dfn: 2, tribal_enrollment_number: "CN-67890"),
-          Patient.new(dfn: 3, tribal_enrollment_number: "NN-11111")
-        ]
-
-        valid_patients.each do |patient|
-          assert patient.tribal_enrollment_valid?,
-            "Expected #{patient.tribal_enrollment_number} to be valid"
+      test "tribal_enrollment_eligibility is undetermined and surfaces the raw status" do
+        with_gateway(eligibility: { eligibility_status: "I", eligibility_status_name: "Indian",
+                                    classification_ien: 1, classification: "Direct" }) do
+          e = @enrolled.tribal_enrollment_eligibility
+          assert_equal :undetermined, e[:determination]
+          refute e[:eligible]
+          assert_equal "I", e[:eligibility_status]
         end
       end
 
-      test "handles missing tribe code in enrollment number" do
-        patient = Patient.new(dfn: 1, tribal_enrollment_number: "12345")
-        refute patient.tribal_enrollment_valid?
+      test "tribal_enrollment_eligibility is undetermined for an unsaved patient" do
+        e = Patient.new(tribal_enrollment_number: "EXNH-12345").tribal_enrollment_eligibility
+        assert_equal :undetermined, e[:determination]
+        refute e[:eligible]
       end
 
-      test "handles empty strings vs nil for enrollment" do
-        patient_nil = Patient.new(tribal_enrollment_number: nil)
-        patient_empty = Patient.new(tribal_enrollment_number: "")
+      test "tribal_enrollment_eligibility is undetermined when the read returns nothing" do
+        with_gateway(eligibility: nil) do
+          e = @enrolled.tribal_enrollment_eligibility
+          assert_equal :undetermined, e[:determination]
+          refute e[:eligible]
+        end
+      end
 
-        refute patient_nil.tribal_enrollment_valid?
-        refute patient_empty.tribal_enrollment_valid?
+      # eligible_for_ihs_services? FAILS CLOSED: no eligibility_status confers
+      # eligibility until the mapping is signed off, so it is false even when a
+      # status is present.
+      test "eligible_for_ihs_services? is false while the determination is undetermined" do
+        with_gateway(eligibility: { eligibility_status: "I", classification: "Direct" }) do
+          refute @enrolled.eligible_for_ihs_services?
+        end
+      end
+
+      test "eligible_for_ihs_services? is false for no enrollment" do
+        refute @unenrolled.eligible_for_ihs_services?
+      end
+
+      # PARKED on #520: asserting that a specific set code confers eligibility
+      # requires the compliance-signed-off I/D/C/P → determination mapping. A
+      # fabricated mapping would violate the fail-closed non-negotiable, so this
+      # stays skipped rather than green-by-invention.
+      test "eligible_for_ihs_services? is true once a status is determined eligible" do
+        skip "eligibility_status (I/D/C/P) → IHS-eligibility mapping is a compliance " \
+             "decision tracked in #520; fail-closed until signed off"
+      end
+
+      # -- service unit (undetermined; no per-patient read) ------------------
+
+      test "enrollment_service_unit is nil until the community-linkage path exists" do
+        assert_nil @enrolled.enrollment_service_unit
+        assert_nil Patient.new(tribal_enrollment_number: "EXNH-12345").enrollment_service_unit
+      end
+
+      # -- tribe information (via the enrollment's TRIBE pointer) -------------
+
+      test "tribe_information reads the TRIBE entry named by the enrollment pointer" do
+        with_gateway(enrollment_details: { tribe_ien: 100 },
+                     tribe_info: { ien: 100, name: "Example Native Health (EXNH)", code: "EXNH" }) do
+          info = @enrolled.tribe_information
+          assert_equal "EXNH", info[:code]
+          assert_equal "Example Native Health (EXNH)", info[:name]
+        end
+      end
+
+      test "tribe_information is nil when the enrollment names no tribe" do
+        with_gateway(enrollment_details: { tribe_ien: nil }) do
+          assert_nil @enrolled.tribe_information
+        end
+      end
+
+      test "tribe_information is nil for a missing enrollment number" do
+        assert_nil @unenrolled.tribe_information
+      end
+
+      # -- attributes --------------------------------------------------------
+
+      test "tribal_enrollment_number attribute is accessible" do
+        assert_equal "EXNH-12345", Patient.new(tribal_enrollment_number: "EXNH-12345").tribal_enrollment_number
+      end
+
+      test "tribal_affiliation attribute is accessible" do
+        assert_equal "Painted Sky Nation", Patient.new(tribal_affiliation: "Painted Sky Nation").tribal_affiliation
+      end
+
+      test "service_area attribute is accessible" do
+        assert_equal "Anchorage", Patient.new(service_area: "Anchorage").service_area
+      end
+
+      # -- fail-closed workflows ---------------------------------------------
+
+      test "an unenrolled patient is not valid and not eligible" do
+        refute @unenrolled.tribal_enrollment_valid?
+        refute @unenrolled.eligible_for_ihs_services?
+        assert_equal :undetermined, @unenrolled.tribal_enrollment_eligibility[:determination]
+      end
+
+      test "a format-valid enrollment is still not eligible without a determination" do
+        with_gateway(validate: { valid: true },
+                     eligibility: { eligibility_status: "I", classification: "Direct" }) do
+          assert @enrolled.tribal_enrollment_valid?
+          refute @enrolled.eligible_for_ihs_services?
+        end
+      end
+
+      test "handles empty string vs nil for the enrollment number" do
+        refute Patient.new(tribal_enrollment_number: nil).tribal_enrollment_valid?
+        refute Patient.new(tribal_enrollment_number: "").tribal_enrollment_valid?
       end
     end
   end
