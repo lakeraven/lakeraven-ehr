@@ -3,6 +3,14 @@
 module Lakeraven
   module EHR
     class CoverageEligibilityRequestsController < ApplicationController
+      include PatientCompartment
+
+      # Returns the patient's coverage, so: read as well as write, and bound
+      # to the compartment.
+      # The response names the patient and their coverage.
+      discloses_clinical_data :create, reads: %w[Patient Coverage]
+      compartment_bound :create, param: :patient_dfn
+
       def create
         request = CoverageEligibilityRequest.new(eligibility_params)
 
