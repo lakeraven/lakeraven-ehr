@@ -7,12 +7,12 @@ gemspec
 if ENV["RPMS_RPC_PATH"]
   gem "rpms-rpc", path: ENV["RPMS_RPC_PATH"]
 else
-  # Pinned to the #235 merge (rpms-rpc 0.3.0): the broker-faithful sign-on path
-  # — encrypted AV pair, CIA reply grammar, and RpmsRpc.synchronize_wire. A
-  # fixed ref rather than branch:main so the pin does not drift during the auth
-  # merge train (#235 -> #486 -> #501 -> #491 -> #517); bump to a later ref or
-  # branch:main once the train has landed.
-  gem "rpms-rpc", github: "lakeraven/rpms-rpc", ref: "d5f09c4"
+  # Pinned to the #250 merge (rpms-rpc main f514068): adds RpmsRpc::SessionPool
+  # (session-scoped broker clients, ADR 0005 / #234) plus the #249 nil-DUZ
+  # fail-closed sign-on and the #240 RPC tiers, on top of the 0.3.0 sign-on
+  # path (encrypted AV pair, CIA reply grammar, RpmsRpc.synchronize_wire). A
+  # fixed ref rather than branch:main so the pin does not drift mid-merge.
+  gem "rpms-rpc", github: "lakeraven/rpms-rpc", ref: "f514068"
 end
 
 gem "puma"
