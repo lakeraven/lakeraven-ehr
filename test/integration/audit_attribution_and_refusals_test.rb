@@ -27,7 +27,7 @@ class AuditAttributionAndRefusalsTest < ActionDispatch::IntegrationTest
   # and the row named that clinician. The token authenticated the request;
   # the session did not.
   test "a token-authenticated read is not attributed to a bystanding browser session" do
-    sign_in_browser_session # session[:duz] = "99999"
+    sign_in_browser_session # session[:duz] = "304"
     setup_auth(scopes: "system/*.read system/Patient.read")
 
     get "/patients/1", headers: @headers
@@ -35,7 +35,7 @@ class AuditAttributionAndRefusalsTest < ActionDispatch::IntegrationTest
 
     event = Lakeraven::EHR::AuditEvent.order(:id).last
     refute_nil event, "the chart read left no audit trail"
-    refute_equal [ "Practitioner", "99999" ],
+    refute_equal [ "Practitioner", "304" ],
                  [ event.agent_who_type, event.agent_who_identifier ],
                  "a token-authenticated read was filed under the browser session's human"
     assert_equal "Application", event.agent_who_type
@@ -58,15 +58,20 @@ class AuditAttributionAndRefusalsTest < ActionDispatch::IntegrationTest
   # session-authenticated, so its refusals must not name the browser's
   # bystanding human. With SameSite=Lax cookies, any cross-site top-level
   # GET mints these rows against an innocent signed-in clinician.
+  #
+  # #486's session→token fallback is scoped to the HTML chart surface only
+  # (ChartsController); the FHIR API (ActionController::API) is bearer-only, so
+  # this holds. Restored verbatim after the security seat (#525) rejected the
+  # rebase that had inverted it to a 200.
   test "a tokenless FHIR refusal is not attributed to a bystanding browser session" do
-    sign_in_browser_session # session[:duz] = "99999"
+    sign_in_browser_session # session[:duz] = "304"
 
     get "/lakeraven-ehr/Patient/1" # no Authorization header at all
     assert_response :unauthorized
 
     event = Lakeraven::EHR::AuditEvent.order(:id).last
     refute_nil event, "the tokenless refusal left no audit trail"
-    refute_equal [ "Practitioner", "99999" ],
+    refute_equal [ "Practitioner", "304" ],
                  [ event.agent_who_type, event.agent_who_identifier ],
                  "a refusal the session did not make was filed under the session's human"
     assert_equal "Unknown", event.agent_who_type
@@ -82,7 +87,7 @@ class AuditAttributionAndRefusalsTest < ActionDispatch::IntegrationTest
 
     event = Lakeraven::EHR::AuditEvent.order(:id).last
     refute_nil event, "the garbage-token refusal left no audit trail"
-    refute_equal "99999", event.agent_who_identifier,
+    refute_equal "304", event.agent_who_identifier,
                  "an unknown token string fell through to the bystanding session's human"
     assert_equal "Unknown", event.agent_who_type
   end
@@ -101,7 +106,7 @@ class AuditAttributionAndRefusalsTest < ActionDispatch::IntegrationTest
 
     event = Lakeraven::EHR::AuditEvent.order(:id).last
     refute_nil event
-    refute_equal [ "Practitioner", "99999" ],
+    refute_equal [ "Practitioner", "304" ],
                  [ event.agent_who_type, event.agent_who_identifier ],
                  "a session-derived current_duz overrode the token that actually authenticated the request"
     assert_equal "Application", event.agent_who_type
@@ -119,7 +124,7 @@ class AuditAttributionAndRefusalsTest < ActionDispatch::IntegrationTest
     event = Lakeraven::EHR::AuditEvent.order(:id).last
     refute_nil event, "a session-authenticated page left no audit trail"
     assert_equal "Practitioner", event.agent_who_type
-    assert_equal "99999", event.agent_who_identifier
+    assert_equal "304", event.agent_who_identifier
   end
 
   # -- S3: refusals on EVERY browser page, not just the one that overrides --
@@ -207,7 +212,7 @@ class AuditAttributionAndRefusalsTest < ActionDispatch::IntegrationTest
   # and "we determined no" would be indistinguishable from "we said yes and
   # redirected".
   test "a successful sign-in redirect is recorded as a success, not a serious failure" do
-    post "/lakeraven-ehr/login", params: { username: "testprovider", password: "test" }
+    post "/lakeraven-ehr/login", params: { username: "lindarodriguez", password: "test123" }
     assert_response :redirect
 
     event = Lakeraven::EHR::AuditEvent.order(:id).last
@@ -242,8 +247,8 @@ class AuditAttributionAndRefusalsTest < ActionDispatch::IntegrationTest
   private
 
   def sign_in_browser_session
-    post "/lakeraven-ehr/login", params: { username: "testprovider", password: "test" }
-    assert_equal "99999", session[:duz], "the canned test sign-in did not establish a session"
+    post "/lakeraven-ehr/login", params: { username: "lindarodriguez", password: "test123" }
+    assert_equal "304", session[:duz], "the canned test sign-in did not establish a session"
   end
 
   def setup_auth(scopes:)

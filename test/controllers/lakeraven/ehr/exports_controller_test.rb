@@ -8,7 +8,9 @@ module Lakeraven
       include SmartAuthTestHelper
 
       setup do
-        setup_smart_auth
+        # A bulk export is a state-changing operation and needs write scope;
+        # these used to pass on the default read-only token.
+        setup_smart_auth(scopes: "system/*.read system/*.write")
         ExportsController.reset_store!
       end
 
@@ -92,7 +94,9 @@ module Lakeraven
       include SmartAuthTestHelper
 
       setup do
-        setup_smart_auth
+        # A bulk export is a state-changing operation and needs write scope;
+        # these used to pass on the default read-only token.
+        setup_smart_auth(scopes: "system/*.read system/*.write")
         ExportsController.reset_store!
       end
 

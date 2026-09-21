@@ -4,6 +4,16 @@ module Lakeraven
   module EHR
     class ExportsController < ApplicationController
       # POST /exports
+      #
+      # A bulk export is a WRITE (it creates a job and materialises a record
+      # dump), and this was the one state-changing route with no scope gate: a
+      # `system/*.read` token could POST /exports and bulk-export a chart.
+      # #501 supersedes this with discloses_clinical_data (read of the
+      # disclosed types AND write) plus compartment binding — this gate exists
+      # so THIS branch is safe standing alone. Placed on the action rather than
+      # at the class top so it does not collide with #501's authorization
+      # block when the two branches merge.
+      before_action :authorize_fhir_write_scope!, only: :create
       def create
         export = BulkExport.new(
           id: SecureRandom.uuid,
