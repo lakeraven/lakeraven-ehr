@@ -198,7 +198,13 @@ module Lakeraven
         nil
       end
 
+      # Survey-category observations (screening instrument totals, SDOH
+      # screeners) claim the US Core screening-assessment profile regardless of
+      # which instrument produced them, so no per-instrument code list has to be
+      # maintained here.
       def build_meta
+        return { profile: [ SdohObservation::US_CORE_SCREENING_PROFILE ] } if category == "survey"
+
         profile_url = US_CORE_PROFILES[code]
         profile_url ? { profile: [ profile_url ] } : nil
       end

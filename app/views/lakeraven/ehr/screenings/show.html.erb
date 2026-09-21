@@ -1,0 +1,57 @@
+<% content_for :title, "#{@instrument.short_title} result | Lakeraven EHR" %>
+
+<div class="page-header">
+  <h1><%= @instrument.title %></h1>
+  <p>Patient #<%= @dfn %> &middot;
+     <%= @response.effective_at.strftime("%b %-d, %Y at %H:%M") %>
+     <% if @response.encounter_ien.present? %>
+       &middot; visit <%= @response.encounter_ien %>
+     <% end %>
+  </p>
+</div>
+
+<% if flash[:notice] %>
+  <p class="flash-notice" role="status"><%= flash[:notice] %></p>
+<% end %>
+
+<div class="screening-score">
+  <p class="screening-score__total">
+    <span class="screening-score__number"><%= @response.total_score %></span>
+    <span class="screening-score__of">of <%= @instrument.max_score %></span>
+  </p>
+  <p class="screening-score__band">
+    <span class="sr-only">Severity band: </span><%= @response.severity_band.capitalize %>
+  </p>
+</div>
+
+<% if @response.safety_flagged? %>
+  <div class="screening-safety" role="note">
+    <h2>Self-harm response recorded</h2>
+    <p><%= @instrument.safety_guidance %></p>
+  </div>
+<% end %>
+
+<h2>Responses</h2>
+<table class="screening-responses">
+  <caption class="sr-only">Item-level responses for this <%= @instrument.short_title %></caption>
+  <thead>
+    <tr><th scope="col">#</th><th scope="col">Item</th><th scope="col">Response</th><th scope="col">Score</th></tr>
+  </thead>
+  <tbody>
+    <% @response.answered_items.each do |item, choice| %>
+      <tr>
+        <td><%= item.position %></td>
+        <td><%= item.text %></td>
+        <td><%= choice.text %></td>
+        <td><%= choice.value %></td>
+      </tr>
+    <% end %>
+  </tbody>
+  <tfoot>
+    <tr><th scope="row" colspan="3">Total</th><td><%= @response.total_score %></td></tr>
+  </tfoot>
+</table>
+
+<div class="screening-actions">
+  <a href="<%= patient_screenings_path(@dfn) %>">All screenings for this patient</a>
+</div>
