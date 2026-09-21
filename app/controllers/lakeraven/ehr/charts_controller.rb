@@ -77,6 +77,16 @@ module Lakeraven
         Rails.env.development? && ENV["CHART_DEMO_OPEN"] == "1" && ENV["SPIKE_MOCK_RPC"] == "1"
       end
 
+      # THE ONE surface that may authenticate a browser SESSION token. This is
+      # the server-rendered HTML chart (ActionController::Base, BFF-style); a
+      # signed-in clinician reaches it with no Authorization header, so it reads
+      # the SMART token the sign-on bridge stashed in the session. The FHIR API
+      # (ActionController::API) stays bearer-only — see
+      # SmartAuthentication#session_token_fallback_allowed? and #512 F1 / #525.
+      def session_token_fallback_allowed?
+        true
+      end
+
       def authenticate_chart_request!
         return true if demo_bypass?
 

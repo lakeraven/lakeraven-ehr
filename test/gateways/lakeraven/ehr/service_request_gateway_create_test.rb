@@ -2,14 +2,21 @@
 
 require "test_helper"
 
-# Tests for ServiceRequestGateway#create — referral create via BGOREF SET.
-# Sits alongside the existing for_patient/delete/cancel tests.
+# Tests for ServiceRequestGateway#create.
+#
+# rpms-rpc 0.3.0 (#235) REMOVED the fabricated create path: RpmsRpc::Referral.create
+# now returns { error: :not_implemented } because BGOREF SET writes referral
+# REFUSALS, not referrals — the faithful create is BMC ADD REFERRAL
+# (SETREFRL^BMCRPC2 = Referral.add) with the full RCIS parameter list. Wiring
+# the gateway to Referral.add is tracked in #521 and is out of Sprint 1
+# (BH-only) scope. Until then the gateway surfaces the honest not-implemented
+# result rather than fabricating a saved IEN.
 module Lakeraven
   module EHR
     class ServiceRequestGatewayCreateTest < ActiveSupport::TestCase
-      test "create returns success with the saved IEN when the RPC returns an IEN" do
-        RpmsRpc.client.seed_scalar(:referral_create, "1", "5050")
-
+      test "create surfaces the not-implemented result rather than fabricating an IEN" do
+        # The old :referral_create (BGOREF SET) path is gone; create must not
+        # pretend to have saved a referral it did not.
         result = ServiceRequestGateway.create(1, {
           provider_ien: 99999,
           specialty: "Cardiology",
@@ -18,17 +25,16 @@ module Lakeraven
           requested_date: Date.new(2026, 6, 1)
         })
 
-        assert result[:success]
-        assert_equal 5050, result[:ien]
+        refute result[:success]
+        assert_equal :not_implemented, result[:error]
+        assert_nil result[:ien]
       end
 
-      test "create coerces an integer dfn to a string" do
-        RpmsRpc.client.seed_scalar(:referral_create, "1", "5051")
-
+      test "create still coerces and validates its arguments" do
         result = ServiceRequestGateway.create(1, { specialty: "Cardiology" })
 
-        assert result[:success]
-        assert_equal 5051, result[:ien]
+        refute result[:success]
+        assert_equal :not_implemented, result[:error]
       end
 
       test "create returns failure for nil dfn" do

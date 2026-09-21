@@ -1,45 +1,204 @@
 # frozen_string_literal: true
 
+require "rpms_rpc/client"
+
 module Lakeraven
   module EHR
     class SessionsController < WebController
-      # The canned-credential branch must never be reachable outside test, even
-      # if the route gate is loosened by mistake (#401 interim; real sign-on: #332).
-      before_action :ensure_test_environment!, only: :create
+      # Doorkeeper application every browser-session token belongs to. Named in
+      # SmartAuthentication too — a token of this application is a browser
+      # credential and is refused anywhere except the session that minted it.
+      BROWSER_SSO_APP_NAME = SmartAuthentication::BROWSER_SSO_APP_NAME
+      # A fixed, deterministic Doorkeeper uid for the single browser SSO
+      # application, so its creation is guarded by the `uid` unique index rather
+      # than the un-indexed `name` (race-safety — see #browser_sso_application).
+      BROWSER_SSO_APP_UID = "lakeraven-ehr-browser-sso"
+
+      # How long a session may sit idle before it is signed out. RPMS sessions
+      # are not 12-hour credentials and neither is this one; the token's own
+      # expiry is the outer bound, this is the inner one.
+      IDLE_TIMEOUT = SmartAuthentication::SESSION_IDLE_TIMEOUT
+      TOKEN_LIFETIME = 12.hours
 
       def new
         # login form
       end
 
+      # Real RPMS sign-on (#332, replacing the #401 canned interim): validate
+      # the clinician's access/verify against RPMS, establish the browser
+      # session, and mint a SMART token the API layer accepts via its session
+      # fallback.
       def create
-        username = params[:username].to_s
-        password = params[:password].to_s
+        access_code = params[:username].to_s
 
-        if username == "testprovider" && password == "test"
-          reset_session
-          session[:duz] = "99999"
-          session[:user_type] = "provider"
-          session[:user_name] = "Test Provider"
-          redirect_to dashboard_path
-        else
-          # F6: a determined credential refusal says so on its row —
-          # otherwise it is indistinguishable from a 4xx that forgot to note
-          # its denial.
-          note_audit_denial("browser sign-in refused: invalid credentials")
-          flash.now[:alert] = "Invalid username or password"
-          render :new, status: :unprocessable_entity
+        # Whatever credential this browser is already carrying dies here,
+        # before anything else happens. A sign-on at a workstation ends the
+        # previous occupant's session whether it succeeds, fails, is throttled,
+        # or the broker is down — and "ends" means REVOKED, because CookieStore
+        # leaves the client holding a still-valid cookie that reset_session
+        # cannot reach. Clinician B signing in used to leave clinician A's
+        # saved cookie working, audited as B.
+        terminate_session!
+
+        if LoginThrottle.throttled?(access_code, request.remote_ip)
+          # Refused BEFORE the credential is checked, and refused even when it
+          # is correct: RPMS's own three-strike lock keys on the broker client
+          # IP — the app server — so an unthrottled login route lets one
+          # attacker lock out every clinician at once.
+          return render_throttled
         end
+
+        result = authenticate(access_code: access_code, verify_code: params[:password].to_s)
+
+        return render_broker_unavailable if result.nil?
+        return render_rejected(access_code, result.error) unless result.success?
+
+        provider = result.value
+
+        # A verify code RPMS has flagged for change is not a credential to
+        # issue a 12-hour session against — CPRS forces the change first, and
+        # so does this. Establishing no session is the fail-closed answer
+        # until the change flow exists (#493 tracks building it).
+        if provider[:verify_needs_change]
+          terminate_session!
+          flash.now[:alert] = "Your verify code must be changed before you can sign in."
+          return render :new, status: :forbidden
+        end
+
+        LoginThrottle.clear_account(access_code)
+        establish_session(provider)
+        redirect_to dashboard_path
       end
 
       def destroy
-        reset_session
+        terminate_session!
         redirect_to login_path, notice: "Signed out"
       end
 
       private
 
-      def ensure_test_environment!
-        raise ActionController::RoutingError, "Not Found" unless Rails.env.test?
+      def authenticate(access_code:, verify_code:)
+        AuthenticationService.new.authenticate(access_code: access_code, verify_code: verify_code)
+      rescue RpmsRpc::Client::ConnectionError, RpmsRpc::NotConfiguredError, Errno::ECONNREFUSED,
+             IOError, SocketError => e
+        # A broker outage used to surface as an unhandled 500 whose exception
+        # report carried the submitted parameters — including the access code.
+        # Log the class, never the params.
+        Rails.logger.error("RPMS sign-on unavailable: #{e.class}")
+        nil
+      end
+
+      # A failed sign-on must not leave an earlier session standing. Deliberate
+      # choice: the alternative (keep the existing session) means a walk-up
+      # attacker's failed attempt leaves the previous clinician signed in on a
+      # shared workstation, which is the situation this feature exists for.
+      def render_rejected(access_code, _error)
+        LoginThrottle.record_failure(access_code, request.remote_ip)
+        # F6 (#512): a determined credential refusal says so on its audit row.
+        note_audit_denial("browser sign-in refused: invalid credentials") if respond_to?(:note_audit_denial, true)
+        # One message for every failure mode — no enumeration oracle.
+        flash.now[:alert] = "Invalid username or password"
+        render :new, status: :unprocessable_entity
+      end
+
+      def render_throttled
+        response.headers["Retry-After"] = LoginThrottle.retry_after.to_s
+        flash.now[:alert] = "Too many sign-in attempts. Try again later."
+        render :new, status: :too_many_requests
+      end
+
+      def render_broker_unavailable
+        flash.now[:alert] = "RPMS is not reachable right now. Try again shortly."
+        render :new, status: :service_unavailable
+      end
+
+      def establish_session(provider)
+        reset_session
+        session[:duz] = provider[:duz]
+        session[:user_name] = provider[:name]
+        session[:user_type] = provider[:user_type].to_s
+        session[:security_keys] = Array(provider[:security_keys]).map(&:to_s)
+        session[:last_seen_at] = Time.current.to_i
+        session[:smart_token] = mint_smart_token(provider)
+      end
+
+      # Mint a SMART token for this session, bound to the human and scoped by
+      # what that human's RPMS security keys actually authorize.
+      #
+      # Two things this used to get wrong:
+      #   * every session got `user/*.read user/*.write`, so a clerk with no
+      #     security keys held the same credential as a physician;
+      #   * the token was bound to nothing, so it worked from any session, or
+      #     from none at all when replayed as a Bearer header.
+      #
+      # resource_owner_id carries the DUZ. SmartAuthentication only reads it as
+      # a patient compartment for tokens carrying a `patient/` scope, and the
+      # policy below never mints one — asserted here so the two meanings can
+      # never collide silently.
+      def mint_smart_token(provider)
+        revoke_previous_tokens_for(provider[:duz])
+
+        scopes = SessionScopePolicy.scope_string(
+          security_keys: Array(provider[:security_keys]).map(&:to_sym)
+        )
+        raise "browser session tokens must never carry a patient/ scope" if scopes.include?("patient/")
+
+        token = Doorkeeper::AccessToken.new(
+          application: browser_sso_application,
+          scopes: scopes,
+          resource_owner_id: provider[:duz].to_i,
+          expires_in: TOKEN_LIFETIME.to_i
+        )
+        # Intrinsic marker: what makes this a BROWSER credential travels on the
+        # token itself, not on a renameable application label. See
+        # SmartAuthentication#browser_sso_token?.
+        token.browser_session = true if token.has_attribute?(:browser_session)
+        token.save!
+        token.plaintext_token || token.token
+      end
+
+      # Signing in again is not a reason to leave the previous credential live:
+      # three sign-ins used to leave three usable 12-hour tokens, none of them
+      # revocable by the clinician who owned them. One human, one live browser
+      # token — which also bounds the table's growth.
+      def revoke_previous_tokens_for(duz)
+        Doorkeeper::AccessToken
+          .where(application_id: browser_sso_application.id, resource_owner_id: duz.to_i, revoked_at: nil)
+          .find_each(&:revoke)
+      end
+
+      # Race-safe lookup/creation of the one browser SSO Doorkeeper application.
+      #
+      # find_or_create_by!(name:) was NOT race-safe: oauth_applications is
+      # unique on `uid`, not `name`, so two concurrent first-logins both see no
+      # app and both create one — duplicate apps sharing the name (Copilot
+      # PRRT_kwDOR8fnY86gjRXD). Pinning a FIXED uid makes the DB unique index
+      # the arbiter: the loser's INSERT raises RecordNotUnique and falls back to
+      # the winner.
+      def browser_sso_application
+        Doorkeeper::Application.find_by(uid: BROWSER_SSO_APP_UID) ||
+          Doorkeeper::Application.find_by(name: BROWSER_SSO_APP_NAME) ||
+          create_browser_sso_application
+      end
+
+      def create_browser_sso_application
+        Doorkeeper::Application.create!(
+          name: BROWSER_SSO_APP_NAME,
+          uid: BROWSER_SSO_APP_UID,
+          redirect_uri: "urn:ietf:wg:oauth:2.0:oob",
+          scopes: SessionScopePolicy.all_scopes.join(" "),
+          confidential: true
+        )
+      rescue ActiveRecord::RecordNotUnique, ActiveRecord::RecordInvalid => e
+        # A concurrent creator won the fixed uid — rejected either by the DB
+        # unique index (RecordNotUnique) or by the model's uid-uniqueness
+        # validation (RecordInvalid, when their row committed before our
+        # validation query). Reuse the winner. If none exists, the failure was
+        # something else (bad scopes, etc.) — do not mask it.
+        existing = Doorkeeper::Application.find_by(uid: BROWSER_SSO_APP_UID)
+        raise e unless existing
+
+        existing
       end
     end
   end
