@@ -356,6 +356,19 @@ class FhirApiAuthorizationTest < ActionDispatch::IntegrationTest
     assert_equal foreign.first, missing.first
   end
 
+  # A blank client_id names no owner (legacy/malformed row). It must fail
+  # closed — an unowned export is not a public one, and its PHI must not be
+  # reachable by any authenticated caller.
+  test "an export with no owner is refused, not treated as owned" do
+    seed_victim_export(owner: "")
+    setup_auth(scopes: "system/*.read system/*.write")
+
+    get "/lakeraven-ehr/exports/victim-export/files/PatientNdjson", headers: @headers
+
+    assert_response :not_found
+    refute_includes response.body, "111-11-1111"
+  end
+
   test "a client can still reach its own export files" do
     seed_victim_export
     setup_auth(scopes: "system/*.read system/*.write")

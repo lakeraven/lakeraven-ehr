@@ -62,7 +62,12 @@ module Lakeraven
       end
 
       def owns_export?(export)
-        return true if export.client_id.blank?
+        # A blank client_id names no owner — a legacy or malformed row. An
+        # export nobody owns is not an export everybody owns: an unidentifiable
+        # owner is unanswerable, and an unanswerable authorization question is a
+        # refusal (the same fail-closed rule as an unresolvable clinician
+        # identity below). This must never read as "owned".
+        return false if export.client_id.blank?
         return false unless export_owner_identity_resolvable?(export)
 
         export.client_id == export_owner_identity
