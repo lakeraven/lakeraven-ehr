@@ -3,6 +3,17 @@
 module Lakeraven
   module EHR
     class ExportsController < ApplicationController
+      include PatientCompartment
+      include ExportOwnership
+
+      # A bulk export IS a read of the patient's record; it needs read scope as
+      # well as write, and it is bound to the compartment.
+      # A bulk export dumps the patient's record; EhiExportService::FHIR_RESOURCE_TYPES
+      # is what actually lands in the files.
+      discloses_clinical_data :create, reads: EhiExportService::FHIR_RESOURCE_TYPES
+      compartment_bound :create, param: :patient_dfn
+      before_action :authorize_export_owner!, only: %i[show destroy]
+
       # POST /exports
       #
       # A bulk export is a WRITE (it creates a job and materialises a record
@@ -21,7 +32,7 @@ module Lakeraven
           status: "pending",
           request_url: request.original_url,
           output_format: "application/fhir+ndjson",
-          client_id: current_token&.application&.uid,
+          client_id: export_owner_identity,
           since_timestamp: params[:since],
           type_filters: params[:type]
         )
@@ -39,14 +50,6 @@ module Lakeraven
       def show
         export = self.class.store[params[:id]]
         return render_not_found("Export", params[:id]) unless export
-
-        if export.client_id && current_token&.application&.uid != export.client_id
-          render_operation_outcome(
-            status: :forbidden, severity: "error",
-            code: "forbidden", diagnostics: "Export belongs to a different client"
-          )
-          return
-        end
 
         resp = export.status_response
         if resp[:status] == 202
@@ -72,6 +75,8 @@ module Lakeraven
       end
 
       private
+
+      def stored_export = self.class.store[params[:id]]
 
       def run_export(export)
         export.start_processing!

@@ -1,7 +1,9 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Lakeraven ehr</title>
+  <%# Views set a page-specific title via content_for; the engine name is the
+      fallback. A distinct title per page is a basic screen-reader affordance. %>
+  <title><%= content_for(:title).presence || "Lakeraven EHR" %></title>
   <%= csrf_meta_tags %>
   <%= csp_meta_tag %>
 

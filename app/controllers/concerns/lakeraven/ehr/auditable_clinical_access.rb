@@ -604,7 +604,18 @@ module Lakeraven
         discard_unrecorded_session!
         discard_unrecorded_flash!
         discard_unrecorded_cookies!
-        render plain: "Service Unavailable: this access could not be recorded, so it was not completed",
+        render_unrecorded_access_denial
+      end
+
+      UNRECORDED_ACCESS_MESSAGE =
+        "this access could not be recorded, so it was not completed"
+
+      # The REPRESENTATION of the refusal, and only that — the discard
+      # sequence above is not overridable. A controller that owes its caller
+      # some other shape (a FHIR client gets an OperationOutcome) overrides
+      # this; it must render a 503 and nothing derived from the action.
+      def render_unrecorded_access_denial
+        render plain: "Service Unavailable: #{UNRECORDED_ACCESS_MESSAGE}",
                status: :service_unavailable
       end
 

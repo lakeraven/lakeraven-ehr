@@ -36,6 +36,12 @@ module Lakeraven
     # test/dummy/lib/lakeraven_demo_seeds.rb).
     class ChartsController < ActionController::Base
       include SmartAuthentication
+      # FAIL-CLOSED audit, the same terms the clinician screening surface is
+      # held to. The chart now carries scored screenings (#474), so it serves
+      # the same item-level self-harm disclosures — and a sibling route to the
+      # same bytes must not be the one with the weaker audit. Since #512 the
+      # shared concern IS the fail-closed one: if the access cannot be
+      # recorded, it is not completed.
       include AuditableClinicalAccess
 
       FHIR_CONTENT_TYPE = "application/fhir+json"
@@ -151,6 +157,56 @@ module Lakeraven
         @procedures    = readable?("Procedure") ? build_procedures(dfn) : []
         @encounters    = readable?("Encounter") ? safe { EncounterGateway.for_patient(dfn) } : []
         @encounter_resources = build_encounter_resources(dfn)
+        load_screenings(dfn)
+      end
+
+      # Scored screening instruments (#474). Engine-owned records rather than an
+      # RPMS read, and they yield TWO resource families with different
+      # sensitivities:
+      #
+      #   * the total score        -> Observation           (Observation scope)
+      #   * the item-level answers -> QuestionnaireResponse  (QR scope)
+      #
+      # The two are authorized INDEPENDENTLY. A token with QuestionnaireResponse
+      # scope but no Observation scope still gets the answers, and vice versa —
+      # neither family may be reachable only via the other's scope. One query
+      # feeds both; it is skipped entirely when neither scope is held.
+      # A screening row is engine-owned side data. If one of them cannot be
+      # rendered or serialized, that must cost AT MOST that row — never the
+      # Patient, Conditions, Medications, Allergies and Vitals that the chart
+      # exists for. `safe` wrapped only the QUERY, so a single out-of-range
+      # ordinal (serializer -> nil choice -> NoMethodError) 500'd the whole
+      # bundle. Rows whose instrument no longer exists are dropped up front;
+      # anything else that raises is dropped per row by `safe_map`.
+      def load_screenings(dfn)
+        wants_scores  = readable?("Observation")
+        wants_answers = readable?("QuestionnaireResponse")
+        screenings = if wants_scores || wants_answers
+                       publishable_screenings(safe { ScreeningResponse.for_patient(dfn) })
+        else
+                       []
+        end
+
+        @screenings = wants_scores ? screenings : []
+        @screening_observations = safe_map(@screenings, &:to_observation)
+        @screening_answers = wants_answers ? screenings : []
+      end
+
+      # Validation runs on WRITE; this is the read side of the same contract.
+      # A row that does not satisfy its own invariants — a total that is not
+      # its answers' sum, a self-harm disclosure with no acknowledgement, an
+      # instrument that no longer exists — is SKIPPED rather than published as
+      # a `completed` QuestionnaireResponse or a `final` Observation. Those
+      # statuses are assertions, and this row cannot support them. It is never
+      # repaired here: inventing the missing half is the failure being guarded
+      # against.
+      def publishable_screenings(screenings)
+        screenings.select do |screening|
+          next true if screening.publishable?
+
+          Rails.logger.warn("[chart] screening #{screening.id} withheld: fails its own invariants")
+          false
+        end
       end
 
       def build_conditions(dfn)
@@ -238,6 +294,20 @@ module Lakeraven
         []
       end
 
+      # Per-record projection boundary: one record that cannot be projected is
+      # skipped, the rest of the collection survives, and the request does not
+      # 500. Used where the projection is derived from stored data rather than
+      # fetched (screenings), since a bad row is otherwise indistinguishable
+      # from a bad chart.
+      def safe_map(records)
+        records.filter_map do |record|
+          yield record
+        rescue => e
+          Rails.logger.warn("[chart] record #{record.class}##{record.id} skipped: #{e.class}: #{e.message}")
+          nil
+        end
+      end
+
       # -- FHIR Bundle ----------------------------------------------------------
 
       def fhir_bundle
@@ -246,6 +316,8 @@ module Lakeraven
         resources.concat(@medications.map(&:to_fhir))
         resources.concat(@allergies.map(&:to_fhir))
         resources.concat(@observations.map(&:to_fhir))
+        resources.concat(safe_map(@screening_observations, &:to_fhir))
+        resources.concat(safe_map(@screening_answers, &:to_questionnaire_response))
         resources.concat(@immunizations.map(&:to_fhir))
         resources.concat(@procedures.map(&:to_fhir))
         resources.concat(@encounter_resources.map { |e| encounter_to_fhir(e) })
@@ -320,6 +392,22 @@ module Lakeraven
           }, status: status, content_type: FHIR_CONTENT_TYPE
         else
           render plain: "#{status.to_s.titleize}: #{message}", status: status
+        end
+      end
+
+      # AuditableClinicalAccess hook: a FHIR caller gets an OperationOutcome
+      # rather than plain text, like every other refusal on this controller.
+      # The chart establishes no state, so there is nothing to roll back.
+      def render_unrecorded_access_denial
+        if fhir_requested?
+          render json: {
+            resourceType: "OperationOutcome",
+            issue: [ { severity: "error", code: "transient",
+                       diagnostics: UNRECORDED_ACCESS_MESSAGE } ]
+          }, status: :service_unavailable, content_type: FHIR_CONTENT_TYPE
+        else
+          render plain: "Service Unavailable: #{UNRECORDED_ACCESS_MESSAGE}",
+                 status: :service_unavailable
         end
       end
 
