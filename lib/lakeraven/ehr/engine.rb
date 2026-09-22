@@ -5,6 +5,16 @@ module Lakeraven
     class Engine < ::Rails::Engine
       isolate_namespace Lakeraven::EHR
 
+      initializer "lakeraven-ehr.doorkeeper_extensions" do |app|
+        app.config.to_prepare do
+          # Backend-services client bindings live on Doorkeeper::Application;
+          # registration-time JWKS transport rules ride along.
+          unless Doorkeeper::Application.include?(Lakeraven::EHR::BackendClientRegistration)
+            Doorkeeper::Application.include(Lakeraven::EHR::BackendClientRegistration)
+          end
+        end
+      end
+
       # The VistA ACCESS CODE is a credential, and the sign-on form submits it
       # as `username` — a name no default filter matches, so it was written to
       # the log in cleartext on every sign-on attempt and rode along in every

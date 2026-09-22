@@ -2,225 +2,180 @@
 
 module Lakeraven
   module EHR
-    # SMART Backend Services OAuth token endpoint
-    # ONC 170.315(g)(10)(vi) - Backend services authorization
+    # SMART Backend Services OAuth token endpoint.
+    # ONC 170.315(g)(10)(vi); partner source-system profile section 2.
     #
-    # RFC 7523 client authentication: the client proves itself with a JWT it
-    # SIGNED. Decoding the payload is not authentication — before #496 this
-    # endpoint split the assertion on ".", read `iss` out of the payload, and
-    # issued whatever scope the caller asked for. Anyone who could reach it
-    # could mint any scope in the system, which made every scope-based control
-    # elsewhere decorative. Each guard below exists because its absence was
-    # exploitable.
+    # client_credentials grant, client authenticated by a JWT assertion
+    # (private_key_jwt) signed with a key from the JWKS the client publishes
+    # at its registered jwks_uri. Issued tokens are short-lived and carry
+    # only system/ scopes within the client's registration; the client's
+    # organization binding (organization_id) scopes all FHIR reads made with
+    # the token to that organization's patients.
     class BackendServicesController < ActionController::API
-      # Signature algorithms accepted. "none" is deliberately absent: an
-      # unsigned assertion is an unauthenticated one.
-      #
-      # Defence in depth, not the load-bearing control — verified by mutation:
-      # adding "none" here alone changes no test outcome, because an alg-none
-      # assertion carries no valid RSA signature and is refused by
-      # #signature_valid? regardless. The allowlist exists so the refusal is
-      # explicit and near the top, rather than incidental to crypto.
-      PERMITTED_ALGORITHMS = %w[RS256 RS384 RS512].freeze
-
-      # A jti may not be reused inside its own lifetime. Held for longer than
-      # the maximum assertion lifetime so a replay cannot outlive the record.
-      JTI_RETENTION = 10.minutes
-
-      # RFC 7523 caps assertion lifetime; a long-lived assertion is a bearer
-      # credential in all but name.
+      CLIENT_ASSERTION_TYPE = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
+      ALLOWED_ALGORITHMS = %w[RS384 RS256 ES384].freeze
+      TOKEN_LIFETIME = 5.minutes
+      # SMART Backend Services: assertion exp SHALL be no more than five
+      # minutes in the future — a hard cap, with no skew allowance on top
+      # (an earlier +30s allowance exceeded the spec ceiling).
       MAX_ASSERTION_LIFETIME = 5.minutes
+      # Every claim the verifier relies on must be present; JWT.decode
+      # otherwise treats a MISSING exp as "never expires" (nil.to_i == 0
+      # passes the max-lifetime check), yielding a replayable assertion.
+      REQUIRED_CLAIMS = %w[iss sub aud exp jti].freeze
 
       def token
         unless params[:grant_type] == "client_credentials"
-          render json: { error: "unsupported_grant_type" }, status: :bad_request
-          return
+          return render_token_error("unsupported_grant_type", status: :bad_request)
         end
 
-        if params[:client_assertion].blank?
-          render json: { error: "invalid_client", error_description: "client_assertion is required" },
-                 status: :bad_request
-          return
+        unless params[:client_assertion_type] == CLIENT_ASSERTION_TYPE
+          return render_token_error("invalid_request",
+            description: "client_assertion_type must be #{CLIENT_ASSERTION_TYPE}",
+            status: :bad_request)
         end
 
-        result = authenticate_assertion(params[:client_assertion])
-        unless result[:app]
-          # The specific reason goes to the audit log, never to the caller. A
-          # per-reason description told an unauthenticated caller whether a
-          # client id existed and whether it had a key registered — a registry
-          # oracle available before signature verification.
-          audit_token_event(outcome: "refused", reason: result[:reason])
-          render json: { error: "invalid_client",
-                         error_description: "Client authentication failed" },
-                 status: :unauthorized
-          return
+        assertion = params[:client_assertion]
+        unless assertion.present?
+          return render_token_error("invalid_client",
+            description: "client_assertion is required", status: :bad_request)
         end
 
-        app = result[:app]
-        granted = granted_scopes(app, params[:scope])
+        app = client_for(assertion)
+        unless app
+          return render_token_error("invalid_client",
+            description: "Unknown client", status: :unauthorized)
+        end
 
-        if granted.empty?
-          audit_token_event(outcome: "refused", reason: "no_permitted_scope", application: app)
-          render json: { error: "invalid_scope",
-                         error_description: "No requested scope is registered to this client" },
-                 status: :bad_request
-          return
+        claims = verify_assertion!(assertion, app)
+        return unless claims
+
+        # The organization binding is what scopes every FHIR read a system/
+        # token makes; an unbound credential would read every organization's
+        # patients (fail-open), so it must never be minted at all.
+        if app.organization_id.blank?
+          return render_token_error("invalid_client",
+            description: "Client is not bound to an organization", status: :unauthorized)
+        end
+
+        scopes = granted_scopes(app)
+        if scopes.empty?
+          return render_token_error("invalid_scope",
+            description: "No requested scope is within the client's registration",
+            status: :bad_request)
         end
 
         access_token = Doorkeeper::AccessToken.create!(
           application: app,
-          scopes: granted.join(" "),
-          expires_in: 3600
+          scopes: scopes.join(" "),
+          expires_in: TOKEN_LIFETIME.to_i
         )
-        audit_token_event(outcome: "issued", application: app, scopes: granted)
 
         render json: {
           access_token: access_token.plaintext_token || access_token.token,
           token_type: "bearer",
-          expires_in: 3600,
+          expires_in: TOKEN_LIFETIME.to_i,
           scope: access_token.scopes.to_s
         }, status: :ok
       end
 
       private
 
-      # Returns {app:} on success, or {reason:, description:} on refusal.
-      # Fails closed: every path that is not a verified assertion from a
-      # registered client with a registered key returns no app.
-      def authenticate_assertion(assertion)
-        segments = assertion.split(".", -1)
-        unless segments.length == 3
-          return refusal("malformed", "Assertion is not a three-segment JWT")
-        end
-
-        header = decode_segment(segments[0])
-        payload = decode_segment(segments[1])
-        return refusal("undecodable", "Assertion header or payload is not valid JSON") if header.nil? || payload.nil?
-
-        alg = header["alg"]
-        unless PERMITTED_ALGORITHMS.include?(alg)
-          return refusal("unpermitted_alg", "Unsupported assertion algorithm")
-        end
-
-        # iss identifies the client; sub must be the same client (RFC 7523 §3).
-        # Checked before any lookup so a mismatched pair never selects an app.
-        issuer = payload["iss"].to_s
-        return refusal("iss_sub_mismatch", "iss and sub must be the client id") if issuer.empty? || payload["sub"].to_s != issuer
-
-        unless audience_valid?(payload["aud"])
-          return refusal("bad_audience", "aud must be this token endpoint")
-        end
-
-        expiry = payload["exp"]
-        return refusal("missing_exp", "exp is required") unless expiry.is_a?(Integer)
-
-        now = Time.current.to_i
-        return refusal("expired", "Assertion has expired") if expiry <= now
-        return refusal("lifetime_too_long", "Assertion lifetime exceeds the permitted maximum") if expiry - now > MAX_ASSERTION_LIFETIME.to_i
-
-        jti = payload["jti"].to_s
-        return refusal("missing_jti", "jti is required") if jti.empty?
-
-        app = Doorkeeper::Application.find_by(uid: issuer)
-        return refusal("unknown_client", "Unknown client") unless app
-
-        public_key = registered_key(app)
-        return refusal("no_registered_key", "Client has no registered public key") unless public_key
-
-        unless signature_valid?(public_key, alg, segments)
-          return refusal("bad_signature", "Assertion signature does not verify")
-        end
-
-        # Replay is checked LAST, so a rejected assertion cannot burn a jti.
-        # Probing is prevented by the uniform refusal description above, not by
-        # this ordering.
-        return refusal("replayed_jti", "Assertion jti has already been used") unless claim_jti(issuer, jti, expiry)
-
-        { app: app }
-      end
-
-      def refusal(reason, description)
-        { app: nil, reason: reason, description: description }
-      end
-
-      def decode_segment(segment)
-        JSON.parse(Base64.urlsafe_decode64(pad_base64(segment)))
-      rescue ArgumentError, JSON::ParserError
+      # Locate the client from the assertion's (unverified) iss claim; the
+      # signature is then verified against that client's published JWKS.
+      def client_for(assertion)
+        unverified, = JWT.decode(assertion, nil, false)
+        Doorkeeper::Application.find_by(uid: unverified["iss"])
+      rescue JWT::DecodeError
         nil
       end
 
-      def pad_base64(segment)
-        segment + ("=" * ((4 - (segment.length % 4)) % 4))
-      end
-
-      def audience_valid?(aud)
-        Array(aud).map(&:to_s).include?(token_endpoint_url)
-      end
-
-      def token_endpoint_url
-        url_for(action: :token, only_path: false)
-      end
-
-      def registered_key(app)
-        pem = app.respond_to?(:public_key) ? app.public_key : nil
-        return nil if pem.blank?
-
-        OpenSSL::PKey::RSA.new(pem)
-      rescue OpenSSL::PKey::RSAError
-        nil
-      end
-
-      def signature_valid?(public_key, alg, segments)
-        digest = case alg
-        when "RS256" then OpenSSL::Digest.new("SHA256")
-        when "RS384" then OpenSSL::Digest.new("SHA384")
-        when "RS512" then OpenSSL::Digest.new("SHA512")
+      # Verifies signature (against the client's published JWKS), aud, exp,
+      # iss/sub consistency, and jti uniqueness. Renders the token error and
+      # returns nil on any failure.
+      def verify_assertion!(assertion, app)
+        jwks = ClientJwks.fetch(app.jwks_uri)
+        unless jwks
+          return render_invalid_client("Client has no retrievable registered JWKS")
         end
-        signature = Base64.urlsafe_decode64(pad_base64(segments[2]))
-        public_key.verify(digest, signature, "#{segments[0]}.#{segments[1]}")
-      rescue ArgumentError, OpenSSL::PKey::PKeyError
-        false
-      end
 
-      # True when this jti is newly claimed. Backed by a unique index rather
-      # than a cache: a replay guard that disables itself when no cache is
-      # configured fails open, which is the class of defect this endpoint is
-      # being fixed for.
-      def claim_jti(issuer, jti, expiry)
-        BackendAssertionJti.purge_expired
-        # Held past the assertion's own exp: a row that expires exactly when the
-        # assertion does leaves no margin for clock skew between the claim and
-        # the next presentation.
-        BackendAssertionJti.claim(
-          issuer: issuer, jti: jti, expires_at: Time.zone.at(expiry) + JTI_RETENTION
+        claims, = JWT.decode(
+          assertion, nil, true,
+          algorithms: ALLOWED_ALGORITHMS,
+          jwks: JWT::JWK::Set.new(jwks),
+          verify_aud: true,
+          aud: token_endpoint_url,
+          required_claims: REQUIRED_CLAIMS
         )
+
+        unless claims["iss"] == app.uid && claims["sub"] == app.uid
+          return render_invalid_client("Assertion iss/sub must match the client id")
+        end
+
+        exp = claims["exp"].to_i
+        if exp > MAX_ASSERTION_LIFETIME.from_now.to_i
+          return render_invalid_client("Assertion exp exceeds the five-minute maximum")
+        end
+        if claims["iat"].present? && exp - claims["iat"].to_i > MAX_ASSERTION_LIFETIME.to_i
+          return render_invalid_client("Assertion lifetime exceeds the five-minute maximum")
+        end
+
+        jti = claims["jti"].to_s
+        return render_invalid_client("Assertion jti is required") if jti.blank?
+        if AssertionReplayGuard.replayed?(app.uid, jti, exp)
+          return render_invalid_client("Assertion has already been used")
+        end
+
+        claims
+      rescue JWT::ExpiredSignature
+        render_invalid_client("Assertion has expired")
+      rescue JWT::InvalidAudError
+        render_invalid_client("Assertion audience does not match the token endpoint")
+      rescue JWT::DecodeError
+        render_invalid_client("Invalid JWT assertion")
       end
 
-      # Every issuance and every refusal is recorded. A refusal is the event
-      # most worth keeping: it is what probing looks like.
-      def audit_token_event(outcome:, reason: nil, application: nil, scopes: nil)
-        AuditEvent.create!(
-          action: "backend_services_token",
-          outcome: outcome,
-          user_identifier: application&.uid || "unknown",
-          resource_type: "OAuthToken",
-          resource_id: reason || scopes&.join(" "),
-          occurred_at: Time.current
-        )
-      rescue StandardError => e
-        Rails.logger.warn("[backend_services] audit write failed: #{e.class}")
-      end
-
-      # Only scopes the application is registered for. A requested scope that
-      # was never registered is dropped, never granted.
-      def granted_scopes(app, requested)
+      # Grant the intersection of the requested scopes and the client's
+      # registered scopes, restricted to system/ scopes. A registered
+      # wildcard (system/*.read) covers per-resource requests
+      # (system/Patient.read); the reverse is not true.
+      def granted_scopes(app)
         registered = app.scopes.to_s.split
-        return [] if registered.empty?
+        requested = (params[:scope].presence || app.scopes.to_s).split
 
-        asked = requested.to_s.split
-        return registered if asked.empty?
+        requested.uniq.select do |scope|
+          scope.start_with?("system/") && scope_registered?(scope, registered)
+        end
+      end
 
-        asked & registered
+      def scope_registered?(scope, registered)
+        return true if registered.include?(scope) || registered.include?("system/*.*")
+
+        if (match = scope.match(%r{\Asystem/[^.]+\.(read|write)\z}))
+          registered.include?("system/*.#{match[1]}")
+        else
+          false
+        end
+      end
+
+      # The expected assertion audience. When the deployment configures its
+      # published token endpoint URL (the value .well-known/smart-configuration
+      # advertises), that is the ONLY accepted audience — never the incoming
+      # request's Host, which a reverse proxy rewrites and a cross-host replay
+      # controls. The request-derived value is only a fallback for
+      # unconfigured (dev/test) deployments.
+      def token_endpoint_url
+        Lakeraven::EHR.configuration.token_endpoint_url.presence ||
+          request.base_url + request.path
+      end
+
+      def render_invalid_client(description)
+        render_token_error("invalid_client", description: description, status: :unauthorized)
+        nil
+      end
+
+      def render_token_error(error, description: nil, status:)
+        render json: { error: error, error_description: description }.compact, status: status
       end
     end
   end

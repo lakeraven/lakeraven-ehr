@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_23_000001) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_24_000000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -27,8 +27,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_000001) do
     t.string "reviewed_by"
     t.string "status", default: "pending", null: false
     t.datetime "updated_at", null: false
-    t.index [ "patient_dfn" ], name: "index_lakeraven_ehr_amendment_requests_on_patient_dfn"
-    t.index [ "status" ], name: "index_lakeraven_ehr_amendment_requests_on_status"
+    t.index ["patient_dfn"], name: "index_lakeraven_ehr_amendment_requests_on_patient_dfn"
+    t.index ["status"], name: "index_lakeraven_ehr_amendment_requests_on_status"
   end
 
   create_table "lakeraven_ehr_audit_events", force: :cascade do |t|
@@ -47,9 +47,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_000001) do
     t.text "outcome_desc"
     t.string "tenant_identifier"
     t.datetime "updated_at", null: false
-    t.index [ "created_at" ], name: "index_lakeraven_ehr_audit_events_on_created_at"
-    t.index [ "entity_type" ], name: "index_lakeraven_ehr_audit_events_on_entity_type"
-    t.index [ "tenant_identifier" ], name: "index_lakeraven_ehr_audit_events_on_tenant_identifier"
+    t.index ["created_at"], name: "index_lakeraven_ehr_audit_events_on_created_at"
+    t.index ["entity_type"], name: "index_lakeraven_ehr_audit_events_on_entity_type"
+    t.index ["tenant_identifier"], name: "index_lakeraven_ehr_audit_events_on_tenant_identifier"
+  end
+
+  create_table "lakeraven_ehr_backend_assertion_jtis", force: :cascade do |t|
+    t.string "client_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "expires_at", null: false
+    t.string "jti", null: false
+    t.index [ "client_id", "jti" ], name: "idx_backend_assertion_jti_uniqueness", unique: true
+    t.index [ "expires_at" ], name: "index_lakeraven_ehr_backend_assertion_jtis_on_expires_at"
   end
 
   create_table "lakeraven_ehr_disclosures", force: :cascade do |t|
@@ -66,8 +75,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_000001) do
     t.string "recipient_npi"
     t.string "recipient_type"
     t.datetime "updated_at", null: false
-    t.index [ "disclosed_at" ], name: "index_lakeraven_ehr_disclosures_on_disclosed_at"
-    t.index [ "patient_dfn" ], name: "index_lakeraven_ehr_disclosures_on_patient_dfn"
+    t.index ["disclosed_at"], name: "index_lakeraven_ehr_disclosures_on_disclosed_at"
+    t.index ["patient_dfn"], name: "index_lakeraven_ehr_disclosures_on_patient_dfn"
   end
 
   create_table "lakeraven_ehr_emergency_accesses", force: :cascade do |t|
@@ -85,9 +94,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_000001) do
     t.string "reviewed_by"
     t.string "reviewed_by_name"
     t.datetime "updated_at", null: false
-    t.index [ "accessed_by" ], name: "index_lakeraven_ehr_emergency_accesses_on_accessed_by"
-    t.index [ "expires_at" ], name: "index_lakeraven_ehr_emergency_accesses_on_expires_at"
-    t.index [ "patient_dfn" ], name: "index_lakeraven_ehr_emergency_accesses_on_patient_dfn"
+    t.index ["accessed_by"], name: "index_lakeraven_ehr_emergency_accesses_on_accessed_by"
+    t.index ["expires_at"], name: "index_lakeraven_ehr_emergency_accesses_on_expires_at"
+    t.index ["patient_dfn"], name: "index_lakeraven_ehr_emergency_accesses_on_patient_dfn"
   end
 
   create_table "lakeraven_ehr_launch_contexts", force: :cascade do |t|
@@ -99,7 +108,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_000001) do
     t.string "oauth_application_uid", null: false
     t.string "patient_dfn"
     t.datetime "updated_at", null: false
-    t.index [ "launch_token" ], name: "index_lakeraven_ehr_launch_contexts_on_launch_token", unique: true
+    t.index ["launch_token"], name: "index_lakeraven_ehr_launch_contexts_on_launch_token", unique: true
   end
 
   create_table "lakeraven_ehr_patient_supplements", force: :cascade do |t|
@@ -108,7 +117,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_000001) do
     t.integer "patient_dfn", null: false
     t.string "sexual_orientation"
     t.datetime "updated_at", null: false
-    t.index [ "patient_dfn" ], name: "index_lakeraven_ehr_patient_supplements_on_patient_dfn", unique: true
+    t.index ["patient_dfn"], name: "index_lakeraven_ehr_patient_supplements_on_patient_dfn", unique: true
   end
 
   create_table "lakeraven_ehr_reconciliation_items", force: :cascade do |t|
@@ -128,9 +137,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_000001) do
     t.datetime "updated_at", null: false
     t.boolean "write_back_completed", default: false
     t.string "write_back_error"
-    t.index [ "decision" ], name: "index_lakeraven_ehr_reconciliation_items_on_decision"
-    t.index [ "reconciliation_session_id" ], name: "idx_on_reconciliation_session_id_5031b9cf3c"
-    t.index [ "resource_type" ], name: "index_lakeraven_ehr_reconciliation_items_on_resource_type"
+    t.index ["decision"], name: "index_lakeraven_ehr_reconciliation_items_on_decision"
+    t.index ["reconciliation_session_id"], name: "idx_on_reconciliation_session_id_5031b9cf3c"
+    t.index ["resource_type"], name: "index_lakeraven_ehr_reconciliation_items_on_resource_type"
   end
 
   create_table "lakeraven_ehr_reconciliation_sessions", force: :cascade do |t|
@@ -145,9 +154,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_000001) do
     t.datetime "started_at"
     t.string "status", default: "pending", null: false
     t.datetime "updated_at", null: false
-    t.index [ "clinician_duz" ], name: "index_lakeraven_ehr_reconciliation_sessions_on_clinician_duz"
-    t.index [ "patient_dfn" ], name: "index_lakeraven_ehr_reconciliation_sessions_on_patient_dfn"
-    t.index [ "status" ], name: "index_lakeraven_ehr_reconciliation_sessions_on_status"
+    t.index ["clinician_duz"], name: "index_lakeraven_ehr_reconciliation_sessions_on_clinician_duz"
+    t.index ["patient_dfn"], name: "index_lakeraven_ehr_reconciliation_sessions_on_patient_dfn"
+    t.index ["status"], name: "index_lakeraven_ehr_reconciliation_sessions_on_status"
   end
 
   create_table "lakeraven_ehr_screening_responses", force: :cascade do |t|
@@ -166,13 +175,13 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_000001) do
     t.string "submission_token"
     t.integer "total_score", null: false
     t.datetime "updated_at", null: false
-    t.index [ "submission_token" ], name: "index_lakeraven_ehr_screenings_on_submission_token", unique: true
-    t.index [ "encounter_ien" ], name: "index_lakeraven_ehr_screening_responses_on_encounter_ien"
-    t.index [ "patient_dfn", "instrument_key", "effective_at" ], name: "index_lakeraven_ehr_screenings_on_patient_instrument_time"
-    t.check_constraint "NOT (safety_flagged AND source = 'clinician') OR safety_acknowledged_by IS NOT NULL", name: "screening_clinician_flag_requires_acknowledger"
-    t.check_constraint "source <> 'clinician' OR administered_by IS NOT NULL", name: "screening_clinician_requires_administrator"
+    t.index ["encounter_ien"], name: "index_lakeraven_ehr_screening_responses_on_encounter_ien"
+    t.index ["patient_dfn", "instrument_key", "effective_at"], name: "index_lakeraven_ehr_screenings_on_patient_instrument_time"
+    t.index ["submission_token"], name: "index_lakeraven_ehr_screenings_on_submission_token", unique: true
+    t.check_constraint "NOT (safety_flagged AND source::text = 'clinician'::text) OR safety_acknowledged_by IS NOT NULL", name: "screening_clinician_flag_requires_acknowledger"
     t.check_constraint "NOT safety_flagged OR safety_acknowledged_at IS NOT NULL", name: "screening_flagged_requires_acknowledgement"
-    t.check_constraint "safety_flagged OR NOT (instrument_key = 'phq-9' AND answers ? '44260-8' AND COALESCE(answers ->> '44260-8', '') !~ '^\\s*[+-]?0*\\s*$')", name: "screening_disclosure_requires_flag"
+    t.check_constraint "safety_flagged OR NOT (instrument_key::text = 'phq-9'::text AND answers ? '44260-8'::text AND COALESCE(answers ->> '44260-8'::text, ''::text) !~ '^\\s*[+-]?0*\\s*$'::text)", name: "screening_disclosure_requires_flag"
+    t.check_constraint "source::text <> 'clinician'::text OR administered_by IS NOT NULL", name: "screening_clinician_requires_administrator"
   end
 
   create_table "oauth_access_grants", force: :cascade do |t|
@@ -184,9 +193,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_000001) do
     t.datetime "revoked_at"
     t.string "scopes", default: "", null: false
     t.string "token", null: false
-    t.index [ "application_id" ], name: "index_oauth_access_grants_on_application_id"
-    t.index [ "resource_owner_id" ], name: "index_oauth_access_grants_on_resource_owner_id"
-    t.index [ "token" ], name: "index_oauth_access_grants_on_token", unique: true
+    t.index ["application_id"], name: "index_oauth_access_grants_on_application_id"
+    t.index ["resource_owner_id"], name: "index_oauth_access_grants_on_resource_owner_id"
+    t.index ["token"], name: "index_oauth_access_grants_on_token", unique: true
   end
 
   create_table "oauth_access_tokens", force: :cascade do |t|
@@ -200,11 +209,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_000001) do
     t.datetime "revoked_at"
     t.string "scopes"
     t.string "token", null: false
-    t.index [ "application_id" ], name: "index_oauth_access_tokens_on_application_id"
-    t.index [ "browser_session" ], name: "index_oauth_access_tokens_on_browser_session"
-    t.index [ "refresh_token" ], name: "index_oauth_access_tokens_on_refresh_token", unique: true
-    t.index [ "resource_owner_id" ], name: "index_oauth_access_tokens_on_resource_owner_id"
-    t.index [ "token" ], name: "index_oauth_access_tokens_on_token", unique: true
+    t.index ["application_id"], name: "index_oauth_access_tokens_on_application_id"
+    t.index ["browser_session"], name: "index_oauth_access_tokens_on_browser_session"
+    t.index ["refresh_token"], name: "index_oauth_access_tokens_on_refresh_token", unique: true
+    t.index ["resource_owner_id"], name: "index_oauth_access_tokens_on_resource_owner_id"
+    t.index ["token"], name: "index_oauth_access_tokens_on_token", unique: true
   end
 
   create_table "lakeraven_ehr_backend_assertion_jtis", force: :cascade do |t|
@@ -220,14 +229,16 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_000001) do
   create_table "oauth_applications", force: :cascade do |t|
     t.boolean "confidential", default: true, null: false
     t.datetime "created_at", null: false
+    t.string "jwks_uri"
     t.string "name", null: false
+    t.string "organization_id"
     t.text "redirect_uri", null: false
-    t.text "public_key"
     t.string "scopes", default: "", null: false
     t.string "secret", null: false
     t.string "uid", null: false
     t.datetime "updated_at", null: false
-    t.index [ "uid" ], name: "index_oauth_applications_on_uid", unique: true
+    t.index ["organization_id"], name: "index_oauth_applications_on_organization_id"
+    t.index ["uid"], name: "index_oauth_applications_on_uid", unique: true
   end
 
   add_foreign_key "lakeraven_ehr_reconciliation_items", "lakeraven_ehr_reconciliation_sessions", column: "reconciliation_session_id"
