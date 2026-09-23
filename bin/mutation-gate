@@ -1,0 +1,192 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Mutation gate for authorization surfaces.
+#
+# Green tests mean the code runs. They do not mean the code is correct, and on a
+# privilege surface they do not even mean the tests would notice if it were not:
+# a scenario asserting a few positives cannot tell an intended grant from a
+# widened one. This gate answers the only question that settles it — inject a
+# defect, does anything go red?
+#
+# A SURVIVING mutant is a privilege change the suite would ship silently.
+#
+# Usage:
+#   bin/mutation-gate                      # every target in test/mutation/targets.yml
+#   bin/mutation-gate SessionScopePolicy   # one target
+#   bin/mutation-gate --list               # enumerate mutants without running them
+#
+# Exit 0 when every mutant is killed, 1 when any survives or the baseline is
+# not green. Source files are restored on every path, including interrupt.
+
+require "yaml"
+require "open3"
+require "digest"
+
+ROOT = File.expand_path("..", __dir__)
+CONFIG = File.join(ROOT, "test/mutation/targets.yml")
+
+Mutant = Struct.new(:id, :label, :why, :apply, keyword_init: true)
+
+class Target
+  attr_reader :name, :file, :verify, :probe
+
+  def initialize(spec)
+    @name = spec.fetch("name")
+    @file = File.join(ROOT, spec.fetch("file"))
+    @verify = spec.fetch("verify")
+    @probe = spec["behavior_probe"]
+    @spec = spec
+    raise "target #{@name}: #{@file} does not exist" unless File.exist?(@file)
+  end
+
+  def source = @source ||= File.read(@file)
+
+  def mutants = declared + generated
+
+  private
+
+  def declared
+    Array(@spec["declared"]).map do |m|
+      find = m.fetch("find")
+      unless source.include?(find)
+        raise "target #{@name}: declared mutant #{m['id']} anchor not found — " \
+              "the code moved and this mutant is no longer testing anything: #{find.inspect}"
+      end
+      Mutant.new(
+        id: m.fetch("id"), label: m.fetch("id"), why: m.fetch("why"),
+        apply: ->(src) { replace_once(src, find, m.fetch("replace")) }
+      )
+    end
+  end
+
+  # Derived from the file's own structure, so a key added next month is covered
+  # without touching the config.
+  def generated
+    gen = @spec["generated"] or return []
+    pattern = Regexp.new(gen.fetch("table_row_pattern"))
+    rows = source.lines.grep(pattern)
+    raise "target #{@name}: table_row_pattern matched no rows" if rows.empty?
+
+    rows.flat_map do |row|
+      md = row.match(pattern)
+      gen.fetch("operators").map do |op|
+        replacement = op.fetch("replace").gsub(/\{\{(\w+)\}\}/) { md[Regexp.last_match(1).to_sym].to_s }
+        Mutant.new(
+          id: "#{op.fetch('id')}:#{md[:key]}",
+          label: "#{op.fetch('id')} on #{md[:key]}",
+          why: op.fetch("why").gsub("%{key}", md[:key]),
+          apply: ->(src) { replace_once(src, row.chomp, replacement) }
+        )
+      end
+    end
+  end
+
+  def replace_once(src, find, replace)
+    count = src.scan(Regexp.new(Regexp.escape(find))).size
+    raise "anchor appears #{count} times, expected exactly 1: #{find.inspect}" unless count == 1
+
+    src.sub(find, replace)
+  end
+end
+
+# A mutant whose behaviour fingerprint matches the baseline cannot be killed by
+# any test, because it does not change what the code does. Reporting those as
+# survivors would be crying wolf, and a gate nobody believes is worse than none.
+def fingerprint(target)
+  return nil unless target.probe
+
+  out, status = Open3.capture2e(target.probe, chdir: ROOT)
+  abort "  behaviour probe failed:\n#{out}" unless status.success?
+  out.strip
+end
+
+def run_suite(target)
+  out, = Open3.capture2e(target.verify, chdir: ROOT)
+  summary = out[/^\d+ scenarios \([^)]*\)/] || out[/^\d+ runs,.*$/]
+  # Cucumber's exit status is unreliable here: features/support/env.rb pulls in
+  # minitest, whose at_exit handler runs afterwards and reports on zero tests.
+  # Read the summary line instead, and treat an unreadable one as a failure
+  # rather than a pass — an unparseable run must never count as a killed mutant.
+  return [ :error, out.lines.last(3).join.strip ] if summary.nil?
+
+  [ summary.match?(/failed|error/) ? :red : :green, summary ]
+end
+
+def with_mutation(target, mutant)
+  original = File.read(target.file)
+  checksum = Digest::SHA256.hexdigest(original)
+  File.write(target.file, mutant.apply.call(original))
+  yield
+ensure
+  File.write(target.file, original)
+  unless Digest::SHA256.hexdigest(File.read(target.file)) == checksum
+    abort "FATAL: could not restore #{target.file} — restore it from git before continuing"
+  end
+end
+
+targets = YAML.load_file(CONFIG).fetch("targets").map { |s| Target.new(s) }
+if (only = ARGV.find { |a| !a.start_with?("--") })
+  targets = targets.select { |t| t.name == only }
+  abort "no target named #{only}" if targets.empty?
+end
+
+if ARGV.include?("--list")
+  targets.each do |t|
+    puts "#{t.name} (#{t.mutants.size} mutants)"
+    t.mutants.each { |m| puts "  #{m.label.ljust(44)} #{m.why}" }
+  end
+  exit 0
+end
+
+survivors = []
+equivalents = []
+targets.each do |target|
+  puts "\n\e[1m#{target.name}\e[0m — #{target.file.sub("#{ROOT}/", '')}"
+
+  state, summary = run_suite(target)
+  unless state == :green
+    abort "  baseline is not green (#{summary}). Mutation results are meaningless until it is."
+  end
+  puts "  baseline: #{summary}"
+
+  baseline_behaviour = fingerprint(target)
+  mutants = target.mutants
+  puts "  #{mutants.size} mutants\n\n"
+
+  mutants.each do |mutant|
+    behaviour, state, summary = with_mutation(target, mutant) do
+      b = fingerprint(target)
+      # Skip the suite entirely for an equivalent mutant — it is the same code.
+      b == baseline_behaviour ? [ b, :equivalent, "no behaviour change" ] : [ b, *run_suite(target) ]
+    end
+
+    case state
+    when :equivalent
+      equivalents << [ target, mutant ]
+      puts "  \e[90mequiv.  #{mutant.label.ljust(44)} #{summary}\e[0m"
+    when :red
+      puts "  \e[32m killed \e[0m  #{mutant.label.ljust(44)} #{summary}"
+    else
+      survivors << [ target, mutant, summary ]
+      puts "  \e[31mSURVIVED\e[0m  #{mutant.label.ljust(44)} #{summary}"
+    end
+    _ = behaviour
+  end
+end
+
+puts
+unless equivalents.empty?
+  puts "#{equivalents.size} equivalent mutant(s) skipped — the edit cannot change behaviour:"
+  equivalents.each { |t, m| puts "  \e[90m#{t.name} / #{m.label}\e[0m" }
+  puts
+end
+
+if survivors.empty?
+  puts "\e[32mAll killable mutants killed.\e[0m Every modelled privilege change fails a scenario."
+  exit 0
+end
+
+puts "\e[31m#{survivors.size} mutant(s) SURVIVED.\e[0m Each is a privilege change the suite would ship silently:\n\n"
+survivors.each { |t, m, _| puts "  #{t.name} / #{m.label}\n    #{m.why}\n" }
+exit 1

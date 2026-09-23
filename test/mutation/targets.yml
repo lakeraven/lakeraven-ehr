@@ -1,0 +1,66 @@
+# Surfaces guarded by the mutation gate.
+#
+# A mutant that SURVIVES is a behaviour nothing pins: the suite stayed green
+# while the code did something else. On an authorization surface that is not a
+# coverage statistic, it is a privilege change no test would notice.
+#
+# Two kinds of mutant per target:
+#
+#   generated — derived from the code's own structure, so keys added later are
+#               covered without editing this file. This is what makes
+#               "7 of 13 keys had no scenario" impossible to reintroduce.
+#   declared  — cross-cutting defects that no per-row operator produces
+#               (scope prefix, write vocabulary, the deny-by-default guard).
+#
+# Each declared mutant needs `why`: the privilege change it represents. A mutant
+# without a stated consequence is noise, and the gate is only worth running if
+# every line in its report means something.
+
+targets:
+  - name: SessionScopePolicy
+    file: app/services/lakeraven/ehr/session_scope_policy.rb
+    verify: bundle exec cucumber features/session_scope_policy.feature
+
+    # Prints a deterministic fingerprint of what the surface DOES. A mutant whose
+    # fingerprint matches the baseline is equivalent — it cannot be killed by any
+    # test, so it is skipped rather than reported as a survivor.
+    behavior_probe: bundle exec ruby test/mutation/probes/session_scope_policy_probe.rb
+
+    # Applied to every `key: { read: ..., write: ... }` row found in the file.
+    generated:
+      table_row_pattern: '^(?<indent>\s*)(?<key>\w+): \{ read: (?<read>.+?), write: (?<write>.+?) \}(?<comma>,?)$'
+      operators:
+        - id: widen_read
+          replace: '{{indent}}{{key}}: { read: {{read}} + %w[ZzMutantResource], write: {{write}} }{{comma}}'
+          why: "%{key} reads a resource type its RPMS workflow does not own"
+        - id: widen_write
+          replace: '{{indent}}{{key}}: { read: {{read}}, write: {{write}} + %w[ZzMutantResource] }{{comma}}'
+          why: "%{key} writes a resource type its RPMS workflow does not own"
+        - id: escalate_write_to_read
+          replace: '{{indent}}{{key}}: { read: {{read}}, write: {{read}} }{{comma}}'
+          why: "%{key} may write everything it can read"
+        - id: empty_read
+          replace: '{{indent}}{{key}}: { read: [], write: {{write}} }{{comma}}'
+          why: "%{key} silently loses its read surface"
+
+    declared:
+      - id: patient_compartment_prefix
+        find: '"user/#{t}.read"'
+        replace: '"patient/#{t}.read"'
+        why: "scopes minted in a patient compartment collide with resource_owner_id's DUZ meaning"
+      - id: write_minted_as_c
+        find: '"user/#{t}.write"'
+        replace: '"user/#{t}.c"'
+        why: "writes minted in a form the deny-writes assertions do not recognise (SmartAuthentication#can_write? honours it)"
+      - id: wildcard_resource
+        find: 'cprs_gui_chart: { read: CHART_READ_TYPES, write: [] }'
+        replace: 'cprs_gui_chart: { read: %w[*], write: [] }'
+        why: "the chart key grants every resource type via a wildcard"
+      - id: deny_by_default_removed
+        find: 'Array(security_keys).filter_map { |k| KEY_SCOPES[k.to_sym] }'
+        replace: 'Array(security_keys).map { |k| KEY_SCOPES[k.to_sym] || { read: %w[Patient], write: %w[Patient] } }'
+        why: "an unmodelled key confers privilege instead of nothing"
+      - id: chart_surface_gutted
+        find: 'Patient Practitioner Organization Location Encounter'
+        replace: 'Patient Encounter'
+        why: "most of the chart read surface disappears with no failing test"
