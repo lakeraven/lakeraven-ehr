@@ -70,7 +70,7 @@ lives in the `corvid` RCM engine, not here, so an engine-scoped audit misses it.
 **Status today: nothing transmits.** `Corvid::Adapters::Base#submit_claim` raises
 `NotImplementedError` (`lib/corvid/adapters/base.rb:230`), as do `check_claim_status` and
 the remittance fetch. The clearinghouse integration is a planned seam (corvid#561 claims
-end-to-end, Sprint 4; Stedi partner work in corvid#567), **not built code**.
+end-to-end, Sprint 4; clearinghouse-partner work in corvid#567), **not built code**.
 
 **Why that matters:** the Part 2 posture for claims is still a *design decision*, not a
 retrofit. Decide before the seam is written whether an SUD diagnosis may appear on an
