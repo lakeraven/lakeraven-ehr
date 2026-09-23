@@ -1,8 +1,17 @@
 # ADR 0006: 42 CFR Part 2 posture — December is MH-only; segmentation is layered in the engine, never in RPMS
 
-**Status:** Accepted — **Branch B (MH/BH only, not a Part 2 program) for December.** See "The determination (answered)".
+**Status:** Proposed — a Branch B posture is **intended** for December, and is **not
+yet established**. See "The determination (intended, not established)".
 
-**Date:** 2026-09-15 · **Amended:** 2026-09-23 (determination answered; renumbered)
+> **Blocked on facts, not on engineering.** § 2.11 is a fact-specific test — how
+> the program operates and how it describes its services. Nobody has checked the
+> December service list, website, community flyer, licence, referral practice, or
+> prescribing against it. Until that is done and written down, this ADR records an
+> intention and its consequences; it does not make a legal finding. An adversarial
+> review on 2026-09-23 blocked the earlier "Accepted" wording for exactly this:
+> it recorded a cost decision as a legal conclusion.
+
+**Date:** 2026-09-15 · **Amended:** 2026-09-23 (intention recorded; renumbered; review findings appended)
 
 > **Renumbered.** This was drafted as ADR 0005; `0005` is taken by *PHI access
 > audit* on `main`.
@@ -234,10 +243,17 @@ What the current rule actually says (all quotes from the current eCFR text):
   we could ever emit; OCAP review of any SUD-touching report path is a
   standing requirement in both branches below.
 
-## The determination (answered)
+## The determination (intended, not established)
 
-**Answer: Branch B — the December clinic is MH/BH only and does not hold itself
-out as providing SUD diagnosis, treatment, or referral for treatment.**
+**Intended posture: Branch B — the December clinic is MH/BH only and does not
+hold itself out as providing SUD diagnosis, treatment, or referral for
+treatment.**
+
+**This is a product intention, not yet a § 2.11 determination.** The test is
+"holds itself out **and** provides", assessed on how the program actually
+operates and describes itself. The facts that decide it have not been gathered.
+Until they are, the intention below governs what gets built; it does not
+establish that the clinic is outside Part 2.
 
 This reverses an earlier reading. The sequence, kept because the reasoning
 matters more than the conclusion:
@@ -277,6 +293,46 @@ shared backend is the expensive cleanup this ADR exists to prevent.
 That is why #522 (enforce the MH-only posture, honor received Part 2 records)
 is the **plan of record and a December blocker**, not an interim measure. A
 de-commit that is intended but not enforced is the failure mode.
+
+### Open review findings (2026-09-23) — must be resolved before Accepted
+
+An adversarial regulatory review blocked the earlier "Accepted" wording. Beyond
+the status downgrade above, these remain open in this document:
+
+1. **The § 2.11 facts are ungathered.** Service list, website, community flyer,
+   licence, referral practice, prescribing. Until checked and written down, no
+   determination.
+2. **The "primary function" framing was wrong for this clinic.** That qualifier
+   is § 2.11 prong (3), which applies *inside a general medical facility*. A BH
+   practice with primary care not opening until April is prong (1), which has no
+   such qualifier. The ER analogy elsewhere in this document is a § 2.12(e)(1)
+   example, not a rule for this clinic.
+3. **HHS declined to exempt IHS/tribal facilities** providing medications for
+   opioid use disorder incident to general medical care. Directly on point and
+   absent here.
+4. **"No legal-proceedings use ever" is wrong.** § 2.12(d)(1) bars use *against
+   the patient* absent the patient's consent or a subpart E court order. Both
+   paths exist; "ever" erases them.
+5. **A current duty is missing from the Branch B column.** The HIPAA notice
+   changes were adopted in the 26 Apr 2024 Privacy Rule (89 FR 33064), not
+   deferred — 45 CFR 164.520 now requires the notice to describe Part 2's
+   stricter limits, compliance date 16 Feb 2026, already passed. A Branch B
+   clinic that receives Part 2 records owes this **now**.
+6. **§ 2.12(a)(1) is conjunctive** and is quoted here as though it were not.
+7. **The § 2.31 element list here is incomplete** — signed date, TPO
+   redisclosure and consequences-of-refusal statements, the HIPAA-redisclosure
+   statement, and the separate consent for SUD counselling notes, which cannot
+   be combined with a single TPO consent. Counselling notes are exactly what a
+   BH therapist produces.
+8. **Stale text.** Sentences in Context, Decision item 2, and Consequences still
+   describe the fork as open. Reversal trigger (a) is narrower than the test
+   this document now adopts, and trigger (b) cites rulemaking that has happened.
+9. **The four below are mostly decisions to decide later.** The one that is
+   missing and gets expensive immediately: a rule, *before the first patient*,
+   for what may be entered on the problem list, in a TIU note, and on a claim.
+
+**These are regulatory readings from an adversarial model review, not legal
+advice, and they are not settled by engineering agreement.** They need counsel.
 
 ### Not foreclosing Branch A — four decisions taken now because they are cheap now
 
