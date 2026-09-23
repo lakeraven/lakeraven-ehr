@@ -1,20 +1,100 @@
-# ADR 0006: 42 CFR Part 2 posture — December is MH-only; segmentation is layered in the engine, never in RPMS
+# ADR 0006: 42 CFR Part 2 posture is a deployment input; segmentation is layered in the engine, never in RPMS
 
-**Status:** Proposed — a Branch B posture is **intended** for December, and is **not
-yet established**. See "The determination (intended, not established)".
+**Status:** Proposed
+**Date:** 2026-09-15 · **Rewritten:** 2026-09-23
 
-> **Blocked on facts, not on engineering.** § 2.11 is a fact-specific test — how
-> the program operates and how it describes its services. Nobody has checked the
-> December service list, website, community flyer, licence, referral practice, or
-> prescribing against it. Until that is done and written down, this ADR records an
-> intention and its consequences; it does not make a legal finding. An adversarial
-> review on 2026-09-23 blocked the earlier "Accepted" wording for exactly this:
-> it recorded a cost decision as a legal conclusion.
+> **Renumbered.** Drafted as ADR 0005; `0005` is *PHI access audit* on `main`.
 
-**Date:** 2026-09-15 · **Amended:** 2026-09-23 (intention recorded; renumbered; review findings appended)
+## What changed in this rewrite, and why
 
-> **Renumbered.** This was drafted as ADR 0005; `0005` is taken by *PHI access
-> audit* on `main`.
+Earlier drafts of this ADR tried to answer, for a specific launch, whether the
+clinic is a 42 CFR Part 2 program — and then recorded the answer here. An
+adversarial regulatory review blocked that, correctly: § 2.11 is a fact-specific
+test about how a program operates and describes its services, and this codebase
+cannot know those facts.
+
+The deeper problem was the coupling, not the reasoning. **This engine is not a
+deployment.** It is shipped to more than one organisation, and each one's Part 2
+status is a fact about that organisation's service list, marketing, prescribing
+and referral practice. An ADR in a shared engine has no standing to make that
+finding for anybody, and a determination recorded here would be wrong for the
+next deployment even if it were right for the first.
+
+So the determination is removed from this document. **The host declares its
+posture; the engine enforces what it is told.** That is the same rule ADR 0001
+sets for Rails coupling and ADR 0002 sets for host-configurable policy, applied
+to a regulatory posture instead of a UI or a tagging rule.
+
+## Decision
+
+**1. Part 2 posture is a deployment input, not a property of this engine.**
+The host declares, per deployment, whether it operates a Part 2 program. The
+engine never infers it, never defaults it to "no", and fails closed if it is
+unset. Concretely:
+
+- **`part2_program: true`** — the deployment is a Part 2 program. Every Part 2
+  obligation that has an engine-side mechanism is enforced.
+- **`part2_program: false`** — the deployment is not a Part 2 program. Recipient
+  duties still apply to records received from Part 2 programs; native records
+  are not segmented.
+- **unset** — the engine refuses to serve rather than guessing. An unset posture
+  is a configuration error, not a default.
+
+The declaration itself, and the facts supporting it, live with the deployment —
+in the private deploy configuration, alongside the tenant identity — **not in
+this repository**. This engine records only that the input exists and what it
+switches.
+
+**2. Whichever posture is declared, segmentation is enforced in the engine at
+the serialization/egress boundary, expressed as DS4P security labels, and never
+delegated to RPMS.** RPMS cannot represent it (headline finding below); the
+engine's FHIR/C-CDA/export surface is the only place every egress passes
+through. Labels live in a PG sidecar keyed to RPMS record identity and are never
+written back into RPMS files.
+
+**3. The two postures differ in capability, and they ship on different
+schedules.** This is a product-roadmap decision, and unlike a § 2.11 finding it
+is ours to make:
+
+| | **Recipient duties** (ships first) | **Program capability** (deferred) |
+|---|---|---|
+| Applies to | every deployment, both postures | deployments declaring `part2_program: true` |
+| Content | preserve inbound `confidentialityCode` / `meta.security`; § 2.32 redisclosure notice; legal-proceedings guard; the HIPAA notice duty adopted 26 Apr 2024 (89 FR 33064), compliance date already passed | SUD classifier, egress gating on every path, § 2.31 consent store, § 2.25 accounting, § 2.22 notice, break-glass |
+| Cost | ~2–4 dev-weeks | ~4–6 dev-months |
+
+A deployment that declares `part2_program: true` before the program capability
+ships is **not supported** — the engine should say so at boot rather than serve
+it. That is the honest form of "the program capability is not ready": a gap in
+the product, stated as one, rather than a claim about anybody's clinic.
+
+**4. Deployment preconditions are stated, not assumed.** RPMS-side access
+(roll-and-scroll, other RPC clients, printed health summaries, the PCC visit)
+bypasses the engine entirely. No engine posture can control it. A deployment
+declaring `part2_program: true` therefore requires site-level controls — RPMS
+account, menu and security-key governance — as an operational requirement, and
+the engine's conformance claims are scoped to its own surfaces. Whether the
+RPMS behavioural-health package's separation is actually configured on a given
+instance is site configuration plus a live-dispatch proof, never an assumption
+(rpms-ops#635, rpms-ops#536, rpms-rpc#224).
+
+**5. Tribal-data overlays are independent gates.** OCAP community authorisation
+is required for any SUD-touching aggregate or reporting flow under either
+posture; Expert Determination remains the only acceptable de-identification
+basis. Part 2 consent never substitutes for either.
+
+## What this ADR deliberately does not do
+
+- **It does not determine whether any deployment is a Part 2 program.** That is
+  a fact about an organisation, assessed on its service list, website, community
+  materials, licence, referral practice and prescribing. It is answered per
+  deployment, by that deployment, with counsel — and recorded with the deploy
+  config, off-git.
+- **It does not schedule anyone's launch.** The program capability is unbuilt;
+  when a deployment needs it, that is a roadmap conversation, not a finding here.
+- **It does not restate Part 2.** The regulatory summary below is orientation for
+  engineers, was found in review to be incomplete in places (notably the § 2.31
+  element list and § 2.12(a)(1)'s conjunctive structure), and is not a
+  compliance reference. Counsel governs.
 
 ## Context
 
@@ -187,9 +267,10 @@ What the current rule actually says (all quotes from the current eCFR text):
 - **C-CDA**: `ccda_generator.rb` builds a CCD (allergies, problems, meds,
   vitals, encounters) with **no `confidentialityCode` handling**; the import
   path (`ccda_parser.rb`) likewise drops any inbound confidentiality marking
-  on the floor — which matters for Branch B below, because inbound documents
-  from an outside SUD program arrive *already labeled* and we currently erase
-  the label.
+  on the floor — which matters under **either** posture, because inbound
+  documents from an outside SUD program arrive *already labeled* and we
+  currently erase the label. Recipient duties do not depend on whether the
+  deployment is itself a program.
 - **Authorization**: SMART scopes at **resource-type granularity**
   (`authorize_fhir_scope!`), Pundit policies thin. The gap is already
   documented in code: `session_scope_policy.rb` carries a "42 CFR PART 2 —
@@ -243,240 +324,46 @@ What the current rule actually says (all quotes from the current eCFR text):
   we could ever emit; OCAP review of any SUD-touching report path is a
   standing requirement in both branches below.
 
-## The determination (intended, not established)
-
-**Intended posture: Branch B — the December clinic is MH/BH only and does not
-hold itself out as providing SUD diagnosis, treatment, or referral for
-treatment.**
-
-**This is a product intention, not yet a § 2.11 determination.** The test is
-"holds itself out **and** provides", assessed on how the program actually
-operates and describes itself. The facts that decide it have not been gathered.
-Until they are, the intention below governs what gets built; it does not
-establish that the clinic is outside Part 2.
-
-This reverses an earlier reading. The sequence, kept because the reasoning
-matters more than the conclusion:
-
-| Date | Determination | Basis |
-|---|---|---|
-| 2026-09-16 | **Branch A** — SUD in scope | Product commitment to supporting SUD |
-| **2026-09-23** | **Branch B for December** — SUD de-committed | The cost of Branch A became concrete once the disclosure surface was audited and the obligations were read against a real launch |
-
-The founder's stated basis for the reversal: *having learned how involved SUD
-is, de-commit — and make sure we do not get in the way of it later.*
-
-Nothing about the regulation changed. What changed is that Branch A's cost
-stopped being an estimate. This ADR's own table already said Branch A was
-"not safely achievable" for December — the compliance date passed on
-2026-02-16 and OCR enforcement is live — so Branch A always meant either the
-SUD service line waits or December slips. The reversal chooses the first.
-
-### This is an operational determination, not a code one
-
-§ 2.11's "program" prong turns on what the clinic **holds itself out as
-doing**. The engine cannot make the clinic not-a-Part-2-program; it can only
-avoid contradicting it. So the de-commit has to be true in the artifacts that
-answer the three sub-questions below — the December service list, the website
-and community flyer, the absence of an advertised SUD referral pathway, and no
-clinician prescribing buprenorphine/naltrexone *for* OUD/AUD. **If those say
-otherwise, this determination is wrong regardless of what the codebase does.**
-
-### The risk this accepts, stated plainly
-
-The "guessed B, truth A" cell below is the live risk, and one part-time BH
-therapist **will** encounter substance use — in a PHQ-9 conversation, in a
-progress note — without the clinic offering SUD treatment. Incidental
-encounter is not the § 2.11 test, but unlabeled SUD content accumulating in a
-shared backend is the expensive cleanup this ADR exists to prevent.
-
-That is why #522 (enforce the MH-only posture, honor received Part 2 records)
-is the **plan of record and a December blocker**, not an interim measure. A
-de-commit that is intended but not enforced is the failure mode.
-
-### Open review findings (2026-09-23) — must be resolved before Accepted
-
-An adversarial regulatory review blocked the earlier "Accepted" wording. Beyond
-the status downgrade above, these remain open in this document:
-
-1. **The § 2.11 facts are ungathered.** Service list, website, community flyer,
-   licence, referral practice, prescribing. Until checked and written down, no
-   determination.
-2. **The "primary function" framing was wrong for this clinic.** That qualifier
-   is § 2.11 prong (3), which applies *inside a general medical facility*. A BH
-   practice with primary care not opening until April is prong (1), which has no
-   such qualifier. The ER analogy elsewhere in this document is a § 2.12(e)(1)
-   example, not a rule for this clinic.
-3. **HHS declined to exempt IHS/tribal facilities** providing medications for
-   opioid use disorder incident to general medical care. Directly on point and
-   absent here.
-4. **"No legal-proceedings use ever" is wrong.** § 2.12(d)(1) bars use *against
-   the patient* absent the patient's consent or a subpart E court order. Both
-   paths exist; "ever" erases them.
-5. **A current duty is missing from the Branch B column.** The HIPAA notice
-   changes were adopted in the 26 Apr 2024 Privacy Rule (89 FR 33064), not
-   deferred — 45 CFR 164.520 now requires the notice to describe Part 2's
-   stricter limits, compliance date 16 Feb 2026, already passed. A Branch B
-   clinic that receives Part 2 records owes this **now**.
-6. **§ 2.12(a)(1) is conjunctive** and is quoted here as though it were not.
-7. **The § 2.31 element list here is incomplete** — signed date, TPO
-   redisclosure and consequences-of-refusal statements, the HIPAA-redisclosure
-   statement, and the separate consent for SUD counselling notes, which cannot
-   be combined with a single TPO consent. Counselling notes are exactly what a
-   BH therapist produces.
-8. **Stale text.** Sentences in Context, Decision item 2, and Consequences still
-   describe the fork as open. Reversal trigger (a) is narrower than the test
-   this document now adopts, and trigger (b) cites rulemaking that has happened.
-9. **The four below are mostly decisions to decide later.** The one that is
-   missing and gets expensive immediately: a rule, *before the first patient*,
-   for what may be entered on the problem list, in a TIU note, and on a claim.
-
-**These are regulatory readings from an adversarial model review, not legal
-advice, and they are not settled by engineering agreement.** They need counsel.
-
-### Not foreclosing Branch A — four decisions taken now because they are cheap now
-
-De-committing from SUD for December is not a decision to make SUD expensive
-later. Four things are decided at this point because each is free today and a
-retrofit afterwards:
-
-1. **The label sidecar seam is kept; the classifier is not built.** The
-   engine-layer sidecar is the only place record-level segmentation can be
-   expressed (RPMS cannot — headline finding). Keeping the seam costs
-   approximately nothing; re-introducing it later is the 4–6 months.
-2. **Outbound claims:** whether an SUD diagnosis may appear on a claim, and
-   under what consent, is decided **before** the clearinghouse seam is
-   written. `Corvid::Adapters::Base#submit_claim` raises `NotImplementedError`
-   today (corvid#561, corvid#567) — the cheapest possible moment.
-3. **Treatment plans (#475) and TIU progress notes:** the target design is
-   decided before building. Once BH content is written to the shared RPMS
-   backend it is readable by every other RPMS consumer and cannot be gated by
-   this engine.
-4. **Inbound label preservation is built regardless.** Records received from
-   outside Part 2 programs keep their `confidentialityCode` / `meta.security`
-   and their § 2.32 notice. This is Branch B work and is required now.
-
-### Independent of the branch
-
-**#496 remains a December blocker.** It is a live authentication defect — an
-unverified client assertion mints caller-supplied scopes — and it is not a
-Part 2 item. Every "that path is not exposed in Phase 1" control routes
-through scopes a caller can currently grant themselves.
-
-### The original framing, retained
-
-## The determination — as originally posed
-
-**One question decides scope, cost, and schedule, and only the founder can
-answer it: will the December-launch clinic *hold itself out as providing, and
-provide, SUD diagnosis, treatment, or referral for treatment — or only
-mental-health/behavioral-health services?***
-
-Federal assistance is a given; the "program" prong is the whole test. Concrete
-sub-questions that decide it (answer against the December service line, then
-again for April):
-
-1. Does the service list / website / community flyer mention substance use,
-   addiction, recovery, MAT/MOUD, or SBIRT *as a service offered*?
-2. Will any clinician prescribe buprenorphine/naltrexone *for* OUD/AUD, or
-   run SUD counseling as a program?
-3. Is "referral for treatment" part of the offering (an advertised SUD
-   referral pathway is enough to satisfy "referral for treatment"), or do
-   referrals happen only incidentally, the way an ER refers an overdose?
-
-| | **A: Yes — SUD offered (Part 2 program)** | **B: No — MH/BH only (not a Part 2 program)** |
-|---|---|---|
-| **Regulatory posture** | Full Part 2: § 2.22 notice day one, § 2.31 consent capture, § 2.32 notices on egress, § 2.25 accounting (EHR-mediated TPO disclosures included), § 2.16 breach, OCR-enforced penalties — all already past their compliance date | HIPAA only for records we originate (§ 2.12(d)(2)(ii)); Part 2 duties attach **only to records received from outside Part 2 programs** (no legal-proceedings use ever; § 2.32 notice on redisclosure; no segregation required if received under single TPO consent) |
-| **Build** | Record-level segmentation engine: SUD value-set classifier + sidecar labels, egress gating on *every* path (FHIR read/search, bulk export, C-CDA, chart UI), consent-on-file checks, Part 2 accounting wired, break-glass persisted, § 2.22 notice content, #494 + #496 closed as blockers | Inbound-document label preservation (stop dropping `confidentialityCode`/`meta.security` on C-CDA/FHIR ingest), quarantine-and-notice handling for received Part 2 records, § 2.32 notice passthrough on re-export, legal-hold/subpoena guard. No classifier, no egress gating of native records |
-| **Cost (engineering)** | ~4–6 dev-months, and clinical-workflow cost forever after (suppressed meds/problems are a patient-safety trade the care team must govern) | ~2–4 dev-weeks |
-| **December 2026** | **Not safely achievable.** Compliance date already passed; the clinic would be out of compliance on opening day under live OCR enforcement. Either the SUD service line waits (e.g., to April, aligned with primary care) or December slips | **Achievable.** BH-only launch needs the Branch B items, and only the inbound-records path is even exposed in a single-therapist December |
-| **If we guess wrong** | Guessed A, truth B: 4–6 months spent; classifier shelved (labeling/consent/disclosure plumbing all reusable — see "no-regret" below); over-suppression friction until unwound | Guessed B, truth A: **operating a Part 2 program out of compliance from day one**, with unlabeled SUD data accumulating in RPMS that must be *retroactively* classified before any export/exchange path is safe — the expensive, maybe-impossible cleanup this ADR exists to prevent |
-
-This document does not answer the question. It exists so that answering it is
-a five-minute act with known consequences.
-
-## Decision
-
-**1. The determination above is surfaced to the founder as a decision, not a
-ticket.** #291 was blocked on it and said so. No Part 2 implementation work
-started until it was answered in writing, because the two branches diverge at
-the first commit. **Satisfied: answered 2026-09-23 in the Status line and in
-"The determination (answered)" — Branch B for December.** Implementation work
-is therefore unblocked along the Branch B path only; Branch A's classifier and
-egress gating remain unbuilt by decision, not by oversight.
-
-**2. The architecture is decided now, whichever branch wins: Part 2
-segmentation is enforced in the engine at the serialization/egress boundary,
-expressed as DS4P security labels, and never delegated to RPMS.** RPMS cannot
-represent it (headline finding); the engine's FHIR/C-CDA/export surface is
-the only place every egress passes through. Concretely, when implementation
-begins:
-
-- A **classification service** (Branch A) or **inbound-label registry**
-  (Branch B) produces, per record, a label set (`Confidentiality: R`,
-  ActCode `SUD`/`OPIOIDUD`, DS4P handling codes incl. the § 2.32 obligation).
-  Branch A classification is value-set-driven (ICD-10 F1x, SUD med RxNorm
-  classes, LOINC tox panels, BH-package visit provenance), host-configurable,
-  and stored in a local PG sidecar keyed to RPMS record identity — never
-  written back into RPMS files.
-- **Every egress path consults labels**: FHIR read/search (default scope
-  excludes `R`-labeled records absent consent-on-file + authorized purpose),
-  **bulk/EHI export** (labeled records withheld or included-with-labels per
-  the export's consent basis — never silently included), **C-CDA**
-  (`confidentialityCode` + DS4P section/entry tagging), chart UI.
-- **Consent** is a first-class stored artifact implementing § 2.31's element
-  list, including the single-TPO-consent form; egress decisions reference it;
-  revocation stops future disclosure.
-- **Every Part 2 egress writes a `Disclosure` row** — the existing
-  `DisclosureService` finally gets production call sites — satisfying § 2.25
-  including its EHR-mediated-TPO clause, and the § 2.32 notice is attached
-  in-band (DS4P) and in generated documents.
-- **Break-glass** (§ 2.12-consistent medical emergency) persists to PG with
-  reason + after-the-fact review, extending `EmergencyAccessService`.
-- **#496 closes before any of this is claimed to exist**, and #494 is the
-  implementation marker for Branch A's engine.
-
-**3. Deployment preconditions are stated, not assumed.** Because RPMS-side
-access (roll-and-scroll, other RPC clients, printed health summaries) bypasses
-the engine, a Branch A deployment requires site-level controls (RPMS account
-and menu/key governance) documented as operational requirements. The engine's
-conformance claims are scoped to its own surfaces.
-
-**4. Tribal-data overlays are independent gates.** OCAP community
-authorization is required for any SUD-touching aggregate/reporting flow in
-either branch; Expert Determination remains the only acceptable
-de-identification basis. Part 2 consent never substitutes for either.
-
 ## Consequences
 
 ### Positive
 
-- The founder's decision is a five-minute fork with priced branches instead
-  of an open-ended compliance anxiety.
-- Branch B (if it holds) makes December safe with weeks, not months, of work
-  — and the 2024 rule's no-segregation-under-TPO-consent clause
-  (§ 2.12(d)(2)(i)(C)) means we are not building a shadow segmentation engine
-  for records we merely receive.
-- The label/consent/disclosure plumbing is no-regret: it is the same
-  machinery ONC (d)(11) accounting and ordinary HIPAA hygiene want, so
-  Branch-B-now does not strand work if April's primary-care launch later
-  adds SUD services and flips us to Branch A.
+- **A deployment's regulatory status stops being this repository's problem.**
+  The engine cannot be wrong about a fact it never asserts, and the same build
+  serves an organisation that is a Part 2 program and one that is not.
+- **Fail-closed on an unset posture** turns the dangerous default — assuming
+  "not a program" because nobody said otherwise — into a boot-time error.
+- Recipient duties ship for every deployment regardless of posture, and the
+  2024 rule's no-segregation-under-TPO-consent clause (§ 2.12(d)(2)(i)(C))
+  means merely *receiving* Part 2 records does not require a shadow
+  segmentation engine.
+- The label / consent / disclosure plumbing is no-regret: it is the same
+  machinery ONC (d)(11) accounting and ordinary HIPAA hygiene want, so shipping
+  recipient duties first strands nothing if a deployment later declares
+  `part2_program: true`.
 - Putting the RPMS-can't-represent-it finding in the architecture (engine-
-  boundary enforcement, PG sidecar) now prevents the dead-end alternative of
-  waiting for a FileMan schema change that will never come.
+  boundary enforcement, PG sidecar) prevents the dead-end alternative of waiting
+  for a FileMan schema change that will never come.
 
 ### Negative
 
-- Branch A's honest cost — months of work plus permanent clinical-workflow
-  friction — may push the SUD service line out of December, a product
-  decision this ADR forces into the open rather than resolving.
-- Engine-boundary enforcement means we cannot claim deployment-wide
-  compliance; RPMS-native access remains a documented residual risk managed
-  operationally.
-- A computed classifier (Branch A) will have false negatives at the margins
-  (free-text notes referencing SUD, meds with dual indications); the design
-  accepts label-at-egress plus curated value sets rather than promising
-  perfection, and says so in conformance language.
+- **The engine can refuse a posture it cannot serve.** A deployment declaring
+  `part2_program: true` before the program capability ships gets a boot-time
+  refusal. That is honest, and it is also a product gap that will be felt by the
+  first organisation that needs it.
+- The program capability's cost — months of work plus permanent
+  clinical-workflow friction — is unchanged by moving the determination out of
+  this document. It is now a roadmap decision rather than a compliance one.
+- Engine-boundary enforcement means no deployment-wide compliance claim is
+  possible; RPMS-native access (roll-and-scroll, printed summaries, the PCC
+  visit) remains a documented residual risk managed operationally.
+- A computed classifier will have false negatives at the margins (free-text
+  notes referencing SUD, medications with dual indications); the design accepts
+  label-at-egress plus curated value sets rather than promising perfection, and
+  says so in conformance language.
+- **Declaring the posture is now a deployment obligation**, and a deployment
+  that gets it wrong gets it wrong quietly. The engine can refuse an unset
+  posture; it cannot detect a mistaken one.
 
 ### Alternatives considered
 
@@ -510,40 +397,19 @@ de-identification basis. Part 2 consent never substitutes for either.
 
 ## Reversal trigger
 
-Re-open this ADR if: (a) the determination's answer changes (a service-line
-addition in April that adds SUD treatment flips B→A with a hard compliance
-date of the service's first day); (b) HHS issues the anticipated further
-alignment rulemaking (the 2024 preamble flags follow-on work, and 45 CFR
-164.520 NPP changes interlock); or (c) a partner integration requires DS4P
-conformance testing beyond label passthrough.
+Re-open this ADR if: (a) the engine acquires a path that can determine posture
+itself rather than receiving it — it should not; (b) HHS rulemaking changes what
+the postures must enforce; (c) a partner integration requires DS4P conformance
+testing beyond label passthrough; or (d) the product decides to ship the program
+capability, which changes point 3's schedule but not points 1 or 2.
 
 ## References
 
-- Issue #291 (this ADR's marker — blocked on the determination)
-- Issue #494 (record-level segmentation — Branch A implementation marker)
-- Issue #496 (unverified backend-services JWT — blocker for any Part 2 claim)
-- ADR 0001 (authorization library). Note: #291 cites "ADR 0002" for a
-  host-configurable tagging rule and "ADR 0003"; this repo's ADR 0002/0003
-  are staff-UI placement and ETL archival — the issue's ADR and model
-  references (`Case`/`Determination`/`Task`) belong to another repo's set
-  and do not apply here.
-- 42 CFR Part 2, current text: https://www.ecfr.gov/current/title-42/chapter-I/subchapter-A/part-2
-  (definitions § 2.11; applicability & federal-assistance test § 2.12;
-  safeguards § 2.13; security & breach § 2.16; notice § 2.22; intermediary
-  list § 2.24; accounting § 2.25; consent § 2.31; redisclosure notice § 2.32;
-  TPO redisclosure § 2.33; penalties § 2.3)
-- Final rule: "Confidentiality of Substance Use Disorder (SUD) Patient
-  Records," 89 FR 12472 (Feb. 16, 2024):
-  https://www.federalregister.gov/documents/2024/02/16/2024-02544/confidentiality-of-substance-use-disorder-sud-patient-records
-- HHS fact sheet on the final rule:
-  https://www.hhs.gov/hipaa/for-professionals/regulatory-initiatives/fact-sheet-42-cfr-part-2-final-rule/index.html
-- Compliance date / enforcement commencement (Feb 16, 2026):
-  https://www.hipaajournal.com/february-16-2026-compliance-deadline-part-2-final-rule/ ;
-  https://www.quarles.com/newsroom/publications/go-for-gold-42-cfr-part-2-compliance-deadline-and-hhs-enforcement-is-here
-- 42 U.S.C. 290dd-2 (statute, as amended by CARES Act § 3221)
-- HL7 FHIR Data Segmentation for Privacy (DS4P) IG, STU1:
-  https://hl7.org/fhir/uv/security-label-ds4p/STU1/
-- FHIR R4 security labels: https://hl7.org/fhir/R4/security-labels.html
-- HL7 v3 ActCode (SUD/OPIOIDUD sensitivity) and Confidentiality (R):
-  https://terminology.hl7.org/CodeSystem-v3-ActCode.html ;
-  https://terminology.hl7.org/CodeSystem-v3-Confidentiality.html
+- 42 CFR Part 2 as amended by the 2024 final rule (89 FR 12472)
+- 45 CFR 164.520 as amended 26 Apr 2024 (89 FR 33064) — notice duty, compliance
+  date 16 Feb 2026
+- ADR 0001 (no Rails coupling), ADR 0002 (host-configurable policy)
+- #291 (umbrella), #494 / #523 (record-level segmentation), #496 (scope minting
+  — independent of posture), #522 (declared-posture enforcement), #532
+  (disclosure-surface audit)
+- rpms-ops#635, rpms-ops#536, rpms-rpc#224 (site configuration and live proof)
