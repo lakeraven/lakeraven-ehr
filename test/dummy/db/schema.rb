@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_15_000000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_23_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -207,11 +207,22 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_15_000000) do
     t.index [ "token" ], name: "index_oauth_access_tokens_on_token", unique: true
   end
 
+  create_table "lakeraven_ehr_backend_assertion_jtis", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.datetime "expires_at", null: false
+    t.string "issuer", null: false
+    t.string "jti", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "expires_at" ], name: "index_backend_assertion_jtis_on_expires_at"
+    t.index [ "issuer", "jti" ], name: "index_backend_assertion_jtis_on_issuer_and_jti", unique: true
+  end
+
   create_table "oauth_applications", force: :cascade do |t|
     t.boolean "confidential", default: true, null: false
     t.datetime "created_at", null: false
     t.string "name", null: false
     t.text "redirect_uri", null: false
+    t.text "public_key"
     t.string "scopes", default: "", null: false
     t.string "secret", null: false
     t.string "uid", null: false
