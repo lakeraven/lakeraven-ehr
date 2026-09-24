@@ -28,10 +28,14 @@ module Lakeraven
         )
         # Stubbed here rather than through a seam in ClientJwks: the fetch is
         # network I/O, and production code should not carry a test hook.
-        @jwks_payload = { keys: [ @client_jwk.export ] }
-        payload = @jwks_payload
+        # Keyed by URI, not blanket: a stub that answers for ANY uri — including
+        # the nil of a client with no registered JWKS — hands that client a
+        # valid key set and makes it look authenticated. The stub has to model
+        # "this client published keys, that one did not".
+        @jwks_uri = "https://example-backend.example.test/.well-known/jwks.json"
+        known = { @jwks_uri => { keys: [ @client_jwk.export ] } }
         ClientJwks.singleton_class.send(:alias_method, :fetch_without_stub, :fetch)
-        ClientJwks.define_singleton_method(:fetch) { |_uri| payload }
+        ClientJwks.define_singleton_method(:fetch) { |uri| known[uri] }
         ExportsController.reset_store!
       end
 
