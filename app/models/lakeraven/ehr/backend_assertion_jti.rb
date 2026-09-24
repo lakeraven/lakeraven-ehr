@@ -15,6 +15,11 @@ module Lakeraven
         true
       rescue ActiveRecord::RecordNotUnique
         false
+      rescue ActiveRecord::ActiveRecordError => e
+        # Fail CLOSED. If the claim cannot be recorded we cannot know this is
+        # not a replay, so refuse rather than 500 or wave it through.
+        Rails.logger.error("[backend_services] jti claim failed: #{e.class}")
+        false
       end
 
       # Rows are only useful until the assertion they guard has expired.

@@ -28,6 +28,10 @@ module Lakeraven
         ExportsController.reset_store!
         Doorkeeper::AccessToken.delete_all
         Doorkeeper::Application.delete_all
+        # Without this the fixed jti below survives between runs, so the second
+        # post is refused by a LEFTOVER row and the replay test passes even
+        # when the guard is removed.
+        BackendAssertionJti.delete_all
       end
 
       test "forged signature is rejected" do
@@ -82,6 +86,8 @@ module Lakeraven
       test "replayed jti is rejected" do
         jwt = assertion(claims(jti: "replayed-jti-example"))
         post_token(jwt)
+        assert_response :success, "the first presentation must be accepted, or this is not a replay test"
+
         post_token(jwt)
 
         assert_response :unauthorized
@@ -98,15 +104,48 @@ module Lakeraven
       test "requested scope beyond registered scopes is not on the issued token" do
         post_token(assertion(claims), scope: "system/*.write")
 
-        granted = if response.status == 200
-          JSON.parse(response.body)["scope"].to_s.split
-        else
-          []
-        end
-        issued = Doorkeeper::AccessToken.order(:created_at).last
-        granted = issued.scopes.to_s.split if issued
+        # A refusal is the correct outcome here: nothing in the request is
+        # registered to this client. Asserted explicitly, because a test that
+        # accepts either a 200 or a 400 passes whatever the endpoint does.
+        assert_response :bad_request
+        assert_equal "invalid_scope", JSON.parse(response.body)["error"]
+        assert_nil Doorkeeper::AccessToken.order(:created_at).last,
+          "no token may be issued when no requested scope is registered"
+      end
 
-        refute_includes granted, "system/*.write"
+      test "a request mixing registered and unregistered scopes is granted only the registered ones" do
+        post_token(assertion(claims), scope: "system/*.read system/*.write")
+
+        assert_response :success
+        assert_equal "system/*.read", JSON.parse(response.body)["scope"]
+      end
+
+      test "refusals do not reveal whether a client exists or has a key" do
+        # A per-reason description let an unauthenticated caller walk the client
+        # registry: "Unknown client" vs "Client has no registered public key"
+        # vs "Assertion signature does not verify", all before any signature was
+        # checked. Every refusal must look identical from outside.
+        keyless = Doorkeeper::Application.create!(
+          name: "Keyless Backend",
+          uid: "keyless-backend-client",
+          redirect_uri: "urn:ietf:wg:oauth:2.0:oob",
+          scopes: "system/*.read",
+          confidential: true
+        )
+
+        post_token(assertion(claims(iss: "no-such-client", sub: "no-such-client")))
+        unknown = JSON.parse(response.body)
+
+        post_token(assertion(claims(iss: keyless.uid, sub: keyless.uid)))
+        no_key = JSON.parse(response.body)
+
+        post_token(assertion(claims, signature: "not-a-signature"))
+        bad_sig = JSON.parse(response.body)
+
+        assert_equal unknown, no_key,
+          "an unknown client and a key-less client must be indistinguishable"
+        assert_equal unknown, bad_sig,
+          "a registry miss and a signature failure must be indistinguishable"
       end
 
       test "escalated scope does not authorize a downstream export" do

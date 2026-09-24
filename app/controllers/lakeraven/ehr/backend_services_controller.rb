@@ -45,8 +45,13 @@ module Lakeraven
 
         result = authenticate_assertion(params[:client_assertion])
         unless result[:app]
+          # The specific reason goes to the audit log, never to the caller. A
+          # per-reason description told an unauthenticated caller whether a
+          # client id existed and whether it had a key registered — a registry
+          # oracle available before signature verification.
           audit_token_event(outcome: "refused", reason: result[:reason])
-          render json: { error: "invalid_client", error_description: result[:description] },
+          render json: { error: "invalid_client",
+                         error_description: "Client authentication failed" },
                  status: :unauthorized
           return
         end
@@ -126,8 +131,9 @@ module Lakeraven
           return refusal("bad_signature", "Assertion signature does not verify")
         end
 
-        # Replay is checked LAST, so a rejected assertion cannot burn a jti and
-        # a replay check cannot be used to probe which clients exist.
+        # Replay is checked LAST, so a rejected assertion cannot burn a jti.
+        # Probing is prevented by the uniform refusal description above, not by
+        # this ordering.
         return refusal("replayed_jti", "Assertion jti has already been used") unless claim_jti(issuer, jti, expiry)
 
         { app: app }
@@ -182,7 +188,12 @@ module Lakeraven
       # being fixed for.
       def claim_jti(issuer, jti, expiry)
         BackendAssertionJti.purge_expired
-        BackendAssertionJti.claim(issuer: issuer, jti: jti, expires_at: Time.zone.at(expiry))
+        # Held past the assertion's own exp: a row that expires exactly when the
+        # assertion does leaves no margin for clock skew between the claim and
+        # the next presentation.
+        BackendAssertionJti.claim(
+          issuer: issuer, jti: jti, expires_at: Time.zone.at(expiry) + JTI_RETENTION
+        )
       end
 
       # Every issuance and every refusal is recorded. A refusal is the event
