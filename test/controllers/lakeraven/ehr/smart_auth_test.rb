@@ -6,15 +6,11 @@ module Lakeraven
   module EHR
     class SmartAuthTest < ActionDispatch::IntegrationTest
       setup do
-        # Org-bound to the seeded patients' site (7819): system credentials
-        # without an organization binding are refused outright, so the
-        # scope-semantics cases below run under a properly bound one.
         @oauth_app = Doorkeeper::Application.create!(
           name: "test client",
           redirect_uri: "https://example.test/callback",
           scopes: "system/Patient.read patient/Patient.read",
-          confidential: true,
-          organization_id: "rpms-organization-7819"
+          confidential: true
         )
       end
 

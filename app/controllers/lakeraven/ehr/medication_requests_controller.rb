@@ -10,14 +10,8 @@ module Lakeraven
 
       def index
         dfn = extract_patient_dfn(params[:patient])
-        medications = MedicationRequest.from_rpc_hashes(
-          MedicationRequest.for_patient(dfn), patient_dfn: dfn
-        )
-        if params[:status].present?
-          statuses = params[:status].split(",")
-          medications = medications.select { |m| statuses.include?(m.status) }
-        end
-        render_bundle(medications.map(&:to_fhir))
+        results = MedicationRequest.for_patient(dfn)
+        render_bundle(results.map { |r| { resourceType: "MedicationRequest" }.merge(r) })
       end
 
       def show

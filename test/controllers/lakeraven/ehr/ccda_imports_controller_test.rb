@@ -8,7 +8,7 @@ module Lakeraven
       include SmartAuthTestHelper
 
       setup do
-        setup_internal_smart_auth
+        setup_smart_auth
       end
 
       teardown do
