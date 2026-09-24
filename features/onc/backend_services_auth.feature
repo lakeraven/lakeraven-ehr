@@ -22,3 +22,20 @@ Feature: Backend Services JWT Authentication
     When I POST to "/oauth/token" with an invalid JWT assertion
     Then the response status should be 401
     And the response JSON should include error "invalid_client"
+
+  Scenario: POST /oauth/token with a forged JWT signature returns 401
+    Given a SMART backend service application is registered
+    When I POST to "/oauth/token" with a forged-signature client_credentials JWT assertion
+    Then the response status should be 401
+    And the response JSON should include error "invalid_client"
+
+  Scenario: POST /oauth/token does not grant a scope the application is not registered for
+    Given a SMART backend service application is registered
+    When I POST to "/oauth/token" with a client_credentials JWT assertion requesting scope "system/*.write"
+    Then the issued access token scopes should not include "system/*.write"
+
+  Scenario: an issued token cannot export beyond the application's registered scopes
+    Given a SMART backend service application is registered
+    When I POST to "/oauth/token" with a client_credentials JWT assertion requesting scope "system/*.read system/*.write"
+    And I POST to "/lakeraven-ehr/exports" with the issued access token
+    Then the response status should be 403
