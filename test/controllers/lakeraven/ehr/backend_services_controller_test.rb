@@ -12,19 +12,34 @@ module Lakeraven
         # A real keypair: the assertion is genuinely signed, so each negative
         # case below fails for the reason it names rather than falling out at
         # the signature check.
-        @client_key = OpenSSL::PKey::RSA.generate(2048)
+        # Ported from a static public_key column to the JWKS mechanism that
+        # superseded it: the client publishes a key set and the endpoint
+        # fetches it. The key that signs below is the one the JWKS serves.
+        @client_key = OpenSSL::PKey::RSA.new(2048)
+        @client_jwk = JWT::JWK.new(@client_key)
         @backend_app = Doorkeeper::Application.create!(
           name: "Example Backend",
           uid: "example-backend-client",
           redirect_uri: "urn:ietf:wg:oauth:2.0:oob",
           scopes: "system/*.read",
           confidential: true,
-          public_key: @client_key.public_key.to_pem
+          jwks_uri: "https://example-backend.example.test/.well-known/jwks.json",
+          organization_id: "example-organization-1"
         )
+        # Stubbed here rather than through a seam in ClientJwks: the fetch is
+        # network I/O, and production code should not carry a test hook.
+        @jwks_payload = { keys: [ @client_jwk.export ] }
+        payload = @jwks_payload
+        ClientJwks.singleton_class.send(:alias_method, :fetch_without_stub, :fetch)
+        ClientJwks.define_singleton_method(:fetch) { |_uri| payload }
         ExportsController.reset_store!
       end
 
       teardown do
+        if ClientJwks.singleton_class.method_defined?(:fetch_without_stub)
+          ClientJwks.define_singleton_method(:fetch) { |uri| fetch_without_stub(uri) }
+          ClientJwks.singleton_class.send(:remove_method, :fetch_without_stub)
+        end
         ExportsController.reset_store!
         Doorkeeper::AccessToken.delete_all
         Doorkeeper::Application.delete_all
@@ -55,7 +70,7 @@ module Lakeraven
       end
 
       test "a signature from the wrong key is rejected" do
-        other_key = OpenSSL::PKey::RSA.generate(2048)
+        other_key = OpenSSL::PKey::RSA.new(2048)
         post_token(assertion(claims, key: other_key))
 
         assert_response :unauthorized
@@ -130,7 +145,8 @@ module Lakeraven
           uid: "keyless-backend-client",
           redirect_uri: "urn:ietf:wg:oauth:2.0:oob",
           scopes: "system/*.read",
-          confidential: true
+          confidential: true,
+          organization_id: "example-organization-2"
         )
 
         post_token(assertion(claims(iss: "no-such-client", sub: "no-such-client")))
@@ -170,17 +186,14 @@ module Lakeraven
         }.merge(overrides)
       end
 
+      # signature: replaces the real signature with the given string, for the
+      # forged case. key: signs with a different key than the JWKS publishes.
       def assertion(payload = claims, signature: nil, key: nil)
-        header_b64 = Base64.urlsafe_encode64({ alg: "RS384", typ: "JWT" }.to_json, padding: false)
-        payload_b64 = Base64.urlsafe_encode64(payload.to_json, padding: false)
-        signing_input = "#{header_b64}.#{payload_b64}"
-        sig_b64 = if signature
-          signature
-        else
-          raw = (key || @client_key).sign(OpenSSL::Digest.new("SHA384"), signing_input)
-          Base64.urlsafe_encode64(raw, padding: false)
-        end
-        "#{signing_input}.#{sig_b64}"
+        jwt = JWT.encode(payload, key || @client_key, "RS256", kid: @client_jwk[:kid])
+        return jwt unless signature
+
+        head, body, = jwt.split(".")
+        "#{head}.#{body}.#{signature}"
       end
 
       def post_token(jwt, scope: "system/*.read")
