@@ -73,4 +73,4 @@ jobs:
       # The SMART Backend Services auth + per-organization isolation
       # scenarios are a merge gate: signature/claims verification, replay,
       # JWKS transport, and cross-organization denial must stay green.
-      - run: bundle exec cucumber --publish-quiet features/vardana_backend_services_auth.feature features/onc/backend_services_auth.feature
+      - run: bundle exec cucumber --publish-quiet features/partner_backend_services_auth.feature features/onc/backend_services_auth.feature

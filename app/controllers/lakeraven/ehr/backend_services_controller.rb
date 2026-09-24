@@ -3,7 +3,7 @@
 module Lakeraven
   module EHR
     # SMART Backend Services OAuth token endpoint.
-    # ONC 170.315(g)(10)(vi); Vardana source-system profile section 2.
+    # ONC 170.315(g)(10)(vi); Partner source-system profile section 2.
     #
     # client_credentials grant, client authenticated by a JWT assertion
     # (private_key_jwt) signed with a key from the JWKS the client publishes

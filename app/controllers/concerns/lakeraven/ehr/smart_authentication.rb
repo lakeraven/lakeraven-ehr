@@ -114,7 +114,7 @@ module Lakeraven
       end
 
       # -- Per-organization credential scoping --------------------------------
-      # Vardana source-system profile section 2 / conformance item 2: a
+      # Partner source-system profile section 2 / conformance item 2: a
       # credential bound to one organization must not reach another
       # organization's patients. Binding lives on the Doorkeeper application
       # (organization_id); a nil binding means the credential is not org-bound.

@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# SMART Backend Services client bindings (Vardana source-system profile, section 2):
+# SMART Backend Services client bindings (Partner source-system profile, section 2):
 # - jwks_uri: the URL the client publishes (and rotates) its JWKS at; client
 #   assertions are verified against these keys.
 # - organization_id: the single organization the credential is scoped to

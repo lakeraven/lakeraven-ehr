@@ -1,6 +1,6 @@
-@vardana_auth
+@partner_auth
 Feature: SMART Backend Services auth for server-to-server FHIR clients
-  As a FHIR server serving server-to-server clients (Vardana source-system profile, section 2)
+  As a FHIR server serving server-to-server clients (Partner source-system profile, section 2)
   The token endpoint should issue tokens only for JWT assertions verified against
   the client's published JWKS, and each credential should be bound to one
   organization and demonstrably unable to read another organization's patients.

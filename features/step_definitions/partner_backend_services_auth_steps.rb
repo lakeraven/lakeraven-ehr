@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# Vardana source-system auth conformance — SMART Backend Services steps.
+# Partner source-system auth conformance — SMART Backend Services steps.
 #
 # Checklist item 1: token obtained with a signed JWT assertion against a
 # published JWKS (real RSA keypairs; the JWKS fetch is stubbed to the
@@ -16,19 +16,19 @@
 
 require "openssl"
 
-module VardanaAuthWorld
-  VARDANA_TOKEN_PATH = "/lakeraven-ehr/oauth/token"
-  VARDANA_TOKEN_AUD = "http://example.org/lakeraven-ehr/oauth/token"
-  VARDANA_ASSERTION_TYPE = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
+module PartnerAuthWorld
+  PARTNER_TOKEN_PATH = "/lakeraven-ehr/oauth/token"
+  PARTNER_TOKEN_AUD = "http://example.org/lakeraven-ehr/oauth/token"
+  PARTNER_ASSERTION_TYPE = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
 
   # Registration defaults to an organization binding: the token endpoint
   # refuses to mint system/ tokens for unbound credentials (fail closed), so
   # only the explicit "no organization binding" scenario registers without one.
-  def vardana_register_client(name:, scopes:, organization_id: "rpms-organization-101",
+  def partner_register_client(name:, scopes:, organization_id: "rpms-organization-101",
                               with_jwks: true, stub_fetch: true)
-    @vardana_key = OpenSSL::PKey::RSA.new(2048)
-    @vardana_jwk = JWT::JWK.new(@vardana_key)
-    @vardana_app = Doorkeeper::Application.create!(
+    @partner_key = OpenSSL::PKey::RSA.new(2048)
+    @partner_jwk = JWT::JWK.new(@partner_key)
+    @partner_app = Doorkeeper::Application.create!(
       name: name,
       redirect_uri: "urn:ietf:wg:oauth:2.0:oob",
       scopes: scopes,
@@ -38,31 +38,31 @@ module VardanaAuthWorld
     )
     return unless with_jwks && stub_fetch
 
-    stub_gateway(Lakeraven::EHR::ClientJwks, :fetch, { keys: [ @vardana_jwk.export ] })
+    stub_gateway(Lakeraven::EHR::ClientJwks, :fetch, { keys: [ @partner_jwk.export ] })
   end
 
   # Substitute DNS resolution for JWKS transport scenarios (@webmock stubs the
   # HTTP layer; this stubs name resolution so the SSRF address checks run
   # against controlled answers).
-  def vardana_stub_resolver(mapping)
+  def partner_stub_resolver(mapping)
     fake = Object.new
     fake.define_singleton_method(:getaddresses) { |host| Array(mapping[host]) }
     Lakeraven::EHR::ClientJwks.resolver = fake
   end
 
-  def vardana_assertion(key: @vardana_key, kid: @vardana_jwk.kid,
-                        exp: 4.minutes.from_now.to_i, aud: VARDANA_TOKEN_AUD,
+  def partner_assertion(key: @partner_key, kid: @partner_jwk.kid,
+                        exp: 4.minutes.from_now.to_i, aud: PARTNER_TOKEN_AUD,
                         jti: SecureRandom.uuid)
-    claims = { iss: @vardana_app.uid, sub: @vardana_app.uid, aud: aud, exp: exp, jti: jti }
+    claims = { iss: @partner_app.uid, sub: @partner_app.uid, aud: aud, exp: exp, jti: jti }
     JWT.encode(claims, key, "RS384", { kid: kid, typ: "JWT" })
   end
 
-  def vardana_post_token(assertion, scope:)
-    @vardana_last_assertion = assertion
-    @vardana_last_scope = scope
-    post VARDANA_TOKEN_PATH, {
+  def partner_post_token(assertion, scope:)
+    @partner_last_assertion = assertion
+    @partner_last_scope = scope
+    post PARTNER_TOKEN_PATH, {
       grant_type: "client_credentials",
-      client_assertion_type: VARDANA_ASSERTION_TYPE,
+      client_assertion_type: PARTNER_ASSERTION_TYPE,
       client_assertion: assertion,
       scope: scope
     }
@@ -73,31 +73,31 @@ module VardanaAuthWorld
     end
   end
 
-  def vardana_site_ien(org_id)
+  def partner_site_ien(org_id)
     org_id[/\d+\z/].to_i
   end
 
-  def vardana_synthetic_patient(dfn:, name:, site_ien:)
+  def partner_synthetic_patient(dfn:, name:, site_ien:)
     Lakeraven::EHR::Patient.new(
       dfn: dfn, name: name, sex: "M", dob: Date.new(1970, 1, 1),
       phone: "555-0100", site_ien: site_ien
     )
   end
 end
-World(VardanaAuthWorld)
+World(PartnerAuthWorld)
 
 # --- Registration -----------------------------------------------------------
 
 Given("a backend client {string} is registered with a published JWKS and scopes {string}") do |name, scopes|
-  vardana_register_client(name: name, scopes: scopes)
+  partner_register_client(name: name, scopes: scopes)
 end
 
 Given("a backend client {string} is registered without a JWKS and scopes {string}") do |name, scopes|
-  vardana_register_client(name: name, scopes: scopes, with_jwks: false)
+  partner_register_client(name: name, scopes: scopes, with_jwks: false)
 end
 
 Given("a backend client {string} is registered with a published JWKS but no organization binding, with scopes {string}") do |name, scopes|
-  vardana_register_client(name: name, scopes: scopes, organization_id: nil)
+  partner_register_client(name: name, scopes: scopes, organization_id: nil)
 end
 
 Given("the server is configured with token endpoint URL {string}") do |url|
@@ -105,60 +105,60 @@ Given("the server is configured with token endpoint URL {string}") do |url|
 end
 
 Given("a backend client bound to organization {string} holds a token with scope {string}") do |org_id, scopes|
-  vardana_register_client(name: "Example Connector #{org_id}", scopes: scopes, organization_id: org_id)
-  token = Doorkeeper::AccessToken.create!(application: @vardana_app, scopes: scopes, expires_in: 300)
+  partner_register_client(name: "Example Connector #{org_id}", scopes: scopes, organization_id: org_id)
+  token = Doorkeeper::AccessToken.create!(application: @partner_app, scopes: scopes, expires_in: 300)
   @fhir_headers = { "Authorization" => "Bearer #{token.plaintext_token || token.token}" }
 end
 
 # --- Token requests ---------------------------------------------------------
 
 When("the client requests a token with a valid signed assertion and scope {string}") do |scope|
-  vardana_post_token(vardana_assertion, scope: scope)
+  partner_post_token(partner_assertion, scope: scope)
 end
 
 When("the client requests a token with an assertion signed by a different key") do
   rogue_key = OpenSSL::PKey::RSA.new(2048)
-  vardana_post_token(vardana_assertion(key: rogue_key), scope: "system/Patient.read")
+  partner_post_token(partner_assertion(key: rogue_key), scope: "system/Patient.read")
 end
 
 When("the client requests a token with an expired signed assertion") do
-  vardana_post_token(vardana_assertion(exp: 2.minutes.ago.to_i), scope: "system/Patient.read")
+  partner_post_token(partner_assertion(exp: 2.minutes.ago.to_i), scope: "system/Patient.read")
 end
 
 When("the client requests a token with a signed assertion for audience {string}") do |aud|
-  vardana_post_token(vardana_assertion(aud: aud), scope: "system/Patient.read")
+  partner_post_token(partner_assertion(aud: aud), scope: "system/Patient.read")
 end
 
 When("the client replays the same assertion") do
-  vardana_post_token(@vardana_last_assertion, scope: @vardana_last_scope)
+  partner_post_token(@partner_last_assertion, scope: @partner_last_scope)
 end
 
 When("the client requests a token with a signed assertion that has no exp claim") do
-  claims = { iss: @vardana_app.uid, sub: @vardana_app.uid,
-             aud: VardanaAuthWorld::VARDANA_TOKEN_AUD, jti: SecureRandom.uuid }
-  assertion = JWT.encode(claims, @vardana_key, "RS384", { kid: @vardana_jwk.kid, typ: "JWT" })
-  vardana_post_token(assertion, scope: "system/Patient.read")
+  claims = { iss: @partner_app.uid, sub: @partner_app.uid,
+             aud: PartnerAuthWorld::PARTNER_TOKEN_AUD, jti: SecureRandom.uuid }
+  assertion = JWT.encode(claims, @partner_key, "RS384", { kid: @partner_jwk.kid, typ: "JWT" })
+  partner_post_token(assertion, scope: "system/Patient.read")
 end
 
 When("the client requests a token with a signed assertion that expires {int} seconds from now") do |seconds|
-  vardana_post_token(vardana_assertion(exp: seconds.seconds.from_now.to_i),
+  partner_post_token(partner_assertion(exp: seconds.seconds.from_now.to_i),
     scope: "system/Patient.read")
 end
 
 When("the client requests a token with an unsigned alg=none assertion") do
-  claims = { iss: @vardana_app.uid, sub: @vardana_app.uid, aud: VardanaAuthWorld::VARDANA_TOKEN_AUD,
+  claims = { iss: @partner_app.uid, sub: @partner_app.uid, aud: PartnerAuthWorld::PARTNER_TOKEN_AUD,
              exp: 4.minutes.from_now.to_i, jti: SecureRandom.uuid }
-  vardana_post_token(JWT.encode(claims, nil, "none"), scope: "system/Patient.read")
+  partner_post_token(JWT.encode(claims, nil, "none"), scope: "system/Patient.read")
 end
 
 # Algorithm-confusion probe: sign with HMAC using the published RSA public
 # key PEM as the shared secret. A verifier that lets the token pick the
 # algorithm would validate this against the same key material.
 When("the client requests a token with an HMAC assertion keyed with the published RSA public key") do
-  claims = { iss: @vardana_app.uid, sub: @vardana_app.uid, aud: VardanaAuthWorld::VARDANA_TOKEN_AUD,
+  claims = { iss: @partner_app.uid, sub: @partner_app.uid, aud: PartnerAuthWorld::PARTNER_TOKEN_AUD,
              exp: 4.minutes.from_now.to_i, jti: SecureRandom.uuid }
-  assertion = JWT.encode(claims, @vardana_key.public_key.to_pem, "HS384", { kid: @vardana_jwk.kid })
-  vardana_post_token(assertion, scope: "system/Patient.read")
+  assertion = JWT.encode(claims, @partner_key.public_key.to_pem, "HS384", { kid: @partner_jwk.kid })
+  partner_post_token(assertion, scope: "system/Patient.read")
 end
 
 # --- Token response assertions ----------------------------------------------
@@ -178,21 +178,21 @@ end
 # --- Per-organization patient fixtures --------------------------------------
 
 Given("patient {int} is managed by organization {string}") do |dfn, org_id|
-  patient = vardana_synthetic_patient(
-    dfn: dfn, name: "DEMO,PATIENT#{dfn}", site_ien: vardana_site_ien(org_id)
+  patient = partner_synthetic_patient(
+    dfn: dfn, name: "DEMO,PATIENT#{dfn}", site_ien: partner_site_ien(org_id)
   )
   stub_gateway(Lakeraven::EHR::PatientRepository, :find, patient)
 end
 
 Given("patient {int} has no managing organization on record") do |dfn|
-  patient = vardana_synthetic_patient(dfn: dfn, name: "DEMO,PATIENT#{dfn}", site_ien: nil)
+  patient = partner_synthetic_patient(dfn: dfn, name: "DEMO,PATIENT#{dfn}", site_ien: nil)
   stub_gateway(Lakeraven::EHR::PatientRepository, :find, patient)
 end
 
 Given("a patient search for {string} would match patients in organizations {string} and {string}") do |_query, org_a, org_b|
-  patient_a = vardana_synthetic_patient(dfn: 900_001, name: "DEMO,ALPHA", site_ien: vardana_site_ien(org_a))
-  patient_b = vardana_synthetic_patient(dfn: 900_002, name: "DEMO,BRAVO", site_ien: vardana_site_ien(org_b))
-  @vardana_org_patients = { org_a => [ "900001" ], org_b => [ "900002" ] }
+  patient_a = partner_synthetic_patient(dfn: 900_001, name: "DEMO,ALPHA", site_ien: partner_site_ien(org_a))
+  patient_b = partner_synthetic_patient(dfn: 900_002, name: "DEMO,BRAVO", site_ien: partner_site_ien(org_b))
+  @partner_org_patients = { org_a => [ "900001" ], org_b => [ "900002" ] }
   stub_gateway(Lakeraven::EHR::PatientRepository, :search, [ patient_a, patient_b ])
 end
 
@@ -211,7 +211,7 @@ Then("the Bundle should contain only patients managed by organization {string}")
     .select { |e| e.dig("resource", "resourceType") == "Patient" }
     .map { |e| e.dig("resource", "id") }
   refute_empty ids, "Expected the Bundle to contain the organization's own patients"
-  assert_equal @vardana_org_patients.fetch(org_id).sort, ids.sort,
+  assert_equal @partner_org_patients.fetch(org_id).sort, ids.sort,
     "Expected only #{org_id} patients, got ids #{ids}"
 end
 
@@ -277,8 +277,8 @@ Given("the client has requested an export for patient {int}") do |dfn|
   header "Authorization", @fhir_headers["Authorization"]
   post "/lakeraven-ehr/exports", { patient_dfn: dfn.to_s }
   body = JSON.parse(last_response.body) rescue {}
-  @vardana_export_id = body["id"]
-  assert @vardana_export_id.present?,
+  @partner_export_id = body["id"]
+  assert @partner_export_id.present?,
     "Expected an export id, got #{last_response.status}: #{last_response.body[0..200]}"
 end
 
@@ -289,17 +289,17 @@ Given("a second backend client bound to organization {string} holds a token with
     scopes: scopes, confidential: true, organization_id: org_id
   )
   token = Doorkeeper::AccessToken.create!(application: app, scopes: scopes, expires_in: 300)
-  @vardana_second_headers = { "Authorization" => "Bearer #{token.plaintext_token || token.token}" }
+  @partner_second_headers = { "Authorization" => "Bearer #{token.plaintext_token || token.token}" }
 end
 
 When("the second client requests the first client's export status") do
-  header "Authorization", @vardana_second_headers["Authorization"]
-  get "/lakeraven-ehr/exports/#{@vardana_export_id}"
+  header "Authorization", @partner_second_headers["Authorization"]
+  get "/lakeraven-ehr/exports/#{@partner_export_id}"
 end
 
 When("the second client requests the first client's export file") do
-  header "Authorization", @vardana_second_headers["Authorization"]
-  get "/lakeraven-ehr/exports/#{@vardana_export_id}/files/Patient.ndjson"
+  header "Authorization", @partner_second_headers["Authorization"]
+  get "/lakeraven-ehr/exports/#{@partner_export_id}/files/Patient.ndjson"
 end
 
 # --- JWKS transport ----------------------------------------------------------
@@ -317,27 +317,27 @@ Then("registering a backend client with jwks_uri {string} is rejected") do |uri|
 end
 
 Given("a backend client whose registered JWKS host resolves to {string}") do |address|
-  vardana_register_client(name: "Example Org A Connector",
+  partner_register_client(name: "Example Org A Connector",
     scopes: "system/Patient.read", stub_fetch: false)
-  vardana_stub_resolver("client.example.test" => [ address ])
+  partner_stub_resolver("client.example.test" => [ address ])
   # No HTTP stub on purpose: the fetch must refuse before any request leaves.
 end
 
 Given("a backend client whose published JWKS is served over HTTPS from a public address") do
-  vardana_register_client(name: "Example Org A Connector",
+  partner_register_client(name: "Example Org A Connector",
     scopes: "system/Patient.read", stub_fetch: false)
-  vardana_stub_resolver("client.example.test" => [ "203.0.113.10" ])
+  partner_stub_resolver("client.example.test" => [ "203.0.113.10" ])
   stub_request(:get, "https://client.example.test/.well-known/jwks.json")
-    .to_return(status: 200, body: { keys: [ @vardana_jwk.export ] }.to_json,
+    .to_return(status: 200, body: { keys: [ @partner_jwk.export ] }.to_json,
                headers: { "Content-Type" => "application/json" })
 end
 
 Given("a backend client whose published JWKS endpoint fails on the first fetch and succeeds afterwards") do
-  vardana_register_client(name: "Example Org A Connector",
+  partner_register_client(name: "Example Org A Connector",
     scopes: "system/Patient.read", stub_fetch: false)
-  vardana_stub_resolver("client.example.test" => [ "203.0.113.10" ])
+  partner_stub_resolver("client.example.test" => [ "203.0.113.10" ])
   stub_request(:get, "https://client.example.test/.well-known/jwks.json")
     .to_return({ status: 503 },
-               { status: 200, body: { keys: [ @vardana_jwk.export ] }.to_json,
+               { status: 200, body: { keys: [ @partner_jwk.export ] }.to_json,
                  headers: { "Content-Type" => "application/json" } })
 end
