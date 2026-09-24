@@ -71,7 +71,7 @@ module Lakeraven
       #   * recordedDate is OMITTED — the wire's date at piece 6 is LAST
       #     MODIFIED, not the recorded date.
       # Ids prefer the real IEN and otherwise derive deterministically
-      # from dfn + code so they stay stable across reads (partner §5.3).
+      # from dfn + code so they stay stable across reads (Partner §5.3).
       def self.from_problem_hashes(hashes, patient_dfn:)
         hashes.map do |h|
           new(

@@ -53,7 +53,7 @@ module Lakeraven
       # RPMS measurement/vital type mnemonics → LOINC. Terminology mapping
       # only — NO units here: units come from the source system
       # (BEHOVM2 VUNITS via the rpms-rpc Measurement read); a value whose
-      # source supplies no unit is dropped, never guessed (partner §5.1).
+      # source supplies no unit is dropped, never guessed (Partner §5.1).
       # Both AUTTMSR abbreviations (BGOVMSR: "HT;WT;TMP;BP;PU;RS;PA") and
       # the GMRV-style codes ORQQVI uses ("BP;HT;WT;T;R;P;PN") appear.
       VITAL_TYPE_MAP = {
@@ -138,7 +138,7 @@ module Lakeraven
       #   { measurement_ien:, type:, value:, units:, date:, visit_ien:,
       #     service_category:, capture_mode:, entered_in_error:, ... }
       #
-      # Honest-serialization rules (partner §5):
+      # Honest-serialization rules (Partner §5):
       #   * id is the real V MEASUREMENT IEN — a row without one has no
       #     stable identity and is dropped (never a blank or colliding id).
       #   * units come from the source (BEHOVM2 VUNITS); a row without a

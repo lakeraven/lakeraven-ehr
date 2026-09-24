@@ -1,12 +1,12 @@
 # frozen_string_literal: true
 
 @partner_conformance
-Feature: partner source-system clinical-data conformance
-  As a chronic-care program platform (partner)
+Feature: Partner source-system clinical-data conformance
+  As a chronic-care program platform (Partner)
   I need the FHIR API to satisfy the clinical half of the source-system profile
   So that a program can read a patient's clinical baseline safely
 
-  # Spec: partner Source System Profile v1 — §3 (resources), §4 (search),
+  # Spec: Partner Source System Profile v1 — §3 (resources), §4 (search),
   # §5 (data quality), §7 (checklist items 3-10). Auth (items 1-2) is owned
   # by the parallel auth PR.
   #

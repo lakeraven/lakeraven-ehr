@@ -50,7 +50,7 @@ module Lakeraven
         )
       end
 
-      # Renders a searchset Bundle. Honours FHIR paging (partner §4 /
+      # Renders a searchset Bundle. Honours FHIR paging (Partner §4 /
       # checklist item 7): `_count` caps the page size and `Bundle.link`
       # carries rel=self plus rel=next while more matches remain. The next
       # link is this same URL with `_page` advanced — FHIR treats paging

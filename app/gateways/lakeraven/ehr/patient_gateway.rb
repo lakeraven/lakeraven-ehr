@@ -34,7 +34,7 @@ module Lakeraven
 
         private
 
-        # Patient telecom (partner-checklist item 3): RpmsRpc::Patient.contact reads
+        # Patient telecom (Partner item 3): RpmsRpc::Patient.contact reads
         # PATIENT #2 fields .131/.132/.134/.133 (home/work/cell phone +
         # email) via the registered DDR GETS ENTRY DATA. The Patient model
         # carries one phone — prefer residence, then cell, then work. A nil

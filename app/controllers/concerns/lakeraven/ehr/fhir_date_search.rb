@@ -3,7 +3,7 @@
 module Lakeraven
   module EHR
     # FHIR date search-parameter semantics for in-memory result sets
-    # (partner §4: `date=ge{date}` floors and `_sort=-date` ordering).
+    # (Partner §4: `date=ge{date}` floors and `_sort=-date` ordering).
     # Supports the ge/gt/le/lt prefixes plus a bare date (equality), with
     # FHIR R4 date-precision semantics: a partial date names the WHOLE
     # period at its precision (a bare "2025-01-10" is the whole day, a

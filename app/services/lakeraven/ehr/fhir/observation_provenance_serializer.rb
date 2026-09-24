@@ -5,7 +5,7 @@ module Lakeraven
     module FHIR
       # Serializes a FHIR R4 Provenance for an Observation, distinguishing
       # office-measured values from values captured outside an in-person
-      # clinical visit (partner source-system profile §3/§7 item 10).
+      # clinical visit (Partner source-system profile §3/§7 item 10).
       #
       # RPMS/PCC grounding — the distinction is the source system's own:
       # a V MEASUREMENT (file 9000010.01, ^AUPNVMSR) points at its VISIT
@@ -27,7 +27,7 @@ module Lakeraven
       #       informant not recorded") and Provenance.activity carries the
       #       raw service-category code for machine consumption.
       #
-      #   anything else / absent → NO Provenance — partner treats a value
+      #   anything else / absent → NO Provenance — Partner treats a value
       #   without provenance as unverified (§3), the honest degrade.
       #
       # R4 shape notes: agent.type is 0..1 CodeableConcept (NOT an array);
@@ -56,7 +56,7 @@ module Lakeraven
         end
 
         # Deterministic Provenance id for an Observation id — stable across
-        # reads (partner §5.3) and reversible for target search.
+        # reads (Partner §5.3) and reversible for target search.
         def self.id_for(observation_id)
           "prov-#{observation_id}"
         end

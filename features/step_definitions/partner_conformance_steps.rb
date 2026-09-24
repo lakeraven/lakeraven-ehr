@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# partner clinical-data conformance steps (source-system profile v1,
+# Partner clinical-data conformance steps (source-system profile v1,
 # §3/§4/§5 + checklist items 3-10). Auth steps (items 1-2) live with the
 # parallel auth work.
 #

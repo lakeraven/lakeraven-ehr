@@ -3,7 +3,7 @@
 module Lakeraven
   module EHR
     # FHIR R4 Provenance — distinguishes office-measured observation values
-    # from values captured outside an in-person visit (partner checklist
+    # from values captured outside an in-person visit (Partner checklist
     # item 10). Derived per-request from the measurement read path; see
     # FHIR::ObservationProvenanceSerializer for the RPMS/PCC grounding.
     #

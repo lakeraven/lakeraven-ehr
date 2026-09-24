@@ -1,6 +1,6 @@
-# partner source-system conformance — living checklist
+# Partner source-system conformance — living checklist
 
-Tracks lakeraven-ehr against the **partner Source System Profile v1** (September 2026)
+Tracks lakeraven-ehr against the **Partner Source System Profile v1** (September 2026)
 §7 conformance checklist. Clinical-data items (3–10) are exercised by
 `features/partner_clinical_conformance.feature` (17 scenarios, tag
 `@partner_conformance`, enforced in CI); auth items (1–2) are owned by the parallel
@@ -51,7 +51,7 @@ wire cannot supply the signal — gap documented), **see auth PR**.
 |---|---|---|
 | `A` Ambulatory, `H` Hospitalization, `I` In Hospital, `O` Observation, `S` Day Surgery, `R` Nursing Home, `D` Daily Hospitalization Data | in-person clinical capture | `agent.type` = `author` (single CodeableConcept, per R4 0..1); `agent.who` = the recording provider's display name when the read supplies one, else a facility display — never an invented resource id |
 | `T` Telecommunications, `M` Telemedicine, `E` Event (Historical), `C` Chart Review | **not office-measured** — the DD records the modality, NOT who supplied the value | no `agent.type` (the wire proves no participant role); `agent.who.display` = "Not office-measured — source modality: X; informant not recorded". **`who = Patient/{dfn}` is never asserted** — chart review / telemedicine says nothing about the patient being the informant |
-| `N`, `X`, absent, anything else | unknown capture context | **no Provenance emitted** — partner treats a value without provenance as unverified (§3) |
+| `N`, `X`, absent, anything else | unknown capture context | **no Provenance emitted** — Partner treats a value without provenance as unverified (§3) |
 
 Both classes carry `Provenance.activity` with the raw service-category code
 (system `https://lakeraven.com/fhir/CodeSystem/rpms-visit-service-category`) so

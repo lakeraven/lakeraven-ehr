@@ -26,7 +26,7 @@ module Lakeraven
       attribute :ien, :integer
       # Deterministic fallback id for rows with no IEN (ORWPT APPTLST rows
       # carry none): derived from dfn + timestamp so ids stay stable across
-      # reads (partner §5.3). Used only when `ien` is absent.
+      # reads (Partner §5.3). Used only when `ien` is absent.
       attribute :derived_id, :string
       attribute :status, :string
       attribute :class_code, :string
