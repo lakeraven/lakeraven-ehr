@@ -120,6 +120,20 @@ module Lakeraven
         assert_equal "system/*.read", JSON.parse(response.body)["scope"]
       end
 
+      # Tracks #496. granted_scopes intersects the requested scope with the
+      # registered scope as exact strings, so a client registered for
+      # system/*.read that asks for system/Patient.read is refused.
+      # scope_permits? in SmartAuthentication is the authority for what a
+      # wildcard covers: system/*.read permits system/Patient.read, and a
+      # client asking for less than its entitlement must be issued that
+      # narrower scope.
+      test "requesting system/Patient.read against a registered system/*.read wildcard is issued system/Patient.read" do
+        post_token(assertion(claims), scope: "system/Patient.read")
+
+        assert_response :success
+        assert_equal "system/Patient.read", JSON.parse(response.body)["scope"]
+      end
+
       test "refusals do not reveal whether a client exists or has a key" do
         # A per-reason description let an unauthenticated caller walk the client
         # registry: "Unknown client" vs "Client has no registered public key"
