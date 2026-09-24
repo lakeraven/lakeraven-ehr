@@ -43,8 +43,7 @@ module Lakeraven
 
         app = client_for(assertion)
         unless app
-          return render_token_error("invalid_client",
-            description: "Unknown client", status: :unauthorized)
+          return render_invalid_client("unknown_client")
         end
 
         claims = verify_assertion!(assertion, app)
@@ -54,8 +53,7 @@ module Lakeraven
         # token makes; an unbound credential would read every organization's
         # patients (fail-open), so it must never be minted at all.
         if app.organization_id.blank?
-          return render_token_error("invalid_client",
-            description: "Client is not bound to an organization", status: :unauthorized)
+          return render_invalid_client("client_not_bound_to_organization")
         end
 
         scopes = granted_scopes(app)
@@ -96,7 +94,7 @@ module Lakeraven
       def verify_assertion!(assertion, app)
         jwks = ClientJwks.fetch(app.jwks_uri)
         unless jwks
-          return render_invalid_client("Client has no retrievable registered JWKS")
+          return render_invalid_client("no_retrievable_jwks")
         end
 
         claims, = JWT.decode(
@@ -109,30 +107,30 @@ module Lakeraven
         )
 
         unless claims["iss"] == app.uid && claims["sub"] == app.uid
-          return render_invalid_client("Assertion iss/sub must match the client id")
+          return render_invalid_client("iss_sub_mismatch")
         end
 
         exp = claims["exp"].to_i
         if exp > MAX_ASSERTION_LIFETIME.from_now.to_i
-          return render_invalid_client("Assertion exp exceeds the five-minute maximum")
+          return render_invalid_client("exp_too_far")
         end
         if claims["iat"].present? && exp - claims["iat"].to_i > MAX_ASSERTION_LIFETIME.to_i
-          return render_invalid_client("Assertion lifetime exceeds the five-minute maximum")
+          return render_invalid_client("lifetime_too_long")
         end
 
         jti = claims["jti"].to_s
-        return render_invalid_client("Assertion jti is required") if jti.blank?
+        return render_invalid_client("missing_jti") if jti.blank?
         if AssertionReplayGuard.replayed?(app.uid, jti, exp)
-          return render_invalid_client("Assertion has already been used")
+          return render_invalid_client("replayed_jti")
         end
 
         claims
       rescue JWT::ExpiredSignature
-        render_invalid_client("Assertion has expired")
+        render_invalid_client("expired")
       rescue JWT::InvalidAudError
-        render_invalid_client("Assertion audience does not match the token endpoint")
+        render_invalid_client("bad_audience")
       rescue JWT::DecodeError
-        render_invalid_client("Invalid JWT assertion")
+        render_invalid_client("undecodable")
       end
 
       # Grant the intersection of the requested scopes and the client's
@@ -169,8 +167,20 @@ module Lakeraven
           request.base_url + request.path
       end
 
-      def render_invalid_client(description)
-        render_token_error("invalid_client", description: description, status: :unauthorized)
+      # Every client-authentication refusal looks identical from outside.
+      #
+      # The per-reason description was a registry oracle: an unauthenticated
+      # caller could distinguish an unknown client from a registered one with
+      # no retrievable JWKS from a genuine signature failure, and could do so
+      # before presenting any valid signature. The specific reason is still
+      # recorded — it is the most useful thing in the log, because a run of
+      # refusals is what probing looks like — but it does not travel back to
+      # the caller.
+      UNIFORM_REFUSAL = "Client authentication failed"
+
+      def render_invalid_client(reason)
+        Rails.logger.info("[backend_services] refused: #{reason}")
+        render_token_error("invalid_client", description: UNIFORM_REFUSAL, status: :unauthorized)
         nil
       end
 
