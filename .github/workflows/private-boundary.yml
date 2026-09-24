@@ -1,6 +1,13 @@
 name: private-boundary
 # Fails a PR if a private-boundary term (partner / tribe / vendor names, etc.)
-# appears in this public repo — in tracked files OR in the PR title/body.
+# appears in this public repo — in tracked files, in the PR title/body, in the
+# BRANCH NAME, or in any COMMIT MESSAGE the PR would land.
+#
+# Files and PR prose were the original scope, and it was not enough: three
+# separate incidents reached a public ref through paths this job did not look
+# at — a partner name in two branch names, in commit subjects on those
+# branches, and in a tag pushed over commits whose tree had never been
+# scanned. A name in a ref is as public as a name in a file.
 # The blocklist lives ONLY in the encrypted `LAKERAVEN_BOUNDARY_BLOCKLIST`
 # secret (newline-delimited, case-insensitive), never in the repo, and matched
 # terms are never echoed — only file:line — so the blocklist cannot leak
@@ -18,10 +25,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Commit messages cannot be scanned from a shallow clone.
+          fetch-depth: 0
       - name: Scan for private-boundary terms
         shell: bash
         env:
           BLOCKLIST: ${{ secrets.LAKERAVEN_BOUNDARY_BLOCKLIST }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           IS_FORK_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
@@ -52,6 +65,20 @@ jobs:
             if printf '%s\n%s\n' "${PR_TITLE:-}" "${PR_BODY:-}" | grep -qEi -e "$pattern"; then
               echo "::error::private-boundary term matched in the PR title or body"
               fail=1
+            fi
+            # The ref itself. A branch name is published the moment it is pushed,
+            # and renaming one later does not unpublish it.
+            if printf '%s\n' "${HEAD_REF:-}" | grep -qEi -e "$pattern"; then
+              echo "::error::private-boundary term matched in the branch name"
+              fail=1
+            fi
+            # Every commit message this PR would land. Subjects are as public as
+            # file contents and survive a file-level scrub.
+            if [ -n "${BASE_SHA:-}" ] && [ -n "${HEAD_SHA:-}" ]; then
+              if git log --format='%B' "${BASE_SHA}..${HEAD_SHA}" 2>/dev/null | grep -qEi -e "$pattern"; then
+                echo "::error::private-boundary term matched in a commit message on this branch"
+                fail=1
+              fi
             fi
           done <<< "${BLOCKLIST}"
           if [ "$fail" -ne 0 ]; then
