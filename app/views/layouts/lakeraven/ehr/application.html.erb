@@ -4,16 +4,47 @@
   <%# Views set a page-specific title via content_for; the engine name is the
       fallback. A distinct title per page is a basic screen-reader affordance. %>
   <title><%= content_for(:title).presence || "Lakeraven EHR" %></title>
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1"
+  >
   <%= csrf_meta_tags %>
   <%= csp_meta_tag %>
 
   <%= yield :head %>
 
-  <%= stylesheet_link_tag    "lakeraven/ehr/application", media: "all" %>
+  <%# The host's Tailwind build, which includes the engine's engine.css
+      (app/assets/tailwind/lakeraven_ehr/engine.css says how). %>
+  <%= stylesheet_link_tag "tailwind", media: "all" %>
 </head>
-<body>
+<body class="lr-ehr min-h-screen bg-slate-50 text-slate-900 antialiased">
 
-<%= yield %>
+<%# On a shared clinic workstation the next person at the keyboard has to see
+    whose session is open, and be able to end it. %>
+<header class="border-b border-slate-200 bg-white">
+  <div class="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 px-4 py-3">
+    <%= link_to "Lakeraven EHR",
+          session[:duz].present? ? dashboard_path : login_path,
+          class: "text-lg font-semibold text-slate-900 no-underline hover:text-slate-700" %>
+
+    <% if session[:duz].present? %>
+      <div class="flex items-center gap-4 text-sm">
+        <span class="text-slate-600">
+          Signed in as
+          <strong class="font-semibold text-slate-900"><%= session[:user_name].presence || "DUZ #{session[:duz]}" %></strong>
+        </span>
+        <%= button_to "Sign out",
+              logout_path,
+              method: :delete,
+              class: "min-h-9 bg-white px-3 py-1.5 text-sm text-slate-700 ring-1 ring-slate-300 ring-inset hover:bg-slate-50" %>
+      </div>
+    <% end %>
+  </div>
+</header>
+
+<main class="mx-auto max-w-5xl px-4 py-8">
+  <%= yield %>
+</main>
 
 </body>
 </html>

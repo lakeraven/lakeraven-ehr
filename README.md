@@ -21,6 +21,25 @@ Or install it yourself as:
 $ gem install lakeraven-ehr
 ```
 
+### Styles
+
+Engine pages are styled with Tailwind CSS v4 and link the host's Tailwind build (`tailwind.css`).
+The engine ships no build of its own.
+The host needs `tailwindcss-rails` (4.x) and includes the engine in its build:
+
+```bash
+$ bin/rails tailwindcss:engines
+```
+
+Then add this line to the host's `app/assets/tailwind/application.css`:
+
+```css
+@import "../builds/tailwind/lakeraven_ehr";
+```
+
+The engine's styles cannot restyle the host's own pages.
+They define no theme, and every element default is scoped to `.lr-ehr`, the class the engine layout puts on `<body>`.
+
 ## Contributing
 Contribution directions go here.
 
