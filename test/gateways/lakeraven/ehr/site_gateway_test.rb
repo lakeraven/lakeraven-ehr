@@ -45,6 +45,10 @@ module Lakeraven
         refute SiteGateway.select("301", 540, via: nil)
       end
 
+      test "select returns false when the provider cannot select a site" do
+        refute SiteGateway.select("301", 540, via: Module.new)
+      end
+
       # --- delegation + coercion via a fake provider ---
 
       test "list delegates to the provider with duz coerced to a string" do

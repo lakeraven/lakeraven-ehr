@@ -20,8 +20,10 @@ module Lakeraven
         via.current(duz.to_s)
       end
 
+      # RpmsRpc::Site has no select yet (division switching would wrap XUS DIVISION SET);
+      # without it the call hits the private Kernel#select and raises, so refuse instead (#541).
       def self.select(duz, site_ien, via: default_provider)
-        return false if via.nil?
+        return false if via.nil? || !via.respond_to?(:select)
 
         via.select(duz.to_s, site_ien.to_s)
       end

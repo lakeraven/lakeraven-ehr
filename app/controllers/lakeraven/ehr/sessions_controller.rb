@@ -80,7 +80,11 @@ module Lakeraven
       def authenticate(access_code:, verify_code:)
         AuthenticationService.new.authenticate(access_code: access_code, verify_code: verify_code)
       rescue RpmsRpc::Client::ConnectionError, RpmsRpc::NotConfiguredError, Errno::ECONNREFUSED,
-             IOError, SocketError => e
+             IOError, SocketError,
+             # A broker that answers but refuses the sign-on RPCs themselves (a CIA-only
+             # broker denies XUS AV CODE before CIANBRPC AUTH, #539) is unavailable for
+             # login, not a bad credential: same fail-closed answer, no throttle strike.
+             RpmsRpc::Client::RpcError, RpmsRpc::Client::AuthenticationError => e
         # A broker outage used to surface as an unhandled 500 whose exception
         # report carried the submitted parameters — including the access code.
         # Log the class, never the params.
