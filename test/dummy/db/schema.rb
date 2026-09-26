@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_23_000001) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_24_000000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -50,6 +50,15 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_000001) do
     t.index [ "created_at" ], name: "index_lakeraven_ehr_audit_events_on_created_at"
     t.index [ "entity_type" ], name: "index_lakeraven_ehr_audit_events_on_entity_type"
     t.index [ "tenant_identifier" ], name: "index_lakeraven_ehr_audit_events_on_tenant_identifier"
+  end
+
+  create_table "lakeraven_ehr_backend_assertion_jtis", force: :cascade do |t|
+    t.string "client_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "expires_at", null: false
+    t.string "jti", null: false
+    t.index [ "client_id", "jti" ], name: "idx_backend_assertion_jti_uniqueness", unique: true
+    t.index [ "expires_at" ], name: "index_lakeraven_ehr_backend_assertion_jtis_on_expires_at"
   end
 
   create_table "lakeraven_ehr_disclosures", force: :cascade do |t|
@@ -166,13 +175,13 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_000001) do
     t.string "submission_token"
     t.integer "total_score", null: false
     t.datetime "updated_at", null: false
-    t.index [ "submission_token" ], name: "index_lakeraven_ehr_screenings_on_submission_token", unique: true
     t.index [ "encounter_ien" ], name: "index_lakeraven_ehr_screening_responses_on_encounter_ien"
     t.index [ "patient_dfn", "instrument_key", "effective_at" ], name: "index_lakeraven_ehr_screenings_on_patient_instrument_time"
-    t.check_constraint "NOT (safety_flagged AND source = 'clinician') OR safety_acknowledged_by IS NOT NULL", name: "screening_clinician_flag_requires_acknowledger"
-    t.check_constraint "source <> 'clinician' OR administered_by IS NOT NULL", name: "screening_clinician_requires_administrator"
+    t.index [ "submission_token" ], name: "index_lakeraven_ehr_screenings_on_submission_token", unique: true
+    t.check_constraint "NOT (safety_flagged AND source::text = 'clinician'::text) OR safety_acknowledged_by IS NOT NULL", name: "screening_clinician_flag_requires_acknowledger"
     t.check_constraint "NOT safety_flagged OR safety_acknowledged_at IS NOT NULL", name: "screening_flagged_requires_acknowledgement"
-    t.check_constraint "safety_flagged OR NOT (instrument_key = 'phq-9' AND answers ? '44260-8' AND COALESCE(answers ->> '44260-8', '') !~ '^\\s*[+-]?0*\\s*$')", name: "screening_disclosure_requires_flag"
+    t.check_constraint "safety_flagged OR NOT (instrument_key::text = 'phq-9'::text AND answers ? '44260-8'::text AND COALESCE(answers ->> '44260-8'::text, ''::text) !~ '^\\s*[+-]?0*\\s*$'::text)", name: "screening_disclosure_requires_flag"
+    t.check_constraint "source::text <> 'clinician'::text OR administered_by IS NOT NULL", name: "screening_clinician_requires_administrator"
   end
 
   create_table "oauth_access_grants", force: :cascade do |t|
@@ -207,26 +216,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_000001) do
     t.index [ "token" ], name: "index_oauth_access_tokens_on_token", unique: true
   end
 
-  create_table "lakeraven_ehr_backend_assertion_jtis", force: :cascade do |t|
-    t.datetime "created_at", null: false
-    t.datetime "expires_at", null: false
-    t.string "issuer", null: false
-    t.string "jti", null: false
-    t.datetime "updated_at", null: false
-    t.index [ "expires_at" ], name: "index_backend_assertion_jtis_on_expires_at"
-    t.index [ "issuer", "jti" ], name: "index_backend_assertion_jtis_on_issuer_and_jti", unique: true
-  end
-
   create_table "oauth_applications", force: :cascade do |t|
     t.boolean "confidential", default: true, null: false
     t.datetime "created_at", null: false
+    t.string "jwks_uri"
     t.string "name", null: false
+    t.string "organization_id"
     t.text "redirect_uri", null: false
-    t.text "public_key"
     t.string "scopes", default: "", null: false
     t.string "secret", null: false
     t.string "uid", null: false
     t.datetime "updated_at", null: false
+    t.index [ "organization_id" ], name: "index_oauth_applications_on_organization_id"
     t.index [ "uid" ], name: "index_oauth_applications_on_uid", unique: true
   end
 

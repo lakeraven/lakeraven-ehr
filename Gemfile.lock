@@ -12,6 +12,7 @@ PATH
     lakeraven-ehr (0.1.0)
       csv
       doorkeeper (~> 5.8)
+      jwt (~> 2.7)
       ostruct
       pundit (~> 2.4)
       rails (>= 8.1.0)
@@ -168,6 +169,8 @@ GEM
       rdoc (>= 4.0.0)
       reline (>= 0.4.2)
     json (2.21.2)
+    jwt (2.10.3)
+      base64
     language_server-protocol (3.17.0.5)
     lint_roller (1.1.0)
     logger (1.7.0)
