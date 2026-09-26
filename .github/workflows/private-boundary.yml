@@ -35,6 +35,11 @@ jobs:
           HEAD_REF: ${{ github.event.pull_request.head.ref || github.ref_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          # A fork PR has no secret, so its only scan is the one on merge.
+          # On that push event the pull_request fields are all empty, so the
+          # range and the branch name have to come from the push itself.
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.event.after }}
           IS_FORK_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
@@ -48,6 +53,39 @@ jobs:
             echo "::error::LAKERAVEN_BOUNDARY_BLOCKLIST is unset — the boundary guard is inert. Set the org secret."
             exit 1
           fi
+          # Commit range to scan. A pull_request event names it directly; a push
+          # to main supplies before..after, which is what a fork PR's commits
+          # arrive through. Without this, the "the scan runs again on merge"
+          # promise covered tracked files only.
+          range=""
+          if [ -n "${BASE_SHA:-}" ] && [ -n "${HEAD_SHA:-}" ]; then
+            range="${BASE_SHA}..${HEAD_SHA}"
+          elif [ -n "${PUSH_BEFORE:-}" ] && [ -n "${PUSH_AFTER:-}" ] \
+               && [ "${PUSH_BEFORE}" != "0000000000000000000000000000000000000000" ]; then
+            range="${PUSH_BEFORE}..${PUSH_AFTER}"
+          fi
+
+          # Collect the text to scan ONCE, into variables. Every check below
+          # uses a here-string rather than `producer | grep -q`: under
+          # `set -o pipefail`, grep -q exits at the first match, the producer
+          # takes SIGPIPE, and the pipeline reports failure -- so a match made
+          # the guard report "no match" precisely when output was large.
+          commit_messages=""
+          if [ -n "$range" ]; then
+            commit_messages="$(git log --format='%B' "$range" 2>/dev/null || true)"
+          fi
+
+          # Branch names. HEAD_REF is the PR's head branch on a pull_request
+          # event and merely "main" on a push, so a fork's branch name would
+          # never be checked. A merge commit carries it in its subject
+          # ("Merge pull request #N from fork/branch"), which is recovered here.
+          refs="${HEAD_REF:-}"
+          if [ -n "$range" ]; then
+            merged_from="$(git log --format='%s' "$range" 2>/dev/null \
+              | sed -n 's|^Merge pull request #[0-9]* from ||p' || true)"
+            refs="$(printf '%s\n%s\n' "$refs" "$merged_from")"
+          fi
+
           fail=0
           while IFS= read -r term; do
             term="${term%$'\r'}"
@@ -62,23 +100,21 @@ jobs:
                 fail=1
               done <<< "$matches"
             fi
-            if printf '%s\n%s\n' "${PR_TITLE:-}" "${PR_BODY:-}" | grep -qEi -e "$pattern"; then
+            if grep -qEi -e "$pattern" <<< "$(printf '%s\n%s\n' "${PR_TITLE:-}" "${PR_BODY:-}")"; then
               echo "::error::private-boundary term matched in the PR title or body"
               fail=1
             fi
             # The ref itself. A branch name is published the moment it is pushed,
             # and renaming one later does not unpublish it.
-            if printf '%s\n' "${HEAD_REF:-}" | grep -qEi -e "$pattern"; then
-              echo "::error::private-boundary term matched in the branch name"
+            if grep -qEi -e "$pattern" <<< "$refs"; then
+              echo "::error::private-boundary term matched in a branch name"
               fail=1
             fi
             # Every commit message this PR would land. Subjects are as public as
             # file contents and survive a file-level scrub.
-            if [ -n "${BASE_SHA:-}" ] && [ -n "${HEAD_SHA:-}" ]; then
-              if git log --format='%B' "${BASE_SHA}..${HEAD_SHA}" 2>/dev/null | grep -qEi -e "$pattern"; then
-                echo "::error::private-boundary term matched in a commit message on this branch"
-                fail=1
-              fi
+            if [ -n "$commit_messages" ] && grep -qEi -e "$pattern" <<< "$commit_messages"; then
+              echo "::error::private-boundary term matched in a commit message"
+              fail=1
             fi
           done <<< "${BLOCKLIST}"
           if [ "$fail" -ne 0 ]; then
