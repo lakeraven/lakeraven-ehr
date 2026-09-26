@@ -78,4 +78,11 @@ jobs:
           ruby-version: "3.4"
           bundler-cache: true
       - run: bundle exec rails db:create db:migrate
+        # The engine's own migrations under db/migrate are not on the dummy
+        # app's migration path, so db:migrate leaves their versions out of
+        # schema_migrations. `rails test` papers over that by reloading the
+        # schema; the gate's verify command is cucumber, which does not, and
+        # the baseline then reports those migrations as pending. Preparing the
+        # test schema explicitly makes both paths start from the same database.
+      - run: bundle exec rails db:test:prepare
       - run: bin/mutation-gate
