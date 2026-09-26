@@ -14,7 +14,7 @@ require "rails/test_help"
 # it here: once per run, from the current views, and loudly when it fails.
 # Cucumber loads this file too.
 Tailwindcss::Engines.bundle
-system(*Tailwindcss::Commands.compile_command(silent: true), exception: true)
+system(*Tailwindcss::Commands.compile_command(silent: false), exception: true)
 
 require "rpms_rpc/version"
 require "rpms_rpc/mock_client"
