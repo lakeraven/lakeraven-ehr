@@ -70,9 +70,16 @@ jobs:
           # `set -o pipefail`, grep -q exits at the first match, the producer
           # takes SIGPIPE, and the pipeline reports failure -- so a match made
           # the guard report "no match" precisely when output was large.
+          # A failed history read must NEVER read as "nothing to report". If
+          # main was rewritten so the previous tip is gone from this checkout,
+          # git log exits non-zero and swallowing that would let the job print
+          # "No private-boundary terms found" having scanned no history at all.
           commit_messages=""
           if [ -n "$range" ]; then
-            commit_messages="$(git log --format='%B' "$range" 2>/dev/null || true)"
+            if ! commit_messages="$(git log --format='%B' "$range" 2>/dev/null)"; then
+              echo "::error::boundary scan could not read commit messages for ${range} (rewritten history or missing objects). Refusing to report clean."
+              exit 1
+            fi
           fi
 
           # Branch names. HEAD_REF is the PR's head branch on a pull_request
@@ -81,8 +88,11 @@ jobs:
           # ("Merge pull request #N from fork/branch"), which is recovered here.
           refs="${HEAD_REF:-}"
           if [ -n "$range" ]; then
-            merged_from="$(git log --format='%s' "$range" 2>/dev/null \
-              | sed -n 's|^Merge pull request #[0-9]* from ||p' || true)"
+            if ! subjects="$(git log --format='%s' "$range" 2>/dev/null)"; then
+              echo "::error::boundary scan could not read commit subjects for ${range}. Refusing to report clean."
+              exit 1
+            fi
+            merged_from="$(sed -n 's|^Merge pull request #[0-9]* from ||p' <<< "$subjects")"
             refs="$(printf '%s\n%s\n' "$refs" "$merged_from")"
           fi
 
