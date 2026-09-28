@@ -44,9 +44,9 @@ class MutationGateTest < Minitest::Test
           "operators" => [
             { "id" => "write_becomes_read",
               "replace" => "  {{key}}: { read: {{read}}, write: {{read}} },",
-              "why" => "%{key} may write whatever it may read" },
-          ],
-        },
+              "why" => "%{key} may write whatever it may read" }
+          ]
+        }
       }
       spec["behavior_probe"] = behavior_probe if behavior_probe
       if declared
@@ -54,7 +54,7 @@ class MutationGateTest < Minitest::Test
           "id" => "mints_everything",
           "find" => "write: %w[Patient]",
           "replace" => "write: %w[Patient Observation]",
-          "why" => "bh_provider may write Observation it was never granted",
+          "why" => "bh_provider may write Observation it was never granted"
         } ]
       end
 
