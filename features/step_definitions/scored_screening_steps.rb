@@ -12,7 +12,11 @@
 SCREENING_PHQ9 = Lakeraven::EHR::ScreeningInstrument::PHQ9
 SCREENING_GAD7 = Lakeraven::EHR::ScreeningInstrument::GAD7
 SCREENING_MOUNT = "/lakeraven-ehr"
-SCREENING_SCOPES = "user/QuestionnaireResponse.read user/QuestionnaireResponse.write"
+# The security keys a behavioural-health clinician actually signs on with. The
+# scopes are DERIVED from them by the same policy the sessions controller uses
+# (see `screening_scopes` below) rather than written out here — a literal scope
+# string would let this suite pass on a grant no sign-on can produce.
+SCREENING_CLINICIAN_KEYS = [ :bh_provider ].freeze
 
 module ScreeningStepHelpers
   def instrument_named(name)
@@ -218,13 +222,21 @@ Given("the clinician is signed in") do
   # A CLINICIAN credential specifically: recording a screening is a clinical
   # act, so it takes a sign-on token (whose resource_owner_id is a DUZ), never
   # a patient-context or backend one.
+  # The scopes come from SessionScopePolicy, exactly as
+  # SessionsController#mint_smart_token derives them at sessions_controller.rb:145.
+  # Writing them out literally instead would prove only that the surface works
+  # when handed scopes — which is not the question. The question is whether a
+  # clinician who signs on can reach it.
+  scopes = Lakeraven::EHR::SessionScopePolicy.scope_string(
+    security_keys: SCREENING_CLINICIAN_KEYS
+  )
   app = Doorkeeper::Application.create!(
     name: Lakeraven::EHR::SmartAuthentication::BROWSER_SSO_APP_NAME,
     redirect_uri: "https://example.test/callback",
-    scopes: SCREENING_SCOPES, confidential: true
+    scopes: scopes, confidential: true
   )
   token = Doorkeeper::AccessToken.create!(
-    application: app, scopes: SCREENING_SCOPES, resource_owner_id: "99999", expires_in: 3600
+    application: app, scopes: scopes, resource_owner_id: "99999", expires_in: 3600
   )
   token.update_column(:browser_session, true) if token.has_attribute?(:browser_session)
   post "#{SCREENING_MOUNT}/test_session",
