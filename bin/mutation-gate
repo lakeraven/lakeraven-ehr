@@ -26,7 +26,7 @@ require "digest"
 ROOT = File.expand_path("..", __dir__)
 CONFIG = ENV["MUTATION_TARGETS"] || File.join(ROOT, "test/mutation/targets.yml")
 
-Mutant = Struct.new(:id, :label, :why, :apply, keyword_init: true)
+Mutant = Struct.new(:id, :label, :why, :apply, :declared, keyword_init: true)
 
 class Target
   attr_reader :name, :file, :verify, :probe
@@ -54,7 +54,7 @@ class Target
               "the code moved and this mutant is no longer testing anything: #{find.inspect}"
       end
       Mutant.new(
-        id: m.fetch("id"), label: m.fetch("id"), why: m.fetch("why"),
+        id: m.fetch("id"), label: m.fetch("id"), why: m.fetch("why"), declared: true,
         apply: ->(src) { replace_once(src, find, m.fetch("replace")) }
       )
     end
@@ -73,6 +73,7 @@ class Target
       gen.fetch("operators").map do |op|
         replacement = op.fetch("replace").gsub(/\{\{(\w+)\}\}/) { md[Regexp.last_match(1).to_sym].to_s }
         Mutant.new(
+          declared: false,
           id: "#{op.fetch('id')}:#{md[:key]}",
           label: "#{op.fetch('id')} on #{md[:key]}",
           why: op.fetch("why").gsub("%{key}", md[:key]),
@@ -141,6 +142,7 @@ end
 
 survivors = []
 equivalents = []
+blind_spots = []
 targets.each do |target|
   puts "\n\e[1m#{target.name}\e[0m — #{target.file.sub("#{ROOT}/", '')}"
 
@@ -159,7 +161,7 @@ targets.each do |target|
   puts "  #{mutants.size} mutants\n\n"
 
   mutants.each do |mutant|
-    behaviour, state, summary = with_mutation(target, mutant) do
+    behaviour, state, summary, blind = with_mutation(target, mutant) do
       b = fingerprint(target)
       # Skip the suite entirely for an equivalent mutant — it is the same code.
       # Only a probe can establish that. Without one both fingerprints are nil,
@@ -168,11 +170,23 @@ targets.each do |target|
       # gate did not earn. No probe means equivalence is unknown, so the mutant
       # is tested like any other.
       if target.probe && b == baseline_behaviour
-        [ b, :equivalent, "no behaviour change" ]
+        # A DECLARED mutant states the privilege change it represents — that is
+        # what its `why` is. If the probe cannot see it, the probe is blind to
+        # that path, not the mutant harmless: skipping it would file a real
+        # escalation as "no behaviour change" and still report a clean gate.
+        # Measured on this very target: before the probe fingerprinted
+        # scope_string, both scope_string mutants came back equivalent.
+        if mutant.declared
+          [ b, *run_suite(target), :blind ]
+        else
+          [ b, :equivalent, "no behaviour change" ]
+        end
       else
         [ b, *run_suite(target) ]
       end
     end
+
+    blind_spots << [ target, mutant ] if blind == :blind
 
     case state
     when :equivalent
@@ -192,6 +206,14 @@ puts
 unless equivalents.empty?
   puts "#{equivalents.size} equivalent mutant(s) skipped — the edit cannot change behaviour:"
   equivalents.each { |t, m| puts "  \e[90m#{t.name} / #{m.label}\e[0m" }
+  puts
+end
+
+unless blind_spots.empty?
+  puts "\e[33m#{blind_spots.size} probe blind spot(s).\e[0m The probe reported no behaviour change for a " \
+       "mutant that declares one, so the suite was run instead of trusting it. Extend the probe to " \
+       "observe these paths, or its equivalence verdicts cannot be trusted there:"
+  blind_spots.each { |t, m| puts "  \e[33m#{t.name} / #{m.label}\e[0m" }
   puts
 end
 

@@ -17,7 +17,7 @@ class MutationGateTest < Minitest::Test
 
   # A target with a table row to mutate and a verify that always reports green.
   # Every mutant therefore survives, and a gate that ran the suite must exit 1.
-  def with_target(behavior_probe:)
+  def with_target(behavior_probe:, declared: false)
     Dir.mktmpdir do |dir|
       subject = File.join(dir, "subject.rb")
       File.write(subject, <<~SUBJECT)
@@ -49,6 +49,14 @@ class MutationGateTest < Minitest::Test
         },
       }
       spec["behavior_probe"] = behavior_probe if behavior_probe
+      if declared
+        spec["declared"] = [ {
+          "id" => "mints_everything",
+          "find" => "write: %w[Patient]",
+          "replace" => "write: %w[Patient Observation]",
+          "why" => "bh_provider may write Observation it was never granted",
+        } ]
+      end
 
       config = File.join(dir, "targets.yml")
       File.write(config, { "targets" => [ spec ] }.to_yaml)
@@ -72,6 +80,26 @@ class MutationGateTest < Minitest::Test
       runs = File.exist?(verify_log) ? File.readlines(verify_log).size : 0
       assert_operator runs, :>, 1,
         "suite ran #{runs} time(s): the mutant was decided without being tested"
+    end
+  end
+
+  # A probe that exists but does not observe the mutated path is the same
+  # false-clean wearing a working gate's clothes. Measured on the real target:
+  # before the probe fingerprinted scope_string, both declared scope_string
+  # mutants came back "no behaviour change" and the gate still announced that
+  # all killable mutants were killed. A DECLARED mutant states its privilege
+  # change in `why`; an equivalence verdict on one means the probe is blind,
+  # not that the escalation is harmless.
+  def test_a_declared_mutant_is_never_filed_equivalent_on_a_probes_word
+    probe = "printf constant"       # sees nothing, so every mutant looks equivalent
+    with_target(behavior_probe: probe, declared: true) do |out, status, verify_log|
+      refute_includes out, "equiv.  mints_everything",
+        "a declared privilege change was skipped on a blind probe's word:\n#{out}"
+      assert_includes out, "probe blind spot"
+      refute_equal 0, status.exitstatus, out
+
+      runs = File.exist?(verify_log) ? File.readlines(verify_log).size : 0
+      assert_operator runs, :>, 1, "declared mutant was decided without being tested"
     end
   end
 
