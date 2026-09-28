@@ -24,7 +24,7 @@ require "open3"
 require "digest"
 
 ROOT = File.expand_path("..", __dir__)
-CONFIG = File.join(ROOT, "test/mutation/targets.yml")
+CONFIG = ENV["MUTATION_TARGETS"] || File.join(ROOT, "test/mutation/targets.yml")
 
 Mutant = Struct.new(:id, :label, :why, :apply, keyword_init: true)
 
@@ -33,7 +33,7 @@ class Target
 
   def initialize(spec)
     @name = spec.fetch("name")
-    @file = File.join(ROOT, spec.fetch("file"))
+    @file = File.expand_path(spec.fetch("file"), ROOT)
     @verify = spec.fetch("verify")
     @probe = spec["behavior_probe"]
     @spec = spec
@@ -151,6 +151,10 @@ targets.each do |target|
   puts "  baseline: #{summary}"
 
   baseline_behaviour = fingerprint(target)
+  unless target.probe
+    puts "  \e[33mno behaviour probe\e[0m — equivalence cannot be established, so " \
+         "every mutant runs the suite and a genuinely equivalent one will report as a survivor."
+  end
   mutants = target.mutants
   puts "  #{mutants.size} mutants\n\n"
 
@@ -158,7 +162,16 @@ targets.each do |target|
     behaviour, state, summary = with_mutation(target, mutant) do
       b = fingerprint(target)
       # Skip the suite entirely for an equivalent mutant — it is the same code.
-      b == baseline_behaviour ? [ b, :equivalent, "no behaviour change" ] : [ b, *run_suite(target) ]
+      # Only a probe can establish that. Without one both fingerprints are nil,
+      # and treating nil == nil as "no behaviour change" would class every
+      # mutant equivalent, never run the suite, and exit 0 — a clean report the
+      # gate did not earn. No probe means equivalence is unknown, so the mutant
+      # is tested like any other.
+      if target.probe && b == baseline_behaviour
+        [ b, :equivalent, "no behaviour change" ]
+      else
+        [ b, *run_suite(target) ]
+      end
     end
 
     case state
