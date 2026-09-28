@@ -64,3 +64,14 @@ targets:
         find: 'Patient Practitioner Organization Location Encounter'
         replace: 'Patient Encounter'
         why: "most of the chart read surface disappears with no failing test"
+      # scope_string is the production entry point (SessionsController#mint_smart_token);
+      # scopes_for is what the per-key scenarios call. A defect on the one line
+      # between them is invisible to every scenario that stops at the array.
+      - id: scope_string_mints_all_scopes
+        find: 'scopes_for(security_keys: security_keys).join(" ")'
+        replace: 'all_scopes.join(" ")'
+        why: "every sign-on is minted every scope in the table regardless of keys — a clerk with no keys holds the physician's token, the defect this policy replaced"
+      - id: scope_string_not_space_delimited
+        find: 'scopes_for(security_keys: security_keys).join(" ")'
+        replace: 'scopes_for(security_keys: security_keys).join(",")'
+        why: "Doorkeeper and scope_permits? split on whitespace, so a multi-scope grant is stored as one scope nothing matches — every keyed clinician silently loses their whole surface"

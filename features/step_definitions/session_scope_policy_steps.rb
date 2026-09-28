@@ -120,3 +120,59 @@ Then("every scope policy entry should correspond to an RPMS security key") do
     "Scope policy entries with no RPMS registry key (unreachable from a real " \
     "sign-on, but still counted in all_scopes): #{orphaned.inspect}"
 end
+
+# ---------------------------------------------------------------------------
+# The production entry point.
+#
+# SessionsController#mint_smart_token -> SessionScopePolicy.scope_string ->
+# Doorkeeper::AccessToken. Everything above this line calls scopes_for, which
+# production never does; a defect confined to scope_string is invisible to it.
+# These steps sign in through the real login route against the mock broker,
+# then read the scopes off the token that was minted — with
+# `scopes.to_s.split`, which is exactly how SmartAuthentication#scope_permits?
+# reads them, so what is asserted here is what will be enforced.
+# ---------------------------------------------------------------------------
+
+SESSION_SCOPE_LOGIN_PATH = "/lakeraven-ehr/login"
+SESSION_SCOPE_VERIFY_CODE = "test123"
+
+# One synthetic DUZ per access code, allocated on first use, so a scenario
+# never reuses — or re-seeds — a user test_helper set up for something else.
+SESSION_SCOPE_DUZ = Hash.new { |h, code| h[code] = (9300 + h.size + 1).to_s }
+
+def seed_signon_user(access_code, rpms_key_names)
+  @access_code = access_code
+  @security_keys = RpmsRpc::SecurityKeys.symbolize(rpms_key_names)
+  @duz = SESSION_SCOPE_DUZ[access_code]
+  # seed_user stores the keys as their RPMS strings, so sign-on returns them
+  # the way ORWU USERKEYS would and AuthenticationService symbolizes them
+  # again: the same chain a real session runs.
+  RpmsRpc.client.seed_user(@duz,
+    credentials: "#{access_code};#{SESSION_SCOPE_VERIFY_CODE}",
+    name: "SYNTHETIC,#{access_code.upcase}", role: :clerk,
+    security_keys: @security_keys)
+end
+
+Given("RPMS will sign on {string} holding no security keys") do |access_code|
+  seed_signon_user(access_code, [])
+end
+
+Given("RPMS will sign on {string} holding {string}") do |access_code, key_list|
+  seed_signon_user(access_code, key_list.split(",").map(&:strip).reject(&:empty?))
+end
+
+When("they sign in and a browser session token is minted") do
+  # The throttle is process-global by design; do not inherit another
+  # scenario's failed attempts.
+  Lakeraven::EHR::LoginThrottle.reset!
+
+  post SESSION_SCOPE_LOGIN_PATH, username: @access_code, password: SESSION_SCOPE_VERIFY_CODE
+  assert_equal 302, last_response.status,
+    "sign-on for #{@access_code} did not establish a session (HTTP #{last_response.status})"
+
+  token = Doorkeeper::AccessToken
+    .where(resource_owner_id: @duz.to_i, revoked_at: nil)
+    .order(:id).last
+  refute_nil token, "no live browser session token was minted for DUZ #{@duz}"
+  @granted_scopes = token.scopes.to_s.split
+end

@@ -170,6 +170,34 @@ Feature: Session scope policy
       | user/Procedure.write  |
 
   # ===========================================================================
+  # THE PRODUCTION ENTRY POINT
+  # ===========================================================================
+  #
+  # Every scenario above resolves scopes through scopes_for, the array form.
+  # Production does not: SessionsController#mint_smart_token calls scope_string,
+  # the space-joined form, and hands its result to Doorkeeper as the browser
+  # token's scope set — and the API layer enforces what that token says, not
+  # what the array said. The seam between the two is one line, and an
+  # adversarial pass rewrote it to mint every scope in the table for every
+  # sign-on with all of the scenarios above still green. These sign in through
+  # the real login route against the mock broker and read the scopes off the
+  # token that was actually minted, the way the enforcement side reads them.
+
+  Scenario: A clerk holding no security keys signs in and their browser token carries no scope at all
+    Given RPMS will sign on "example.clerk" holding no security keys
+    When they sign in and a browser session token is minted
+    Then the granted scopes should be empty
+
+  Scenario: A signed-in clinician's browser token carries exactly what their keys grant
+    Given RPMS will sign on "example.tech" holding "PRCFA TECH, SD SUPERVISOR"
+    When they sign in and a browser session token is minted
+    Then the granted scopes should be exactly:
+      | user/Encounter.read      |
+      | user/Encounter.write     |
+      | user/Location.read       |
+      | user/ServiceRequest.read |
+
+  # ===========================================================================
   # SHAPE OF THE GRANT
   # ===========================================================================
 

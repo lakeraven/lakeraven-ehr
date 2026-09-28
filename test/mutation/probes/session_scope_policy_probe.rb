@@ -35,4 +35,15 @@ fingerprint["__none__"] = policy.scopes_for(security_keys: [])
 fingerprint["__unmodelled__"] = policy.scopes_for(security_keys: [ :zz_not_modelled ])
 fingerprint["__all__"] = policy.all_scopes.sort
 
+# The production entry point is scope_string, not scopes_for: the sessions
+# controller hands its result to Doorkeeper. A mutant confined to that one
+# line (minting all_scopes for everyone, say) leaves every scopes_for
+# fingerprint above untouched and would be filed as EQUIVALENT — skipped, and
+# never run against the suite at all. Fingerprint the string form per key and
+# for no keys so a change there is a behaviour change here.
+fingerprint["__string__"] = policy::KEY_SCOPES.keys.sort.to_h do |key|
+  [ key.to_s, policy.scope_string(security_keys: [ key ]) ]
+end
+fingerprint["__string_none__"] = policy.scope_string(security_keys: [])
+
 puts JSON.generate(fingerprint)
