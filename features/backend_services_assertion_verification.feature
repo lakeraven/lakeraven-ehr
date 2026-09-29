@@ -179,3 +179,8 @@ Feature: SMART Backend Services auth for server-to-server FHIR clients
     Then the response status should be 401
     And the response JSON should include error "invalid_client"
 
+  # The JWKS scenarios above install a process-global resolver stub. This
+  # must run after them: a leaked stub answers here instead of Resolv.
+  Scenario: A JWKS resolver stub does not leak into later scenarios
+    Then the backend-services JWKS resolver is the process default
+

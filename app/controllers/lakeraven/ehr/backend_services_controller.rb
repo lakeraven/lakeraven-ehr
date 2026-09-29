@@ -8,12 +8,21 @@ module Lakeraven
     # client_credentials grant, client authenticated by a JWT assertion
     # (private_key_jwt) signed with a key from the JWKS the client publishes
     # at its registered jwks_uri. Issued tokens are short-lived and carry
-    # only system/ scopes within the client's registration; the client's
-    # organization binding (organization_id) scopes all FHIR reads made with
-    # the token to that organization's patients.
+    # only system/ scopes within the client's registration.
+    #
+    # organization_id is required before a token is minted: a client with a
+    # blank binding is refused. Nothing in the FHIR read path consults that
+    # column, so a token for organization A can still read organization B's
+    # patients. Closing that gap is lakeraven-ehr#553.
     class BackendServicesController < ActionController::API
       CLIENT_ASSERTION_TYPE = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
-      ALLOWED_ALGORITHMS = %w[RS384 RS256 ES384].freeze
+      # SMART Backend Services requires the authentication JWT to be signed
+      # with RS384 and requires the authorization server to reject every
+      # other alg. One algorithm, not a menu: RS256 is a different signature,
+      # and ES384 is only optional in the spec, so an EC key in a published
+      # JWKS cannot authenticate. HMAC and "none" are absent so the assertion
+      # cannot choose a symmetric or unsigned algorithm.
+      ALLOWED_ALGORITHMS = %w[RS384].freeze
       TOKEN_LIFETIME = 5.minutes
       # SMART Backend Services: assertion exp SHALL be no more than five
       # minutes in the future — a hard cap, with no skew allowance on top
@@ -35,11 +44,8 @@ module Lakeraven
             status: :bad_request)
         end
 
-        assertion = params[:client_assertion]
-        unless assertion.present?
-          return render_token_error("invalid_client",
-            description: "client_assertion is required", status: :bad_request)
-        end
+        assertion = require_client_assertion
+        return unless assertion
 
         app = client_for(assertion)
         unless app
@@ -49,12 +55,15 @@ module Lakeraven
         claims = verify_assertion!(assertion, app)
         return unless claims
 
-        # The organization binding is what scopes every FHIR read a system/
-        # token makes; an unbound credential would read every organization's
-        # patients (fail-open), so it must never be minted at all.
+        # Mint-time gate only. A blank organization_id is not issued a
+        # system/ token. FHIR reads do not apply the binding, so this does
+        # not stop a token for organization A from reading organization B
+        # (lakeraven-ehr#553).
         if app.organization_id.blank?
           return render_invalid_client("client_not_bound_to_organization")
         end
+
+        return unless scope_param_usable?
 
         scopes = granted_scopes(app)
         if scopes.empty?
@@ -82,6 +91,8 @@ module Lakeraven
       # Locate the client from the assertion's (unverified) iss claim; the
       # signature is then verified against that client's published JWKS.
       def client_for(assertion)
+        return nil unless assertion.is_a?(String)
+
         unverified, = JWT.decode(assertion, nil, false)
         Doorkeeper::Application.find_by(uid: unverified["iss"])
       rescue JWT::DecodeError
@@ -92,6 +103,8 @@ module Lakeraven
       # iss/sub consistency, and jti uniqueness. Renders the token error and
       # returns nil on any failure.
       def verify_assertion!(assertion, app)
+        return render_invalid_client("undecodable") unless assertion.is_a?(String)
+
         jwks = ClientJwks.fetch(app.jwks_uri)
         unless jwks
           return render_invalid_client("no_retrievable_jwks")
@@ -139,11 +152,21 @@ module Lakeraven
       # (system/Patient.read); the reverse is not true.
       def granted_scopes(app)
         registered = app.scopes.to_s.split
-        requested = (params[:scope].presence || app.scopes.to_s).split
+        requested = requested_scope_values(app)
 
         requested.uniq.select do |scope|
           scope.start_with?("system/") && scope_registered?(scope, registered)
         end
+      end
+
+      # A non-string scope (scope[]=system/Patient.read arrives as an Array)
+      # has no #split, so calling it is an HTTP 500. Treating it as omitted
+      # would grant every registered scope. Empty is not a grant.
+      def requested_scope_values(app)
+        raw = params[:scope]
+        return [] unless raw.nil? || raw.is_a?(String)
+
+        (raw.presence || app.scopes.to_s).split
       end
 
       def scope_registered?(scope, registered)
@@ -177,6 +200,41 @@ module Lakeraven
       # refusals is what probing looks like — but it does not travel back to
       # the caller.
       UNIFORM_REFUSAL = "Client authentication failed"
+
+      # nil and a blank string are a missing assertion (invalid_client).
+      # Any other non-string — client_assertion[]=... arrives as an Array —
+      # is a malformed request. JWT.decode raises ArgumentError on an Array,
+      # which is not a DecodeError and would otherwise be an HTTP 500.
+      def require_client_assertion
+        assertion = params[:client_assertion]
+        if assertion.is_a?(String)
+          return assertion if assertion.present?
+
+          render_token_error("invalid_client",
+            description: "client_assertion is required", status: :bad_request)
+          return
+        end
+
+        if assertion.nil?
+          render_token_error("invalid_client",
+            description: "client_assertion is required", status: :bad_request)
+        else
+          render_token_error("invalid_request",
+            description: "client_assertion must be a string",
+            status: :bad_request)
+        end
+        nil
+      end
+
+      def scope_param_usable?
+        raw = params[:scope]
+        return true if raw.nil? || raw.is_a?(String)
+
+        render_token_error("invalid_request",
+          description: "scope must be a string",
+          status: :bad_request)
+        false
+      end
 
       def render_invalid_client(reason)
         Rails.logger.info("[backend_services] refused: #{reason}")

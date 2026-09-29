@@ -44,6 +44,9 @@ module PartnerAuthWorld
   # Substitute DNS resolution for JWKS transport scenarios (@webmock stubs the
   # HTTP layer; this stubs name resolution so the SSRF address checks run
   # against controlled answers).
+  # Process-global. features/support/client_jwks_resolver.rb snapshots the
+  # previous resolver and restores it after the scenario, including when the
+  # scenario fails. Do not rely on the stub disappearing on its own.
   def partner_stub_resolver(mapping)
     fake = Object.new
     fake.define_singleton_method(:getaddresses) { |host| Array(mapping[host]) }
@@ -343,6 +346,11 @@ Given("a backend client whose published JWKS is served over HTTPS from a public 
   stub_request(:get, "https://client.example.test/.well-known/jwks.json")
     .to_return(status: 200, body: { keys: [ @partner_jwk.export ] }.to_json,
                headers: { "Content-Type" => "application/json" })
+end
+
+Then("the backend-services JWKS resolver is the process default") do
+  assert_equal Resolv, Lakeraven::EHR::ClientJwks.resolver,
+    "JWKS resolver leaked a scenario stub"
 end
 
 Given("a backend client whose published JWKS endpoint fails on the first fetch and succeeds afterwards") do

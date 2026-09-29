@@ -81,11 +81,90 @@ module Lakeraven
         assert_equal "invalid_client", JSON.parse(response.body)["error"]
       end
 
-      test "a correctly signed assertion is accepted and granted its registered scope" do
+      test "the verifier accepts only RS384" do
+        assert_equal %w[RS384], BackendServicesController::ALLOWED_ALGORITHMS
+      end
+
+      test "a correctly signed RS384 assertion is accepted and granted its registered scope" do
         post_token(assertion(claims))
 
         assert_response :success
         assert_equal "system/*.read", JSON.parse(response.body)["scope"]
+      end
+
+      test "an RS256 assertion is rejected" do
+        post_token(assertion(claims, alg: "RS256"))
+
+        assert_response :unauthorized
+        assert_equal "invalid_client", JSON.parse(response.body)["error"]
+        assert_equal "Client authentication failed", JSON.parse(response.body)["error_description"]
+      end
+
+      test "an ES384 assertion is rejected even when that key is published" do
+        ec_key = OpenSSL::PKey::EC.generate("secp384r1")
+        ec_jwk = JWT::JWK.new(ec_key)
+        ClientJwks.define_singleton_method(:fetch) do |uri|
+          if uri == "https://example-backend.example.test/.well-known/jwks.json"
+            { keys: [ ec_jwk.export ] }
+          end
+        end
+
+        assert_no_difference -> { Doorkeeper::AccessToken.count } do
+          post_token(JWT.encode(claims, ec_key, "ES384", kid: ec_jwk.kid))
+        end
+
+        assert_response :unauthorized
+        assert_equal "invalid_client", JSON.parse(response.body)["error"]
+      end
+
+      test "an array client_assertion is an OAuth invalid_request and not a 500" do
+        sentinel = "client-assertion-array-sentinel"
+        assert_no_difference -> { Doorkeeper::AccessToken.count } do
+          post_token([ sentinel ])
+        end
+
+        assert_response :bad_request
+        body = JSON.parse(response.body)
+        assert_equal "invalid_request", body["error"]
+        assert_equal "client_assertion must be a string", body["error_description"]
+        refute_includes response.body, sentinel
+      end
+
+      test "a missing client_assertion is invalid_client" do
+        post TOKEN_URL, params: {
+          grant_type: "client_credentials",
+          client_assertion_type: "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
+        }
+
+        assert_response :bad_request
+        assert_equal "invalid_client", JSON.parse(response.body)["error"]
+      end
+
+      test "a JSON non-string client_assertion is an OAuth invalid_request" do
+        assert_no_difference -> { Doorkeeper::AccessToken.count } do
+          post TOKEN_URL, params: {
+            grant_type: "client_credentials",
+            client_assertion_type: "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+            client_assertion: 1,
+            scope: "system/*.read"
+          }, as: :json
+        end
+
+        assert_response :bad_request
+        assert_equal "invalid_request", JSON.parse(response.body)["error"]
+      end
+
+      test "an array scope is an OAuth invalid_request and mints nothing" do
+        sentinel = "system/Patient.read"
+        assert_no_difference -> { Doorkeeper::AccessToken.count } do
+          post_token(assertion(claims), scope: [ sentinel ])
+        end
+
+        assert_response :bad_request
+        body = JSON.parse(response.body)
+        assert_equal "invalid_request", body["error"]
+        assert_equal "scope must be a string", body["error_description"]
+        refute_includes response.body, sentinel
       end
 
       test "expired exp is rejected" do
@@ -192,8 +271,8 @@ module Lakeraven
 
       # signature: replaces the real signature with the given string, for the
       # forged case. key: signs with a different key than the JWKS publishes.
-      def assertion(payload = claims, signature: nil, key: nil)
-        jwt = JWT.encode(payload, key || @client_key, "RS256", kid: @client_jwk[:kid])
+      def assertion(payload = claims, signature: nil, key: nil, alg: "RS384")
+        jwt = JWT.encode(payload, key || @client_key, alg, kid: @client_jwk[:kid])
         return jwt unless signature
 
         head, body, = jwt.split(".")

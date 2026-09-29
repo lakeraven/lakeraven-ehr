@@ -29,8 +29,9 @@ Given("a SMART backend service application is registered") do
 end
 
 When("I POST to {string} with a valid client_credentials JWT assertion") do |path|
-  # A genuinely valid assertion: RS256, signed by the client's published key,
-  # audience = the token endpoint it is presented to.
+  # A genuinely valid assertion: RS384, signed by the client's published key,
+  # audience = the token endpoint it is presented to. RS384 is the only
+  # algorithm the token endpoint accepts.
   url = path.sub("/oauth/", "/lakeraven-ehr/oauth/")
   claims = {
     iss: @backend_app.uid,
@@ -39,7 +40,7 @@ When("I POST to {string} with a valid client_credentials JWT assertion") do |pat
     exp: 4.minutes.from_now.to_i,
     jti: SecureRandom.uuid
   }
-  jwt_assertion = JWT.encode(claims, @backend_key, "RS256", kid: @backend_jwk[:kid])
+  jwt_assertion = JWT.encode(claims, @backend_key, "RS384", kid: @backend_jwk[:kid])
 
   post url, {
     grant_type: "client_credentials",
@@ -112,14 +113,14 @@ When("I POST to {string} with a forged-signature client_credentials JWT assertio
   # for it.
   other_key = OpenSSL::PKey::RSA.new(2048)
   post_backend_token(
-    JWT.encode(backend_claims, other_key, "RS256", kid: @backend_jwk[:kid]),
+    JWT.encode(backend_claims, other_key, "RS384", kid: @backend_jwk[:kid]),
     scope: "system/*.read"
   )
 end
 
 When("I POST to {string} with a client_credentials JWT assertion requesting scope {string}") do |_path, scope|
   post_backend_token(
-    JWT.encode(backend_claims, @backend_key, "RS256", kid: @backend_jwk[:kid]),
+    JWT.encode(backend_claims, @backend_key, "RS384", kid: @backend_jwk[:kid]),
     scope: scope
   )
 end

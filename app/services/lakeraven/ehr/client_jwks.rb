@@ -20,8 +20,10 @@ module Lakeraven
     # (BackendClientRegistration) and again at every fetch (DNS answers
     # change; registration-time checks alone are TOCTOU). The connection is
     # pinned to the vetted resolved address so the checked answer is the one
-    # dialed. Failures are never cached — a transient JWKS outage must not
-    # brown out client auth for a full TTL.
+    # dialed. Net::HTTP would otherwise honor HTTPS_PROXY and open the socket
+    # to the proxy, which can connect somewhere other than that address.
+    # Failures are never cached — a transient JWKS outage must not brown out
+    # client auth for a full TTL.
     class ClientJwks
       CACHE_TTL = 5.minutes
       FETCH_TIMEOUT = 5 # seconds
@@ -71,19 +73,31 @@ module Lakeraven
           address = vetted_public_address(uri.host)
           return nil unless address
 
-          response = Net::HTTP.start(uri.host, uri.port,
-                                     ipaddr: address,
-                                     use_ssl: true,
-                                     open_timeout: FETCH_TIMEOUT,
-                                     read_timeout: FETCH_TIMEOUT) do |http|
-            http.get(uri.request_uri)
-          end
+          response = pinned_get(uri, address)
           return nil unless response.is_a?(Net::HTTPSuccess)
 
           parsed = JSON.parse(response.body, symbolize_names: true)
           parsed.is_a?(Hash) && parsed[:keys].is_a?(Array) ? parsed : nil
         rescue StandardError
           nil
+        end
+
+        # Proxy address/port/user/password are explicit nils. Net::HTTP.start
+        # defaults that slot to :ENV, so HTTPS_PROXY makes the socket we open
+        # the proxy's, and ipaddr never becomes the dialed destination. A
+        # proxy can then connect into private space after we vetted a public
+        # address. No proxy: the vetted address is the one TCP connects to.
+        def pinned_get(uri, address)
+          Net::HTTP.start(
+            uri.host, uri.port,
+            nil, nil, nil, nil,
+            ipaddr: address,
+            use_ssl: true,
+            open_timeout: FETCH_TIMEOUT,
+            read_timeout: FETCH_TIMEOUT
+          ) do |http|
+            http.get(uri.request_uri)
+          end
         end
 
         # The address to dial: an already-vetted literal, or the host's DNS
