@@ -128,7 +128,7 @@ end
 Then("the issued access token scopes should not include {string}") do |scope|
   issued = Doorkeeper::AccessToken.order(:created_at).last
   granted = issued ? issued.scopes.to_s.split : []
-  expect(granted).not_to include(scope)
+  refute_includes granted, scope
 end
 
 When("I POST to {string} with the issued access token") do |path|
