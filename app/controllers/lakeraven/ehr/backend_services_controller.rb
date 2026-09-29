@@ -63,6 +63,29 @@ module Lakeraven
           return render_invalid_client("client_not_bound_to_organization")
         end
 
+        # SINGLE-ORGANIZATION GUARD (lakeraven-ehr#553).
+        #
+        # The binding above is recorded and NOT enforced on reads, so a
+        # system/ token for organization A can read organization B's
+        # patients. That is currently unreachable for a structural reason
+        # rather than a policy one: RpmsRpc.client is a single process-global
+        # broker connection (rpms-rpc#234), so one deployment reaches exactly
+        # one RPMS, and one RPMS serves one tribe. One deployment therefore
+        # holds one organization.
+        #
+        # That is an accident of the transport, not a control, and #234 ends
+        # it: per-session or pooled connections let one deployment serve
+        # several RPMS instances. Rather than leave the safety of this surface
+        # resting on an unenforced assumption, refuse to mint once a second
+        # distinct organization appears. The build fails loudly at the moment
+        # the assumption stops holding instead of silently leaking across
+        # tribes.
+        #
+        # Remove this guard when #553 scopes reads by organization.
+        if other_organization_registered?(app)
+          return render_invalid_client("multiple_organizations_unsupported")
+        end
+
         return unless scope_param_usable?
 
         scopes = granted_scopes(app)
@@ -244,6 +267,16 @@ module Lakeraven
 
       def render_token_error(error, description: nil, status:)
         render json: { error: error, error_description: description }.compact, status: status
+      end
+
+      # True when any OTHER registered client is bound to a different
+      # organization. Reads through Doorkeeper's application model so a
+      # client registered by any path is counted, not just ones minted here.
+      def other_organization_registered?(app)
+        Doorkeeper::Application
+          .where.not(organization_id: [ nil, "" ])
+          .where.not(organization_id: app.organization_id)
+          .exists?
       end
     end
   end

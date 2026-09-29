@@ -59,6 +59,44 @@ module Lakeraven
         BackendAssertionJti.delete_all
       end
 
+      # lakeraven-ehr#553: the organization binding is recorded and not
+      # enforced on reads. Today one deployment holds one organization only
+      # because RpmsRpc.client is a single process-global broker (rpms-rpc#234).
+      # These pin the guard that makes that structural accident explicit, so
+      # #234 cannot quietly turn it into a cross-tribe read.
+      test "a second registered organization refuses to mint" do
+        Doorkeeper::Application.create!(
+          name: "Other Tribe Backend",
+          uid: "other-tribe-client",
+          redirect_uri: "urn:ietf:wg:oauth:2.0:oob",
+          scopes: "system/*.read",
+          confidential: true,
+          organization_id: "example-organization-other"
+        )
+
+        post_token(assertion)
+
+        assert_response :unauthorized
+        assert_equal "invalid_client", JSON.parse(response.body)["error"]
+        assert_nil JSON.parse(response.body)["access_token"]
+      end
+
+      test "another client in the SAME organization still mints" do
+        Doorkeeper::Application.create!(
+          name: "Sibling Backend",
+          uid: "sibling-client",
+          redirect_uri: "urn:ietf:wg:oauth:2.0:oob",
+          scopes: "system/*.read",
+          confidential: true,
+          organization_id: @backend_app.organization_id
+        )
+
+        post_token(assertion)
+
+        assert_response :success
+        assert JSON.parse(response.body)["access_token"].present?
+      end
+
       test "forged signature is rejected" do
         post_token(assertion(signature: "not-a-signature"))
 
