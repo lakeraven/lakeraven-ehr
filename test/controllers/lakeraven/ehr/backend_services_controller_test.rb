@@ -41,7 +41,13 @@ module Lakeraven
 
       teardown do
         if ClientJwks.singleton_class.method_defined?(:fetch_without_stub)
-          ClientJwks.define_singleton_method(:fetch) { |uri| fetch_without_stub(uri) }
+          # Restore the ORIGINAL method by aliasing it back, then drop the temp
+          # alias. Redefining fetch to CALL fetch_without_stub and then deleting
+          # fetch_without_stub left ClientJwks.fetch as a permanently broken
+          # shim: every later caller of the real fetch got NoMethodError. It
+          # went unnoticed only because nothing after this suite called it.
+          ClientJwks.singleton_class.send(:remove_method, :fetch)
+          ClientJwks.singleton_class.send(:alias_method, :fetch, :fetch_without_stub)
           ClientJwks.singleton_class.send(:remove_method, :fetch_without_stub)
         end
         ExportsController.reset_store!
