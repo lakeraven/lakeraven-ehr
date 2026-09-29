@@ -97,6 +97,25 @@ module Lakeraven
         assert JSON.parse(response.body)["access_token"].present?
       end
 
+      # Review finding: organization_id is a free-form string, so a formatting
+      # variant of the SAME site must not read as a second organization and
+      # shut off issuance for a deployment still serving one RPMS.
+      test "a formatting variant of the same organization still mints" do
+        Doorkeeper::Application.create!(
+          name: "Same Site Different Spelling",
+          uid: "same-site-variant",
+          redirect_uri: "urn:ietf:wg:oauth:2.0:oob",
+          scopes: "system/*.read",
+          confidential: true,
+          organization_id: "  #{@backend_app.organization_id.upcase}  "
+        )
+
+        post_token(assertion)
+
+        assert_response :success
+        assert JSON.parse(response.body)["access_token"].present?
+      end
+
       test "forged signature is rejected" do
         post_token(assertion(signature: "not-a-signature"))
 

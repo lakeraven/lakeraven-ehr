@@ -269,14 +269,34 @@ module Lakeraven
         render json: { error: error, error_description: description }.compact, status: status
       end
 
-      # True when any OTHER registered client is bound to a different
-      # organization. Reads through Doorkeeper's application model so a
-      # client registered by any path is counted, not just ones minted here.
+      # True when another registered client is bound to a genuinely different
+      # organization. Reads through Doorkeeper's application model so a client
+      # registered by any path is counted, not just ones minted here.
+      #
+      # Compared NORMALISED (strip + casefold). organization_id is a free-form
+      # string column, not a verified RPMS binding, so "Example-Org" and
+      # "example-org " are the same site written twice. Comparing raw would
+      # let a formatting variant shut off token issuance for a deployment
+      # that still serves exactly one RPMS — trading a confidentiality risk
+      # for an availability one (review finding on this PR).
+      #
+      # The refusal is still deliberate where the difference is real: reads
+      # are not organization-scoped (#553), so once two organizations exist
+      # EVERY system/ token is effectively global and refusing both is the
+      # conservative choice. Backend-services tokens are system-to-system;
+      # user-facing sessions are unaffected.
       def other_organization_registered?(app)
+        mine = normalized_organization(app.organization_id)
+        return false if mine.blank?
+
         Doorkeeper::Application
           .where.not(organization_id: [ nil, "" ])
-          .where.not(organization_id: app.organization_id)
-          .exists?
+          .pluck(:organization_id)
+          .any? { |other| normalized_organization(other) != mine }
+      end
+
+      def normalized_organization(value)
+        value.to_s.strip.downcase
       end
     end
   end
