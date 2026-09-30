@@ -27,6 +27,8 @@ module Lakeraven
 
       def show
         event = scoped_events.find_by(id: params[:id])
+        return unless authorize_tenant_row!(event)
+
         if event
           render_fhir(event.to_fhir)
         else
