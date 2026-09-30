@@ -1,7 +1,11 @@
 # ADR 0007: "Organization" names three different things, and only one of them is the tenancy boundary
 
 **Status:** Proposed
-**Date:** 2026-09-29
+**Date:** 2026-09-29 · **Revised after round-1 gate:** 2026-09-29
+
+> **Revised.** A two-vendor gate refuted two claims in the first draft and
+> corrected a third. The tenancy model below is the maintainer's decision on a
+> point the two seats split on. See `gate/runs/lakeraven-ehr-556/r1/`.
 
 ## Scope, and what this ADR deliberately is not
 
@@ -30,16 +34,31 @@ suggests.
 
 RPMS supplies a fourth concept the code does not model at all: `DUZ(2)`, the
 signed-on **division**. It is load-bearing in the RPC layer — a patient's
-health record number is issued per division (`$$HRN^AUPNPAT(dfn,DUZ(2))`), and
-AG registration edits file against `DA=DUZ(2)`. RPMS's own patient identity is
-division-scoped whether or not we model it.
+health *record number* is issued per division (`$$HRN^AUPNPAT(dfn,DUZ(2))`)
+and AG registration edits file against `DA=DUZ(2)`.
+
+**The DFN is not division-scoped.** An earlier draft said RPMS patient
+identity is division-scoped; that overstates it. Only the HRN subrecord is
+facility-scoped — the DFN is instance-global
+(`rpms-rpc/lib/rpms_rpc/api/registration.rb:80-93`). A read by DFN therefore
+crosses divisions regardless of `DUZ(2)`, which makes division membership a
+weaker boundary than it appears, not a stronger one.
 
 ## Decision
 
-**1. The tenancy boundary is the RPMS instance.** One tribal health program
-runs one RPMS; one deployment reaches one RPMS. Tenancy, deployment and
-sovereign data boundary are the same object. This is what `organization_id`
-means, and the column should become a validated reference to it rather than
+**1. The tenancy boundary is the COVERED ENTITY, modelled explicitly.** Not
+the RPMS instance, and not inferred from deployment topology. A tenant is a
+first-class record naming the entity whose PHI must not leak; instances and
+divisions are attributes of it, not definitions of it.
+
+Explicitly, because HIPAA's covered entity is a *legal* construct and the
+governing authority over tribal data may not coincide with it. An organization
+serving members of several nations is one covered entity while each nation
+retains a claim over its own people's records under OCAP. The model must be
+able to express a domain NARROWER than the covered entity without redefining
+the term; the covered entity is the default, not the ceiling.
+
+`organization_id` becomes an immutable foreign key to that record rather than
 free text.
 
 **2. It is NOT the FHIR `Organization` resource.** That keeps meaning file-4
@@ -47,61 +66,104 @@ institution and keeps serving `/fhir/Organization`. The two need different
 names in code and prose. This collision is the whole reason #553 stalled, and
 renaming is the durable half of this ADR.
 
-**3. Enforcement is connection selection, not read filtering.** Today
-`RpcSupport.broker` returns one process-global `RpmsRpc.client`, so every read
-in the process reaches one RPMS and there is no second tenant's data to
-filter. When rpms-rpc#234 makes connections per-session or pooled, **the
-token's tenancy binding selects the connection**. Cross-tenant reads become
-impossible rather than filtered.
+**3. Enforcement is connection selection FIRST, and read scoping where the
+two diverge.** The first draft said connection selection was sufficient. Under
+decision 1 it is not, and this is the direct cost of choosing the covered
+entity over the instance: the two can diverge in both directions. One entity
+may run several instances; one instance may serve several entities. Connection
+selection cannot separate tenants that share an instance.
 
-Consequently **lakeraven-ehr#553 is delivered by rpms-rpc#234**, not before it
-and not separately. A filter written today would specify behaviour against a
-partition that does not exist, and its tests would assert fiction.
+So:
 
-**4. Divisions are out of scope while sites remain single-division.** Per
-clinical operations guidance, a separate RPMS division is warranted when a
-service line has **its own TIN, separate financials, or its own pharmacy set**
-— and is not recommended otherwise. Where those do not hold, one instance
-holds one division and per-read division scoping buys nothing.
+- **Necessary:** the token's tenant selects the connection (rpms-rpc#234).
+  Where a tenant maps to its own instance, this is the whole control and no
+  per-read comparison runs on the hot path.
+- **Also required:** `tenant_id` stamped on tokens, locally held clinical
+  rows, cache keys, background jobs and audit rows, so a shared instance or a
+  shared process cannot leak across tenants through state that is not the
+  broker connection.
 
-## The trigger that ends this
+`RpcSupport.broker` is one process-global `RpmsRpc.client` today, so nothing
+in-process is tenant-aware at all. That is the gap #234 opens and this decision
+closes.
 
-Decision 4 rests on a configuration fact, not a law. **Revisit this ADR when
-any of the divisional criteria above becomes true for a served site** — most
-plausibly a service line acquiring its own TIN for billing, which is a live
-possibility wherever FQHC or revenue-cycle work is underway.
+**lakeraven-ehr#553 is therefore NOT simply delivered by #234.** #234 delivers
+the necessary half. The stamping half is #553's own work and can begin against
+the tenant model without waiting.
 
-At that point one instance holds two divisions, connection selection no longer
-separates them, and a per-read division control becomes necessary. That is a
-different design from this one; do not retrofit it silently.
+**4. Divisions are deferred, but detected mechanically rather than trusted.**
+A separate RPMS division is warranted when a service line has its own TIN,
+separate financials, or its own pharmacy set, and is not recommended
+otherwise. Where those do not hold, one instance holds one division.
+
+The first draft deferred on that basis alone. The gate refuted it: the
+connection never sets `DUZ(2)`, so RPMS falls back to the signed-on user's
+default division. A site that adds a division does not get an error — it gets
+silently wrong reads. Deferral is only safe with a detector, tracked as
+rpms-rpc#293.
+
+## The detector that ends this
+
+The first draft asked a human to revisit this ADR when a service line acquired
+its own TIN — that is, to recognise a billing decision as an architecture
+decision, months later. Both gate seats rejected that as insufficient, and
+they are right: it fails silently by construction.
+
+Detect the **technical condition**, not the business event:
+
+- Enumerate the instance's divisions authoritatively at startup. `Site.list`
+  is not sufficient for this.
+- **Fail closed** when an instance exposes a division that is not mapped to a
+  tenant, rather than proceeding on a default.
+- Capture the signed-on `DUZ(2)` and refuse when it is not allowlisted for the
+  token's tenant.
+- Require explicit `(tenant, instance, division)` configuration before a
+  connection is enabled.
+
+Tracked as rpms-rpc#293.
 
 ## Interim control
 
-Until #234 lands, the binding is recorded at mint and unenforced. #529 added a
-mint-time guard: token issuance refuses once a second distinct organization is
-registered (compared normalised, so a spelling variant is not a second
-tenant). It converts an unenforced assumption into one that fails loudly at
-the moment it stops holding. **It is removed by #234, not kept.**
+An issuance-time guard (#529) refuses to mint a backend-services token once a
+second distinct organization is registered, compared normalised so a spelling
+variant is not a second tenant.
+
+**Its reach is narrower than the first draft claimed.** It observes
+backend-client registrations only. It does not see a tenant that arrives as a
+division, one that holds no backend client, or credentials already issued. It
+is a tripwire on one path, not a boundary, and it is removed by #234 rather
+than kept.
 
 ## Consequences
 
-- `#234` must not ship without tenancy-aware connection resolution; the
-  dependency between it and `#553` is the reverse of how it was first recorded.
-- `organization_id` should be validated against the tenancy referent this ADR
-  names, not left free-form.
-- Code and docs must stop using "organization" for both concepts. New names are
-  a follow-up, and the FHIR resource keeps the existing one.
+- A **tenant record** must exist before either half of the enforcement can be
+  built. `organization_id` becomes an immutable foreign key to it, associated
+  with approved instances and division IENs.
+- `#234` must not ship without tenant-aware connection resolution.
+- `#553` is no longer purely downstream of `#234`: the stamping half is its
+  own work. The board dependency recorded as `#234 blocked_by #553` should
+  stand, since #234 must not land without the tenant model.
+- `rpms-rpc#293` — set `DUZ(2)` explicitly and fail closed on an unmapped
+  division — is a prerequisite for serving any multi-division instance.
+- Code and docs must stop using "organization" for both concepts. The FHIR
+  resource keeps the name; the tenancy term needs a new one.
 - Nothing here changes the FHIR API surface.
 
 ## Alternatives rejected
 
-**Filter reads by organization now.** Rejected: there is no second tenant to
-filter, so the control would be untested in the only way that matters, and it
-would sit on the hot path of every clinical read for no present benefit.
+**Tenancy = the RPMS instance.** Simpler, matches every deployment today, and
+makes connection selection the whole control. Rejected because it defines the
+boundary by deployment topology rather than by who is accountable for the
+data: it cannot represent one entity across two instances, two entities on one
+instance, or a governance domain narrower than the covered entity. One gate
+seat argued for it on simplicity; the boundary is worth the extra indirection.
 
-**Treat the file-4 institution as the tenant.** Rejected: file 4 is a reference
-list including external facilities. It cannot carry tenancy.
+**Filter reads by organization now, before the tenant model exists.**
+Rejected: there is no second tenant to filter, so the control would be
+exercised only by fabricated fixtures.
 
-**Model divisions immediately.** Rejected as premature while served sites are
-single-division, but explicitly deferred rather than dismissed — see the
-trigger above.
+**Treat the file-4 institution as the tenant.** Rejected: file 4 is a
+reference list including external facilities. It cannot carry tenancy.
+
+**Defer divisions on operational guidance alone.** Rejected after review — see
+the detector above. Deferring is fine; deferring without detection is not.
