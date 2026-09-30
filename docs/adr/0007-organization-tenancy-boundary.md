@@ -94,10 +94,20 @@ So:
 - **Necessary:** the token's tenant selects the connection (rpms-rpc#234).
   Where a tenant maps to its own instance, this is the whole control and no
   per-read comparison runs on the hot path.
-- **Also required:** `tenant_id` stamped on tokens, locally held clinical
-  rows, cache keys, background jobs and audit rows, so a shared instance or a
-  shared process cannot leak across tenants through state that is not the
-  broker connection.
+- **Also required:** `tenant_id` stamped on locally held clinical rows, cache
+  keys, background jobs and audit rows, so a shared instance or a shared
+  process cannot leak across tenants through state that is not the broker
+  connection.
+- **NOT on the token.** An earlier revision of this ADR also required stamping
+  `tenant_id` on tokens. Dropped: because `organization_id` is an *immutable*
+  foreign key (decision 1), an application's tenant cannot change, so the
+  token's tenant is already reachable as `token.application.organization_id`.
+  Copying it onto `oauth_access_tokens` would mean altering Doorkeeper's schema
+  to denormalise a value that cannot drift — and introducing the one way it
+  could: two sources of truth that disagree. The immutability of the FK is what
+  makes the stamp unnecessary; if that immutability is ever relaxed, this
+  decision must be revisited in the same change.
+  (Raised by the step-0 gate seat on lakeraven-ehr#553, Gemini 3.1 Pro.)
 
 `RpcSupport.broker` is one process-global `RpmsRpc.client` today, so nothing
 in-process is tenant-aware at all. That is the gap #234 opens and this decision
@@ -160,6 +170,15 @@ Detect the **technical condition**, not the business event:
   connection is enabled.
 
 Tracked as rpms-rpc#293.
+
+**Open: `DUZ(2)` for system/ tokens.** The detector above captures the signed-on
+`DUZ(2)` and refuses when it is not allowlisted for the token's tenant. That
+presumes a signed-on user, and a backend-services (`system/`) token has none.
+Where one instance serves several tenants by division, nothing here says how the
+broker initialises a connection's `DUZ(2)` from tenant configuration alone. That
+mechanism is unspecified and must be settled before a multi-division instance is
+served by a system/ token — rpms-rpc#293's scope, not #553's.
+(Raised by the step-0 gate seat on lakeraven-ehr#553, Gemini 3.1 Pro.)
 
 ## Interim control
 

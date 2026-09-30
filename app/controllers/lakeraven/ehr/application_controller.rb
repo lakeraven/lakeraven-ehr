@@ -5,6 +5,7 @@ module Lakeraven
     class ApplicationController < ActionController::API
       include SmartAuthentication
       include AuditableClinicalAccess
+      include TenantBoundary
 
       FHIR_CONTENT_TYPE = "application/fhir+json"
 

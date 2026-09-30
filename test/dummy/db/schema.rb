@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_24_000000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_30_000000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -229,6 +229,16 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_24_000000) do
     t.datetime "updated_at", null: false
     t.index [ "organization_id" ], name: "index_oauth_applications_on_organization_id"
     t.index [ "uid" ], name: "index_oauth_applications_on_uid", unique: true
+  end
+
+  create_table "lakeraven_ehr_approved_instances", force: :cascade do |t|
+    t.string "division_ien"
+    t.string "instance_identifier"
+    t.bigint "tenant_id"
+  end
+
+  create_table "lakeraven_ehr_tenants", force: :cascade do |t|
+    t.string "name"
   end
 
   add_foreign_key "lakeraven_ehr_reconciliation_items", "lakeraven_ehr_reconciliation_sessions", column: "reconciliation_session_id"
