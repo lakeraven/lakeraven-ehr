@@ -10,6 +10,12 @@
 #
 # Run them deliberately:   bundle exec cucumber --profile unsourced
 # Run absolutely all:      bundle exec cucumber --profile all
-default: --publish-quiet --tags "not @unsourced"
+# @part2_pending: step-0 specs for lakeraven-ehr#560, authored by the gate seat
+# BEFORE the build (SOFTWARE-FACTORY.md step 0). They are red by design and the
+# builder makes them pass without editing them. Excluded from the default
+# profile so they do not red a suite that is otherwise green; run them with
+# `bundle exec cucumber --profile part2` or `--profile all`.
+default: --publish-quiet --tags "not @unsourced and not @part2_pending"
 unsourced: --publish-quiet --tags @unsourced
+part2: --publish-quiet --tags @part2_pending
 all: --publish-quiet
