@@ -44,3 +44,87 @@ jobs:
           bundler-cache: true
       - run: bundle exec rails db:create db:migrate
       - run: bundle exec rails test
+
+  cucumber:
+    # NON-BLOCKING on purpose (lakeraven-ehr#561). CI has never run cucumber,
+    # and 33 of 829 scenarios fail on main today -- 18 of them because the
+    # feature still expects a 200 on a cross-patient read that
+    # PatientCompartment now correctly refuses with 403. Making this required
+    # before those are triaged would turn main red and teach everyone to
+    # ignore the job, so it reports and does not gate.
+    #
+    # The point is to make the count VISIBLE on every PR instead of invisible.
+    # Step 3 of #561 removes continue-on-error and adds this to branch
+    # protection, once the 33 are triaged.
+    name: Cucumber (non-blocking)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    env:
+      RAILS_ENV: test
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/lakeraven_ehr_test
+      CUCUMBER_PUBLISH_QUIET: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+          bundler-cache: true
+      # db:schema:load, NOT db:migrate. The first run of this job showed
+      # `db:migrate` creating the database and applying ZERO migrations, which
+      # left schema_migrations empty and cucumber aborting with "15 pending
+      # migrations" (lakeraven-ehr#558). The Test job survives the same command
+      # only because rails/test_help's maintain_test_schema! silently loads
+      # schema.rb when it finds migrations pending; cucumber's equivalent
+      # raises instead. test/dummy/db/schema.rb is the committed source of
+      # truth for the test database, so load it directly.
+      - run: bundle exec rails db:create db:schema:load
+      # Fails on FAILED SCENARIOS or on no summary at all. Does NOT fail on the
+      # 125 undefined / 11 pending steps that already exist on main, because
+      # cucumber exits 1 for those too (verified: 0 failures, exit 1) and a job
+      # permanently red over pre-existing scaffolding rot is a job everyone
+      # learns to ignore -- which is the decay this is here to stop.
+      #
+      # This is NOT the `|| true` mistake again. That masked every outcome, so
+      # a cucumber which never ran reported PASS in 38 seconds. Here the counts
+      # are always published, a MISSING summary is treated as a crash and
+      # fails, and "failed" in the summary fails. Undefined and pending stay
+      # visible as numbers rather than silently passing or permanently failing.
+      - name: Run cucumber and record the scenario counts
+        run: |
+          set -o pipefail
+          bundle exec cucumber --format progress 2>&1 | tee cucumber.log || true
+
+          summary=$(grep -E "^[0-9]+ scenarios" cucumber.log || true)
+
+          {
+            echo "### Cucumber"
+            if [ -z "$summary" ]; then
+              echo "**No scenario summary produced — cucumber did not run.**"
+            else
+              echo "\`$summary\`"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -z "$summary" ]; then
+            echo "::error::cucumber produced no scenario summary; it did not run"
+            exit 1
+          fi
+
+          if echo "$summary" | grep -q "failed"; then
+            echo "::error::cucumber reported failing scenarios: $summary"
+            exit 1
+          fi
+
+          echo "No failing scenarios. $summary"
