@@ -23,6 +23,25 @@ Given("a bulk export exists for a different client") do
   )
   @other_export_id = "other-export-1"
   @other_client_uid = other_app.uid
+
+  # The export must ACTUALLY EXIST and be owned by the other client.
+  # Creating only the application left ExportsController.store empty, so
+  # find_owned_export returned nil and the request 404'd because the export
+  # was MISSING -- which the scenario would have passed even if foreign
+  # exports were fully readable. The whole point is to distinguish
+  # "exists but not yours" from "does not exist", since ExportOwnership
+  # deliberately makes them identical on the wire.
+  Lakeraven::EHR::ExportsController.store[@other_export_id] =
+    Lakeraven::EHR::BulkExport.new(
+      id: @other_export_id,
+      export_type: "patient",
+      status: "completed",
+      client_id: other_app.uid
+    )
+end
+
+After do
+  Lakeraven::EHR::ExportsController.store.delete(@other_export_id) if @other_export_id
 end
 
 When("I check the status of the other client's export with my Bearer token") do
