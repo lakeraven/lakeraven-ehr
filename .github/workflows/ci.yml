@@ -90,14 +90,41 @@ jobs:
       # raises instead. test/dummy/db/schema.rb is the committed source of
       # truth for the test database, so load it directly.
       - run: bundle exec rails db:create db:schema:load
-      # No `|| true` and no `|| echo` fallback. continue-on-error at the JOB
-      # level is what makes this non-blocking; masking the command's exit
-      # status as well meant a cucumber that never ran reported PASS in 38s,
-      # which is a gate that cannot fail -- the exact failure mode this job
-      # exists to expose.
+      # Fails on FAILED SCENARIOS or on no summary at all. Does NOT fail on the
+      # 125 undefined / 11 pending steps that already exist on main, because
+      # cucumber exits 1 for those too (verified: 0 failures, exit 1) and a job
+      # permanently red over pre-existing scaffolding rot is a job everyone
+      # learns to ignore -- which is the decay this is here to stop.
+      #
+      # This is NOT the `|| true` mistake again. That masked every outcome, so
+      # a cucumber which never ran reported PASS in 38 seconds. Here the counts
+      # are always published, a MISSING summary is treated as a crash and
+      # fails, and "failed" in the summary fails. Undefined and pending stay
+      # visible as numbers rather than silently passing or permanently failing.
       - name: Run cucumber and record the scenario counts
         run: |
           set -o pipefail
-          bundle exec cucumber --format progress 2>&1 | tee cucumber.log
-          echo "### Cucumber" >> "$GITHUB_STEP_SUMMARY"
-          grep -E "^[0-9]+ scenarios" cucumber.log >> "$GITHUB_STEP_SUMMARY"
+          bundle exec cucumber --format progress 2>&1 | tee cucumber.log || true
+
+          summary=$(grep -E "^[0-9]+ scenarios" cucumber.log || true)
+
+          {
+            echo "### Cucumber"
+            if [ -z "$summary" ]; then
+              echo "**No scenario summary produced — cucumber did not run.**"
+            else
+              echo "\`$summary\`"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -z "$summary" ]; then
+            echo "::error::cucumber produced no scenario summary; it did not run"
+            exit 1
+          fi
+
+          if echo "$summary" | grep -q "failed"; then
+            echo "::error::cucumber reported failing scenarios: $summary"
+            exit 1
+          fi
+
+          echo "No failing scenarios. $summary"
