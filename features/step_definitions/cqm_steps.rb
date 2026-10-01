@@ -25,13 +25,24 @@ Given("the system is configured for FHIR API access") do
   # Engine is always configured
 end
 
+# The fixture patient every patient/-scoped scenario requests as `patient | 1 |`.
+PATIENT_CONTEXT_DFN = 1
+
 Given("I have a valid SMART token with scope {string}") do |scopes|
   @oauth_app ||= Doorkeeper::Application.create!(
     name: "cqm-test", redirect_uri: "https://example.test/callback",
     scopes: scopes, confidential: true
   )
+  # A patient/ scope is patient-CONTEXT-bound in SMART: a real launch supplies
+  # the patient, and authorize_patient_context! refuses when the token carries
+  # any patient/ scope and resource_owner_id is blank. Minting unbound made
+  # every patient/-scoped scenario 403 unconditionally, and also made
+  # "Token with wrong resource scope is forbidden" pass for the wrong reason --
+  # it got its 403 from the missing context, never from the scope. Bind to the
+  # fixture patient every scenario actually requests (DFN 1, Alice Anderson).
   token = Doorkeeper::AccessToken.create!(
-    application: @oauth_app, scopes: scopes, expires_in: 3600
+    application: @oauth_app, scopes: scopes, expires_in: 3600,
+    resource_owner_id: (scopes.include?("patient/") ? PATIENT_CONTEXT_DFN : nil)
   )
   @fhir_headers = { "Authorization" => "Bearer #{token.plaintext_token || token.token}" }
 end

@@ -27,7 +27,8 @@ end
 
 When("I check the status of the other client's export with my Bearer token") do
   header "Authorization", @fhir_headers["Authorization"]
-  get "/lakeraven-ehr/$export-status/#{@other_export_id}"
+  # Route corrected: $export-status was never routed; status is GET exports/:id.
+  get "/lakeraven-ehr/exports/#{@other_export_id}"
 end
 
 Then("the response status should be {int}") do |status|

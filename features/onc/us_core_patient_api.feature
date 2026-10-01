@@ -8,7 +8,13 @@ Feature: US Core Patient API
 
   Background:
     Given the system is configured for FHIR API access
-    And I have a valid SMART token with scope "patient/Patient.read"
+    # POPULATION services (the (g)(10)(i) criterion this feature cites covers
+    # "patient and population services"). These scenarios search across
+    # patients by _id, name, gender and identifier, naming no patient
+    # compartment. A patient/ scope is patient-CONTEXT-bound and cannot issue a
+    # cross-patient search -- PatientCompartment refuses it, correctly. The
+    # scope was wrong here, not the refusal.
+    And I have a valid SMART token with scope "user/Patient.read"
 
   Scenario: Search by _id returns patient with US Core profile in meta
     When I request GET "/fhir/Patient?_id=1" with the Bearer token
@@ -53,6 +59,11 @@ Feature: US Core Patient API
     And the first patient entry should include US Core ethnicity extension
 
   Scenario: Show returns 403 for patient outside SMART context
+    # This scenario is ABOUT patient-context enforcement, so it needs a
+    # patient-CONTEXT-bound token and overrides the population scope in the
+    # Background. With an unbound user/ token there is no context to be
+    # outside of, and the request correctly 404s instead.
+    Given I have a valid SMART token with scope "patient/Patient.read"
     When I request GET "/fhir/Patient/999999" with the Bearer token
     Then the response status should be 403
     And the response should be a FHIR OperationOutcome with code "forbidden"
