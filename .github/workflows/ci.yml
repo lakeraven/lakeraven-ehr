@@ -44,3 +44,38 @@ jobs:
           bundler-cache: true
       - run: bundle exec rails db:create db:migrate
       - run: bundle exec rails test
+
+  mutation:
+    # Green tests mean the code runs. On a privilege surface they do not mean the
+    # tests would notice if it stopped being correct. This gate injects each
+    # modelled privilege change and fails if any of them ships green.
+    #
+    # Added after a BDD PR for SessionScopePolicy passed 14 scenarios while a
+    # mutated policy let prc_tech read coverage, eligibility_verify mint
+    # user/Patient.write, and prc_manager take the whole chart. Against that
+    # version of the suite this gate reports 32 surviving mutants.
+    name: Mutation gate (authorization surfaces)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    env:
+      RAILS_ENV: test
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/lakeraven_ehr_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+          bundler-cache: true
+      - run: bundle exec rails db:create db:migrate
+      - run: bin/mutation-gate
