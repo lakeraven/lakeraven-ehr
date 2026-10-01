@@ -31,8 +31,15 @@ module Lakeraven
         "view_records" => "View Records",
         "upload_docs" => "Upload Documents",
         "message" => "Message",
-        "full_access" => "Full Access"
+        "full_access" => "Full Access",
+        # Substance-use counseling notes. Not satisfied by full_access —
+        # see PART2_SCOPES.
+        "sud-counseling" => "Substance-use counseling notes"
       }.freeze
+
+      # A general grant must not stand in for these. allows? requires an
+      # exact scope match; full_access does not cover them.
+      PART2_SCOPES = %w[sud-counseling].freeze
 
       # Provision types
       PROVISION_TYPES = {
@@ -117,7 +124,11 @@ module Lakeraven
 
       def allows?(permission)
         return false unless active?
-        scope == "full_access" || scope == permission.to_s
+
+        asked = permission.to_s
+        return scope == asked if PART2_SCOPES.include?(asked)
+
+        scope == "full_access" || scope == asked
       end
 
       def expired?

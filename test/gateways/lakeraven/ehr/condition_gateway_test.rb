@@ -76,6 +76,52 @@ module Lakeraven
         refute result[:success]
       end
 
+      test "add does not write an F10-F19 code to the shared problem list" do
+        before = RpmsRpc.client.received_calls.length
+
+        result = ConditionGateway.add("123", {
+          code: "F11.20",
+          display: "Opioid dependence",
+          code_system: "http://hl7.org/fhir/sid/icd-10-cm"
+        })
+
+        refute result[:success]
+        assert_nil result[:ien]
+        assert_match(/F10-F19/, result[:error])
+        assert_match(/no per-record sensitivity flag/, result[:error])
+        assert_match(/no Part 2 store/, result[:error])
+        assert_equal before, RpmsRpc.client.received_calls.length
+      end
+
+      test "add refuses a problem it cannot classify" do
+        before = RpmsRpc.client.received_calls.length
+
+        result = ConditionGateway.add(1, { description: "Opioid dependence" })
+
+        refute result[:success]
+        assert_match(/could not be classified/, result[:error])
+        assert_equal before, RpmsRpc.client.received_calls.length
+      end
+
+      test "add still writes an ICD-10-CM code outside F10-F19" do
+        RpmsRpc.client.seed_scalar(:problem_set, "8", "56")
+
+        result = ConditionGateway.add(8, { icd_code: "F32.1", description: "Major depressive disorder" })
+
+        assert result[:success]
+        assert_equal 56, result[:ien]
+      end
+
+      test "update does not write an F10-F19 code onto the shared problem list" do
+        before = RpmsRpc.client.received_calls.length
+
+        result = ConditionGateway.update(1, 55, { icd_code: "F11.20" })
+
+        refute result[:success]
+        assert_match(/F10-F19/, result[:error])
+        assert_equal before, RpmsRpc.client.received_calls.length
+      end
+
       # --- filter ---
 
       test "filter returns the seeded list scoped by IPL tab" do
