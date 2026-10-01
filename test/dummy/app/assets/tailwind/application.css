@@ -1,0 +1,4 @@
+/* The dummy app's Tailwind build: Tailwind itself plus the engine, the same
+   two lines a host app adds (see the engine's engine.css header). */
+@import "tailwindcss";
+@import "../builds/tailwind/lakeraven_ehr";
