@@ -31,15 +31,6 @@ module Lakeraven
           RpmsRpc::Patient.brief_header(dfn.to_i)
         end
 
-        # Telecom projection — VistA PATIENT #2 fields .131/.132/.133/.134 read
-        # via DDR GETS ENTRY DATA. Returns the rpms-rpc contract hash
-        # { dfn:, phone_home:, phone_work:, phone_cell:, email: } or nil when
-        # the read failed, which the caller must keep distinct from "no phone
-        # on file".
-        def contact(dfn)
-          RpmsRpc::Patient.contact(dfn.to_i)
-        end
-
         private
 
         # rpms-rpc returns fields beyond the Patient model's declared
