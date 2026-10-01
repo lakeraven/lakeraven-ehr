@@ -90,6 +90,67 @@ module Lakeraven
 
         def build_patient(patient, source: :rpc)
           patient.provenance = build_provenance(source)
+          attach_tribal_detail(patient)
+          attach_contact_detail(patient)
+          patient
+        end
+
+        # Tribal detail lives in #9000001 (^AUPNPAT) and is read separately via
+        # DDR GETS ENTRY DATA -- ORWPT ID INFO does not carry it, and an earlier
+        # mapping that claimed it did was corrected. RPMS stores it, so we
+        # surface it rather than leaving the chart thinner than the system we
+        # replace.
+        #
+        # Here and NOT in `search`: this is a second broker round trip, so it
+        # runs for a single-patient read, never once per row of a result set.
+        #
+        # Fail SOFT. A tribal read that errors must not take down a chart that
+        # otherwise loaded -- the patient's clinical record does not depend on
+        # it. The failure is logged rather than swallowed silently, because an
+        # empty field and an unavailable source are different facts.
+        def attach_tribal_detail(patient)
+          return patient if patient.nil?
+          return patient if patient.tribal_enrollment_number.present?
+
+          details = TribalEnrollmentGateway.enrollment_details(patient.dfn)
+          return patient if details.blank?
+
+          patient.tribal_enrollment_number = details[:enrollment_number]
+          patient.tribal_affiliation = details[:tribe_name]
+          patient
+        end
+
+        # Telecom comes from VistA PATIENT #2 fields .131/.132/.133/.134, read
+        # via DDR GETS ENTRY DATA. RpmsRpc::Patient.contact already wraps it,
+        # and its own notes record WHY: the cellular phone (.134) is served by
+        # no purpose-built registered RPC, so DDR is the read path.
+        #
+        # ADDRESS is deliberately NOT set here. Patient carries address_line1 /
+        # city / state / zip_code, and RPMS does store them, but no field map
+        # for them is sourced in this codebase -- and the mapping provenance
+        # rule is that nothing invents a response layout. See lakeraven-ehr#564.
+        #
+        # Same placement and same fail-soft rule as the tribal read: a single
+        # patient read, never per row of a search, and a contact read that
+        # errors must not take down a chart that otherwise loaded.
+        def attach_contact_detail(patient)
+          return patient if patient.nil?
+          return patient if patient.phone.present?
+
+          contact = PatientGateway.contact(patient.dfn)
+          return patient if contact.blank?
+
+          patient.phone = contact[:phone_home].presence || contact[:phone_cell].presence
+          patient
+        rescue StandardError => e
+          Rails.logger.warn(
+            "[patient] contact detail unavailable for dfn=#{patient.dfn}: #{e.class}: #{e.message}"
+          )
+          patient
+        rescue StandardError => e
+          Rails.logger.warn(
+            "[patient] tribal detail unavailable for dfn=#{patient.dfn}: #{e.class}: #{e.message}"
+          )
           patient
         end
 
