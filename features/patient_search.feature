@@ -20,6 +20,11 @@ Feature: Patient Search and Lookup
     Then I should find 1 patient in the results
     And the patient should have name "Anderson,Alice"
 
+  # DEFERRED (@unsourced): the read this needs lives in rpms-rpc, not the
+    # engine, and the field numbers were only verified against the live DD on
+    # 2026-10-01. Asserts city/address, same #2 address fields as above.
+    # Tracked: lakeraven-ehr#564 and rpms-rpc#294.
+  @unsourced
   Scenario: Retrieve patient by DFN
     When I retrieve patient with DFN 1
     Then I should see patient "Anderson,Alice"

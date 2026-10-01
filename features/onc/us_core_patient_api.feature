@@ -47,6 +47,13 @@ Feature: US Core Patient API
     And the response should be a FHIR Bundle
     And the Bundle should contain at least 1 entries
 
+  # DEFERRED (@unsourced): the read this needs lives in rpms-rpc, not the
+    # engine, and the field numbers were only verified against the live DD on
+    # 2026-10-01. Needs a populated race value. #2 .06 is flagged HISTORICAL PURPOSES ONLY in
+    # its input transform; the USCDI source is the #2 RACE INFORMATION multiple.
+    # No new code table needed -- RACE_CODE_MAP already keys the external form.
+    # Tracked: lakeraven-ehr#564 and rpms-rpc#294.
+  @unsourced
   Scenario: Patient resource includes US Core race extension with ombCategory coding
     When I request GET "/fhir/Patient?_id=1" with the Bearer token
     Then the response status should be 200
