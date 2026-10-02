@@ -7,6 +7,10 @@
   <% end %>
 </div>
 
+<% if flash[:notice] %>
+  <p role="status"><%= flash[:notice] %></p>
+<% end %>
+
 <% if @registered %>
   <div
     role="status"
@@ -30,9 +34,20 @@
     <dd><%= @patient.dob&.strftime("%m/%d/%Y") %></dd>
     <dt>Sex</dt>
     <dd><%= @patient.sex %></dd>
+    <dt>Social security number</dt>
+    <% if @show_ssn %>
+      <dd><%= @patient.ssn %></dd>
+    <% else %>
+      <dd>not shown: you do not hold AGZVIEWSSN</dd>
+    <% end %>
     <dt>Record number</dt>
     <dd><%= @patient.dfn %></dd>
   </dl>
+  <% if @hrn.blank? && @can_register %>
+    <p>
+      <%= link_to "Give this patient a chart at this facility", new_registration_patient_hrn_path(@patient.dfn) %>
+    </p>
+  <% end %>
 <% elsif @registered %>
   <p class="mt-6">
     The new record could not be read back from RPMS yet.

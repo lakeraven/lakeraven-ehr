@@ -47,7 +47,8 @@ Given("RPMS has the AG registration service") do
 end
 
 Given("the tribe list holds {string} as tribe {int}") do |name, ien|
-  key = RpmsRpc::DdrFileman.lister_param(file: "9999999.03", fields: ".01", max: "*").to_s
+  # RpmsRpc::Tribal.tribes: DDR LISTER over TRIBE #9999999.03 by the B index.
+  key = RpmsRpc::DdrFileman.lister_param(file: "9999999.03", xref: "B").to_s
   RpmsRpc.client.seed(:ddr_lister, key, "[Data]\n#{ien}^#{name}")
 end
 
@@ -125,6 +126,122 @@ end
 
 Then("no registration write was sent to RPMS") do
   assert_empty registration_writes.map { |c| c[:rpc] }
+end
+
+Given("{string} is the social security number of {string} in PATIENT \\(#2)") do |ssn, name|
+  # ORWPT FULLSSN takes the nine digits (the gem's mapping cites the live
+  # shape "...^000009999"); test_helper seeds the dashed form only.
+  digits = ssn.delete("-")
+  patient = Lakeraven::EHR::Patient.find_by_ssn(ssn)
+  assert patient && patient.name == name, "the seeds hold no patient named #{name} with SSN #{ssn}"
+  RpmsRpc.client.seed(:patient_ssn, digits, { dfn: patient.dfn, name: patient.name, ssn: digits })
+end
+
+Then("I am shown {string} as a possible match with health record number {string}") do |name, hrn|
+  assert page.has_css?("h1", text: "already on file"), page.text
+  row = page.find("tr", text: name)
+  assert row.has_content?(hrn), "match row does not show HRN #{hrn}: #{row.text}"
+end
+
+Then("I can open that registration instead") do
+  click_link "Open registration"
+  assert page.has_css?("h1", text: "Registration"), page.text
+end
+
+When("I open registration") do
+  visit engine_path("/registration/patients")
+end
+
+Then("I cannot add a patient") do
+  refute page.has_link?("Add a new patient"), page.text
+  visit engine_path("/registration/patients/new")
+  assert_equal 403, page.status_code
+  assert page.has_content?("register a patient"), page.text
+end
+
+# -- S-REG-20 ---------------------------------------------------------------------
+
+When("I open the registration of record {int}") do |dfn|
+  visit engine_path("/registration/patients/#{dfn}")
+end
+
+Then("the social security number is not shown to me") do
+  assert_equal 200, page.status_code
+  refute page.has_content?("111-11-1111"), page.text
+  assert page.has_content?("not shown: you do not hold AGZVIEWSSN"), page.text
+end
+
+Then("I see the registration of {string}") do |name|
+  assert_equal 200, page.status_code
+  assert page.has_css?("h1", text: "Registration"), page.text
+  assert page.has_content?(name), page.text
+end
+
+Then("I am offered nothing to change") do
+  within("main") do
+    refute page.has_link?("Give this patient a chart at this facility"), page.text
+    refute page.has_css?("button, input[type=submit]"), page.text
+  end
+end
+
+Then("opening the registration form is refused") do
+  visit engine_path("/registration/patients/new")
+  assert_equal 403, page.status_code
+end
+
+# -- S-REG-06 ---------------------------------------------------------------------
+
+Given("{string}, record {int}, has no health record number at facility {int}") do |name, dfn, facility|
+  patient = Lakeraven::EHR::Patient.find_by_dfn(dfn)
+  assert patient && patient.name == name, "the test_helper seeds no patient #{dfn} named #{name}"
+  RpmsRpc.client.seed(:ddr_gets_entry_data, hrn_read_key(dfn: dfn, facility: facility), "[ERROR]")
+end
+
+Given("RPMS will accept a chart number for record {int} at facility {int}") do |dfn, facility|
+  node = "^AUPNPAT(#{dfn})"
+  RpmsRpc.client.seed(:ddr_lock_unlock_node, RpmsRpc::DdrFileman.lock_param(node: node).to_s, true)
+  RpmsRpc.client.seed(:ddr_lock_unlock_node, RpmsRpc::DdrFileman.unlock_param(node: node).to_s, true)
+  RpmsRpc.client.seed(:ddr_filer, "ADD", "[Data]\n+1,^#{facility}")
+end
+
+When("I give record {int} the chart number {string} at this facility") do |dfn, hrn|
+  visit engine_path("/registration/patients/#{dfn}/hrns/new")
+  fill_in "Health record number", with: hrn
+  click_button "File chart number"
+end
+
+When("I try to give record {int} a chart number at this facility") do |dfn|
+  visit engine_path("/registration/patients/#{dfn}/hrns/new")
+end
+
+Then("RPMS was sent the HEALTH RECORD multiple \\(#9000001.41) rows for record {int} at facility {int} with number {string}") do |dfn, facility, hrn|
+  filer = received_rpc_calls("DDR FILER").last
+  assert filer, "DDR FILER was not called"
+  assert_equal "ADD", filer[:params][0]
+  rows = filer[:params][1].values
+  assert_includes rows, "9000001.41^.01^+1,#{dfn},^#{facility}"
+  assert_includes rows, "9000001.41^.02^+1,#{dfn},^#{hrn}"
+  lock = received_rpc_calls("DDR LOCK/UNLOCK NODE").first
+  assert lock, "the ^AUPNPAT(DFN) node was not locked"
+  assert_equal RpmsRpc::DdrFileman.lock_param(node: "^AUPNPAT(#{dfn})"), lock[:params].first
+end
+
+Then("the page says health record number {string} was filed") do |hrn|
+  assert page.has_css?("[role=status]", text: "Health record number #{hrn} filed"), page.text
+end
+
+Then("I am told the patient is already registered at this facility") do
+  assert_equal 422, page.status_code
+  assert page.has_css?("[role=alert]", text: "already registered at this facility"), page.text
+end
+
+Then("no chart number write was sent to RPMS") do
+  assert_empty received_rpc_calls("DDR FILER")
+end
+
+Then("it is refused for want of a registration key") do
+  assert_equal 403, page.status_code
+  assert page.has_content?("AGZMENU"), page.text
 end
 
 # -- S-REG-01 ---------------------------------------------------------------------

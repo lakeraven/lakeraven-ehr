@@ -2,6 +2,7 @@
 
 require "rpms_rpc/api/registration"
 require "rpms_rpc/api/ddr_fileman"
+require "rpms_rpc/api/tribal"
 
 module Lakeraven
   module EHR
@@ -26,8 +27,6 @@ module Lakeraven
     # is; this is the browser's.
     class PatientRegistrationGateway
       UNAVAILABLE = "Registration service unavailable"
-      # TRIBE (^AUTTTRI), the file #9000001/1108 points to; .01 NAME.
-      TRIBE_FILE = "9999999.03"
       HRN_SUBFILE = RpmsRpc::Registration::HRN_SUBFILE
       HRN_FIELD = RpmsRpc::Registration::HRN_FIELD
       FIELD_TRIBE = RpmsRpc::Registration::FIELD_TRIBE
@@ -57,14 +56,57 @@ module Lakeraven
         end
 
         # TRIBE entries for a picker: [{ ien:, name: }], or nil when the
-        # broker gave no answer. DDR LISTER over #9999999.03 with the .01
-        # name; the packed row's first piece after the IEN is read as the
-        # name (no live capture of this listing yet).
-        def tribes
-          listed = RpmsRpc::DdrFileman.lister(file: TRIBE_FILE, fields: ".01", max: "*")
-          return nil if listed.nil? || listed[:error]
+        # broker gave no answer. The gem's own listing (DDR LISTER over
+        # #9999999.03 by the B index); one page, the first `part` of names
+        # when given.
+        def tribes(part: nil)
+          RpmsRpc::Tribal.tribes(part: part)
+        end
 
-          listed[:entries].map { |e| { ien: e[:ien], name: e[:pieces].first.to_s } }
+        # Patients already on file with the same name, date of birth and sex
+        # (S-REG-02.3): the stock name lookup (ORWPT LIST ALL), narrowed here.
+        def possible_matches(name:, dob:, sex:)
+          last = name.to_s.split(",").first.to_s.strip
+          return [] if last.empty?
+
+          Patient.search(last).select do |p|
+            p.name.to_s.casecmp?(name.to_s.strip) && p.dob == dob && p.sex.to_s.casecmp?(sex.to_s)
+          end
+        end
+
+        # Is this social security number already on another patient in
+        # PATIENT (#2)? (S-REG-02.8) The stock SSN lookup; nil means the
+        # broker gave no answer, which the caller treats as "cannot tell".
+        def ssn_taken?(ssn)
+          Patient.search_by_ssn(ssn).any?
+        end
+
+        # File a health record number for the patient at a facility
+        # (S-REG-06.1): an entry in the HEALTH RECORD multiple (#9000001.41)
+        # DINUM'd to the facility, .01 the facility pointer, .02 the number,
+        # through DDR FILER under the ^AUPNPAT(DFN) lock, the rows exactly as
+        # RpmsRpc::Registration files them on a new registration
+        # (completion_rows: AG1.m:53-54, AGACT.m:10). Returns { success: true }
+        # or { success: false, status:, error: }.
+        def file_hrn(dfn:, facility_ien:, hrn:)
+          node = "^AUPNPAT(#{dfn})"
+          RpcSupport.with_broker(UNAVAILABLE) do
+            next { success: false, status: 409, error: "The patient's record is locked by another user" } unless RpmsRpc::DdrFileman.lock(node: node)
+
+            begin
+              sub_iens = "+1,#{dfn},"
+              filed = RpmsRpc::DdrFileman.filer(mode: "ADD", rows: [
+                { file: HRN_SUBFILE, field: ".01", iens: sub_iens, value: facility_ien.to_s },
+                { file: HRN_SUBFILE, field: HRN_FIELD, iens: sub_iens, value: hrn.to_s }
+              ], iens: { 1 => facility_ien.to_s })
+              next unavailable if filed.nil?
+              next { success: false, status: 422, error: filed[:errors].join("; ") } unless filed[:success]
+
+              { success: true }
+            ensure
+              RpmsRpc::DdrFileman.unlock(node: node)
+            end
+          end
         end
 
         # The patient's health record number at a facility: field .02 of the

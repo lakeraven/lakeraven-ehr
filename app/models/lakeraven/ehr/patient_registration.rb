@@ -16,10 +16,19 @@ module Lakeraven
       attribute :tribe_ien, :string
       attribute :community, :string
 
+      # The rules BPRM's RegisterPatientCommandValidator enforces, in the
+      # rpms-ux scenarios' words: name LAST,FIRST MIDDLE and 3 to 30 characters
+      # (S-REG-02.4), date of birth after 1870 and not in the future
+      # (S-REG-02.5), a nine-digit social security number (S-REG-02.7).
+      EARLIEST_DOB = Date.new(1871, 1, 1)
+
       validates :name, :sex, :dob, :tribe_ien, :community, presence: true
       validates :sex, inclusion: { in: %w[M F] }, allow_blank: true
-      validates :name, format: { with: /\A[^,^]+,[^,^]+\z/, message: "must be LAST,FIRST" }, allow_blank: true
+      validates :name, format: { with: /\A[^,^]+,[^,^]+\z/, message: "must be LAST,FIRST MIDDLE" }, allow_blank: true
+      validates :name, length: { in: 3..30 }, allow_blank: true
       validates :ssn, format: { with: /\A\d{3}-?\d{2}-?\d{4}\z/, message: "must be nine digits" }, allow_blank: true
+      validate :dob_in_range
+      validate :ssn_not_on_another_patient
 
       attr_reader :result
 
@@ -45,6 +54,28 @@ module Lakeraven
         errors.add(:base, @result[:error])
         false
       end
+
+      private
+
+      def dob_in_range
+        return if dob.blank?
+
+        errors.add(:dob, "cannot be in the future") if dob > Date.current
+        errors.add(:dob, "cannot be before 1871") if dob < EARLIEST_DOB
+      end
+
+      # S-REG-02.8: the number is looked up before anything is filed. A
+      # broker that gives no answer makes the lookup empty, which this cannot
+      # tell from "not on file"; the registration itself still goes through
+      # the broker, which refuses an unreachable one.
+      def ssn_not_on_another_patient
+        digits = ssn.to_s.delete("-")
+        return if digits.empty? || errors[:ssn].any?
+
+        errors.add(:ssn, "is already on another patient") if PatientRegistrationGateway.ssn_taken?(digits)
+      end
+
+      public
 
       def dfn = result&.dig(:dfn)
       def hrn = result&.dig(:hrn)

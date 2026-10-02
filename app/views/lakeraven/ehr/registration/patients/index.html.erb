@@ -57,11 +57,17 @@
     >
       No patient matches.
     </p>
-    <p>
-      <%= link_to "Add a new patient", new_registration_patient_path %>
-    </p>
+    <% if @can_register %>
+      <p>
+        <%= link_to "Add a new patient", new_registration_patient_path %>
+      </p>
+    <% else %>
+      <p>
+        You cannot add a patient: that takes a registration key.
+      </p>
+    <% end %>
   <% end %>
-<% else %>
+<% elsif @can_register %>
   <p class="mt-6">
     <%= link_to "Add a new patient", new_registration_patient_path %>
   </p>

@@ -44,13 +44,20 @@ Lakeraven::EHR::Engine.routes.draw do
   # Session-authenticated HTML, like the dashboard; the chart at
   # /patients/:dfn stays the clinician's view.
   namespace :registration do
-    resources :patients, only: %i[index new create show], param: :dfn, constraints: { dfn: /\d+/ }
+    resources :patients, only: %i[index new create show], param: :dfn, constraints: { dfn: /\d+/ } do
+      # A chart number at this facility for a patient registered elsewhere (S-REG-06).
+      resources :hrns, only: %i[new create]
+    end
   end
 
   # Scheduling (rpms-ux W02): book a patient into a clinic's slot. The first
   # slice; the clinic day view and the rest of W02 are pending stubs.
   namespace :scheduling do
-    resources :appointments, only: %i[new create]
+    resources :appointments, only: %i[new create], constraints: { id: /\d+/ } do
+      # Cancelling a booked appointment with a reason (S-SCH-02); :appointment_id
+      # is the BSDX APPOINTMENT IEN.
+      resources :cancellations, only: %i[new create]
+    end
   end
 
   # Doorkeeper models (Application, AccessToken) are used directly;
