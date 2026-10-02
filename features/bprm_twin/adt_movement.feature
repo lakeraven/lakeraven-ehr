@@ -20,12 +20,14 @@ Feature: Inpatient admission, transfer, and discharge (ADT)
     Given a registered patient with DFN 42 named "RAVEN,NORA"
     And an inpatient ward "MED/SURG" with IEN 3
 
+  @S-ADT-01.1
   Scenario: Admit a patient
     When I admit patient 42 to ward 3 at "2026-08-20 14:00" under provider "BEGAY,MICHELLE"
     Then the admission succeeds
     And patient 42 appears on the census for ward 3
     And the movement is written through DGPMV* (not a raw ^DGPM set)
 
+  @S-ADT-02.1
   Scenario: Transfer a patient to another ward
     Given patient 42 is admitted to ward 3
     And an inpatient ward "ICU" with IEN 4
@@ -33,18 +35,21 @@ Feature: Inpatient admission, transfer, and discharge (ADT)
     Then the transfer succeeds
     And patient 42 appears on the census for ward 4
 
+  @S-ADT-03.1
   Scenario: Discharge a patient
     Given patient 42 is admitted to ward 3
     When I discharge patient 42 at "2026-08-23 11:00" with disposition "Home"
     Then the discharge succeeds
     And patient 42 no longer appears on the census for ward 3
 
+  @S-ADT-04.1
   Scenario: Cancel an erroneous movement
     Given patient 42 has movement 8001 admitting to ward 3
     When I cancel movement 8001
     Then the cancellation succeeds
     And the census for ward 3 is corrected
 
+  @S-ADT-01.5
   Scenario: Admitting an already-admitted patient is rejected
     Given patient 42 is admitted to ward 3
     When I admit patient 42 to ward 3 at "2026-08-21 09:00" under provider "BEGAY,MICHELLE"
@@ -52,11 +57,13 @@ Feature: Inpatient admission, transfer, and discharge (ADT)
     And the error message mentions "already admitted"
     And patient 42 still has exactly one open admission
 
+  @S-ADT-03.4
   Scenario: Discharging a patient who is not admitted is rejected
     When I discharge patient 42 at "2026-08-23 11:00" with disposition "Home"
     Then the discharge is rejected with status 422
     And the error message mentions "not currently admitted"
 
+  @S-ADT-01.6
   Scenario: Admitting to an unknown or closed ward is rejected
     Given ward 99 does not exist or is closed
     When I admit patient 42 to ward 99 at "2026-08-20 14:00" under provider "BEGAY,MICHELLE"
@@ -64,6 +71,7 @@ Feature: Inpatient admission, transfer, and discharge (ADT)
     And the error message mentions "ward"
     And no movement is created for patient 42
 
+  @S-ADT-01.7
   Scenario: Re-admission shortly after discharge surfaces the re-admit check
     Given patient 42 was discharged from ward 3 on "2026-08-18"
     When I admit patient 42 to ward 3 at "2026-08-20 14:00" under provider "BEGAY,MICHELLE"

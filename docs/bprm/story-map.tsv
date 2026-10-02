@@ -1,0 +1,137 @@
+# story map: every feature-inventory row joined to the rpms-ux stories written from it, or the reason it has none (docs/bprm/README.md)
+module	feature	story_ids	reason
+Adt	(root)		module scaffolding (startup, policies, routes, layout): no user goal
+Adt	ChartDeficiencies		site setup: table maintenance, left to a site-setup workflow (open question in lakeraven-ehr#565)
+Adt	Common		shared UI components and client plumbing: no user goal
+Adt	Configuration	S-ADT-01.4;S-ADT-05.3	user-rights cache; the rights are asserted in S-ADT-01.4, S-ADT-05.3
+Adt	Dashboard	S-ADT-06	
+Adt	DischargeList	S-ADT-06.2	
+Adt	IncompleteCharts	S-ADT-05	
+Adt	Movements	S-ADT-01;S-ADT-02;S-ADT-03;S-ADT-04	
+Adt	ReferenceData		reference-data lookups the forms are filled from: no user goal of their own
+Adt	Reports		out of scope: ADT census and statistics reports; no story yet (reports come after Benefits in the issue's order)
+Adt	RoomBeds	S-ADT-02.2	S-ADT-02.2; maintaining rooms and beds is site setup: table maintenance, left to a site-setup workflow (open question in lakeraven-ehr#565)
+Adt	SiteParameters		site setup: table maintenance, left to a site-setup workflow (open question in lakeraven-ehr#565)
+Adt	Wards		site setup: table maintenance, left to a site-setup workflow (open question in lakeraven-ehr#565)
+Adt	Workspace	S-ADT-01.4;S-ADT-02;S-ADT-03;S-ADT-04	
+Benefits	(root)		module scaffolding (startup, policies, routes, layout): no user goal
+Benefits	BenefitsCase	S-BEN-10	
+Benefits	EmployerGroupInsurances		site setup: table maintenance, left to a site-setup workflow (open question in lakeraven-ehr#565)
+Benefits	Employers		site setup: table maintenance, left to a site-setup workflow (open question in lakeraven-ehr#565)
+Benefits	Guarantor	S-BEN-09	
+Benefits	Insurance	S-BEN-01	
+Benefits	Insurers		site setup: table maintenance, left to a site-setup workflow (open question in lakeraven-ehr#565)
+Benefits	Medicaid	S-BEN-03	
+Benefits	Medicare	S-BEN-02	
+Benefits	MspSurvey	S-BEN-05	
+Benefits	PartD	S-BEN-02.5	
+Benefits	PatientApplicationTypes		site setup: table maintenance, left to a site-setup workflow (open question in lakeraven-ehr#565)
+Benefits	PriorAuthorizations	S-BEN-07	
+Benefits	Private	S-BEN-04	
+Benefits	Railroad	S-BEN-02.4	
+Benefits	ReferenceData		reference-data lookups the forms are filled from: no user goal of their own
+Benefits	Sequencing	S-BEN-06	
+Benefits	TPLiability	S-BEN-08.2	
+Benefits	Workman	S-BEN-08.1	
+Common	(root)		module scaffolding (startup, policies, routes, layout): no user goal
+Common	About		the About page: no user goal
+Common	Authentication	S-SGN-01	sign-on: W03's S-SGN-01 owns signing on; BPRM's own session plumbing has no story
+Common	Browser		shared UI components and client plumbing: no user goal
+Common	Components		shared UI components and client plumbing: no user goal
+Common	DataTableExportModel		Excel export of list screens: a convenience, no FileMan state
+Common	Device		reference-data lookups the forms are filled from: no user goal of their own
+Common	Employer		reference-data lookups the forms are filled from: no user goal of their own
+Common	EmployerSearch		reference-data lookups the forms are filled from: no user goal of their own
+Common	EmploymentStatus		reference-data lookups the forms are filled from: no user goal of their own
+Common	Facility		reference-data lookups the forms are filled from: no user goal of their own
+Common	FacilitySelection	S-SGN-01	picking the division to work in: a sign-on step (W03 S-SGN-01), not a registration goal
+Common	Institution		reference-data lookups the forms are filled from: no user goal of their own
+Common	MedicalCenterDivision		reference-data lookups the forms are filled from: no user goal of their own
+Common	MiniRegistration	S-REG-05	
+Common	ModuleNav		shared UI components and client plumbing: no user goal
+Common	Name		shared UI components and client plumbing: no user goal
+Common	Patient	S-REG-20.1	
+Common	PatientSearch	S-REG-01	
+Common	PatientSearchModel	S-REG-01.3;S-REG-01.4	
+Common	Person		reference-data lookups the forms are filled from: no user goal of their own
+Common	Provider		reference-data lookups the forms are filled from: no user goal of their own
+Common	ReferenceData		reference-data lookups the forms are filled from: no user goal of their own
+Common	Relationship		reference-data lookups the forms are filled from: no user goal of their own
+Common	Reports	S-REG-24.2;S-REG-30;S-SCH-13	the report runner (BMW_BSF_SP.Core_PrintReport): the reports are storied where they are run, S-REG-24.2, S-REG-30, S-SCH-13
+Common	SelectPatientInEhr	S-REG-01.6	
+Common	SensitivePatientTracking	S-REG-04	
+Common	Settings		site setup: table maintenance, left to a site-setup workflow (open question in lakeraven-ehr#565)
+Common	Shared		shared UI components and client plumbing: no user goal
+Common	Signals	S-SCH-05.4	
+Common	State		reference-data lookups the forms are filled from: no user goal of their own
+Common	StateManagement		shared UI components and client plumbing: no user goal
+Common	TableMaintenance		site setup: table maintenance, left to a site-setup workflow (open question in lakeraven-ehr#565)
+Common	Template		shared UI components and client plumbing: no user goal
+Common	Tenancy		infrastructure (tenant resolution): no user goal
+Common	User		reference-data lookups the forms are filled from: no user goal of their own
+Common	UserManagement	S-CRD-01	RPMS users and keys: W09 credentialing (S-CRD-01), not registration
+Common	ZipCode		reference-data lookups the forms are filled from: no user goal of their own
+PatientProfile	(root)		module scaffolding (startup, policies, routes, layout): no user goal
+PatientProfile	Address	S-REG-21;S-REG-22.1;S-REG-22.2;S-REG-22.3;S-REG-22.4;S-REG-22.5;S-REG-22.6	
+PatientProfile	AddressHistory	S-REG-22.7;S-REG-22.8	
+PatientProfile	AddressVerification	S-REG-21.2	
+PatientProfile	AdvanceDirective	S-REG-17	
+PatientProfile	AobRoi	S-REG-15.3;S-REG-15.4;S-REG-15.5;S-REG-15.6	
+PatientProfile	Consent	S-REG-16;S-REG-23.3	
+PatientProfile	Contacts	S-REG-08	
+PatientProfile	DeathInfo	S-REG-27	
+PatientProfile	Demographics	S-REG-20.1;S-REG-20.2;S-REG-20.3;S-REG-20.4;S-REG-20.5;S-REG-20.6;S-REG-20.7	
+PatientProfile	Documents	S-REG-24.1	
+PatientProfile	EligMods		site setup: table maintenance, left to a site-setup workflow (open question in lakeraven-ehr#565)
+PatientProfile	EligibilityModifiers		site setup: table maintenance, left to a site-setup workflow (open question in lakeraven-ehr#565)
+PatientProfile	Facesheet	S-REG-24.2	
+PatientProfile	FamilyInfo	S-REG-09	
+PatientProfile	HealthRecordNumber	S-REG-06;S-REG-25	
+PatientProfile	Hrn	S-REG-06;S-REG-25	
+PatientProfile	Languages	S-REG-10	
+PatientProfile	LegalDocuments	S-REG-18	
+PatientProfile	MigrantHomeless	S-REG-11	
+PatientProfile	Names	S-REG-12;S-REG-26	
+PatientProfile	Notes	S-REG-19	
+PatientProfile	NoticeOfPrivacyPractices	S-REG-15.1;S-REG-15.2	
+PatientProfile	Npp	S-REG-15.1;S-REG-15.2	
+PatientProfile	PersonalDetail	S-REG-10;S-REG-11;S-REG-20	
+PatientProfile	PhrAccess	S-REG-15.7	
+PatientProfile	PrfLocalFlag		site setup: table maintenance, left to a site-setup workflow (open question in lakeraven-ehr#565)
+PatientProfile	PrfLocalFlags		site setup: table maintenance, left to a site-setup workflow (open question in lakeraven-ehr#565)
+PatientProfile	Profile	S-REG-20.9;S-REG-25.3;S-REG-27.3	
+PatientProfile	RecordFlags	S-REG-28	
+PatientProfile	RefereceData		reference-data lookups the forms are filled from: no user goal of their own
+PatientProfile	ReferenceData		reference-data lookups the forms are filled from: no user goal of their own
+PatientProfile	RegisterPatient	S-REG-02	
+PatientProfile	Reports	S-REG-30	
+PatientProfile	RestrictedHealthInfo	S-REG-29	
+PatientProfile	Rhi	S-REG-29	
+PatientProfile	Sogi	S-REG-13	
+PatientProfile	TribalInfo	S-REG-07	
+PatientProfile	VeteranStatus	S-REG-14	
+PatientWorkspace	(root)		module scaffolding (startup, policies, routes, layout): no user goal
+PatientWorkspace	ErrorAndWarnings	S-REG-23	
+PatientWorkspace	Facesheet	S-REG-24.2	
+PatientWorkspace	Layout	S-REG-01.5;S-REG-20.9;S-REG-27.3	
+PatientWorkspace	PatientBanner	S-REG-01.3;S-REG-01.4;S-REG-28.1;S-REG-29.1	
+PatientWorkspace	RegistrationParameters	S-REG-02.12;S-REG-09.6;S-REG-15.6;S-REG-21.3	
+Reports	(root)	S-REG-30;S-SCH-13	the cross-module report page: each report is storied in its module, S-REG-30, S-SCH-13; ADT and Benefits reports have no story yet
+Scheduling	(root)		module scaffolding (startup, policies, routes, layout): no user goal
+Scheduling	AccessTypes	S-SCH-01.9;S-SCH-04.2	site setup: table maintenance, left to a site-setup workflow (open question in lakeraven-ehr#565); its prevent-access flag is asserted in S-SCH-01.9, S-SCH-04.2
+Scheduling	Appointments	S-SCH-01;S-SCH-02;S-SCH-03;S-SCH-06;S-SCH-07;S-SCH-08;S-SCH-09	
+Scheduling	AppointmentsList	S-SCH-05.5	
+Scheduling	Clinics		site setup: table maintenance, left to a site-setup workflow (open question in lakeraven-ehr#565) (clinic parameters, availability, blocking time)
+Scheduling	Configuration	S-SCH-01.13;S-SCH-05.1	user-rights cache; the rights are asserted in S-SCH-01.13, S-SCH-05.1
+Scheduling	Holidays	S-SCH-04.3;S-SCH-05.2	site setup: table maintenance, left to a site-setup workflow (open question in lakeraven-ehr#565); the effect is asserted in S-SCH-04.3, S-SCH-05.2
+Scheduling	Letters	S-SCH-11;S-SCH-12	
+Scheduling	PatientAppointmentList	S-SCH-05.6	
+Scheduling	ReferenceData	S-SCH-03.5;S-SCH-13.7	reference-data lookups the forms are filled from: no user goal of their own (clinic stops for S-SCH-03.5, handouts for S-SCH-13.7)
+Scheduling	Reports	S-SCH-13	
+Scheduling	ResourceAssignment	S-SCH-01.10;S-SCH-01.13;S-SCH-01.9;S-SCH-05.1	site setup: table maintenance, left to a site-setup workflow (open question in lakeraven-ehr#565); the rights it grants are asserted in S-SCH-01.9, S-SCH-01.10, S-SCH-01.13, S-SCH-05.1
+Scheduling	ResourceGroups		site setup: table maintenance, left to a site-setup workflow (open question in lakeraven-ehr#565)
+Scheduling	Scheduler	S-SCH-01.10;S-SCH-01.11;S-SCH-01.13;S-SCH-01.7;S-SCH-01.8;S-SCH-01.9;S-SCH-02.10;S-SCH-02.9;S-SCH-05.1;S-SCH-05.2;S-SCH-05.3;S-SCH-05.4;S-SCH-06.2	
+Scheduling	Signals	S-SCH-05.4	
+Scheduling	SlotSearch	S-SCH-04	
+Scheduling	ToolBar	S-SCH-04.7;S-SCH-05.5;S-SCH-10.9;S-SCH-11.1;S-SCH-11.3	
+Scheduling	WaitingList	S-SCH-06.4;S-SCH-07.5;S-SCH-10	

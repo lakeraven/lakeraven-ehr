@@ -19,16 +19,19 @@ Feature: Patient eligibility and third-party insurance
       | 1  | Medicaid (WA)      | WA55501234  | Medicaid  | yes    |
       | 2  | Contract Health    | CHS-2026-88 | Tribal    | yes    |
 
+  @S-BEN-01.1
   Scenario: List a patient's insurances
     When I request the insurances for patient 42
     Then I see 2 insurances
     And insurance "Medicaid (WA)" is flagged in-use
 
+  @S-BEN-01.3
   Scenario: Update a policy number
     When I update insurance 1 for patient 42 with policy number "WA55509999"
     Then the update succeeds
     And insurance 1 now has policy number "WA55509999"
 
+  @S-BEN-01.4
   Scenario: Delete an insurance and cascade its dependent records safely
     When I delete insurance 2 for patient 42
     Then the delete succeeds
@@ -36,6 +39,7 @@ Feature: Patient eligibility and third-party insurance
     And all dependent coverage records for insurance 2 are removed through FileMan
     And no orphaned cross-reference remains for insurance 2
 
+  @S-BEN-04.4
   Scenario: Deleting an in-use insurance is blocked
     When I delete insurance 1 for patient 42
     Then the delete is rejected with status 409

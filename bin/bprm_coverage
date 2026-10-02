@@ -1,0 +1,181 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# BPRM parity, as a count (lakeraven-ehr#565).
+#
+#   bin/bprm_coverage            # check the ids, run the specs, print the table
+#   bin/bprm_coverage --check    # only check the ids (no cucumber run)
+#   bin/bprm_coverage --strict   # also fail on a twin scenario with no id
+#
+# Checks every scenario under features/bprm_twin/ against the rpms-ux
+# snapshot (docs/bprm/scenarios.tsv): an id that is not in rpms-ux, a retired
+# id, or an id tagged on two scenarios fails. Then it runs the twin through
+# cucumber's JSON formatter and prints, per workflow, how many rpms-ux
+# scenarios exist, how many have a spec here, and how many of those pass,
+# pend or fail. "Passing" means the spec passed against the configured
+# broker (RpmsRpc.mock! in test/test_helper.rb unless a live one is wired in);
+# the row says which, and a mock-backed pass is not parity.
+#
+# Twin features written before the ids existed (the 16 original
+# features/bprm_twin/*.feature files) carry no id: they are reported as
+# "untagged" and fail the check only with --strict.
+
+require "json"
+require "optparse"
+require "set"
+require "tmpdir"
+
+module BprmCoverage
+  TAG = /@(S-[A-Z]+-\d+\.\d+)\b/
+  SCENARIO_LINE = /^\s*Scenario(?: Outline)?:/
+  WORKFLOWS = %w[W01 W02 W18 W19].freeze
+  STATUS_RANK = { "failed" => 4, "undefined" => 3, "pending" => 2, "skipped" => 1, "passed" => 0 }.freeze
+
+  module_function
+
+  def read_scenarios(path)
+    lines = File.readlines(path, chomp: true)
+    header = lines.find { |l| !l.start_with?("#") }.split("\t")
+    lines.reject { |l| l.start_with?("#") }.drop(1).map { |l| header.zip(l.split("\t", -1)).to_h }
+  end
+
+  # [{id:, file:, line:}] for every tagged scenario, plus the untagged ones.
+  def scan(features_dir)
+    tagged = []
+    untagged = []
+    Dir.glob(File.join(features_dir, "**", "*.feature")).sort.each do |file|
+      pending_tags = []
+      File.readlines(file).each_with_index do |line, i|
+        if line.strip.start_with?("@")
+          pending_tags.concat(line.scan(TAG).flatten)
+        elsif line.match?(SCENARIO_LINE)
+          if pending_tags.empty?
+            untagged << { file: file, line: i + 1 }
+          else
+            pending_tags.each { |id| tagged << { id: id, file: file, line: i + 1 } }
+          end
+          pending_tags = []
+        elsif !line.strip.empty? && !line.strip.start_with?("#")
+          pending_tags = [] unless line.strip.start_with?("@")
+        end
+      end
+    end
+    [ tagged, untagged ]
+  end
+
+  def check(rows, tagged, untagged, strict:)
+    known = rows.to_h { |r| [ r["scenario"], r ] }
+    errors = []
+    tagged.each do |t|
+      row = known[t[:id]]
+      errors << "#{t[:file]}:#{t[:line]}: #{t[:id]} is not an rpms-ux scenario" unless row
+      errors << "#{t[:file]}:#{t[:line]}: #{t[:id]} is retired in rpms-ux" if row && row["retired"] == "yes"
+    end
+    tagged.group_by { |t| t[:id] }.select { |_, ts| ts.size > 1 }.each do |id, ts|
+      errors << "#{id} is tagged on #{ts.size} scenarios: #{ts.map { |t| "#{t[:file]}:#{t[:line]}" }.join(", ")}"
+    end
+    untagged.each { |u| errors << "#{u[:file]}:#{u[:line]}: scenario carries no rpms-ux id" } if strict
+    errors
+  end
+
+  # Run cucumber on the twin and return { id => status }.
+  def run(features_dir)
+    Dir.mktmpdir("bprm-coverage") do |dir|
+      out = File.join(dir, "cucumber.json")
+      system("bundle", "exec", "cucumber", features_dir, "--publish-quiet", "--format", "json", "--out", out,
+             "--format", "progress", { out: File::NULL, err: File::NULL })
+      raise "cucumber produced no report; run `bundle exec cucumber #{features_dir}` to see why" unless File.exist?(out)
+
+      statuses = {}
+      JSON.parse(File.read(out)).each do |feature|
+        Array(feature["elements"]).each do |element|
+          next unless element["type"] == "scenario"
+
+          ids = Array(element["tags"]).map { |t| t["name"][TAG, 1] }.compact
+          next if ids.empty?
+
+          # Cucumber's own verdict: the first step that did not pass decides
+          # (a scenario that pends on its first step is pending, whatever
+          # follows); all passed is passed.
+          step_statuses = Array(element["steps"]).map { |s| s.dig("result", "status") }
+          status = step_statuses.find { |s| s != "passed" } || (step_statuses.empty? ? "skipped" : "passed")
+          ids.each { |id| statuses[id] = status }
+        end
+      end
+      statuses
+    end
+  end
+
+  # docs/bprm/story-map.tsv: every inventory row has a map row, and every
+  # story or scenario id a map row names is in rpms-ux.
+  def check_story_map(rows, inventory_path, map_path)
+    return [] unless File.exist?(inventory_path) && File.exist?(map_path)
+
+    keys = ->(path) { File.readlines(path, chomp: true).reject { |l| l.start_with?("#") }.drop(1).map { |l| l.split("\t", 3)[0, 2] } }
+    inventory = keys.call(inventory_path)
+    mapped = keys.call(map_path)
+    errors = (inventory - mapped).map { |m, f| "#{map_path}: no row for inventory feature #{m}/#{f}" }
+    errors += (mapped - inventory).map { |m, f| "#{map_path}: #{m}/#{f} is not in #{inventory_path}" }
+    known = rows.flat_map { |r| [ r["scenario"], r["story"] ] }.to_set
+    File.readlines(map_path, chomp: true).reject { |l| l.start_with?("#") }.drop(1).each do |line|
+      mod, feat, ids, = line.split("\t", 4)
+      ids.to_s.split(";").reject { |id| known.include?(id) }.each do |id|
+        errors << "#{map_path}: #{mod}/#{feat} names #{id}, which is not in rpms-ux"
+      end
+    end
+    errors
+  end
+
+  def report(rows, tagged, statuses, backend)
+    live = rows.select { |r| r["retired"] == "no" && WORKFLOWS.include?(r["workflow"]) }
+    specced = tagged.map { |t| t[:id] }.uniq
+    puts "BPRM parity (rpms-ux scenarios in W01, W02, W18, W19); specs run against #{backend}"
+    puts format("%-6s %-9s %-7s %-8s %-8s %-9s %-7s %-10s", "wf", "scenarios", "specced", "passing", "pending", "undefined", "failed", "no spec")
+    (WORKFLOWS + [ "all" ]).each do |wf|
+      ids = wf == "all" ? live.map { |r| r["scenario"] } : live.select { |r| r["workflow"] == wf }.map { |r| r["scenario"] }
+      have = ids & specced
+      counts = {
+        "scenarios" => ids.size, "specced" => have.size,
+        "passing" => have.count { |id| statuses[id] == "passed" },
+        "pending" => have.count { |id| %w[pending skipped].include?(statuses[id]) },
+        # A spec whose steps are not written yet (the legacy twin features):
+        # it proves nothing, and it is not a failure either (lakeraven-ehr#492).
+        "undefined" => have.count { |id| statuses[id] == "undefined" },
+        "failed" => have.count { |id| statuses[id] == "failed" },
+        "no spec" => ids.size - have.size
+      }
+      puts format("%-6s %9d %7d %8d %8d %9d %7d %10d", wf, *counts.values)
+    end
+    counts_for_pass = live.map { |r| r["scenario"] }.select { |id| statuses[id] == "passed" }
+    puts "\npassing: #{counts_for_pass.sort.join(" ")}" if counts_for_pass.any?
+  end
+end
+
+if $PROGRAM_NAME == __FILE__
+  scenarios = "docs/bprm/scenarios.tsv"
+  features = "features/bprm_twin"
+  check_only = false
+  strict = false
+  OptionParser.new do |o|
+    o.on("--scenarios FILE") { |v| scenarios = v }
+    o.on("--features DIR") { |v| features = v }
+    o.on("--check") { check_only = true }
+    o.on("--strict") { strict = true }
+  end.parse!
+
+  rows = BprmCoverage.read_scenarios(scenarios)
+  tagged, untagged = BprmCoverage.scan(features)
+  errors = BprmCoverage.check(rows, tagged, untagged, strict: strict)
+  errors += BprmCoverage.check_story_map(rows, "docs/bprm/feature-inventory.tsv", "docs/bprm/story-map.tsv")
+  unless errors.empty?
+    warn "#{errors.size} error(s):"
+    errors.each { |e| warn "  #{e}" }
+    exit 1
+  end
+  puts "ids: #{tagged.map { |t| t[:id] }.uniq.size} tagged scenario(s) all in rpms-ux; #{untagged.size} untagged (legacy twin)"
+  exit 0 if check_only
+
+  statuses = BprmCoverage.run(features)
+  backend = ENV["RPMS_RPC_LIVE"] ? "a live broker (RPMS_RPC_LIVE)" : "RpmsRpc.mock! (test/test_helper.rb); a pass here is not parity"
+  BprmCoverage.report(rows, tagged, statuses, backend)
+end

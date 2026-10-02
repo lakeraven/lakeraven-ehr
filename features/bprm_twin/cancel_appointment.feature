@@ -13,6 +13,7 @@ Feature: Cancel an appointment
     Given a registered patient with DFN 42
     And patient 42 has appointment 7001 in clinic 15 at "2026-08-20 09:00"
 
+  @S-SCH-02.7
   Scenario: Clinic-cancel an appointment with a reason
     When I cancel appointment 7001 as "clinic" with reason "Provider unavailable" and note "Rescheduling"
     Then the cancellation succeeds
@@ -24,11 +25,13 @@ Feature: Cancel an appointment
     Then the cancellation succeeds
     And appointment 7001 is marked patient-cancelled
 
+  @S-SCH-02.14
   Scenario: Cancelling an unknown appointment fails
     When I cancel appointment 999999 as "clinic" with reason "Provider unavailable"
     Then the cancellation is rejected with status 422
     And the error message mentions "Invalid Appointment ID"
 
+  @S-SCH-02.15
   Scenario: Cancellation is blocked while another user holds the patient record
     Given another user holds a lock on patient 42's record
     When I cancel appointment 7001 as "clinic" with reason "Provider unavailable"

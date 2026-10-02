@@ -122,6 +122,7 @@ module Lakeraven
         session[:user_name] = provider[:name]
         session[:user_type] = provider[:user_type].to_s
         session[:security_keys] = Array(provider[:security_keys]).map(&:to_s)
+        session[:rpms_keys] = Array(provider[:rpms_keys]).map(&:to_s)
         session[:last_seen_at] = Time.current.to_i
         session[:smart_token] = mint_smart_token(provider)
       end

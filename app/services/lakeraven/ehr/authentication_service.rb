@@ -71,6 +71,11 @@ module Lakeraven
             name: user_info&.dig(:name) || auth[:name].to_s,
             user_type: RpmsRpc::UserRoles.resolve(user_class: user_class, security_keys: symbolic_keys),
             security_keys: symbolic_keys,
+            # The keys as RPMS names them (ORWU USERKEYS), before the registry
+            # drops the ones it does not know. The registration, scheduling
+            # and ADT screens gate on AG/SD/DG keys the registry does not
+            # carry yet (rpms-rpc#296), so they read these.
+            rpms_keys: Array(raw_keys).map(&:to_s),
             # RPMS said this verify code must be changed (admin reset, or aged
             # out). Dropping the flag granted a full session on a temporary
             # credential where CPRS would force the change first; the caller

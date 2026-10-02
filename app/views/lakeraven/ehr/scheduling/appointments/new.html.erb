@@ -1,0 +1,55 @@
+<% content_for :title, "Book an appointment | Lakeraven EHR" %>
+
+<div class="page-header">
+  <h1>Book an appointment</h1>
+  <p>
+    Files the appointment on the clinic and on the patient in RPMS.
+  </p>
+</div>
+
+<% if @booking.errors.any? %>
+  <div
+    class="screening-errors"
+    role="alert"
+  >
+    <h2>The booking was refused</h2>
+    <p>
+      No appointment was filed.
+    </p>
+    <ul>
+      <% @booking.errors.full_messages.each do |message| %>
+        <li><%= message %></li>
+      <% end %>
+    </ul>
+  </div>
+<% end %>
+
+<%= form_with model: @booking, url: scheduling_appointments_path, method: :post, local: true, class: "grid max-w-xl gap-4" do |f| %>
+  <div>
+    <%= f.label :resource, "Clinic" %>
+    <%= f.text_field :resource, autocomplete: "off" %>
+  </div>
+  <div>
+    <%= f.label :dfn, "Patient record number" %>
+    <%= f.number_field :dfn, min: 1 %>
+  </div>
+  <div>
+    <%= f.label :date, "Date" %>
+    <%= f.date_field :date %>
+  </div>
+  <div>
+    <%= f.label :time, "Time" %>
+    <%= f.time_field :time %>
+  </div>
+  <div>
+    <%= f.label :minutes, "Length in minutes" %>
+    <%= f.number_field :minutes, min: 1 %>
+  </div>
+  <div>
+    <%= f.label :note, "Note" %>
+    <%= f.text_field :note, autocomplete: "off" %>
+  </div>
+  <div>
+    <%= f.submit "Book appointment" %>
+  </div>
+<% end %>

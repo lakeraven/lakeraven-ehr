@@ -79,6 +79,31 @@ module Lakeraven
       def current_security_keys
         Array(session[:security_keys])
       end
+
+      # The RPMS security keys the signed-on user holds, as RPMS names them
+      # (SessionsController stores ORWU USERKEYS verbatim). The registration,
+      # scheduling and ADT screens gate on these the way BPRM does, on the
+      # key names, because rpms-rpc's symbolic registry does not carry the
+      # AG/SD/DG keys yet (rpms-rpc#296).
+      def current_rpms_keys
+        Array(session[:rpms_keys]).map(&:to_s)
+      end
+
+      def holds_rpms_key?(*names)
+        names.flatten.any? { |name| current_rpms_keys.include?(name.to_s) }
+      end
+
+      # Refuse the page unless the user holds one of `any_of` and none of
+      # `none_of`; the refusal names the keys so the clerk knows what to ask
+      # for, and it is audited as a denial.
+      def require_rpms_key!(any_of:, none_of: [], action: "do this")
+        held = holds_rpms_key?(any_of) && !holds_rpms_key?(none_of)
+        return true if held
+
+        note_audit_denial("browser access refused: none of #{Array(any_of).join(', ')} held") if respond_to?(:note_audit_denial, true)
+        render plain: "Forbidden: you need one of the keys #{Array(any_of).join(', ')} to #{action}", status: :forbidden
+        false
+      end
     end
   end
 end

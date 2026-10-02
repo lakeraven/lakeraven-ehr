@@ -13,11 +13,13 @@ Feature: Clinic waiting list
     Given a registered patient with DFN 42 named "RAVEN,NORA"
     And a clinic "GENERAL MEDICINE" with IEN 15
 
+  @S-SCH-10.1
   Scenario: Add a patient to the waiting list
     When I add patient 42 to the waiting list for clinic 15 with priority "routine" and reason "No open slots"
     Then the waiting-list add succeeds
     And clinic 15's waiting list includes patient 42
 
+  @S-SCH-13.6
   Scenario: Report the waiting list
     Given clinic 15's waiting list has patients "RAVEN,NORA" and "BEGAY,MICHELLE"
     When I request the waiting-list report for clinic 15

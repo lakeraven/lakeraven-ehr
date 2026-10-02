@@ -1,0 +1,32 @@
+<% content_for :title, "Chart at this facility | Lakeraven EHR" %>
+
+<div class="page-header">
+  <h1>Give <%= @patient.name %> a chart at this facility</h1>
+  <p>
+    The patient keeps their chart elsewhere; this files a health record number here.
+  </p>
+</div>
+
+<% if @assignment.errors.any? %>
+  <div
+    class="screening-errors"
+    role="alert"
+  >
+    <h2>No chart number was filed</h2>
+    <ul>
+      <% @assignment.errors.full_messages.each do |message| %>
+        <li><%= message %></li>
+      <% end %>
+    </ul>
+  </div>
+<% end %>
+
+<%= form_with model: @assignment, url: registration_patient_hrns_path(@patient.dfn), method: :post, local: true, class: "grid max-w-xl gap-4" do |f| %>
+  <div>
+    <%= f.label :hrn, "Health record number" %>
+    <%= f.text_field :hrn, autocomplete: "off" %>
+  </div>
+  <div>
+    <%= f.submit "File chart number" %>
+  </div>
+<% end %>

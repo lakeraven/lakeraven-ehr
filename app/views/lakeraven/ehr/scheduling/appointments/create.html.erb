@@ -1,0 +1,21 @@
+<% content_for :title, "Appointment booked | Lakeraven EHR" %>
+
+<div class="page-header">
+  <h1>Appointment booked</h1>
+</div>
+
+<div
+  role="status"
+  class="rounded-lg border border-green-300 bg-green-50 p-4"
+>
+  <p>
+    <%= @patient&.name || "Patient #{@booking.dfn}" %> is booked in <%= @booking.resource %> on <%= @booking.start_time.strftime("%m/%d/%Y at %H:%M") %> for <%= @booking.minutes %> minutes.
+  </p>
+  <p>
+    RPMS filed it as appointment <%= @booking.appointment_id %>.
+  </p>
+</div>
+
+<p class="mt-6">
+  <%= link_to "Book another appointment", new_scheduling_appointment_path %>
+</p>

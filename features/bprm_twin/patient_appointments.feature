@@ -19,6 +19,7 @@ Feature: A patient's appointments and routing slip
       | DENTAL           | 2026-09-02 13:30 | scheduled |
       | BEHAVIORAL HEALTH| 2026-07-01 10:00 | cancelled |
 
+  @S-SCH-05.6
   Scenario: List future appointments
     Given the current date is "2026-08-08"
     When I request the future appointments for patient 42
@@ -29,6 +30,7 @@ Feature: A patient's appointments and routing slip
     When I request the cancelled appointments for patient 42
     Then I see 1 appointment in clinic "BEHAVIORAL HEALTH"
 
+  @S-SCH-13.7
   Scenario: Generate a routing slip for a day's visit
     When I request the routing slip for patient 42 on "2026-08-20"
     Then the routing slip lists the "GENERAL MEDICINE" appointment at "09:00"

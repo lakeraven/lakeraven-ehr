@@ -1,0 +1,48 @@
+<% content_for :title, "Possible matches | Lakeraven EHR" %>
+
+<div class="page-header">
+  <h1>A patient like this is already on file</h1>
+  <p>
+    Nothing has been filed.
+    Open one of these registrations instead, or register this patient as new.
+  </p>
+</div>
+
+<table
+  class="mt-6"
+  aria-label="Patients with the same name, date of birth and sex"
+>
+  <thead>
+    <tr>
+      <th scope="col">Name</th>
+      <th scope="col">Date of birth</th>
+      <th scope="col">Sex</th>
+      <th scope="col">Health record number</th>
+      <th scope="col"></th>
+    </tr>
+  </thead>
+  <tbody>
+    <% @matches.each do |patient| %>
+      <tr>
+        <td><%= patient.name %></td>
+        <td><%= patient.dob&.strftime("%m/%d/%Y") %></td>
+        <td><%= patient.sex %></td>
+        <td><%= @hrns[patient.dfn].presence || "none at this facility" %></td>
+        <td>
+          <%= link_to "Open registration", registration_patient_path(patient.dfn) %>
+        </td>
+      </tr>
+    <% end %>
+  </tbody>
+</table>
+
+<%= form_with model: @registration, url: registration_patients_path, method: :post, local: true, class: "mt-6" do |f| %>
+  <%= f.hidden_field :name %>
+  <%= f.hidden_field :sex %>
+  <%= f.hidden_field :dob %>
+  <%= f.hidden_field :ssn %>
+  <%= f.hidden_field :tribe_ien %>
+  <%= f.hidden_field :community %>
+  <%= hidden_field_tag :confirmed_new, "1" %>
+  <%= f.submit "Register as a new patient" %>
+<% end %>

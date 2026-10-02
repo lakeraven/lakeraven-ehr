@@ -17,6 +17,7 @@ Feature: List a clinic's daily schedule
       | 09:20 | RAVEN,NOAH     | checked-in  |
       | 09:40 | BEGAY,MICHELLE | no-show     |
 
+  @S-SCH-05.3
   Scenario: View the clinic schedule for a date
     When I request the schedule for clinic 15 on "2026-08-20"
     Then I see 3 appointments in time order
