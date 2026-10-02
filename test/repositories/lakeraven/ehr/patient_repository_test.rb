@@ -38,10 +38,16 @@ module Lakeraven
         assert_equal 7819, patient.site_ien
         assert_nil patient.race
         assert_nil patient.address_line1
-        # Reverted with the tribal enrichment (gate findings on #563, see #566):
-        # nothing populates this again until the read is rebuilt with an
-        # authorization gate, a real rescue, and a gem lock that has the method.
+        # Both halves of the reverted enrichment are pinned, not just the tribal
+        # one (gate findings on #563, see #566). Nothing populates either until
+        # the reads are rebuilt: tribal needs an authorization gate on a
+        # sovereign identifier and a reachable rescue; telecom needs a gem lock
+        # that actually contains RpmsRpc::Patient.contact -- the lock pins
+        # f514068 (21 Sep) and the method arrived in 19fffc3 (24 Sep), so it
+        # raised NoMethodError in every deployed build and the rescue hid it.
         assert_nil patient.tribal_enrollment_number
+        assert_nil patient.tribal_affiliation
+        assert_nil patient.phone
       end
 
 

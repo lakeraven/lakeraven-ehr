@@ -8,20 +8,22 @@ Feature: Care Coordination with External Systems
       | dfn | first_name | last_name | dob        | sex | ssn         | tribal_enrollment | tribal_affiliation                    | service_area |
       | 1   | Alice      | Anderson  | 1980-05-15 | F   | 111-11-1111 | EXNH-12345       | Example Native Health (EXNH)      | Anchorage    |
 
-  # DEFERRED (@unsourced): passed briefly on the tribal enrichment merged in
-    # #563, which a retroactive gate BLOCKED and this change reverts. The read
-    # itself works; what it lacked was an authorization gate on a sovereign
-    # identifier, the right extension value, a reachable rescue, and a gem lock
-    # containing the method. Rebuilt under #566 -- do NOT make these green by
-    # seeding the field again.
-  @unsourced
   Scenario: External system requests patient information
     Given patient "Anderson, Alice" has consented to data sharing
     When an authorized external system requests patient data
     Then patient demographics are provided in a standard format
-    And tribal affiliation is included
-    And enrollment information is available for eligibility checks
     And the data format is compatible with national health networks
+
+  # DEFERRED (@unsourced): depends on the tribal enrichment reverted here.
+    # Only the TRIBAL assertions are deferred -- the sourced contract above
+    # keeps running. Rebuilt under #566; do NOT make this green by seeding
+    # the field again.
+  @unsourced
+  Scenario: External system receives tribal affiliation and enrollment
+    Given patient "Anderson, Alice" has consented to data sharing
+    When an authorized external system requests patient data
+    Then tribal affiliation is included
+    And enrollment information is available for eligibility checks
 
   Scenario: Sending service request to care navigation platform
     Given patient "Anderson, Alice" needs specialty care
@@ -47,20 +49,22 @@ Feature: Care Coordination with External Systems
     And the clinician is notified
     And the patient can be informed of next steps
 
-  # DEFERRED (@unsourced): passed briefly on the tribal enrichment merged in
-    # #563, which a retroactive gate BLOCKED and this change reverts. The read
-    # itself works; what it lacked was an authorization gate on a sovereign
-    # identifier, the right extension value, a reachable rescue, and a gem lock
-    # containing the method. Rebuilt under #566 -- do NOT make these green by
-    # seeding the field again.
-  @unsourced
   Scenario: Ensuring data privacy during external sharing
-    Given patient "Anderson, Alice" has sensitive tribal enrollment data
+    Given patient "Anderson, Alice" has consented to data sharing
     When patient information is shared with external systems
     Then only authorized systems can access the data
-    And tribal-specific information is properly protected
     And audit logs record all data access
     And the patient can review who accessed their information
+
+  # DEFERRED (@unsourced): depends on the tribal enrichment reverted here.
+    # Only the TRIBAL assertions are deferred -- the sourced contract above
+    # keeps running. Rebuilt under #566; do NOT make this green by seeding
+    # the field again.
+  @unsourced
+  Scenario: Tribal-specific information is protected during external sharing
+    Given patient "Anderson, Alice" has sensitive tribal enrollment data
+    When patient information is shared with external systems
+    Then tribal-specific information is properly protected
 
   Scenario: Handling external system outages gracefully
     Given the care navigation platform is temporarily unavailable
