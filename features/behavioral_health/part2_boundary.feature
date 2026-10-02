@@ -1,4 +1,3 @@
-@part2_pending
 Feature: 42 CFR Part 2 Boundaries (Issue #560)
   As a Part 2 program operator
   I want substance use disorder (SUD) data segmented from shared records

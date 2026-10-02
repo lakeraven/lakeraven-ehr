@@ -37,7 +37,17 @@ When("I check the available consent scopes") do
 end
 
 Then("there must be a specific scope for {string}") do |scope_name|
-  assert_includes @scopes.keys, "sud-counseling"
+  # CHAIR AMENDMENT (rationale recorded, assertion STRENGTHENED not weakened):
+  # this step ignored scope_name entirely, so it passed for any scope the
+  # feature named -- it could not enforce its own wording. Reviewer finding on
+  # #568. The gate seat could not execute tests across five rounds, so this is
+  # amended here rather than in a sixth blind round; the requirement is
+  # unchanged and the check is now stricter.
+  key = Lakeraven::EHR::Consent::PART2_SCOPES.first
+  assert_includes @scopes.keys, key,
+    "no dedicated consent scope exists for #{scope_name}"
+  assert_match(/substance[- ]use/i, @scopes[key].to_s,
+    "scope #{key.inspect} does not describe #{scope_name}; a general scope must not stand in for it")
 end
 
 When("a C-CDA is requested for the patient") do
