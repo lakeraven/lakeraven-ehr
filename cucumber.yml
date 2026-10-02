@@ -10,6 +10,11 @@
 #
 # Run them deliberately:   bundle exec cucumber --profile unsourced
 # Run absolutely all:      bundle exec cucumber --profile all
+# The #560 Part 2 specs are GREEN and run in the default profile. They were
+# tagged @part2_pending while red by design during step 0; leaving the tag on
+# after they passed would have hidden the acceptance coverage for all three
+# requirements from CI, so a broken filter call or a dropped consent slot could
+# merge unnoticed. A gate that cannot fail is worse than no gate.
 default: --publish-quiet --tags "not @unsourced"
 unsourced: --publish-quiet --tags @unsourced
 all: --publish-quiet
