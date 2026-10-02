@@ -15,6 +15,7 @@ Feature: Clinic availability and open slots
     And clinic 15 has an access block "ROUTINE" on "2026-08-20" from "08:00" to "12:00"
     And clinic 15 has a booked appointment at "2026-08-20 09:00" for 20 minutes
 
+  @S-SCH-04.1
   Scenario: List open slots for a day
     When I request availability for clinic 15 on "2026-08-20"
     Then the open slots exclude "2026-08-20 09:00"

@@ -12,6 +12,7 @@ Feature: Register a new patient
   Background:
     Given I am authenticated as a registration clerk at service area "Portland"
 
+  @S-REG-02.14
   Scenario: Register a new American Indian/Alaska Native patient
     When I submit a registration with:
       | field             | value            |
@@ -40,6 +41,7 @@ Feature: Register a new patient
     Then the registration is rejected with status 422
     And the error message mentions "SSN"
 
+  @S-REG-02.16
   Scenario: Broker unreachable surfaces as service-unavailable, not a data error
     Given the RPC broker is unreachable
     When I submit a valid registration

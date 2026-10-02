@@ -22,12 +22,14 @@ Feature: Book an appointment
     And clinic 15 shows patient 42 booked at "2026-08-20 09:00"
     And the appointment is written through BSDAPI to ^SC (no raw global set)
 
+  @S-SCH-01.2
   Scenario: Double-booking an occupied slot is rejected
     Given clinic 15 has patient 43 booked at "2026-08-20 09:00"
     When I book patient 42 into clinic 15 at "2026-08-20 09:00" for 20 minutes
     Then the booking is rejected with status 409
     And the error message mentions "not available"
 
+  @S-SCH-01.14
   Scenario: Booking on an unknown clinic fails
     When I book patient 42 into clinic 999 at "2026-08-20 09:00" for 20 minutes
     Then the booking is rejected with status 422

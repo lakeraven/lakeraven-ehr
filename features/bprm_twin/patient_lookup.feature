@@ -27,16 +27,19 @@ Feature: Patient lookup and face sheet
     Then I find 1 patient
     And the result is "RAVEN,NORA"
 
+  @S-REG-24.2
   Scenario: Retrieve the face sheet for a patient
     When I request the face sheet for patient 42
     Then the face sheet shows name "RAVEN,NORA", community "Broken Rock City", tribe "Broken Rock"
     And the face sheet shows the facility Health Record Number "101226"
 
+  @S-REG-23.1
   Scenario: Face sheet surfaces registration errors and warnings
     Given patient 42 has an incomplete registration item for "ELIGIBILITY"
     When I request the face sheet for patient 42
     Then the face sheet warnings include an item for "ELIGIBILITY"
 
+  @S-REG-01.7
   Scenario: Lookup of an unknown DFN returns not found
     When I request patient 99999
     Then the response status is 404

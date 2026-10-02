@@ -94,8 +94,12 @@ module BprmCoverage
           ids = Array(element["tags"]).map { |t| t["name"][TAG, 1] }.compact
           next if ids.empty?
 
-          status = Array(element["steps"]).map { |s| s.dig("result", "status") }.max_by { |s| STATUS_RANK.fetch(s, 0) }
-          ids.each { |id| statuses[id] = status || "skipped" }
+          # Cucumber's own verdict: the first step that did not pass decides
+          # (a scenario that pends on its first step is pending, whatever
+          # follows); all passed is passed.
+          step_statuses = Array(element["steps"]).map { |s| s.dig("result", "status") }
+          status = step_statuses.find { |s| s != "passed" } || (step_statuses.empty? ? "skipped" : "passed")
+          ids.each { |id| statuses[id] = status }
         end
       end
       statuses
@@ -126,8 +130,7 @@ module BprmCoverage
     live = rows.select { |r| r["retired"] == "no" && WORKFLOWS.include?(r["workflow"]) }
     specced = tagged.map { |t| t[:id] }.uniq
     puts "BPRM parity (rpms-ux scenarios in W01, W02, W18, W19); specs run against #{backend}"
-    puts format("%-6s %-9s %-7s %-8s %-8s %-7s %-10s", "wf", "scenarios", "specced", "passing", "pending", "failed", "no spec")
-    totals = Hash.new(0)
+    puts format("%-6s %-9s %-7s %-8s %-8s %-9s %-7s %-10s", "wf", "scenarios", "specced", "passing", "pending", "undefined", "failed", "no spec")
     (WORKFLOWS + [ "all" ]).each do |wf|
       ids = wf == "all" ? live.map { |r| r["scenario"] } : live.select { |r| r["workflow"] == wf }.map { |r| r["scenario"] }
       have = ids & specced
@@ -135,11 +138,13 @@ module BprmCoverage
         "scenarios" => ids.size, "specced" => have.size,
         "passing" => have.count { |id| statuses[id] == "passed" },
         "pending" => have.count { |id| %w[pending skipped].include?(statuses[id]) },
-        "failed" => have.count { |id| %w[failed undefined].include?(statuses[id]) },
+        # A spec whose steps are not written yet (the legacy twin features):
+        # it proves nothing, and it is not a failure either (lakeraven-ehr#492).
+        "undefined" => have.count { |id| statuses[id] == "undefined" },
+        "failed" => have.count { |id| statuses[id] == "failed" },
         "no spec" => ids.size - have.size
       }
-      puts format("%-6s %9d %7d %8d %8d %7d %10d", wf, *counts.values)
-      counts.each { |k, v| totals[k] += v } unless wf == "all"
+      puts format("%-6s %9d %7d %8d %8d %9d %7d %10d", wf, *counts.values)
     end
     counts_for_pass = live.map { |r| r["scenario"] }.select { |id| statuses[id] == "passed" }
     puts "\npassing: #{counts_for_pass.sort.join(" ")}" if counts_for_pass.any?

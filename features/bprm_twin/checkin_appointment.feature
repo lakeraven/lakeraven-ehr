@@ -14,6 +14,7 @@ Feature: Check in a patient for their appointment
     Given a registered patient with DFN 42
     And patient 42 has appointment 7001 in clinic 15 at "2026-08-20 09:00"
 
+  @S-SCH-03.1
   Scenario: Check a patient in at arrival
     Given the current time is "2026-08-20 08:55"
     When I check in appointment 7001
@@ -21,11 +22,13 @@ Feature: Check in a patient for their appointment
     And appointment 7001 status is "checked-in"
     And a check-in movement is recorded through BSDAPI (not a raw ^DGPM set)
 
+  @S-SCH-03.9
   Scenario: Undo a check-in
     Given appointment 7001 is checked in
     When I undo the check-in on appointment 7001
     Then appointment 7001 status is "scheduled"
 
+  @S-SCH-03.7
   Scenario: Cannot check in a cancelled appointment
     Given appointment 7001 is cancelled
     When I check in appointment 7001

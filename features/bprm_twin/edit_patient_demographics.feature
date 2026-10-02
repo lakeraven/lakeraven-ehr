@@ -13,6 +13,7 @@ Feature: Edit patient demographics and eligibility
   Background:
     Given a registered patient with DFN 42 named "RAVEN,NORA"
 
+  @S-REG-20.10
   Scenario: Correct a misspelled patient name
     When I update patient 42 with:
       | field | value       |
@@ -21,6 +22,7 @@ Feature: Edit patient demographics and eligibility
     And patient 42 now has name "RAVEN,NORAH"
     And a FileMan audit entry records the name change
 
+  @S-REG-21.5
   Scenario: Update a patient's cell phone number
     When I update patient 42 with:
       | field       | value        |
@@ -28,6 +30,7 @@ Feature: Edit patient demographics and eligibility
     Then the update succeeds
     And patient 42 now has cell phone "509-555-0142"
 
+  @S-REG-27.1
   Scenario: Record a date of death
     When I update patient 42 with:
       | field         | value      |

@@ -15,17 +15,20 @@ Feature: Mark an appointment as no-show
     Given a registered patient with DFN 42
     And patient 42 has appointment 7001 in clinic 15 at "2026-08-20 09:00"
 
+  @S-SCH-08.1
   Scenario: Flag a no-show after the appointment time
     Given the current time is "2026-08-20 09:30"
     When I mark appointment 7001 as no-show
     Then the no-show is recorded
     And appointment 7001 status is "no-show"
 
+  @S-SCH-08.4
   Scenario: Undo a no-show
     Given appointment 7001 is marked no-show
     When I undo the no-show on appointment 7001
     Then appointment 7001 status is "scheduled"
 
+  @S-SCH-08.2
   Scenario: Cannot no-show a future appointment
     Given the current time is "2026-08-20 08:00"
     When I mark appointment 7001 as no-show
