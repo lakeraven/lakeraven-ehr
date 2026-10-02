@@ -1,0 +1,62 @@
+<% content_for :title, "Register a patient | Lakeraven EHR" %>
+
+<div class="page-header">
+  <h1>Register a new patient</h1>
+  <p>
+    Files the patient in RPMS with a health record number for this facility.
+  </p>
+</div>
+
+<% if @registration.errors.any? %>
+  <div
+    class="screening-errors"
+    role="alert"
+  >
+    <h2>The registration was refused</h2>
+    <p>
+      Nothing was filed.
+    </p>
+    <ul>
+      <% @registration.errors.full_messages.each do |message| %>
+        <li><%= message %></li>
+      <% end %>
+    </ul>
+  </div>
+<% end %>
+
+<%= form_with model: @registration, url: registration_patients_path, method: :post, local: true, class: "grid max-w-xl gap-4" do |f| %>
+  <div>
+    <%= f.label :name, "Name (LAST,FIRST)" %>
+    <%= f.text_field :name, autocomplete: "off" %>
+  </div>
+  <div>
+    <%= f.label :sex, "Sex" %>
+    <%= f.select :sex, [ [ "", "" ], [ "Female", "F" ], [ "Male", "M" ] ] %>
+  </div>
+  <div>
+    <%= f.label :dob, "Date of birth" %>
+    <%= f.date_field :dob %>
+  </div>
+  <div>
+    <%= f.label :ssn, "Social security number (optional)" %>
+    <%= f.text_field :ssn, autocomplete: "off" %>
+  </div>
+  <div>
+    <%= f.label :tribe_ien, "Tribe of membership" %>
+    <% if @tribes %>
+      <%= f.select :tribe_ien, [ [ "", "" ] ] + @tribes.map { |t| [ t[:name], t[:ien] ] } %>
+    <% else %>
+      <p role="alert">
+        The tribe list could not be read from RPMS.
+      </p>
+      <%= f.select :tribe_ien, [ [ "", "" ] ] %>
+    <% end %>
+  </div>
+  <div>
+    <%= f.label :community, "Community of residence" %>
+    <%= f.text_field :community, autocomplete: "off" %>
+  </div>
+  <div>
+    <%= f.submit "Register patient" %>
+  </div>
+<% end %>

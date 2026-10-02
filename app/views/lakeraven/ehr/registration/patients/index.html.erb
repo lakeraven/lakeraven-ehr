@@ -1,0 +1,68 @@
+<% content_for :title, "Find a patient | Lakeraven EHR" %>
+
+<div class="page-header">
+  <h1>Find a patient</h1>
+  <p>
+    Search before registering, so nobody gets a second chart.
+  </p>
+</div>
+
+<%= form_with url: registration_patients_path, method: :get, local: true, class: "flex flex-wrap items-end gap-4" do |f| %>
+  <div class="grow">
+    <%= f.label :q, "Last name, or LAST,FIRST" %>
+    <%= f.search_field :q, value: @query, autocomplete: "off" %>
+  </div>
+  <div>
+    <%= f.label :dob, "Date of birth" %>
+    <%= f.date_field :dob, value: @dob %>
+  </div>
+  <div>
+    <%= f.submit "Search" %>
+  </div>
+<% end %>
+
+<% if @query.present? %>
+  <% if @patients.any? %>
+    <table class="mt-6">
+      <caption class="sr-only">
+        Patients matching <%= @query %>
+      </caption>
+      <thead>
+        <tr>
+          <th scope="col">Name</th>
+          <th scope="col">Date of birth</th>
+          <th scope="col">Sex</th>
+          <th scope="col">Health record number</th>
+          <th scope="col"></th>
+        </tr>
+      </thead>
+      <tbody>
+        <% @patients.each do |patient| %>
+          <tr>
+            <td><%= patient.name %></td>
+            <td><%= patient.dob&.strftime("%m/%d/%Y") %></td>
+            <td><%= patient.sex %></td>
+            <td><%= @hrns[patient.dfn].presence || "none at this facility" %></td>
+            <td>
+              <%= link_to "Open registration", registration_patient_path(patient.dfn) %>
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  <% else %>
+    <p
+      role="status"
+      class="mt-6"
+    >
+      No patient matches.
+    </p>
+    <p>
+      <%= link_to "Add a new patient", new_registration_patient_path %>
+    </p>
+  <% end %>
+<% else %>
+  <p class="mt-6">
+    <%= link_to "Add a new patient", new_registration_patient_path %>
+  </p>
+<% end %>

@@ -1,0 +1,44 @@
+<% content_for :title, "Registration | Lakeraven EHR" %>
+
+<div class="page-header">
+  <h1>Registration</h1>
+  <% if @patient %>
+    <p><%= @patient.name %></p>
+  <% end %>
+</div>
+
+<% if @registered %>
+  <div
+    role="status"
+    class="rounded-lg border border-green-300 bg-green-50 p-4"
+  >
+    <h2 class="mt-0">Patient registered</h2>
+    <p>
+      <%= @registered["name"] %> is filed in RPMS as record <%= @registered["dfn"] %> with health record number <%= @registered["hrn"] %> at this facility.
+    </p>
+    <% Array(@registered["warnings"]).each do |warning| %>
+      <p role="alert"><%= warning %></p>
+    <% end %>
+  </div>
+<% end %>
+
+<% if @patient %>
+  <dl class="mt-6 grid max-w-xl grid-cols-2 gap-2">
+    <dt>Health record number</dt>
+    <dd><%= @hrn.presence || "none at this facility" %></dd>
+    <dt>Date of birth</dt>
+    <dd><%= @patient.dob&.strftime("%m/%d/%Y") %></dd>
+    <dt>Sex</dt>
+    <dd><%= @patient.sex %></dd>
+    <dt>Record number</dt>
+    <dd><%= @patient.dfn %></dd>
+  </dl>
+<% elsif @registered %>
+  <p class="mt-6">
+    The new record could not be read back from RPMS yet.
+  </p>
+<% end %>
+
+<p class="mt-6">
+  <%= link_to "Find another patient", registration_patients_path %>
+</p>

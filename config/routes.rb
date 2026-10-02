@@ -39,6 +39,14 @@ Lakeraven::EHR::Engine.routes.draw do
   get  "patients/:dfn/screenings/new", to: "screenings#new",    as: :new_patient_screening, constraints: { dfn: /\d+/ }
   get  "patients/:dfn/screenings/:id", to: "screenings#show",   as: :patient_screening, constraints: { dfn: /\d+/, id: /\d+/ }
 
+  # Front-desk registration (rpms-ux W01, lakeraven-ehr#565): find a patient
+  # before registering, register a new one, see the registration record.
+  # Session-authenticated HTML, like the dashboard; the chart at
+  # /patients/:dfn stays the clinician's view.
+  namespace :registration do
+    resources :patients, only: %i[index new create show], param: :dfn, constraints: { dfn: /\d+/ }
+  end
+
   # Doorkeeper models (Application, AccessToken) are used directly;
   # routes are NOT mounted here because the engine provides its own
   # BackendServicesController for OAuth token issuance.
