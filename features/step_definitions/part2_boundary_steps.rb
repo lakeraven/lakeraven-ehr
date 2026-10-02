@@ -86,38 +86,22 @@ When("a C-CDA is requested for the patient") do
     []
   end
 
-  # Stub Auth for the controller action
-  if defined?(Lakeraven::EHR::TransitionsOfCareController)
-    controller_class = Lakeraven::EHR::TransitionsOfCareController
-
-    [ :doorkeeper_authorize!, :authorize_patient_search! ].each do |method_name|
-      if controller_class.method_defined?(method_name)
-        original = controller_class.instance_method(method_name)
-        @gateway_stubs << -> { controller_class.send(:define_method, method_name, original) }
-      else
-        @gateway_stubs << -> { controller_class.send(:remove_method, method_name) }
-      end
-      controller_class.send(:define_method, method_name) { true }
-    end
-
-    if controller_class.method_defined?(:current_token)
-      original = controller_class.instance_method(:current_token)
-      @gateway_stubs << -> { controller_class.send(:define_method, :current_token, original) }
-    else
-      @gateway_stubs << -> { controller_class.send(:remove_method, :current_token) }
-    end
-
-    unless defined?(TokenMock)
-      TokenMock = Struct.new(:application)
-      AppMock = Struct.new(:name)
-    end
-    controller_class.send(:define_method, :current_token) do
-      TokenMock.new(AppMock.new("test"))
-    end
-  end
+  app = Doorkeeper::Application.create!(
+    name: "part2-test", redirect_uri: "https://example.test/callback",
+    scopes: "system/*.read system/*.write", confidential: true
+  )
+  token = Doorkeeper::AccessToken.create!(
+    application: app, scopes: "system/*.read system/*.write", expires_in: 3600
+  )
+  # Rack::Test takes a Rack ENV, not a `headers:` option -- `post(..., headers:)`
+  # is silently ignored, which is why this returned
+  # 401 "No Bearer token provided" with a perfectly good token in hand. Set the
+  # header on the session first, the way every other step file here does
+  # (e.g. bulk_export_steps.rb:15).
+  header "Authorization", "Bearer #{token.plaintext_token || token.token}"
 
   begin
-    post "/transitions_of_care", params: { patient_dfn: @patient_dfn }
+    post "/lakeraven-ehr/transitions_of_care", params: { patient_dfn: @patient_dfn }
   rescue => e
     @post_error = e
   end
