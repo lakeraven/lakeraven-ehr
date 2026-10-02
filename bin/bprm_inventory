@@ -1,0 +1,355 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# bin/bprm_inventory: the BPRM 4.00.06 feature inventory, generated from the
+# pinned FOIA source zip and the rpms-ops client manifest (lakeraven-ehr#565).
+#
+#   bin/bprm_inventory <source.zip> <manifest.yml> [--out PATH] [--check]
+#
+# The source is read as a specification: only identifiers (file names, routes,
+# policy names, security keys, SQL object names) leave this script. Output is
+# byte-identical across runs: every cell is sorted, nothing is dated.
+
+require "digest"
+require "optparse"
+require "tmpdir"
+require "yaml"
+
+module BprmInventory
+  GENERATOR = "bin/bprm_inventory"
+  DEFAULT_OUT = File.expand_path("../docs/bprm/feature-inventory.tsv", __dir__)
+  PROJECTS = %w[App Core Shared].freeze
+  ROOT_FEATURE = "(root)"
+  COLUMNS = %w[module feature routes pages command_handlers query_handlers validators
+               policies security_keys bmw_tables bmw_procedures source_files].freeze
+  # Suffixes stripped from a loose file's stem to name its feature, longest first.
+  STEM_SUFFIXES = %w[CommandHandler QueryHandler Validator Repository Component
+                     Selector Command Query Page].freeze
+  ROUTE = /^\s*@page\s+"([^"]*)"/
+  POLICY_REF = /\bPolicies\.([A-Z]\w*)/
+  SQL_REF = /\b(BMW_BSF_VW|BMW_BSF_SP|BMW)\.(?:BMW\.)?([A-Za-z_]\w*)/i
+
+  module_function
+
+  # --- text helpers ---------------------------------------------------------
+
+  # Many files in the drop start with a UTF-8 BOM; "@page" on line 1 sits after it.
+  def read(path)
+    File.binread(path).force_encoding(Encoding::UTF_8).scrub.delete_prefix("﻿")
+  end
+
+  # Drops // and /* */ comments and razor @* *@ comments, leaving string
+  # literals intact (a URL inside a string is not a comment).
+  def strip_comments(text)
+    out = +""
+    i = 0
+    while i < text.length
+      i = consume(text, i, out)
+    end
+    out
+  end
+
+  def consume(text, i, out)
+    case text[i, 2]
+    when "//" then skip_past(text, i, "\n")
+    when "/*" then skip_past(text, i, "*/")
+    when "@*" then skip_past(text, i, "*@")
+    else
+      j = text[i] == '"' ? string_end(text, i) : i + 1
+      out << text[i...j]
+      j
+    end
+  end
+
+  def skip_past(text, i, terminator)
+    j = text.index(terminator, i + 2)
+    j ? j + terminator.length : text.length
+  end
+
+  def string_end(text, i)
+    verbatim = i.positive? && text[i - 1] == "@"
+    j = i + 1
+    while j < text.length
+      ch = text[j]
+      return j + 1 if ch == '"' && !(verbatim && text[j + 1] == '"')
+      return j if ch == "\n" && !verbatim
+
+      j += (!verbatim && ch == "\\") || (verbatim && ch == '"') ? 2 : 1
+    end
+    j
+  end
+
+  # --- Policies.cs -----------------------------------------------------------
+
+  # name => sorted security keys, across every <Module>.Shared/Policies.cs.
+  # A policy's keys come from the <Name>Policy() builder, matched by the
+  # const's name or its value (the source does both).
+  def load_policies(modules_dir)
+    Dir.glob(File.join(modules_dir, "*", "*.Shared", "Policies.cs")).sort
+       .each_with_object({}) { |path, map| map.merge!(parse_policies(read(path))) }
+  end
+
+  def parse_policies(text)
+    code = strip_comments(text)
+    consts = code.scan(/public const string (\w+)\s*=\s*"([^"]*)"/)
+    bodies = code.scan(/AuthorizationPolicy\s+(\w+)Policy\(\)(.*?)\.Build\(\)/m).to_h
+    consts.to_h { |name, value| [ name, policy_keys(bodies[name] || bodies[value] || "") ] }
+  end
+
+  def policy_keys(body)
+    required = body.scan(/\.Requirekey\(([^)]*)\)/i).flat_map { |(args)| quoted(args) }
+    denied = body.scan(/\.DenyKey\(([^)]*)\)/i).flat_map { |(args)| quoted(args) }
+    (required + denied.map { |key| "!#{key}" }).uniq.sort
+  end
+
+  def quoted(args)
+    args.scan(/"([^"]*)"/).flatten
+  end
+
+  # --- one feature ----------------------------------------------------------
+
+  class Feature
+    attr_reader :module_name, :name, :routes, :pages, :command_handlers, :query_handlers,
+                :validators, :policies, :tables, :procedures, :source_files
+
+    def initialize(module_name, name)
+      @module_name = module_name
+      @name = name
+      @routes, @pages, @command_handlers, @query_handlers, @validators = Array.new(5) { [] }
+      @policies, @tables, @procedures = Array.new(3) { [] }
+      @source_files = 0
+    end
+
+    # Handlers and validators are named Project/File: the App and Core projects
+    # of a feature often hold a same-named pair (client proxy + server handler).
+    def add(project, file_name, text)
+      @source_files += 1
+      kind = BprmInventory.classify(file_name, text)
+      bucket(kind) << (kind == :pages ? file_name : "#{project}/#{file_name}") if kind
+      @routes.concat(text.scan(ROUTE).flatten) if kind == :pages
+      code = BprmInventory.strip_comments(text)
+      @policies.concat(code.scan(POLICY_REF).flatten) if kind == :pages || file_name.end_with?("Handler.cs")
+      add_sql(code) if file_name.end_with?(".cs")
+    end
+
+    def row(policy_map, manifest_tables)
+      known = @tables.select { |table| manifest_tables.include?(table) }
+      keys = @policies.flat_map { |policy| policy_map.fetch(policy, []) }
+      [ @module_name, @name, cell(@routes), cell(@pages), cell(@command_handlers), cell(@query_handlers),
+        cell(@validators), cell(@policies), cell(keys), cell(known), cell(@procedures), @source_files.to_s ]
+    end
+
+    def unknown_tables(manifest_tables)
+      @tables.reject { |table| manifest_tables.include?(table) }
+    end
+
+    private
+
+    def bucket(kind)
+      { pages: @pages, command_handlers: @command_handlers,
+        query_handlers: @query_handlers, validators: @validators }.fetch(kind)
+    end
+
+    def add_sql(code)
+      code.scan(SQL_REF).each do |schema, object|
+        schema = schema.upcase
+        if schema == "BMW_BSF_SP"
+          @procedures << "#{schema}.#{object}"
+        else
+          @tables << "#{schema}.#{object.upcase}"
+        end
+      end
+    end
+
+    def cell(values)
+      values.uniq.sort.join(";")
+    end
+  end
+
+  # --- the source tree ------------------------------------------------------
+
+  # A file's kind from its name (whitespace-stripped: four handlers in the
+  # 4.00.06 drop are named "...CommandHandler .cs") and, for a page, its text.
+  def classify(file_name, text)
+    name = file_name.gsub(/\s+/, "")
+    if name.end_with?(".razor")
+      :pages if text.match?(ROUTE)
+    elsif name.end_with?("CommandHandler.cs") then :command_handlers
+    elsif name.end_with?("QueryHandler.cs") then :query_handlers
+    elsif name.end_with?(".cs") && name.include?("Validator") then :validators
+    end
+  end
+
+  # Features/<X>/... => X; Features/<file> => the file's stem minus its role
+  # suffix (and an interface's leading I); anything else => the module root.
+  def feature_for(relative_path)
+    segments = relative_path.split("/")
+    return ROOT_FEATURE unless segments.first == "Features"
+    return segments[1] if segments.length > 2
+
+    stem_feature(segments[1])
+  end
+
+  def stem_feature(file_name)
+    stem = file_name.gsub(/\s+/, "").sub(/\..*\z/, "").sub(/\AI(?=[A-Z])/, "")
+    suffix = STEM_SUFFIXES.find { |candidate| stem.end_with?(candidate) && stem != candidate }
+    suffix ? stem.delete_suffix(suffix) : stem
+  end
+
+  # Every file of every <Module>/<Module>.{App,Core,Shared} project.
+  def project_files(modules_dir)
+    Dir.glob(File.join(modules_dir, "*", "*", "**", "*")).sort.filter_map do |path|
+      next unless File.file?(path)
+
+      module_name, project, *rest = path.delete_prefix("#{modules_dir}/").split("/")
+      suffix = PROJECTS.find { |candidate| project == "#{module_name}.#{candidate}" }
+      next unless suffix
+
+      [ module_name, suffix, rest.join("/"), path ]
+    end
+  end
+
+  def scan(modules_dir)
+    features = {}
+    project_files(modules_dir).each do |module_name, project, relative_path, path|
+      key = [ module_name, feature_for(relative_path) ]
+      feature = features[key] ||= Feature.new(*key)
+      feature.add(project, File.basename(path), read(path))
+    end
+    features.keys.sort.map { |key| features[key] }
+  end
+
+  # --- the manifest and the artifact ----------------------------------------
+
+  def manifest_tables(manifest, manifest_path)
+    tables = manifest.dig("sql_surface", "tables")
+    abort "#{GENERATOR}: #{manifest_path} has no sql_surface.tables" unless tables.is_a?(Array)
+
+    tables.map { |table| table["name"] }
+  end
+
+  def check_pin(manifest, manifest_path, source_name, source_sha)
+    pinned = manifest.dig("source", "sha256")
+    return if pinned == source_sha
+
+    abort "#{GENERATOR}: #{manifest_path} pins source sha256 #{pinned.inspect}, " \
+          "but #{source_name} is #{source_sha}"
+  end
+
+  def unpack(zip, dir)
+    system("unzip", "-q", zip, "-d", dir, exception: true)
+  rescue Errno::ENOENT
+    abort "#{GENERATOR}: unzip is required to read #{zip} and was not found on PATH"
+  end
+
+  def find_modules_dir(dir)
+    app = Dir.glob(File.join(dir, "**", "Modules", "*", "*.App")).sort.first
+    abort "#{GENERATOR}: no Modules/<Module>/<Module>.App directory in the archive" unless app
+
+    File.expand_path("../..", app)
+  end
+
+  # --- rendering ------------------------------------------------------------
+
+  def generate(modules_dir:, manifest_path:, source_name:, source_sha:)
+    manifest = YAML.safe_load_file(manifest_path)
+    check_pin(manifest, manifest_path, source_name, source_sha)
+    tables = manifest_tables(manifest, manifest_path)
+    policy_map = load_policies(modules_dir)
+    features = scan(modules_dir)
+    header = header_lines(features, tables, source_name, source_sha, manifest_path)
+    rows = features.map { |feature| feature.row(policy_map, tables).join("\t") }
+    (header + [ COLUMNS.join("\t") ] + rows).join("\n") << "\n"
+  end
+
+  def header_lines(features, tables, source_name, source_sha, manifest_path)
+    unknown = features.flat_map { |feature| feature.unknown_tables(tables) }.uniq.sort
+    [
+      "# BPRM feature inventory: one row per (module, feature) of the BPRM 4.00.06 source (lakeraven-ehr#565)",
+      "# generator: #{GENERATOR}; regenerate with: #{GENERATOR} <source.zip> <manifest.yml>",
+      "# source: #{source_name} sha256 #{source_sha}",
+      "# manifest: #{File.basename(manifest_path)} sha256 #{Digest::SHA256.file(manifest_path).hexdigest}",
+      "# totals: #{totals(features)}",
+      "# bmw tables referenced in source but absent from the manifest (left out of bmw_tables): #{unknown.join(';')}"
+    ]
+  end
+
+  def totals(features)
+    counts = { features: features.size, routed_pages: 0, routes: 0, command_handlers: 0,
+               query_handlers: 0, validators: 0, source_files: 0 }
+    features.each do |feature|
+      counts[:routed_pages] += feature.pages.size
+      counts[:routes] += feature.routes.size
+      counts[:command_handlers] += feature.command_handlers.size
+      counts[:query_handlers] += feature.query_handlers.size
+      counts[:validators] += feature.validators.size
+      counts[:source_files] += feature.source_files
+    end
+    counts.map { |name, value| "#{name}=#{value}" }.join(" ")
+  end
+
+  # --- the command ----------------------------------------------------------
+
+  def parse_args(argv)
+    options = { out: DEFAULT_OUT, check: false }
+    parser = OptionParser.new do |opts|
+      opts.banner = "usage: #{GENERATOR} <source.zip> <manifest.yml> [--out PATH] [--check]"
+      opts.on("--out PATH", "write the inventory here (default docs/bprm/feature-inventory.tsv)") { |v| options[:out] = v }
+      opts.on("--check", "regenerate in memory and exit 1 when the committed file differs") { options[:check] = true }
+    end
+    positional = parser.parse(argv)
+    abort parser.banner unless positional.length == 2
+
+    options.merge(zip: positional[0], manifest: positional[1])
+  end
+
+  def main(argv)
+    options = parse_args(argv)
+    unless File.file?(options[:zip])
+      return skip(options[:zip]) if options[:check]
+
+      abort "#{GENERATOR}: source zip not found: #{options[:zip]}"
+    end
+    tsv = generate_from_zip(options[:zip], options[:manifest])
+    options[:check] ? check(tsv, options[:out]) : write(tsv, options[:out])
+  end
+
+  def generate_from_zip(zip, manifest_path)
+    Dir.mktmpdir("bprm_inventory") do |dir|
+      unpack(zip, dir)
+      generate(modules_dir: find_modules_dir(dir), manifest_path: manifest_path,
+               source_name: File.basename(zip), source_sha: Digest::SHA256.file(zip).hexdigest)
+    end
+  end
+
+  def skip(zip)
+    puts "#{GENERATOR}: skip, source zip not present: #{zip}"
+    0
+  end
+
+  def write(tsv, out)
+    File.binwrite(out, tsv)
+    puts "#{GENERATOR}: wrote #{out} (#{tsv.lines.count { |line| !line.start_with?('#') } - 1} rows)"
+    0
+  end
+
+  def check(tsv, out)
+    committed = File.file?(out) ? File.binread(out) : ""
+    if committed == tsv
+      puts "#{GENERATOR}: #{out} is up to date"
+      return 0
+    end
+    report_diff(committed.lines, tsv.lines, out)
+    1
+  end
+
+  def report_diff(committed, generated, out)
+    missing = generated - committed
+    stale = committed - generated
+    puts "#{GENERATOR}: #{out} differs from the source: #{stale.size} stale line(s), #{missing.size} missing line(s)"
+    stale.first(5).each { |line| puts "- #{line.chomp}" }
+    missing.first(5).each { |line| puts "+ #{line.chomp}" }
+  end
+end
+
+exit BprmInventory.main(ARGV) if __FILE__ == $PROGRAM_NAME
