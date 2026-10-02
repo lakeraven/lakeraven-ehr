@@ -12,14 +12,10 @@ module Lakeraven
       DISCLOSED_TYPES = %w[Patient AllergyIntolerance Condition MedicationRequest].freeze
       EGRESS_LISTS = %i[allergies conditions medications].freeze
 
-      # Inherited token and scope filters are skipped so they are not run
-      # twice. They run inside doorkeeper_authorize!, which is the method
-      # the #560 scenario replaces. A private method would be invisible to
-      # that scenario's method_defined? check, and its cleanup would delete
-      # the method instead of restoring it.
-      skip_before_action :authenticate_smart_token!
-      skip_before_action :authorize_fhir_scope!
-      before_action :doorkeeper_authorize!
+      # This POST RETURNS the patient's chart as a C-CDA, so it needs read
+      # scope as well as write, and it is bound to the patient compartment
+      # like any other read of that patient.
+      discloses_clinical_data :create, reads: DISCLOSED_TYPES
       compartment_bound :create, param: :patient_dfn
 
       # POST /transitions_of_care
@@ -31,18 +27,6 @@ module Lakeraven
         return refuse_unfiltered_egress unless egress_sections?(filtered)
 
         render xml: renderable_ccda(filtered), status: :created, content_type: "application/xml"
-      end
-
-      # Bearer token, then write scope, then read scope for every disclosed
-      # type. Same checks ApplicationController ran as separate filters.
-      def doorkeeper_authorize!
-        authenticate_smart_token!
-        return if performed?
-
-        authorize_fhir_scope!
-        return if performed?
-
-        authorize_disclosing_write!(DISCLOSED_TYPES)
       end
 
       private
