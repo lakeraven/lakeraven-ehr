@@ -38,29 +38,19 @@ module Lakeraven
         assert_equal 7819, patient.site_ien
         assert_nil patient.race
         assert_nil patient.address_line1
+        # Both halves of the reverted enrichment are pinned, not just the tribal
+        # one (gate findings on #563, see #566). Nothing populates either until
+        # the reads are rebuilt: tribal needs an authorization gate on a
+        # sovereign identifier and a reachable rescue; telecom needs a gem lock
+        # that actually contains RpmsRpc::Patient.contact -- the lock pins
+        # f514068 (21 Sep) and the method arrived in 19fffc3 (24 Sep), so it
+        # raised NoMethodError in every deployed build and the rescue hid it.
+        assert_nil patient.tribal_enrollment_number
+        assert_nil patient.tribal_affiliation
+        assert_nil patient.phone
       end
 
-      # tribal_enrollment_number is NO LONGER in the unsourced set. RPMS stores
-      # it in #9000001 (^AUPNPAT) field .07 and the repository now reads it via
-      # DDR GETS ENTRY DATA, so `find` populates it and the tribe name. This
-      # test previously asserted it was nil, which pinned the absence of a read
-      # path rather than a property of the data.
-      test "find attaches tribal detail read from #9000001" do
-        patient = PatientRepository.find(1)
 
-        assert_equal "EXNH-12345", patient.tribal_enrollment_number
-        assert_equal "Example Tribe", patient.tribal_affiliation
-      end
-
-      # The tribal read is a SECOND broker round trip, so it must not run once
-      # per row of a result set. `search` goes through attach_provenance, not
-      # build_patient, which is what keeps it off that path.
-      test "search does not attach tribal detail per row" do
-        results = PatientRepository.search("Anderson")
-
-        refute_empty results
-        assert_nil results.first.tribal_enrollment_number
-      end
 
       # =============================================================================
       # FIND WITH PROVENANCE

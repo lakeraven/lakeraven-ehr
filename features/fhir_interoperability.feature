@@ -18,6 +18,13 @@ Feature: FHIR R4 Interoperability
       | birthDate    | 1980-05-15 |
     And the FHIR Patient should have an identifier with system "urn:oid:2.16.840.1.113883.4.349"
 
+  # DEFERRED (@unsourced): passed briefly on the tribal enrichment merged in
+    # #563, which a retroactive gate BLOCKED and this change reverts. The read
+    # itself works; what it lacked was an authorization gate on a sovereign
+    # identifier, the right extension value, a reachable rescue, and a gem lock
+    # containing the method. Rebuilt under #566 -- do NOT make these green by
+    # seeding the field again.
+  @unsourced
   Scenario: FHIR Patient includes tribal enrollment extension
     When I request patient "1" in FHIR format
     Then the FHIR Patient should have a tribal enrollment number in the identifiers
