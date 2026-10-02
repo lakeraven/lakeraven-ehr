@@ -148,6 +148,30 @@ module LakeravenDemoSeeds
     })
     m.seed(:patient_ssn, "111-11-1111", { dfn: 1, name: "Anderson,Alice", ssn: "111-11-1111" })
 
+    # Tribal detail for DFN 1 — #9000001 (^AUPNPAT) read via DDR GETS ENTRY
+    # DATA, which is where RPMS actually stores this. ORWPT ID INFO does NOT
+    # carry it; an earlier mapping claimed it did and was corrected.
+    # Fields: .07 enrollment no, 1108 tribe (pointer -> #9999999.03),
+    # 1109 tribe quantum, 1110 Indian blood quantum,
+    # 1111 classification/beneficiary (pointer -> #9999999.25),
+    # 1112 eligibility status (set I/D/C/P), 1118 current community.
+    # Synthetic values throughout.
+    m.seed(:ddr_gets_entry_data,
+      RpmsRpc::DdrFileman.gets_entry_param(
+        file: "9000001", iens: "1,",
+        fields: ".07;1108;1109;1110;1111;1112;1118", flags: "IE"
+      ).to_s,
+      <<~REPLY.chomp)
+        [Data]
+        9000001^1^.07^EXNH-12345^EXNH-12345
+        9000001^1^1108^41^Example Tribe
+        9000001^1^1109^4/4^4/4
+        9000001^1^1110^4/4^4/4
+        9000001^1^1111^1^Indian/Alaska Native
+        9000001^1^1112^I^Indian/Alaska Native
+        9000001^1^1118^Example Community^Example Community
+      REPLY
+
     # Patient search (lookup/select beat): Alice + the whole DEMOPATIENT panel.
     panel_rows = PANEL.map { |p| { dfn: p[:dfn], name: p[:name], sex: p[:sex], dob: p[:dob] } }
     m.seed_collection(:patient_list,

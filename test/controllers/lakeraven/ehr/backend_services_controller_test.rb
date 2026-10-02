@@ -12,19 +12,44 @@ module Lakeraven
         # A real keypair: the assertion is genuinely signed, so each negative
         # case below fails for the reason it names rather than falling out at
         # the signature check.
-        @client_key = OpenSSL::PKey::RSA.generate(2048)
+        # Ported from a static public_key column to the JWKS mechanism that
+        # superseded it: the client publishes a key set and the endpoint
+        # fetches it. The key that signs below is the one the JWKS serves.
+        @client_key = OpenSSL::PKey::RSA.new(2048)
+        @client_jwk = JWT::JWK.new(@client_key)
         @backend_app = Doorkeeper::Application.create!(
           name: "Example Backend",
           uid: "example-backend-client",
           redirect_uri: "urn:ietf:wg:oauth:2.0:oob",
           scopes: "system/*.read",
           confidential: true,
-          public_key: @client_key.public_key.to_pem
+          jwks_uri: "https://example-backend.example.test/.well-known/jwks.json",
+          organization_id: "example-organization-1"
         )
+        # Stubbed here rather than through a seam in ClientJwks: the fetch is
+        # network I/O, and production code should not carry a test hook.
+        # Keyed by URI, not blanket: a stub that answers for ANY uri — including
+        # the nil of a client with no registered JWKS — hands that client a
+        # valid key set and makes it look authenticated. The stub has to model
+        # "this client published keys, that one did not".
+        @jwks_uri = "https://example-backend.example.test/.well-known/jwks.json"
+        known = { @jwks_uri => { keys: [ @client_jwk.export ] } }
+        ClientJwks.singleton_class.send(:alias_method, :fetch_without_stub, :fetch)
+        ClientJwks.define_singleton_method(:fetch) { |uri| known[uri] }
         ExportsController.reset_store!
       end
 
       teardown do
+        if ClientJwks.singleton_class.method_defined?(:fetch_without_stub)
+          # Restore the ORIGINAL method by aliasing it back, then drop the temp
+          # alias. Redefining fetch to CALL fetch_without_stub and then deleting
+          # fetch_without_stub left ClientJwks.fetch as a permanently broken
+          # shim: every later caller of the real fetch got NoMethodError. It
+          # went unnoticed only because nothing after this suite called it.
+          ClientJwks.singleton_class.send(:remove_method, :fetch)
+          ClientJwks.singleton_class.send(:alias_method, :fetch, :fetch_without_stub)
+          ClientJwks.singleton_class.send(:remove_method, :fetch_without_stub)
+        end
         ExportsController.reset_store!
         Doorkeeper::AccessToken.delete_all
         Doorkeeper::Application.delete_all
@@ -32,6 +57,63 @@ module Lakeraven
         # post is refused by a LEFTOVER row and the replay test passes even
         # when the guard is removed.
         BackendAssertionJti.delete_all
+      end
+
+      # lakeraven-ehr#553: the organization binding is recorded and not
+      # enforced on reads. Today one deployment holds one organization only
+      # because RpmsRpc.client is a single process-global broker (rpms-rpc#234).
+      # These pin the guard that makes that structural accident explicit, so
+      # #234 cannot quietly turn it into a cross-tribe read.
+      test "a second registered organization refuses to mint" do
+        Doorkeeper::Application.create!(
+          name: "Other Tribe Backend",
+          uid: "other-tribe-client",
+          redirect_uri: "urn:ietf:wg:oauth:2.0:oob",
+          scopes: "system/*.read",
+          confidential: true,
+          organization_id: "example-organization-other"
+        )
+
+        post_token(assertion)
+
+        assert_response :unauthorized
+        assert_equal "invalid_client", JSON.parse(response.body)["error"]
+        assert_nil JSON.parse(response.body)["access_token"]
+      end
+
+      test "another client in the SAME organization still mints" do
+        Doorkeeper::Application.create!(
+          name: "Sibling Backend",
+          uid: "sibling-client",
+          redirect_uri: "urn:ietf:wg:oauth:2.0:oob",
+          scopes: "system/*.read",
+          confidential: true,
+          organization_id: @backend_app.organization_id
+        )
+
+        post_token(assertion)
+
+        assert_response :success
+        assert JSON.parse(response.body)["access_token"].present?
+      end
+
+      # Review finding: organization_id is a free-form string, so a formatting
+      # variant of the SAME site must not read as a second organization and
+      # shut off issuance for a deployment still serving one RPMS.
+      test "a formatting variant of the same organization still mints" do
+        Doorkeeper::Application.create!(
+          name: "Same Site Different Spelling",
+          uid: "same-site-variant",
+          redirect_uri: "urn:ietf:wg:oauth:2.0:oob",
+          scopes: "system/*.read",
+          confidential: true,
+          organization_id: "  #{@backend_app.organization_id.upcase}  "
+        )
+
+        post_token(assertion)
+
+        assert_response :success
+        assert JSON.parse(response.body)["access_token"].present?
       end
 
       test "forged signature is rejected" do
@@ -55,18 +137,97 @@ module Lakeraven
       end
 
       test "a signature from the wrong key is rejected" do
-        other_key = OpenSSL::PKey::RSA.generate(2048)
+        other_key = OpenSSL::PKey::RSA.new(2048)
         post_token(assertion(claims, key: other_key))
 
         assert_response :unauthorized
         assert_equal "invalid_client", JSON.parse(response.body)["error"]
       end
 
-      test "a correctly signed assertion is accepted and granted its registered scope" do
+      test "the verifier accepts only RS384" do
+        assert_equal %w[RS384], BackendServicesController::ALLOWED_ALGORITHMS
+      end
+
+      test "a correctly signed RS384 assertion is accepted and granted its registered scope" do
         post_token(assertion(claims))
 
         assert_response :success
         assert_equal "system/*.read", JSON.parse(response.body)["scope"]
+      end
+
+      test "an RS256 assertion is rejected" do
+        post_token(assertion(claims, alg: "RS256"))
+
+        assert_response :unauthorized
+        assert_equal "invalid_client", JSON.parse(response.body)["error"]
+        assert_equal "Client authentication failed", JSON.parse(response.body)["error_description"]
+      end
+
+      test "an ES384 assertion is rejected even when that key is published" do
+        ec_key = OpenSSL::PKey::EC.generate("secp384r1")
+        ec_jwk = JWT::JWK.new(ec_key)
+        ClientJwks.define_singleton_method(:fetch) do |uri|
+          if uri == "https://example-backend.example.test/.well-known/jwks.json"
+            { keys: [ ec_jwk.export ] }
+          end
+        end
+
+        assert_no_difference -> { Doorkeeper::AccessToken.count } do
+          post_token(JWT.encode(claims, ec_key, "ES384", kid: ec_jwk.kid))
+        end
+
+        assert_response :unauthorized
+        assert_equal "invalid_client", JSON.parse(response.body)["error"]
+      end
+
+      test "an array client_assertion is an OAuth invalid_request and not a 500" do
+        sentinel = "client-assertion-array-sentinel"
+        assert_no_difference -> { Doorkeeper::AccessToken.count } do
+          post_token([ sentinel ])
+        end
+
+        assert_response :bad_request
+        body = JSON.parse(response.body)
+        assert_equal "invalid_request", body["error"]
+        assert_equal "client_assertion must be a string", body["error_description"]
+        refute_includes response.body, sentinel
+      end
+
+      test "a missing client_assertion is invalid_client" do
+        post TOKEN_URL, params: {
+          grant_type: "client_credentials",
+          client_assertion_type: "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
+        }
+
+        assert_response :bad_request
+        assert_equal "invalid_client", JSON.parse(response.body)["error"]
+      end
+
+      test "a JSON non-string client_assertion is an OAuth invalid_request" do
+        assert_no_difference -> { Doorkeeper::AccessToken.count } do
+          post TOKEN_URL, params: {
+            grant_type: "client_credentials",
+            client_assertion_type: "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+            client_assertion: 1,
+            scope: "system/*.read"
+          }, as: :json
+        end
+
+        assert_response :bad_request
+        assert_equal "invalid_request", JSON.parse(response.body)["error"]
+      end
+
+      test "an array scope is an OAuth invalid_request and mints nothing" do
+        sentinel = "system/Patient.read"
+        assert_no_difference -> { Doorkeeper::AccessToken.count } do
+          post_token(assertion(claims), scope: [ sentinel ])
+        end
+
+        assert_response :bad_request
+        body = JSON.parse(response.body)
+        assert_equal "invalid_request", body["error"]
+        assert_equal "scope must be a string", body["error_description"]
+        refute_includes response.body, sentinel
       end
 
       test "expired exp is rejected" do
@@ -130,7 +291,8 @@ module Lakeraven
           uid: "keyless-backend-client",
           redirect_uri: "urn:ietf:wg:oauth:2.0:oob",
           scopes: "system/*.read",
-          confidential: true
+          confidential: true,
+          organization_id: "example-organization-2"
         )
 
         post_token(assertion(claims(iss: "no-such-client", sub: "no-such-client")))
@@ -170,17 +332,14 @@ module Lakeraven
         }.merge(overrides)
       end
 
-      def assertion(payload = claims, signature: nil, key: nil)
-        header_b64 = Base64.urlsafe_encode64({ alg: "RS384", typ: "JWT" }.to_json, padding: false)
-        payload_b64 = Base64.urlsafe_encode64(payload.to_json, padding: false)
-        signing_input = "#{header_b64}.#{payload_b64}"
-        sig_b64 = if signature
-          signature
-        else
-          raw = (key || @client_key).sign(OpenSSL::Digest.new("SHA384"), signing_input)
-          Base64.urlsafe_encode64(raw, padding: false)
-        end
-        "#{signing_input}.#{sig_b64}"
+      # signature: replaces the real signature with the given string, for the
+      # forged case. key: signs with a different key than the JWKS publishes.
+      def assertion(payload = claims, signature: nil, key: nil, alg: "RS384")
+        jwt = JWT.encode(payload, key || @client_key, alg, kid: @client_jwk[:kid])
+        return jwt unless signature
+
+        head, body, = jwt.split(".")
+        "#{head}.#{body}.#{signature}"
       end
 
       def post_token(jwt, scope: "system/*.read")

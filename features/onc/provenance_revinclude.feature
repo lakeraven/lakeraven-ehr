@@ -8,7 +8,13 @@ Feature: Provenance _revinclude
 
   Background:
     Given the system is configured for FHIR API access
-    And I have a valid SMART token with scope "patient/Patient.read"
+    # Provenance.read is REQUIRED, not incidental. _revinclude hands the caller
+    # resources of another type, so it needs that type's read scope like any
+    # other read -- a Patient-only token used to receive Provenance entries,
+    # including their agent references, because the inclusion was never
+    # authorized. This token carried no Provenance scope, so the scenario was
+    # asserting that unauthorized inclusion.
+    And I have a valid SMART token with scope "patient/Patient.read patient/Provenance.read"
 
   Scenario: Search with _revinclude=Provenance:target includes Provenance entries in Bundle
     Given provenance records exist for patient "1"

@@ -9,10 +9,21 @@ module Lakeraven
 
       setup do
         setup_smart_auth
+        # $import WRITES a YAML file into Measure::MEASURES_PATH, which is the
+        # real config/measures directory the app loads from -- not a tmp dir.
+        # Without cleanup every run of this file left test-measure.yml and
+        # test.yml behind, so `bin/rails test` dirtied the working tree, the
+        # two artifacts were eventually committed by a `git add -A`, and
+        # Measure.all then carried two stubs with no population criteria --
+        # which failed the cucumber scenario asserting every measure has
+        # population criteria defined. Snapshot and restore instead.
+        @measures_before = Dir.glob(File.join(Measure::MEASURES_PATH, "*.yml"))
       end
 
       teardown do
         teardown_smart_auth
+        (Dir.glob(File.join(Measure::MEASURES_PATH, "*.yml")) - @measures_before)
+          .each { |f| File.delete(f) }
       end
 
       test "GET /Measure returns 200 with FHIR Bundle" do

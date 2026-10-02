@@ -18,6 +18,8 @@ system(*Tailwindcss::Commands.compile_command(silent: false), exception: true)
 
 require "rpms_rpc/version"
 require "rpms_rpc/mock_client"
+# Needed to build the DDR GETS ENTRY DATA seed key below.
+require "rpms_rpc/api/ddr_fileman"
 
 # Configure RpmsRpc with mock client and seed data for all tests.
 RpmsRpc.mock! do |m|
@@ -28,12 +30,15 @@ RpmsRpc.mock! do |m|
 
   # patient_id_info now returns the identifier projection from ORWPT ID INFO
   # (SSN/DOB/sex/race_code/site_ien/name) — not the extended demographics
-  # that the prior mapping hallucinated. Address, phone, tribal enrollment,
-  # service_area, coverage_type have NO known RPC source — the old
-  # "BHDPTRPC, not installed on staging" attribution was itself unverified
-  # (see rpms-rpc docs/RPC_COVERAGE.md, "BHDPTRPC provenance"); a real
-  # demographics read path is future work. Tests that need those fields construct
-  # Patient.new(...) directly rather than going through the gateway.
+  # that the prior mapping hallucinated. Address, phone, service_area and
+  # coverage_type still have NO known RPC source — the old "BHDPTRPC, not
+  # installed on staging" attribution was itself unverified (see rpms-rpc
+  # docs/RPC_COVERAGE.md, "BHDPTRPC provenance"); a real demographics read
+  # path for those is future work (lakeraven-ehr#564). Tests that need them
+  # construct Patient.new(...) directly rather than going through the gateway.
+  #
+  # TRIBAL detail is no longer in that list. RPMS stores it in #9000001
+  # (^AUPNPAT) and it is read via DDR GETS ENTRY DATA, seeded below.
   m.seed(:patient_id_info, "1", {
     ssn: "111-11-1111", dob: Date.parse("1980-05-15"), sex: "F",
     race_code: "I", site_ien: 7819, name: "Anderson,Alice"
@@ -46,6 +51,29 @@ RpmsRpc.mock! do |m|
     ssn: "555667777", dob: Date.parse("1990-12-25"), sex: "F",
     race_code: "I", site_ien: 7819, name: "DOE,JANE"
   })
+
+  # Tribal detail for DFN 1 — #9000001 (^AUPNPAT) via DDR GETS ENTRY DATA,
+  # which is where RPMS actually keeps it. Wire form per field is
+  # FILE^IEN^FIELD^INTERNAL^EXTERNAL. Fields: .07 enrollment no, 1108 tribe
+  # (pointer -> TRIBE #9999999.03), 1109 tribe quantum, 1110 Indian blood
+  # quantum, 1111 classification/beneficiary (pointer -> BENEFICIARY
+  # #9999999.25), 1112 eligibility status (set I/D/C/P), 1118 current
+  # community. Synthetic values throughout.
+  m.seed(:ddr_gets_entry_data,
+    RpmsRpc::DdrFileman.gets_entry_param(
+      file: "9000001", iens: "1,",
+      fields: ".07;1108;1109;1110;1111;1112;1118", flags: "IE"
+    ).to_s,
+    <<~TRIBAL.chomp)
+      [Data]
+      9000001^1^.07^EXNH-12345^EXNH-12345
+      9000001^1^1108^41^Example Tribe
+      9000001^1^1109^4/4^4/4
+      9000001^1^1110^4/4^4/4
+      9000001^1^1111^1^Indian/Alaska Native
+      9000001^1^1112^I^Indian/Alaska Native
+      9000001^1^1118^Example Community^Example Community
+    TRIBAL
 
   m.seed(:patient_ssn, "111-11-1111", { dfn: 1, name: "Anderson,Alice", ssn: "111-11-1111" })
 
