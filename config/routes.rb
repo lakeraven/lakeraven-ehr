@@ -47,6 +47,12 @@ Lakeraven::EHR::Engine.routes.draw do
     resources :patients, only: %i[index new create show], param: :dfn, constraints: { dfn: /\d+/ }
   end
 
+  # Scheduling (rpms-ux W02): book a patient into a clinic's slot. The first
+  # slice; the clinic day view and the rest of W02 are pending stubs.
+  namespace :scheduling do
+    resources :appointments, only: %i[new create]
+  end
+
   # Doorkeeper models (Application, AccessToken) are used directly;
   # routes are NOT mounted here because the engine provides its own
   # BackendServicesController for OAuth token issuance.
