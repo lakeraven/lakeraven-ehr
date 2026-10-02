@@ -5,11 +5,13 @@ module Lakeraven
     module Scheduling
       # Booking an appointment (rpms-ux W02 S-SCH-01, lakeraven-ehr#565): the
       # first scheduling screen. Session-authenticated and audited like the
-      # registration screens; the scheduling keys BPRM gates on (SDZMENU,
-      # SDZSUP) are not in rpms-rpc's key registry yet, so signing on is the
-      # gate until they are.
+      # registration screens, and gated on the scheduling keys BPRM gates on
+      # (SDZSUP or SDZMENU), by name (WebController#require_rpms_key!).
       class AppointmentsController < WebController
+        SCHEDULING_KEYS = %w[SDZSUP SDZMENU].freeze
+
         before_action :require_authentication
+        before_action :require_scheduling_key!
 
         def new
           @booking = AppointmentBooking.new(minutes: 20)
@@ -29,6 +31,10 @@ module Lakeraven
         end
 
         private
+
+        def require_scheduling_key!
+          require_rpms_key!(any_of: SCHEDULING_KEYS, action: "book an appointment")
+        end
 
         def booking_params
           params.fetch(:appointment_booking, {}).permit(:resource, :dfn, :date, :time, :minutes, :note)

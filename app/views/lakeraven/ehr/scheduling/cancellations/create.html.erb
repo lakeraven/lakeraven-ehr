@@ -1,0 +1,18 @@
+<% content_for :title, "Appointment cancelled | Lakeraven EHR" %>
+
+<div class="page-header">
+  <h1>Appointment cancelled</h1>
+</div>
+
+<div
+  role="status"
+  class="rounded-lg border border-green-300 bg-green-50 p-4"
+>
+  <p>
+    RPMS cancelled appointment <%= @cancellation.appointment_ien %> on behalf of the <%= @cancellation.cancelled_by %>.
+  </p>
+</div>
+
+<p class="mt-6">
+  <%= link_to "Book another appointment", new_scheduling_appointment_path %>
+</p>

@@ -1,0 +1,50 @@
+<% content_for :title, "Cancel an appointment | Lakeraven EHR" %>
+
+<div class="page-header">
+  <h1>Cancel appointment <%= @cancellation.appointment_ien %></h1>
+  <p>
+    Frees the slot on the clinic and marks the appointment cancelled on the patient, with the reason.
+  </p>
+</div>
+
+<% if @cancellation.errors.any? %>
+  <div
+    class="screening-errors"
+    role="alert"
+  >
+    <h2>The cancellation was refused</h2>
+    <p>
+      The appointment stays booked.
+    </p>
+    <ul>
+      <% @cancellation.errors.full_messages.each do |message| %>
+        <li><%= message %></li>
+      <% end %>
+    </ul>
+  </div>
+<% end %>
+
+<%= form_with model: @cancellation, url: scheduling_appointment_cancellations_path(@cancellation.appointment_ien), method: :post, local: true, class: "grid max-w-xl gap-4" do |f| %>
+  <div>
+    <%= f.label :cancelled_by, "Cancelled by" %>
+    <%= f.select :cancelled_by, [ [ "", "" ], [ "The clinic", "clinic" ], [ "The patient", "patient" ] ] %>
+  </div>
+  <div>
+    <%= f.label :reason_ien, "Reason" %>
+    <% if @reasons %>
+      <%= f.select :reason_ien, [ [ "", "" ] ] + @reasons.map { |r| [ r[:name], r[:ien] ] } %>
+    <% else %>
+      <p role="alert">
+        The cancellation reasons could not be read from RPMS.
+      </p>
+      <%= f.select :reason_ien, [ [ "", "" ] ] %>
+    <% end %>
+  </div>
+  <div>
+    <%= f.label :remarks, "Remarks" %>
+    <%= f.text_field :remarks, autocomplete: "off" %>
+  </div>
+  <div>
+    <%= f.submit "Cancel appointment" %>
+  </div>
+<% end %>
