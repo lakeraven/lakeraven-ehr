@@ -35,20 +35,25 @@ ParameterType(
 module BprmScenarioHelpers
   # Synthetic DUZ per persona: stable so audit rows and received RPC calls can
   # be attributed in assertions. Nothing on a stack holds these.
+  # `rpms_keys` are the RPMS security keys the persona holds (PERSONAS.md:
+  # the keys BPRM's Policies.cs gates each role on); the screens gate on
+  # these names (WebController#require_rpms_key!).
   PERSONA_USERS = {
-    "front_desk_clerk" => { duz: "99901", user_name: "CLERK,FRONTDESK" },
-    "registration_supervisor" => { duz: "99907", user_name: "SUPERVISOR,REGISTRATION" },
-    "scheduler" => { duz: "99902", user_name: "CLERK,SCHEDULING" },
-    "admissions_clerk" => { duz: "99903", user_name: "CLERK,ADMISSIONS" },
-    "nurse" => { duz: "99904", user_name: "NURSE,WARD" },
-    "him_technician" => { duz: "99905", user_name: "TECH,HIM" },
-    "benefits_coordinator" => { duz: "99906", user_name: "COORDINATOR,BENEFITS" }
+    "front_desk_clerk" => { duz: "99901", user_name: "CLERK,FRONTDESK", rpms_keys: %w[AGZMENU SDZMENU] },
+    "registration_supervisor" => { duz: "99907", user_name: "SUPERVISOR,REGISTRATION",
+                                   rpms_keys: %w[AGZMGR AGZMENU AGZVIEWSSN] },
+    "scheduler" => { duz: "99902", user_name: "CLERK,SCHEDULING", rpms_keys: %w[SDZMENU SDZREGMENU] },
+    "admissions_clerk" => { duz: "99903", user_name: "CLERK,ADMISSIONS", rpms_keys: %w[DGZMENU DGZADT] },
+    "nurse" => { duz: "99904", user_name: "NURSE,WARD", rpms_keys: %w[DGZNUR] },
+    "him_technician" => { duz: "99905", user_name: "TECH,HIM", rpms_keys: %w[DGZICE] },
+    "benefits_coordinator" => { duz: "99906", user_name: "COORDINATOR,BENEFITS", rpms_keys: %w[AGZMENU AGZCREOPN] }
   }.freeze
 
-  def sign_on_as(persona)
+  def sign_on_as(persona, rpms_keys: nil)
     user = PERSONA_USERS.fetch(persona)
+    keys = rpms_keys || user[:rpms_keys]
     page.driver.post(engine_path("/test_session"),
-                     duz: user[:duz], user_name: user[:user_name], user_type: persona)
+                     duz: user[:duz], user_name: user[:user_name], user_type: persona, rpms_keys: keys)
     @persona = persona
     @persona_user = user
   end
@@ -82,4 +87,11 @@ end
 
 Given("the {persona} is signed on") do |persona|
   sign_on_as(persona)
+end
+
+# The key-refusal scenarios: a user in the persona's role signed on with
+# only the named keys ("no keys" for none).
+Given("the {persona} is signed on holding only {string}") do |persona, keys|
+  held = keys == "no keys" ? [] : keys.split(",").map(&:strip)
+  sign_on_as(persona, rpms_keys: held)
 end

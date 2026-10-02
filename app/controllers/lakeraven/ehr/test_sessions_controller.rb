@@ -15,6 +15,9 @@ module Lakeraven
         session[:duz] = params[:duz].presence || "99996"
         session[:user_type] = params[:user_type].presence || "case_manager"
         session[:security_keys] = normalized_security_keys(params[:security_keys])
+        # The RPMS key names a sign-on would carry (SessionsController), for
+        # the screens that gate on AG/SD/DG keys.
+        session[:rpms_keys] = normalized_security_keys(params[:rpms_keys])
         # Tests exercising token-authenticated browser surfaces stash the
         # SMART token where the sign-on bridge does (#486): a browser token
         # is session-bound, so a header cannot present it.
