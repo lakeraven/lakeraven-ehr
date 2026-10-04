@@ -32,6 +32,15 @@ class SsoSessionTokenBridgeTest < ActionDispatch::IntegrationTest
     assert_includes response.body, "Anderson"
   end
 
+  test "the dashboard says who is signed in" do
+    post "/lakeraven-ehr/login", params: KEYED_USER
+    follow_redirect!
+
+    assert_response :ok
+    assert_select "h1", "Dashboard"
+    assert_select ".signed-in-as", "Signed in as RODRIGUEZ,LINDA"
+  end
+
   test "sign-on records who signed in" do
     post "/lakeraven-ehr/login", params: KEYED_USER
 

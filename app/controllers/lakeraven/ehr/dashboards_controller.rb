@@ -6,6 +6,7 @@ module Lakeraven
       before_action :require_authentication
 
       def show
+        @user_name = session[:user_name]
         @active_cases_count = 3
         @my_tasks_count = 2
         @pending_referrals_count = 1
