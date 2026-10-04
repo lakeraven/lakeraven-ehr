@@ -42,6 +42,10 @@ jobs:
         with:
           ruby-version: "3.4"
           bundler-cache: true
+      # Engine pages link the host's Tailwind build (tailwind.css). It is build output (git-ignored),
+      # so build it before anything renders a page. tailwindcss-rails ships the standalone CLI; no Node.
+      - name: Build Tailwind CSS
+        run: bundle exec rails app:tailwindcss:build
       - run: bundle exec rails db:create db:migrate
       - run: bundle exec rails test
 
@@ -89,6 +93,10 @@ jobs:
       # schema.rb when it finds migrations pending; cucumber's equivalent
       # raises instead. test/dummy/db/schema.rb is the committed source of
       # truth for the test database, so load it directly.
+      # Engine pages link the host's Tailwind build (tailwind.css). It is build output (git-ignored),
+      # so build it before anything renders a page. tailwindcss-rails ships the standalone CLI; no Node.
+      - name: Build Tailwind CSS
+        run: bundle exec rails app:tailwindcss:build
       - run: bundle exec rails db:create db:schema:load
       # Fails on FAILED SCENARIOS or on no summary at all. Does NOT fail on the
       # 125 undefined / 11 pending steps that already exist on main, because
