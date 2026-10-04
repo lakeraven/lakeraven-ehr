@@ -1,6 +1,13 @@
 name: private-boundary
 # Fails a PR if a private-boundary term (partner / tribe / vendor names, etc.)
-# appears in this public repo — in tracked files OR in the PR title/body.
+# appears in this public repo — in tracked files, in the PR title/body, in the
+# BRANCH NAME, or in any COMMIT MESSAGE the PR would land.
+#
+# Files and PR prose were the original scope, and it was not enough: three
+# separate incidents reached a public ref through paths this job did not look
+# at — a partner name in two branch names, in commit subjects on those
+# branches, and in a tag pushed over commits whose tree had never been
+# scanned. A name in a ref is as public as a name in a file.
 # The blocklist lives ONLY in the encrypted `LAKERAVEN_BOUNDARY_BLOCKLIST`
 # secret (newline-delimited, case-insensitive), never in the repo, and matched
 # terms are never echoed — only file:line — so the blocklist cannot leak
@@ -18,10 +25,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Commit messages cannot be scanned from a shallow clone.
+          fetch-depth: 0
       - name: Scan for private-boundary terms
         shell: bash
         env:
           BLOCKLIST: ${{ secrets.LAKERAVEN_BOUNDARY_BLOCKLIST }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          # A fork PR has no secret, so its only scan is the one on merge.
+          # On that push event the pull_request fields are all empty, so the
+          # range and the branch name have to come from the push itself.
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.event.after }}
           IS_FORK_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
@@ -35,6 +53,49 @@ jobs:
             echo "::error::LAKERAVEN_BOUNDARY_BLOCKLIST is unset — the boundary guard is inert. Set the org secret."
             exit 1
           fi
+          # Commit range to scan. A pull_request event names it directly; a push
+          # to main supplies before..after, which is what a fork PR's commits
+          # arrive through. Without this, the "the scan runs again on merge"
+          # promise covered tracked files only.
+          range=""
+          if [ -n "${BASE_SHA:-}" ] && [ -n "${HEAD_SHA:-}" ]; then
+            range="${BASE_SHA}..${HEAD_SHA}"
+          elif [ -n "${PUSH_BEFORE:-}" ] && [ -n "${PUSH_AFTER:-}" ] \
+               && [ "${PUSH_BEFORE}" != "0000000000000000000000000000000000000000" ]; then
+            range="${PUSH_BEFORE}..${PUSH_AFTER}"
+          fi
+
+          # Collect the text to scan ONCE, into variables. Every check below
+          # uses a here-string rather than `producer | grep -q`: under
+          # `set -o pipefail`, grep -q exits at the first match, the producer
+          # takes SIGPIPE, and the pipeline reports failure -- so a match made
+          # the guard report "no match" precisely when output was large.
+          # A failed history read must NEVER read as "nothing to report". If
+          # main was rewritten so the previous tip is gone from this checkout,
+          # git log exits non-zero and swallowing that would let the job print
+          # "No private-boundary terms found" having scanned no history at all.
+          commit_messages=""
+          if [ -n "$range" ]; then
+            if ! commit_messages="$(git log --format='%B' "$range" 2>/dev/null)"; then
+              echo "::error::boundary scan could not read commit messages for ${range} (rewritten history or missing objects). Refusing to report clean."
+              exit 1
+            fi
+          fi
+
+          # Branch names. HEAD_REF is the PR's head branch on a pull_request
+          # event and merely "main" on a push, so a fork's branch name would
+          # never be checked. A merge commit carries it in its subject
+          # ("Merge pull request #N from fork/branch"), which is recovered here.
+          refs="${HEAD_REF:-}"
+          if [ -n "$range" ]; then
+            if ! subjects="$(git log --format='%s' "$range" 2>/dev/null)"; then
+              echo "::error::boundary scan could not read commit subjects for ${range}. Refusing to report clean."
+              exit 1
+            fi
+            merged_from="$(sed -n 's|^Merge pull request #[0-9]* from ||p' <<< "$subjects")"
+            refs="$(printf '%s\n%s\n' "$refs" "$merged_from")"
+          fi
+
           fail=0
           while IFS= read -r term; do
             term="${term%$'\r'}"
@@ -49,8 +110,20 @@ jobs:
                 fail=1
               done <<< "$matches"
             fi
-            if printf '%s\n%s\n' "${PR_TITLE:-}" "${PR_BODY:-}" | grep -qEi -e "$pattern"; then
+            if grep -qEi -e "$pattern" <<< "$(printf '%s\n%s\n' "${PR_TITLE:-}" "${PR_BODY:-}")"; then
               echo "::error::private-boundary term matched in the PR title or body"
+              fail=1
+            fi
+            # The ref itself. A branch name is published the moment it is pushed,
+            # and renaming one later does not unpublish it.
+            if grep -qEi -e "$pattern" <<< "$refs"; then
+              echo "::error::private-boundary term matched in a branch name"
+              fail=1
+            fi
+            # Every commit message this PR would land. Subjects are as public as
+            # file contents and survive a file-level scrub.
+            if [ -n "$commit_messages" ] && grep -qEi -e "$pattern" <<< "$commit_messages"; then
+              echo "::error::private-boundary term matched in a commit message"
               fail=1
             fi
           done <<< "${BLOCKLIST}"

@@ -7,52 +7,26 @@ module Lakeraven
     class TransitionsOfCareController < ApplicationController
       include PatientCompartment
 
+      # Types in the C-CDA body. A scope named after this controller is not
+      # one of them.
+      DISCLOSED_TYPES = %w[Patient AllergyIntolerance Condition MedicationRequest].freeze
+      EGRESS_LISTS = %i[allergies conditions medications].freeze
+
       # This POST RETURNS the patient's chart as a C-CDA, so it needs read
       # scope as well as write, and it is bound to the patient compartment
       # like any other read of that patient.
-      # The C-CDA carries demographics, allergies, problems and medications.
-      discloses_clinical_data :create,
-        reads: %w[Patient AllergyIntolerance Condition MedicationRequest]
+      discloses_clinical_data :create, reads: DISCLOSED_TYPES
       compartment_bound :create, param: :patient_dfn
 
       # POST /transitions_of_care
       def create
         patient = Patient.find_by_dfn(params[:patient_dfn])
-        unless patient
-          return render_not_found("Patient", params[:patient_dfn])
-        end
+        return render_not_found("Patient", params[:patient_dfn]) unless patient
 
-        # The clinical *.for_patient methods may return either model instances
-        # or raw attribute hashes depending on whether the gateway has been
-        # updated to wrap responses. Read defensively until #233 normalizes.
-        attr = ->(item, key) { item.is_a?(Hash) ? item[key] : item.public_send(key) }
+        filtered = Part2EgressFilter.call(egress_sections(patient))
+        return refuse_unfiltered_egress unless egress_sections?(filtered)
 
-        allergies = (AllergyIntolerance.for_patient(params[:patient_dfn]) rescue [])
-          .map { |a| { code: attr.call(a, :allergen_code), display: attr.call(a, :allergen), code_system: nil } }
-        conditions = (Condition.for_patient(params[:patient_dfn]) rescue [])
-          .map { |c| { code: attr.call(c, :code), display: attr.call(c, :display), code_system: attr.call(c, :code_system) } }
-        medications = (MedicationRequest.for_patient(params[:patient_dfn]) rescue [])
-          .map { |m| { code: attr.call(m, :medication_code), display: attr.call(m, :medication_display), code_system: nil } }
-
-        # CcdaGenerator expects hashes until #233 is resolved
-        name_parts = patient.name.to_s.split(",", 2)
-        patient_hash = {
-          dfn: patient.dfn.to_s,
-          name: { family: name_parts[0]&.strip, given: name_parts[1]&.strip },
-          dob: patient.dob,
-          sex: patient.sex,
-          address: { street: patient.address_line1, city: patient.city, state: patient.state, zip: patient.zip_code }
-        }
-
-        ccda_xml = CcdaGenerator.generate(
-          patient: patient_hash,
-          allergies: allergies,
-          conditions: conditions,
-          medications: medications,
-          author: ccda_author
-        )
-
-        render xml: ccda_xml, status: :created, content_type: "application/xml"
+        render xml: renderable_ccda(filtered), status: :created, content_type: "application/xml"
       end
 
       private
@@ -84,6 +58,84 @@ module Lakeraven
         end
 
         { name: nil, npi: nil, institution: nil, device: current_token&.application&.name }
+      end
+
+      def egress_sections(patient)
+        dfn = params[:patient_dfn]
+        {
+          patient: patient_demographics(patient),
+          allergies: coded_rows(AllergyIntolerance, dfn, :allergen_code, :allergen),
+          conditions: coded_rows(Condition, dfn, :code, :display, :code_system),
+          medications: coded_rows(MedicationRequest, dfn, :medication_code, :medication_display)
+        }
+      end
+
+      def patient_demographics(patient)
+        family, given = patient.name.to_s.split(",", 2)
+        {
+          dfn: patient.dfn.to_s,
+          name: { family: family&.strip, given: given&.strip },
+          dob: patient.dob,
+          sex: patient.sex,
+          address: address_hash(patient)
+        }
+      end
+
+      def address_hash(patient)
+        {
+          street: patient.address_line1,
+          city: patient.city,
+          state: patient.state,
+          zip: patient.zip_code
+        }
+      end
+
+      # for_patient may raise, or return something other than an array,
+      # until #233. An unreadable section becomes []. That empty array is
+      # not a claim that the patient has no such records.
+      def coded_rows(model, dfn, code_key, display_key, system_key = nil)
+        rows = model.for_patient(dfn)
+        rows = [] unless rows.is_a?(Array)
+        rows.map { |item| coded_row(item, code_key, display_key, system_key) }
+      rescue StandardError
+        []
+      end
+
+      def coded_row(item, code_key, display_key, system_key)
+        {
+          code: item_value(item, code_key),
+          display: item_value(item, display_key),
+          code_system: system_key ? item_value(item, system_key) : nil
+        }
+      end
+
+      def item_value(item, key)
+        item.is_a?(Hash) ? item[key] : item.public_send(key)
+      end
+
+      def egress_sections?(filtered)
+        return false unless filtered.is_a?(Hash) && filtered[:patient].is_a?(Hash)
+
+        EGRESS_LISTS.all? { |key| filtered[key].is_a?(Array) }
+      end
+
+      def renderable_ccda(sections)
+        CcdaGenerator.generate(
+          patient: sections[:patient],
+          allergies: sections[:allergies],
+          conditions: sections[:conditions],
+          medications: sections[:medications],
+          author: ccda_author
+        )
+      end
+
+      def refuse_unfiltered_egress
+        render_operation_outcome(
+          status: :service_unavailable,
+          severity: "error",
+          code: "exception",
+          diagnostics: "Part 2 egress filter did not return clinical sections; C-CDA not generated"
+        )
       end
     end
   end

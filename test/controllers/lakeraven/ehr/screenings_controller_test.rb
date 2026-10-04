@@ -645,10 +645,22 @@ module Lakeraven
         assert_audit_reference("QuestionnaireResponse/100")
       end
 
+      # The guard below is the point of this test: if the audit named the DFN
+      # instead of the screening, an id that happened to equal DFN_PARAM would
+      # hide it. So GUARANTEE the two differ rather than asserting and hoping —
+      # the sequence is shared across the suite and Minitest randomises order,
+      # so whether this row lands on id 1 (== DFN_PARAM) varied per seed and the
+      # guard failed the run outright roughly whenever it did. Same pinning
+      # idiom as the screening-100 reproduction above.
       test "the create audit names the screening that was created" do
+        ScreeningResponse.connection.execute(
+          "ALTER SEQUENCE lakeraven_ehr_screening_responses_id_seq RESTART WITH 500"
+        )
+
         submit
         record = ScreeningResponse.last
 
+        assert_equal 500, record.id, "the sequence pin above should decide this id"
         assert_not_equal DFN_PARAM, record.id.to_s,
                          "guard: with id == dfn this test would pass vacuously"
         assert_audit_reference("QuestionnaireResponse/#{record.id}")

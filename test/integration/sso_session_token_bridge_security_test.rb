@@ -499,6 +499,20 @@ class SsoSessionTokenBridgeSecurityTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "a broker that refuses the sign-on RPCs renders a sign-in failure rather than an exception" do
+    [ RpmsRpc::Client::RpcError.new("4 Access denied for remote procedure: XUS AV CODE"),
+      RpmsRpc::Client::AuthenticationError.new("CIA sign-on rejected") ].each do |error|
+      refusing = Object.new
+      refusing.define_singleton_method(:authenticate) { |**| raise error }
+
+      with_singleton(Lakeraven::EHR::AuthenticationService, :new, ->(*) { refusing }) do
+        sign_in
+        assert_response :service_unavailable, error.class.name
+        assert_nil session[:duz]
+      end
+    end
+  end
+
   # -- M2: session timeout ---------------------------------------------------
 
   test "an idle session past the timeout is signed out" do
