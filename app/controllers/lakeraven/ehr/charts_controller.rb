@@ -152,7 +152,11 @@ module Lakeraven
         @medications   = readable?("MedicationRequest") ? build_medications(dfn) : []
         @allergies     = readable?("AllergyIntolerance") ? build_allergies(dfn) : []
         @vitals        = readable?("Observation") ? safe { ObservationGateway.for_patient(dfn) } : []
-        @observations  = Observation.from_vital_hashes(@vitals, patient_dfn: dfn)
+        # Through the seam, like the FHIR search: converting the raw vitals here
+        # would stamp this patient's DFN over whatever a row stated, and would
+        # omit a configured supplemental provider's rows from the chart while
+        # showing them in the search.
+        @observations  = readable?("Observation") ? safe { SupplementalClinicalResources.merged_observations_for_patient(dfn) } || [] : []
         @immunizations = readable?("Immunization") ? safe { Immunization.for_patient(dfn) } : []
         @procedures    = readable?("Procedure") ? build_procedures(dfn) : []
         @encounters    = readable?("Encounter") ? safe { EncounterGateway.for_patient(dfn) } : []
@@ -246,15 +250,12 @@ module Lakeraven
         valid.include?(normalized) ? normalized : fallback
       end
 
+      # Through the shared normalizer, so this bundle and the FHIR search cannot
+      # disagree about the same wire row -- they previously read different keys
+      # for the reaction -- and so a configured supplemental provider's rows are
+      # in the chart rather than only in the search.
       def build_allergies(dfn)
-        safe { AllergyIntolerance.for_patient(dfn) }.map do |h|
-          AllergyIntolerance.new(
-            ien: allergy_id(dfn, h), patient_dfn: dfn,
-            allergen: h[:allergen], reaction: h[:reaction],
-            severity: h[:severity], clinical_status: "active",
-            criticality: h[:severity].to_s.downcase == "severe" ? "high" : "low"
-          )
-        end
+        safe { SupplementalClinicalResources.merged_allergy_intolerances_for_patient(dfn) } || []
       end
 
       # ORQQAL LIST (the allergy RPC) returns ALLERGEN^REACTION^SEVERITY with no

@@ -138,7 +138,7 @@ module Lakeraven
         end
 
         def fetch_allergies(patient_dfn)
-          AllergyIntolerance.for_patient(patient_dfn)
+          SupplementalClinicalResources.merged_allergy_intolerances_for_patient(patient_dfn)
         rescue
           []
         end
