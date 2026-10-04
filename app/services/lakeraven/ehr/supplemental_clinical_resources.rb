@@ -1,23 +1,26 @@
 # frozen_string_literal: true
 
 require "set"
+
 module Lakeraven
   module EHR
     # Merges wire-sourced clinical resources with a deployment's supplemental
-    # provider output, enforcing the patient compartment on the supplemental
-    # slice.
+    # provider output, enforcing the patient compartment on BOTH slices.
     #
-    # The wire slice is already patient-scoped by the RPC. The supplemental
-    # slice is not scoped by anything until here: the provider is deployment
-    # code and can return any resource, including another patient's. So every
-    # supplemental row is checked against the requested DFN, and a row with no
-    # patient_dfn at all is dropped -- an unattributable clinical resource
-    # cannot be shown to be the requested patient's.
+    # The wire slice is queried per patient, but a row that states a patient of
+    # its own is believed over the question that was asked: a mis-scoped row
+    # (broker bug, stale cache, bad LIST) would otherwise be served as the
+    # requested patient's and be indistinguishable from it.
+    #
+    # The supplemental slice is deployment-supplied Ruby and is scoped by nothing
+    # until here, so every row is checked and a row that cannot state an owner is
+    # dropped -- an unattributable clinical resource cannot be shown to be this
+    # patient's.
     class SupplementalClinicalResources
       class << self
         def merged_observations_for_patient(dfn)
-          wire = Observation.from_vital_hashes(Observation.for_patient(dfn), patient_dfn: dfn)
-          merge(wire, owned_by(dfn, Lakeraven::EHR.configuration.supplemental_observations_provider))
+          merge(wire_observations(dfn),
+                owned_by(dfn, Lakeraven::EHR.configuration.supplemental_observations_provider))
         end
 
         def merged_allergy_intolerances_for_patient(dfn)
@@ -25,65 +28,59 @@ module Lakeraven
                 owned_by(dfn, Lakeraven::EHR.configuration.supplemental_allergy_intolerances_provider))
         end
 
-        # The wire returns ORQQAL LIST rows as hashes (ien, allergen, severity,
-        # signs) while a supplemental provider returns model instances. Both
-        # sides are normalized to models here so one serializer renders them and
-        # a supplemental row cannot be told from a wire row by its shape.
-        # A wire row that does NOT state a patient is taken as the requested
-        # patient's: the RPC was asked for that patient and is the system of
-        # record. A row that DOES state a different patient is dropped -- its own
-        # statement wins over the question that was asked, because a mis-scoped
-        # row (broker bug, stale cache, bad LIST) would otherwise be served as
-        # this patient's data and be indistinguishable from it.
+        private
+
+        # Observation.from_vital_hashes STAMPS the requested DFN and discards
+        # whatever the row said, so a row naming another patient has to be
+        # rejected BEFORE conversion -- afterwards the evidence is gone.
+        def wire_observations(dfn)
+          rows = Array(ObservationGateway.for_patient(dfn)).select { |row| wire_row_owned?(row, dfn) }
+          Observation.from_vital_hashes(rows, patient_dfn: dfn)
+        end
+
         def wire_allergies(dfn)
           Array(AllergyIntolerance.for_patient(dfn)).filter_map do |row|
-            resource = row.is_a?(Hash) ? allergy_from_wire(row, dfn) : row
-            next resource unless resource.respond_to?(:patient_dfn)
+            next unless wire_row_owned?(row, dfn)
 
-            resource if resource.patient_dfn.to_s == dfn.to_s
+            row.is_a?(Hash) ? allergy_from_wire(row, dfn) : verified(row, dfn)
           end
         end
 
-        # The one place a wire allergy row becomes a model, so the FHIR search
-        # and the chart bundle cannot disagree about the same row.
-        #
-        # Two readings of ORQQAL LIST exist in this codebase: the mapped surface
-        # names IEN^ALLERGEN^SEVERITY^SIGNS, while the chart builder documented
-        # ALLERGEN^REACTION^SEVERITY with no IEN. Rather than pick one and be
-        # silently wrong on the other, both key names are accepted and the id
-        # falls back to a deterministic derivation when the row carries none.
+        # A wire row with no stated owner is the requested patient's: the RPC was
+        # asked for that patient and is the system of record. One that states a
+        # different owner is not.
+        def wire_row_owned?(row, dfn)
+          owner = stated_owner(row)
+          owner.nil? || same_patient?(owner, dfn)
+        end
+
         def allergy_from_wire(row, dfn)
-          AllergyIntolerance.new(
-            ien: row[:ien].to_s.presence || "allergy-#{dfn}-#{row[:allergen].to_s.parameterize}",
-            # The row's own patient when it states one. Stamping the requested
-            # DFN unconditionally would launder a mis-scoped row into this
-            # patient's compartment.
-            patient_dfn: row[:patient_dfn].presence&.to_s || dfn.to_s,
-            allergen: row[:allergen],
-            severity: row[:severity],
-            reaction: row[:signs].presence || row[:reaction],
-            category: row[:category],
-            allergen_code: row[:allergen_code],
-            clinical_status: row[:clinical_status].presence || "active",
-            criticality: row[:criticality].presence ||
-                         (row[:severity].to_s.downcase == "severe" ? "high" : nil)
+          verified(
+            AllergyIntolerance.new(
+              ien: field(row, :ien).to_s.presence ||
+                   "allergy-#{canonical(dfn)}-#{field(row, :allergen).to_s.parameterize}",
+              allergen: field(row, :allergen),
+              severity: field(row, :severity),
+              # Two readings of ORQQAL LIST exist in this codebase: the mapped
+              # surface names IEN^ALLERGEN^SEVERITY^SIGNS, while the chart builder
+              # documented ALLERGEN^REACTION^SEVERITY with no IEN. Both key names
+              # are accepted rather than picking one and being silently wrong on
+              # the other.
+              reaction: field(row, :signs).presence || field(row, :reaction),
+              category: field(row, :category),
+              allergen_code: field(row, :allergen_code),
+              clinical_status: field(row, :clinical_status).presence || "active",
+              criticality: field(row, :criticality).presence ||
+                           (field(row, :severity).to_s.downcase == "severe" ? "high" : nil)
+            ),
+            dfn
           )
         end
 
-        private
-
-        # A FHIR searchset must not carry two entries with the same id: a client
-        # keying on id either breaks or shows a false duplicate. The wire row
-        # wins -- it is the system of record, and a supplemental provider must
-        # not be able to shadow it.
-        def merge(wire, supplemental)
-          seen = wire.map { |r| r.ien.to_s }.to_set
-          wire + supplemental.reject { |r| seen.include?(r.ien.to_s) }
-        end
-
-        # nil / [] / a non-array all mean "no supplemental rows" -- those are
-        # ordinary states for a provider, not failures. A provider that RAISES
-        # is a failure and is surfaced.
+        # nil / [] / a non-array all mean "no supplemental rows" -- ordinary
+        # states for a provider, not failures. A provider that RAISES is a
+        # failure and is surfaced rather than rescued into an empty slice, which
+        # would be indistinguishable from configuring no provider at all.
         def owned_by(dfn, provider)
           return [] if provider.nil?
 
@@ -98,9 +95,70 @@ module Lakeraven
 
           return [] unless produced.is_a?(Array)
 
-          produced.select do |resource|
-            owner = resource.respond_to?(:patient_dfn) ? resource.patient_dfn : nil
-            owner.present? && owner.to_s == dfn.to_s
+          produced.filter_map do |resource|
+            owner = stated_owner(resource)
+            verified(resource, dfn) if owner && same_patient?(owner, dfn)
+          end
+        end
+
+        # The ownership check and the serialization are separate reads, so an
+        # object whose patient_dfn changes in between -- a provider handing back
+        # a mutable object it still holds -- could pass the check and then
+        # serialize a foreign reference. Serve a copy carrying the OWNER WE
+        # VERIFIED, so what was checked is what is rendered.
+        def verified(resource, dfn)
+          return resource unless resource.respond_to?(:patient_dfn=)
+
+          copy = resource.dup
+          copy.patient_dfn = canonical(dfn)
+          copy
+        end
+
+        def stated_owner(row)
+          value = row.is_a?(Hash) ? field(row, :patient_dfn) : (row.respond_to?(:patient_dfn) ? row.patient_dfn : nil)
+          value.to_s.strip.presence
+        end
+
+        # Hashes reach here from several RPC mappings; some use symbol keys and
+        # some string keys. Reading only one kind treats a stated owner as absent
+        # and lets the row be adopted by whichever patient was asked for.
+        def field(row, key)
+          return nil unless row.is_a?(Hash)
+
+          row[key].nil? ? row[key.to_s] : row[key]
+        end
+
+        # PatientRepository.find resolves a DFN with to_i, so 1, "1", "01" and
+        # " 1 " are the same patient. Comparing the raw strings would exclude a
+        # row that is genuinely this patient's because it was written "01".
+        # Non-positive values are not patients at all (same rejection as the
+        # repository) and never match.
+        def same_patient?(a, b)
+          left = canonical(a)
+          right = canonical(b)
+          left.present? && left == right
+        end
+
+        def canonical(value)
+          numeric = value.to_s.strip
+          return "" unless numeric.match?(/\A\d+\z/)
+
+          i = numeric.to_i
+          i.positive? ? i.to_s : ""
+        end
+
+        # A FHIR searchset must not carry two entries with one id: a client
+        # keying on id either breaks or shows a false duplicate. The wire row
+        # wins as the system of record. A blank id is not an identity, so blanks
+        # never collide with each other, and supplemental ids join the seen set
+        # so two supplemental rows cannot both claim one id.
+        def merge(wire, supplemental)
+          seen = Set.new
+          (wire + supplemental).select do |resource|
+            id = resource.respond_to?(:ien) ? resource.ien.to_s.strip : ""
+            next true if id.empty?
+
+            seen.add?(id) ? true : false
           end
         end
       end

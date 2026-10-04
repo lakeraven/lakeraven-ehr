@@ -152,7 +152,11 @@ module Lakeraven
         @medications   = readable?("MedicationRequest") ? build_medications(dfn) : []
         @allergies     = readable?("AllergyIntolerance") ? build_allergies(dfn) : []
         @vitals        = readable?("Observation") ? safe { ObservationGateway.for_patient(dfn) } : []
-        @observations  = Observation.from_vital_hashes(@vitals, patient_dfn: dfn)
+        # Through the seam, like the FHIR search: converting the raw vitals here
+        # would stamp this patient's DFN over whatever a row stated, and would
+        # omit a configured supplemental provider's rows from the chart while
+        # showing them in the search.
+        @observations  = readable?("Observation") ? safe { SupplementalClinicalResources.merged_observations_for_patient(dfn) } || [] : []
         @immunizations = readable?("Immunization") ? safe { Immunization.for_patient(dfn) } : []
         @procedures    = readable?("Procedure") ? build_procedures(dfn) : []
         @encounters    = readable?("Encounter") ? safe { EncounterGateway.for_patient(dfn) } : []
