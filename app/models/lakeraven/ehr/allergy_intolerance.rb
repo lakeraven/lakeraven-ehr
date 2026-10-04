@@ -16,6 +16,9 @@ module Lakeraven
       attribute :category, :string
       attribute :criticality, :string
 
+      RXNORM_SYSTEM = "http://www.nlm.nih.gov/research/umls/rxnorm"
+      VALID_CRITICALITIES = %w[low high unable-to-assess].freeze
+
       # -- Gateway DI -----------------------------------------------------------
 
       class << self
@@ -53,7 +56,11 @@ module Lakeraven
           resourceType: "AllergyIntolerance",
           id: ien&.to_s,
           clinicalStatus: { coding: [ { system: CLINICAL_STATUS_SYSTEM, code: clinical_status } ] },
-          code: { text: allergen },
+          # A coded allergen carries its coding; the mapped RPC surface returns
+          # text only, so the coding is present exactly when something upstream
+          # could supply one.
+          code: { coding: allergen_coding, text: allergen }.compact,
+          criticality: fhir_criticality,
           patient: { reference: "Patient/#{patient_dfn}" },
           # FHIR JSON forbids empty arrays — omit reaction entirely when absent.
           reaction: reaction ? [ { manifestation: [ { text: reaction } ], severity: fhir_reaction_severity }.compact ] : nil
@@ -61,6 +68,18 @@ module Lakeraven
       end
 
       private
+
+      def allergen_coding
+        return nil if allergen_code.blank?
+
+        [ { system: RXNORM_SYSTEM, code: allergen_code.to_s, display: allergen }.compact ]
+      end
+
+      # Required binding: omit anything that is not a legal criticality code.
+      def fhir_criticality
+        normalized = criticality.to_s.strip.downcase
+        VALID_CRITICALITIES.include?(normalized) ? normalized : nil
+      end
 
       # Required binding: emit severity only when it normalizes to a legal code.
       def fhir_reaction_severity
