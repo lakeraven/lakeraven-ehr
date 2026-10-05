@@ -9,8 +9,7 @@ module Lakeraven
 
       def index
         dfn = patient_compartment_dfn
-        raw = Observation.for_patient(dfn)
-        observations = Observation.from_vital_hashes(raw, patient_dfn: dfn)
+        observations = SupplementalClinicalResources.merged_observations_for_patient(dfn)
         observations = filter_observations(observations)
         render_bundle(observations.map(&:to_fhir))
       end
