@@ -175,7 +175,18 @@ module Lakeraven
           result = SchedulingGateway.check_in(7001, undo: true)
 
           assert_equal "scheduled", result[:appointment_status]
-          assert_equal [ "7001", "UNDO" ], broker.last_call[:params]
+        end
+      end
+
+      # CHECKIN^BSDX25 deletes the check-in only when the date param is "@";
+      # anything else goes through ^%DT and a non-date is rejected (#583).
+      test "undo check-in sends the appointment id and \"@\" as the check-in date" do
+        broker = FakeBroker.new.on("BSDX CHECKIN APPOINTMENT", "1^")
+        use_broker(broker) do
+          SchedulingGateway.check_in(7001, undo: true)
+
+          assert_equal "BSDX CHECKIN APPOINTMENT", broker.last_call[:rpc]
+          assert_equal [ "7001", "@" ], broker.last_call[:params]
         end
       end
 
