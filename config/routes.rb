@@ -51,6 +51,7 @@ Lakeraven::EHR::Engine.routes.draw do
   end
 
   # SMART discovery + EHR Launch
+  get "metadata", to: "capability_statements#show"
   get ".well-known/smart-configuration", to: "smart_configuration#show"
   get "smart/launch", to: "smart_launch#show"
 

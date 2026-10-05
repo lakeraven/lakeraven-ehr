@@ -17,7 +17,14 @@ module Lakeraven
       before_action :require_registration_scope!, only: :create
 
       def index
-        patients = resolve_patient_search
+        patients = begin
+          resolve_patient_search
+        rescue UnsupportedIdentifierSystem => e
+          return render_operation_outcome(
+            status: :bad_request, severity: "error", code: "not-supported",
+            diagnostics: "Unsupported Patient.identifier system: #{e.message}"
+          )
+        end
         # Org-bound backend credentials only see their own organization's
         # patients (SmartAuthentication — partner conformance item 2).
         patients = patients.select { |p| org_visible_patient?(p) } if organization_bound?
@@ -110,8 +117,7 @@ module Lakeraven
           patient = Patient.find_by_dfn(params[:_id])
           patient ? [ patient ] : []
         elsif params[:identifier].present?
-          ssn = extract_ssn_from_identifier(params[:identifier])
-          ssn ? Patient.search_by_ssn(ssn) : []
+          identifier_search(params[:identifier])
         elsif params[:name].present?
           results = Patient.search(params[:name])
           results = filter_by_birthdate(results) if params[:birthdate].present?
@@ -120,6 +126,52 @@ module Lakeraven
         else
           Patient.search("")
         end
+      end
+
+      # US Core requires `identifier` as a Patient search parameter, and a
+      # search parameter must answer the question it was asked. The previous
+      # implementation split on "|", discarded the SYSTEM and searched SSN, so a
+      # client searching any other identifier system received 200 with an empty
+      # bundle -- the server reporting "no such patient" about a lookup it never
+      # performed. An unknown system is now refused, because a false negative on
+      # a patient lookup is the most expensive answer this endpoint can give.
+      #
+      # Raises UnsupportedIdentifierSystem, which `index` renders as a 400
+      # OperationOutcome with issue code `not-supported`.
+      DFN_IDENTIFIER_SYSTEM = "urn:oid:2.16.840.1.113883.4.349"
+      SSN_IDENTIFIER_SYSTEMS = [
+        "http://hl7.org/fhir/sid/us-ssn",
+        "urn:oid:2.16.840.1.113883.4.1"
+      ].freeze
+
+      class UnsupportedIdentifierSystem < StandardError; end
+
+      def identifier_search(token)
+        system, value = split_identifier(token)
+
+        case system
+        when nil
+          # A bare value carries no system, so the server cannot know what it
+          # names. Kept as SSN for the callers that already rely on it, rather
+          # than guessed at as a DFN.
+          Patient.search_by_ssn(value).presence || []
+        when DFN_IDENTIFIER_SYSTEM
+          patient = Patient.find_by_dfn(value)
+          patient ? [ patient ] : []
+        when *SSN_IDENTIFIER_SYSTEMS
+          Patient.search_by_ssn(value)
+        else
+          raise UnsupportedIdentifierSystem, system
+        end
+      end
+
+      # "system|value" per FHIR token search. A trailing "|" means an explicitly
+      # empty system, which is not the same as no system at all.
+      def split_identifier(token)
+        return [ nil, token.to_s ] unless token.to_s.include?("|")
+
+        system, value = token.to_s.split("|", 2)
+        [ system.presence, value.to_s ]
       end
 
       def extract_ssn_from_identifier(identifier)
