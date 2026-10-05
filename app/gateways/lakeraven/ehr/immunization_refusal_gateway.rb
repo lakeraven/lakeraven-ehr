@@ -10,11 +10,13 @@ module Lakeraven
     class ImmunizationRefusalGateway
       FAILURE = { success: false, ien: nil, raw: nil }.freeze
 
-      def self.record(dfn, vaccine_code, reason_code:, narrative: nil, via: default_provider)
+      # reason_ien is the REFUSAL REASON (#9999999.102) IEN the gem files;
+      # RpmsRpc::ImmunizationRefusal.reasons lists the valid ones.
+      def self.record(dfn, vaccine_ien, reason_ien:, narrative: nil, via: default_provider)
         return FAILURE if via.nil?
 
-        via.record(dfn.to_s, vaccine_code,
-          reason_code: reason_code, narrative: narrative)
+        via.record(dfn.to_s, vaccine_ien,
+          reason_ien: reason_ien, narrative: narrative)
       end
 
       def self.default_provider

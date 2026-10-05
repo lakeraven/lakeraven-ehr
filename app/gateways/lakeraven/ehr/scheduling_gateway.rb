@@ -45,10 +45,13 @@ module Lakeraven
       ADD_HOLIDAY_RPC = "BSDX ADD HOLIDAY"
       # PROVISIONAL: RPC name/encoding unconfirmed against #8994 — needs trace capture.
       DEL_HOLIDAY_RPC = "BSDX REMOVE HOLIDAY"
-      # PROVISIONAL: no stock un-check-in RPC exists in #8994. BSDX CHECKIN with
-      # an "UNDO" flag is a placeholder encoding pending trace capture; the
-      # confirmed BSDX CHECKIN APPOINTMENT (via the gem) has no undo path.
+      # Un-check-in is BSDX CHECKIN APPOINTMENT with "@" as the check-in
+      # date: CHECKIN^BSDX25 (v3.0) reads "@" as "delete check-in" and runs any
+      # other value through ^%DT, so a word like "UNDO" is a bad date (#583).
+      # PROVISIONAL: the gem has no undo wrapper and the reply is not yet
+      # confirmed by a trace capture.
       UNCHECKIN_RPC = "BSDX CHECKIN APPOINTMENT"
+      UNCHECKIN_DATE = "@"
 
       UNAVAILABLE = "Scheduling service unavailable"
       # BSDX cancellation TYPE codes: clinic-cancelled "C" / patient-cancelled "PC".
@@ -113,7 +116,7 @@ module Lakeraven
         # --- #9 Check-in (POST /appointments/:id/check_in, /undo_check_in) --
         # Confirmed: RpmsRpc::Scheduling.checkin_appointment → BSDX CHECKIN
         # APPOINTMENT ("0"/empty ERRORID == success, handled by the gem). Undo
-        # has no stock RPC and stays on the PROVISIONAL placeholder below.
+        # is the same RPC with "@" as the date, sent by the PROVISIONAL path below.
         def check_in(appointment_id, at: nil, undo: false)
           return validation_error("appointment id is required") unless valid_id?(appointment_id)
           return uncheck_in(appointment_id) if undo
@@ -282,10 +285,10 @@ module Lakeraven
 
         private
 
-        # PROVISIONAL placeholder — see UNCHECKIN_RPC. No confirmed un-check-in RPC.
+        # PROVISIONAL — see UNCHECKIN_RPC.
         def uncheck_in(appointment_id)
           RpcSupport.with_broker(UNAVAILABLE) do
-            parts = RpcSupport.pieces(RpcSupport.broker.call_rpc(UNCHECKIN_RPC, appointment_id.to_s, "UNDO"))
+            parts = RpcSupport.pieces(RpcSupport.broker.call_rpc(UNCHECKIN_RPC, appointment_id.to_s, UNCHECKIN_DATE))
             next RpcSupport.rejection(parts[1] || "Undo check-in rejected") unless RpcSupport.success_flag?(parts)
 
             { success: true, status: 200, appointment_id: appointment_id.to_i, appointment_status: "scheduled" }
