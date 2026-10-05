@@ -69,10 +69,17 @@ module Lakeraven
 
       private
 
+      # Required binding: an RxCUI is a numeric concept id. Emitting any
+      # non-blank string under the RxNorm system publishes a coding that is not
+      # an RxNorm code -- "not-rxnorm", or a whitespace-padded value a consumer
+      # cannot look up -- and a wrong coding is worse than an absent one,
+      # because a consumer trusts the system URI. Anything that is not an RxCUI
+      # is dropped and the allergen survives as text.
       def allergen_coding
-        return nil if allergen_code.blank?
+        rxcui = allergen_code.to_s.strip
+        return nil unless rxcui.match?(/\A\d+\z/)
 
-        [ { system: RXNORM_SYSTEM, code: allergen_code.to_s, display: allergen }.compact ]
+        [ { system: RXNORM_SYSTEM, code: rxcui, display: allergen }.compact ]
       end
 
       # Required binding: omit anything that is not a legal criticality code.

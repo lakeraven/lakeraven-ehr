@@ -113,6 +113,68 @@ module Lakeraven
         end
       end
 
+      # Ownership is not enough. A resource of the WRONG TYPE that owns the right
+      # patient would be serialized into the other endpoint's bundle, which
+      # breaks the resource-type contract a FHIR client relies on, and an object
+      # of no known type fails later, outside the provider-error wrapper where
+      # the failure no longer names a cause.
+      test "the observation provider cannot contribute an AllergyIntolerance" do
+        intruder = AllergyIntolerance.new(ien: "wrong-type", patient_dfn: DFN,
+                                          allergen: "Drug", category: "medication")
+
+        with_supplemental_providers(observations: ->(_dfn) { [ intruder ] }) do
+          results = SupplementalClinicalResources.merged_observations_for_patient(DFN)
+          refute_includes results.map { |r| r.ien.to_s }, "wrong-type",
+            "an AllergyIntolerance must not be served in an Observation bundle"
+          assert(results.all? { |r| r.is_a?(Observation) },
+            "every row in an Observation result must be an Observation")
+        end
+      end
+
+      test "the allergy provider cannot contribute an Observation" do
+        intruder = Observation.new(ien: "wrong-type", patient_dfn: DFN, code: "8310-5",
+                                   display: "Body temperature", value: "37")
+
+        with_allergy_gateway([]) do
+          with_supplemental_providers(allergy_intolerances: ->(_dfn) { [ intruder ] }) do
+            results = SupplementalClinicalResources.merged_allergy_intolerances_for_patient(DFN)
+            assert_empty results,
+              "an Observation must not be served in an AllergyIntolerance bundle"
+          end
+        end
+      end
+
+      test "an object of no known type is dropped rather than failing downstream" do
+        junk = Struct.new(:ien, :patient_dfn).new("junk", DFN)
+
+        with_supplemental_providers(observations: ->(_dfn) { [ junk ] }) do
+          results = SupplementalClinicalResources.merged_observations_for_patient(DFN)
+          refute_includes results.map { |r| r.ien.to_s }, "junk"
+        end
+      end
+
+      # An RxCUI is a numeric concept id. Publishing any non-blank string under
+      # the RxNorm system URI asserts something false about it, and a consumer
+      # trusts the system URI.
+      test "only an RxCUI is served as an RxNorm coding" do
+        [ "not-rxnorm", " ", "723x", "", "rx723" ].each do |bad|
+          allergy = AllergyIntolerance.new(ien: "c", patient_dfn: DFN, allergen: "Amoxicillin",
+                                           allergen_code: bad, category: "medication")
+          assert_nil allergy.to_fhir[:code][:coding],
+            "#{bad.inspect} is not an RxCUI and must not be published as one"
+          assert_equal "Amoxicillin", allergy.to_fhir[:code][:text],
+            "the allergen must still survive as text"
+        end
+      end
+
+      test "a padded RxCUI is served trimmed, not dropped" do
+        allergy = AllergyIntolerance.new(ien: "c", patient_dfn: DFN, allergen: "Amoxicillin",
+                                         allergen_code: " 723 ", category: "medication")
+        coding = allergy.to_fhir[:code][:coding]
+        refute_nil coding, "a padded RxCUI is still an RxCUI"
+        assert_equal "723", coding.first[:code]
+      end
+
       # Observation.from_vital_hashes stamps the requested DFN and discards what
       # the row said, so a foreign row has to be rejected before conversion.
       test "a wire observation stating another patient is not converted into this one" do

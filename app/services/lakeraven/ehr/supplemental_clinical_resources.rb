@@ -20,12 +20,14 @@ module Lakeraven
       class << self
         def merged_observations_for_patient(dfn)
           merge(wire_observations(dfn),
-                owned_by(dfn, Lakeraven::EHR.configuration.supplemental_observations_provider))
+                owned_by(dfn, Lakeraven::EHR.configuration.supplemental_observations_provider,
+                         Observation))
         end
 
         def merged_allergy_intolerances_for_patient(dfn)
           merge(wire_allergies(dfn),
-                owned_by(dfn, Lakeraven::EHR.configuration.supplemental_allergy_intolerances_provider))
+                owned_by(dfn, Lakeraven::EHR.configuration.supplemental_allergy_intolerances_provider,
+                         AllergyIntolerance))
         end
 
         private
@@ -81,7 +83,13 @@ module Lakeraven
         # states for a provider, not failures. A provider that RAISES is a
         # failure and is surfaced rather than rescued into an empty slice, which
         # would be indistinguishable from configuring no provider at all.
-        def owned_by(dfn, provider)
+        # `expected` is the resource type this provider is declared to supply.
+        # Ownership alone is not enough: an AllergyIntolerance returned by the
+        # OBSERVATION provider owns the right patient and would be serialized
+        # into an Observation bundle, breaking the endpoint's resource-type
+        # contract. An object of no known type would also fail later, outside
+        # the provider-error wrapper, where the failure no longer names a cause.
+        def owned_by(dfn, provider, expected)
           return [] if provider.nil?
 
           produced = begin
@@ -96,6 +104,8 @@ module Lakeraven
           return [] unless produced.is_a?(Array)
 
           produced.filter_map do |resource|
+            next unless resource.is_a?(expected)
+
             owner = stated_owner(resource)
             verified(resource, dfn) if owner && same_patient?(owner, dfn)
           end
