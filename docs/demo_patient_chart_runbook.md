@@ -22,9 +22,10 @@ Equivalent manual start:
 
 `bin/demo` does all of this for you; if starting manually:
 
-1. **Port 3000 free?** A previous dummy server (or its stale pidfile) is the most
-   likely failure. `lsof -ti:3000 | xargs kill; rm -f test/dummy/tmp/pids/server.pid`
-   — or just reuse the already-running server if it is serving `/patients/1` correctly.
+1. **Port 3000 free?** `lsof -nP -iTCP:3000 -sTCP:LISTEN` names what holds it.
+   `bin/demo` refuses to start on a held port and never stops the owner.
+   If it is a previous dummy server, reuse it or stop it yourself.
+   If it is something else, start on another port: `PORT=3001 test/dummy/bin/demo`.
 2. **Postgres up?** `pg_isready || brew services start postgresql`. Dev-mode
    migration checking queries the DB on every request; a down Postgres 500s everything.
 3. **Clean env.** `unset RPMS_RPC_PATH` (flips the Gemfile to a path source →
