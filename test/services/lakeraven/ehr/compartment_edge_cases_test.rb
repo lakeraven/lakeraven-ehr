@@ -113,6 +113,53 @@ module Lakeraven
         end
       end
 
+      # The HTML chart renders the raw vitals hashes directly, so reading them
+      # straight from the gateway skipped the ownership check the FHIR paths
+      # apply to the same rows -- a second door onto the same data.
+      test "the raw wire vitals the HTML chart renders are compartment-checked" do
+        original = ObservationGateway.method(:for_patient)
+        ObservationGateway.define_singleton_method(:for_patient) do |_dfn|
+          [ { type: "P", value: "72", patient_dfn: "2" },
+            { type: "T", value: "37" } ]
+        end
+
+        rows = SupplementalClinicalResources.wire_vital_rows_for_patient(DFN)
+        refute_empty rows, "the unstated-owner row belongs to the requested patient"
+        assert_equal [ "T" ], rows.map { |r| r[:type] },
+          "the row naming patient 2 must not reach the chart"
+      ensure
+        ObservationGateway.define_singleton_method(:for_patient, original)
+      end
+
+      # Preferring a non-nil symbol value let a blank one mask a stated
+      # string-keyed owner, so the row read as ownerless and was adopted.
+      test "a blank symbol key cannot mask a stated string-keyed owner" do
+        original = ObservationGateway.method(:for_patient)
+        ObservationGateway.define_singleton_method(:for_patient) do |_dfn|
+          [ { patient_dfn: "", "patient_dfn" => "2", type: "P", value: "72" } ]
+        end
+
+        assert_empty SupplementalClinicalResources.wire_vital_rows_for_patient(DFN),
+          "the string key states patient 2; a blank symbol key is not a denial of that"
+      ensure
+        ObservationGateway.define_singleton_method(:for_patient, original)
+      end
+
+      # A subclass can override to_fhir to emit a different resource type, and an
+      # object can override is_a? to pass a check it should fail. Only the
+      # engine's own model is accepted.
+      test "a subclass of the expected model is not accepted" do
+        subclass = Class.new(AllergyIntolerance)
+        impostor = subclass.new(ien: "sub-1", patient_dfn: DFN, allergen: "Drug",
+                                category: "medication")
+
+        with_allergy_gateway([]) do
+          with_supplemental_providers(allergy_intolerances: ->(_dfn) { [ impostor ] }) do
+            assert_empty SupplementalClinicalResources.merged_allergy_intolerances_for_patient(DFN)
+          end
+        end
+      end
+
       # Ownership is not enough. A resource of the WRONG TYPE that owns the right
       # patient would be serialized into the other endpoint's bundle, which
       # breaks the resource-type contract a FHIR client relies on, and an object

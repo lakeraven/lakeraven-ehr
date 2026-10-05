@@ -24,6 +24,13 @@ module Lakeraven
                          Observation))
         end
 
+        # The raw wire vitals, compartment-checked. The HTML chart renders these
+        # hashes directly rather than models, and reading them straight from the
+        # gateway skipped the ownership check the FHIR paths apply.
+        def wire_vital_rows_for_patient(dfn)
+          Array(ObservationGateway.for_patient(dfn)).select { |row| wire_row_owned?(row, dfn) }
+        end
+
         def merged_allergy_intolerances_for_patient(dfn)
           merge(wire_allergies(dfn),
                 owned_by(dfn, Lakeraven::EHR.configuration.supplemental_allergy_intolerances_provider,
@@ -36,8 +43,7 @@ module Lakeraven
         # whatever the row said, so a row naming another patient has to be
         # rejected BEFORE conversion -- afterwards the evidence is gone.
         def wire_observations(dfn)
-          rows = Array(ObservationGateway.for_patient(dfn)).select { |row| wire_row_owned?(row, dfn) }
-          Observation.from_vital_hashes(rows, patient_dfn: dfn)
+          Observation.from_vital_hashes(wire_vital_rows_for_patient(dfn), patient_dfn: dfn)
         end
 
         def wire_allergies(dfn)
@@ -104,7 +110,10 @@ module Lakeraven
           return [] unless produced.is_a?(Array)
 
           produced.filter_map do |resource|
-            next unless resource.is_a?(expected)
+            # instance_of?, not is_a?: a subclass can override to_fhir to emit
+            # another resource type, and an object can override is_a? to pass a
+            # check it should fail. Only the engine's own model is accepted.
+            next unless resource.instance_of?(expected)
 
             owner = stated_owner(resource)
             verified(resource, dfn) if owner && same_patient?(owner, dfn)
@@ -117,10 +126,21 @@ module Lakeraven
         # serialize a foreign reference. Serve a copy carrying the OWNER WE
         # VERIFIED, so what was checked is what is rendered.
         def verified(resource, dfn)
-          return resource unless resource.respond_to?(:patient_dfn=)
+          return nil unless resource.respond_to?(:patient_dfn=)
 
           copy = resource.dup
           copy.patient_dfn = canonical(dfn)
+          # Prove the assignment took, so a setter that ignored its argument
+          # could not leave the original owner in place and serialize it after
+          # passing the check.
+          #
+          # UNREACHABLE while the instance_of? check above holds: only this
+          # engine's own models get here, and their patient_dfn= is an ordinary
+          # attribute writer. No test covers it and a mutation removing it
+          # survives, so it is not a verified guard -- it is here so that
+          # loosening instance_of? later fails closed instead of open.
+          return nil unless same_patient?(copy.patient_dfn, dfn)
+
           copy
         end
 
@@ -132,10 +152,14 @@ module Lakeraven
         # Hashes reach here from several RPC mappings; some use symbol keys and
         # some string keys. Reading only one kind treats a stated owner as absent
         # and lets the row be adopted by whichever patient was asked for.
+        # The FIRST PRESENT value across both key kinds. Preferring a non-nil
+        # symbol value let a blank one mask a stated string-keyed owner --
+        # { patient_dfn: "", "patient_dfn" => "2" } read as ownerless and was
+        # adopted by whichever patient was asked for.
         def field(row, key)
           return nil unless row.is_a?(Hash)
 
-          row[key].nil? ? row[key.to_s] : row[key]
+          [ row[key], row[key.to_s] ].find { |v| v.to_s.strip.present? } || row[key] || row[key.to_s]
         end
 
         # PatientRepository.find resolves a DFN with to_i, so 1, "1", "01" and

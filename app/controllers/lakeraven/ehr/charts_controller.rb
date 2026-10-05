@@ -151,7 +151,10 @@ module Lakeraven
         @conditions    = readable?("Condition") ? build_conditions(dfn) : []
         @medications   = readable?("MedicationRequest") ? build_medications(dfn) : []
         @allergies     = readable?("AllergyIntolerance") ? build_allergies(dfn) : []
-        @vitals        = readable?("Observation") ? safe { ObservationGateway.for_patient(dfn) } : []
+        # Compartment-checked: the HTML chart renders these raw rows directly,
+        # so reading them straight from the gateway skipped the ownership check
+        # the FHIR paths apply to the same data.
+        @vitals        = readable?("Observation") ? safe { SupplementalClinicalResources.wire_vital_rows_for_patient(dfn) } || [] : []
         # Through the seam, like the FHIR search: converting the raw vitals here
         # would stamp this patient's DFN over whatever a row stated, and would
         # omit a configured supplemental provider's rows from the chart while
