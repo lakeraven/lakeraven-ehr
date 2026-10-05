@@ -55,6 +55,39 @@ module Lakeraven
           headers: { "Authorization" => "Bearer #{expired.plaintext_token || expired.token}" }
         assert_response :unauthorized
       end
+
+      test "C-CDA serializes the Part 2 filter return value" do
+        marker = { code: "ZZZ-FILTER-MARKER", display: "Filter marker", code_system: nil }
+        stub_egress_filter(->(sections) { sections.merge(conditions: [ marker ]) }) do
+          post "/lakeraven-ehr/transitions_of_care",
+            params: { patient_dfn: "1" }, headers: @headers
+        end
+
+        assert_response :created
+        assert_includes response.body, "ZZZ-FILTER-MARKER"
+      end
+
+      test "C-CDA is not rendered when the Part 2 filter does not return sections" do
+        stub_egress_filter(->(*) { [] }) do
+          post "/lakeraven-ehr/transitions_of_care",
+            params: { patient_dfn: "1" }, headers: @headers
+        end
+
+        assert_response :service_unavailable
+        refute_includes response.body, "ClinicalDocument"
+        refute_includes response.body, "Anderson"
+      end
+
+      private
+
+      def stub_egress_filter(implementation)
+        filter = Part2EgressFilter.singleton_class
+        original = filter.instance_method(:call)
+        filter.define_method(:call, &implementation)
+        yield
+      ensure
+        filter.define_method(:call, original)
+      end
     end
   end
 end

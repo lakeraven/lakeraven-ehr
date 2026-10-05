@@ -9,8 +9,8 @@ module Lakeraven
 
       def index
         dfn = patient_compartment_dfn
-        results = AllergyIntolerance.for_patient(dfn)
-        render_bundle(results.map { |r| { resourceType: "AllergyIntolerance" }.merge(r) })
+        results = SupplementalClinicalResources.merged_allergy_intolerances_for_patient(dfn)
+        render_bundle(results.map(&:to_fhir))
       end
 
       def show
