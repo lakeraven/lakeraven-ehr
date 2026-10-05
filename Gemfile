@@ -7,12 +7,15 @@ gemspec
 if ENV["RPMS_RPC_PATH"]
   gem "rpms-rpc", path: ENV["RPMS_RPC_PATH"]
 else
-  # Pinned to the #250 merge (rpms-rpc main f514068): adds RpmsRpc::SessionPool
-  # (session-scoped broker clients, ADR 0005 / #234) plus the #249 nil-DUZ
-  # fail-closed sign-on and the #240 RPC tiers, on top of the 0.3.0 sign-on
-  # path (encrypted AV pair, CIA reply grammar, RpmsRpc.synchronize_wire). A
-  # fixed ref rather than branch:main so the pin does not drift mid-merge.
-  gem "rpms-rpc", github: "lakeraven/rpms-rpc", ref: "f514068"
+  # Pinned to rpms-rpc main 98276f0, past #251: CIA sign-on reads the DUZ with
+  # XUS GET USER INFO (every CIA sign-on failed closed before it; #540). Not
+  # yet 19fffc3 (#188): it retires Problem.filter and reshapes the medication
+  # and vitals rows, a migration of its own. Earlier
+  # pins brought RpmsRpc::SessionPool (ADR 0005 / #234), the #249 nil-DUZ
+  # fail-closed sign-on and the 0.3.0 sign-on path (encrypted AV pair, CIA
+  # reply grammar, RpmsRpc.synchronize_wire). A fixed ref rather than
+  # branch:main so the pin does not drift mid-merge.
+  gem "rpms-rpc", github: "lakeraven/rpms-rpc", ref: "98276f0"
 end
 
 gem "puma"
@@ -26,6 +29,10 @@ gem "tailwindcss-rails", "~> 4.4"
 
 gem "cucumber-rails", require: false
 gem "minitest"
+
+# Headless Chrome for the live system tests (test/system/live), which sign in
+# against a real RPMS broker and save screenshots as evidence.
+gem "cuprite", require: false
 
 # Omakase Ruby styling [https://github.com/rails/rubocop-rails-omakase/]
 gem "rubocop-rails-omakase", require: false

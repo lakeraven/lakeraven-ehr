@@ -1,7 +1,7 @@
 GIT
   remote: https://github.com/lakeraven/rpms-rpc.git
-  revision: f5140680094fe80ea7d3babe2cb6159e065e191f
-  ref: f514068
+  revision: 98276f0f600b0b26d3782b67b7662578b27da53f
+  ref: 98276f0
   specs:
     rpms-rpc (0.3.0)
       rexml (~> 3.2)
@@ -143,6 +143,9 @@ GEM
       cucumber (>= 7, < 11)
       railties (>= 6.1, < 9)
     cucumber-tag-expressions (8.1.0)
+    cuprite (0.17)
+      capybara (~> 3.0)
+      ferrum (~> 0.17.0)
     date (3.5.1)
     diff-lcs (1.6.2)
     doorkeeper (5.9.0)
@@ -150,6 +153,12 @@ GEM
     drb (2.2.3)
     erb (6.0.4)
     erubi (1.13.1)
+    ferrum (0.17.2)
+      addressable (~> 2.5)
+      base64 (~> 0.2)
+      concurrent-ruby (~> 1.1)
+      webrick (~> 1.7)
+      websocket-driver (~> 0.7)
     ffi (1.17.4-aarch64-linux-gnu)
     ffi (1.17.4-aarch64-linux-musl)
     ffi (1.17.4-arm-linux-gnu)
@@ -348,6 +357,7 @@ GEM
     unicode-emoji (4.2.0)
     uri (1.1.1)
     useragent (0.16.11)
+    webrick (1.9.2)
     websocket-driver (0.8.2)
       base64
       websocket-extensions (>= 0.1.0)
@@ -370,6 +380,7 @@ PLATFORMS
 
 DEPENDENCIES
   cucumber-rails
+  cuprite
   lakeraven-ehr!
   minitest
   pg
