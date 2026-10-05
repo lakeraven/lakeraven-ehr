@@ -4,12 +4,12 @@ require "test_helper"
 
 module Lakeraven
   module EHR
-    # Vardana source-system profile (sections 3-5, conformance checklist
+    # partner source-system profile (sections 3-5, conformance checklist
     # section 7): the four core resources serve valid US Core FHIR through
     # an org-bound backend credential — correct codings, units, clinical
     # dates, BP components, pagination, stable ids, and a distinguishable
     # corrected value.
-    class VardanaConformanceSerializationTest < ActionDispatch::IntegrationTest
+    class PartnerConformanceSerializationTest < ActionDispatch::IntegrationTest
       include SmartAuthTestHelper
 
       VITALS_TAKEN = DateTime.new(2026, 2, 1, 9, 30, 0)

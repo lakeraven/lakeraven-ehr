@@ -7,8 +7,8 @@
 
 Given("a SMART backend service application is registered") do
   # Registers a client with a published JWKS; assertions are signed with the
-  # matching private key (helpers in vardana_backend_services_auth_steps.rb).
-  vardana_register_client(name: "Backend Service App", scopes: "system/*.read")
+  # matching private key (helpers in partner_backend_services_auth_steps.rb).
+  partner_register_client(name: "Backend Service App", scopes: "system/*.read")
 end
 
 When("I POST to {string} with a valid client_credentials JWT assertion") do |path|
@@ -16,7 +16,7 @@ When("I POST to {string} with a valid client_credentials JWT assertion") do |pat
   post url, {
     grant_type: "client_credentials",
     client_assertion_type: "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
-    client_assertion: vardana_assertion,
+    client_assertion: partner_assertion,
     scope: "system/*.read"
   }
   @response_json = JSON.parse(last_response.body) rescue nil

@@ -72,7 +72,7 @@ module Lakeraven
 
       # Renders a searchset Bundle of FHIR resource hashes.
       #
-      # Pagination (Vardana source-system profile section 4): when the
+      # Pagination (partner source-system profile section 4): when the
       # client sends `_count`, the match set is sliced into pages addressed
       # by `_page`, `Bundle.total` stays the FULL match count, and a
       # `Bundle.link` with relation "next" is emitted while more matches

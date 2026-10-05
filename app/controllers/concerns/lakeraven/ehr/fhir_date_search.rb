@@ -5,7 +5,7 @@ module Lakeraven
     # FHIR `date` search parameter + `_sort=date/-date` support, shared by the
     # controllers whose resources search on a clinical date (Observation on
     # effectiveDateTime, Encounter on period.start, DiagnosticReport on
-    # effectiveDateTime — Vardana profile section 4: `date=ge{date}`).
+    # effectiveDateTime — partner profile section 4: `date=ge{date}`).
     #
     # Comparison prefixes apply to the item's date; repeated date params AND
     # together. Items without a date sort last either way.

@@ -47,7 +47,7 @@ module Lakeraven
           codes = params[:code].split(",")
           observations = observations.select { |o| codes.include?(o.code) }
         end
-        # FHIR date search parameter (Vardana profile section 4:
+        # FHIR date search parameter (partner profile section 4:
         # `date=ge{date}`) on effectiveDateTime — see FHIRDateSearch.
         filter_by_fhir_date(observations, &:effective_datetime)
       end
@@ -59,7 +59,7 @@ module Lakeraven
       end
 
       # `_revinclude=Provenance:target` (US Core's mechanism for provenance,
-      # and how Vardana distinguishes office-measured from patient-reported
+      # and how the partner profile distinguishes office-measured from patient-reported
       # values). Provenance rides along as search.mode "include".
       def provenance_includes(observations)
         return [] unless params[:_revinclude] == "Provenance:target"

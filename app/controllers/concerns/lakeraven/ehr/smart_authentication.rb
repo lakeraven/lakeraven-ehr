@@ -114,7 +114,7 @@ module Lakeraven
       end
 
       # -- Per-organization credential scoping --------------------------------
-      # Vardana source-system profile section 2 / conformance item 2: a
+      # partner source-system profile section 2 / conformance item 2: a
       # credential bound to one organization must not reach another
       # organization's patients. Binding lives on the Doorkeeper application
       # (organization_id); a nil binding means the credential is not org-bound.
@@ -134,7 +134,7 @@ module Lakeraven
       # unlisted endpoint bypassed; independent security review finding).
       def enforce_organization_scope!
         # A system/ credential is only ever legitimate when bound to exactly
-        # one organization (Vardana source-system profile section 2). The
+        # one organization (partner source-system profile section 2). The
         # token endpoint refuses to mint tokens for unbound clients, but the
         # authorization layer must fail closed too: a token whose application
         # predates mandatory binding, was minted through another flow, or had
