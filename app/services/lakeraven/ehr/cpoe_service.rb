@@ -34,7 +34,7 @@ module Lakeraven
           interaction_result = DrugInteractionService.new.check(
             active_medications: MedicationRequest.for_patient(patient_dfn),
             proposed_medication: order,
-            allergies: AllergyIntolerance.for_patient(patient_dfn)
+            allergies: SupplementalClinicalResources.merged_allergy_intolerances_for_patient(patient_dfn)
           )
 
           CpoeAuditor.record_order_created(order, provider_duz: provider_duz)

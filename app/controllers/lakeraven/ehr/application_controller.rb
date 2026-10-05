@@ -77,6 +77,22 @@ module Lakeraven
         render_forbidden("Insufficient scope for writing #{fhir_resource_type}")
       end
 
+      # A configured supplemental provider that fails makes the chart INCOMPLETE,
+      # so the read fails rather than returning a partial list that reads as a
+      # whole one. The diagnostics are deliberately generic: the exception
+      # message and the DFN stay in the server log, because this response field
+      # is caller-visible and the same reasoning as the audit note below applies
+      # -- a rescued message is free text that can carry PHI.
+      rescue_from Lakeraven::EHR::SupplementalProviderError do |error|
+        Rails.logger.error("supplemental clinical provider failed: #{error.message}")
+        render_operation_outcome(
+          status: :internal_server_error,
+          severity: "error",
+          code: "exception",
+          diagnostics: "A configured supplemental clinical data provider failed."
+        )
+      end
+
       def render_operation_outcome(status:, severity:, code:, diagnostics: nil)
         outcome = {
           resourceType: "OperationOutcome",
