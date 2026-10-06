@@ -12,13 +12,13 @@ The host app names it in `config/rpms.yml`, one block per environment, the way `
 
 ```yaml
 default: &default
-  broker: <%= ENV.fetch("VISTA_BROKER", "cia") %>  # cia (RPMS CIA broker) or xwb (stock VistA XWB)
-  host: <%= ENV["VISTA_RPC_HOST"] %>
+  broker: "<%= ENV.fetch("VISTA_BROKER", "cia") %>"  # cia (RPMS CIA broker) or xwb (stock VistA XWB)
+  host: "<%= ENV["VISTA_RPC_HOST"] %>"
   port: <%= ENV.fetch("VISTA_RPC_PORT", 9100) %>
 
 development:
   <<: *default
-  host: <%= ENV.fetch("VISTA_RPC_HOST", "127.0.0.1") %>
+  host: "<%= ENV.fetch("VISTA_RPC_HOST", "127.0.0.1") %>"
 
 production:
   <<: *default

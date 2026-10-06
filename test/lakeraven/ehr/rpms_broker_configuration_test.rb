@@ -67,7 +67,13 @@ class RpmsBrokerConfigurationTest < ActiveSupport::TestCase
 
   test "the dummy app's test environment names no broker by default" do
     with_env("VISTA_BROKER" => nil, "VISTA_RPC_HOST" => nil, "VISTA_RPC_PORT" => nil) do
-      assert_nil Lakeraven::EHR::Engine.rpms_settings[:host]
+      assert_empty Lakeraven::EHR::Engine.rpms_settings[:host].to_s
+    end
+  end
+
+  test "a host YAML would read as a boolean stays a hostname" do
+    with_env("VISTA_RPC_HOST" => "on") do
+      assert_equal "on", Lakeraven::EHR::Engine.rpms_settings[:host]
     end
   end
 
