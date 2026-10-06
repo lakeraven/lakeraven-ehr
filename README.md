@@ -5,6 +5,39 @@ RPMS stays the system of record: this engine reads and writes through its RPC br
 ## Usage
 How to use my plugin.
 
+## Development
+
+Rails runs on your machine; RPMS runs in Docker, from a pinned [rpms-ops](https://github.com/lakeraven/rpms-ops) release (`compose.yml`).
+You need Ruby 3.4, Docker and PostgreSQL.
+
+Once, log in to the private image registry:
+
+```bash
+$ gh auth refresh -s read:packages
+$ gh auth token | docker login ghcr.io -u <your GitHub user> --password-stdin
+```
+
+Then:
+
+```bash
+$ docker compose up -d        # RPMS; the first pull is about 6.5 GB
+$ cd test/dummy
+$ bin/setup                   # gems, database, Tailwind build; then starts bin/dev
+```
+
+`bin/dev` runs the Rails server and the Tailwind watcher.
+Sign in at http://localhost:3000/lakeraven-ehr/login as `SYS123` / `RPMS.000`, the image's development operator.
+
+- **No PostgreSQL on your machine:** `docker compose --profile postgres up -d`, then `export PGHOST=127.0.0.1 PGUSER=postgres PGPASSWORD=postgres` before `bin/setup`. Set `POSTGRES_PASSWORD` before the first start to use another password.
+- **Start RPMS over**, or move to a new release after `RPMS_TAG` changes in `compose.yml`: remove the RPMS container and its volume only, so the database stays.
+
+  ```bash
+  $ docker compose rm --stop --force rpms
+  $ docker volume rm lakeraven-ehr_rpms-data
+  $ docker compose up -d rpms
+  ```
+- **Apple Silicon:** the pinned tag is amd64-only and runs under emulation. Releases cut after 2026-10-06 also carry arm64 (rpms-ops#802); move `RPMS_TAG` to the first one.
+
 ## RPMS backend
 
 The app needs an RPMS broker to sign in and to read or write anything.
@@ -30,16 +63,7 @@ With no host named, the app boots and logs `No RPMS backend configured`, and sig
 A host app may instead set `RpmsRpc.configure { |c| c.client = ... }` in an initializer; the engine leaves a configured client alone.
 
 **Local: an rpms-ops release in Docker.**
-Every `bcer-*-ydb` release of [rpms-ops](https://github.com/lakeraven/rpms-ops) is an image; take the newest tag from its releases page.
-If the pull is refused, `docker login ghcr.io` with a GitHub token that can read lakeraven packages.
-
-```bash
-$ docker run -d --name rpms -p 127.0.0.1:9100:9100 ghcr.io/lakeraven/rpms-ydb:$TAG
-$ cd test/dummy
-$ bin/rails server        # development defaults to a CIA broker on 127.0.0.1:9100
-```
-
-Sign in at http://localhost:3000/lakeraven-ehr/login with an RPMS access and verify code on that image.
+`docker compose up -d` runs one ("Development", above); development's defaults point at it.
 
 **A deployed stack.**
 Forward the stack's broker port to your machine (cloud-rpms runs its stacks behind SSM) and point `VISTA_RPC_HOST` and `VISTA_RPC_PORT` at the forwarded port.
