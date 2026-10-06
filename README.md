@@ -28,8 +28,14 @@ $ bin/setup                   # gems, database, Tailwind build; then starts bin/
 `bin/dev` runs the Rails server and the Tailwind watcher.
 Sign in at http://localhost:3000/lakeraven-ehr/login as `SYS123` / `RPMS.000`, the image's development operator.
 
-- **No PostgreSQL on your machine:** `docker compose --profile postgres up -d`, then `export PGHOST=127.0.0.1 PGUSER=postgres PGPASSWORD=postgres` before `bin/setup`.
-- **Start RPMS over:** `docker compose down -v`, then `docker compose up -d`. The same two steps move to a new release after `RPMS_TAG` changes in `compose.yml`.
+- **No PostgreSQL on your machine:** `docker compose --profile postgres up -d`, then `export PGHOST=127.0.0.1 PGUSER=postgres PGPASSWORD=postgres` before `bin/setup`. Set `POSTGRES_PASSWORD` before the first start to use another password.
+- **Start RPMS over**, or move to a new release after `RPMS_TAG` changes in `compose.yml`: remove the RPMS container and its volume only, so the database stays.
+
+  ```bash
+  $ docker compose rm --stop --force rpms
+  $ docker volume rm lakeraven-ehr_rpms-data
+  $ docker compose up -d rpms
+  ```
 - **Apple Silicon:** the pinned tag is amd64-only and runs under emulation. Releases cut after 2026-10-06 also carry arm64 (rpms-ops#802); move `RPMS_TAG` to the first one.
 
 ## RPMS backend

@@ -13,7 +13,8 @@
 #
 # /data is a named volume, seeded from the image on first start, so RPMS state survives restarts.
 # The image refuses another build's /data (rpms-ops#514): to move to a new release, change RPMS_TAG
-# here, then `docker compose down -v` and `docker compose up -d`. `down -v` is also how to start over.
+# here, then remove the RPMS container and volume and start it again (README, "Development"). Do not use
+# `docker compose down -v` for that: it also deletes the postgres profile's database.
 
 name: lakeraven-ehr
 
@@ -37,7 +38,8 @@ services:
     profiles: [postgres]
     image: postgres:17
     environment:
-      POSTGRES_PASSWORD: postgres
+      # Development only, published on loopback. Set POSTGRES_PASSWORD before the first start for another.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
