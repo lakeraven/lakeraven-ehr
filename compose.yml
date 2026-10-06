@@ -1,0 +1,54 @@
+# Local services for lakeraven-ehr development. Rails runs on your machine; these run in Docker.
+#
+#   docker compose up -d                     # RPMS: a pinned rpms-ops release, CIA broker on 127.0.0.1:9100
+#   docker compose --profile postgres up -d  # also PostgreSQL, if you have none (README, "Development")
+#
+# lakeraven-ehr is a front end for RPMS: test/dummy/config/rpms.yml points development at
+# 127.0.0.1:9100, this service. Sign on as SYS123 / RPMS.000, the image's development operator.
+#
+# The image is private: `docker login ghcr.io` first (README, "Development").
+# The service runs the image's own entrypoint, its supervisor (tini -> ydb_supervise, rpms-ops#408),
+# which starts the brokers and TaskMan and restarts either if it dies. Do not override it.
+# Ports are on loopback only: the brokers speak plaintext.
+#
+# /data is a named volume, seeded from the image on first start, so RPMS state survives restarts.
+# The image refuses another build's /data (rpms-ops#514): to move to a new release, change RPMS_TAG
+# here, then `docker compose down -v` and `docker compose up -d`. `down -v` is also how to start over.
+
+name: lakeraven-ehr
+
+services:
+  rpms:
+    image: ghcr.io/lakeraven/rpms-ydb:${RPMS_TAG:-bcer-9.0-20261005-17411fa-ydb}
+    ports:
+      - "127.0.0.1:9100:9100"
+    volumes:
+      - rpms-data:/data
+    healthcheck:
+      # LISTEN state, not a connect: a connect is a session to the broker (rpms-ops#444).
+      test: ["CMD-SHELL", "ss -ltnH | grep -q ':9100 '"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
+    restart: unless-stopped
+
+  postgres:
+    profiles: [postgres]
+    image: postgres:17
+    environment:
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  rpms-data:
+  postgres-data:
