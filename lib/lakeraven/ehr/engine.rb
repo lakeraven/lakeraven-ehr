@@ -25,34 +25,40 @@ module Lakeraven
         app.config.filter_parameters += %i[username access_code verify_code]
       end
 
-      NO_RPMS_BACKEND = "[lakeraven-ehr] No RPMS backend configured: set VISTA_BROKER, " \
-                        "VISTA_RPC_HOST and VISTA_RPC_PORT (README, \"RPMS backend\"). Sign-in will fail."
+      NO_RPMS_BACKEND = "[lakeraven-ehr] No RPMS backend configured: name a broker in " \
+                        "config/rpms.yml (README, \"RPMS backend\"). Sign-in will fail."
 
-      # The live broker client, built once per process from the environment
-      # (#539). Before this nothing built one, so every live request raised
-      # NotConfiguredError. It runs after the host app's initializers so a
+      # The live broker client, built once per process from the host app's
+      # config/rpms.yml (#539). It runs after the host app's initializers, so a
       # client configured there (or the SPIKE_MOCK_RPC demo mock) wins.
       config.after_initialize do
         Lakeraven::EHR::Engine.configure_rpms_broker!
       end
 
-      # VISTA_BROKER picks the wire (cia for an RPMS CIA broker: a YDB stack's
-      # 9100, an IRIS stack's 9200; xwb for stock VistA), VISTA_RPC_HOST and
-      # VISTA_RPC_PORT say where. No host, no client. The socket opens at
-      # sign-on, not here, so the app boots with the broker down.
-      # lakeraven-ehr is a front end for RPMS: with no broker named and no
-      # client configured, it says so at boot instead of failing at sign-in.
-      def self.configure_rpms_broker!(env = ENV, logger: Rails.logger)
+      # The host's config/rpms.yml for this environment, or nothing when the
+      # host has none.
+      def self.rpms_settings
+        return {} unless Rails.root.join("config", "rpms.yml").exist?
+
+        Rails.application.config_for(:rpms)
+      end
+
+      # broker picks the wire (cia or xwb), host and port say where. No host,
+      # no client. The socket opens at sign-on, not here, so the app boots with
+      # the broker down. lakeraven-ehr is a front end for RPMS: with no broker
+      # named and no client configured, it says so at boot instead of failing
+      # at sign-in.
+      def self.configure_rpms_broker!(settings = rpms_settings, logger: Rails.logger)
         require "rpms_rpc/core"
         require "rpms_rpc/broker_factory"
         return if RpmsRpc.configuration.client
 
-        if env["VISTA_RPC_HOST"].to_s.empty?
+        if settings[:host].to_s.empty?
           logger&.warn(NO_RPMS_BACKEND)
           return
         end
 
-        client = RpmsRpc.client_for(env["VISTA_BROKER"], host: env["VISTA_RPC_HOST"], port: env["VISTA_RPC_PORT"])
+        client = RpmsRpc.client_for(settings[:broker], host: settings[:host], port: settings[:port])
         RpmsRpc.configure { |c| c.client = client }
       end
 
