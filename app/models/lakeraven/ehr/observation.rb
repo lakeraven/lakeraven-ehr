@@ -38,6 +38,22 @@ module Lakeraven
 
       CATEGORY_SYSTEM = "http://terminology.hl7.org/CodeSystem/observation-category"
 
+      # This sandbox serves only synthetic conformance-demo data, never a
+      # real patient record; HTEST (v3 ActReason "test health data") marks
+      # every resource it returns as such, unconditionally.
+      HTEST_SECURITY_LABEL = {
+        system: "http://terminology.hl7.org/CodeSystem/v3-ActReason",
+        code: "HTEST",
+        display: "test health data"
+      }.freeze
+
+      # Generic US Core profile for observation categories with no
+      # code-specific mapping below (e.g. laboratory results carried in
+      # alongside vitals from a supplemental provider).
+      GENERIC_US_CORE_PROFILES = {
+        "laboratory" => "http://hl7.org/fhir/us/core/StructureDefinition/us-core-observation-lab"
+      }.freeze
+
       # US Core vital sign profile URLs
       US_CORE_PROFILES = {
         "85354-9" => "http://hl7.org/fhir/us/core/StructureDefinition/us-core-blood-pressure",
@@ -199,8 +215,10 @@ module Lakeraven
       end
 
       def build_meta
-        profile_url = US_CORE_PROFILES[code]
-        profile_url ? { profile: [ profile_url ] } : nil
+        profile_url = US_CORE_PROFILES[code] || GENERIC_US_CORE_PROFILES[category]
+        meta = { security: [ HTEST_SECURITY_LABEL ] }
+        meta[:profile] = [ profile_url ] if profile_url
+        meta
       end
 
       # Quantity.value is a FHIR decimal — it must serialize as a JSON

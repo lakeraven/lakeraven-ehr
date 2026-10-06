@@ -7,6 +7,15 @@ module Lakeraven
       class PatientSerializer
         US_CORE_PROFILE = "http://hl7.org/fhir/us/core/StructureDefinition/us-core-patient"
 
+        # This sandbox serves only synthetic conformance-demo data, never a
+        # real patient record; HTEST (v3 ActReason "test health data") marks
+        # every resource it returns as such, unconditionally.
+        HTEST_SECURITY_LABEL = {
+          system: "http://terminology.hl7.org/CodeSystem/v3-ActReason",
+          code: "HTEST",
+          display: "test health data"
+        }.freeze
+
         # CDC Race & Ethnicity code system OID
         RACE_CODE_SYSTEM = "urn:oid:2.16.840.1.113883.6.238"
 
@@ -36,7 +45,7 @@ module Lakeraven
           resource = {
             resourceType: "Patient",
             id: @p.dfn.to_s,
-            meta: { profile: [ US_CORE_PROFILE ] },
+            meta: { profile: [ US_CORE_PROFILE ], security: [ HTEST_SECURITY_LABEL ] },
             name: [ build_name ],
             gender: gender_value
           }

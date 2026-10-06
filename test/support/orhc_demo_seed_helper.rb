@@ -5,25 +5,29 @@ require_relative "rpms_mock_patient_seeds_helper"
 module OrhcDemoSeedHelper
   include RpmsMockPatientSeedsHelper
 
-  # Minimal RPMS-shaped seed the adapter will mirror; MRN must be indexed for
-  # identifier_search — not only echoed on Patient.identifier in responses.
+  # Minimal RPMS-shaped seed the adapter will mirror; MRN (the real IHS
+  # health record number, HRN) must be indexed for identifier_search — not
+  # only echoed on Patient.identifier in responses. Seeded on
+  # :patient_lookup_agg (AGG LOOKUP PATIENTS), the real RPC
+  # RpmsRpc::Patient.find_by_hrn resolves through — never on an invented
+  # wire position.
   def seed_orhc_demo_patients!(site_ien: 5001)
     client = RpmsRpc.client
-    [
+    patients = [
       { dfn: "9101", name: "Kessler,Pat", sex: "F", dob: Date.parse("1959-04-12"),
-        ssn: "900-00-9101", mrn: "ORHC-A" },
+        ssn: "900-00-9101", hrn: "ORHC-A" },
       { dfn: "9102", name: "Ames,Robin", sex: "M", dob: Date.parse("1955-11-03"),
-        ssn: "900-00-9102", mrn: "ORHC-B" },
+        ssn: "900-00-9102", hrn: "ORHC-B" },
       { dfn: "9007", name: "DEMOPATIENT,OUTSIDE", sex: "M", dob: Date.parse("1980-04-18"),
-        ssn: "900-00-9007", mrn: "ORHC-OUTSIDE", site_ien: 7000 }
-    ].each do |row|
+        ssn: "900-00-9007", hrn: "ORHC-OUTSIDE", site_ien: 7000 }
+    ]
+    patients.each do |row|
       client.seed(:patient_select, row[:dfn], {
         name: row[:name], sex: row[:sex], dob: row[:dob], ssn: row[:ssn], age: 65
       })
       client.seed(:patient_id_info, row[:dfn], {
         ssn: row[:ssn], dob: row[:dob], sex: row[:sex],
-        race_code: "I", site_ien: row[:site_ien] || site_ien, name: row[:name],
-        orhc_demo_mrn: row[:mrn]
+        race_code: "I", site_ien: row[:site_ien] || site_ien, name: row[:name]
       })
       client.seed(:patient_ssn, row[:ssn], { dfn: row[:dfn].to_i, name: row[:name], ssn: row[:ssn] })
     end
@@ -34,6 +38,9 @@ module OrhcDemoSeedHelper
         { dfn: 9007, name: "DEMOPATIENT,OUTSIDE", sex: "M", dob: Date.parse("1980-04-18") }
       ],
       filter_field: :name)
+    client.seed_collection(:patient_lookup_agg,
+      patients.map { |row| { dfn_raw: row[:dfn], name: row[:name], hrn: row[:hrn] } },
+      filter_field: :hrn)
   end
 
   def seed_orhc_patient_kessler!(site_ien: 5001)

@@ -37,6 +37,15 @@ module Lakeraven
           attach_provenance(patient, source: :rpc)
         end
 
+        def find_by_mrn(mrn)
+          return nil if mrn.blank?
+
+          patient = PatientGateway.find_by_mrn(mrn)
+          return nil unless patient
+
+          attach_provenance(patient, source: :rpc)
+        end
+
         private
 
         def fetch_patient(dfn, source_preference)

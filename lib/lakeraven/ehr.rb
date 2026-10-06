@@ -44,6 +44,14 @@ module Lakeraven
         owned_by(dfn, Array(supplemental_allergy_intolerances_provider&.call(dfn.to_s)))
       end
 
+      # Business-identifier system recognised by Patient.identifier search as
+      # an additional patient-facing MRN, alongside the DFN and SSN systems
+      # PatientsController already resolves literally. Defaults to the
+      # fixture system this sandbox's conformance demo serves; a deployment
+      # that issues its own MRN system URI overrides it via
+      # Lakeraven::EHR.configure.
+      attr_accessor :mrn_identifier_system
+
       # Supplemental resources are re-checked against the REQUESTED patient
       # before they are served: the request's patient is what authorization
       # bound to (SmartAuthentication resolves and org-checks it), so a
@@ -66,6 +74,7 @@ module Lakeraven
           value.empty? ? nil : value
         }
         @eligibility_adapter = MockEligibilityAdapter.new
+        @mrn_identifier_system = "http://example.org/fhir/sid/orhc-demo/mrn"
       end
     end
 

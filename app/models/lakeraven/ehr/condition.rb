@@ -23,6 +23,17 @@ module Lakeraven
 
       CATEGORY_SYSTEM = "http://terminology.hl7.org/CodeSystem/condition-category"
 
+      US_CORE_PROFILE = "http://hl7.org/fhir/us/core/StructureDefinition/us-core-condition-problems-health-concerns"
+
+      # This sandbox serves only synthetic conformance-demo data, never a
+      # real patient record; HTEST (v3 ActReason "test health data") marks
+      # every resource it returns as such, unconditionally.
+      HTEST_SECURITY_LABEL = {
+        system: "http://terminology.hl7.org/CodeSystem/v3-ActReason",
+        code: "HTEST",
+        display: "test health data"
+      }.freeze
+
       attribute :ien, :string
       attribute :patient_dfn, :string
       attribute :code, :string
@@ -121,6 +132,7 @@ module Lakeraven
         {
           resourceType: "Condition",
           id: ien&.to_s,
+          meta: { profile: [ US_CORE_PROFILE ], security: [ HTEST_SECURITY_LABEL ] },
           subject: patient_dfn ? { reference: "Patient/#{patient_dfn}" } : nil,
           clinicalStatus: build_clinical_status,
           verificationStatus: build_verification_status,

@@ -45,6 +45,11 @@ module Lakeraven
       attribute :race_code, :string
       attribute :site_ien, :integer
 
+      # Business-identifier MRN, distinct from the DFN. Not every deployment
+      # exposes one through RPC; populated by PatientGateway when the
+      # upstream identifier projection carries it.
+      attribute :mrn, :string
+
       # SOGI data elements (USCDI v3 / ONC 170.315(a)(15))
       attribute :sexual_orientation, :string
       attribute :gender_identity, :string
@@ -82,6 +87,15 @@ module Lakeraven
 
       def self.find_by_ssn(ssn)
         PatientRepository.find_by_ssn(ssn)
+      end
+
+      def self.find_by_mrn(mrn)
+        PatientRepository.find_by_mrn(mrn)
+      end
+
+      def self.search_by_mrn(mrn)
+        patient = find_by_mrn(mrn)
+        patient ? [ patient ] : []
       end
 
       # -- Write operations (remain on gateway for now) ------------------------

@@ -160,6 +160,8 @@ module Lakeraven
           patient ? [ patient ] : []
         when *SSN_IDENTIFIER_SYSTEMS
           Patient.search_by_ssn(value)
+        when Lakeraven::EHR.configuration.mrn_identifier_system
+          Patient.search_by_mrn(value)
         else
           raise UnsupportedIdentifierSystem, system
         end

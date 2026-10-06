@@ -55,10 +55,11 @@ rescue
   @orhc_response_body = nil
 end
 
-Then("the response status should be {int}") do |status|
-  assert_equal status, last_response.status,
-    "Expected #{status}, got #{last_response.status}: #{last_response.body[0..300]}"
-end
+# "the response status should be {int}" is defined once, in
+# bulk_export_steps.rb. Cucumber step definitions are global, so redefining it
+# here made every status assertion in features/partner_backend_services_auth.feature
+# an Ambiguous match — silently turning the cross-organization denial gate that
+# CI runs as a merge check into 53 failing scenarios that asserted nothing.
 
 Then("the response should echo X-Request-Id {string}") do |request_id|
   assert_equal request_id, last_response.headers["X-Request-Id"],

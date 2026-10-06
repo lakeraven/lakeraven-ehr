@@ -32,5 +32,11 @@ module RpmsMockPatientSeedsHelper
         { dfn: 3, name: "DOE,JANE", sex: "F", dob: Date.parse("1990-12-25") }
       ],
       filter_field: :name)
+
+    # Clears any HRN rows an ORHC demo test seeded on :patient_lookup_agg
+    # (AGG LOOKUP PATIENTS) — seed_collection replaces the whole collection,
+    # so leaving it unset here would let a prior test's HRNs answer an
+    # unrelated later lookup.
+    client.seed_collection(:patient_lookup_agg, [], filter_field: :hrn)
   end
 end
