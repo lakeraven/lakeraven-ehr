@@ -4,12 +4,6 @@ Read-only demo patient chart (issue #452, PR #453). Synthetic data only — no P
 
 ## Start (local, synthetic data only)
 
-Preferred — runs the preflight checks automatically:
-
-    /Users/kimball/code/lakeraven/rpms/lakeraven-ehr/test/dummy/bin/demo
-
-Equivalent manual start:
-
     cd test/dummy
     CHART_DEMO_OPEN=1 SPIKE_MOCK_RPC=1 bin/rails server
 
@@ -18,20 +12,20 @@ Equivalent manual start:
 
 **URL:** http://localhost:3000/patients/1
 
+To run against a real RPMS instead of the mock, see the README, "RPMS backend".
+
 ## Preflight (5 minutes before)
 
-`bin/demo` does all of this for you; if starting manually:
-
-1. **Port 3000 free?** A previous dummy server (or its stale pidfile) is the most
-   likely failure. `lsof -ti:3000 | xargs kill; rm -f test/dummy/tmp/pids/server.pid`
-   — or just reuse the already-running server if it is serving `/patients/1` correctly.
+1. **Port 3000 free?** If `rails server` reports it is in use, find the owner with
+   `lsof -nP -iTCP:3000 -sTCP:LISTEN` and stop it only if it is your own server,
+   or start on another port with `-p 3001`.
 2. **Postgres up?** `pg_isready || brew services start postgresql`. Dev-mode
    migration checking queries the DB on every request; a down Postgres 500s everything.
 3. **Clean env.** `unset RPMS_RPC_PATH` (flips the Gemfile to a path source →
    bundler rejects the lockfile) and make sure no stray `RAILS_ENV` is exported —
    both demo flags are honored **only in development**.
 4. **Remote screen?** Puma binds localhost. Showing from another device on the
-   network needs `bin/demo -b 0.0.0.0`. A local browser needs nothing.
+   network needs `-b 0.0.0.0`. A local browser needs nothing.
 5. **Smoke test:** open http://localhost:3000/patients/1 (expect Alice Anderson) and
    http://localhost:3000/patients/1.json (expect a FHIR Bundle).
 
@@ -66,5 +60,4 @@ Equivalent manual start:
 - `app/controllers/lakeraven/ehr/charts_controller.rb` — auth/bypass semantics, Bundle assembly
 - `test/dummy/config/initializers/zz_spike_mock_rpc.rb` — SPIKE mock wiring (documents the start command)
 - `test/dummy/lib/lakeraven_demo_seeds.rb` — the synthetic "Anderson, Alice" seed set
-- `test/dummy/bin/demo` — preflight + boot script
 - `test/integration/demo_patient_chart_test.rb` — locks the demo behavior (both representations + auth)

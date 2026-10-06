@@ -16,7 +16,7 @@ class RpmsBrokerConfigurationTest < ActiveSupport::TestCase
 
   test "VISTA_BROKER=cia builds a CIA client for the named host and port, unconnected" do
     Lakeraven::EHR::Engine.configure_rpms_broker!(
-      "VISTA_BROKER" => "cia", "VISTA_RPC_HOST" => "10.0.0.5", "VISTA_RPC_PORT" => "19200"
+      { "VISTA_BROKER" => "cia", "VISTA_RPC_HOST" => "10.0.0.5", "VISTA_RPC_PORT" => "19200" }
     )
 
     client = RpmsRpc.configuration.client
@@ -28,16 +28,27 @@ class RpmsBrokerConfigurationTest < ActiveSupport::TestCase
 
   test "VISTA_BROKER=xwb builds an XWB client" do
     Lakeraven::EHR::Engine.configure_rpms_broker!(
-      "VISTA_BROKER" => "xwb", "VISTA_RPC_HOST" => "10.0.0.5", "VISTA_RPC_PORT" => "9100"
+      { "VISTA_BROKER" => "xwb", "VISTA_RPC_HOST" => "10.0.0.5", "VISTA_RPC_PORT" => "9100" }
     )
 
     assert_instance_of RpmsRpc::XwbClient, RpmsRpc.configuration.client
   end
 
-  test "no VISTA_RPC_HOST, no client" do
-    Lakeraven::EHR::Engine.configure_rpms_broker!("VISTA_BROKER" => "cia")
+  test "no VISTA_RPC_HOST, no client, and the log says no backend is configured" do
+    log = StringIO.new
+    Lakeraven::EHR::Engine.configure_rpms_broker!({ "VISTA_BROKER" => "cia" }, logger: Logger.new(log))
 
     assert_nil RpmsRpc.configuration.client
+    assert_includes log.string, "No RPMS backend configured"
+  end
+
+  test "a client configured elsewhere is not reported as missing" do
+    log = StringIO.new
+    RpmsRpc.configure { |c| c.client = Object.new }
+
+    Lakeraven::EHR::Engine.configure_rpms_broker!({}, logger: Logger.new(log))
+
+    assert_empty log.string
   end
 
   test "a client something else configured first (the mock, a host app) is left alone" do
@@ -45,7 +56,7 @@ class RpmsBrokerConfigurationTest < ActiveSupport::TestCase
     RpmsRpc.configure { |c| c.client = existing }
 
     Lakeraven::EHR::Engine.configure_rpms_broker!(
-      "VISTA_BROKER" => "cia", "VISTA_RPC_HOST" => "10.0.0.5", "VISTA_RPC_PORT" => "19200"
+      { "VISTA_BROKER" => "cia", "VISTA_RPC_HOST" => "10.0.0.5", "VISTA_RPC_PORT" => "19200" }
     )
 
     assert_same existing, RpmsRpc.configuration.client
