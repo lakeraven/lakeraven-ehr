@@ -14,6 +14,25 @@ require_relative "support/capability_metadata_probes_helper"
 require "rpms_rpc/version"
 require "rpms_rpc/mock_client"
 
+# Minimal "around" hook support for integration tests (this repo depends on
+# neither minitest-around nor rspec). A test case may define `around`; its
+# own bare `super` call chains to the base `around` below, which runs the
+# test body — the same calling convention minitest-around uses, so
+# SupplementalProviderConfigHelper-style "wrap the whole test" helpers work
+# without a new gem dependency.
+module MinitestAroundSupport
+  def around(&block)
+    block.call
+  end
+
+  def run
+    result = nil
+    around { result = super }
+    result
+  end
+end
+ActionDispatch::IntegrationTest.include(MinitestAroundSupport)
+
 # Configure RpmsRpc with mock client and seed data for all tests.
 RpmsRpc.mock! do |m|
   # Patients (DFN 1-3)

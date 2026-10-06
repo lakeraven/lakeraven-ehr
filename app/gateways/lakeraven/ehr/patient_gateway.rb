@@ -25,14 +25,12 @@ module Lakeraven
 
         # The business-identifier MRN a consumer searches by is, in IHS
         # RPMS, the health record number (HRN) — a real wire field, not an
-        # engine-side invention. Resolution is entirely rpms-rpc's concern
-        # (RpmsRpc::Patient.find_by_hrn, backed by AGG LOOKUP PATIENTS'
-        # TYPE="H" cross-reference lookup); this gateway never sees an RPC
-        # name or a wire position.
+        # engine-side invention. Resolution is entirely rpms-rpc's concern;
+        # this gateway never sees an RPC name or a wire position.
         def find_by_mrn(mrn)
           return nil if mrn.blank?
 
-          attrs = RpmsRpc::Patient.find_by_hrn(mrn)
+          attrs = RpmsRpc::Patient.find_by_business_identifier(mrn)
           return nil unless attrs
 
           build_patient(attrs)

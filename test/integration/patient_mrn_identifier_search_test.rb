@@ -116,7 +116,6 @@ module Lakeraven
         get "/lakeraven-ehr/Patient/9007", headers: @headers
         assert_response :forbidden
       end
-
     end
   end
 end

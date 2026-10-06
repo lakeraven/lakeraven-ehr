@@ -62,7 +62,7 @@ module Lakeraven
       # and how the partner profile distinguishes office-measured from patient-reported
       # values). Provenance rides along as search.mode "include".
       def provenance_includes(observations)
-        return [] unless params[:_revinclude] == "Provenance:target"
+        return [] unless params[:_revinclude] == "Provenance:target" && can_read?("Provenance")
 
         observations.flat_map do |o|
           ProvenanceStore.instance.for_target("Observation", o.ien.to_s).map(&:to_fhir)

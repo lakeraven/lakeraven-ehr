@@ -7,10 +7,9 @@ module OrhcDemoSeedHelper
 
   # Minimal RPMS-shaped seed the adapter will mirror; MRN (the real IHS
   # health record number, HRN) must be indexed for identifier_search — not
-  # only echoed on Patient.identifier in responses. Seeded on
-  # :patient_lookup_agg (AGG LOOKUP PATIENTS), the real RPC
-  # RpmsRpc::Patient.find_by_hrn resolves through — never on an invented
-  # wire position.
+  # only echoed on Patient.identifier in responses. Seeded through
+  # RpmsRpc::Patient.find_by_business_identifier's sandbox-only lookup (see
+  # rpms-rpc's mappings/sandbox.rb) — never on an invented wire position.
   def seed_orhc_demo_patients!(site_ien: 5001)
     client = RpmsRpc.client
     patients = [
@@ -30,6 +29,7 @@ module OrhcDemoSeedHelper
         race_code: "I", site_ien: row[:site_ien] || site_ien, name: row[:name]
       })
       client.seed(:patient_ssn, row[:ssn], { dfn: row[:dfn].to_i, name: row[:name], ssn: row[:ssn] })
+      client.seed(:patient_business_identifier, row[:hrn], { dfn: row[:dfn].to_i, identifier: row[:hrn] })
     end
     client.seed_collection(:patient_list,
       [
@@ -38,9 +38,6 @@ module OrhcDemoSeedHelper
         { dfn: 9007, name: "DEMOPATIENT,OUTSIDE", sex: "M", dob: Date.parse("1980-04-18") }
       ],
       filter_field: :name)
-    client.seed_collection(:patient_lookup_agg,
-      patients.map { |row| { dfn_raw: row[:dfn], name: row[:name], hrn: row[:hrn] } },
-      filter_field: :hrn)
   end
 
   def seed_orhc_patient_kessler!(site_ien: 5001)

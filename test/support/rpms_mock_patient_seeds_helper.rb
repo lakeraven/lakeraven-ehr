@@ -33,10 +33,9 @@ module RpmsMockPatientSeedsHelper
       ],
       filter_field: :name)
 
-    # Clears any HRN rows an ORHC demo test seeded on :patient_lookup_agg
-    # (AGG LOOKUP PATIENTS) — seed_collection replaces the whole collection,
-    # so leaving it unset here would let a prior test's HRNs answer an
-    # unrelated later lookup.
-    client.seed_collection(:patient_lookup_agg, [], filter_field: :hrn)
+    # No cleanup needed for :patient_business_identifier — it is a
+    # single-record, exact-key lookup (see OrhcDemoSeedHelper), so a prior
+    # test's HRN keys ("ORHC-A", etc.) never answer an unrelated later
+    # lookup; nothing here queries those keys.
   end
 end

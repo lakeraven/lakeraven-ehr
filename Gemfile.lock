@@ -1,7 +1,7 @@
 GIT
   remote: https://github.com/lakeraven/rpms-rpc.git
-  revision: 4063bc25f304bca9eab16a1e3988cd7cf897c38d
-  branch: main
+  revision: 63ea0dc56ad4af3de044262dae22fce9d8aafd00
+  branch: sandbox/hrn-on-pin
   specs:
     rpms-rpc (0.2.0)
       rexml (~> 3.2)

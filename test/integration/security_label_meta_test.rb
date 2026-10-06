@@ -42,7 +42,7 @@ module Lakeraven
 
       # Catches meta stamping on RPC-backed types only while supplemental types stay bare.
       test "Condition search entries carry HTEST security" do
-        get "/lakeraven-ehr/Condition", params: {patient: "9101"}, headers: @headers
+        get "/lakeraven-ehr/Condition", params: { patient: "9101" }, headers: @headers
         assert_response :ok
         body = JSON.parse(response.body)
         refute_empty body["entry"], "need at least one Condition to assert meta"
@@ -53,7 +53,9 @@ module Lakeraven
 
       # Catches meta omitted on supplemental observations served beside vitals.
       test "Observation search entries carry HTEST security" do
-        get "/lakeraven-ehr/Observation", params: {patient: "9101", code: "2345-7"}, headers: @headers
+        get "/lakeraven-ehr/Observation",
+          params: { patient: "9101", code: "2345-7" },
+          headers: @headers
         assert_response :ok
         body = JSON.parse(response.body)
         refute_empty body["entry"], "need at least one Observation to assert meta"
@@ -80,16 +82,16 @@ module Lakeraven
         Class.new do
           def for_patient(_dfn)
             [
-              {ien: "cond-orhc-a-i10", status: "A", icd_code: "I10",
-               description: "Essential hypertension", onset_date: Date.new(2019, 3, 1),
-               recorded_date: Date.new(2019, 3, 1)}
+              { ien: "cond-orhc-a-i10", status: "A", icd_code: "I10",
+                description: "Essential hypertension", onset_date: Date.new(2019, 3, 1),
+                recorded_date: Date.new(2019, 3, 1) }
             ]
           end
         end.new
       end
 
       def orhc_supplemental_observations_proc
-        ->(_dfn) {
+        lambda do |_dfn|
           [
             Observation.new(
               ien: "obs-orhc-a-glu-fix", patient_dfn: "9101", code: "2345-7",
@@ -98,7 +100,7 @@ module Lakeraven
               effective_datetime: DateTime.new(2026, 9, 22, 8, 5, 0, "-7")
             )
           ]
-        }
+        end
       end
     end
   end

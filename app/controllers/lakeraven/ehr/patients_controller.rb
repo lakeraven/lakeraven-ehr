@@ -31,7 +31,7 @@ module Lakeraven
 
         entries = patients.map { |p| build_patient_entry(p) }
 
-        if params[:_revinclude] == "Provenance:target"
+        if params[:_revinclude] == "Provenance:target" && can_read?("Provenance")
           patients.each do |p|
             ProvenanceStore.instance.for_target("Patient", "rpms-#{p.dfn}").each do |prov|
               entries << { resource: prov.to_fhir, search: { mode: "include" } }
