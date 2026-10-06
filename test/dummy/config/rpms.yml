@@ -8,15 +8,16 @@
 #   port    the broker's port
 #
 # Each value can come from the environment, as database.yml takes DATABASE_URL.
+# broker and host are quoted: a bare `on` or `null` would otherwise load as a boolean or nil.
 default: &default
-  broker: <%= ENV.fetch("VISTA_BROKER", "cia") %>
-  host: <%= ENV["VISTA_RPC_HOST"] %>
+  broker: "<%= ENV.fetch("VISTA_BROKER", "cia") %>"
+  host: "<%= ENV["VISTA_RPC_HOST"] %>"
   port: <%= ENV.fetch("VISTA_RPC_PORT", 9100) %>
 
 # A local rpms-ops image: docker run -p 127.0.0.1:9100:9100 ghcr.io/lakeraven/rpms-ydb:$TAG
 development:
   <<: *default
-  host: <%= ENV.fetch("VISTA_RPC_HOST", "127.0.0.1") %>
+  host: "<%= ENV.fetch("VISTA_RPC_HOST", "127.0.0.1") %>"
 
 # The suite runs on rpms-rpc's MockClient (test_helper.rb), which replaces any
 # client built here. Only test/system/live names a broker, through VISTA_*.

@@ -18,7 +18,7 @@ To run against a real RPMS instead of the mock, see the README, "RPMS backend".
 
 1. **Port 3000 free?** If `rails server` reports it is in use, find the owner with
    `lsof -nP -iTCP:3000 -sTCP:LISTEN` and stop it only if it is your own server,
-   or start on another port with `-p 3001`.
+   or start on another port with `-p 3001` and use that port in every URL below.
 2. **Postgres up?** `pg_isready || brew services start postgresql`. Dev-mode
    migration checking queries the DB on every request; a down Postgres 500s everything.
 3. **Clean env.** `unset RPMS_RPC_PATH` (flips the Gemfile to a path source →

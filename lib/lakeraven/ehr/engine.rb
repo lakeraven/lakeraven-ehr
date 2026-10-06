@@ -31,8 +31,10 @@ module Lakeraven
       # The live broker client, built once per process from the host app's
       # config/rpms.yml (#539). It runs after the host app's initializers, so a
       # client configured there (or the SPIKE_MOCK_RPC demo mock) wins.
+      # Not in the test environment, where test_helper installs the mock client
+      # right after boot and the warning would be wrong.
       config.after_initialize do
-        Lakeraven::EHR::Engine.configure_rpms_broker!
+        Lakeraven::EHR::Engine.configure_rpms_broker!(logger: (Rails.logger unless Rails.env.test?))
       end
 
       # The host's config/rpms.yml for this environment, or nothing when the
