@@ -7,6 +7,10 @@ require_relative "../test/dummy/config/environment"
 ActiveRecord::Migrator.migrations_paths = [ File.expand_path("../test/dummy/db/migrate", __dir__) ]
 ActiveRecord::Migrator.migrations_paths << File.expand_path("../db/migrate", __dir__)
 require "rails/test_help"
+require_relative "support/supplemental_provider_config_helper"
+require_relative "support/rpms_mock_patient_seeds_helper"
+require_relative "support/orhc_demo_seed_helper"
+require_relative "support/capability_metadata_probes_helper"
 require "rpms_rpc/version"
 require "rpms_rpc/mock_client"
 

@@ -7,6 +7,8 @@ module Lakeraven
     # GATE SPEC — ORHC Booth Demo Spec v1.1 §1 rule 1 and §5 (meta.security HTEST only).
     class SecurityLabelMetaTest < ActionDispatch::IntegrationTest
       include SmartAuthTestHelper
+      include SupplementalProviderConfigHelper
+      include OrhcDemoSeedHelper
 
       HTEST_SYSTEM = "http://terminology.hl7.org/CodeSystem/v3-ActReason"
       SITE_IEN = 5001
@@ -16,14 +18,19 @@ module Lakeraven
           scopes: "system/Patient.read system/Condition.read system/Observation.read",
           organization_id: "rpms-organization-#{SITE_IEN}"
         )
-        seed_patient_and_clinical_rows!
+        @saved_condition_gateway = Condition.gateway
+        seed_orhc_patient_kessler!(site_ien: SITE_IEN)
+        Condition.gateway = orhc_condition_gateway
       end
 
       teardown do
         teardown_smart_auth
-        Condition.gateway = nil
-        Observation.gateway = nil
-        Lakeraven::EHR.configuration.supplemental_observations_provider = nil
+        Condition.gateway = @saved_condition_gateway
+        restore_default_rpms_patient_seeds!
+      end
+
+      def around
+        with_supplemental_providers(observations: orhc_supplemental_observations_proc) { super }
       end
 
       # Catches serializers that only emit meta.profile and omit HTEST security.
@@ -69,18 +76,8 @@ module Lakeraven
           "per-resource meta.tag must not be invented (§1 rule 1)"
       end
 
-      def seed_patient_and_clinical_rows!
-        client = RpmsRpc.client
-        client.seed(:patient_select, "9101", {
-          name: "Kessler,Pat", sex: "F", dob: Date.parse("1959-04-12"),
-          ssn: "900-00-9101", age: 67
-        })
-        client.seed(:patient_id_info, "9101", {
-          ssn: "900-00-9101", dob: Date.parse("1959-04-12"), sex: "F",
-          race_code: "I", site_ien: SITE_IEN, name: "Kessler,Pat"
-        })
-
-        Condition.gateway = Class.new do
+      def orhc_condition_gateway
+        Class.new do
           def for_patient(_dfn)
             [
               {ien: "cond-orhc-a-i10", status: "A", icd_code: "I10",
@@ -89,8 +86,10 @@ module Lakeraven
             ]
           end
         end.new
+      end
 
-        Lakeraven::EHR.configuration.supplemental_observations_provider = ->(_dfn) {
+      def orhc_supplemental_observations_proc
+        ->(_dfn) {
           [
             Observation.new(
               ien: "obs-orhc-a-glu-fix", patient_dfn: "9101", code: "2345-7",
