@@ -5,5 +5,6 @@ Rails.application.routes.draw do
 
   # Demo convenience: expose the engine's read-only chart at the host root
   # so the partner demo URL is simply /patients/:dfn (issue #452).
-  get "patients/:dfn(.:format)", to: "lakeraven/ehr/charts#show", constraints: { dfn: /\d+/ }
+  get "patients", to: "lakeraven/ehr/charts#index", as: :patient_charts
+  get "patients/:dfn(.:format)", to: "lakeraven/ehr/charts#show", as: :patient_chart, constraints: { dfn: /\d+/ }
 end

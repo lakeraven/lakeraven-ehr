@@ -10,6 +10,7 @@ Lakeraven::EHR::Engine.routes.draw do
   # RESTful path: the chart is the human-facing representation of a patient,
   # so it lives at /patients/:dfn (the FHIR API keeps /Patient per convention;
   # that resource also owns the patient_path helper, hence :patient_chart).
+  get "patients", to: "charts#index", as: :patient_charts
   get "patients/:dfn(.:format)", to: "charts#show", as: :patient_chart, constraints: { dfn: /\d+/ }
 
   # Doorkeeper models (Application, AccessToken) are used directly;

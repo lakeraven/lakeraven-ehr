@@ -183,6 +183,22 @@ module Lakeraven
 
       # Fail closed: a patient whose managing organization cannot be resolved
       # is not readable by an org-bound credential.
+      # Whether an organization-bound credential may see this patient, failing
+      # closed. A search result may carry no site, so the full record is
+      # resolved before deciding; a patient whose managing site cannot be
+      # resolved is not visible.
+      #
+      # Lives here rather than in one controller because both the FHIR search
+      # and the clinician-facing index answer the same question, and a second
+      # copy is a second thing to get wrong.
+      def org_visible_patient?(patient)
+        return true if organization_permits_patient?(patient)
+        return false if patient.site_ien.present? || patient.dfn.blank?
+
+        resolved = Patient.find_by_dfn(patient.dfn)
+        resolved.present? && organization_permits_patient?(resolved)
+      end
+
       def organization_permits_patient?(patient)
         site_ien = patient.respond_to?(:site_ien) ? patient.site_ien : nil
         return false if site_ien.blank?

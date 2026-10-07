@@ -91,17 +91,6 @@ module Lakeraven
 
       private
 
-      # The search projection (ORWPT LIST ALL) carries no site_ien, so an
-      # org-bound search would otherwise return nothing; resolve the full
-      # record before deciding. Fail closed: a patient whose managing site
-      # cannot be resolved is not visible to org-bound credentials.
-      def org_visible_patient?(patient)
-        return true if organization_permits_patient?(patient)
-        return false if patient.site_ien.present? || patient.dfn.blank?
-
-        resolved = Patient.find_by_dfn(patient.dfn)
-        resolved.present? && organization_permits_patient?(resolved)
-      end
 
       def enforce_patient_context!
         authorize_patient_context!(params[:dfn])

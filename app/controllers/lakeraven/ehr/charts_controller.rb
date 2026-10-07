@@ -50,8 +50,11 @@ module Lakeraven
 
       before_action :authenticate_chart_request!
       before_action :require_patient_scope!
-      before_action :enforce_patient_context!
-      before_action :enforce_organization_scope!
+      # Patient-context binding and the single-patient organization check apply
+      # to one chart. The index has no :dfn to bind to, so it scopes the list
+      # instead — see #index.
+      before_action :enforce_patient_context!, except: :index
+      before_action :enforce_organization_scope!, except: :index
 
       # RPMS problem-list status codes -> FHIR clinical-status
       PROBLEM_STATUS = { "A" => "active", "I" => "inactive" }.freeze
@@ -61,6 +64,21 @@ module Lakeraven
         "checked out" => "finished", "cancelled" => "cancelled",
         "no show" => "cancelled"
       }.freeze
+
+      # The way in to a chart. Without it the chart is reachable only by
+      # someone who already knows a DFN.
+      #
+      # An organization-bound credential sees only its own organization's
+      # patients, applied with the same org_visible_patient? the FHIR search
+      # uses: a list is the surface where a scoping mistake exposes everyone at
+      # once, rather than one patient to someone who guessed an identifier.
+      def index
+        @patients = Patient.search(params[:name].to_s)
+        @patients = @patients.select { |p| org_visible_patient?(p) } if organization_bound?
+        @query = params[:name].to_s
+
+        render :index, layout: false
+      end
 
       def show
         @patient = Patient.find_by_dfn(params[:dfn])
