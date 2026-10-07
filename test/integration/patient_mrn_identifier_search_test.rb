@@ -133,6 +133,37 @@ module Lakeraven
           "bare DFN must stay inside the credential's organization binding"
       end
 
+      # GATE FINDING (Composer, 2026-10-07) §4.2 -- bare foreign MRN was
+      # untested; only the system|value form was. Catches the widened bare path
+      # resolving another organisation's patient by their MRN.
+      test "bare foreign MRN cannot cross an organization binding" do
+        get "/lakeraven-ehr/Patient", params: { identifier: "ORHC-FOREIGN" }, headers: @headers
+
+        assert_response :ok
+        entries = Array(JSON.parse(response.body)["entry"])
+        refute_includes entries.map { |e| e.dig("resource", "id") }, "9007",
+          "a bare foreign MRN must stay inside the credential's organization binding"
+        refute entries.any? { |e|
+          Array(e.dig("resource", "identifier")).any? { |id| id["value"] == "ORHC-FOREIGN" }
+        }, "foreign ORHC MRN must not resolve bare under another organisation's credential"
+      end
+
+      # GATE FINDING (Composer, 2026-10-07) §4.3 -- _revinclude was never tested
+      # together with a bare identifier and an org binding. Catches a Provenance
+      # include for a patient the organization filter removed from the matches.
+      test "bare identifier with _revinclude leaks no Provenance for a filtered patient" do
+        get "/lakeraven-ehr/Patient",
+          params: { identifier: "9007", _revinclude: "Provenance:target" },
+          headers: @headers
+
+        assert_response :ok
+        entries = Array(JSON.parse(response.body)["entry"])
+        refute entries.any? { |e|
+          e.dig("resource", "resourceType") == "Provenance" &&
+            Array(e.dig("resource", "target")).any? { |t| t["reference"].to_s.include?("9007") }
+        }, "a filtered-out patient must not surface through a Provenance include"
+      end
+
       # Catches identifier search bypassing organization_scope (cross-tenant leak).
       test "org-bound credential cannot resolve another site's patient by ORHC MRN" do
         foreign_token = "#{ORHC_MRN_SYSTEM}|ORHC-FOREIGN"
