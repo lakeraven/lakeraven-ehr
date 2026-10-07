@@ -83,17 +83,54 @@ module Lakeraven
           "unknown systems must not widen into an unfiltered Patient search"
       end
 
-      # ORHC §5 + patient_identifier_search_test: bare value is not DFN lookup (SSN legacy only).
-      # Catches widening identifier_search to match DFN digits when system is absent.
-      test "bare identifier value without system does not resolve by DFN" do
+      # SPEC CHANGE -- this test previously asserted the inverse. FHIR R4 token
+      # search states that `identifier=[code]` matches `Identifier.value`
+      # irrespective of the system property, so a bare value MUST match. The
+      # earlier assertion encoded the implementation rather than the standard.
+      # Catches a bare value resolving against SSN alone and returning an empty
+      # bundle for a DFN or MRN the server holds.
+      test "bare identifier value without system resolves by DFN" do
         get "/lakeraven-ehr/Patient", params: { identifier: PAT_A_DFN }, headers: @headers
 
         assert_response :ok
         body = JSON.parse(response.body)
         assert_equal "Bundle", body["resourceType"]
         patient_ids = Array(body["entry"]).map { |e| e.dig("resource", "id") }
-        refute_includes patient_ids, PAT_A_DFN,
-          "bare DFN must not match without an explicit identifier system"
+        assert_includes patient_ids, PAT_A_DFN,
+          "bare DFN must match per FHIR R4 token search (system-independent)"
+      end
+
+      # Catches a bare-value path that resolves DFN but still ignores the MRN.
+      test "bare identifier value without system resolves by fixture MRN" do
+        get "/lakeraven-ehr/Patient", params: { identifier: "ORHC-A" }, headers: @headers
+
+        assert_response :ok
+        body = JSON.parse(response.body)
+        assert_equal 1, body["total"],
+          "a bare MRN must resolve exactly one patient, not an unfiltered list"
+        assert_equal PAT_A_DFN, body.dig("entry", 0, "resource", "id")
+      end
+
+      # Catches the union path returning the same patient twice when a value
+      # matches under more than one recognised system.
+      test "bare identifier value resolves each patient at most once" do
+        get "/lakeraven-ehr/Patient", params: { identifier: PAT_A_DFN }, headers: @headers
+
+        assert_response :ok
+        patient_ids = Array(JSON.parse(response.body)["entry"]).map { |e| e.dig("resource", "id") }
+        assert_equal patient_ids.uniq, patient_ids, "bare-value union must not duplicate a patient"
+      end
+
+      # Catches the widened bare-value path bypassing organization_scope -- the
+      # regression that matters most, since a bare value now touches every system.
+      test "bare identifier value cannot cross an organization binding" do
+        get "/lakeraven-ehr/Patient", params: { identifier: "9007" }, headers: @headers
+
+        assert_response :ok
+        body = JSON.parse(response.body)
+        patient_ids = Array(body["entry"]).map { |e| e.dig("resource", "id") }
+        refute_includes patient_ids, "9007",
+          "bare DFN must stay inside the credential's organization binding"
       end
 
       # Catches identifier search bypassing organization_scope (cross-tenant leak).
