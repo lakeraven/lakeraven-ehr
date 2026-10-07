@@ -177,9 +177,12 @@ module Lakeraven
       # organization binding.
       def bare_identifier_search(value)
         found = []
-        # A DFN is a positive integer. Guard on that rather than letting
-        # String#to_i coerce an SSN such as "111-11-1111" into DFN 111.
-        found << Patient.find_by_dfn(value) if value.to_s.match?(/\A\d+\z/)
+        # Only a CANONICAL DFN takes the DFN leg: a positive integer with no
+        # leading zeros. PatientRepository.find applies `dfn.to_i`, so a looser
+        # guard silently resolves the wrong patient -- measured: a bare
+        # "00000000001" returned DFN 1. A padded or dashed value is a business
+        # identifier, and the MRN and SSN legs below match it as a literal.
+        found << Patient.find_by_dfn(value) if value.to_s.match?(/\A[1-9]\d*\z/)
         found.concat(Array(Patient.search_by_mrn(value)))
         found.concat(Array(Patient.search_by_ssn(value)))
         found.compact.uniq { |patient| patient.dfn.to_s }
