@@ -51,7 +51,7 @@ class PatientIndexTest < ActionDispatch::IntegrationTest
   test "a name search narrows the list" do
     # RPMS name search is by surname; display_name is already humanized to
     # "First Last", so the surname is its last word.
-    get "/patients", params: {name: known_patient.display_name.split.last}, headers: @headers
+    get "/patients", params: { name: known_patient.display_name.split.last }, headers: @headers
 
     assert_response :success
     assert_match(%r{href="[^"]*/patients/#{known_dfn}"}, response.body)
@@ -93,7 +93,7 @@ class PatientIndexTest < ActionDispatch::IntegrationTest
 
     get "/patients/#{foreign}", headers: bearer(org_bound_token)
 
-    assert_includes [403, 404], response.status,
+    assert_includes [ 403, 404 ], response.status,
       "the index and the chart must agree about who is visible"
   end
 
@@ -114,15 +114,15 @@ class PatientIndexTest < ActionDispatch::IntegrationTest
   # rather than found. Without it the leak test silently skips, which is the
   # one test here that must not be allowed to pass by not running.
   def seed_patient_at_another_site(m)
-    m.seed(:patient_select, FOREIGN_DFN, {name: "Farwood,Dale", sex: "M",
-                                          dob: Date.parse("1966-02-09"), ssn: "900-00-9007", age: 60})
+    m.seed(:patient_select, FOREIGN_DFN, { name: "Farwood,Dale", sex: "M",
+                                          dob: Date.parse("1966-02-09"), ssn: "900-00-9007", age: 60 })
     m.seed(:patient_id_info, FOREIGN_DFN, {
       ssn: "900-00-9007", dob: Date.parse("1966-02-09"), sex: "M",
       race_code: "I", site_ien: FOREIGN_SITE, name: "Farwood,Dale"
     })
     m.seed_collection(:patient_list,
-      [ {dfn: 1, name: "Anderson,Alice", sex: "F", dob: Date.parse("1980-05-15")},
-        {dfn: FOREIGN_DFN.to_i, name: "Farwood,Dale", sex: "M", dob: Date.parse("1966-02-09")} ],
+      [ { dfn: 1, name: "Anderson,Alice", sex: "F", dob: Date.parse("1980-05-15") },
+        { dfn: FOREIGN_DFN.to_i, name: "Farwood,Dale", sex: "M", dob: Date.parse("1966-02-09") } ],
       filter_field: :name)
   end
 
@@ -143,7 +143,7 @@ class PatientIndexTest < ActionDispatch::IntegrationTest
   end
 
   def bearer(token)
-    {"Authorization" => "Bearer #{token.plaintext_token || token.token}"}
+    { "Authorization" => "Bearer #{token.plaintext_token || token.token}" }
   end
 
   def token_with(scopes:)
