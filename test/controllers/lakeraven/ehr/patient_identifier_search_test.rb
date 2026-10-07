@@ -75,9 +75,11 @@ module Lakeraven
         assert_includes body["entry"].map { |e| e.dig("resource", "id") }, "1"
       end
 
-      # Bare value is legacy SSN-only: avoids treating DFN digits as SSN and
-      # avoids widening to an unfiltered list when the system is absent.
-      test "bare identifier value without system is accepted only as SSN legacy" do
+      # SPEC CHANGE -- the second assertion previously expected total 0. FHIR R4
+      # token search matches `Identifier.value` irrespective of system, so a
+      # bare value resolves against every recognised system and returns the
+      # union. A bare SSN still resolves, which is what the legacy callers need.
+      test "bare identifier value without system resolves across recognised systems" do
         get "/lakeraven-ehr/Patient", params: { identifier: "111-11-1111" }, headers: @headers
         assert_response :ok
         body = JSON.parse(response.body)
@@ -87,8 +89,19 @@ module Lakeraven
         get "/lakeraven-ehr/Patient", params: { identifier: "1" }, headers: @headers
         assert_response :ok
         body = JSON.parse(response.body)
-        assert_equal 0, body["total"],
-          "bare '1' must not match DFN without an explicit identifier system"
+        assert_operator body["total"].to_i, :>=, 1
+        assert_includes body["entry"].map { |e| e.dig("resource", "id") }, "1",
+          "bare value must match the DFN per FHIR R4 token search"
+      end
+
+      # Catches String#to_i coercing a dashed SSN into a DFN lookup -- bare
+      # "111-11-1111" must not resolve DFN 111.
+      test "bare dashed SSN is not coerced into a DFN lookup" do
+        get "/lakeraven-ehr/Patient", params: { identifier: "111-11-1111" }, headers: @headers
+        assert_response :ok
+        patient_ids = JSON.parse(response.body)["entry"].map { |e| e.dig("resource", "id") }
+        refute_includes patient_ids, "111",
+          "a non-numeric bare value must not be coerced into a DFN"
       end
 
       # Ensures the foreign fixture is reachable before asserting org isolation.

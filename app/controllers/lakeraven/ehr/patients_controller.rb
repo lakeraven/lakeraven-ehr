@@ -140,10 +140,7 @@ module Lakeraven
 
         case system
         when nil
-          # A bare value carries no system, so the server cannot know what it
-          # names. Kept as SSN for the callers that already rely on it, rather
-          # than guessed at as a DFN.
-          Patient.search_by_ssn(value).presence || []
+          bare_identifier_search(value)
         when DFN_IDENTIFIER_SYSTEM
           patient = Patient.find_by_dfn(value)
           patient ? [ patient ] : []
@@ -154,6 +151,27 @@ module Lakeraven
         else
           raise UnsupportedIdentifierSystem, system
         end
+      end
+
+      # FHIR R4 token search is explicit that `identifier=[code]` matches
+      # `Identifier.value` irrespective of the system property. A bare value is
+      # therefore resolved against every system this endpoint recognises and the
+      # union returned, rather than guessed at as one of them. The previous
+      # implementation searched SSN alone, so a caller presenting a known MRN or
+      # DFN without a system received 200 and an empty bundle -- the server
+      # reporting "no such patient" about a lookup it never performed.
+      #
+      # `index` applies the organization filter to this result set exactly as it
+      # does to every other, so widening the match cannot cross a credential's
+      # organization binding.
+      def bare_identifier_search(value)
+        found = []
+        # A DFN is a positive integer. Guard on that rather than letting
+        # String#to_i coerce an SSN such as "111-11-1111" into DFN 111.
+        found << Patient.find_by_dfn(value) if value.to_s.match?(/\A\d+\z/)
+        found.concat(Array(Patient.search_by_mrn(value)))
+        found.concat(Array(Patient.search_by_ssn(value)))
+        found.compact.uniq { |patient| patient.dfn.to_s }
       end
 
       # "system|value" per FHIR token search. A trailing "|" means an explicitly
