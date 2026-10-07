@@ -153,7 +153,7 @@ module Lakeraven
         when nil
           bare_identifier_search(value)
         when DFN_IDENTIFIER_SYSTEM
-          patient = Patient.find_by_dfn(value)
+          patient = canonical_dfn?(value) ? Patient.find_by_dfn(value) : nil
           patient ? [ patient ] : []
         when *SSN_IDENTIFIER_SYSTEMS
           Patient.search_by_ssn(value)
@@ -177,15 +177,23 @@ module Lakeraven
       # organization binding.
       def bare_identifier_search(value)
         found = []
-        # Only a CANONICAL DFN takes the DFN leg: a positive integer with no
-        # leading zeros. PatientRepository.find applies `dfn.to_i`, so a looser
-        # guard silently resolves the wrong patient -- measured: a bare
-        # "00000000001" returned DFN 1. A padded or dashed value is a business
-        # identifier, and the MRN and SSN legs below match it as a literal.
-        found << Patient.find_by_dfn(value) if value.to_s.match?(/\A[1-9]\d*\z/)
+        found << Patient.find_by_dfn(value) if canonical_dfn?(value)
         found.concat(Array(Patient.search_by_mrn(value)))
         found.concat(Array(Patient.search_by_ssn(value)))
         found.compact.uniq { |patient| patient.dfn.to_s }
+      end
+
+      # A DFN is a positive integer with no leading zeros. The guard matters
+      # because `PatientRepository.find` applies `dfn.to_i`, which silently
+      # discards anything the integer form cannot carry -- measured, before this
+      # guard existed: both `?identifier=00000000001` and
+      # `?identifier=urn:oid:2.16.840.1.113883.4.349|00000000001` resolved
+      # DFN 1. A padded value is a business identifier, not a DFN, and
+      # resolving it positionally returns the WRONG PATIENT, which is the most
+      # expensive answer this endpoint can give. Applied on both the bare and
+      # the explicit-system paths, since the coercion is in the repository.
+      def canonical_dfn?(value)
+        value.to_s.match?(/\A[1-9]\d*\z/)
       end
 
       # "system|value" per FHIR token search. A trailing "|" means an explicitly
