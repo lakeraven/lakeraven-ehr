@@ -109,6 +109,21 @@ module Lakeraven
           "a padded value matches only as a literal business identifier"
       end
 
+      # RE-GATE FINDING (Composer, 2026-10-07) -- reproduced: the EXPLICIT
+      # system|value DFN path had the same to_i coercion, and that is the form
+      # the partner spec tells clients to send, so it mattered more than the
+      # bare case. Catches the canonical-DFN guard being applied to only one
+      # of the two paths that reach PatientRepository.find.
+      test "padded DFN on the explicit system path is not coerced" do
+        get "/lakeraven-ehr/Patient",
+          params: { identifier: "#{DFN_SYSTEM}|00000000001" }, headers: @headers
+        assert_response :ok
+        body = JSON.parse(response.body)
+        refute_includes Array(body["entry"]).map { |e| e.dig("resource", "id") }, "1",
+          "a padded DFN must not resolve DFN 1 through to_i coercion"
+        assert_equal 0, body["total"]
+      end
+
       # Catches String#to_i coercing a dashed SSN into a DFN lookup -- bare
       # "111-11-1111" must not resolve DFN 111.
       test "bare dashed SSN is not coerced into a DFN lookup" do
