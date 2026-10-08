@@ -26,7 +26,8 @@ module Lakeraven
     # keeps it from ever fronting a real backend. Host browser-session
     # -> token SSO is a documented follow-up (ADR 0004), out of scope here.
     #
-    # ONE endpoint, content-negotiated:
+    # The chart is content-negotiated; the list is HTML and staff-only:
+    #   GET /patients              -> patient list (name, sex, birth date, DFN)
     #   GET /patients/:dfn         -> clinician-facing HTML chart
     #   GET /patients/:dfn.json    -> FHIR R4 Bundle (searchset)
     #   Accept: application/fhir+json / ?_format=json also yield the Bundle
@@ -36,6 +37,7 @@ module Lakeraven
     # test/dummy/lib/lakeraven_demo_seeds.rb).
     class ChartsController < ActionController::Base
       include SmartAuthentication
+      include BrowserSmartAuthentication
       # FAIL-CLOSED audit, the same terms the clinician screening surface is
       # held to. The chart now carries scored screenings (#474), so it serves
       # the same item-level self-harm disclosures — and a sibling route to the
@@ -48,7 +50,12 @@ module Lakeraven
 
       before_action :authenticate_chart_request!
       before_action :require_patient_scope!
-      before_action :enforce_patient_context!
+      # The list is staff-only. A patient-scoped token and a system token both
+      # fail require_clinician_credential!; enforce_patient_context! is not
+      # what refuses them. The index has no :dfn to bind, and binding a missing
+      # compartment would hide the staff-only rule behind a mismatch.
+      before_action :require_clinician_credential!, only: :index
+      before_action :enforce_patient_context!, except: :index
 
       # RPMS problem-list status codes -> FHIR clinical-status
       PROBLEM_STATUS = { "A" => "active", "I" => "inactive" }.freeze
@@ -58,6 +65,13 @@ module Lakeraven
         "checked out" => "finished", "cancelled" => "cancelled",
         "no show" => "cancelled"
       }.freeze
+
+      def index
+        @query = params[:name].to_s
+        @patients = patients_visible_to_credential(Patient.search(@query))
+
+        render :index, layout: false
+      end
 
       def show
         @patient = Patient.find_by_dfn(params[:dfn])
@@ -109,6 +123,28 @@ module Lakeraven
         false
       end
 
+      # ScreeningsController#require_clinician_credential!, for a list rather
+      # than a write. current_duz is nil unless the token is a browser sign-on
+      # with a DUZ — the same two checks as clinician_credential?, plus a
+      # present DUZ — so a patient login and a system credential are both
+      # refused. demo_bypass? is not widened; it only skips this the way the
+      # other chart guards already skip authentication.
+      def require_clinician_credential!
+        return true if demo_bypass?
+        return true if clinician_credential? && current_duz.present?
+
+        render_forbidden("Listing patients requires a clinician sign-on")
+        false
+      end
+
+      # Unbound staff see every site. An organization-bound credential sees
+      # only patients it manages; org_visible_patient? fails closed.
+      def patients_visible_to_credential(patients)
+        return patients unless organization_bound?
+
+        patients.select { |patient| org_visible_patient?(patient) }
+      end
+
       def enforce_patient_context!
         return true if demo_bypass?
 
@@ -133,6 +169,56 @@ module Lakeraven
       # route dfn — no additional PHI enters the log.
       def unauthenticated_audit_actor
         "demo-bypass" if demo_bypass?
+      end
+
+      # One row per listed patient, not one row for the request. A refusal
+      # showed nobody, so it gets no Patient row — a blank Patient entity
+      # would name someone who was not on the page. @audit_recorded is set
+      # so the fail-closed wrapper does not turn that refusal into a 503.
+      def record_audit_event!(detached: false)
+        return super unless action_name == "index"
+
+        record_patient_list_audits!(detached:)
+      end
+
+      def record_patient_list_audits!(detached: false)
+        return if @audit_recorded
+        return settle_index_without_patient_rows unless patient_index_served?
+
+        agent = audit_agent_attributes
+        shared = listed_patient_audit_context
+        @patients.each { |patient| write_listed_patient_audit(patient, agent, shared, detached) }
+        @audit_recorded = true
+      end
+
+      def patient_index_served?
+        @audit_action_failure.nil? && response.successful? && @patients
+      end
+
+      def settle_index_without_patient_rows
+        @audit_recorded = true
+      end
+
+      def listed_patient_audit_context
+        {
+          event_type: "rest",
+          action: audit_action,
+          outcome: audit_outcome,
+          outcome_desc: audit_outcome_desc,
+          entity_type: "Patient",
+          agent_network_address: request.remote_ip,
+          tenant_identifier: audit_tenant_identifier,
+          facility_identifier: audit_facility_identifier
+        }
+      end
+
+      def write_listed_patient_audit(patient, agent, shared, detached)
+        persist_audit_row!(
+          detached: detached,
+          entity_identifier: patient.dfn.to_s,
+          **shared,
+          **agent
+        )
       end
 
       # -- Content negotiation --------------------------------------------------

@@ -225,7 +225,40 @@ module Lakeraven
         authorize_patient_context!(patient_id)
       end
 
+      # Whether an organization-bound credential may see this patient.
+      # Fail closed: a search row often carries no site, so the full record
+      # is resolved before deciding, and a patient whose managing site cannot
+      # be resolved is not visible.
+      #
+      # The clinician patient list uses this. The FHIR Patient search does
+      # not — calling it there would change that search's results.
+      def org_visible_patient?(patient)
+        return true if organization_permits_patient?(patient)
+        return false if patient.site_ien.present? || patient.dfn.blank?
+
+        resolved = Patient.find_by_dfn(patient.dfn)
+        resolved.present? && organization_permits_patient?(resolved)
+      end
+
+      def organization_bound?
+        current_organization_id.present?
+      end
+
       private
+
+      def current_organization_id
+        current_token&.application&.organization_id
+      end
+
+      # A credential's organization_id is either a bare site IEN or the
+      # `rpms-organization-<ien>` form the FHIR Organization id uses.
+      def organization_permits_patient?(patient)
+        site_ien = patient.respond_to?(:site_ien) ? patient.site_ien : nil
+        return false if site_ien.blank?
+
+        bound_to = current_organization_id.to_s
+        bound_to == site_ien.to_s || bound_to == "rpms-organization-#{site_ien}"
+      end
 
       def scope_permits?(resource_type, actions)
         token_scopes = current_token.scopes.to_s.split
