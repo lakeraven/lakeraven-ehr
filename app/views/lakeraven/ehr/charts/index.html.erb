@@ -22,8 +22,6 @@
       .banner{background:#1f3b57;color:#fff;padding:18px 20px;border-radius:10px;margin-bottom:20px}
       .banner h1{margin:0;font-size:23px;font-weight:700;letter-spacing:.2px}
       .banner p{margin:6px 0 0;font-size:13px;opacity:.85}
-      .demo-tag{display:inline-block;margin-left:10px;padding:2px 8px;border-radius:999px;
-                background:#f0b429;color:#3b2f00;font-size:11px;font-weight:700;vertical-align:middle}
       form.search{display:flex;gap:8px;margin-bottom:18px}
       form.search input{flex:1;padding:10px 12px;border:1px solid #cfd8e3;border-radius:8px;font-size:15px}
       form.search button{padding:10px 18px;border:0;border-radius:8px;background:#1f3b57;color:#fff;
@@ -42,12 +40,14 @@
       td a:hover{text-decoration:underline}
       .dfn{font-variant-numeric:tabular-nums;color:#5b6b7c}
       .empty{padding:28px 16px;text-align:center;color:#5b6b7c;font-size:14px}
+      .pager{padding:12px 16px;border-top:1px solid #e6ecf2}
+      .pager a{color:#1f3b57;font-weight:600;text-decoration:none}
     </style>
   </head>
   <body>
     <div class="wrap">
       <div class="banner">
-        <h1>Patients <span class="demo-tag">Synthetic demo data</span></h1>
+        <h1>Patients</h1>
         <p>Select a patient to open their chart.</p>
       </div>
 
@@ -60,14 +60,14 @@
 
       <div class="card">
         <div class="card__head">
-          <h2><%= @query.present? ? "Results for “#{@query}”" : "All patients" %></h2>
+          <h2><%= @query.present? ? "Starting at #{@query}" : "All patients" %></h2>
           <span class="count"><%= @patients.length %></span>
         </div>
 
         <% if @patients.any? %>
           <table>
             <thead>
-              <tr><th>Name</th><th>Sex</th><th>Date of birth</th><th>DFN</th></tr>
+              <tr><th>Name</th><th>DFN</th></tr>
             </thead>
             <tbody>
               <% @patients.each do |patient| %>
@@ -76,13 +76,14 @@
                       link is correct whether the engine is mounted at the host
                       root (the demo URL) or under a prefix. %>
                   <td><a href="<%= "#{request.path.chomp("/")}/#{patient.dfn}" %>"><%= patient.display_name %></a></td>
-                  <td><%= patient.sex.presence || "—" %></td>
-                  <td><%= patient.dob&.to_fs(:long) || "—" %></td>
                   <td class="dfn"><%= patient.dfn %></td>
                 </tr>
               <% end %>
             </tbody>
           </table>
+          <% if @next_name.present? %>
+            <p class="pager"><a href="<%= request.path %>?<%= { name: @next_name }.to_query %>">Next</a></p>
+          <% end %>
         <% else %>
           <p class="empty">
             <% if @query.present? %>

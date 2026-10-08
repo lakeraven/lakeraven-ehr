@@ -26,8 +26,10 @@ module Lakeraven
     # keeps it from ever fronting a real backend. Host browser-session
     # -> token SSO is a documented follow-up (ADR 0004), out of scope here.
     #
-    # The chart is content-negotiated; the list is HTML and staff-only:
-    #   GET /patients              -> patient list (name, sex, birth date, DFN)
+    # The chart is content-negotiated; the list is HTML-only and staff-only.
+    # ORWPT LIST ALL returns at most 44 names and no sex or birth date:
+    #   GET /patients              -> patient list (name, DFN, chart link)
+    #   GET /patients.json         -> 406 (the list has no other format)
     #   GET /patients/:dfn         -> clinician-facing HTML chart
     #   GET /patients/:dfn.json    -> FHIR R4 Bundle (searchset)
     #   Accept: application/fhir+json / ?_format=json also yield the Bundle
@@ -47,6 +49,9 @@ module Lakeraven
       include AuditableClinicalAccess
 
       FHIR_CONTENT_TYPE = "application/fhir+json"
+      # ORWPT LIST ALL (ORWPT.m LISTALL) returns at most this many names.
+      # A page of exactly this size is full, so the next cursor is the last name.
+      PATIENT_LIST_PAGE_SIZE = 44
 
       before_action :authenticate_chart_request!
       before_action :require_patient_scope!
@@ -67,9 +72,11 @@ module Lakeraven
       }.freeze
 
       def index
+        return head(:not_acceptable) unless html_patient_index?
+
         @query = params[:name].to_s
         @patients = patients_visible_to_credential(Patient.search(@query))
-
+        @next_name = next_patient_cursor
         render :index, layout: false
       end
 
@@ -171,19 +178,17 @@ module Lakeraven
         "demo-bypass" if demo_bypass?
       end
 
-      # One row per listed patient, not one row for the request. A refusal
-      # showed nobody, so it gets no Patient row — a blank Patient entity
-      # would name someone who was not on the page. @audit_recorded is set
-      # so the fail-closed wrapper does not turn that refusal into a 503.
+      # One success row per listed patient. Anything that did not serve the
+      # list — 401, 403, a raising search — falls through to the concern,
+      # which records a single failure row and does not name a patient DFN.
       def record_audit_event!(detached: false)
-        return super unless action_name == "index"
+        return super unless action_name == "index" && patient_index_served?
 
         record_patient_list_audits!(detached:)
       end
 
       def record_patient_list_audits!(detached: false)
         return if @audit_recorded
-        return settle_index_without_patient_rows unless patient_index_served?
 
         agent = audit_agent_attributes
         shared = listed_patient_audit_context
@@ -195,8 +200,17 @@ module Lakeraven
         @audit_action_failure.nil? && response.successful? && @patients
       end
 
-      def settle_index_without_patient_rows
-        @audit_recorded = true
+      # The list template is HTML. Any other format (patients.json) is 406
+      # rather than a missing-template 500, which would also render names.
+      def html_patient_index?
+        format = params[:format].to_s
+        format.empty? || format.casecmp?("html")
+      end
+
+      def next_patient_cursor
+        return unless @patients.length == PATIENT_LIST_PAGE_SIZE
+
+        @patients.last.name
       end
 
       def listed_patient_audit_context

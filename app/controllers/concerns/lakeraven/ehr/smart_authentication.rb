@@ -252,12 +252,23 @@ module Lakeraven
 
       # A credential's organization_id is either a bare site IEN or the
       # `rpms-organization-<ien>` form the FHIR Organization id uses.
+      #
+      # site_ien is an integer attribute. Nil, blank, and anything that
+      # casts to 0 or below (including 0 and "0") matches no binding, not
+      # even "0" or "rpms-organization-0".
       def organization_permits_patient?(patient)
-        site_ien = patient.respond_to?(:site_ien) ? patient.site_ien : nil
-        return false if site_ien.blank?
+        site_ien = positive_site_ien(patient)
+        return false unless site_ien
 
         bound_to = current_organization_id.to_s
         bound_to == site_ien.to_s || bound_to == "rpms-organization-#{site_ien}"
+      end
+
+      def positive_site_ien(patient)
+        return nil unless patient.respond_to?(:site_ien)
+
+        site = Patient.type_for_attribute(:site_ien).cast(patient.site_ien)
+        site if site&.positive?
       end
 
       def scope_permits?(resource_type, actions)
