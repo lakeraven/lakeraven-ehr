@@ -10,6 +10,10 @@ Lakeraven::EHR::Engine.routes.draw do
   # RESTful path: the chart is the human-facing representation of a patient,
   # so it lives at /patients/:dfn (the FHIR API keeps /Patient per convention;
   # that resource also owns the patient_path helper, hence :patient_chart).
+  # The list is one route, format segment included. A non-HTML format is
+  # refused in ChartsController#index after authentication — answering 406
+  # from a Rack constraint would hide a missing credential behind that status.
+  get "patients(.:format)", to: "charts#index", as: :patient_charts
   get "patients/:dfn(.:format)", to: "charts#show", as: :patient_chart, constraints: { dfn: /\d+/ }
   # Demo-only clickable walk-in visit (the UI counterpart of
   # features/encounter/demo_visit.feature). Gated to dev + CHART_DEMO_OPEN +

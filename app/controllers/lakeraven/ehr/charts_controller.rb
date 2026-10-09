@@ -26,7 +26,10 @@ module Lakeraven
     # keeps it from ever fronting a real backend. Host browser-session
     # -> token SSO is a documented follow-up (ADR 0004), out of scope here.
     #
-    # ONE endpoint, content-negotiated:
+    # The chart is content-negotiated; the list is HTML-only and staff-only.
+    # ORWPT LIST ALL returns at most 44 names and no sex or birth date:
+    #   GET /patients              -> patient list (name, DFN, chart link)
+    #   GET /patients.json         -> 406 after auth (Accept never selects a format)
     #   GET /patients/:dfn         -> clinician-facing HTML chart
     #   GET /patients/:dfn.json    -> FHIR R4 Bundle (searchset)
     #   Accept: application/fhir+json / ?_format=json also yield the Bundle
@@ -36,6 +39,7 @@ module Lakeraven
     # test/dummy/lib/lakeraven_demo_seeds.rb).
     class ChartsController < ActionController::Base
       include SmartAuthentication
+      include BrowserSmartAuthentication
       # FAIL-CLOSED audit, the same terms the clinician screening surface is
       # held to. The chart now carries scored screenings (#474), so it serves
       # the same item-level self-harm disclosures — and a sibling route to the
@@ -45,10 +49,18 @@ module Lakeraven
       include AuditableClinicalAccess
 
       FHIR_CONTENT_TYPE = "application/fhir+json"
+      # ORWPT LIST ALL (ORWPT.m LISTALL) returns at most this many names.
+      # A page of exactly this size is full, so the next cursor is the last name.
+      PATIENT_LIST_PAGE_SIZE = 44
 
       before_action :authenticate_chart_request!
       before_action :require_patient_scope!
-      before_action :enforce_patient_context!
+      # The list is staff-only. A patient-scoped token and a system token both
+      # fail require_clinician_credential!; enforce_patient_context! is not
+      # what refuses them. The index has no :dfn to bind, and binding a missing
+      # compartment would hide the staff-only rule behind a mismatch.
+      before_action :require_clinician_credential!, only: :index
+      before_action :enforce_patient_context!, except: :index
 
       # RPMS problem-list status codes -> FHIR clinical-status
       PROBLEM_STATUS = { "A" => "active", "I" => "inactive" }.freeze
@@ -58,6 +70,22 @@ module Lakeraven
         "checked out" => "finished", "cancelled" => "cancelled",
         "no show" => "cancelled"
       }.freeze
+
+      def index
+        # After authenticate_chart_request!, require_patient_scope!, and
+        # require_clinician_credential!. An explicit format is refused here;
+        # a missing credential has already halted as 401 or 403.
+        return head(:not_acceptable) unless html_patient_index?
+
+        force_patient_index_html!
+        query = params[:name].to_s
+        @cursor_label = patient_list_cursor_label(query)
+        # Next follows this page, not the org-filtered subset of it.
+        searched = Patient.search(query)
+        @patients = patients_visible_to_credential(searched)
+        @next_cursor = next_patient_cursor(searched)
+        render :index, formats: [ :html ], layout: false
+      end
 
       def show
         @patient = Patient.find_by_dfn(params[:dfn])
@@ -109,6 +137,28 @@ module Lakeraven
         false
       end
 
+      # ScreeningsController#require_clinician_credential!, for a list rather
+      # than a write. current_duz is nil unless the token is a browser sign-on
+      # with a DUZ — the same two checks as clinician_credential?, plus a
+      # present DUZ — so a patient login and a system credential are both
+      # refused. demo_bypass? is not widened; it only skips this the way the
+      # other chart guards already skip authentication.
+      def require_clinician_credential!
+        return true if demo_bypass?
+        return true if clinician_credential? && current_duz.present?
+
+        render_forbidden("Listing patients requires a clinician sign-on")
+        false
+      end
+
+      # Unbound staff see every site. An organization-bound credential sees
+      # only patients it manages; org_visible_patient? fails closed.
+      def patients_visible_to_credential(patients)
+        return patients unless organization_bound?
+
+        patients.select { |patient| org_visible_patient?(patient) }
+      end
+
       def enforce_patient_context!
         return true if demo_bypass?
 
@@ -133,6 +183,85 @@ module Lakeraven
       # route dfn — no additional PHI enters the log.
       def unauthenticated_audit_actor
         "demo-bypass" if demo_bypass?
+      end
+
+      # One success row per listed patient. A served page with nobody on it
+      # falls through to the concern: one success row, no DFN. Anything that
+      # did not serve the list — 401, 403, 406, a raising search — does too,
+      # which records a single failure row and does not name a patient.
+      def record_audit_event!(detached: false)
+        return super unless action_name == "index" && patient_index_served?
+        return super if @patients.empty?
+
+        record_patient_list_audits!(detached:)
+      end
+
+      def record_patient_list_audits!(detached: false)
+        return if @audit_recorded
+
+        agent = audit_agent_attributes
+        shared = listed_patient_audit_context
+        @patients.each { |patient| write_listed_patient_audit(patient, agent, shared, detached) }
+        @audit_recorded = true
+      end
+
+      def patient_index_served?
+        @audit_action_failure.nil? && response.successful? && @patients
+      end
+
+      # Path extension and ?format= are explicit, any case. Accept is not:
+      # a request that only prefers JSON still renders this HTML list.
+      # Checked from the action so the staff credential has already been decided.
+      def html_patient_index?
+        format = params[:format].to_s
+        format.empty? || format.casecmp?("html")
+      end
+
+      # process_action already copied Accept onto the lookup formats. Pin
+      # both back to HTML so application/json cannot miss index.html.
+      def force_patient_index_html!
+        request.format = :html
+        self.formats = [ :html ]
+      end
+
+      # ORWPT LIST ALL resumes inside a duplicate name only from "IEN^Name".
+      # The page says the name. A typed name has no leading DFN and stays as typed.
+      def patient_list_cursor_label(query)
+        dfn, name = query.to_s.split("^", 2)
+        return name if name && dfn.match?(/\A\d+\z/)
+
+        query.to_s
+      end
+
+      # A full RPC page is exactly PATIENT_LIST_PAGE_SIZE rows, whether or
+      # not the org filter kept them. The cursor is the last of those rows.
+      def next_patient_cursor(searched)
+        return unless searched.length == PATIENT_LIST_PAGE_SIZE
+
+        last = searched.last
+        "#{last.dfn}^#{last.name}"
+      end
+
+      def listed_patient_audit_context
+        {
+          event_type: "rest",
+          action: audit_action,
+          outcome: audit_outcome,
+          outcome_desc: audit_outcome_desc,
+          entity_type: "Patient",
+          agent_network_address: request.remote_ip,
+          tenant_identifier: audit_tenant_identifier,
+          facility_identifier: audit_facility_identifier
+        }
+      end
+
+      def write_listed_patient_audit(patient, agent, shared, detached)
+        persist_audit_row!(
+          detached: detached,
+          entity_identifier: patient.dfn.to_s,
+          **shared,
+          **agent
+        )
       end
 
       # -- Content negotiation --------------------------------------------------
