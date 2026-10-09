@@ -43,15 +43,24 @@ class PatientIndexTest < ActionDispatch::IntegrationTest
 
   # --- 1. List and link ----------------------------------------------------
 
-  test "the index lists patients and links each to its chart" do
+  test "the index lists patients and links each to its chart via canonical path across variants" do
     sign_in_staff
 
-    get "/lakeraven-ehr/patients"
+    paths = [ "/lakeraven-ehr/patients", "/lakeraven-ehr/patients/", "/lakeraven-ehr/patients.html", "/lakeraven-ehr/patients.HTML" ]
+    paths.each do |p|
+      get p
 
-    assert_response :success
-    assert_match(%r{href="[^"]*/lakeraven-ehr/patients/#{known_dfn}"}, response.body,
-      "every listed patient must link to its own chart")
-    assert_select "h1", /Patients/i
+      assert_response :success
+      assert_match(%r{href="[^"]*/lakeraven-ehr/patients/#{known_dfn}"}, response.body,
+        "every listed patient must link to its own chart canonically, no format segment")
+
+      assert_no_match(%r{href="[^"]*/lakeraven-ehr/patients/#{known_dfn}\.html"}, response.body,
+        "must not carry .html extension in chart link")
+      assert_no_match(%r{href="[^"]*/lakeraven-ehr/patients/#{known_dfn}\.HTML"}, response.body,
+        "must not carry .HTML extension in chart link")
+
+      assert_select "h1", /Patients/i
+    end
   end
 
   test "the index shows enough to tell two patients apart" do
@@ -73,6 +82,12 @@ class PatientIndexTest < ActionDispatch::IntegrationTest
   test "a name search acts as a cursor" do
     sign_in_staff
 
+    seen = []
+    client = RpmsRpc.configuration.client
+    orig = client.method(:call_rpc)
+    client.define_singleton_method(:call_rpc) { |*a| seen << a if a[0] == "ORWPT LIST ALL"; orig.call(*a) }
+
+    # When name is a typed string, it stays name-only
     get "/lakeraven-ehr/patients", params: { name: "Anderson" }
 
     assert_response :success
@@ -81,7 +96,20 @@ class PatientIndexTest < ActionDispatch::IntegrationTest
       "a non-matching patient is absent")
 
     assert_match(/Starting at Anderson/i, response.body, "the page must label the name parameter as a cursor")
-    # Cannot test mock filtering directly due to RPMS constraints, but we ensure the cursor label is present.
+
+    assert_equal 1, seen.size
+    assert_equal "Anderson", seen.first[1], "typed name stays name-only in the RPC request"
+
+    # When name is the raw ^ form from Next
+    seen.clear
+    get "/lakeraven-ehr/patients", params: { name: "1^Anderson,Alice" }
+
+    assert_response :success
+    assert_match(/Starting at Anderson,Alice/i, response.body, "the page must label the name parameter as a cursor, showing only the name part")
+    assert_no_match(/1\^Anderson,Alice/, response.body, "must never show the raw ^ form")
+
+    assert_equal 1, seen.size
+    assert_equal "1^Anderson,Alice", seen.first[1], "exact IEN^Name string reaches the RPC as FROM"
 
     # Positive control: Mickey Mouse (DFN 2) appears without the filter
     get "/lakeraven-ehr/patients"
@@ -89,7 +117,7 @@ class PatientIndexTest < ActionDispatch::IntegrationTest
       "positive control: patient is visible without the filter")
   end
 
-  test "a full page of 44 patients offers a next link with the last patient's name as cursor, and fewer than 44 offers no next link" do
+  test "a full page of 44 patients offers a next link based on RPC results, not filtered results, and the cursor is IEN^Name" do
     sign_in_staff
 
     list_44 = 44.times.map do |i|
@@ -97,15 +125,37 @@ class PatientIndexTest < ActionDispatch::IntegrationTest
     end
 
     RpmsRpc.mock! do |m|
+      list_44.each do |r|
+        site = r[:dfn] == 100 ? 9999 : 7819
+        m.seed(:patient_select, r[:dfn].to_s, { name: r[:name], sex: "M", dob: Date.parse("1970-01-01"), ssn: "000-00-#{r[:dfn]}", age: 50 })
+        m.seed(:patient_id_info, r[:dfn].to_s, { ssn: "000-00-#{r[:dfn]}", dob: Date.parse("1970-01-01"), sex: "M", race_code: "I", site_ien: site, name: r[:name] })
+      end
       m.seed_collection(:patient_list, list_44, filter_field: :name)
     end
 
     get "/lakeraven-ehr/patients"
     assert_response :success
 
+    assert_match(/Next/i, response.body, "44 rows must offer a next link for unbound staff")
+    assert_equal 44, response.body.scan(%r{href="[^"]*/lakeraven-ehr/patients/1\d\d"}).size, "positive control: unbound credential sees 44 rows"
+
+    # The cursor must be IEN^Name, correctly URL-escaped
+    last_dfn = "143"
     last_name = "P43,Test"
-    assert_match(/Next/i, response.body, "44 rows must offer a next link")
-    assert_match(/name=#{CGI.escape(last_name)}/i, response.body, "the next link cursor must be the last row's name")
+    cursor = "#{last_dfn}^#{last_name}"
+    escaped_cursor = CGI.escape(cursor)
+    assert_match(/name=#{escaped_cursor}/i, response.body, "the next link cursor must be the last row's IEN^Name")
+
+    # The label must only show the name part
+    assert_no_match(/Starting at #{Regexp.escape(cursor)}/i, response.body, "the label must not show the raw ^ form")
+
+    app = Doorkeeper::Application.find_by!(uid: Lakeraven::EHR::SessionsController::BROWSER_SSO_APP_UID)
+    app.update!(organization_id: "rpms-organization-7819")
+
+    get "/lakeraven-ehr/patients"
+    assert_response :success
+    assert_match(/Next/i, response.body, "44 RPC rows where one is filtered out must still offer a Next link")
+    assert_equal 43, response.body.scan(%r{href="[^"]*/lakeraven-ehr/patients/1\d\d"}).size, "org-bound credential sees 43 rows"
 
     list_43 = 43.times.map do |i|
       { dfn: 200 + i, name: "Short#{i},Test", sex: "M", dob: Date.parse("1970-01-01") }
@@ -274,17 +324,98 @@ class PatientIndexTest < ActionDispatch::IntegrationTest
     assert_match(/#{Regexp.escape(known_patient.display_name)}/i, response.body)
   end
 
-  test "a JSON request to the patient index does not 500 and discloses no names" do
-    sign_in_staff
+  test "explicit non-HTML formats are refused after authentication and leave exactly one failure audit row" do
+    # Unauthenticated gets 401
+    Lakeraven::EHR::AuditEvent.delete_all
     get "/lakeraven-ehr/patients.json"
+    assert_response :unauthorized
 
-    assert_response :not_acceptable, "a format not supported should be 406 (or 404), not 500"
+    events = Lakeraven::EHR::AuditEvent.where(entity_type: "Patient")
+    assert_equal 1, events.size, "401 must leave exactly one audit row"
+    assert_not_equal "0", events.first.outcome
+    assert_nil events.first.entity_identifier
+
+    # Patient credential gets 403
+    app = Doorkeeper::Application.create!(
+      name: "patient-app-2", redirect_uri: "https://example.test/callback",
+      scopes: "patient/*.read", confidential: true
+    )
+    token = Doorkeeper::AccessToken.create!(
+      application: app, scopes: "patient/*.read", expires_in: 3600,
+      resource_owner_id: known_dfn
+    )
+    Lakeraven::EHR::AuditEvent.delete_all
+    get "/lakeraven-ehr/patients.xml", headers: bearer(token)
+    assert_response :forbidden
     assert_no_match(/Anderson/i, response.body, "must not disclose names")
+    events = Lakeraven::EHR::AuditEvent.where(entity_type: "Patient")
+    assert_equal 1, events.size, "403 must leave exactly one audit row for patient credential"
+    assert_not_equal "0", events.first.outcome
+    assert_nil events.first.entity_identifier
+
+    # System credential gets 403
+    sys_app = Doorkeeper::Application.create!(
+      name: "machine-app-2", redirect_uri: "https://example.test/callback",
+      scopes: "system/Patient.read", confidential: true
+    )
+    sys_token = Doorkeeper::AccessToken.create!(
+      application: sys_app, scopes: "system/Patient.read", expires_in: 3600
+    )
+    Lakeraven::EHR::AuditEvent.delete_all
+    get "/lakeraven-ehr/patients.json", headers: bearer(sys_token)
+    assert_response :forbidden
+    assert_no_match(/Anderson/i, response.body, "must not disclose names")
+    events = Lakeraven::EHR::AuditEvent.where(entity_type: "Patient")
+    assert_equal 1, events.size, "403 must leave exactly one audit row for system credential"
+    assert_not_equal "0", events.first.outcome
+    assert_nil events.first.entity_identifier
+
+    # Staff credential gets 406
+    sign_in_staff
+    [ "json", "xml", "JSON" ].each do |ext|
+      Lakeraven::EHR::AuditEvent.delete_all
+      get "/lakeraven-ehr/patients.#{ext}"
+      assert_response :not_acceptable, ".#{ext} extension must be 406 for staff"
+      assert_no_match(/Anderson/i, response.body, "must not disclose names")
+
+      events = Lakeraven::EHR::AuditEvent.where(entity_type: "Patient")
+      assert_equal 1, events.size, "406 must leave exactly one audit row"
+      assert_not_equal "0", events.first.outcome
+      assert_nil events.first.entity_identifier
+    end
+
+    [ "json", "xml", "JSON" ].each do |f|
+      Lakeraven::EHR::AuditEvent.delete_all
+      get "/lakeraven-ehr/patients", params: { format: f }
+      assert_response :not_acceptable, "?format=#{f} must be 406 for staff"
+      assert_no_match(/Anderson/i, response.body, "must not disclose names")
+
+      events = Lakeraven::EHR::AuditEvent.where(entity_type: "Patient")
+      assert_equal 1, events.size, "406 must leave exactly one audit row"
+      assert_not_equal "0", events.first.outcome
+      assert_nil events.first.entity_identifier
+    end
+  end
+
+  test "Accept header never selects a format, they get the HTML list" do
+    sign_in_staff
+
+    get "/lakeraven-ehr/patients", headers: { "Accept" => "application/json" }
+    assert_response :success
+    assert_match(/#{Regexp.escape(known_patient.display_name)}/i, response.body, "must return HTML list")
+
+    get "/lakeraven-ehr/patients", headers: { "Accept" => "application/fhir+json" }
+    assert_response :success
+    assert_match(/#{Regexp.escape(known_patient.display_name)}/i, response.body, "must return HTML list")
+
+    get "/lakeraven-ehr/patients", params: { _format: "json" }
+    assert_response :success
+    assert_match(/#{Regexp.escape(known_patient.display_name)}/i, response.body, "must return HTML list")
   end
 
   # --- 7. Audit names who was shown ----------------------------------------
 
-  test "a list request audits exactly the set of patients rendered in the page, each exactly once" do
+  test "a list request audits exactly the set of patients rendered in the page, each exactly once, and an empty page writes exactly one row without a patient" do
     sign_in_staff
 
     Lakeraven::EHR::AuditEvent.delete_all
@@ -296,6 +427,7 @@ class PatientIndexTest < ActionDispatch::IntegrationTest
 
     assert_equal rendered_dfns.sort, audited_dfns.sort, "audited DFNs must match exactly the rendered DFNs"
     assert_equal audited_dfns.uniq.size, audited_dfns.size, "each DFN must be audited exactly once"
+    assert_not_includes audited_dfns, nil, "non-empty page must not have an extra request-level row"
 
     Lakeraven::EHR::AuditEvent.delete_all
     get "/lakeraven-ehr/patients", params: { name: "Anderson" }
@@ -306,6 +438,7 @@ class PatientIndexTest < ActionDispatch::IntegrationTest
 
     assert_equal rendered_dfns.sort, audited_dfns.sort, "audited DFNs must match exactly the rendered DFNs on search"
     assert_equal audited_dfns.uniq.size, audited_dfns.size, "each DFN must be audited exactly once on search"
+    assert_not_includes audited_dfns, nil, "non-empty page must not have an extra request-level row"
 
     Lakeraven::EHR::AuditEvent.delete_all
     site = Lakeraven::EHR::Patient.find_by_dfn(known_dfn).site_ien
@@ -321,6 +454,30 @@ class PatientIndexTest < ActionDispatch::IntegrationTest
     assert_equal rendered_dfns.sort, audited_dfns.sort, "audited DFNs must match exactly the rendered DFNs on org-bound list"
     assert_equal audited_dfns.uniq.size, audited_dfns.size, "each DFN must be audited exactly once on org-bound list"
     assert_not_includes audited_dfns, FOREIGN_DFN, "foreign patient hid by org filter must not have a success audit row"
+    assert_not_includes audited_dfns, nil, "non-empty page must not have an extra request-level row"
+
+    # Empty page because name matches nothing
+    Lakeraven::EHR::AuditEvent.delete_all
+    get "/lakeraven-ehr/patients", params: { name: "ZZZZZZZZZ" }
+    assert_response :success
+
+    assert_empty response.body.scan(%r{href="[^"]*/lakeraven-ehr/patients/(\d+)"}).flatten
+    events = Lakeraven::EHR::AuditEvent.where(entity_type: "Patient")
+    assert_equal 1, events.size, "empty page must leave exactly one audit row"
+    assert_equal "0", events.first.outcome, "the empty page audit row must be a success outcome"
+    assert_nil events.first.entity_identifier, "the empty page audit row must not carry a patient DFN"
+
+    # Empty page because org filter blocks all
+    app.update!(organization_id: "rpms-organization-999999")
+    Lakeraven::EHR::AuditEvent.delete_all
+    get "/lakeraven-ehr/patients"
+    assert_response :success
+
+    assert_empty response.body.scan(%r{href="[^"]*/lakeraven-ehr/patients/(\d+)"}).flatten
+    events = Lakeraven::EHR::AuditEvent.where(entity_type: "Patient")
+    assert_equal 1, events.size, "empty page must leave exactly one audit row"
+    assert_equal "0", events.first.outcome, "the empty page audit row must be a success outcome"
+    assert_nil events.first.entity_identifier, "the empty page audit row must not carry a patient DFN"
   end
 
   test "a 401/403/error request leaves exactly one denial audit row without a DFN" do
