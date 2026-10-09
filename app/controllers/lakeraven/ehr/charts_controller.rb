@@ -29,7 +29,7 @@ module Lakeraven
     # The chart is content-negotiated; the list is HTML-only and staff-only.
     # ORWPT LIST ALL returns at most 44 names and no sex or birth date:
     #   GET /patients              -> patient list (name, DFN, chart link)
-    #   GET /patients.json         -> 406 (the list has no other format)
+    #   GET /patients.json         -> 406 after auth (Accept never selects a format)
     #   GET /patients/:dfn         -> clinician-facing HTML chart
     #   GET /patients/:dfn.json    -> FHIR R4 Bundle (searchset)
     #   Accept: application/fhir+json / ?_format=json also yield the Bundle
@@ -72,12 +72,19 @@ module Lakeraven
       }.freeze
 
       def index
+        # After authenticate_chart_request!, require_patient_scope!, and
+        # require_clinician_credential!. An explicit format is refused here;
+        # a missing credential has already halted as 401 or 403.
         return head(:not_acceptable) unless html_patient_index?
 
-        @query = params[:name].to_s
-        @patients = patients_visible_to_credential(Patient.search(@query))
-        @next_name = next_patient_cursor
-        render :index, layout: false
+        force_patient_index_html!
+        query = params[:name].to_s
+        @cursor_label = patient_list_cursor_label(query)
+        # Next follows this page, not the org-filtered subset of it.
+        searched = Patient.search(query)
+        @patients = patients_visible_to_credential(searched)
+        @next_cursor = next_patient_cursor(searched)
+        render :index, formats: [ :html ], layout: false
       end
 
       def show
@@ -178,11 +185,13 @@ module Lakeraven
         "demo-bypass" if demo_bypass?
       end
 
-      # One success row per listed patient. Anything that did not serve the
-      # list — 401, 403, a raising search — falls through to the concern,
-      # which records a single failure row and does not name a patient DFN.
+      # One success row per listed patient. A served page with nobody on it
+      # falls through to the concern: one success row, no DFN. Anything that
+      # did not serve the list — 401, 403, 406, a raising search — does too,
+      # which records a single failure row and does not name a patient.
       def record_audit_event!(detached: false)
         return super unless action_name == "index" && patient_index_served?
+        return super if @patients.empty?
 
         record_patient_list_audits!(detached:)
       end
@@ -200,17 +209,37 @@ module Lakeraven
         @audit_action_failure.nil? && response.successful? && @patients
       end
 
-      # The list template is HTML. Any other format (patients.json) is 406
-      # rather than a missing-template 500, which would also render names.
+      # Path extension and ?format= are explicit, any case. Accept is not:
+      # a request that only prefers JSON still renders this HTML list.
+      # Checked from the action so the staff credential has already been decided.
       def html_patient_index?
         format = params[:format].to_s
         format.empty? || format.casecmp?("html")
       end
 
-      def next_patient_cursor
-        return unless @patients.length == PATIENT_LIST_PAGE_SIZE
+      # process_action already copied Accept onto the lookup formats. Pin
+      # both back to HTML so application/json cannot miss index.html.
+      def force_patient_index_html!
+        request.format = :html
+        self.formats = [ :html ]
+      end
 
-        @patients.last.name
+      # ORWPT LIST ALL resumes inside a duplicate name only from "IEN^Name".
+      # The page says the name. A typed name has no leading DFN and stays as typed.
+      def patient_list_cursor_label(query)
+        dfn, name = query.to_s.split("^", 2)
+        return name if name && dfn.match?(/\A\d+\z/)
+
+        query.to_s
+      end
+
+      # A full RPC page is exactly PATIENT_LIST_PAGE_SIZE rows, whether or
+      # not the org filter kept them. The cursor is the last of those rows.
+      def next_patient_cursor(searched)
+        return unless searched.length == PATIENT_LIST_PAGE_SIZE
+
+        last = searched.last
+        "#{last.dfn}^#{last.name}"
       end
 
       def listed_patient_audit_context

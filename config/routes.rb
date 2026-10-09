@@ -10,21 +10,10 @@ Lakeraven::EHR::Engine.routes.draw do
   # RESTful path: the chart is the human-facing representation of a patient,
   # so it lives at /patients/:dfn (the FHIR API keeps /Patient per convention;
   # that resource also owns the patient_path helper, hence :patient_chart).
-  # The list is HTML only. A format extension other than html is 406 here,
-  # before a template lookup can turn `/patients.json` into a 500.
-  patient_list_html = ->(req) {
-    format = req.path_parameters[:format].to_s
-    format.blank? || format.casecmp?("html")
-  }
-  patient_list_other = ->(req) {
-    format = req.path_parameters[:format].to_s
-    format.present? && !format.casecmp?("html")
-  }
-  patient_list_not_acceptable = ->(_env) {
-    [ 406, { "Content-Type" => "text/plain; charset=utf-8" }, [ "" ] ]
-  }
-  get "patients", to: "charts#index", as: :patient_charts, constraints: patient_list_html
-  get "patients", to: patient_list_not_acceptable, constraints: patient_list_other
+  # The list is one route, format segment included. A non-HTML format is
+  # refused in ChartsController#index after authentication — answering 406
+  # from a Rack constraint would hide a missing credential behind that status.
+  get "patients(.:format)", to: "charts#index", as: :patient_charts
   get "patients/:dfn(.:format)", to: "charts#show", as: :patient_chart, constraints: { dfn: /\d+/ }
   # Demo-only clickable walk-in visit (the UI counterpart of
   # features/encounter/demo_visit.feature). Gated to dev + CHART_DEMO_OPEN +

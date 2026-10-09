@@ -51,8 +51,8 @@
         <p>Select a patient to open their chart.</p>
       </div>
 
-      <form class="search" method="get" action="<%= request.path %>">
-        <input type="search" name="name" value="<%= @query %>"
+      <form class="search" method="get" action="<%= patient_charts_path %>">
+        <input type="search" name="name" value="<%= @cursor_label %>"
                placeholder="Search by name" aria-label="Search patients by name"
                autocomplete="off">
         <button type="submit">Search</button>
@@ -60,7 +60,7 @@
 
       <div class="card">
         <div class="card__head">
-          <h2><%= @query.present? ? "Starting at #{@query}" : "All patients" %></h2>
+          <h2><%= @cursor_label.present? ? "Starting at #{@cursor_label}" : "All patients" %></h2>
           <span class="count"><%= @patients.length %></span>
         </div>
 
@@ -72,22 +72,21 @@
             <tbody>
               <% @patients.each do |patient| %>
                 <tr>
-                  <%# The chart is always this page's path plus the DFN, so the
-                      link is correct whether the engine is mounted at the host
-                      root (the demo URL) or under a prefix. %>
-                  <td><a href="<%= "#{request.path.chomp("/")}/#{patient.dfn}" %>"><%= patient.display_name %></a></td>
+                  <%# Built from the engine's route helper, so the link is canonical
+                      whatever variant of the list URL was requested. %>
+                  <td><a href="<%= patient_chart_path(patient.dfn) %>"><%= patient.display_name %></a></td>
                   <td class="dfn"><%= patient.dfn %></td>
                 </tr>
               <% end %>
             </tbody>
           </table>
-          <% if @next_name.present? %>
-            <p class="pager"><a href="<%= request.path %>?<%= { name: @next_name }.to_query %>">Next</a></p>
+          <% if @next_cursor.present? %>
+            <p class="pager"><a href="<%= patient_charts_path %>?<%= { name: @next_cursor }.to_query %>">Next</a></p>
           <% end %>
         <% else %>
           <p class="empty">
-            <% if @query.present? %>
-              No patients match “<%= @query %>”.
+            <% if @cursor_label.present? %>
+              No patients match “<%= @cursor_label %>”.
             <% else %>
               No patients are visible to this session.
             <% end %>
