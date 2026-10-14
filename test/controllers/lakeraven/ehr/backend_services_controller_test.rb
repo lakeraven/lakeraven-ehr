@@ -281,6 +281,121 @@ module Lakeraven
         assert_equal "system/*.read", JSON.parse(response.body)["scope"]
       end
 
+      # The token endpoint grants by the same wildcard rule the FHIR API reads
+      # by (SmartScopes). A client asking for less than its entitlement is
+      # issued that narrower scope, never refused and never handed the wider
+      # registered one: refusing it pushes clients toward omitting scope and
+      # taking the full grant.
+      test "requesting system/Patient.read against a registered system/*.read wildcard is issued system/Patient.read" do
+        post_token(assertion(claims), scope: "system/Patient.read")
+
+        assert_response :success
+        assert_equal "system/Patient.read", JSON.parse(response.body)["scope"]
+      end
+
+      test "a narrowed token reads the type it asked for and nothing else" do
+        post_token(assertion(claims), scope: "system/Patient.read")
+        token = Doorkeeper::AccessToken.order(:created_at).last
+
+        assert SmartScopes.permits?(token.scopes.to_a, "Patient", :read)
+        refute SmartScopes.permits?(token.scopes.to_a, "Observation", :read),
+          "the issued token must carry the narrower request, not the registered wildcard"
+      end
+
+      test "a registered action wildcard covers a narrower per-action request" do
+        @backend_app.update!(scopes: "system/Patient.*")
+
+        post_token(assertion(claims), scope: "system/Patient.read")
+
+        assert_response :success
+        assert_equal "system/Patient.read", JSON.parse(response.body)["scope"]
+      end
+
+      test "a registered full wildcard covers a narrower write request" do
+        @backend_app.update!(scopes: "system/*.*")
+
+        post_token(assertion(claims), scope: "system/Observation.write")
+
+        assert_response :success
+        assert_equal "system/Observation.write", JSON.parse(response.body)["scope"]
+      end
+
+      test "a per-type registration does not widen to the type wildcard" do
+        @backend_app.update!(scopes: "system/Patient.read")
+
+        post_token(assertion(claims), scope: "system/*.read")
+
+        assert_response :bad_request
+        assert_equal "invalid_scope", JSON.parse(response.body)["error"]
+        assert_nil Doorkeeper::AccessToken.order(:created_at).last
+      end
+
+      test "a per-type registration does not cover another type" do
+        @backend_app.update!(scopes: "system/Patient.read")
+
+        post_token(assertion(claims), scope: "system/Observation.read")
+
+        assert_response :bad_request
+        assert_nil Doorkeeper::AccessToken.order(:created_at).last
+      end
+
+      test "a read wildcard registration does not cover a narrower write request" do
+        post_token(assertion(claims), scope: "system/Patient.write")
+
+        assert_response :bad_request
+        assert_nil Doorkeeper::AccessToken.order(:created_at).last
+      end
+
+      test "a read wildcard registration does not cover the full wildcard" do
+        post_token(assertion(claims), scope: "system/*.*")
+
+        assert_response :bad_request
+        assert_nil Doorkeeper::AccessToken.order(:created_at).last
+      end
+
+      test "a full wildcard registration does not grant a scope that permits nothing" do
+        @backend_app.update!(scopes: "system/*.*")
+
+        post_token(assertion(claims), scope: "system/Patient.read system/not-a-scope")
+
+        assert_response :success
+        assert_equal "system/Patient.read", JSON.parse(response.body)["scope"]
+      end
+
+      test "a registered patient wildcard is never granted to a backend client" do
+        @backend_app.update!(scopes: "patient/*.read system/*.read")
+
+        post_token(assertion(claims), scope: "patient/Patient.read")
+
+        assert_response :bad_request
+        assert_nil Doorkeeper::AccessToken.order(:created_at).last
+      end
+
+      test "the endpoint and the FHIR API agree on every registration and request" do
+        scopes = %w[Patient Observation *].product(%w[read write c *]).map { |t, a| "system/#{t}.#{a}" }
+
+        scopes.each do |registered|
+          @backend_app.update!(scopes: registered)
+          scopes.each do |requested|
+            post_token(assertion(claims), scope: requested)
+            issued = response.successful? ? JSON.parse(response.body)["scope"].to_s.split : []
+
+            %w[Patient Observation Encounter].product(%i[read write]).each do |type, access|
+              requested_permits = SmartScopes.permits?([ requested ], type, access)
+              registered_permits = SmartScopes.permits?([ registered ], type, access)
+              issued_permits = SmartScopes.permits?(issued, type, access)
+
+              refute issued_permits && !registered_permits,
+                "#{registered} registered, #{requested} requested: issued #{issued.inspect} permits #{access} on #{type}"
+              if registered_permits && requested_permits && SmartScopes.covers?([ registered ], requested)
+                assert issued_permits,
+                  "#{registered} registered, #{requested} requested: refused a #{access} on #{type} the API would honour"
+              end
+            end
+          end
+        end
+      end
+
       test "refusals do not reveal whether a client exists or has a key" do
         # A per-reason description let an unauthenticated caller walk the client
         # registry: "Unknown client" vs "Client has no registered public key"

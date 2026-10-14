@@ -169,16 +169,18 @@ module Lakeraven
         render_invalid_client("undecodable")
       end
 
-      # Grant the intersection of the requested scopes and the client's
-      # registered scopes, restricted to system/ scopes. A registered
-      # wildcard (system/*.read) covers per-resource requests
-      # (system/Patient.read); the reverse is not true.
+      # Grant each requested system/ scope the client's registration covers,
+      # as requested: a registered wildcard (system/*.read) covers a narrower
+      # request (system/Patient.read), and the token carries the narrower
+      # scope. Coverage is SmartScopes.covers?, the same rule the FHIR API
+      # applies to the issued token, so the endpoint never refuses a scope the
+      # API would honour nor grants one the registration does not permit.
       def granted_scopes(app)
         registered = app.scopes.to_s.split
         requested = requested_scope_values(app)
 
         requested.uniq.select do |scope|
-          scope.start_with?("system/") && scope_registered?(scope, registered)
+          scope.start_with?("system/") && SmartScopes.covers?(registered, scope)
         end
       end
 
@@ -190,16 +192,6 @@ module Lakeraven
         return [] unless raw.nil? || raw.is_a?(String)
 
         (raw.presence || app.scopes.to_s).split
-      end
-
-      def scope_registered?(scope, registered)
-        return true if registered.include?(scope) || registered.include?("system/*.*")
-
-        if (match = scope.match(%r{\Asystem/[^.]+\.(read|write)\z}))
-          registered.include?("system/*.#{match[1]}")
-        else
-          false
-        end
       end
 
       # The expected assertion audience. When the deployment configures its
