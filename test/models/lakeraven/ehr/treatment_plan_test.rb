@@ -12,7 +12,12 @@ module Lakeraven
       THERAPIST = "99999"
       SUPERVISOR = "77777"
 
+      # Reviews may not be dated in the future, so pin "today" after every
+      # date these tests use.
+      setup { travel_to Time.utc(2027, 6, 30, 12) }
+
       teardown do
+        travel_back
         TreatmentPlanReview.delete_all
         TreatmentPlan.delete_all
       end
@@ -55,7 +60,7 @@ module Lakeraven
         # not read as compliance, whatever wrote the row.
         plan = establish
         assert_raises(ActiveRecord::NotNullViolation) do
-          plan.update_column(:progress_review_due_on, nil)
+          TreatmentPlan.transaction(requires_new: true) { plan.update_column(:progress_review_due_on, nil) }
         end
       end
 
@@ -99,10 +104,14 @@ module Lakeraven
       test "the database refuses half a concurrence and self-concurrence" do
         plan = establish
         assert_raises(ActiveRecord::StatementInvalid) do
-          plan.update_columns(concurring_supervisor: SUPERVISOR, supervisor_concurred_at: nil)
+          TreatmentPlan.transaction(requires_new: true) do
+            plan.update_columns(concurring_supervisor: SUPERVISOR, supervisor_concurred_at: nil)
+          end
         end
         assert_raises(ActiveRecord::StatementInvalid) do
-          plan.update_columns(concurring_supervisor: THERAPIST, supervisor_concurred_at: Time.current)
+          TreatmentPlan.transaction(requires_new: true) do
+            plan.update_columns(concurring_supervisor: THERAPIST, supervisor_concurred_at: Time.current)
+          end
         end
       end
 

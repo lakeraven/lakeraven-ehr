@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_24_000000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_14_000000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -184,6 +184,37 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_24_000000) do
     t.check_constraint "source::text <> 'clinician'::text OR administered_by IS NOT NULL", name: "screening_clinician_requires_administrator"
   end
 
+  create_table "lakeraven_ehr_treatment_plan_reviews", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "reviewed_by", null: false
+    t.date "reviewed_on", null: false
+    t.bigint "treatment_plan_id", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "treatment_plan_id" ], name: "index_lakeraven_ehr_treatment_plan_reviews_on_plan"
+  end
+
+  create_table "lakeraven_ehr_treatment_plans", force: :cascade do |t|
+    t.string "concurring_supervisor"
+    t.datetime "created_at", null: false
+    t.string "designated_provider", null: false
+    t.date "end_of_treatment_review_due_on"
+    t.date "ended_on"
+    t.date "established_on", null: false
+    t.text "narrative"
+    t.integer "patient_dfn", null: false
+    t.jsonb "problems_and_goals", default: [], null: false
+    t.date "progress_review_due_on", null: false
+    t.datetime "supervisor_concurred_at"
+    t.datetime "updated_at", null: false
+    t.index [ "patient_dfn" ], name: "index_lakeraven_ehr_treatment_plans_on_patient_dfn"
+    t.index [ "progress_review_due_on" ], name: "index_lakeraven_ehr_treatment_plans_open_by_review_due", where: "(ended_on IS NULL)"
+    t.check_constraint "(concurring_supervisor IS NULL) = (supervisor_concurred_at IS NULL)", name: "treatment_plan_concurrence_is_complete"
+    t.check_constraint "concurring_supervisor IS NULL OR concurring_supervisor::text <> designated_provider::text", name: "treatment_plan_concurrence_by_another_clinician"
+    t.check_constraint "end_of_treatment_review_due_on IS NULL OR end_of_treatment_review_due_on >= established_on", name: "treatment_plan_end_review_not_before_establishment"
+    t.check_constraint "ended_on IS NULL OR ended_on >= established_on", name: "treatment_plan_not_ended_before_establishment"
+    t.check_constraint "progress_review_due_on > established_on", name: "treatment_plan_review_due_after_establishment"
+  end
+
   create_table "oauth_access_grants", force: :cascade do |t|
     t.integer "application_id", null: false
     t.datetime "created_at", null: false
@@ -232,6 +263,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_24_000000) do
   end
 
   add_foreign_key "lakeraven_ehr_reconciliation_items", "lakeraven_ehr_reconciliation_sessions", column: "reconciliation_session_id"
+  add_foreign_key "lakeraven_ehr_treatment_plan_reviews", "lakeraven_ehr_treatment_plans", column: "treatment_plan_id"
   add_foreign_key "oauth_access_grants", "oauth_applications", column: "application_id"
   add_foreign_key "oauth_access_tokens", "oauth_applications", column: "application_id"
 end

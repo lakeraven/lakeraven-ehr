@@ -22,12 +22,17 @@ module TreatmentPlanStepHelpers
   end
 end
 World(TreatmentPlanStepHelpers)
+World(ActiveSupport::Testing::TimeHelpers)
 
+# Reviews may not be dated in the future, so pin "today" after every date the
+# scenarios use.
 Before("@treatment_plans") do
+  travel_to Time.utc(2027, 6, 30, 12)
   Lakeraven::EHR::TreatmentPlanReview.delete_all
   Lakeraven::EHR::TreatmentPlan.delete_all
 end
 After("@treatment_plans") do
+  travel_back
   Lakeraven::EHR::TreatmentPlanReview.delete_all
   Lakeraven::EHR::TreatmentPlan.delete_all
 end

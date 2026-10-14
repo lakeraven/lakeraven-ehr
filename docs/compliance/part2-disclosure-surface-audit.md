@@ -53,9 +53,13 @@ Postgres table** `lakeraven_ehr_screening_responses` (`screening_response.rb:16-
 `schema.rb:153`) — *not* written back to RPMS. The most sensitive Phase 1 content
 (PHQ-9/GAD-7, including item 9) therefore stays under this engine's controls.
 
-**⚠ That changes as Phase 1 completes.** Treatment plans (#475) and therapy progress
-notes (rpms-rpc#219, TIU documents) are **not built yet** and are expected to write to
-RPMS. When they do, Part 2 content lands in the shared backend. **Whether that is a
+**Treatment plans (#475) follow the same rule:** they persist in the engine's own
+tables `lakeraven_ehr_treatment_plans` and `lakeraven_ehr_treatment_plan_reviews`
+(`treatment_plan.rb`), not in RPMS file 9002011.56.
+
+**⚠ Therapy progress notes are the open case.** Notes (rpms-rpc#219, TIU documents) are
+**not built yet** and are expected to write to RPMS. When they do, Part 2 content lands
+in the shared backend. **Whether that is a
 disclosure depends on the tenancy and access model of the pilot's RPMS instance —
 an infrastructure/config question (cloud-rpms#30, rpms-ops#536), not an engine one.**
 
@@ -122,8 +126,9 @@ does not need.**
 2. **Does the clinic "hold itself out as" providing SUD treatment or referral** (the
    §2.11 program test)? A legal/operational question about the service list and marketing,
    not a code question.
-3. **Do treatment plans (#475) and TIU notes write Part 2-eligible content to RPMS?**
-   Not yet built — decide the target design before building, not after.
+3. **Do TIU notes write Part 2-eligible content to RPMS?** Not yet built — decide the
+   target design before building, not after. Treatment plans (#475) stay in the
+   engine's own store (§2).
 4. **May an SUD diagnosis appear on an outbound claim (§2b), and under what consent?**
    The clearinghouse seam is unbuilt; decide before writing it.
 5. Whether disabling the FHIR REST API conflicts with any partner/certification
