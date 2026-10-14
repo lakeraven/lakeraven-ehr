@@ -149,7 +149,7 @@ module Lakeraven
       def can_read?(resource_type)
         return false unless current_token
 
-        scope_permits?(resource_type, %w[read *])
+        scope_permits?(resource_type, :read)
       end
 
       # Authorization for the CURRENT request's HTTP verb. A read scope must
@@ -182,7 +182,7 @@ module Lakeraven
       def can_write?(resource_type)
         return false unless current_token
 
-        scope_permits?(resource_type, %w[write c *])
+        scope_permits?(resource_type, :write)
       end
 
       # Enforce patient compartment for patient-context tokens.
@@ -227,12 +227,10 @@ module Lakeraven
 
       private
 
-      def scope_permits?(resource_type, actions)
-        token_scopes = current_token.scopes.to_s.split
-        allowed = %w[patient user system].flat_map do |context|
-          actions.flat_map { |a| [ "#{context}/#{resource_type}.#{a}", "#{context}/*.#{a}" ] }
-        end
-        (token_scopes & allowed).any?
+      # SmartScopes is the single definition of what a scope permits; the
+      # token endpoint grants by the same rule, so the two cannot disagree.
+      def scope_permits?(resource_type, access)
+        SmartScopes.permits?(current_token.scopes.to_s.split, resource_type, access)
       end
 
       def extract_bearer_token
