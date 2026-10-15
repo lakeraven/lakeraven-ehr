@@ -75,7 +75,7 @@ module Lakeraven
       def stringify_problems_goals
         return unless problems_goals.is_a?(Array)
 
-        self.problems_goals = problems_goals.map { |entry| entry.to_h.stringify_keys }
+        self.problems_goals = problems_goals.map { |entry| problem_goal_hash(entry) || entry }
       end
 
       def problems_goals_are_pairs
@@ -90,8 +90,16 @@ module Lakeraven
       end
 
       def problem_goal_pair?(entry)
-        pair = entry.to_h.stringify_keys
+        pair = problem_goal_hash(entry)
+        return false unless pair
+
         pair["problem"].present? && pair["goal"].present?
+      end
+
+      # Only a Hash is a problem/goal pair. String#to_h and Array#to_h raise,
+      # so a non-hash entry fails validation instead of escaping as an exception.
+      def problem_goal_hash(entry)
+        entry.stringify_keys if entry.is_a?(Hash)
       end
     end
   end
