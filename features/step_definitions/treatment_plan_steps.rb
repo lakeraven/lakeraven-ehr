@@ -40,6 +40,10 @@ module TreatmentPlanStepHelpers
 end
 World(TreatmentPlanStepHelpers)
 
+# "the date is" travels in time; without this the frozen clock carries into the
+# next scenario, where a past review date can read as a future one.
+After { travel_back }
+
 Before("@treatment_plans") do
   Lakeraven::EHR::BehavioralHealthProgramConfiguration.reset!
   if defined?(Lakeraven::EHR::TreatmentPlanProgressReview)
