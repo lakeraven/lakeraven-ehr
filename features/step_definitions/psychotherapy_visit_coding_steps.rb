@@ -94,10 +94,6 @@ Then("the encounter should remain in progress") do
   assert_equal "in-progress", @encounter.status
 end
 
-Then("the encounter should be finished") do
-  assert_equal "finished", @encounter.status
-end
-
 def document_psychotherapy_coding(encounter_kind:, duration_minutes:, selected_cpt_code: nil, persist: false)
   kind = normalize_encounter_kind(encounter_kind)
   attrs = {
