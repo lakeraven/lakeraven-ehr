@@ -13,7 +13,9 @@ module Lakeraven
       self.table_name = "lakeraven_ehr_bh_program_configurations"
 
       SEED_PATH = Engine.root.join("db/data/behavioral_health_program_review_intervals.yml")
-      PART_UNITS = %i[years months weeks days hours minutes seconds].freeze
+      # Calendar units only. Hours and smaller make Date + interval a Time,
+      # which is not a review due date.
+      PART_UNITS = %i[years months weeks days].freeze
 
       class UnknownProgram < StandardError; end
 
@@ -72,24 +74,42 @@ module Lakeraven
 
       # Integer counts, string keys. Duration parts can carry a Scalar, and
       # jsonb will not round-trip that as a number unless it is coerced here.
+      # Zero, negative, and non-numeric counts are not a review cadence.
       def self.parts_for(duration)
         parts = duration.parts
         raise ArgumentError, "duration has no calendar parts: #{duration.inspect}" if parts.blank?
 
-        parts.to_h { |unit, count| [ unit.to_s, count.to_i ] }
+        parts.to_h { |unit, count| [ part_key(unit), positive_integer_count(count) ] }
       end
       private_class_method :parts_for
 
+      def self.part_key(unit)
+        key = unit.to_sym
+        return key.to_s if PART_UNITS.include?(key)
+
+        raise ArgumentError, "unsupported duration part: #{unit.inspect}"
+      end
+      private_class_method :part_key
+
+      def self.positive_integer_count(count)
+        return count.to_i if integer_count?(count)
+
+        raise ArgumentError, "duration count must be a positive integer: #{count.inspect}"
+      end
+      private_class_method :positive_integer_count
+
+      def self.integer_count?(count)
+        count.is_a?(Numeric) && count == count.to_i && count.positive?
+      end
+      private_class_method :integer_count?
+
       def self.duration_piece(unit, count)
-        amount = count.to_i
+        amount = positive_integer_count(count)
         case unit
         when :years then amount.years
         when :months then amount.months
         when :weeks then amount.weeks
         when :days then amount.days
-        when :hours then amount.hours
-        when :minutes then amount.minutes
-        when :seconds then amount.seconds
         else raise ArgumentError, "unsupported duration part: #{unit.inspect}"
         end
       end

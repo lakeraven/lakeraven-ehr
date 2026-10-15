@@ -60,11 +60,17 @@ module Lakeraven
         as_of > progress_review_due_on
       end
 
+      # A VistA DUZ is an integer. "0301" and " 301" are the same provider as "301".
       def designated_provider?(duz)
-        duz.to_s == designated_provider_duz.to_s
+        canonical_duz(duz) == canonical_duz(designated_provider_duz)
       end
 
       private
+
+      def canonical_duz(duz)
+        stripped = duz.to_s.strip
+        stripped.match?(/\A\d+\z/) ? stripped.to_i.to_s : stripped
+      end
 
       def stringify_problems_goals
         return unless problems_goals.is_a?(Array)
@@ -73,9 +79,14 @@ module Lakeraven
       end
 
       def problems_goals_are_pairs
-        return if problems_goals.is_a?(Array) && problems_goals.all? { |entry| problem_goal_pair?(entry) }
+        return if problem_goal_list?
 
         errors.add(:problems_goals, "must list each problem with its goal")
+      end
+
+      def problem_goal_list?
+        problems_goals.is_a?(Array) && problems_goals.any? &&
+          problems_goals.all? { |entry| problem_goal_pair?(entry) }
       end
 
       def problem_goal_pair?(entry)
