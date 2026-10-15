@@ -17,7 +17,7 @@ module Lakeraven
           duration_minutes: 30,
           documented_by_duz: "2843"
         )
-        encounter = Encounter.new(status: "in-progress", class_code: "AMB", ien: 2_090_061)
+        encounter = Encounter.new(status: "in-progress", class_code: "AMB", ien: 2_090_061, patient_dfn: 8801)
 
         result = BehavioralHealthVisitFinalizationService.new(
           encounter: encounter,
@@ -36,7 +36,7 @@ module Lakeraven
           duration_minutes: 15,
           documented_by_duz: "2843"
         )
-        encounter = Encounter.new(status: "in-progress", class_code: "AMB", ien: 2_090_061)
+        encounter = Encounter.new(status: "in-progress", class_code: "AMB", ien: 2_090_061, patient_dfn: 8801)
 
         result = BehavioralHealthVisitFinalizationService.new(
           encounter: encounter,
@@ -49,7 +49,7 @@ module Lakeraven
       end
 
       test "finalize fails closed when visit coding is absent" do
-        encounter = Encounter.new(status: "in-progress", class_code: "AMB", ien: 2_090_061)
+        encounter = Encounter.new(status: "in-progress", class_code: "AMB", ien: 2_090_061, patient_dfn: 8801)
 
         result = BehavioralHealthVisitFinalizationService.new(
           encounter: encounter,
@@ -70,7 +70,7 @@ module Lakeraven
           selected_cpt_code: "90837",
           documented_by_duz: "2843"
         )
-        encounter = Encounter.new(status: "in-progress", class_code: "AMB", ien: 2_090_061)
+        encounter = Encounter.new(status: "in-progress", class_code: "AMB", ien: 2_090_061, patient_dfn: 8801)
 
         result = BehavioralHealthVisitFinalizationService.new(
           encounter: encounter,
