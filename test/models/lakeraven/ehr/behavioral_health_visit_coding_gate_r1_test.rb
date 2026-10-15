@@ -24,6 +24,14 @@ module Lakeraven
         }.merge(overrides)
       end
 
+      # A rejected statement aborts the enclosing transaction in Postgres; the
+      # savepoint keeps the test transaction (and teardown) usable afterwards.
+      def insert_raw(rows)
+        BehavioralHealthVisitCoding.transaction(requires_new: true) do
+          BehavioralHealthVisitCoding.insert_all(rows)
+        end
+      end
+
       def insert_timestamp_attributes
         now = Time.current
         { created_at: now, updated_at: now }
@@ -31,7 +39,7 @@ module Lakeraven
 
       test "B4 raw insert of individual psychotherapy with null duration and cpt 90837 is rejected by the database" do
         assert_raises(ActiveRecord::StatementInvalid) do
-          BehavioralHealthVisitCoding.insert_all(
+          insert_raw(
             [ base_row_attributes(
               encounter_ien: "gate-b4-individual-null-duration",
               encounter_kind: INDIVIDUAL,
@@ -44,7 +52,7 @@ module Lakeraven
 
       test "B4 raw insert of psychiatric diagnostic evaluation with null cpt_code is rejected by the database" do
         assert_raises(ActiveRecord::StatementInvalid) do
-          BehavioralHealthVisitCoding.insert_all(
+          insert_raw(
             [ base_row_attributes(
               encounter_ien: "gate-b4-eval-null-cpt",
               encounter_kind: EVAL,
@@ -58,7 +66,7 @@ module Lakeraven
 
       test "B4 raw insert of individual psychotherapy with 45 minutes and null derived and selected cpt is rejected by the database" do
         assert_raises(ActiveRecord::StatementInvalid) do
-          BehavioralHealthVisitCoding.insert_all(
+          insert_raw(
             [ base_row_attributes(
               encounter_ien: "gate-b4-individual-45-null-cpt",
               encounter_kind: INDIVIDUAL,
