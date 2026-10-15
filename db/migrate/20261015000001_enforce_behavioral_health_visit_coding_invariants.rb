@@ -27,6 +27,8 @@ class EnforceBehavioralHealthVisitCodingInvariants < ActiveRecord::Migration[8.1
 
   # `IS NOT DISTINCT FROM` is false for NULL, and `IS TRUE` makes any
   # remaining unknown fail the check. A plain `=` or `>` would pass.
+  # Evaluation has no time band; a negative duration is still refused.
+  # NULL and zero stay allowed.
   def null_safe_check
     <<~SQL.squish
       (
@@ -34,6 +36,7 @@ class EnforceBehavioralHealthVisitCodingInvariants < ActiveRecord::Migration[8.1
           encounter_kind = 'psychiatric_diagnostic_evaluation'
           AND cpt_code IS NOT DISTINCT FROM '90791'
           AND (selected_cpt_code IS NULL OR selected_cpt_code = '90791')
+          AND (duration_minutes IS NULL OR duration_minutes >= 0)
         )
         OR
         (

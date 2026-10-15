@@ -15,8 +15,9 @@ module Lakeraven
     # The claim handoff carries the procedure code and the documented
     # duration only, and only when `cpt_code` is the code the minutes
     # derive now. That attribute is assigned in before_validation, so an
-    # unvalidated row has none. Diagnosis stays on the POV / claim path
-    # (#560).
+    # unvalidated row has none. A persisted row whose duration was edited
+    # in memory, even inside the same band, has no handoff. Diagnosis
+    # stays on the POV / claim path (#560).
     class BehavioralHealthVisitCoding < ApplicationRecord
       self.table_name = "lakeraven_ehr_behavioral_health_visit_codings"
 
@@ -45,6 +46,9 @@ module Lakeraven
       def to_claim_procedure_handoff
         code = recorded_procedure_code
         return nil if code.nil?
+        # Same band keeps the stored CPT, so the code check above does not
+        # see an unsaved duration. Hand off only the duration on file.
+        return nil if persisted? && duration_minutes_changed?
 
         {
           procedure_code: code,

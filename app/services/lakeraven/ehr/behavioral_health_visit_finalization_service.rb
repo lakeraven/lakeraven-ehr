@@ -40,11 +40,11 @@ module Lakeraven
         @visit_coding.encounter_ien.to_s == visit_ien.to_s
       end
 
-      # Encounters identified only by visit IEN carry no patient_dfn.
-      # When the encounter has one, it has to be the coding's patient.
+      # A visit with no patient_dfn is not this coding's patient. Missing
+      # data must not let another patient's row finalize on the same IEN.
       def visit_patient_matches?
         visit_dfn = @encounter.patient_dfn
-        return true if visit_dfn.nil?
+        return false if visit_dfn.nil?
 
         @visit_coding.patient_dfn.to_i == visit_dfn.to_i
       end
