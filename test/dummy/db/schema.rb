@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_24_000000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_14_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -59,6 +59,20 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_24_000000) do
     t.string "jti", null: false
     t.index [ "client_id", "jti" ], name: "idx_backend_assertion_jti_uniqueness", unique: true
     t.index [ "expires_at" ], name: "index_lakeraven_ehr_backend_assertion_jtis_on_expires_at"
+  end
+
+  create_table "lakeraven_ehr_behavioral_health_visit_codings", force: :cascade do |t|
+    t.string "cpt_code"
+    t.datetime "created_at", null: false
+    t.string "documented_by_duz", null: false
+    t.integer "duration_minutes"
+    t.string "encounter_ien", null: false
+    t.string "encounter_kind", null: false
+    t.integer "patient_dfn", null: false
+    t.string "selected_cpt_code"
+    t.datetime "updated_at", null: false
+    t.index [ "patient_dfn", "encounter_ien" ], name: "index_lakeraven_ehr_bh_visit_codings_on_patient_encounter"
+    t.check_constraint "((encounter_kind = 'psychiatric_diagnostic_evaluation' AND cpt_code = '90791' AND (selected_cpt_code IS NULL OR selected_cpt_code = '90791')) OR (encounter_kind = 'individual_psychotherapy' AND duration_minutes > 0 AND (selected_cpt_code IS NULL OR selected_cpt_code IN ('90832', '90834', '90837')) AND ((duration_minutes < 16 AND cpt_code IS NULL) OR (duration_minutes BETWEEN 16 AND 37 AND (((selected_cpt_code IS NULL OR selected_cpt_code = '90832') AND cpt_code = '90832') OR (selected_cpt_code IS NOT NULL AND selected_cpt_code <> '90832' AND cpt_code IS NULL))) OR (duration_minutes BETWEEN 38 AND 52 AND (((selected_cpt_code IS NULL OR selected_cpt_code = '90834') AND cpt_code = '90834') OR (selected_cpt_code IS NOT NULL AND selected_cpt_code <> '90834' AND cpt_code IS NULL))) OR (duration_minutes >= 53 AND (((selected_cpt_code IS NULL OR selected_cpt_code = '90837') AND cpt_code = '90837') OR (selected_cpt_code IS NOT NULL AND selected_cpt_code <> '90837' AND cpt_code IS NULL))))))", name: "bh_visit_coding_duration_and_cpt_consistent"
   end
 
   create_table "lakeraven_ehr_disclosures", force: :cascade do |t|
