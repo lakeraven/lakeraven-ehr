@@ -5,7 +5,8 @@ module Lakeraven
     # CPT selection for a behavioral-health visit, from documented face-to-face
     # minutes. Pure: no I/O, no persistence, no descriptor prose.
     #
-    # Psychiatric diagnostic evaluation (90791) has no time requirement.
+    # Psychiatric diagnostic evaluation (90791) has no time requirement;
+    # a negative duration is still refused.
     # Individual psychotherapy maps to the CMS minute bands:
     #   16–37 → 90832, 38–52 → 90834, 53+ → 90837.
     # Under 16 minutes is documented but not reportable. Missing or
@@ -38,6 +39,7 @@ module Lakeraven
         invalid_duration
         disallowed_cpt_code
         cpt_code_incompatible_with_encounter_kind
+        unknown_encounter_kind
       ].freeze
 
       Proposal = Struct.new(:cpt_code, :reportable, :blocking_reason, :duration_minutes, keyword_init: true) do
@@ -60,7 +62,7 @@ module Lakeraven
         return evaluation_proposal if evaluation?
         return individual_proposal if individual?
 
-        unreportable(nil)
+        unreportable(:unknown_encounter_kind)
       end
 
       private
@@ -74,6 +76,7 @@ module Lakeraven
       end
 
       def evaluation_proposal
+        return unreportable(:invalid_duration) if negative_duration?
         return reportable(EVAL_CPT) if @selected_cpt_code.nil?
         return unreportable(:disallowed_cpt_code) unless allowed?(@selected_cpt_code)
         return unreportable(:cpt_code_incompatible_with_encounter_kind) unless @selected_cpt_code == EVAL_CPT
@@ -121,6 +124,11 @@ module Lakeraven
 
       def integer_minutes
         @duration_minutes.is_a?(Integer) ? @duration_minutes : nil
+      end
+
+      def negative_duration?
+        minutes = integer_minutes
+        !minutes.nil? && minutes.negative?
       end
 
       def blank_to_nil(value)

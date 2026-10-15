@@ -13,7 +13,10 @@ module Lakeraven
     # not valid rows.
     #
     # The claim handoff carries the procedure code and the documented
-    # duration only. Diagnosis stays on the POV / claim path (#560).
+    # duration only, and only when `cpt_code` is the code the minutes
+    # derive now. That attribute is assigned in before_validation, so an
+    # unvalidated row has none. Diagnosis stays on the POV / claim path
+    # (#560).
     class BehavioralHealthVisitCoding < ApplicationRecord
       self.table_name = "lakeraven_ehr_behavioral_health_visit_codings"
 
@@ -40,16 +43,29 @@ module Lakeraven
       # Procedure code plus duration. No diagnosis keys — those are a
       # different claim input and must not ride along on this handoff.
       def to_claim_procedure_handoff
-        return nil unless resolved?
+        code = recorded_procedure_code
+        return nil if code.nil?
 
         {
-          procedure_code: cpt_code,
+          procedure_code: code,
           duration_minutes: duration_minutes,
           code_system: Procedure::CODE_SYSTEM_URLS["cpt"]
         }
       end
 
       private
+
+      # Stored by before_validation. Live `resolved?` is not enough: an
+      # unsaved row and a row whose inputs have since changed would
+      # otherwise hand off nil or the old code.
+      def recorded_procedure_code
+        return nil unless resolved?
+
+        code = cpt_code
+        return nil if code.nil? || code != proposal.cpt_code
+
+        code
+      end
 
       def proposal
         PsychotherapyVisitCodingRules.proposal(

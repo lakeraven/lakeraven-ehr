@@ -31,8 +31,7 @@ module Lakeraven
       def save
         record = build_record
         return refusal(record) unless record.valid? && record.resolved?
-
-        record.save!
+        return already_recorded(record) unless save_record(record)
         return procedure_failure(record) if @persist_procedure && !write_procedure(record)
 
         Result.new(success: true, record: record, claim_handoff: record.to_claim_procedure_handoff, errors: [])
@@ -54,6 +53,24 @@ module Lakeraven
       def refusal(record)
         reason = record.blocking_reason
         Result.new(success: false, record: record, error: reason, errors: [ reason ].compact)
+      end
+
+      # The unique index is the race boundary. The loser's insert rolls
+      # back to this savepoint so the winner's row stays visible.
+      def save_record(record)
+        BehavioralHealthVisitCoding.transaction(requires_new: true) { record.save! }
+        true
+      rescue ActiveRecord::RecordNotUnique
+        false
+      end
+
+      def already_recorded(record)
+        Result.new(
+          success: false,
+          record: record,
+          error: :coding_already_recorded,
+          errors: [ :coding_already_recorded ]
+        )
       end
 
       # RPMS procedure file write. Skipped entirely unless persist_procedure
