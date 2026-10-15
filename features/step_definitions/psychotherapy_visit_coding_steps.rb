@@ -2,6 +2,10 @@
 
 # Steps for features/behavioral_health/psychotherapy_visit_coding.feature (#476).
 
+# Scenarios do not run in a rolled-back transaction, and one coding per patient
+# and visit is unique, so a row left by an earlier scenario blocks the next.
+Before { Lakeraven::EHR::BehavioralHealthVisitCoding.delete_all }
+
 Given("the documenting provider has DUZ {int}") do |duz|
   @documented_by_duz = duz.to_s
 end
