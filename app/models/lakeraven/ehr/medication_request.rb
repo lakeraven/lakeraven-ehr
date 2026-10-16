@@ -8,6 +8,7 @@ module Lakeraven
 
       VALID_STATUSES = %w[active on-hold cancelled completed stopped draft entered-in-error unknown].freeze
       VALID_INTENTS = %w[proposal plan order original-order reflex-order filler-order instance-order option].freeze
+      DATA_ABSENT_REASON = "http://hl7.org/fhir/StructureDefinition/data-absent-reason"
 
       attribute :ien, :string
       attribute :patient_dfn, :string
@@ -135,6 +136,8 @@ module Lakeraven
           intent: intent,
           subject: patient_dfn ? { reference: "Patient/#{patient_dfn}" } : nil,
           medicationCodeableConcept: build_medication_code,
+          authoredOn: authored_on&.iso8601,
+          _authoredOn: build_authored_on_absent,
           dosageInstruction: build_dosage_instructions,
           dispenseRequest: build_dispense_request,
           requester: build_requester
@@ -185,13 +188,21 @@ module Lakeraven
         dr
       end
 
-      def build_requester
-        return nil if requester_duz.blank?
+      def build_authored_on_absent
+        return nil if authored_on.present?
 
-        {
-          reference: "Practitioner/#{requester_duz}",
-          display: requester_name
-        }.compact
+        { extension: [ { url: DATA_ABSENT_REASON, valueCode: "unknown" } ] }
+      end
+
+      def build_requester
+        if requester_duz.present?
+          {
+            reference: "Practitioner/#{requester_duz}",
+            display: requester_name
+          }.compact
+        else
+          { extension: [ { url: DATA_ABSENT_REASON, valueCode: "unknown" } ] }
+        end
       end
     end
   end
