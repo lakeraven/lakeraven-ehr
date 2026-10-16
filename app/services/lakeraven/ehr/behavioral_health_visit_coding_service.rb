@@ -46,9 +46,21 @@ module Lakeraven
         )
       end
 
+      # A hard block already names the reason. A row that fails validation
+      # with no blocking reason (blank patient, encounter, or provider)
+      # must still say why — a nil error is not a refusal the caller can show.
       def refusal(record)
         reason = record.blocking_reason
-        Result.new(success: false, record: record, error: reason, errors: [ reason ].compact)
+        if reason.nil?
+          return Result.new(
+            success: false,
+            record: record,
+            error: :invalid_input,
+            errors: record.errors.full_messages
+          )
+        end
+
+        Result.new(success: false, record: record, error: reason, errors: [ reason ])
       end
 
       # The unique index is the race boundary. The loser's insert rolls
