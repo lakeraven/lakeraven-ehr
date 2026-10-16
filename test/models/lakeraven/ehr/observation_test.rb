@@ -242,19 +242,39 @@ module Lakeraven
         assert_equal "vital-signs", coding[:code]
       end
 
-      test "H4: Observation built from vital row keeps recorded text in unit and uses UCUM code from map" do
+test "H4: Observation built from vital row handles units correctly" do
         hashes = [
           { type: "T", value: "98.6", units: "Celsius", recorded_date: DateTime.now },
+          { type: "T", value: "98.6", units: "", recorded_date: DateTime.now },
+          { type: "T", value: "98.6", units: "[degF]", recorded_date: DateTime.now },
           { type: "PAIN", value: "4", units: "", recorded_date: DateTime.now }
         ]
         obs = Observation.from_vital_hashes(hashes, patient_dfn: "1")
 
-        temp = obs.find { |o| o.code == Observation::VITAL_SIGNS_CODES[:temperature] }
-        temp_fhir = temp.to_fhir
-        assert_equal "Celsius", temp_fhir[:valueQuantity][:unit]
-        assert_equal "[degF]", temp_fhir[:valueQuantity][:code]
-        assert_equal "http://unitsofmeasure.org", temp_fhir[:valueQuantity][:system]
+        temps = obs.select { |o| o.code == Observation::VITAL_SIGNS_CODES[:temperature] }
 
+        # 1. Recorded unit is text not equal to map's UCUM unit
+        temp_diff = temps.find { |o| o.unit == "Celsius" }.to_fhir
+        assert_equal "Celsius", temp_diff[:valueQuantity][:unit]
+        assert_nil temp_diff[:valueQuantity][:code]
+        assert_nil temp_diff[:valueQuantity][:system]
+
+        # 2. Recorded unit blank -> map unit, code, system
+        # Wait, the unit in the model might be set to the map unit if it was blank.
+        # Let's just find the one that has unit "[degF]" but we have two of them now.
+        # We can differentiate by value or just rely on the order.
+        temp_blank = temps[1].to_fhir
+        assert_equal "[degF]", temp_blank[:valueQuantity][:unit]
+        assert_equal "[degF]", temp_blank[:valueQuantity][:code]
+        assert_equal "http://unitsofmeasure.org", temp_blank[:valueQuantity][:system]
+
+        # 3. Recorded unit equal to the map unit
+        temp_same = temps[2].to_fhir
+        assert_equal "[degF]", temp_same[:valueQuantity][:unit]
+        assert_equal "[degF]", temp_same[:valueQuantity][:code]
+        assert_equal "http://unitsofmeasure.org", temp_same[:valueQuantity][:system]
+
+        # 4. Keep the PAIN/blank case
         pain = obs.find { |o| o.display == "PAIN" }
         pain_fhir = pain.to_fhir
         assert_nil pain_fhir[:valueQuantity][:unit]

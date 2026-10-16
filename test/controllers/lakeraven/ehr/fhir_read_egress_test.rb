@@ -646,6 +646,60 @@ module Lakeraven
         # Safety flag should not be derived from partial answers
         refute_includes response.body, "Self-harm response recorded"
       end
+      test "I2(a): Screenings banner is not shown when filter changes item 9 answer to zero-valued choice" do
+        endpoint = WIRED_ENDPOINTS.find { |e| e[:name] == "screenings show" }
+        instance_exec(&endpoint[:setup])
+        path = instance_exec(&endpoint[:dynamic_path])
+
+        stub_egress_filter(->(payload) {
+          if payload.is_a?(Hash)
+            payload = payload.deep_dup.deep_stringify_keys
+            if payload["resourceType"] == "Bundle"
+              q_response = payload["entry"].find { |e| e.dig("resource", "resourceType") == "QuestionnaireResponse" }
+              if q_response && q_response["resource"]["item"]
+                item9 = q_response["resource"]["item"].find { |item| item["linkId"] == Lakeraven::EHR::ScreeningInstrument::PHQ9.safety_link_id }
+                if item9 && item9["answer"] && item9["answer"].first
+                  item9["answer"].first["valueInteger"] = 0
+                end
+              end
+            end
+          end
+          payload
+        }) do
+          get path
+        end
+
+        assert_response :success
+        refute_includes response.body, "Self-harm response recorded"
+      end
+
+      test "I2(b): Screenings banner is shown when filter keeps item 9 with nonzero answer" do
+        endpoint = WIRED_ENDPOINTS.find { |e| e[:name] == "screenings show" }
+        instance_exec(&endpoint[:setup])
+        path = instance_exec(&endpoint[:dynamic_path])
+
+        stub_egress_filter(->(payload) {
+          if payload.is_a?(Hash)
+            payload = payload.deep_dup.deep_stringify_keys
+            if payload["resourceType"] == "Bundle"
+              q_response = payload["entry"].find { |e| e.dig("resource", "resourceType") == "QuestionnaireResponse" }
+              if q_response && q_response["resource"]["item"]
+                item9 = q_response["resource"]["item"].find { |item| item["linkId"] == Lakeraven::EHR::ScreeningInstrument::PHQ9.safety_link_id }
+                if item9 && item9["answer"] && item9["answer"].first
+                  item9["answer"].first["valueInteger"] = 1
+                end
+              end
+            end
+          end
+          payload
+        }) do
+          get path
+        end
+
+        assert_response :success
+        assert_includes response.body, "Self-harm response recorded"
+      end
+
 
       WIRED_ENDPOINTS.each do |endpoint|
         test_name = endpoint[:name] || endpoint[:path]

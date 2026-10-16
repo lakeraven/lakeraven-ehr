@@ -378,6 +378,40 @@ module Lakeraven
         assert_select "table.screening-responses tfoot td", "12"
       end
 
+
+      def stub_egress_filter(implementation)
+        filter = Part2EgressFilter.singleton_class
+        original = filter.instance_method(:call)
+        filter.define_method(:call, &implementation)
+        yield
+      ensure
+        filter.define_method(:call, original)
+      end
+
+      test "I1: the flash notice on create does not contain the score or severity band when filtered" do
+        stub_egress_filter(->(payload) {
+          if payload.is_a?(Hash)
+            payload = payload.deep_dup.deep_stringify_keys
+            if payload["resourceType"] == "Bundle"
+              payload["entry"].reject! { |e| e.dig("resource", "resourceType") == "Observation" }
+            end
+          end
+          payload
+        }) do
+          submit(answers: answers(PHQ9, [ 3, 3, 3, 3, 3, 3, 3, 3, 0 ]))
+          follow_redirect_authorized!
+        end
+
+        assert_response :ok
+        # Scoped: the whole page also carries a CSRF token, which can contain "24".
+        [ ".flash-notice", ".screening-score", "tfoot" ].each do |selector|
+          css_select(selector).each do |node|
+            assert_no_match(/\b24\b/, node.text, "#{selector} shows the withheld total")
+            assert_no_match(/severe/i, node.text, "#{selector} shows the withheld band")
+          end
+        end
+      end
+
       # -- Incomplete ----------------------------------------------------------
 
       test "an incomplete submission re-renders the form, names the items and stores nothing" do
