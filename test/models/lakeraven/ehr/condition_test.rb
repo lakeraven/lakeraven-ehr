@@ -237,6 +237,113 @@ module Lakeraven
         assert_equal "Moderate", fhir.dig(:severity, :coding, 0, :display)
       end
 
+      # Builder: Condition.from_rpms_row(row, patient_dfn:) — read path maps gateway Hashes to models;
+      # for_patient must keep returning those Hashes for charts, CDS, CPOE, and export callers.
+      test "from_rpms_row maps gateway problem-list row to US Core Condition serialization" do
+        original_client = RpmsRpc.configuration.client
+        RpmsRpc.mock! do |m|
+          require_relative "../../../dummy/lib/lakeraven_demo_seeds"
+          LakeravenDemoSeeds.seed(m)
+        end
+
+        row = Condition.for_patient("1").first
+        assert_kind_of Hash, row
+        assert_equal "E11.9", row[:icd_code]
+        assert_equal "Type 2 diabetes mellitus", row[:description]
+        assert_equal "A", row[:status]
+
+        condition = Condition.from_rpms_row(row, patient_dfn: "1")
+        assert_kind_of Condition, condition
+        assert_equal "1", condition.ien
+        assert_equal "1", condition.patient_dfn
+        assert_equal "E11.9", condition.code
+        assert_equal "Type 2 diabetes mellitus", condition.display
+        assert_equal "active", condition.clinical_status
+        assert_equal "problem-list-item", condition.category
+
+        fhir = condition.to_fhir
+        assert_equal "Condition", fhir[:resourceType]
+        assert_equal "1", fhir[:id]
+        assert_equal "Patient/1", fhir.dig(:subject, :reference)
+        assert_equal "Type 2 diabetes mellitus", fhir.dig(:code, :text)
+        assert_equal "http://hl7.org/fhir/sid/icd-10-cm", fhir.dig(:code, :coding, 0, :system)
+        assert_equal "E11.9", fhir.dig(:code, :coding, 0, :code)
+        assert_equal "active", fhir.dig(:clinicalStatus, :coding, 0, :code)
+        assert_equal "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                     fhir.dig(:clinicalStatus, :coding, 0, :system)
+        assert_equal "problem-list-item", fhir.dig(:category, 0, :coding, 0, :code)
+        assert_nil fhir[:verificationStatus]
+      ensure
+        RpmsRpc.configure { |c| c.client = original_client }
+      end
+
+      DATA_ABSENT_REASON_URL = "http://hl7.org/fhir/StructureDefinition/data-absent-reason"
+
+      def wire_problem_row(overrides = {})
+        {
+          ien: 10,
+          description: "Chronic obstructive pulmonary disease",
+          status: "A",
+          icd_code: "J44.9",
+          onset_date: nil,
+          last_modified: nil,
+          service_connected: nil,
+          special_exposure: nil
+        }.merge(overrides)
+      end
+
+      def assert_clinical_status_data_absent_unknown(fhir_clinical_status)
+        assert_nil fhir_clinical_status&.dig(:coding),
+                   "expected no clinicalStatus coding when RPMS status is not A or I"
+        extensions = fhir_clinical_status&.dig(:extension)
+        assert extensions.present?, "expected clinicalStatus extension for unknown RPMS status"
+        dar = extensions.find { |ext| ext[:url] == DATA_ABSENT_REASON_URL }
+        assert dar, "expected data-absent-reason extension on clinicalStatus"
+        assert_equal "unknown", dar[:valueCode]
+      end
+
+      test "from_rpms_row maps problem list status I to inactive clinicalStatus" do
+        condition = Condition.from_rpms_row(wire_problem_row(status: "I"), patient_dfn: "1")
+
+        assert_equal "inactive", condition.clinical_status
+        assert_equal "inactive", condition.to_fhir.dig(:clinicalStatus, :coding, 0, :code)
+      end
+
+      test "from_rpms_row maps problem list status A to active clinicalStatus" do
+        condition = Condition.from_rpms_row(wire_problem_row(status: "A"), patient_dfn: "1")
+
+        assert_equal "active", condition.clinical_status
+        assert_equal "active", condition.to_fhir.dig(:clinicalStatus, :coding, 0, :code)
+      end
+
+      test "from_rpms_row uses data-absent-reason when problem list status is not A or I" do
+        condition = Condition.from_rpms_row(wire_problem_row(status: "R"), patient_dfn: "1")
+
+        assert_nil condition.clinical_status
+        assert_clinical_status_data_absent_unknown(condition.to_fhir[:clinicalStatus])
+      end
+
+      test "from_rpms_row uses data-absent-reason when problem list status is blank" do
+        condition = Condition.from_rpms_row(wire_problem_row(status: ""), patient_dfn: "1")
+
+        assert_nil condition.clinical_status
+        assert_clinical_status_data_absent_unknown(condition.to_fhir[:clinicalStatus])
+      end
+
+      test "to_fhir omits verificationStatus when RPMS does not supply it" do
+        condition = Condition.new(
+          ien: "2",
+          patient_dfn: "1",
+          code: "I10",
+          code_system: "icd10",
+          display: "Essential hypertension",
+          clinical_status: "active",
+          category: "problem-list-item"
+        )
+
+        assert_nil condition.to_fhir[:verificationStatus]
+      end
+
       # -- from_fhir_attributes --------------------------------------------------
 
       test "from_fhir_attributes extracts attributes" do
