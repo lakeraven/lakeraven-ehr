@@ -504,23 +504,20 @@ module Lakeraven
         return unless observation_category(resource) == "vital-signs"
 
         code = fhir_coding_code(fhir_field(resource, "code"))
-        type, meta = vital_type_for(code)
+        type = vital_type_for(code)&.first
         type = codeable_text(fhir_field(resource, "code")) if type.nil?
         return if type.blank?
 
-        { type: type, value: vital_display_value(resource, code), units: vital_units_from(resource, meta) }
+        { type: type, value: vital_display_value(resource, code), units: vital_units_from(resource) }
       end
 
-      # Prefer the unit the resource carries (the RPMS reading). The map's
-      # unit is only there when the resource has none.
-      def vital_units_from(resource, meta)
+      # The unit RPMS recorded, from valueQuantity.unit. Blood pressure has no
+      # top-level quantity; the same recorded unit is on each component.
+      def vital_units_from(resource)
         stated = fhir_field(fhir_field(resource, "valueQuantity"), "unit")
         return stated unless stated.nil?
 
-        stated = component_unit(resource)
-        return stated unless stated.nil?
-
-        meta&.dig(:unit)
+        component_unit(resource)
       end
 
       def component_unit(resource)

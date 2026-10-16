@@ -313,7 +313,7 @@
                     <td class="mono"><%= e[:datetime].respond_to?(:strftime) ? e[:datetime].strftime("%b %-d, %Y") : e[:datetime] %></td>
                     <td><%= e[:location].presence || "—" %></td>
                     <td>Ambulatory</td>
-                    <td><span class="badge inactive" data-rpms-status="<%= e[:status] %>"><%= e[:status].to_s.titleize %></span></td>
+                    <td><span class="badge inactive"><%= e[:status].to_s.titleize %></span></td>
                   </tr>
                 <% end %>
               </tbody>

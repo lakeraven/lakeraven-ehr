@@ -1,9 +1,6 @@
-<% content_for :title, "#{@instrument.short_title} result | Lakeraven EHR" %>
+<% content_for :title, (@instrument ? "#{@instrument.short_title} result | Lakeraven EHR" : "Screening | Lakeraven EHR") %>
 
-<% if @egress_label.present? %>
-  <div hidden><%= @egress_label %></div>
-<% end %>
-
+<% if @response && @instrument %>
 <div class="page-header">
   <h1><%= @instrument.title %></h1>
   <p>Patient #<%= @dfn %> &middot;
@@ -59,3 +56,10 @@
 <div class="screening-actions">
   <a href="<%= patient_screenings_path(@dfn) %>">All screenings for this patient</a>
 </div>
+<% else %>
+<div class="page-header">
+  <h1>Screening</h1>
+  <p>Patient #<%= @dfn %></p>
+</div>
+<p>No screening to display.</p>
+<% end %>

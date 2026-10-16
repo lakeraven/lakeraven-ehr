@@ -45,11 +45,8 @@ module Lakeraven
       # are the sensitive half of the feature (the score alone is an
       # Observation). Scope is asked for by that name.
       SCREENING_RESOURCE = "QuestionnaireResponse"
-      SCREENING_SCORE_EXT = "https://lakeraven.com/fhir/StructureDefinition/screening-total-score"
-      SCREENING_BAND_EXT = "https://lakeraven.com/fhir/StructureDefinition/screening-severity-band"
-      SCREENING_SAFETY_EXT = "https://lakeraven.com/fhir/StructureDefinition/screening-safety-flag"
 
-      # What the HTML pages read back out of a filtered QuestionnaireResponse.
+      # What the HTML pages read back out of a filtered screening bundle.
       ScreeningPage = Struct.new(
         :id, :effective_at, :instrument, :total_score, :severity_band,
         :encounter_ien, :answered_items, :safety_flagged,
@@ -77,7 +74,6 @@ module Lakeraven
         filtered = filter_fhir_for_egress(screening_bundle(records))
         return refuse_unfiltered_fhir_egress unless filtered
 
-        assign_egress_document(filtered)
         @responses = screening_pages(filtered)
       end
 
@@ -130,11 +126,8 @@ module Lakeraven
         filtered = filter_fhir_for_egress(screening_bundle([ record ]))
         return refuse_unfiltered_fhir_egress unless filtered
 
-        assign_egress_document(filtered)
         @response = screening_pages(filtered).first
-        return render_egress_identity unless @response
-
-        @instrument = @response.instrument
+        @instrument = @response&.instrument
       end
 
       private
@@ -272,57 +265,40 @@ module Lakeraven
       end
 
       # -- Egress ---------------------------------------------------------------
-      # Index and show build a QuestionnaireResponse bundle, hand it to
-      # Part2EgressFilter, and render only what comes back. A payload that
-      # is not a screening bundle (the seam's marker) still has to show up
-      # in the HTML; the pages put its id in a hidden element.
+      # Index and show hand the resources a screening already maps to
+      # (QuestionnaireResponse and its score Observation) to Part2EgressFilter
+      # and render only the entries that come back. An empty bundle is a page
+      # with no answers and no score. Nil or an unusable payload is a 503.
 
       def screening_bundle(records)
+        resources = records.flat_map(&:to_fhir_resources)
         {
           resourceType: "Bundle",
           type: "searchset",
-          total: records.length,
-          entry: records.map { |record| { resource: screening_resource(record) } }
+          total: resources.length,
+          entry: resources.map { |resource| { resource: resource } }
         }
       end
 
-      def screening_resource(record)
-        record.to_questionnaire_response.merge(extension: screening_extensions(record))
-      end
-
-      def screening_extensions(record)
-        [
-          { url: SCREENING_SCORE_EXT, valueInteger: record.total_score },
-          { url: SCREENING_BAND_EXT, valueString: record.severity_band },
-          { url: SCREENING_SAFETY_EXT, valueBoolean: record.safety_flagged? }
-        ]
-      end
-
-      def assign_egress_document(document)
-        @egress_document = document
-        # A normal screening bundle has no id. The seam's replacement
-        # resource does, and the page has to show that id.
-        @egress_label = fhir_value(document, "id").to_s
-      end
-
-      def render_egress_identity
-        render html: helpers.tag.div(@egress_label, hidden: true), layout: true
-      end
-
       def screening_pages(document)
-        questionnaire_resources(document).filter_map { |resource| screening_page(resource) }
+        resources = document_resources(document)
+        observations = resources.select { |resource| resource_type(resource) == "Observation" }
+        resources.select { |resource| resource_type(resource) == "QuestionnaireResponse" }.filter_map do |resource|
+          screening_page(resource, observations)
+        end
       end
 
-      def screening_page(resource)
-        fields = screening_page_fields(resource)
+      def screening_page(resource, observations)
+        fields = screening_page_fields(resource, observations)
         ScreeningPage.new(**fields) if fields
       end
 
-      def screening_page_fields(resource)
+      def screening_page_fields(resource, observations)
         instrument = instrument_for(resource)
+        pairs = answered_pairs(resource, instrument)
         effective_at = egress_time(fhir_value(resource, "authored"))
-        total = screening_total(resource, instrument)
-        band = screening_band(resource, instrument, total)
+        total = screening_total(resource, instrument, observations, pairs)
+        band = instrument.band_label_for(total) if instrument && !total.nil?
         return if instrument.nil? || effective_at.nil? || total.nil? || band.blank?
 
         {
@@ -332,22 +308,21 @@ module Lakeraven
           total_score: total,
           severity_band: band,
           encounter_ien: encounter_ien_from(resource),
-          answered_items: answered_pairs(resource, instrument),
-          safety_flagged: safety_flag_from(resource)
+          answered_items: pairs,
+          safety_flagged: safety_disclosed?(pairs, instrument)
         }
       end
 
-      def questionnaire_resources(document)
-        resources = if fhir_value(document, "resourceType").to_s == "Bundle"
-                      bundle_entry_resources(document)
-                    else
-                      [ document ]
-                    end
-        resources.select { |resource| questionnaire_response?(resource) }
+      def document_resources(document)
+        if resource_type(document) == "Bundle"
+          bundle_entry_resources(document)
+        else
+          [ document ]
+        end
       end
 
-      def questionnaire_response?(resource)
-        fhir_value(resource, "resourceType").to_s == "QuestionnaireResponse"
+      def resource_type(resource)
+        fhir_value(resource, "resourceType").to_s
       end
 
       def bundle_entry_resources(document)
@@ -362,27 +337,41 @@ module Lakeraven
         ScreeningInstrument::ALL.find { |instrument| instrument.questionnaire_canonical == canonical }
       end
 
-      def screening_total(resource, instrument)
-        value = extension_value(resource, SCREENING_SCORE_EXT, "valueInteger")
-        return value.to_i if value.is_a?(Numeric)
+      # The score Observation is the total the screening already publishes.
+      # When the filter returned the answers and not that Observation, the
+      # total is the sum of the answers that remain.
+      def screening_total(resource, instrument, observations, pairs)
+        observed = observation_score(resource, instrument, observations)
+        return observed unless observed.nil?
+        return if pairs.empty?
 
-        pairs = answered_pairs(resource, instrument)
-        pairs.sum { |_item, choice| choice.value.to_i } unless pairs.empty?
+        pairs.sum { |_item, choice| choice.value.to_i }
       end
 
-      def screening_band(resource, instrument, total)
-        band = extension_value(resource, SCREENING_BAND_EXT, "valueString")
-        return band if band.present?
-        return if instrument.nil? || total.nil?
+      def observation_score(questionnaire, instrument, observations)
+        return if instrument.nil?
 
-        instrument.band_label_for(total)
+        id = "screening-#{instrument.key}-#{fhir_value(questionnaire, "id")}"
+        match = observations.find { |observation| fhir_value(observation, "id").to_s == id }
+        quantity_number(match)
       end
 
-      def safety_flag_from(resource)
-        extension = extension_for(resource, SCREENING_SAFETY_EXT)
-        return false unless extension
+      def quantity_number(resource)
+        return if resource.nil?
 
-        !!fhir_value(extension, "valueBoolean")
+        number = Float(fhir_value(fhir_value(resource, "valueQuantity"), "value"))
+        (number % 1).zero? ? number.to_i : number
+      rescue ArgumentError, TypeError
+        nil
+      end
+
+      # Same rule the record enforces: a positive answer on the safety item
+      # is a self-harm disclosure.
+      def safety_disclosed?(pairs, instrument)
+        link_id = instrument.safety_link_id
+        return false if link_id.blank?
+
+        pairs.any? { |item, choice| item.link_id == link_id && choice.value.to_i.positive? }
       end
 
       def answered_pairs(resource, instrument)
@@ -431,17 +420,9 @@ module Lakeraven
         return value if value.respond_to?(:strftime)
         return if value.blank?
 
-        Time.iso8601(value.to_s)
-      rescue ArgumentError
+        Time.zone.parse(value.to_s)
+      rescue ArgumentError, TypeError
         nil
-      end
-
-      def extension_value(resource, url, key)
-        fhir_value(extension_for(resource, url), key)
-      end
-
-      def extension_for(resource, url)
-        Array(fhir_value(resource, "extension")).find { |ext| fhir_value(ext, "url") == url }
       end
 
       def first_fhir(value)
