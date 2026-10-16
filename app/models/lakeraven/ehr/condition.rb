@@ -22,9 +22,10 @@ module Lakeraven
       }.freeze
 
       CATEGORY_SYSTEM = "http://terminology.hl7.org/CodeSystem/condition-category"
+      DATA_ABSENT_REASON = "http://hl7.org/fhir/StructureDefinition/data-absent-reason"
 
-      # RPMS problem-list status codes -> FHIR condition-clinical.
-      # Anything else falls back to active, the chart's prior mapping.
+      # ORQQPL status codes that are real condition-clinical values.
+      # Anything else, including blank, is not coded — to_fhir marks it absent.
       RPMS_PROBLEM_STATUS = { "A" => "active", "I" => "inactive" }.freeze
 
       attribute :ien, :string
@@ -67,7 +68,7 @@ module Lakeraven
           code: row[:icd_code],
           code_system: "icd10",
           display: row[:description],
-          clinical_status: RPMS_PROBLEM_STATUS[row[:status]] || "active",
+          clinical_status: RPMS_PROBLEM_STATUS[row[:status].to_s.strip],
           category: "problem-list-item"
         )
       end
@@ -126,14 +127,18 @@ module Lakeraven
       private
 
       def build_clinical_status
-        return nil unless clinical_status
-
-        {
-          coding: [ {
-            system: "http://terminology.hl7.org/CodeSystem/condition-clinical",
-            code: clinical_status
-          } ]
-        }
+        if clinical_status.present?
+          {
+            coding: [ {
+              system: "http://terminology.hl7.org/CodeSystem/condition-clinical",
+              code: clinical_status
+            } ]
+          }
+        else
+          {
+            extension: [ { url: DATA_ABSENT_REASON, valueCode: "unknown" } ]
+          }
+        end
       end
 
       def build_code

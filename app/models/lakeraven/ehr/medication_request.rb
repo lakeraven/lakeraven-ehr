@@ -6,7 +6,7 @@ module Lakeraven
       include ActiveModel::Model
       include ActiveModel::Attributes
 
-      VALID_STATUSES = %w[active on-hold cancelled completed stopped draft entered-in-error].freeze
+      VALID_STATUSES = %w[active on-hold cancelled completed stopped draft entered-in-error unknown].freeze
       VALID_INTENTS = %w[proposal plan order original-order reflex-order filler-order instance-order option].freeze
 
       attribute :ien, :string
@@ -47,26 +47,46 @@ module Lakeraven
         gateway.for_patient(dfn)
       end
 
-      # Medication-list gateway row -> model. Shared by the chart and
-      # MedicationRequest search. No code, authoredOn, or requester: the
-      # list row does not carry them.
+      # ORQQPS LIST is ID^NAME+FORM^STOP_DATE^ROUTE^SCHEDULE^REFILLS.
+      # Status is mapped only when a row actually carries one. stop_date
+      # is never a status. No code, authoredOn, or requester on this wire.
+      RPMS_STATUS = {
+        "discontinued" => "stopped",
+        "dc" => "stopped",
+        "expired" => "completed",
+        "hold" => "on-hold",
+        "pending" => "draft",
+        "active" => "active"
+      }.freeze
+
       def self.from_rpms_row(row, patient_dfn:)
         new(
           ien: row[:ien]&.to_s,
           patient_dfn: patient_dfn,
           medication_display: row[:drug_name],
-          dosage_instruction: row[:sig],
+          dosage_instruction: dosage_text(row),
           status: rpms_status(row[:status]),
           intent: "order"
         )
       end
 
-      # status has a required FHIR binding. Keep a legal code; otherwise active.
+      # Case-insensitive. Blank and unrecognised RPMS text are unknown,
+      # which is a legal MedicationRequest status. Do not pass a raw
+      # FHIR code through, and do not read stop_date.
       def self.rpms_status(raw)
-        normalized = raw.to_s.strip.downcase
-        VALID_STATUSES.include?(normalized) ? normalized : "active"
+        RPMS_STATUS[raw.to_s.strip.downcase] || "unknown"
       end
-      private_class_method :rpms_status
+
+      # dosageInstruction.text is route + schedule when either is present.
+      # A sig is not on the ORQQPS LIST wire; keep one only when this row
+      # carries it and the wire fields are blank.
+      def self.dosage_text(row)
+        parts = [ row[:route], row[:schedule] ].filter_map { |part| part.to_s.strip.presence }
+        return parts.join(" ") if parts.any?
+
+        row[:sig].to_s.strip.presence
+      end
+      private_class_method :rpms_status, :dosage_text
 
       def self.resource_class
         "MedicationRequest"
