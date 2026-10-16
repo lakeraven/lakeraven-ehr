@@ -55,6 +55,10 @@ module Lakeraven
       end
 
       def self.duration_from(parts)
+        # A stored interval is a hash. to_h would accept an array of pairs and
+        # raise NoMethodError or TypeError for a string, integer, or bare array.
+        raise ArgumentError, "duration parts must be a hash: #{parts.inspect}" unless parts.is_a?(Hash)
+
         normalized = parts.to_h.symbolize_keys
         unknown = normalized.keys - PART_UNITS
         raise ArgumentError, "unsupported duration parts: #{unknown.inspect}" if unknown.any?

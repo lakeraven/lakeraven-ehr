@@ -93,9 +93,13 @@ module Lakeraven
         Result.new(success: false, record: @plan, error: error)
       end
 
+      # DateTime is a Date, so is_a?(Date) would keep the clock time. Noon today
+      # then compares after midnight and is refused as a future review. A plain
+      # Date stays as it is; anything else that can become a date is reduced
+      # with to_date before it is compared or written.
       def coerce_date(value)
         return if value.nil?
-        return value if value.is_a?(Date)
+        return value if value.instance_of?(Date)
         return unless value.respond_to?(:to_date)
 
         value.to_date
