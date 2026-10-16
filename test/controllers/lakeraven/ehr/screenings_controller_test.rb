@@ -812,7 +812,7 @@ module Lakeraven
         submit(submission_token: SecureRandom.uuid)
         landing_page = "#{BASE}/#{ScreeningResponse.last.id}"
         follow_redirect_authorized! # consume this submission's own notice
-        assert_match(/recorded — score 8/i, response.body, "guard: show renders the flash")
+        assert_select ".flash-notice", text: /recorded/i # guard: show renders the flash (I1: it carries no score)
 
         with_broken_audit do
           submit(answers: answers(PHQ9, [ 3, 3, 3, 3, 3, 3, 3, 3, 0 ]),
