@@ -103,13 +103,7 @@ module Lakeraven
         Condition.for_patient(@patient_dfn)
       end
 
-      # The allergy search serializes models. A gateway hash has no to_fhir
-      # and no resourceType; the same merger the search uses builds the models.
-      # Rows that already implement to_fhir are returned as they are.
       def fetch_allergy_intolerances
-        rows = AllergyIntolerance.for_patient(@patient_dfn)
-        return rows if rows.is_a?(Array) && rows.any? && rows.all? { |row| row.respond_to?(:to_fhir) }
-
         SupplementalClinicalResources.merged_allergy_intolerances_for_patient(@patient_dfn)
       end
 
