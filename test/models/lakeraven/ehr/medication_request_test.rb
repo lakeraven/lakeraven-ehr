@@ -209,6 +209,53 @@ module Lakeraven
         assert_equal "Dr. Smith", fhir.dig(:requester, :display)
       end
 
+      # Builder: MedicationRequest.from_rpms_row(row, patient_dfn:) — read path maps gateway Hashes to models;
+      # for_patient must keep returning those Hashes for charts, CDS, CPOE, and export callers.
+      test "from_rpms_row maps gateway medication-list row to US Core MedicationRequest serialization" do
+        original_client = RpmsRpc.configuration.client
+        RpmsRpc.mock! do |m|
+          require_relative "../../../dummy/lib/lakeraven_demo_seeds"
+          LakeravenDemoSeeds.seed(m)
+        end
+
+        row = MedicationRequest.for_patient("1").first
+        assert_kind_of Hash, row
+        assert_equal "Lisinopril 10mg", row[:drug_name]
+
+        mr = MedicationRequest.from_rpms_row(row, patient_dfn: "1")
+        assert_kind_of MedicationRequest, mr
+        assert_equal "1", mr.ien
+        assert_equal "1", mr.patient_dfn
+        assert_equal "Lisinopril 10mg", mr.medication_display
+        assert_equal "active", mr.status
+        assert_equal "order", mr.intent
+
+        fhir = mr.to_fhir
+        assert_equal "MedicationRequest", fhir[:resourceType]
+        assert_equal "1", fhir[:id]
+        assert_equal "active", fhir[:status]
+        assert_equal "order", fhir[:intent]
+        assert_equal "Patient/1", fhir.dig(:subject, :reference)
+        assert_equal "Lisinopril 10mg", fhir.dig(:medicationCodeableConcept, :text)
+        assert_nil fhir.dig(:medicationCodeableConcept, :coding)
+        assert_nil fhir[:authoredOn]
+        assert_nil fhir[:requester]
+      ensure
+        RpmsRpc.configure { |c| c.client = original_client }
+      end
+
+      test "to_fhir omits RxNorm coding when RPMS does not supply a medication code" do
+        mr = MedicationRequest.new(
+          ien: "2",
+          patient_dfn: "1",
+          medication_display: "Metformin 500mg",
+          status: "active",
+          intent: "order"
+        )
+
+        assert_nil mr.to_fhir.dig(:medicationCodeableConcept, :coding)
+      end
+
       # -- from_fhir_attributes --------------------------------------------------
 
       test "from_fhir_attributes extracts attributes" do
