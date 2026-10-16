@@ -242,7 +242,19 @@ module Lakeraven
         assert_equal "Lisinopril 10mg", fhir.dig(:medicationCodeableConcept, :text)
         assert_nil fhir.dig(:medicationCodeableConcept, :coding)
         assert_nil fhir[:authoredOn]
-        assert_nil fhir[:requester]
+        authored_dar = fhir.dig(:_authoredOn, :extension)&.find do |ext|
+          ext[:url] == "http://hl7.org/fhir/StructureDefinition/data-absent-reason"
+        end
+        assert authored_dar, "expected data-absent-reason on _authoredOn when RPMS has no order date"
+        assert_equal "unknown", authored_dar[:valueCode]
+        requester = fhir[:requester]
+        assert_nil requester&.dig(:reference)
+        assert_nil requester&.dig(:display)
+        requester_dar = requester&.dig(:extension)&.find do |ext|
+          ext[:url] == "http://hl7.org/fhir/StructureDefinition/data-absent-reason"
+        end
+        assert requester_dar, "expected data-absent-reason on requester when RPMS has no provider"
+        assert_equal "unknown", requester_dar[:valueCode]
       ensure
         RpmsRpc.configure { |c| c.client = original_client }
       end

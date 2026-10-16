@@ -62,7 +62,13 @@ module Lakeraven
         end
       end
 
-      test "search entries omit authoredOn and requester when RPMS does not supply them" do
+      DATA_ABSENT_REASON_URL = "http://hl7.org/fhir/StructureDefinition/data-absent-reason"
+
+      test "search entries use data-absent-reason for authoredOn and requester when RPMS does not supply them" do
+        RpmsRpc.client.seed_keyed_collection(:medication_list, "1",
+          [ { ien: 1, drug_name: "Lisinopril 10mg", route: "PO", schedule: "daily", refills: 3, stop_date: nil },
+            { ien: 42, drug_name: "Metformin 500mg", route: "PO", schedule: "BID", refills: 2, stop_date: nil } ])
+
         get "/lakeraven-ehr/MedicationRequest", params: { patient: "1" }, headers: @headers
 
         assert_response :ok
@@ -70,7 +76,13 @@ module Lakeraven
           resource = entry["resource"]
           assert resource["intent"].present?, "intent is required on MedicationRequest"
           assert_nil resource["authoredOn"], "authoredOn must be absent, not invented"
-          assert_nil resource["requester"], "requester must be absent, not invented"
+          authored_dar = resource.dig("_authoredOn", "extension")&.find { |ext| ext["url"] == DATA_ABSENT_REASON_URL }
+          assert authored_dar, "expected data-absent-reason on _authoredOn"
+          assert_equal "unknown", authored_dar["valueCode"]
+          refute resource.dig("requester", "reference"), "requester reference must be absent, not invented"
+          requester_dar = resource.dig("requester", "extension")&.find { |ext| ext["url"] == DATA_ABSENT_REASON_URL }
+          assert requester_dar, "expected data-absent-reason on requester"
+          assert_equal "unknown", requester_dar["valueCode"]
         end
       end
 
