@@ -14,6 +14,9 @@ module Lakeraven
       compartment_bound :create, param: :patient_dfn
       before_action :authorize_export_owner!, only: %i[show destroy]
 
+      # Shown on the status OperationOutcome. The exception text stays in the log.
+      EXPORT_FAILURE_DIAGNOSTIC = "Export failed"
+
       # POST /exports
       #
       # A bulk export is a WRITE (it creates a job and materialises a record
@@ -81,24 +84,29 @@ module Lakeraven
       def run_export(export)
         export.start_processing!
         service = EhiExportService.new(patient_dfn: params[:patient_dfn] || "1")
-        result = service.export(
-          resource_types: export.requested_types,
-          since: export.since_timestamp
-        )
-
-        files = (result[:files] || []).map do |file|
-          {
-            "type" => file[:resource_type] || file[:type],
-            "url" => export_file_url(export_id: export.id, file_name: file[:file_name]),
-            "count" => file[:count] || 0,
-            "file_name" => file[:file_name],
-            "content" => file[:content]
-          }
-        end
-
-        export.complete!(files)
+        # #export takes no arguments. resource_types / since are not parameters
+        # of this service; passing them raises before any file is built.
+        result = service.export
+        export.complete!(export_output_files(export, result[:files] || []))
       rescue => e
-        export.fail!(e.message)
+        Rails.logger.error("[export] #{e.full_message}")
+        export.fail!(EXPORT_FAILURE_DIAGNOSTIC)
+      end
+
+      # EhiExportService emits :name. The download route stores that as file_name.
+      def export_output_files(export, files)
+        files.map { |file| export_output_file(export, file) }
+      end
+
+      def export_output_file(export, file)
+        name = file[:name]
+        {
+          "type" => file[:resource_type] || file[:type],
+          "url" => export_file_url(export_id: export.id, file_name: name),
+          "count" => file[:count] || 0,
+          "file_name" => name,
+          "content" => file[:content]
+        }
       end
     end
   end

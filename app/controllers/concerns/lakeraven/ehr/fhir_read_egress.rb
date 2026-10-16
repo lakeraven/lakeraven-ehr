@@ -13,7 +13,7 @@ module Lakeraven
     # Directory, terminology, and status endpoints keep render_fhir /
     # render_bundle and do not enter this seam. ChartsController does not
     # inherit the FHIR base controller, so it includes this concern for
-    # the JSON chart only.
+    # the JSON chart and the HTML chart.
     module FHIRReadEgress
       extend ActiveSupport::Concern
 
@@ -23,8 +23,8 @@ module Lakeraven
       private
 
       def render_fhir_egress(payload, status: :ok)
-        filtered = egress_filter(payload)
-        return refuse_unfiltered_fhir_egress unless filtered.is_a?(Hash)
+        filtered = filter_fhir_for_egress(payload)
+        return refuse_unfiltered_fhir_egress unless filtered
 
         render json: filtered, status: status, content_type: fhir_egress_content_type
       end
@@ -36,9 +36,16 @@ module Lakeraven
 
       def render_ndjson_egress(payload)
         filtered = egress_filter(payload)
-        return refuse_unfiltered_ndjson_egress unless filtered.is_a?(String)
+        return refuse_unfiltered_ndjson_egress unless usable_ndjson_payload?(filtered)
 
         render plain: filtered, content_type: NDJSON_CONTENT_TYPE
+      end
+
+      # HTML chart renders this bundle; JSON callers go through render_fhir_egress.
+      # Nil means the filter output is not a FHIR payload — callers must refuse.
+      def filter_fhir_for_egress(payload)
+        filtered = egress_filter(payload)
+        filtered if usable_fhir_payload?(filtered)
       end
 
       def fhir_search_bundle(entries, type: "searchset")
@@ -52,6 +59,36 @@ module Lakeraven
 
       def egress_filter(payload)
         Part2EgressFilter.call(payload)
+      end
+
+      # A FHIR payload is a Hash whose resourceType is a String, whether the
+      # key arrived as a string (JSON) or a symbol (in-process hashes).
+      def usable_fhir_payload?(payload)
+        return false unless payload.is_a?(Hash)
+
+        fhir_resource_type_value(payload).is_a?(String)
+      end
+
+      def fhir_resource_type_value(payload)
+        [ payload["resourceType"], payload[:resourceType] ].find { |value| value.is_a?(String) }
+      end
+
+      # "" is an empty file. Any other string must be NDJSON: every non-blank
+      # line is a JSON object with a String resourceType.
+      def usable_ndjson_payload?(payload)
+        return false unless payload.is_a?(String)
+
+        payload.each_line.all? { |line| usable_ndjson_line?(line) }
+      end
+
+      def usable_ndjson_line?(line)
+        stripped = line.strip
+        return true if stripped.empty?
+
+        resource = JSON.parse(stripped)
+        resource.is_a?(Hash) && resource["resourceType"].is_a?(String)
+      rescue JSON::ParserError
+        false
       end
 
       def fhir_egress_content_type

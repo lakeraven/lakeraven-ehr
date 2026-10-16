@@ -58,17 +58,22 @@ module Lakeraven
         "no show" => "cancelled"
       }.freeze
 
+      # Screening row the HTML chart reads back out of a filtered Observation.
+      ChartScreening = Struct.new(
+        :effective_at, :instrument, :total_score, :severity_band,
+        keyword_init: true
+      ) do
+        def severity_slug
+          severity_band.to_s.parameterize
+        end
+      end
+
       def show
         @patient = Patient.find_by_dfn(params[:dfn])
         return render_missing_patient unless @patient
 
         load_clinical_collections
-
-        if fhir_requested?
-          render_fhir_egress(fhir_bundle)
-        else
-          render :show, layout: false
-        end
+        render_chart
       end
 
       private
@@ -302,7 +307,7 @@ module Lakeraven
         resources.concat(safe_map(@screening_answers, &:to_questionnaire_response))
         resources.concat(@immunizations.map(&:to_fhir))
         resources.concat(@procedures.map(&:to_fhir))
-        resources.concat(@encounter_resources.map { |e| encounter_to_fhir(e) })
+        resources.concat(chart_encounter_entries)
 
         {
           resourceType: "Bundle",
@@ -323,10 +328,280 @@ module Lakeraven
       # appointment yields the same resolvable fullUrl on every request. If a
       # real visit IEN ever flows through, Encounter#to_fhir uses it and this
       # fallback is skipped.
-      def encounter_to_fhir(encounter)
+      def encounter_to_fhir(encounter, source = {})
         fhir = encounter.to_fhir
-        fhir[:id] ||= "appt-#{encounter.patient_identifier}-#{encounter.period_start&.strftime('%Y%m%d%H%M')}"
+        fhir[:id] ||= appointment_fhir_id(encounter)
+        stamp_location_display(fhir, source[:location] || source["location"])
         fhir
+      end
+
+      def appointment_fhir_id(encounter)
+        "appt-#{encounter.patient_identifier}-#{encounter.period_start&.strftime("%Y%m%d%H%M")}"
+      end
+
+      def stamp_location_display(fhir, name)
+        return if name.blank?
+
+        locations = fhir[:location] || fhir["location"]
+        locations = fhir[:location] = [ { location: {} } ] if locations.blank?
+        locations.each do |entry|
+          place = entry[:location] || entry["location"]
+          place[:display] = name if place.is_a?(Hash)
+        end
+      end
+
+      def chart_encounter_entries
+        @encounters.zip(@encounter_resources).map do |source, encounter|
+          encounter_to_fhir(encounter, source)
+        end
+      end
+
+      def render_chart
+        if fhir_requested?
+          render_fhir_egress(fhir_bundle)
+        else
+          render_html_chart
+        end
+      end
+
+      # The page is the filtered bundle. Loader collections are only the input
+      # to fhir_bundle; they are not what the template renders.
+      def render_html_chart
+        bundle = filter_fhir_for_egress(fhir_bundle)
+        return refuse_unfiltered_fhir_egress unless bundle
+
+        assign_chart_from_bundle(bundle)
+        render :show, layout: false
+      end
+
+      def assign_chart_from_bundle(bundle)
+        grouped = resources_by_type(bundle)
+        observations = grouped["Observation"]
+        @patient = chart_patient(grouped["Patient"]&.first)
+        @conditions = chart_conditions(grouped["Condition"])
+        @medications = chart_medications(grouped["MedicationRequest"])
+        @allergies = chart_allergies(grouped["AllergyIntolerance"])
+        @vitals = chart_vitals(observations)
+        @immunizations = chart_immunizations(grouped["Immunization"])
+        @encounters = chart_encounters(grouped["Encounter"])
+        @screenings = chart_screenings(observations)
+      end
+
+      def resources_by_type(bundle)
+        bundle_resources(bundle).group_by { |resource| fhir_field(resource, "resourceType").to_s }
+      end
+
+      def bundle_resources(bundle)
+        fhir_list(fhir_field(bundle, "entry")).filter_map do |entry|
+          resource = fhir_field(entry, "resource")
+          resource if resource.is_a?(Hash)
+        end
+      end
+
+      def chart_patient(resource)
+        return Patient.new(dfn: params[:dfn]) if resource.nil?
+
+        Patient.from_fhir(stringify_fhir(resource))
+      end
+
+      def stringify_fhir(value)
+        case value
+        when Hash
+          value.each_with_object({}) { |(key, inner), copy| copy[key.to_s] = stringify_fhir(inner) }
+        when Array
+          value.map { |inner| stringify_fhir(inner) }
+        else
+          value
+        end
+      end
+
+      def chart_conditions(resources)
+        fhir_list(resources).map { |resource| condition_from_fhir(resource) }
+      end
+
+      def condition_from_fhir(resource)
+        code = fhir_field(resource, "code")
+        Condition.new(
+          display: codeable_text(code),
+          code: fhir_coding_code(code),
+          clinical_status: fhir_coding_code(fhir_field(resource, "clinicalStatus"))
+        )
+      end
+
+      def chart_medications(resources)
+        fhir_list(resources).map { |resource| medication_from_fhir(resource) }
+      end
+
+      def medication_from_fhir(resource)
+        dose = fhir_first(fhir_field(resource, "dosageInstruction"))
+        MedicationRequest.new(
+          medication_display: codeable_text(fhir_field(resource, "medicationCodeableConcept")),
+          dosage_instruction: fhir_field(dose, "text"),
+          status: fhir_field(resource, "status")
+        )
+      end
+
+      def chart_allergies(resources)
+        fhir_list(resources).map { |resource| allergy_from_fhir(resource) }
+      end
+
+      def allergy_from_fhir(resource)
+        reaction = fhir_first(fhir_field(resource, "reaction"))
+        manifestation = fhir_first(fhir_field(reaction, "manifestation"))
+        AllergyIntolerance.new(
+          allergen: codeable_text(fhir_field(resource, "code")),
+          reaction: fhir_field(manifestation, "text"),
+          severity: fhir_field(reaction, "severity")
+        )
+      end
+
+      def chart_immunizations(resources)
+        fhir_list(resources).map { |resource| immunization_from_fhir(resource) }
+      end
+
+      def immunization_from_fhir(resource)
+        Immunization.new(
+          vaccine_display: codeable_text(fhir_field(resource, "vaccineCode")),
+          occurrence_datetime: parse_fhir_time(fhir_field(resource, "occurrenceDateTime")),
+          status: fhir_field(resource, "status")
+        )
+      end
+
+      def chart_encounters(resources)
+        fhir_list(resources).map { |resource| encounter_row_from_fhir(resource) }
+      end
+
+      def encounter_row_from_fhir(resource)
+        location = fhir_first(fhir_field(resource, "location"))
+        {
+          datetime: parse_fhir_time(fhir_field(fhir_field(resource, "period"), "start")),
+          location: fhir_field(fhir_field(location, "location"), "display"),
+          status: fhir_field(resource, "status")
+        }
+      end
+
+      def chart_vitals(observations)
+        fhir_list(observations).filter_map { |resource| vital_row_from_fhir(resource) }
+      end
+
+      def vital_row_from_fhir(resource)
+        return unless observation_category(resource) == "vital-signs"
+
+        code = fhir_coding_code(fhir_field(resource, "code"))
+        type, meta = vital_type_for(code)
+        return unless type
+
+        { type: type, value: vital_display_value(resource, code), units: meta[:unit] }
+      end
+
+      def vital_type_for(code)
+        Observation::VITAL_TYPE_MAP.find { |_type, mapping| mapping[:code] == code }
+      end
+
+      def vital_display_value(resource, code)
+        if code == Observation::VITAL_SIGNS_CODES[:blood_pressure]
+          blood_pressure_reading(resource)
+        else
+          format_fhir_number(fhir_field(fhir_field(resource, "valueQuantity"), "value"))
+        end
+      end
+
+      def blood_pressure_reading(resource)
+        components = fhir_list(fhir_field(resource, "component"))
+        systolic = component_quantity(components, Observation::VITAL_SIGNS_CODES[:systolic])
+        diastolic = component_quantity(components, Observation::VITAL_SIGNS_CODES[:diastolic])
+        return if systolic.nil? || diastolic.nil?
+
+        "#{format_fhir_number(systolic)}/#{format_fhir_number(diastolic)}"
+      end
+
+      def component_quantity(components, code)
+        match = components.find { |component| fhir_coding_code(fhir_field(component, "code")) == code }
+        fhir_field(fhir_field(match, "valueQuantity"), "value")
+      end
+
+      def format_fhir_number(value)
+        number = Float(value)
+        (number % 1).zero? ? number.to_i.to_s : number.to_s
+      rescue ArgumentError, TypeError
+        value.to_s
+      end
+
+      def chart_screenings(observations)
+        fhir_list(observations).filter_map { |resource| screening_from_fhir(resource) }
+      end
+
+      def screening_from_fhir(resource)
+        return unless observation_category(resource) == "survey"
+
+        instrument = screening_instrument_for(resource)
+        total = screening_total(resource)
+        effective_at = parse_fhir_time(fhir_field(resource, "effectiveDateTime"))
+        return if instrument.nil? || total.nil? || effective_at.nil?
+
+        ChartScreening.new(
+          effective_at: effective_at,
+          instrument: instrument,
+          total_score: total,
+          severity_band: instrument.band_label_for(total).to_s
+        )
+      end
+
+      def screening_instrument_for(resource)
+        code = fhir_coding_code(fhir_field(resource, "code"))
+        ScreeningInstrument::ALL.find { |instrument| instrument.total_score_code == code }
+      end
+
+      def screening_total(resource)
+        value = fhir_field(fhir_field(resource, "valueQuantity"), "value")
+        number = Float(value)
+        (number % 1).zero? ? number.to_i : number
+      rescue ArgumentError, TypeError
+        nil
+      end
+
+      def observation_category(resource)
+        fhir_coding_code(fhir_first(fhir_field(resource, "category")))
+      end
+
+      def codeable_text(codeable)
+        text = fhir_field(codeable, "text")
+        return text if text.present?
+
+        fhir_field(fhir_first(fhir_field(codeable, "coding")), "display")
+      end
+
+      def fhir_coding_code(codeable)
+        fhir_field(fhir_first(fhir_field(codeable, "coding")), "code")
+      end
+
+      def fhir_first(value)
+        value.is_a?(Array) ? value.first : value
+      end
+
+      def fhir_list(value)
+        case value
+        when nil then []
+        when Array then value
+        else [ value ]
+        end
+      end
+
+      def fhir_field(object, key)
+        return unless object.is_a?(Hash)
+        return object[key.to_s] if object.key?(key.to_s)
+
+        object[key.to_sym] if object.key?(key.to_sym)
+      end
+
+      def parse_fhir_time(value)
+        return if value.blank?
+        return value if value.respond_to?(:strftime)
+
+        text = value.to_s
+        text.include?("T") ? Time.iso8601(text) : Date.iso8601(text).to_time
+      rescue ArgumentError, TypeError
+        nil
       end
 
       # Absolute fullUrl for a resource. Resources whose serializer emits an id
