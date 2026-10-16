@@ -144,11 +144,13 @@ module Lakeraven
         end
       end
 
-      # Lock the plan row until the due date is written. A concurrent review
-      # then sees this row when it reads the latest reviewed_on, or this call
+      # SAVEPOINT so a failed due-date update rolls the review insert back
+      # with it. The caller does not commit that row on its own. Lock the
+      # plan row until the due date is written. A concurrent review then
+      # sees this row when it reads the latest reviewed_on, or this call
       # sees theirs.
       def write_progress_review(reviewed, reviewed_by_duz)
-        @plan.transaction do
+        @plan.transaction(requires_new: true) do
           @plan.lock!
           @plan.progress_reviews.create!(reviewed_on: reviewed, reviewed_by_duz: reviewed_by_duz.to_s)
           @plan.update!(progress_review_due_on: progress_due_on(latest_reviewed_on(reviewed)))
