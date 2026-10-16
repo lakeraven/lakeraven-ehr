@@ -618,14 +618,16 @@ module Lakeraven
         path = instance_exec(&endpoint[:dynamic_path])
 
         stub_egress_filter(->(payload) {
-          if payload.is_a?(Hash) && payload["resourceType"] == "Bundle"
-            payload = payload.deep_dup
-            payload["entry"].reject! { |e| e.dig("resource", "resourceType") == "Observation" }
+          if payload.is_a?(Hash)
+            payload = payload.deep_dup.deep_stringify_keys
+            if payload["resourceType"] == "Bundle"
+              payload["entry"].reject! { |e| e.dig("resource", "resourceType") == "Observation" }
 
-            # Also remove PHQ-9 item 9 to test safety flag
-            q_response = payload["entry"].find { |e| e.dig("resource", "resourceType") == "QuestionnaireResponse" }
-            if q_response && q_response["resource"]["item"]
-              q_response["resource"]["item"].reject! { |item| item["linkId"] == "69733-4" }
+              # Also remove PHQ-9 item 9 to test safety flag
+              q_response = payload["entry"].find { |e| e.dig("resource", "resourceType") == "QuestionnaireResponse" }
+              if q_response && q_response["resource"]["item"]
+                q_response["resource"]["item"].reject! { |item| item["linkId"] == Lakeraven::EHR::ScreeningInstrument::PHQ9.safety_link_id }
+              end
             end
           end
           payload
@@ -635,9 +637,11 @@ module Lakeraven
 
         assert_response :success
         # Score should be withheld
-        refute_includes response.body, "9"
-        refute_includes response.body, "Mild"
-        assert_includes response.body, "Withheld"
+        assert_select ".screening-score__total", text: /9/, count: 0
+        assert_select ".screening-score__number", text: /9/, count: 0
+        assert_select "tfoot tr td", text: /9/, count: 0
+        assert_select ".screening-score__band", text: /Mild/, count: 0
+        assert_select ".screening-score__total", text: /Withheld/
 
         # Safety flag should not be derived from partial answers
         refute_includes response.body, "Self-harm response recorded"
