@@ -46,6 +46,7 @@ module Lakeraven
       end
 
       def create
+        forget_program_configuration
         established = coerce_date(@date_established)
         error = create_error(established)
         return failure(error) if error
@@ -60,6 +61,7 @@ module Lakeraven
       end
 
       def record_progress_review(reviewed_on:, reviewed_by_duz:)
+        forget_program_configuration
         reviewed = coerce_date(reviewed_on)
         error = progress_review_error(reviewed, reviewed_by_duz)
         return failure(error) if error
@@ -184,8 +186,16 @@ module Lakeraven
         date.to_date + program_configuration.end_of_treatment_review_interval
       end
 
+      # One configuration per public operation. create and record_progress_review
+      # forget the previous read first, so a reused service loads the intervals
+      # stored for this call. The object stays until the call returns: the
+      # interval readable_intervals? accepted is the one added to the due date.
       def program_configuration
         @program_configuration ||= BehavioralHealthProgramConfiguration.for_program(program_key)
+      end
+
+      def forget_program_configuration
+        @program_configuration = nil
       end
 
       # A stored part count that is not a positive integer raises ArgumentError
