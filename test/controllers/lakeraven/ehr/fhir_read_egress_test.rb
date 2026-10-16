@@ -9,11 +9,11 @@ module Lakeraven
 
       setup do
         setup_smart_auth(scopes: "system/*.read system/*.write")
-        
+
         post "/lakeraven-ehr/exports", headers: @headers
         export_body = JSON.parse(response.body)
         @export_id = export_body["id"]
-        
+
         # Make the export produce a real output file by using the store's API to complete it
         export = ExportsController.store[@export_id]
         export.complete!([
@@ -115,21 +115,21 @@ module Lakeraven
           action = r.defaults[:action]
           "#{controller}##{action}" if controller && action
         end.compact.uniq
-        
+
         untested = controller_actions - ALLOWED_WITHOUT_SEAM - WIRED_ACTIONS - UNIMPLEMENTED_ACTIONS
-        
+
         assert_empty untested, "Found routes that might disclose clinical data but are not explicitly tested for seam wiring or allowlisted."
       end
 
       # Table-driven tests for each wired endpoint that can be successfully invoked with seeded data.
-      # Note: Many /:id show routes (like Consent/:id, AllergyIntolerance/:id) are omitted here because 
-      # we do not have seeded data for those specific resource IDs. We use the nearest real path 
+      # Note: Many /:id show routes (like Consent/:id, AllergyIntolerance/:id) are omitted here because
+      # we do not have seeded data for those specific resource IDs. We use the nearest real path
       # (the index search route) to verify the seam is wired for that controller, rather than inventing IDs that return 404.
       WIRED_ENDPOINTS = [
         { path: "/lakeraven-ehr/Patient", method: :get, params: { name: "Anderson" } },
         { path: "/lakeraven-ehr/Patient/1", method: :get },
         # POST /Patient requires an RPC response to register a patient, which isn't seeded data
-        { path: "/lakeraven-ehr/Patient", method: :post, params: { resourceType: "Patient", name: [{ family: "Test" }], gender: "female", birthDate: "1985-06-15", identifier: [{system: "http://hl7.org/fhir/sid/us-ssn", value: "111-11-1111"}] }.to_json, content_type: "application/fhir+json", needs_registration_stub: true },
+        { path: "/lakeraven-ehr/Patient", method: :post, params: { resourceType: "Patient", name: [ { family: "Test" } ], gender: "female", birthDate: "1985-06-15", identifier: [ { system: "http://hl7.org/fhir/sid/us-ssn", value: "111-11-1111" } ] }.to_json, content_type: "application/fhir+json", needs_registration_stub: true },
         { path: "/lakeraven-ehr/AllergyIntolerance", method: :get, params: { patient: "1" } },
         { path: "/lakeraven-ehr/Condition", method: :get, params: { patient: "1" } },
         { path: "/lakeraven-ehr/MedicationRequest", method: :get, params: { patient: "1" } },
@@ -148,9 +148,9 @@ module Lakeraven
       ].freeze
 
       [
-        ["/lakeraven-ehr/Medication", { patient: "1" }],
-        ["/lakeraven-ehr/DiagnosticReport", { patient: "1" }],
-        ["/lakeraven-ehr/CarePlan", { patient: "1" }]
+        [ "/lakeraven-ehr/Medication", { patient: "1" } ],
+        [ "/lakeraven-ehr/DiagnosticReport", { patient: "1" } ],
+        [ "/lakeraven-ehr/CarePlan", { patient: "1" } ]
       ].each do |path, params|
         test "missing controller for #{path} does not serve data and fails if later added without wiring" do
           begin
@@ -167,17 +167,17 @@ module Lakeraven
 
       WIRED_ENDPOINTS.each do |endpoint|
         test_name = endpoint[:name] || endpoint[:path]
-        
+
         test "seam is invoked and response reflects change for #{endpoint[:method].to_s.upcase} #{test_name}" do
           path = endpoint[:dynamic_path] ? instance_exec(&endpoint[:dynamic_path]) : endpoint[:path]
 
           marker = { "resourceType" => "Basic", "id" => "FILTER-MARKER" }
-          
-          stub_egress_filter(->(payload) { 
+
+          stub_egress_filter(->(payload) {
             if payload.is_a?(String)
               '{"resourceType":"Basic","id":"FILTER-MARKER"}'
             else
-              marker 
+              marker
             end
           }) do
             call_proc = -> {
@@ -219,7 +219,7 @@ module Lakeraven
           end
 
           assert_response :service_unavailable
-          
+
           if test_name == "exports file show"
             refute_includes response.body, "resourceType"
           else
