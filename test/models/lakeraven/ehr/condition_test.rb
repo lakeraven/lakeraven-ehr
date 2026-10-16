@@ -277,6 +277,59 @@ module Lakeraven
         RpmsRpc.configure { |c| c.client = original_client }
       end
 
+      DATA_ABSENT_REASON_URL = "http://hl7.org/fhir/StructureDefinition/data-absent-reason"
+
+      def wire_problem_row(overrides = {})
+        {
+          ien: 10,
+          description: "Chronic obstructive pulmonary disease",
+          status: "A",
+          icd_code: "J44.9",
+          onset_date: nil,
+          last_modified: nil,
+          service_connected: nil,
+          special_exposure: nil
+        }.merge(overrides)
+      end
+
+      def assert_clinical_status_data_absent_unknown(fhir_clinical_status)
+        assert_nil fhir_clinical_status&.dig(:coding),
+                   "expected no clinicalStatus coding when RPMS status is not A or I"
+        extensions = fhir_clinical_status&.dig(:extension)
+        assert extensions.present?, "expected clinicalStatus extension for unknown RPMS status"
+        dar = extensions.find { |ext| ext[:url] == DATA_ABSENT_REASON_URL }
+        assert dar, "expected data-absent-reason extension on clinicalStatus"
+        assert_equal "unknown", dar[:valueCode]
+      end
+
+      test "from_rpms_row maps problem list status I to inactive clinicalStatus" do
+        condition = Condition.from_rpms_row(wire_problem_row(status: "I"), patient_dfn: "1")
+
+        assert_equal "inactive", condition.clinical_status
+        assert_equal "inactive", condition.to_fhir.dig(:clinicalStatus, :coding, 0, :code)
+      end
+
+      test "from_rpms_row maps problem list status A to active clinicalStatus" do
+        condition = Condition.from_rpms_row(wire_problem_row(status: "A"), patient_dfn: "1")
+
+        assert_equal "active", condition.clinical_status
+        assert_equal "active", condition.to_fhir.dig(:clinicalStatus, :coding, 0, :code)
+      end
+
+      test "from_rpms_row uses data-absent-reason when problem list status is not A or I" do
+        condition = Condition.from_rpms_row(wire_problem_row(status: "R"), patient_dfn: "1")
+
+        assert_nil condition.clinical_status
+        assert_clinical_status_data_absent_unknown(condition.to_fhir[:clinicalStatus])
+      end
+
+      test "from_rpms_row uses data-absent-reason when problem list status is blank" do
+        condition = Condition.from_rpms_row(wire_problem_row(status: ""), patient_dfn: "1")
+
+        assert_nil condition.clinical_status
+        assert_clinical_status_data_absent_unknown(condition.to_fhir[:clinicalStatus])
+      end
+
       test "to_fhir omits verificationStatus when RPMS does not supply it" do
         condition = Condition.new(
           ien: "2",

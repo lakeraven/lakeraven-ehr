@@ -120,7 +120,7 @@ module Lakeraven
       end
 
       test "allows valid status values" do
-        %w[active on-hold cancelled completed stopped draft entered-in-error].each do |status|
+        %w[active on-hold cancelled completed stopped draft entered-in-error unknown].each do |status|
           mr = MedicationRequest.new(patient_dfn: "123", medication_display: "Lisinopril", status: status)
           assert mr.valid?, "Expected #{status} to be valid"
         end
@@ -221,19 +221,22 @@ module Lakeraven
         row = MedicationRequest.for_patient("1").first
         assert_kind_of Hash, row
         assert_equal "Lisinopril 10mg", row[:drug_name]
+        refute row.key?(:status), "ORQQPS LIST row must not include RPMS order status"
+        refute row.key?(:sig), "ORQQPS LIST row must not include sig text"
 
         mr = MedicationRequest.from_rpms_row(row, patient_dfn: "1")
         assert_kind_of MedicationRequest, mr
         assert_equal "1", mr.ien
         assert_equal "1", mr.patient_dfn
         assert_equal "Lisinopril 10mg", mr.medication_display
-        assert_equal "active", mr.status
+        assert_equal "unknown", mr.status
+        refute_equal "active", mr.status
         assert_equal "order", mr.intent
 
         fhir = mr.to_fhir
         assert_equal "MedicationRequest", fhir[:resourceType]
         assert_equal "1", fhir[:id]
-        assert_equal "active", fhir[:status]
+        assert_equal "unknown", fhir[:status]
         assert_equal "order", fhir[:intent]
         assert_equal "Patient/1", fhir.dig(:subject, :reference)
         assert_equal "Lisinopril 10mg", fhir.dig(:medicationCodeableConcept, :text)
@@ -242,6 +245,59 @@ module Lakeraven
         assert_nil fhir[:requester]
       ensure
         RpmsRpc.configure { |c| c.client = original_client }
+      end
+
+      def wire_medication_row(overrides = {})
+        {
+          ien: "42",
+          drug_name: "Metformin 500mg",
+          stop_date: nil,
+          route: "PO",
+          schedule: "BID",
+          refills: 2
+        }.merge(overrides)
+      end
+
+      test "from_rpms_row maps wire-shaped medication list row without status to unknown" do
+        row = wire_medication_row(sig: "1 tab PO BID — must not appear in dosage text")
+
+        mr = MedicationRequest.from_rpms_row(row, patient_dfn: "1")
+
+        assert_equal "unknown", mr.status
+        refute_equal "active", mr.status
+        assert_equal "PO BID", mr.dosage_instruction
+        refute_includes mr.dosage_instruction.to_s, "tab"
+
+        dosage = mr.to_fhir[:dosageInstruction]&.first
+        assert_equal "PO BID", dosage&.dig(:text)
+        refute_includes dosage&.dig(:text).to_s, "tab"
+      end
+
+      test "from_rpms_row maps RPMS medication status DISCONTINUED to stopped" do
+        mr = MedicationRequest.from_rpms_row(wire_medication_row(status: "DISCONTINUED"), patient_dfn: "1")
+        assert_equal "stopped", mr.status
+        assert_equal "stopped", mr.to_fhir[:status]
+      end
+
+      test "from_rpms_row maps RPMS medication status EXPIRED to completed" do
+        mr = MedicationRequest.from_rpms_row(wire_medication_row(status: "EXPIRED"), patient_dfn: "1")
+        assert_equal "completed", mr.status
+      end
+
+      test "from_rpms_row maps RPMS medication status HOLD to on-hold" do
+        mr = MedicationRequest.from_rpms_row(wire_medication_row(status: "HOLD"), patient_dfn: "1")
+        assert_equal "on-hold", mr.status
+      end
+
+      test "from_rpms_row maps RPMS medication status ACTIVE to active" do
+        mr = MedicationRequest.from_rpms_row(wire_medication_row(status: "ACTIVE"), patient_dfn: "1")
+        assert_equal "active", mr.status
+      end
+
+      test "from_rpms_row maps unrecognised RPMS medication status to unknown" do
+        mr = MedicationRequest.from_rpms_row(wire_medication_row(status: "SUSPENDED"), patient_dfn: "1")
+        assert_equal "unknown", mr.status
+        refute_equal "active", mr.status
       end
 
       test "to_fhir omits RxNorm coding when RPMS does not supply a medication code" do

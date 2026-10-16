@@ -31,7 +31,8 @@ module Lakeraven
 
         assert_equal "MedicationRequest", lisinopril["resourceType"]
         assert_equal "1", lisinopril["id"]
-        assert_equal "active", lisinopril["status"]
+        assert_equal "unknown", lisinopril["status"]
+        refute_equal "active", lisinopril["status"]
         assert_equal "order", lisinopril["intent"]
         assert_equal "Patient/1", lisinopril.dig("subject", "reference")
         assert_equal "Lisinopril 10mg", lisinopril.dig("medicationCodeableConcept", "text")
@@ -71,6 +72,23 @@ module Lakeraven
           assert_nil resource["authoredOn"], "authoredOn must be absent, not invented"
           assert_nil resource["requester"], "requester must be absent, not invented"
         end
+      end
+
+      test "search entries expose dosageInstruction text from route and schedule" do
+        RpmsRpc.client.seed_keyed_collection(:medication_list, "1",
+          [ { ien: 1, drug_name: "Lisinopril 10mg", route: "PO", schedule: "daily", refills: 3, stop_date: nil } ])
+
+        get "/lakeraven-ehr/MedicationRequest", params: { patient: "1" }, headers: @headers
+
+        assert_response :ok
+        lisinopril = JSON.parse(response.body)["entry"]
+          .map { |e| e["resource"] }
+          .find { |r| r.dig("medicationCodeableConcept", "text") == "Lisinopril 10mg" }
+        assert lisinopril, "expected seeded Lisinopril order in the bundle"
+
+        dosage_text = lisinopril.dig("dosageInstruction", 0, "text")
+        assert_equal "PO daily", dosage_text
+        refute_includes dosage_text.to_s, "tab"
       end
     end
   end

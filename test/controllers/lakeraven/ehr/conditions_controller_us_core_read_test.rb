@@ -54,15 +54,36 @@ module Lakeraven
         end
       end
 
-      test "search entries include clinicalStatus mapped from RPMS problem status" do
+      test "search entries map seeded active problem to clinicalStatus active" do
         get "/lakeraven-ehr/Condition", params: { patient: "1" }, headers: @headers
 
         assert_response :ok
-        JSON.parse(response.body)["entry"].each do |entry|
-          code = entry.dig("resource", "clinicalStatus", "coding", 0, "code")
-          assert_includes %w[active inactive remission resolved recurrence relapse], code,
-                            "expected FHIR clinicalStatus coding from RPMS status"
-        end
+        resources = JSON.parse(response.body)["entry"].map { |e| e["resource"] }
+
+        diabetes = resources.find { |r| r.dig("code", "coding", 0, "code") == "E11.9" }
+        assert diabetes, "expected seeded Type 2 diabetes problem in the bundle"
+        assert_equal "active", diabetes.dig("clinicalStatus", "coding", 0, "code")
+
+        hypertension = resources.find { |r| r.dig("code", "coding", 0, "code") == "I10" }
+        assert hypertension, "expected seeded hypertension problem in the bundle"
+        assert_equal "active", hypertension.dig("clinicalStatus", "coding", 0, "code")
+      end
+
+      DATA_ABSENT_REASON_URL = "http://hl7.org/fhir/StructureDefinition/data-absent-reason"
+
+      test "search entries map seeded inactive problem to clinicalStatus inactive" do
+        RpmsRpc.client.seed_keyed_collection(:problem_list, "1",
+          [ { ien: 1, status: "A", icd_code: "E11.9", description: "Type 2 diabetes mellitus" },
+            { ien: 99, status: "I", icd_code: "J44.9", description: "Chronic obstructive pulmonary disease" } ])
+
+        get "/lakeraven-ehr/Condition", params: { patient: "1" }, headers: @headers
+
+        assert_response :ok
+        copd = JSON.parse(response.body)["entry"]
+          .map { |e| e["resource"] }
+          .find { |r| r.dig("code", "coding", 0, "code") == "J44.9" }
+        assert copd, "expected seeded inactive problem in the bundle"
+        assert_equal "inactive", copd.dig("clinicalStatus", "coding", 0, "code")
       end
     end
   end
