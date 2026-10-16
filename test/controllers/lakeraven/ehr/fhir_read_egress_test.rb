@@ -598,7 +598,7 @@ module Lakeraven
               call_proc.call
             end
             assert_response :success
-            assert_includes response.body, "mild", "Expected seeded data (mild) to appear before filtering"
+            assert_includes response.body, "Mild", "Expected seeded data (mild) to appear before filtering"
 
             calls = 0
             stub_egress_filter(->(payload) {
@@ -614,7 +614,7 @@ module Lakeraven
 
             assert_response :success, "Expected successful response but got #{response.status}. Body: #{response.body}"
             assert_operator calls, :>=, 1, "HTML endpoint must invoke Part2EgressFilter"
-            refute_includes response.body, "mild", "Expected clinical content to be removed when filter returns empty bundle"
+            refute_includes response.body, "Mild", "Expected clinical content to be removed when filter returns empty bundle"
           else
             marker = { "resourceType" => "Basic", "id" => "FILTER-MARKER" }
             marker_ndjson = "{\"resourceType\":\"Basic\",\"id\":\"FILTER-MARKER\"}\n"
