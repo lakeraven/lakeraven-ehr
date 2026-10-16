@@ -16,10 +16,15 @@ module Lakeraven
 
         get "/lakeraven-ehr/exports/#{@export_id}", headers: @headers
         manifest = JSON.parse(response.body)
+        @manifest_output = manifest["output"]
 
         patient_file = manifest["output"]&.find { |f| f["type"] == "Patient" }
         @export_file_url = patient_file&.dig("url")
         @export_file_path = @export_file_url ? URI.parse(@export_file_url).path : "/lakeraven-ehr/exports/#{@export_id}/files/patient.ndjson"
+
+        @audit_csv_file = manifest["output"]&.find { |f| f["type"] == "audit_csv" }
+        @audit_csv_file_url = @audit_csv_file&.dig("url")
+        @audit_csv_file_path = @audit_csv_file_url ? URI.parse(@audit_csv_file_url).path : "/lakeraven-ehr/exports/#{@export_id}/files/audit_log.csv"
 
         @audit_event = AuditEvent.create!(
           event_type: "rest", action: "R", outcome: "0",
@@ -137,12 +142,37 @@ module Lakeraven
         assert_empty untested, "Found WIRED_ACTIONS that are not exercised in WIRED_ENDPOINTS"
       end
 
-      test "real export completes and yields a downloadable file" do
-        assert @export_file_url, "Expected manifest to contain a URL for the Patient export file"
-        get @export_file_path, headers: @headers
-        assert_response :success
-        assert_includes response.body, "Anderson"
-        assert_equal "application/fhir+ndjson", response.media_type
+      test "real export completes and yields a downloadable file for every item in manifest" do
+        assert @manifest_output.present?, "Expected manifest to contain output files"
+
+        @manifest_output.each do |file_info|
+          file_url = file_info["url"]
+          assert file_url, "Expected URL for file #{file_info['type']}"
+          file_path = URI.parse(file_url).path
+
+          get file_path, headers: @headers
+          assert_response :success
+
+          file_ext = File.extname(file_path)
+          if file_ext == ".ndjson"
+            assert_equal "application/fhir+ndjson", response.media_type
+            response.body.each_line do |line|
+              next if line.strip.empty?
+              resource = JSON.parse(line)
+              assert resource["resourceType"], "Expected parsed JSON to have a resourceType"
+            end
+            assert_includes response.body, "Anderson" if file_info["type"] == "Patient"
+          elsif file_ext == ".csv"
+            assert_equal "text/csv", response.media_type
+            assert_kind_of String, response.body
+            assert_includes response.body, "Event Type"
+          elsif file_ext == ".json"
+            assert_equal "application/json", response.media_type
+            assert_kind_of String, response.body
+            parsed = JSON.parse(response.body)
+            assert_kind_of Hash, parsed
+          end
+        end
       end
 
       test "FHIR JSON endpoint fails closed if filter returns empty hash" do
@@ -179,12 +209,28 @@ module Lakeraven
         assert_equal "", response.body
       end
 
+      test "Export file fails closed if seam returns nil for non-NDJSON file" do
+        stub_egress_filter(->(payload) { nil }) do
+          get @audit_csv_file_path, headers: @headers
+        end
+        assert_response :service_unavailable
+        assert_empty response.body, "Expected no file content when filter returns nil"
+      end
+
+      test "Export file fails closed if filter returns non-String for CSV type" do
+        stub_egress_filter(->(payload) { { "invalid" => "csv" } }) do
+          get @audit_csv_file_path, headers: @headers
+        end
+        assert_response :service_unavailable
+        assert_empty response.body, "Expected no file content when filter returns a non-String for CSV"
+      end
+
       test "HTML chart fails closed if filter returns empty hash" do
         stub_egress_filter(->(payload) { {} }) do
           get "/lakeraven-ehr/patients/1", headers: @headers
         end
         assert_response :service_unavailable
-        refute_includes response.body, "Lisinopril 10mg"
+        refute_includes response.body, "120/80"
       end
 
       test "HTML chart fails closed if filter returns hash without resourceType" do
@@ -192,7 +238,7 @@ module Lakeraven
           get "/lakeraven-ehr/patients/1", headers: @headers
         end
         assert_response :service_unavailable
-        refute_includes response.body, "Lisinopril 10mg"
+        refute_includes response.body, "120/80"
       end
 
       test "failed export status does not leak raw exception text" do
@@ -285,7 +331,7 @@ module Lakeraven
         # 1. Verify it appears with the real filter
         get "/lakeraven-ehr/patients/1", headers: @headers
         assert_response :success
-        assert_includes response.body, "Lisinopril 10mg"
+        assert_includes response.body, "120/80"
 
         # 2. Mock filter to return an empty bundle and verify it's gone
         calls = 0
@@ -298,7 +344,7 @@ module Lakeraven
 
         assert_response :success
         assert_operator calls, :>=, 1, "HTML chart must invoke Part2EgressFilter"
-        refute_includes response.body, "Lisinopril 10mg", "Expected clinical content to be removed when filter returns empty bundle"
+        refute_includes response.body, "120/80", "Expected clinical content to be removed when filter returns empty bundle"
       end
 
       test "HTML chart fails closed if seam returns nil" do
@@ -307,7 +353,7 @@ module Lakeraven
         end
 
         assert_response :service_unavailable
-        refute_includes response.body, "Lisinopril 10mg"
+        refute_includes response.body, "120/80"
       end
 
       WIRED_ENDPOINTS.each do |endpoint|
