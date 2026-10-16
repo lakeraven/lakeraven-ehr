@@ -43,6 +43,7 @@ module Lakeraven
       # shared concern IS the fail-closed one: if the access cannot be
       # recorded, it is not completed.
       include AuditableClinicalAccess
+      include FHIRReadEgress
 
       FHIR_CONTENT_TYPE = "application/fhir+json"
 
@@ -64,7 +65,7 @@ module Lakeraven
         load_clinical_collections
 
         if fhir_requested?
-          render json: fhir_bundle, content_type: FHIR_CONTENT_TYPE
+          render_fhir_egress(fhir_bundle)
         else
           render :show, layout: false
         end

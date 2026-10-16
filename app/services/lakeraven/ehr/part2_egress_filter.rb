@@ -2,16 +2,21 @@
 
 module Lakeraven
   module EHR
-    # C-CDA egress seam. TransitionsOfCareController serializes what this
-    # returns and does not build a document when the return value is not
-    # a sections hash.
+    # Egress seam for a disclosing response.
     #
-    # What this method does: return the sections it was given. It does
-    # not classify records and it does not remove any. Bulk export and
-    # the FHIR read API do not call it.
+    # Callers pass the payload they are about to send: C-CDA sections
+    # (TransitionsOfCareController), a FHIR resource or Bundle hash, or
+    # an NDJSON export file (String). TransitionsOfCareController
+    # serializes sections and does not build a document when the return
+    # value is not a sections hash. FHIR and NDJSON callers render the
+    # return value, and refuse when it is nil or not usable for that
+    # response.
+    #
+    # What this method does: return its input unchanged. It does not
+    # classify records and it does not remove any.
     class Part2EgressFilter
-      def self.call(sections)
-        sections
+      def self.call(payload)
+        payload
       end
     end
   end

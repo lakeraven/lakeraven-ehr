@@ -26,10 +26,10 @@ module Lakeraven
           end
         end
 
-        render json: {
+        render_fhir_egress({
           resourceType: "Bundle", type: "searchset",
           total: entries.length, entry: entries
-        }, status: :ok, content_type: FHIR_CONTENT_TYPE
+        })
       end
 
       def show
@@ -45,7 +45,7 @@ module Lakeraven
           return
         end
 
-        render_fhir(patient.to_fhir)
+        render_fhir_egress(patient.to_fhir)
       end
 
       def create
@@ -66,7 +66,7 @@ module Lakeraven
 
         if result[:success] && result[:dfn].to_i.positive?
           response.headers["Location"] = "#{request.base_url}#{request.path}/#{result[:dfn]}"
-          render_fhir(created_patient_fhir(result[:dfn], reg), status: :created)
+          render_fhir_egress(created_patient_fhir(result[:dfn], reg), status: :created)
         elsif result[:success]
           render_operation_outcome(status: :bad_gateway, severity: "error", code: "exception",
             diagnostics: "Registration reported success but returned no patient identifier")

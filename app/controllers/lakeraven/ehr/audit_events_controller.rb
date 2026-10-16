@@ -22,13 +22,13 @@ module Lakeraven
       compartment_bound :index, param: :patient
 
       def index
-        render_bundle(scoped_events.recent.limit(100).map(&:to_fhir))
+        render_bundle_egress(scoped_events.recent.limit(100).map(&:to_fhir))
       end
 
       def show
         event = scoped_events.find_by(id: params[:id])
         if event
-          render_fhir(event.to_fhir)
+          render_fhir_egress(event.to_fhir)
         else
           render_not_found("AuditEvent", params[:id])
         end

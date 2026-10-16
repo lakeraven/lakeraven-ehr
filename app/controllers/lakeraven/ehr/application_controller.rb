@@ -5,6 +5,7 @@ module Lakeraven
     class ApplicationController < ActionController::API
       include SmartAuthentication
       include AuditableClinicalAccess
+      include FHIRReadEgress
 
       FHIR_CONTENT_TYPE = "application/fhir+json"
 
@@ -122,13 +123,7 @@ module Lakeraven
       end
 
       def render_bundle(entries, type: "searchset")
-        bundle = {
-          resourceType: "Bundle",
-          type: type,
-          total: entries.length,
-          entry: entries.map { |e| { resource: e } }
-        }
-        render json: bundle, status: :ok, content_type: FHIR_CONTENT_TYPE
+        render json: fhir_search_bundle(entries, type: type), status: :ok, content_type: FHIR_CONTENT_TYPE
       end
     end
   end
