@@ -564,6 +564,25 @@ module Lakeraven
       end
 
       [
+        "/lakeraven-ehr/Medication/1",
+        "/lakeraven-ehr/DiagnosticReport/1",
+        "/lakeraven-ehr/CarePlan/1"
+      ].each do |path|
+        test "missing member action for #{path} does not serve data and fails if later added without wiring" do
+          begin
+            get path, headers: @headers
+          rescue ActionController::RoutingError, ActionDispatch::MissingController, NameError, AbstractController::ActionNotFound
+            # Pass: no show action is wired yet (same as collection routes above).
+            assert true
+          else
+            refute_response :success,
+                             "The member action for #{path} was added. Wire it to Part2EgressFilter and move it to WIRED_ACTIONS."
+            refute_includes response.body, "Anderson", "Expected member read not to serve patient data without the egress seam"
+          end
+        end
+      end
+
+      [
         [ "/lakeraven-ehr/AllergyIntolerance/1", { patient: "1" } ],
         [ "/lakeraven-ehr/Condition/1", { patient: "1" } ],
         [ "/lakeraven-ehr/MedicationRequest/1", { patient: "1" } ],
