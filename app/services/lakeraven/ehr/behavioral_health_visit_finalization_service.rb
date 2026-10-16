@@ -7,11 +7,12 @@ module Lakeraven
     # the encounter the rest of the chart already uses — not in a view,
     # and not on a second encounter type.
     #
-    # Close only refuses a visit that is already finished, so a cancelled
-    # or entered-in-error encounter is refused here — calling close would
-    # record it as finished. The coding decision is then made on the stored
-    # row under a row lock, not the caller's copy, and the lock is held
-    # through close.
+    # A finished encounter is refused here before any coding check, the
+    # same as cancelled and entered-in-error. Close only refuses a visit
+    # that is already finished, so calling close on a cancelled or
+    # entered-in-error encounter would record it as finished. The coding
+    # decision is then made on the stored row under a row lock, not the
+    # caller's copy, and the lock is held through close.
     class BehavioralHealthVisitFinalizationService
       Result = Struct.new(:success, :error, keyword_init: true) do
         def success? = !!success
@@ -28,7 +29,7 @@ module Lakeraven
         documented_by_duz
       ].freeze
 
-      TERMINAL_STATUSES = %w[cancelled entered-in-error].freeze
+      TERMINAL_STATUSES = %w[finished cancelled entered-in-error].freeze
 
       def initialize(encounter:, visit_coding:)
         @encounter = encounter
