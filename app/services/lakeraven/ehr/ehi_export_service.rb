@@ -53,7 +53,7 @@ module Lakeraven
 
       def export_fhir_type(resource_type, patient)
         resources = fetch_resources(resource_type, patient)
-        ndjson = resources.map { |r| fhir_to_json(r) }.join
+        ndjson = resources.map { |r| fhir_to_json(r, resource_type) }.join
 
         {
           name: "#{resource_type.underscore}.ndjson",
@@ -69,7 +69,7 @@ module Lakeraven
         when "Patient"
           [ patient ]
         when "AllergyIntolerance"
-          AllergyIntolerance.for_patient(@patient_dfn)
+          fetch_allergy_intolerances
         when "Condition"
           fetch_conditions
         when "MedicationRequest"
@@ -90,16 +90,42 @@ module Lakeraven
         []
       end
 
-      def fetch_observations
-        Observation.respond_to?(:for_patient) ? Observation.for_patient(@patient_dfn) : []
+      # The allergy search serializes models. A gateway hash has no to_fhir
+      # and no resourceType; the same merger the search uses builds the models.
+      # Rows that already implement to_fhir are returned as they are.
+      def fetch_allergy_intolerances
+        rows = AllergyIntolerance.for_patient(@patient_dfn)
+        return rows if rows.is_a?(Array) && rows.any? && rows.all? { |row| row.respond_to?(:to_fhir) }
+
+        SupplementalClinicalResources.merged_allergy_intolerances_for_patient(@patient_dfn)
       rescue
         []
       end
 
-      def fhir_to_json(resource)
+      # Vital rows are { type, value, units, recorded_date }. The Observation
+      # search builds models from those rows and serializes to_fhir, which
+      # sets resourceType. The raw row is not a FHIR resource.
+      def fetch_observations
+        SupplementalClinicalResources.merged_observations_for_patient(@patient_dfn)
+      rescue
+        []
+      end
+
+      def fhir_to_json(resource, resource_type)
         fhir = resource.respond_to?(:to_fhir) ? resource.to_fhir : resource
+        fhir = with_resource_type(resource_type, fhir)
         json = fhir.respond_to?(:as_json) ? fhir.as_json : fhir.to_h
         "#{json.to_json}\n"
+      end
+
+      # Condition and MedicationRequest searches stamp resourceType onto the
+      # gateway hash (`{ resourceType: "Condition" }.merge(record)`). No shared
+      # helper exists for that merge; models already set it in to_fhir.
+      def with_resource_type(resource_type, record)
+        return record unless record.is_a?(Hash)
+        return record if [ record["resourceType"], record[:resourceType] ].any? { |value| value.is_a?(String) }
+
+        { resourceType: resource_type }.merge(record)
       end
 
       # ---------------------------------------------------------------------------
