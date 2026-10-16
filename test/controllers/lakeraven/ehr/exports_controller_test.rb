@@ -68,8 +68,7 @@ module Lakeraven
         assert_response :unauthorized
       end
 
-
-      test "I4: POST /exports with _type containing leading space either exports Patient or is refused 400" do
+      test "POST /exports with _type containing leading space either exports Patient or is refused 400" do
         post "/lakeraven-ehr/exports", params: { _type: [ " Patient" ] }, headers: @headers
 
         if response.status == 400

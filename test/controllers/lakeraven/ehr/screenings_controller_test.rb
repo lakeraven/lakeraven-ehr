@@ -388,7 +388,7 @@ module Lakeraven
         filter.define_method(:call, original)
       end
 
-      test "I1: the flash notice on create does not contain the score or severity band when filtered" do
+      test "the flash notice on create does not contain the score or severity band when filtered" do
         stub_egress_filter(->(payload) {
           if payload.is_a?(Hash)
             payload = payload.deep_dup.deep_stringify_keys

@@ -612,7 +612,7 @@ module Lakeraven
         refute_includes response.body, "120/80"
       end
 
-      test "H1: Screenings never invent a score when filter removes the score Observation" do
+      test "screenings never invent a score when filter removes the score Observation" do
         endpoint = WIRED_ENDPOINTS.find { |e| e[:name] == "screenings show" }
         instance_exec(&endpoint[:setup])
         path = instance_exec(&endpoint[:dynamic_path])
@@ -646,7 +646,7 @@ module Lakeraven
         # Safety flag should not be derived from partial answers
         refute_includes response.body, "Self-harm response recorded"
       end
-      test "I2(a): Screenings banner is not shown when filter changes item 9 answer to zero-valued choice" do
+      test "the screenings self-harm banner is not shown when filter changes item 9 answer to zero-valued choice" do
         endpoint = WIRED_ENDPOINTS.find { |e| e[:name] == "screenings show" }
         instance_exec(&endpoint[:setup])
         path = instance_exec(&endpoint[:dynamic_path])
@@ -673,7 +673,7 @@ module Lakeraven
         refute_includes response.body, "Self-harm response recorded"
       end
 
-      test "I2(b): Screenings banner is shown when filter keeps item 9 with nonzero answer" do
+      test "the screenings self-harm banner is shown when filter keeps item 9 with nonzero answer" do
         endpoint = WIRED_ENDPOINTS.find { |e| e[:name] == "screenings show" }
         instance_exec(&endpoint[:setup])
         path = instance_exec(&endpoint[:dynamic_path])

@@ -242,7 +242,7 @@ module Lakeraven
         assert_equal "vital-signs", coding[:code]
       end
 
-test "H4: Observation built from vital row handles units correctly" do
+      test "a vital emits a UCUM code only when it agrees with the recorded unit" do
         hashes = [
           { type: "T", value: "98.6", units: "Celsius", recorded_date: DateTime.now },
           { type: "T", value: "98.6", units: "", recorded_date: DateTime.now },
@@ -259,10 +259,7 @@ test "H4: Observation built from vital row handles units correctly" do
         assert_nil temp_diff[:valueQuantity][:code]
         assert_nil temp_diff[:valueQuantity][:system]
 
-        # 2. Recorded unit blank -> map unit, code, system
-        # Wait, the unit in the model might be set to the map unit if it was blank.
-        # Let's just find the one that has unit "[degF]" but we have two of them now.
-        # We can differentiate by value or just rely on the order.
+        # 2. Recorded unit blank -> map unit, code, system (temps keep input order)
         temp_blank = temps[1].to_fhir
         assert_equal "[degF]", temp_blank[:valueQuantity][:unit]
         assert_equal "[degF]", temp_blank[:valueQuantity][:code]
