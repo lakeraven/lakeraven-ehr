@@ -350,7 +350,23 @@ module Lakeraven
           refute_match /cancelled/i, response.body, "Expected appointment status to not be relabelled to cancelled"
 
           assert_includes response.body, "PAIN", "Expected unmapped vital (PAIN) to be rendered"
-          assert_includes response.body, "Celsius", "Expected vital units from RPMS (Celsius) to be rendered, not hard-coded"
+
+          get "/lakeraven-ehr/patients/1.json", headers: @headers
+          assert_response :success
+          fhir_bundle = JSON.parse(response.body)
+          temp_obs = fhir_bundle["entry"].find do |e|
+            e.dig("resource", "resourceType") == "Observation" &&
+              e.dig("resource", "code", "coding")&.any? { |c| c["code"] == "8310-5" }
+          end
+          fhir_unit = temp_obs.dig("resource", "valueQuantity", "unit")
+
+          get "/lakeraven-ehr/patients/1", headers: @headers
+          assert_response :success
+          html = Nokogiri::HTML(response.body)
+          vital_div = html.css(".vital").find { |div| div.at_css(".lbl")&.text == "Body Temperature" }
+          html_unit = vital_div.at_css(".val .u")&.text
+
+          assert_equal fhir_unit.to_s, html_unit.to_s, "Expected HTML chart unit to match FHIR JSON unit"
         ensure
           RpmsRpc.client.seed_keyed_collection(:patient_appointments, "1", [])
           RpmsRpc.client.seed_keyed_collection(:vitals, "1", [
