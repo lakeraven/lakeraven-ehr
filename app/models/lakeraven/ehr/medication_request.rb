@@ -47,6 +47,27 @@ module Lakeraven
         gateway.for_patient(dfn)
       end
 
+      # Medication-list gateway row -> model. Shared by the chart and
+      # MedicationRequest search. No code, authoredOn, or requester: the
+      # list row does not carry them.
+      def self.from_rpms_row(row, patient_dfn:)
+        new(
+          ien: row[:ien]&.to_s,
+          patient_dfn: patient_dfn,
+          medication_display: row[:drug_name],
+          dosage_instruction: row[:sig],
+          status: rpms_status(row[:status]),
+          intent: "order"
+        )
+      end
+
+      # status has a required FHIR binding. Keep a legal code; otherwise active.
+      def self.rpms_status(raw)
+        normalized = raw.to_s.strip.downcase
+        VALID_STATUSES.include?(normalized) ? normalized : "active"
+      end
+      private_class_method :rpms_status
+
       def self.resource_class
         "MedicationRequest"
       end

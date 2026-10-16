@@ -50,8 +50,6 @@ module Lakeraven
       before_action :require_patient_scope!
       before_action :enforce_patient_context!
 
-      # RPMS problem-list status codes -> FHIR clinical-status
-      PROBLEM_STATUS = { "A" => "active", "I" => "inactive" }.freeze
       # ORWPT APPTLST status text -> FHIR Encounter.status
       APPOINTMENT_STATUS = {
         "scheduled" => "planned", "checked in" => "arrived",
@@ -217,32 +215,11 @@ module Lakeraven
       end
 
       def build_conditions(dfn)
-        safe { Condition.for_patient(dfn) }.map do |h|
-          Condition.new(
-            ien: problem_id(dfn, h), patient_dfn: dfn,
-            code: h[:icd_code], code_system: "icd10", display: h[:description],
-            clinical_status: PROBLEM_STATUS[h[:status]] || "active",
-            category: "problem-list-item"
-          )
-        end
-      end
-
-      # Same deterministic-id policy as allergy_id: prefer a real IEN, else
-      # derive a stable id (never random/urn:uuid) so the Bundle entry's
-      # relative `subject` reference stays resolvable per Bundle rules.
-      def problem_id(dfn, hash)
-        hash[:ien].to_s.presence || "problem-#{dfn}-#{hash[:icd_code].to_s.parameterize}"
+        safe { Condition.for_patient(dfn) }.map { |h| Condition.from_rpms_row(h, patient_dfn: dfn) }
       end
 
       def build_medications(dfn)
-        safe { MedicationRequest.for_patient(dfn) }.map do |h|
-          MedicationRequest.new(
-            ien: h[:ien]&.to_s, patient_dfn: dfn,
-            medication_display: h[:drug_name], dosage_instruction: h[:sig],
-            status: valid_status(h[:status], MedicationRequest::VALID_STATUSES, "active"),
-            intent: "order"
-          )
-        end
+        safe { MedicationRequest.for_patient(dfn) }.map { |h| MedicationRequest.from_rpms_row(h, patient_dfn: dfn) }
       end
 
       # `status` has a REQUIRED binding in FHIR. RPMS status text like

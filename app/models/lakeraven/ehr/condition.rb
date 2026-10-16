@@ -23,6 +23,10 @@ module Lakeraven
 
       CATEGORY_SYSTEM = "http://terminology.hl7.org/CodeSystem/condition-category"
 
+      # RPMS problem-list status codes -> FHIR condition-clinical.
+      # Anything else falls back to active, the chart's prior mapping.
+      RPMS_PROBLEM_STATUS = { "A" => "active", "I" => "inactive" }.freeze
+
       attribute :ien, :string
       attribute :patient_dfn, :string
       attribute :code, :string
@@ -54,6 +58,26 @@ module Lakeraven
       def self.for_patient(dfn)
         gateway.for_patient(dfn)
       end
+
+      # Problem-list gateway row -> model. Shared by the chart and Condition search.
+      def self.from_rpms_row(row, patient_dfn:)
+        new(
+          ien: problem_id(patient_dfn, row),
+          patient_dfn: patient_dfn,
+          code: row[:icd_code],
+          code_system: "icd10",
+          display: row[:description],
+          clinical_status: RPMS_PROBLEM_STATUS[row[:status]] || "active",
+          category: "problem-list-item"
+        )
+      end
+
+      # Prefer a real IEN; otherwise a stable id (never random/urn:uuid) so a
+      # Bundle entry's subject reference stays resolvable.
+      def self.problem_id(patient_dfn, row)
+        row[:ien].to_s.presence || "problem-#{patient_dfn}-#{row[:icd_code].to_s.parameterize}"
+      end
+      private_class_method :problem_id
 
       def self.resource_class
         "Condition"
