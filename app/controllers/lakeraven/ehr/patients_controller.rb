@@ -162,18 +162,24 @@ module Lakeraven
         nil
       end
 
-      # Location names the new DFN. Set it only after the egress filter
-      # accepts the resource, so a refusal carries neither the header nor
-      # the identifier in the body.
+      # Registration has already succeeded by the time the filter refuses.
+      # 503 would invite a retry that registers a second patient. Location
+      # carries the new DFN; the body does not, and neither does any
+      # demographic from the request. The DFN is logged server-side.
       def publish_created_patient(dfn, reg)
         filtered = filter_fhir_for_egress(created_patient_fhir(dfn, reg))
-        unless filtered
-          refuse_unfiltered_fhir_egress
-          return
-        end
-
         response.headers["Location"] = "#{request.base_url}#{request.path}/#{dfn}"
-        render json: filtered, status: :created, content_type: FHIR_CONTENT_TYPE
+        if filtered
+          render json: filtered, status: :created, content_type: FHIR_CONTENT_TYPE
+        else
+          Rails.logger.warn("[patient] registered DFN #{dfn}; FHIR representation withheld")
+          render_operation_outcome(
+            status: :created,
+            severity: "information",
+            code: "suppressed",
+            diagnostics: "The representation is withheld"
+          )
+        end
       end
 
       def created_patient_fhir(dfn, reg)

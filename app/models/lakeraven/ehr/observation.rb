@@ -37,6 +37,7 @@ module Lakeraven
       }.freeze
 
       CATEGORY_SYSTEM = "http://terminology.hl7.org/CodeSystem/observation-category"
+      UCUM_SYSTEM = "http://unitsofmeasure.org"
 
       # US Core vital sign profile URLs
       US_CORE_PROFILES = {
@@ -125,11 +126,16 @@ module Lakeraven
         }
       end
 
+      # Recorded text when the row states it. A blank (or absent) units
+      # field is not a unit; the map's UCUM unit is the fallback. The
+      # recorded text is display-only — it never becomes valueQuantity.code.
       def self.stated_vital_unit(hash, mapping)
-        return hash[:units] if hash.key?(:units)
-        return hash["units"] if hash.key?("units")
-
-        mapping&.dig(:unit)
+        recorded = if hash.key?(:units)
+          hash[:units]
+        elsif hash.key?("units")
+          hash["units"]
+        end
+        recorded.presence || mapping&.dig(:unit)
       end
 
       def self.vital_id(patient_dfn, hash)
@@ -145,7 +151,7 @@ module Lakeraven
       def sdoh? = category == "social-history" || category == "survey"
 
       def to_fhir
-        if blood_pressure?
+        if blood_pressure? && numeric_blood_pressure?
           build_blood_pressure_fhir
         else
           build_standard_fhir
@@ -168,14 +174,13 @@ module Lakeraven
           code: build_code,
           effectiveDateTime: effective_datetime&.iso8601,
           valueQuantity: build_value_quantity,
-          valueString: sdoh? && value_quantity.blank? ? value : nil,
+          valueString: fhir_value_string,
           category: category ? [ { coding: [ { code: category, system: CATEGORY_SYSTEM } ] } ] : nil
         }.compact
       end
 
       def build_blood_pressure_fhir
-        systolic_val, diastolic_val = (value || "").split("/").map(&:strip)
-        bp_unit = unit.presence || "mm[Hg]"
+        systolic_text, diastolic_text = blood_pressure_parts
         {
           resourceType: "Observation",
           id: ien&.to_s,
@@ -186,16 +191,17 @@ module Lakeraven
           effectiveDateTime: effective_datetime&.iso8601,
           category: category ? [ { coding: [ { code: category, system: CATEGORY_SYSTEM } ] } ] : nil,
           component: [
-            {
-              code: { coding: [ { code: VITAL_SIGNS_CODES[:systolic], system: "http://loinc.org" } ] },
-              valueQuantity: { value: systolic_val.to_f, unit: bp_unit, code: bp_unit, system: "http://unitsofmeasure.org" }
-            },
-            {
-              code: { coding: [ { code: VITAL_SIGNS_CODES[:diastolic], system: "http://loinc.org" } ] },
-              valueQuantity: { value: diastolic_val.to_f, unit: bp_unit, code: bp_unit, system: "http://unitsofmeasure.org" }
-            }
+            blood_pressure_component(VITAL_SIGNS_CODES[:systolic], systolic_text),
+            blood_pressure_component(VITAL_SIGNS_CODES[:diastolic], diastolic_text)
           ]
         }.compact
+      end
+
+      def blood_pressure_component(component_code, text)
+        {
+          code: { coding: [ { code: component_code, system: "http://loinc.org" } ] },
+          valueQuantity: quantity_hash(quantity_number(text))
+        }
       end
 
       def build_code
@@ -227,23 +233,72 @@ module Lakeraven
         profile_url ? { profile: [ profile_url ] } : nil
       end
 
-      # Quantity.value is a FHIR decimal — it must serialize as a JSON
-      # number, never a string. Non-numeric values fall back to nil (the
-      # caller compacts the element away) rather than emitting invalid JSON.
+      # Quantity.value is a FHIR decimal — a JSON number, never a string.
+      # A non-numeric vital is not a quantity; fhir_value_string carries
+      # the recorded text instead.
       def build_value_quantity
-        return nil unless value_quantity
+        number = quantity_number(value_quantity)
+        return if number.nil?
 
-        numeric = begin
-          Float(value_quantity)
-        rescue ArgumentError, TypeError
-          return nil
+        quantity_hash(number)
+      end
+
+      # unit is the recorded text when the row stated one, otherwise the
+      # map's UCUM unit. code and system come only from that map for a
+      # vital. Recorded text such as "Celsius" or "F" is never a UCUM
+      # code. A survey score has no vital mapping; its unit attribute is
+      # already the UCUM code ("{score}"). Omit unit, code, and system
+      # when both the recorded text and the map are blank.
+      def quantity_hash(number)
+        shown = display_unit
+        coded = quantity_code
+        fields = { value: number }
+        fields[:unit] = shown if shown.present?
+        if coded.present?
+          fields[:code] = coded
+          fields[:system] = UCUM_SYSTEM
         end
+        fields
+      end
 
-        qty = { value: numeric }
-        qty[:unit] = unit if unit
-        qty[:code] = unit if unit
-        qty[:system] = "http://unitsofmeasure.org" if unit
-        qty
+      def display_unit
+        unit.presence || mapped_ucum_unit
+      end
+
+      def quantity_code
+        mapped = mapped_ucum_unit
+        return mapped if mapped.present?
+        return if vital_sign?
+
+        unit.presence
+      end
+
+      def mapped_ucum_unit
+        VITAL_TYPE_MAP.each_value.find { |mapping| mapping[:code] == code }&.dig(:unit).presence
+      end
+
+      def fhir_value_string
+        return value if sdoh? && value_quantity.blank?
+        return value if vital_sign? && value.present? && quantity_number(value_quantity).nil?
+
+        nil
+      end
+
+      def numeric_blood_pressure?
+        parts = blood_pressure_parts
+        parts.length == 2 && parts.all? { |part| !quantity_number(part).nil? }
+      end
+
+      def blood_pressure_parts
+        value.to_s.split("/", 2).map(&:strip)
+      end
+
+      def quantity_number(text)
+        return if text.blank?
+
+        Float(text)
+      rescue ArgumentError, TypeError
+        nil
       end
     end
   end

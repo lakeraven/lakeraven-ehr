@@ -16,13 +16,17 @@
 <% end %>
 
 <div class="screening-score">
-  <p class="screening-score__total">
-    <span class="screening-score__number"><%= @response.total_score %></span>
-    <span class="screening-score__of">of <%= @instrument.max_score %></span>
-  </p>
-  <p class="screening-score__band">
-    <span class="sr-only">Severity band: </span><%= @response.severity_band.capitalize %>
-  </p>
+  <% if @response.total_score.nil? %>
+    <p class="screening-score__total">Withheld</p>
+  <% else %>
+    <p class="screening-score__total">
+      <span class="screening-score__number"><%= @response.total_score %></span>
+      <span class="screening-score__of">of <%= @instrument.max_score %></span>
+    </p>
+    <p class="screening-score__band">
+      <span class="sr-only">Severity band: </span><%= @response.severity_band.capitalize %>
+    </p>
+  <% end %>
 </div>
 
 <% if @response.safety_flagged? %>
@@ -49,7 +53,7 @@
     <% end %>
   </tbody>
   <tfoot>
-    <tr><th scope="row" colspan="3">Total</th><td><%= @response.total_score %></td></tr>
+    <tr><th scope="row" colspan="3">Total</th><td><%= @response.total_score.nil? ? "Withheld" : @response.total_score %></td></tr>
   </tfoot>
 </table>
 

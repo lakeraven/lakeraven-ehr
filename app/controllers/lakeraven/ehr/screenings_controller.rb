@@ -293,13 +293,21 @@ module Lakeraven
         ScreeningPage.new(**fields) if fields
       end
 
+      # The score and the band come only from the score Observation that
+      # survived the filter. Summing the answers that remain invents a
+      # total the filter removed. A page with no score Observation still
+      # renders; the score and the band are withheld.
       def screening_page_fields(resource, observations)
         instrument = instrument_for(resource)
+        return if instrument.nil?
+
         pairs = answered_pairs(resource, instrument)
         effective_at = egress_time(fhir_value(resource, "authored"))
-        total = screening_total(resource, instrument, observations, pairs)
-        band = instrument.band_label_for(total) if instrument && !total.nil?
-        return if instrument.nil? || effective_at.nil? || total.nil? || band.blank?
+        return if effective_at.nil?
+
+        total = observation_score(resource, instrument, observations)
+        band = instrument.band_label_for(total) unless total.nil?
+        return if !total.nil? && band.blank?
 
         {
           id: fhir_value(resource, "id"),
@@ -309,7 +317,7 @@ module Lakeraven
           severity_band: band,
           encounter_ien: encounter_ien_from(resource),
           answered_items: pairs,
-          safety_flagged: safety_disclosed?(pairs, instrument)
+          safety_flagged: stored_safety_flag(resource, pairs, instrument)
         }
       end
 
@@ -337,17 +345,6 @@ module Lakeraven
         ScreeningInstrument::ALL.find { |instrument| instrument.questionnaire_canonical == canonical }
       end
 
-      # The score Observation is the total the screening already publishes.
-      # When the filter returned the answers and not that Observation, the
-      # total is the sum of the answers that remain.
-      def screening_total(resource, instrument, observations, pairs)
-        observed = observation_score(resource, instrument, observations)
-        return observed unless observed.nil?
-        return if pairs.empty?
-
-        pairs.sum { |_item, choice| choice.value.to_i }
-      end
-
       def observation_score(questionnaire, instrument, observations)
         return if instrument.nil?
 
@@ -365,13 +362,16 @@ module Lakeraven
         nil
       end
 
-      # Same rule the record enforces: a positive answer on the safety item
-      # is a self-harm disclosure.
-      def safety_disclosed?(pairs, instrument)
+      # The stored flag, and only when the safety item itself is still in
+      # the filtered answers. A missing item is not a negative screen:
+      # nil shows nothing about self-harm. The flag is never recomputed
+      # from whatever answers happened to remain.
+      def stored_safety_flag(resource, pairs, instrument)
         link_id = instrument.safety_link_id
-        return false if link_id.blank?
+        return if link_id.blank?
+        return unless pairs.any? { |item, _choice| item.link_id == link_id }
 
-        pairs.any? { |item, choice| item.link_id == link_id && choice.value.to_i.positive? }
+        ScreeningResponse.find_by(id: fhir_value(resource, "id"))&.safety_flagged
       end
 
       def answered_pairs(resource, instrument)

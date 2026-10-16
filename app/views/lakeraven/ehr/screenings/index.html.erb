@@ -27,8 +27,8 @@
         <tr>
           <td><%= response.effective_at.strftime("%b %-d, %Y") %></td>
           <td><%= response.instrument.short_title %></td>
-          <td><%= response.total_score %> / <%= response.instrument.max_score %></td>
-          <td><%= response.severity_band.capitalize %></td>
+          <td><% if response.total_score.nil? %>Withheld<% else %><%= response.total_score %> / <%= response.instrument.max_score %><% end %></td>
+          <td><%= response.severity_band.present? ? response.severity_band.capitalize : "Withheld" %></td>
           <td><a href="<%= patient_screening_path(@dfn, response.id) %>">
             View<span class="sr-only"> <%= response.instrument.short_title %> from
             <%= response.effective_at.strftime("%b %-d, %Y") %></span></a></td>

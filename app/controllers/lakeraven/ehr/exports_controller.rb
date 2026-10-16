@@ -30,6 +30,7 @@ module Lakeraven
       before_action :authorize_fhir_write_scope!, only: :create
       def create
         return render_since_unsupported if since_requested?
+        return render_unsupported_types if unsupported_type_names.any?
 
         export = BulkExport.new(
           id: SecureRandom.uuid,
@@ -118,6 +119,29 @@ module Lakeraven
           severity: "error",
           code: "not-supported",
           diagnostics: "The _since parameter is not supported"
+        )
+      end
+
+      # EhiExportService writes a fixed set of FHIR files. A _type (or the
+      # legacy type param) that names anything outside that set used to
+      # complete with the type silently dropped. Refuse at kickoff instead.
+      def unsupported_type_names
+        requested_type_names.reject { |name| EhiExportService::FHIR_RESOURCE_TYPES.include?(name) }
+      end
+
+      def requested_type_names
+        raw = requested_type_param
+        return [] if raw.blank?
+
+        Array(raw).flat_map { |value| value.to_s.split(",") }.map(&:strip).reject(&:empty?).uniq
+      end
+
+      def render_unsupported_types
+        render_operation_outcome(
+          status: :bad_request,
+          severity: "error",
+          code: "not-supported",
+          diagnostics: "unsupported resource types: #{unsupported_type_names.join(', ')}"
         )
       end
 

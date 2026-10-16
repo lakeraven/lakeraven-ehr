@@ -530,11 +530,15 @@ module Lakeraven
       end
 
       def vital_display_value(resource, code)
-        if code == Observation::VITAL_SIGNS_CODES[:blood_pressure]
+        displayed = if code == Observation::VITAL_SIGNS_CODES[:blood_pressure]
           blood_pressure_reading(resource)
         else
-          format_fhir_number(fhir_field(fhir_field(resource, "valueQuantity"), "value"))
+          quantity = fhir_field(fhir_field(resource, "valueQuantity"), "value")
+          format_fhir_number(quantity) unless quantity.nil?
         end
+        return displayed unless displayed.nil?
+
+        fhir_field(resource, "valueString").presence
       end
 
       def blood_pressure_reading(resource)
