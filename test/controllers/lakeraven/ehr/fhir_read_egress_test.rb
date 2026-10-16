@@ -10,16 +10,16 @@ module Lakeraven
       setup do
         setup_smart_auth(scopes: "system/*.read system/*.write")
 
-        post "/lakeraven-ehr/exports", headers: @headers
+        post "/lakeraven-ehr/exports", params: { export_type: "patient", patient_dfn: "1" }, headers: @headers
         export_body = JSON.parse(response.body)
         @export_id = export_body["id"]
 
-        # Make the export produce a real output file by using the store's API to complete it
-        export = ExportsController.store[@export_id]
-        export.complete!([
-          { "type" => "Patient", "file_name" => "patient.ndjson", "content" => "{\"resourceType\":\"Patient\",\"name\":[{\"family\":\"Anderson\"}]}\n", "count" => 1, "url" => "http://www.example.com/lakeraven-ehr/exports/#{@export_id}/files/patient.ndjson" }
-        ])
-        @export_file = "patient.ndjson"
+        get "/lakeraven-ehr/exports/#{@export_id}", headers: @headers
+        manifest = JSON.parse(response.body)
+
+        patient_file = manifest["output"]&.find { |f| f["type"] == "Patient" }
+        @export_file_url = patient_file&.dig("url")
+        @export_file_path = @export_file_url ? URI.parse(@export_file_url).path : "/lakeraven-ehr/exports/#{@export_id}/files/patient.ndjson"
 
         @audit_event = AuditEvent.create!(
           event_type: "rest", action: "R", outcome: "0",
@@ -40,6 +40,17 @@ module Lakeraven
         "lakeraven/ehr/diagnostic_reports#show",
         "lakeraven/ehr/care_plans#index",
         "lakeraven/ehr/care_plans#show"
+      ].freeze
+
+      # STUBBED_ACTIONS: actions that exist but render 404 or empty content.
+      # When implemented with data, they must be wired to Part2EgressFilter and moved to WIRED_ACTIONS.
+      STUBBED_ACTIONS = [
+        "lakeraven/ehr/allergy_intolerances#show",
+        "lakeraven/ehr/conditions#show",
+        "lakeraven/ehr/medication_requests#show",
+        "lakeraven/ehr/observations#show",
+        "lakeraven/ehr/consents#show",
+        "lakeraven/ehr/encounters#show"
       ].freeze
 
       # Non-disclosing or out-of-scope controller actions that are explicitly allowed to bypass the seam.
@@ -87,22 +98,16 @@ module Lakeraven
         "lakeraven/ehr/patients#create",
         "lakeraven/ehr/charts#show",
         "lakeraven/ehr/allergy_intolerances#index",
-        "lakeraven/ehr/allergy_intolerances#show",
         "lakeraven/ehr/conditions#index",
-        "lakeraven/ehr/conditions#show",
         "lakeraven/ehr/medication_requests#index",
-        "lakeraven/ehr/medication_requests#show",
         "lakeraven/ehr/observations#index",
-        "lakeraven/ehr/observations#show",
         "lakeraven/ehr/encounters#index",
-        "lakeraven/ehr/encounters#show",
         "lakeraven/ehr/service_requests#index",
         "lakeraven/ehr/immunizations#index",
         "lakeraven/ehr/procedures#index",
         "lakeraven/ehr/coverage_eligibility_requests#create",
         "lakeraven/ehr/measure_reports#index",
         "lakeraven/ehr/consents#index",
-        "lakeraven/ehr/consents#show",
         "lakeraven/ehr/audit_events#index",
         "lakeraven/ehr/audit_events#show",
         "lakeraven/ehr/export_files#show"
@@ -116,9 +121,100 @@ module Lakeraven
           "#{controller}##{action}" if controller && action
         end.compact.uniq
 
-        untested = controller_actions - ALLOWED_WITHOUT_SEAM - WIRED_ACTIONS - UNIMPLEMENTED_ACTIONS
+        untested = controller_actions - ALLOWED_WITHOUT_SEAM - WIRED_ACTIONS - UNIMPLEMENTED_ACTIONS - STUBBED_ACTIONS
 
         assert_empty untested, "Found routes that might disclose clinical data but are not explicitly tested for seam wiring or allowlisted."
+      end
+
+      test "completeness: all WIRED_ACTIONS are exercised by a WIRED_ENDPOINTS test" do
+        tested_actions = WIRED_ENDPOINTS.map do |endpoint|
+          path = endpoint[:path] || (endpoint[:dynamic_path] ? instance_exec(&endpoint[:dynamic_path]) : nil)
+          route = Rails.application.routes.recognize_path(path, method: endpoint[:method])
+          "#{route[:controller]}##{route[:action]}"
+        end.compact.uniq
+
+        untested = WIRED_ACTIONS - tested_actions
+        assert_empty untested, "Found WIRED_ACTIONS that are not exercised in WIRED_ENDPOINTS"
+      end
+
+      test "real export completes and yields a downloadable file" do
+        assert @export_file_url, "Expected manifest to contain a URL for the Patient export file"
+        get @export_file_path, headers: @headers
+        assert_response :success
+        assert_includes response.body, "Anderson"
+        assert_equal "application/fhir+ndjson", response.media_type
+      end
+
+      test "FHIR JSON endpoint fails closed if filter returns empty hash" do
+        stub_egress_filter(->(payload) { {} }) do
+          get "/lakeraven-ehr/Patient/1", headers: @headers
+        end
+        assert_response :service_unavailable
+        body = JSON.parse(response.body)
+        assert_equal "OperationOutcome", body["resourceType"]
+      end
+
+      test "FHIR JSON endpoint fails closed if filter returns hash without resourceType" do
+        stub_egress_filter(->(payload) { { "foo" => 1 } }) do
+          get "/lakeraven-ehr/Patient/1", headers: @headers
+        end
+        assert_response :service_unavailable
+        body = JSON.parse(response.body)
+        assert_equal "OperationOutcome", body["resourceType"]
+      end
+
+      test "Export file fails closed if filter returns invalid NDJSON string" do
+        stub_egress_filter(->(payload) { "filter failed" }) do
+          get @export_file_path, headers: @headers
+        end
+        assert_response :service_unavailable
+        refute_includes response.body, "resourceType"
+      end
+
+      test "Export file allows empty string as valid empty NDJSON" do
+        stub_egress_filter(->(payload) { "" }) do
+          get @export_file_path, headers: @headers
+        end
+        assert_response :success
+        assert_equal "", response.body
+      end
+
+      test "HTML chart fails closed if filter returns empty hash" do
+        stub_egress_filter(->(payload) { {} }) do
+          get "/lakeraven-ehr/patients/1", headers: @headers
+        end
+        assert_response :service_unavailable
+        refute_includes response.body, "Lisinopril 10mg"
+      end
+
+      test "HTML chart fails closed if filter returns hash without resourceType" do
+        stub_egress_filter(->(payload) { { "foo" => 1 } }) do
+          get "/lakeraven-ehr/patients/1", headers: @headers
+        end
+        assert_response :service_unavailable
+        refute_includes response.body, "Lisinopril 10mg"
+      end
+
+      test "failed export status does not leak raw exception text" do
+        service_class = EhiExportService
+        original_export = service_class.instance_method(:export)
+
+        begin
+          service_class.define_method(:export) do |*args, **kwargs|
+            raise "SENTINEL-PHI-123: Database connection failed"
+          end
+
+          post "/lakeraven-ehr/exports", params: { export_type: "patient", patient_dfn: "1" }, headers: @headers
+          export_body = JSON.parse(response.body)
+          failed_export_id = export_body["id"]
+
+          get "/lakeraven-ehr/exports/#{failed_export_id}", headers: @headers
+
+          assert_response :error
+          refute_includes response.body, "SENTINEL-PHI-123", "Expected failed export status not to leak raw exception text"
+        ensure
+          service_class.define_method(:export, original_export)
+        end
       end
 
       # Table-driven tests for each wired endpoint that can be successfully invoked with seeded data.
@@ -143,7 +239,7 @@ module Lakeraven
         { path: "/lakeraven-ehr/Consent", method: :get, params: { patient: "1" } },
         { path: "/lakeraven-ehr/AuditEvent", method: :get },
         { name: "AuditEvent show", dynamic_path: -> { "/lakeraven-ehr/AuditEvent/#{@audit_event.id}" }, method: :get },
-        { name: "exports file show", dynamic_path: -> { "/lakeraven-ehr/exports/#{@export_id}/files/#{@export_file}" }, method: :get },
+        { name: "exports file show", dynamic_path: -> { @export_file_path }, method: :get },
         { path: "/lakeraven-ehr/patients/1.json", method: :get }
       ].freeze
 
@@ -165,6 +261,55 @@ module Lakeraven
         end
       end
 
+      [
+        [ "/lakeraven-ehr/AllergyIntolerance/1", { patient: "1" } ],
+        [ "/lakeraven-ehr/Condition/1", { patient: "1" } ],
+        [ "/lakeraven-ehr/MedicationRequest/1", { patient: "1" } ],
+        [ "/lakeraven-ehr/Observation/1", { patient: "1" } ],
+        [ "/lakeraven-ehr/Consent/1", { patient: "1" } ],
+        [ "/lakeraven-ehr/Encounter/1", { patient: "1" } ]
+      ].each do |path, params|
+        test "stubbed action for #{path} does not serve data and fails if implemented without wiring" do
+          begin
+            get path, params: params, headers: @headers
+          rescue ActionController::RoutingError, ActionDispatch::MissingController, NameError, AbstractController::ActionNotFound
+            assert true
+          else
+            assert_response :not_found, "The action for #{path} was implemented but not moved to WIRED_ACTIONS in the test. If it is real, you must wire it to Part2EgressFilter and move it to WIRED_ACTIONS."
+            refute_includes response.body, "Anderson", "Expected not to serve patient data"
+          end
+        end
+      end
+
+      test "HTML chart calls Part2EgressFilter and reflects filter output" do
+        # 1. Verify it appears with the real filter
+        get "/lakeraven-ehr/patients/1", headers: @headers
+        assert_response :success
+        assert_includes response.body, "Lisinopril 10mg"
+
+        # 2. Mock filter to return an empty bundle and verify it's gone
+        calls = 0
+        stub_egress_filter(->(payload) {
+          calls += 1
+          { "resourceType" => "Bundle", "type" => "searchset", "entry" => [] }
+        }) do
+          get "/lakeraven-ehr/patients/1", headers: @headers
+        end
+
+        assert_response :success
+        assert_operator calls, :>=, 1, "HTML chart must invoke Part2EgressFilter"
+        refute_includes response.body, "Lisinopril 10mg", "Expected clinical content to be removed when filter returns empty bundle"
+      end
+
+      test "HTML chart fails closed if seam returns nil" do
+        stub_egress_filter(->(payload) { nil }) do
+          get "/lakeraven-ehr/patients/1", headers: @headers
+        end
+
+        assert_response :service_unavailable
+        refute_includes response.body, "Lisinopril 10mg"
+      end
+
       WIRED_ENDPOINTS.each do |endpoint|
         test_name = endpoint[:name] || endpoint[:path]
 
@@ -172,10 +317,11 @@ module Lakeraven
           path = endpoint[:dynamic_path] ? instance_exec(&endpoint[:dynamic_path]) : endpoint[:path]
 
           marker = { "resourceType" => "Basic", "id" => "FILTER-MARKER" }
+          marker_ndjson = "{\"resourceType\":\"Basic\",\"id\":\"FILTER-MARKER\"}\n"
 
           stub_egress_filter(->(payload) {
             if payload.is_a?(String)
-              '{"resourceType":"Basic","id":"FILTER-MARKER"}'
+              marker_ndjson
             else
               marker
             end
@@ -196,7 +342,18 @@ module Lakeraven
           end
 
           assert_response :success, "Expected successful response but got #{response.status}. Body: #{response.body}"
-          assert_includes response.body, "FILTER-MARKER", "Expected response to reflect the filter's output"
+
+          if test_name == "exports file show"
+            assert_equal marker_ndjson, response.body, "Expected export file body to exactly equal the marker NDJSON"
+          elsif path.include?("/patients/") && !path.end_with?(".json")
+            # HTML chart
+            assert_includes response.body, "FILTER-MARKER", "Expected HTML to reflect the filter's output"
+            refute_includes response.body, "Anderson", "Expected HTML not to contain original clinical data"
+          else
+            # JSON endpoints
+            body = JSON.parse(response.body)
+            assert_equal marker, body, "Expected parsed JSON body to exactly equal the marker hash"
+          end
         end
 
         test "fails closed if seam returns nil for #{endpoint[:method].to_s.upcase} #{test_name}" do
