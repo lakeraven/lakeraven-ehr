@@ -27,7 +27,9 @@ module Lakeraven
     # the race on the unique index is the same refusal, and the first row stays.
     #
     # A review dated before the plan was established is refused. A plan cannot
-    # be established after today. Invalid input, an unknown program, and a
+    # be established after today. A present program key that names a different
+    # program than the plan is refused before a review or concurrence is read
+    # or written. Invalid input, an unknown program, a program mismatch, and a
     # stored interval that cannot be read are failed Results.
     class TreatmentPlanService
       Result = Struct.new(:success, :record, :error, keyword_init: true) do
@@ -61,6 +63,8 @@ module Lakeraven
       end
 
       def record_progress_review(reviewed_on:, reviewed_by_duz:)
+        return failure(:program_mismatch) if program_mismatch?
+
         forget_program_configuration
         reviewed = coerce_date(reviewed_on)
         error = progress_review_error(reviewed, reviewed_by_duz)
@@ -78,6 +82,8 @@ module Lakeraven
       end
 
       def record_concurrence(supervisor_duz:, concurred_at:)
+        return failure(:program_mismatch) if program_mismatch?
+
         error = concurrence_error(supervisor_duz, concurred_at)
         return failure(error) if error
 
@@ -211,10 +217,17 @@ module Lakeraven
         false
       end
 
-      # Create has no plan. A nil key reaches for_program and fails as an
-      # unknown program.
+      # The plan's program is used when a plan is given. A nil or blank key
+      # is not given. Create has no plan and uses the supplied key; a blank
+      # key reaches for_program and fails as an unknown program.
       def program_key
-        @program_key || @plan&.program_key
+        return @plan.program_key if @plan
+
+        @program_key
+      end
+
+      def program_mismatch?
+        @plan && @program_key.present? && @program_key.to_s != @plan.program_key.to_s
       end
     end
   end
