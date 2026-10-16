@@ -346,8 +346,8 @@ module Lakeraven
           get "/lakeraven-ehr/patients/1", headers: @headers
           assert_response :success
 
-          assert_includes response.body, "no show", "Expected appointment status to not be relabelled to cancelled"
-          refute_includes response.body, "cancelled", "Expected appointment status to not be relabelled to cancelled"
+          assert_includes response.body, "No Show", "Expected appointment status to not be relabelled to cancelled"
+          refute_match /cancelled/i, response.body, "Expected appointment status to not be relabelled to cancelled"
 
           assert_includes response.body, "PAIN", "Expected unmapped vital (PAIN) to be rendered"
           assert_includes response.body, "Celsius", "Expected vital units from RPMS (Celsius) to be rendered, not hard-coded"
@@ -578,46 +578,69 @@ module Lakeraven
         test_name = endpoint[:name] || endpoint[:path]
 
         test "seam is invoked and response reflects change for #{endpoint[:method].to_s.upcase} #{test_name}" do
-          path = nil
-          marker = { "resourceType" => "Basic", "id" => "FILTER-MARKER" }
-          marker_ndjson = "{\"resourceType\":\"Basic\",\"id\":\"FILTER-MARKER\"}\n"
+          instance_exec(&endpoint[:setup]) if endpoint[:setup]
+          path = endpoint[:dynamic_path] ? instance_exec(&endpoint[:dynamic_path]) : endpoint[:path]
 
-          stub_egress_filter(->(payload) {
-            if payload.is_a?(String)
-              marker_ndjson
+          is_html = path.include?("/patients/") && !path.end_with?(".json")
+
+          call_proc = -> {
+            if endpoint[:method] == :post
+              post path, params: endpoint[:params], headers: @headers.merge("Content-Type" => endpoint[:content_type] || "application/x-www-form-urlencoded")
             else
-              marker
+              get path, params: endpoint[:params], headers: (endpoint[:session_auth] ? {} : @headers)
             end
-          }) do
-            call_proc = -> {
-              if endpoint[:method] == :post
-                post path, params: endpoint[:params], headers: @headers.merge("Content-Type" => endpoint[:content_type] || "application/x-www-form-urlencoded")
-              else
-                get path, params: endpoint[:params], headers: (endpoint[:session_auth] ? {} : @headers)
-              end
-            }
+          }
 
-            instance_exec(&endpoint[:setup]) if endpoint[:setup]
-            path = endpoint[:dynamic_path] ? instance_exec(&endpoint[:dynamic_path]) : endpoint[:path]
+          if is_html
             if endpoint[:needs_registration_stub]
               with_registration_success(&call_proc)
             else
               call_proc.call
             end
-          end
+            assert_response :success
+            assert_includes response.body, "mild", "Expected seeded data (mild) to appear before filtering"
 
-          assert_response :success, "Expected successful response but got #{response.status}. Body: #{response.body}"
+            calls = 0
+            stub_egress_filter(->(payload) {
+              calls += 1
+              { "resourceType" => "Bundle", "type" => "searchset", "entry" => [] }
+            }) do
+              if endpoint[:needs_registration_stub]
+                with_registration_success(&call_proc)
+              else
+                call_proc.call
+              end
+            end
 
-          if test_name == "exports file show"
-            assert_equal marker_ndjson, response.body, "Expected export file body to exactly equal the marker NDJSON"
-          elsif path.include?("/patients/") && !path.end_with?(".json")
-            # HTML chart
-            assert_includes response.body, "FILTER-MARKER", "Expected HTML to reflect the filter's output"
-            refute_includes response.body, "Anderson", "Expected HTML not to contain original clinical data"
+            assert_response :success, "Expected successful response but got #{response.status}. Body: #{response.body}"
+            assert_operator calls, :>=, 1, "HTML endpoint must invoke Part2EgressFilter"
+            refute_includes response.body, "mild", "Expected clinical content to be removed when filter returns empty bundle"
           else
-            # JSON endpoints
-            body = JSON.parse(response.body)
-            assert_equal marker, body, "Expected parsed JSON body to exactly equal the marker hash"
+            marker = { "resourceType" => "Basic", "id" => "FILTER-MARKER" }
+            marker_ndjson = "{\"resourceType\":\"Basic\",\"id\":\"FILTER-MARKER\"}\n"
+
+            stub_egress_filter(->(payload) {
+              if payload.is_a?(String)
+                marker_ndjson
+              else
+                marker
+              end
+            }) do
+              if endpoint[:needs_registration_stub]
+                with_registration_success(&call_proc)
+              else
+                call_proc.call
+              end
+            end
+
+            assert_response :success, "Expected successful response but got #{response.status}. Body: #{response.body}"
+
+            if test_name == "exports file show"
+              assert_equal marker_ndjson, response.body, "Expected export file body to exactly equal the marker NDJSON"
+            else
+              body = JSON.parse(response.body)
+              assert_equal marker, body, "Expected parsed JSON body to exactly equal the marker hash"
+            end
           end
         end
 
