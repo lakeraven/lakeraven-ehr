@@ -243,34 +243,32 @@ module Lakeraven
         quantity_hash(number)
       end
 
-      # unit is the recorded text when the row stated one, otherwise the
-      # map's UCUM unit. code and system come only from that map for a
-      # vital. Recorded text such as "Celsius" or "F" is never a UCUM
-      # code. A survey score has no vital mapping; its unit attribute is
-      # already the UCUM code ("{score}"). Omit unit, code, and system
-      # when both the recorded text and the map are blank.
+      # code and system come from the UCUM map only when the recorded unit
+      # is blank or equals that map unit. Other recorded text is the unit
+      # alone — never a code that disagrees with it ("Celsius" must not
+      # carry [degF]). A blank recorded unit with a map unit takes unit,
+      # code, and system from the map. A survey score has no vital mapping;
+      # its unit attribute is already the UCUM code ("{score}"), so unit,
+      # code, and system are that same text. Omit all three when both the
+      # recorded text and the map are blank.
       def quantity_hash(number)
-        shown = display_unit
-        coded = quantity_code
-        fields = { value: number }
-        fields[:unit] = shown if shown.present?
-        if coded.present?
-          fields[:code] = coded
-          fields[:system] = UCUM_SYSTEM
-        end
-        fields
-      end
-
-      def display_unit
-        unit.presence || mapped_ucum_unit
-      end
-
-      def quantity_code
+        recorded = unit.presence
         mapped = mapped_ucum_unit
-        return mapped if mapped.present?
-        return if vital_sign?
+        fields = { value: number }
 
-        unit.presence
+        if mapped && (recorded.nil? || recorded == mapped)
+          fields[:unit] = mapped
+          fields[:code] = mapped
+          fields[:system] = UCUM_SYSTEM
+        elsif recorded
+          fields[:unit] = recorded
+          if mapped.nil? && !vital_sign?
+            fields[:code] = recorded
+            fields[:system] = UCUM_SYSTEM
+          end
+        end
+
+        fields
       end
 
       def mapped_ucum_unit

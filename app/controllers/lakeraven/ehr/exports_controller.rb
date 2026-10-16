@@ -30,7 +30,13 @@ module Lakeraven
       before_action :authorize_fhir_write_scope!, only: :create
       def create
         return render_since_unsupported if since_requested?
-        return render_unsupported_types if unsupported_type_names.any?
+
+        # One list for the 400 check and the export. Normalizing again
+        # inside BulkExport.normalize_types dropped a stripped name such
+        # as " Patient" after this check had already accepted it.
+        type_names = BulkExport.type_names(requested_type_param)
+        unsupported = unsupported_type_names(type_names)
+        return render_unsupported_types(unsupported) if unsupported.any?
 
         export = BulkExport.new(
           id: SecureRandom.uuid,
@@ -42,7 +48,7 @@ module Lakeraven
           type_filters: requested_type_param
         )
         export.set_defaults!
-        export.requested_types = BulkExport.normalize_types(requested_type_param)
+        export.requested_types = type_names.nil? ? BulkExport.normalize_types(nil) : type_names
 
         self.class.store[export.id] = export
         run_export(export)
@@ -125,23 +131,17 @@ module Lakeraven
       # EhiExportService writes a fixed set of FHIR files. A _type (or the
       # legacy type param) that names anything outside that set used to
       # complete with the type silently dropped. Refuse at kickoff instead.
-      def unsupported_type_names
-        requested_type_names.reject { |name| EhiExportService::FHIR_RESOURCE_TYPES.include?(name) }
+      # `names` is BulkExport.type_names — nil when the caller sent no filter.
+      def unsupported_type_names(names)
+        Array(names).reject { |name| EhiExportService::FHIR_RESOURCE_TYPES.include?(name) }
       end
 
-      def requested_type_names
-        raw = requested_type_param
-        return [] if raw.blank?
-
-        Array(raw).flat_map { |value| value.to_s.split(",") }.map(&:strip).reject(&:empty?).uniq
-      end
-
-      def render_unsupported_types
+      def render_unsupported_types(names)
         render_operation_outcome(
           status: :bad_request,
           severity: "error",
           code: "not-supported",
-          diagnostics: "unsupported resource types: #{unsupported_type_names.join(', ')}"
+          diagnostics: "unsupported resource types: #{names.join(', ')}"
         )
       end
 

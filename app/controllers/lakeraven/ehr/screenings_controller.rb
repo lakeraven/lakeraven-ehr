@@ -132,17 +132,16 @@ module Lakeraven
 
       private
 
-      # A replay wrote nothing. Saying "PHQ-9 recorded — score N" for a
-      # submission that recorded nothing is how a discarded administration goes
-      # unnoticed, so a collapse is reported as a collapse.
+      # The notice is a status, not a copy of the score. Show renders the
+      # total and the band only from the filtered bundle; putting them in
+      # the flash would publish a total the filter removed. A replay still
+      # has to say that nothing new was stored — "recorded" for a submission
+      # that wrote nothing is how a discarded administration goes unnoticed.
       def outcome_notice
-        record = @result.record
         if @result.duplicate?
-          "#{@instrument.short_title} was already recorded — " \
-            "score #{record.total_score}, #{record.severity_band}. Nothing was recorded again."
+          "#{@instrument.short_title} was already recorded. Nothing was recorded again."
         else
-          "#{@instrument.short_title} recorded — " \
-            "score #{record.total_score}, #{record.severity_band}."
+          "Screening recorded."
         end
       end
 
@@ -317,7 +316,7 @@ module Lakeraven
           severity_band: band,
           encounter_ien: encounter_ien_from(resource),
           answered_items: pairs,
-          safety_flagged: stored_safety_flag(resource, pairs, instrument)
+          safety_flagged: filtered_safety_flag(resource, instrument)
         }
       end
 
@@ -362,16 +361,37 @@ module Lakeraven
         nil
       end
 
-      # The stored flag, and only when the safety item itself is still in
-      # the filtered answers. A missing item is not a negative screen:
-      # nil shows nothing about self-harm. The flag is never recomputed
-      # from whatever answers happened to remain.
-      def stored_safety_flag(resource, pairs, instrument)
+      # The banner follows item 9 in the filtered bundle, not the stored
+      # flag and not a second read of ScreeningResponse. A missing item is
+      # not a negative screen: nothing is shown. Shown only when that item
+      # is present and its answer value is nonzero.
+      def filtered_safety_flag(resource, instrument)
+        ordinal = filtered_safety_ordinal(resource, instrument)
+        !ordinal.nil? && !ordinal.zero?
+      end
+
+      def filtered_safety_ordinal(resource, instrument)
         link_id = instrument.safety_link_id
         return if link_id.blank?
-        return unless pairs.any? { |item, _choice| item.link_id == link_id }
 
-        ScreeningResponse.find_by(id: fhir_value(resource, "id"))&.safety_flagged
+        item = Array(fhir_value(resource, "item")).find do |entry|
+          fhir_value(entry, "linkId").to_s == link_id
+        end
+        safety_answer_ordinal(item) if item
+      end
+
+      # valueInteger, when the filtered answer carries one (including zero),
+      # is the answer value. Otherwise the value is the LOINC choice ordinal
+      # this app writes on valueCoding.
+      def safety_answer_ordinal(item)
+        answer = first_fhir(fhir_value(item, "answer"))
+        return unless answer.is_a?(Hash)
+
+        if answer.key?("valueInteger") || answer.key?(:valueInteger)
+          return Integer(fhir_value(answer, "valueInteger"), exception: false)
+        end
+
+        choice_from(item)&.value
       end
 
       def answered_pairs(resource, instrument)
