@@ -33,6 +33,7 @@ module Lakeraven
       end
 
       teardown do
+        ActionController::Base.allow_forgery_protection = @forgery_was unless @forgery_was.nil?
         teardown_smart_auth
       end
 
@@ -68,10 +69,8 @@ module Lakeraven
         "lakeraven/ehr/demo_visits#reset",    # Dev-gated demo UI
         "lakeraven/ehr/demo_visits#new",      # Dev-gated demo UI
         "lakeraven/ehr/demo_visits#summary",  # Dev-gated demo UI
-        "lakeraven/ehr/screenings#index",     # Session-authenticated clinician UI
-        "lakeraven/ehr/screenings#create",    # Session-authenticated clinician UI
-        "lakeraven/ehr/screenings#new",       # Session-authenticated clinician UI
-        "lakeraven/ehr/screenings#show",      # Session-authenticated clinician UI
+        "lakeraven/ehr/screenings#create",    # Session-authenticated clinician UI (entry, not disclosure)
+        "lakeraven/ehr/screenings#new",       # Session-authenticated clinician UI (entry, not disclosure)
         "lakeraven/ehr/sessions#new",         # Web UI login
         "lakeraven/ehr/sessions#create",      # Web UI login
         "lakeraven/ehr/sessions#destroy",     # Web UI logout
@@ -102,6 +101,8 @@ module Lakeraven
         "lakeraven/ehr/patients#show",
         "lakeraven/ehr/patients#create",
         "lakeraven/ehr/charts#show",
+        "lakeraven/ehr/screenings#index",
+        "lakeraven/ehr/screenings#show",
         "lakeraven/ehr/allergy_intolerances#index",
         "lakeraven/ehr/conditions#index",
         "lakeraven/ehr/medication_requests#index",
@@ -140,6 +141,64 @@ module Lakeraven
 
         untested = WIRED_ACTIONS - tested_actions
         assert_empty untested, "Found WIRED_ACTIONS that are not exercised in WIRED_ENDPOINTS"
+      end
+
+      test "export fails if patient is not found" do
+        post "/lakeraven-ehr/exports", params: { export_type: "patient", patient_dfn: "99999" }, headers: @headers
+        export_body = JSON.parse(response.body)
+
+        get "/lakeraven-ehr/exports/#{export_body['id']}", headers: @headers
+        # Wait, Bulk Export specifies 500 or just error status for GET /exports/:id if it failed.
+        # Typically it returns 500 with OperationOutcome. Let's just check the response is an error.
+        assert_response :error
+
+        body = JSON.parse(response.body)
+        assert_equal "OperationOutcome", body["resourceType"]
+        assert_equal "Export failed", body.dig("issue", 0, "diagnostics")
+      end
+
+      test "export fails if a single resource type fetch raises an error" do
+        # Method-swap one fetch to raise
+        service_class = Lakeraven::EHR::EhiExportService
+        original_fetch = service_class.instance_method(:fetch_conditions)
+
+        begin
+          service_class.define_method(:fetch_conditions) do |*args|
+            raise "Sentinel error during fetch"
+          end
+
+          post "/lakeraven-ehr/exports", params: { export_type: "patient", patient_dfn: "1" }, headers: @headers
+          export_body = JSON.parse(response.body)
+
+          get "/lakeraven-ehr/exports/#{export_body['id']}", headers: @headers
+          assert_response :error
+
+          body = JSON.parse(response.body)
+          assert_equal "Export failed", body.dig("issue", 0, "diagnostics")
+        ensure
+          service_class.define_method(:fetch_conditions, original_fetch)
+        end
+      end
+
+      test "export honours _type parameter" do
+        post "/lakeraven-ehr/exports", params: { export_type: "patient", patient_dfn: "1", type: "Patient" }, headers: @headers
+        export_body = JSON.parse(response.body)
+        get "/lakeraven-ehr/exports/#{export_body['id']}", headers: @headers
+        manifest = JSON.parse(response.body)
+
+        types = manifest["output"].map { |f| f["type"] }
+        assert_includes types, "Patient"
+        refute_includes types, "AllergyIntolerance"
+        refute_includes types, "Condition"
+      end
+
+      test "export refuses _since parameter with 400 Bad Request" do
+        post "/lakeraven-ehr/exports", params: { export_type: "patient", patient_dfn: "1", since: "2026-01-01T00:00:00Z" }, headers: @headers
+        assert_response :bad_request
+
+        body = JSON.parse(response.body)
+        assert_equal "OperationOutcome", body["resourceType"]
+        assert_equal "The _since parameter is not supported", body.dig("issue", 0, "diagnostics")
       end
 
       test "real export completes and yields a downloadable file for every item in manifest" do
@@ -193,6 +252,15 @@ module Lakeraven
         assert_equal "OperationOutcome", body["resourceType"]
       end
 
+      test "FHIR JSON endpoint fails closed if filter returns hash with empty resourceType" do
+        stub_egress_filter(->(payload) { { "resourceType" => "" } }) do
+          get "/lakeraven-ehr/Patient/1", headers: @headers
+        end
+        assert_response :service_unavailable
+        body = JSON.parse(response.body)
+        assert_equal "OperationOutcome", body["resourceType"]
+      end
+
       test "Export file fails closed if filter returns invalid NDJSON string" do
         stub_egress_filter(->(payload) { "filter failed" }) do
           get @export_file_path, headers: @headers
@@ -225,6 +293,30 @@ module Lakeraven
         assert_empty response.body, "Expected no file content when filter returns a non-String for CSV"
       end
 
+      test "Export CSV file fails closed if first line does not match audit headers" do
+        stub_egress_filter(->(payload) { "arbitrary text,not,headers\nvalue,value" }) do
+          get @audit_csv_file_path, headers: @headers
+        end
+        assert_response :service_unavailable
+      end
+
+      test "Export JSON file fails closed if filter returns scalar or null instead of an object" do
+        config_path = @manifest_output.find { |f| f["type"] == "configuration" }&.dig("url")
+        config_path = config_path ? URI.parse(config_path).path : "/lakeraven-ehr/exports/#{@export_id}/files/configuration.json"
+
+        # Mock filter to return a scalar JSON string
+        stub_egress_filter(->(payload) { "\"just a string\"" }) do
+          get config_path, headers: @headers
+        end
+        assert_response :service_unavailable
+
+        # Mock filter to return JSON null
+        stub_egress_filter(->(payload) { "null" }) do
+          get config_path, headers: @headers
+        end
+        assert_response :service_unavailable
+      end
+
       test "HTML chart fails closed if filter returns empty hash" do
         stub_egress_filter(->(payload) { {} }) do
           get "/lakeraven-ehr/patients/1", headers: @headers
@@ -239,6 +331,38 @@ module Lakeraven
         end
         assert_response :service_unavailable
         refute_includes response.body, "120/80"
+      end
+
+            test "HTML chart retains RPMS text for appointments, missing vitals, and units" do
+        begin
+          RpmsRpc.client.seed_keyed_collection(:patient_appointments, "1", [
+            { datetime: Date.new(2026, 2, 1), location_ien: 1, location: "Clinic", status: "no show" }
+          ])
+          RpmsRpc.client.seed_keyed_collection(:vitals, "1", [
+            { type: "PAIN", value: "4", units: "", recorded_date: DateTime.now },
+            { type: "T", value: "98.6", units: "Celsius", recorded_date: DateTime.now }
+          ])
+
+          get "/lakeraven-ehr/patients/1", headers: @headers
+          assert_response :success
+
+          assert_includes response.body, "no show", "Expected appointment status to not be relabelled to cancelled"
+          refute_includes response.body, "cancelled", "Expected appointment status to not be relabelled to cancelled"
+
+          assert_includes response.body, "PAIN", "Expected unmapped vital (PAIN) to be rendered"
+          assert_includes response.body, "Celsius", "Expected vital units from RPMS (Celsius) to be rendered, not hard-coded"
+        ensure
+          RpmsRpc.client.seed_keyed_collection(:patient_appointments, "1", [])
+          RpmsRpc.client.seed_keyed_collection(:vitals, "1", [
+            { type: "BP",  value: "120/80", units: "mm[Hg]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
+            { type: "P",   value: "72",     units: "/min",   recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
+            { type: "T",   value: "98.6",   units: "[degF]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
+            { type: "R",   value: "16",     units: "/min",   recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
+            { type: "POX", value: "98",     units: "%",      recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
+            { type: "WT",  value: "150",    units: "[lb_av]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
+            { type: "HT",  value: "65",     units: "[in_i]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) }
+          ])
+        end
       end
 
       test "failed export status does not leak raw exception text" do
@@ -286,7 +410,101 @@ module Lakeraven
         { path: "/lakeraven-ehr/AuditEvent", method: :get },
         { name: "AuditEvent show", dynamic_path: -> { "/lakeraven-ehr/AuditEvent/#{@audit_event.id}" }, method: :get },
         { name: "exports file show", dynamic_path: -> { @export_file_path }, method: :get },
-        { path: "/lakeraven-ehr/patients/1.json", method: :get }
+        { path: "/lakeraven-ehr/patients/1.json", method: :get },
+        { path: "/lakeraven-ehr/patients/1/screenings", method: :get, session_auth: true,
+          setup: -> {
+            app = Doorkeeper::Application.find_or_create_by!(name: Lakeraven::EHR::SmartAuthentication::BROWSER_SSO_APP_NAME) do |a|
+              a.redirect_uri = "https://example.test/callback"
+              a.scopes = "user/QuestionnaireResponse.read user/QuestionnaireResponse.write"
+              a.confidential = true
+            end
+            #
+
+            token = Doorkeeper::AccessToken.create!(
+              application: app,
+              scopes: "user/QuestionnaireResponse.read user/QuestionnaireResponse.write",
+              resource_owner_id: "99999",
+              expires_in: 3600
+            )
+            token.update_column(:browser_session, true) if token.has_attribute?(:browser_session)
+
+            post "/lakeraven-ehr/test_session", params: {
+              duz: "99999", user_type: "provider",
+              smart_token: token.plaintext_token || token.token
+            }
+
+            # Like ScreeningsControllerTest: the patient-context POST needs a real CSRF token.
+            @forgery_was = ActionController::Base.allow_forgery_protection if @forgery_was.nil?
+            ActionController::Base.allow_forgery_protection = true
+            get "/lakeraven-ehr/login"
+            csrf_token = css_select("meta[name=csrf-token]").first&.[]("content")
+
+            post "/lakeraven-ehr/patients/1/context", params: { authenticity_token: csrf_token }
+
+            Lakeraven::EHR::ScreeningResponse.where(patient_dfn: "1").delete_all
+            Lakeraven::EHR::ScreeningResponse.create!(
+              patient_dfn: "1",
+              encounter_ien: "2090061",
+              instrument_key: "phq-9",
+              answers: Lakeraven::EHR::ScreeningInstrument::PHQ9.link_ids.index_with { 1 },
+              total_score: 9,
+              severity_band: "mild",
+              effective_at: Time.utc(2026, 3, 1),
+              source: "clinician",
+              administered_by: "99999",
+              safety_flagged: true,
+              safety_acknowledged_at: Time.utc(2026, 3, 1),
+              safety_acknowledged_by: "99999"
+            )
+          }
+        },
+        { name: "screenings show", dynamic_path: -> { "/lakeraven-ehr/patients/1/screenings/#{(Lakeraven::EHR::ScreeningResponse.last&.id || 1)}" }, method: :get, session_auth: true,
+          setup: -> {
+            app = Doorkeeper::Application.find_or_create_by!(name: Lakeraven::EHR::SmartAuthentication::BROWSER_SSO_APP_NAME) do |a|
+              a.redirect_uri = "https://example.test/callback"
+              a.scopes = "user/QuestionnaireResponse.read user/QuestionnaireResponse.write"
+              a.confidential = true
+            end
+            #
+
+            token = Doorkeeper::AccessToken.create!(
+              application: app,
+              scopes: "user/QuestionnaireResponse.read user/QuestionnaireResponse.write",
+              resource_owner_id: "99999",
+              expires_in: 3600
+            )
+            token.update_column(:browser_session, true) if token.has_attribute?(:browser_session)
+
+            post "/lakeraven-ehr/test_session", params: {
+              duz: "99999", user_type: "provider",
+              smart_token: token.plaintext_token || token.token
+            }
+
+            # Like ScreeningsControllerTest: the patient-context POST needs a real CSRF token.
+            @forgery_was = ActionController::Base.allow_forgery_protection if @forgery_was.nil?
+            ActionController::Base.allow_forgery_protection = true
+            get "/lakeraven-ehr/login"
+            csrf_token = css_select("meta[name=csrf-token]").first&.[]("content")
+
+            post "/lakeraven-ehr/patients/1/context", params: { authenticity_token: csrf_token }
+
+            Lakeraven::EHR::ScreeningResponse.where(patient_dfn: "1").delete_all
+            Lakeraven::EHR::ScreeningResponse.create!(
+              patient_dfn: "1",
+              encounter_ien: "2090061",
+              instrument_key: "phq-9",
+              answers: Lakeraven::EHR::ScreeningInstrument::PHQ9.link_ids.index_with { 1 },
+              total_score: 9,
+              severity_band: "mild",
+              effective_at: Time.utc(2026, 3, 1),
+              source: "clinician",
+              administered_by: "99999",
+              safety_flagged: true,
+              safety_acknowledged_at: Time.utc(2026, 3, 1),
+              safety_acknowledged_by: "99999"
+            )
+          }
+        }
       ].freeze
 
       [
@@ -360,8 +578,7 @@ module Lakeraven
         test_name = endpoint[:name] || endpoint[:path]
 
         test "seam is invoked and response reflects change for #{endpoint[:method].to_s.upcase} #{test_name}" do
-          path = endpoint[:dynamic_path] ? instance_exec(&endpoint[:dynamic_path]) : endpoint[:path]
-
+          path = nil
           marker = { "resourceType" => "Basic", "id" => "FILTER-MARKER" }
           marker_ndjson = "{\"resourceType\":\"Basic\",\"id\":\"FILTER-MARKER\"}\n"
 
@@ -376,10 +593,12 @@ module Lakeraven
               if endpoint[:method] == :post
                 post path, params: endpoint[:params], headers: @headers.merge("Content-Type" => endpoint[:content_type] || "application/x-www-form-urlencoded")
               else
-                get path, params: endpoint[:params], headers: @headers
+                get path, params: endpoint[:params], headers: (endpoint[:session_auth] ? {} : @headers)
               end
             }
 
+            instance_exec(&endpoint[:setup]) if endpoint[:setup]
+            path = endpoint[:dynamic_path] ? instance_exec(&endpoint[:dynamic_path]) : endpoint[:path]
             if endpoint[:needs_registration_stub]
               with_registration_success(&call_proc)
             else
@@ -403,17 +622,18 @@ module Lakeraven
         end
 
         test "fails closed if seam returns nil for #{endpoint[:method].to_s.upcase} #{test_name}" do
-          path = endpoint[:dynamic_path] ? instance_exec(&endpoint[:dynamic_path]) : endpoint[:path]
-
+          path = nil
           stub_egress_filter(->(payload) { nil }) do
             call_proc = -> {
               if endpoint[:method] == :post
                 post path, params: endpoint[:params], headers: @headers.merge("Content-Type" => endpoint[:content_type] || "application/x-www-form-urlencoded")
               else
-                get path, params: endpoint[:params], headers: @headers
+                get path, params: endpoint[:params], headers: (endpoint[:session_auth] ? {} : @headers)
               end
             }
 
+            instance_exec(&endpoint[:setup]) if endpoint[:setup]
+            path = endpoint[:dynamic_path] ? instance_exec(&endpoint[:dynamic_path]) : endpoint[:path]
             if endpoint[:needs_registration_stub]
               with_registration_success(&call_proc)
             else
@@ -430,6 +650,11 @@ module Lakeraven
             assert_equal "OperationOutcome", body["resourceType"]
             refute body.key?("entry")
             refute_includes response.body, "Anderson"
+
+            if endpoint[:method] == :post && endpoint[:needs_registration_stub]
+              assert_nil response.headers["Location"], "Expected no Location header on refused POST"
+              refute_includes response.body, "123", "Expected no new DFN in refused POST response"
+            end
           end
         end
       end
@@ -447,6 +672,8 @@ module Lakeraven
         gateway.define_method(:register, original)
       end
 
+      # session_auth rows (screenings) authenticate through the browser session
+      # their setup opens; the class's system bearer token would replace it.
       def stub_egress_filter(implementation)
         filter = Part2EgressFilter.singleton_class
         original = filter.instance_method(:call)
