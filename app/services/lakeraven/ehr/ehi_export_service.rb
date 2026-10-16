@@ -20,10 +20,15 @@ module Lakeraven
 
       AUDIT_CSV_HEADERS = [ "Timestamp", "Event Type", "Action", "Outcome", "Resource Type", "Resource ID", "Description" ].freeze
 
-      def initialize(patient_dfn:, since: nil, before: nil)
+      def self.audit_csv_header_line
+        CSV.generate { |csv| csv << AUDIT_CSV_HEADERS }.lines.first.to_s.chomp
+      end
+
+      def initialize(patient_dfn:, since: nil, before: nil, resource_types: nil)
         @patient_dfn = patient_dfn
         @since = since
         @before = before
+        @resource_types = resource_types
       end
 
       def export
@@ -38,6 +43,7 @@ module Lakeraven
 
         { success: true, files: files, patient_dfn: @patient_dfn, exported_at: Time.current.iso8601 }
       rescue => e
+        Rails.logger.error("[export] #{e.full_message}")
         failure("Export failed: #{e.message}")
       end
 
@@ -48,7 +54,17 @@ module Lakeraven
       end
 
       def export_fhir_resources(patient)
-        FHIR_RESOURCE_TYPES.map { |type| export_fhir_type(type, patient) }
+        fhir_types_for_export.map { |type| export_fhir_type(type, patient) }
+      end
+
+      # nil means every type this service can write. An explicit list (the
+      # bulk `_type` parameter) keeps only those, in FHIR_RESOURCE_TYPES order.
+      # Audit, configuration, and the manifest are not FHIR NDJSON types and
+      # are always written alongside.
+      def fhir_types_for_export
+        return FHIR_RESOURCE_TYPES if @resource_types.nil?
+
+        FHIR_RESOURCE_TYPES & Array(@resource_types)
       end
 
       def export_fhir_type(resource_type, patient)
@@ -79,15 +95,12 @@ module Lakeraven
         else
           []
         end
-      rescue => e
-        Rails.logger.warn("EHI export: failed to fetch #{resource_type}: #{e.message}")
-        []
       end
 
       def fetch_conditions
-        Condition.respond_to?(:for_patient) ? Condition.for_patient(@patient_dfn) : []
-      rescue
-        []
+        return [] unless Condition.respond_to?(:for_patient)
+
+        Condition.for_patient(@patient_dfn)
       end
 
       # The allergy search serializes models. A gateway hash has no to_fhir
@@ -98,8 +111,6 @@ module Lakeraven
         return rows if rows.is_a?(Array) && rows.any? && rows.all? { |row| row.respond_to?(:to_fhir) }
 
         SupplementalClinicalResources.merged_allergy_intolerances_for_patient(@patient_dfn)
-      rescue
-        []
       end
 
       # Vital rows are { type, value, units, recorded_date }. The Observation
@@ -107,8 +118,6 @@ module Lakeraven
       # sets resourceType. The raw row is not a FHIR resource.
       def fetch_observations
         SupplementalClinicalResources.merged_observations_for_patient(@patient_dfn)
-      rescue
-        []
       end
 
       def fhir_to_json(resource, resource_type)

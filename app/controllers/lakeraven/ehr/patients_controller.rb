@@ -65,8 +65,7 @@ module Lakeraven
         result = RegistrationGateway.register(reg)
 
         if result[:success] && result[:dfn].to_i.positive?
-          response.headers["Location"] = "#{request.base_url}#{request.path}/#{result[:dfn]}"
-          render_fhir_egress(created_patient_fhir(result[:dfn], reg), status: :created)
+          publish_created_patient(result[:dfn], reg)
         elsif result[:success]
           render_operation_outcome(status: :bad_gateway, severity: "error", code: "exception",
             diagnostics: "Registration reported success but returned no patient identifier")
@@ -161,6 +160,20 @@ module Lakeraven
       def ssn_from_identifiers(identifiers)
         Array(identifiers).each { |i| return i["value"] if i.is_a?(Hash) && SSN_SYSTEMS.include?(i["system"]) }
         nil
+      end
+
+      # Location names the new DFN. Set it only after the egress filter
+      # accepts the resource, so a refusal carries neither the header nor
+      # the identifier in the body.
+      def publish_created_patient(dfn, reg)
+        filtered = filter_fhir_for_egress(created_patient_fhir(dfn, reg))
+        unless filtered
+          refuse_unfiltered_fhir_egress
+          return
+        end
+
+        response.headers["Location"] = "#{request.base_url}#{request.path}/#{dfn}"
+        render json: filtered, status: :created, content_type: FHIR_CONTENT_TYPE
       end
 
       def created_patient_fhir(dfn, reg)

@@ -11,9 +11,11 @@ module Lakeraven
     # the filter does not return C-CDA sections.
     #
     # An export file's check depends on its type. fhir_ndjson keeps the
-    # NDJSON-of-resources rule ("" is an empty file). audit_csv is any
-    # String. configuration and manifest are a String that parses as
-    # JSON. Any other type is refused. That refusal is an empty 503.
+    # NDJSON-of-resources rule ("" is an empty file; a resourceType must
+    # be a non-empty String). audit_csv is a String whose first line is
+    # EhiExportService's header row. configuration and manifest are a
+    # String that parses to a JSON object. Any other type is refused.
+    # That refusal is an empty 503.
     #
     # Directory, terminology, and status endpoints keep render_fhir /
     # render_bundle and do not enter this seam. ChartsController does not
@@ -67,12 +69,13 @@ module Lakeraven
         Part2EgressFilter.call(payload)
       end
 
-      # A FHIR payload is a Hash whose resourceType is a String, whether the
-      # key arrived as a string (JSON) or a symbol (in-process hashes).
+      # A FHIR payload is a Hash whose resourceType is a non-empty String,
+      # whether the key arrived as a string (JSON) or a symbol (in-process hashes).
       def usable_fhir_payload?(payload)
         return false unless payload.is_a?(Hash)
 
-        fhir_resource_type_value(payload).is_a?(String)
+        type = fhir_resource_type_value(payload)
+        type.is_a?(String) && !type.empty?
       end
 
       def fhir_resource_type_value(payload)
@@ -105,7 +108,7 @@ module Lakeraven
       def usable_export_file?(kind, payload)
         case kind
         when :fhir_ndjson then usable_ndjson_payload?(payload)
-        when :audit_csv then payload.is_a?(String)
+        when :audit_csv then usable_audit_csv?(payload)
         when :json then usable_json_payload?(payload)
         else false
         end
@@ -120,7 +123,7 @@ module Lakeraven
       end
 
       # "" is an empty file. Any other string must be NDJSON: every non-blank
-      # line is a JSON object with a String resourceType.
+      # line is a JSON object with a non-empty String resourceType.
       def usable_ndjson_payload?(payload)
         return false unless payload.is_a?(String)
 
@@ -132,16 +135,24 @@ module Lakeraven
         return true if stripped.empty?
 
         resource = JSON.parse(stripped)
-        resource.is_a?(Hash) && resource["resourceType"].is_a?(String)
+        type = resource["resourceType"] if resource.is_a?(Hash)
+        type.is_a?(String) && !type.empty?
       rescue JSON::ParserError
         false
+      end
+
+      # The first line is the header row EhiExportService writes. Any other
+      # text is not an audit file, even when it is a String.
+      def usable_audit_csv?(payload)
+        return false unless payload.is_a?(String)
+
+        payload.lines.first.to_s.chomp == EhiExportService.audit_csv_header_line
       end
 
       def usable_json_payload?(payload)
         return false unless payload.is_a?(String)
 
-        JSON.parse(payload)
-        true
+        JSON.parse(payload).is_a?(Hash)
       rescue JSON::ParserError
         false
       end

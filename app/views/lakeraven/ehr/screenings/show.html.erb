@@ -1,5 +1,9 @@
 <% content_for :title, "#{@instrument.short_title} result | Lakeraven EHR" %>
 
+<% if @egress_label.present? %>
+  <div hidden><%= @egress_label %></div>
+<% end %>
+
 <div class="page-header">
   <h1><%= @instrument.title %></h1>
   <p>Patient #<%= @dfn %> &middot;

@@ -1,5 +1,9 @@
 <% content_for :title, "Screenings | Lakeraven EHR" %>
 
+<% if @egress_label.present? %>
+  <div hidden><%= @egress_label %></div>
+<% end %>
+
 <div class="page-header">
   <h1>Behavioral health screenings</h1>
   <p>Patient #<%= @dfn %></p>

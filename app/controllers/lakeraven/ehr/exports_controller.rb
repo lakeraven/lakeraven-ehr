@@ -29,6 +29,8 @@ module Lakeraven
       # block when the two branches merge.
       before_action :authorize_fhir_write_scope!, only: :create
       def create
+        return render_since_unsupported if since_requested?
+
         export = BulkExport.new(
           id: SecureRandom.uuid,
           export_type: params[:export_type] || "patient",
@@ -36,11 +38,10 @@ module Lakeraven
           request_url: request.original_url,
           output_format: "application/fhir+ndjson",
           client_id: export_owner_identity,
-          since_timestamp: params[:since],
-          type_filters: params[:type]
+          type_filters: requested_type_param
         )
         export.set_defaults!
-        export.requested_types = BulkExport.normalize_types(params[:type])
+        export.requested_types = BulkExport.normalize_types(requested_type_param)
 
         self.class.store[export.id] = export
         run_export(export)
@@ -83,14 +84,41 @@ module Lakeraven
 
       def run_export(export)
         export.start_processing!
-        service = EhiExportService.new(patient_dfn: params[:patient_dfn] || "1")
-        # #export takes no arguments. resource_types / since are not parameters
-        # of this service; passing them raises before any file is built.
+        service = EhiExportService.new(
+          patient_dfn: params[:patient_dfn].presence || "1",
+          resource_types: export.requested_types
+        )
         result = service.export
-        export.complete!(export_output_files(export, result[:files] || []))
+        if result[:success]
+          export.complete!(export_output_files(export, result[:files] || []))
+        else
+          # The diagnostic shown to the caller stays generic. The real
+          # reason (unknown patient, a fetch that raised) stays in the log.
+          Rails.logger.error("[export] #{Array(result[:errors]).join("; ")}")
+          export.fail!(EXPORT_FAILURE_DIAGNOSTIC)
+        end
       rescue => e
         Rails.logger.error("[export] #{e.full_message}")
         export.fail!(EXPORT_FAILURE_DIAGNOSTIC)
+      end
+
+      # FHIR Bulk Data names these `_since` and `_type`. This route has
+      # always read the unprefixed params; accept either spelling.
+      def since_requested?
+        params[:since].present? || params[:_since].present?
+      end
+
+      def requested_type_param
+        params[:_type].presence || params[:type]
+      end
+
+      def render_since_unsupported
+        render_operation_outcome(
+          status: :bad_request,
+          severity: "error",
+          code: "not-supported",
+          diagnostics: "The _since parameter is not supported"
+        )
       end
 
       # EhiExportService emits :name and :type. The download route stores

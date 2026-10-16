@@ -95,24 +95,41 @@ module Lakeraven
       # DETERMINISTIC id from dfn + vital type (+ timestamp when present) —
       # never a random uuid — so ids/fullUrls are stable across requests.
       def self.from_vital_hashes(hashes, patient_dfn:)
-        hashes.filter_map do |h|
-          mapping = VITAL_TYPE_MAP[h[:type]]
-          next unless mapping
+        hashes.filter_map { |hash| vital_from_hash(hash, patient_dfn) }
+      end
 
-          new(
-            ien: h[:ien]&.to_s || vital_id(patient_dfn, h),
-            patient_dfn: patient_dfn,
-            code: mapping[:code],
-            code_system: "loinc",
-            display: mapping[:display],
-            value: h[:value],
-            value_quantity: h[:type] == "BP" ? nil : h[:value],
-            unit: mapping[:unit],
-            category: "vital-signs",
-            status: "final",
-            effective_datetime: h[:recorded_date]
-          )
-        end
+      # Unmapped RPMS types (PAIN) stay on the resource as code.text. A row
+      # that states units keeps those units; the map's UCUM unit is only the
+      # fallback when the row says nothing.
+      def self.vital_from_hash(hash, patient_dfn)
+        type = hash[:type]
+        return if type.blank?
+
+        mapping = VITAL_TYPE_MAP[type]
+        new(vital_attributes(hash, patient_dfn, type, mapping))
+      end
+
+      def self.vital_attributes(hash, patient_dfn, type, mapping)
+        {
+          ien: hash[:ien]&.to_s.presence || vital_id(patient_dfn, hash),
+          patient_dfn: patient_dfn,
+          code: mapping&.dig(:code),
+          code_system: ("loinc" if mapping),
+          display: mapping&.dig(:display) || type.to_s,
+          value: hash[:value],
+          value_quantity: (type == "BP" ? nil : hash[:value]),
+          unit: stated_vital_unit(hash, mapping),
+          category: "vital-signs",
+          status: "final",
+          effective_datetime: hash[:recorded_date]
+        }
+      end
+
+      def self.stated_vital_unit(hash, mapping)
+        return hash[:units] if hash.key?(:units)
+        return hash["units"] if hash.key?("units")
+
+        mapping&.dig(:unit)
       end
 
       def self.vital_id(patient_dfn, hash)
@@ -121,7 +138,7 @@ module Lakeraven
         id += "-#{recorded.strftime('%Y%m%d%H%M')}" if recorded.respond_to?(:strftime)
         id
       end
-      private_class_method :vital_id
+      private_class_method :vital_from_hash, :vital_attributes, :stated_vital_unit, :vital_id
 
       def vital_sign? = category == "vital-signs"
       def laboratory? = category == "laboratory"
@@ -158,6 +175,7 @@ module Lakeraven
 
       def build_blood_pressure_fhir
         systolic_val, diastolic_val = (value || "").split("/").map(&:strip)
+        bp_unit = unit.presence || "mm[Hg]"
         {
           resourceType: "Observation",
           id: ien&.to_s,
@@ -170,11 +188,11 @@ module Lakeraven
           component: [
             {
               code: { coding: [ { code: VITAL_SIGNS_CODES[:systolic], system: "http://loinc.org" } ] },
-              valueQuantity: { value: systolic_val.to_f, unit: "mm[Hg]", code: "mm[Hg]", system: "http://unitsofmeasure.org" }
+              valueQuantity: { value: systolic_val.to_f, unit: bp_unit, code: bp_unit, system: "http://unitsofmeasure.org" }
             },
             {
               code: { coding: [ { code: VITAL_SIGNS_CODES[:diastolic], system: "http://loinc.org" } ] },
-              valueQuantity: { value: diastolic_val.to_f, unit: "mm[Hg]", code: "mm[Hg]", system: "http://unitsofmeasure.org" }
+              valueQuantity: { value: diastolic_val.to_f, unit: bp_unit, code: bp_unit, system: "http://unitsofmeasure.org" }
             }
           ]
         }.compact

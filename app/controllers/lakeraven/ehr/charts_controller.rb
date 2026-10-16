@@ -57,6 +57,9 @@ module Lakeraven
         "checked out" => "finished", "cancelled" => "cancelled",
         "no show" => "cancelled"
       }.freeze
+      # Encounter.status is the FHIR code. The HTML chart shows the RPMS
+      # text, which has to ride on the resource the filter returns.
+      RPMS_APPOINTMENT_STATUS = "https://lakeraven.com/fhir/StructureDefinition/rpms-appointment-status"
 
       # Screening row the HTML chart reads back out of a filtered Observation.
       ChartScreening = Struct.new(
@@ -155,10 +158,6 @@ module Lakeraven
         @conditions    = readable?("Condition") ? build_conditions(dfn) : []
         @medications   = readable?("MedicationRequest") ? build_medications(dfn) : []
         @allergies     = readable?("AllergyIntolerance") ? build_allergies(dfn) : []
-        # Compartment-checked: the HTML chart renders these raw rows directly,
-        # so reading them straight from the gateway skipped the ownership check
-        # the FHIR paths apply to the same data.
-        @vitals        = readable?("Observation") ? safe { SupplementalClinicalResources.wire_vital_rows_for_patient(dfn) } || [] : []
         # Through the seam, like the FHIR search: converting the raw vitals here
         # would stamp this patient's DFN over whatever a row stated, and would
         # omit a configured supplemental provider's rows from the chart while
@@ -332,11 +331,21 @@ module Lakeraven
         fhir = encounter.to_fhir
         fhir[:id] ||= appointment_fhir_id(encounter)
         stamp_location_display(fhir, source[:location] || source["location"])
+        stamp_rpms_status(fhir, source[:status] || source["status"])
         fhir
       end
 
       def appointment_fhir_id(encounter)
         "appt-#{encounter.patient_identifier}-#{encounter.period_start&.strftime("%Y%m%d%H%M")}"
+      end
+
+      def stamp_rpms_status(fhir, status_text)
+        return if status_text.blank?
+
+        fhir[:extension] = Array(fhir[:extension]) + [ {
+          url: RPMS_APPOINTMENT_STATUS,
+          valueString: status_text.to_s
+        } ]
       end
 
       def stamp_location_display(fhir, name)
@@ -476,8 +485,15 @@ module Lakeraven
         {
           datetime: parse_fhir_time(fhir_field(fhir_field(resource, "period"), "start")),
           location: fhir_field(fhir_field(location, "location"), "display"),
-          status: fhir_field(resource, "status")
+          status: rpms_status_text(resource) || fhir_field(resource, "status")
         }
+      end
+
+      def rpms_status_text(resource)
+        extension = fhir_list(fhir_field(resource, "extension")).find do |ext|
+          fhir_field(ext, "url") == RPMS_APPOINTMENT_STATUS
+        end
+        fhir_field(extension, "valueString").presence
       end
 
       def chart_vitals(observations)
@@ -489,9 +505,27 @@ module Lakeraven
 
         code = fhir_coding_code(fhir_field(resource, "code"))
         type, meta = vital_type_for(code)
-        return unless type
+        type = codeable_text(fhir_field(resource, "code")) if type.nil?
+        return if type.blank?
 
-        { type: type, value: vital_display_value(resource, code), units: meta[:unit] }
+        { type: type, value: vital_display_value(resource, code), units: vital_units_from(resource, meta) }
+      end
+
+      # Prefer the unit the resource carries (the RPMS reading). The map's
+      # unit is only there when the resource has none.
+      def vital_units_from(resource, meta)
+        stated = fhir_field(fhir_field(resource, "valueQuantity"), "unit")
+        return stated unless stated.nil?
+
+        stated = component_unit(resource)
+        return stated unless stated.nil?
+
+        meta&.dig(:unit)
+      end
+
+      def component_unit(resource)
+        component = fhir_first(fhir_field(resource, "component"))
+        fhir_field(fhir_field(component, "valueQuantity"), "unit")
       end
 
       def vital_type_for(code)

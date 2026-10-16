@@ -37,11 +37,26 @@ module Lakeraven
       # the action's own transaction. This controller only supplies the
       # audit hooks below.
       include ClinicianPatientContext
+      include FHIRReadEgress
+
+      FHIR_CONTENT_TYPE = "application/fhir+json"
 
       # The item-level answers are what this surface reads and writes, and they
       # are the sensitive half of the feature (the score alone is an
       # Observation). Scope is asked for by that name.
       SCREENING_RESOURCE = "QuestionnaireResponse"
+      SCREENING_SCORE_EXT = "https://lakeraven.com/fhir/StructureDefinition/screening-total-score"
+      SCREENING_BAND_EXT = "https://lakeraven.com/fhir/StructureDefinition/screening-severity-band"
+      SCREENING_SAFETY_EXT = "https://lakeraven.com/fhir/StructureDefinition/screening-safety-flag"
+
+      # What the HTML pages read back out of a filtered QuestionnaireResponse.
+      ScreeningPage = Struct.new(
+        :id, :effective_at, :instrument, :total_score, :severity_band,
+        :encounter_ien, :answered_items, :safety_flagged,
+        keyword_init: true
+      ) do
+        def safety_flagged? = !!safety_flagged
+      end
 
       before_action :authenticate_smart_token!
       before_action :authorize_screening_scope!
@@ -58,7 +73,12 @@ module Lakeraven
       # Trend view: every scored screening for this patient, oldest first.
       # The charting work (#483) reads the same records.
       def index
-        @responses = displayable(ScreeningResponse.for_patient(@dfn))
+        records = displayable(ScreeningResponse.for_patient(@dfn))
+        filtered = filter_fhir_for_egress(screening_bundle(records))
+        return refuse_unfiltered_fhir_egress unless filtered
+
+        assign_egress_document(filtered)
+        @responses = screening_pages(filtered)
       end
 
       # TODO(#480): `encounter_ien` arrives as a query param and is rendered as
@@ -103,9 +123,16 @@ module Lakeraven
       end
 
       def show
-        @response = ScreeningResponse.for_patient(@dfn).find_by(id: params[:id])
-        return render plain: "Screening not found", status: :not_found unless @response
-        return render_undisplayable unless @response.publishable?
+        record = ScreeningResponse.for_patient(@dfn).find_by(id: params[:id])
+        return render plain: "Screening not found", status: :not_found unless record
+        return render_undisplayable unless record.publishable?
+
+        filtered = filter_fhir_for_egress(screening_bundle([ record ]))
+        return refuse_unfiltered_fhir_egress unless filtered
+
+        assign_egress_document(filtered)
+        @response = screening_pages(filtered).first
+        return render_egress_identity unless @response
 
         @instrument = @response.instrument
       end
@@ -242,6 +269,190 @@ module Lakeraven
         return {} unless raw.respond_to?(:to_unsafe_h)
 
         raw.to_unsafe_h.slice(*@instrument.link_ids)
+      end
+
+      # -- Egress ---------------------------------------------------------------
+      # Index and show build a QuestionnaireResponse bundle, hand it to
+      # Part2EgressFilter, and render only what comes back. A payload that
+      # is not a screening bundle (the seam's marker) still has to show up
+      # in the HTML; the pages put its id in a hidden element.
+
+      def screening_bundle(records)
+        {
+          resourceType: "Bundle",
+          type: "searchset",
+          total: records.length,
+          entry: records.map { |record| { resource: screening_resource(record) } }
+        }
+      end
+
+      def screening_resource(record)
+        record.to_questionnaire_response.merge(extension: screening_extensions(record))
+      end
+
+      def screening_extensions(record)
+        [
+          { url: SCREENING_SCORE_EXT, valueInteger: record.total_score },
+          { url: SCREENING_BAND_EXT, valueString: record.severity_band },
+          { url: SCREENING_SAFETY_EXT, valueBoolean: record.safety_flagged? }
+        ]
+      end
+
+      def assign_egress_document(document)
+        @egress_document = document
+        # A normal screening bundle has no id. The seam's replacement
+        # resource does, and the page has to show that id.
+        @egress_label = fhir_value(document, "id").to_s
+      end
+
+      def render_egress_identity
+        render html: helpers.tag.div(@egress_label, hidden: true), layout: true
+      end
+
+      def screening_pages(document)
+        questionnaire_resources(document).filter_map { |resource| screening_page(resource) }
+      end
+
+      def screening_page(resource)
+        fields = screening_page_fields(resource)
+        ScreeningPage.new(**fields) if fields
+      end
+
+      def screening_page_fields(resource)
+        instrument = instrument_for(resource)
+        effective_at = egress_time(fhir_value(resource, "authored"))
+        total = screening_total(resource, instrument)
+        band = screening_band(resource, instrument, total)
+        return if instrument.nil? || effective_at.nil? || total.nil? || band.blank?
+
+        {
+          id: fhir_value(resource, "id"),
+          effective_at: effective_at,
+          instrument: instrument,
+          total_score: total,
+          severity_band: band,
+          encounter_ien: encounter_ien_from(resource),
+          answered_items: answered_pairs(resource, instrument),
+          safety_flagged: safety_flag_from(resource)
+        }
+      end
+
+      def questionnaire_resources(document)
+        resources = if fhir_value(document, "resourceType").to_s == "Bundle"
+                      bundle_entry_resources(document)
+                    else
+                      [ document ]
+                    end
+        resources.select { |resource| questionnaire_response?(resource) }
+      end
+
+      def questionnaire_response?(resource)
+        fhir_value(resource, "resourceType").to_s == "QuestionnaireResponse"
+      end
+
+      def bundle_entry_resources(document)
+        Array(fhir_value(document, "entry")).filter_map do |entry|
+          resource = fhir_value(entry, "resource")
+          resource if resource.is_a?(Hash)
+        end
+      end
+
+      def instrument_for(resource)
+        canonical = fhir_value(resource, "questionnaire").to_s
+        ScreeningInstrument::ALL.find { |instrument| instrument.questionnaire_canonical == canonical }
+      end
+
+      def screening_total(resource, instrument)
+        value = extension_value(resource, SCREENING_SCORE_EXT, "valueInteger")
+        return value.to_i if value.is_a?(Numeric)
+
+        pairs = answered_pairs(resource, instrument)
+        pairs.sum { |_item, choice| choice.value.to_i } unless pairs.empty?
+      end
+
+      def screening_band(resource, instrument, total)
+        band = extension_value(resource, SCREENING_BAND_EXT, "valueString")
+        return band if band.present?
+        return if instrument.nil? || total.nil?
+
+        instrument.band_label_for(total)
+      end
+
+      def safety_flag_from(resource)
+        extension = extension_for(resource, SCREENING_SAFETY_EXT)
+        return false unless extension
+
+        !!fhir_value(extension, "valueBoolean")
+      end
+
+      def answered_pairs(resource, instrument)
+        return [] if instrument.nil?
+
+        Array(fhir_value(resource, "item")).filter_map { |item| answered_pair(item, instrument) }
+      end
+
+      def answered_pair(item, instrument)
+        link_id = fhir_value(item, "linkId").to_s
+        source = instrument.item_for(link_id)
+        choice = choice_from(item)
+        return if source.nil? || choice.nil?
+
+        [ display_item(source, item), choice ]
+      end
+
+      def display_item(source, item)
+        ScreeningInstrument::Item.new(
+          link_id: source.link_id,
+          position: source.position,
+          text: fhir_value(item, "text").presence || source.text
+        )
+      end
+
+      def choice_from(item)
+        coding = fhir_value(first_fhir(fhir_value(item, "answer")), "valueCoding")
+        code = fhir_value(coding, "code").to_s
+        known = ScreeningInstrument::CHOICES.find { |choice| choice.link_id == code }
+        return if known.nil?
+
+        ScreeningInstrument::Choice.new(
+          value: known.value,
+          link_id: known.link_id,
+          text: fhir_value(coding, "display").presence || known.text
+        )
+      end
+
+      def encounter_ien_from(resource)
+        reference = fhir_value(fhir_value(resource, "encounter"), "reference").to_s
+        prefix, ien = reference.split("/", 2)
+        ien if prefix == "Encounter" && ien.present?
+      end
+
+      def egress_time(value)
+        return value if value.respond_to?(:strftime)
+        return if value.blank?
+
+        Time.iso8601(value.to_s)
+      rescue ArgumentError
+        nil
+      end
+
+      def extension_value(resource, url, key)
+        fhir_value(extension_for(resource, url), key)
+      end
+
+      def extension_for(resource, url)
+        Array(fhir_value(resource, "extension")).find { |ext| fhir_value(ext, "url") == url }
+      end
+
+      def first_fhir(value)
+        value.is_a?(Array) ? value.first : value
+      end
+
+      def fhir_value(object, key)
+        return unless object.is_a?(Hash)
+        return object[key.to_s] if object.key?(key.to_s)
+
+        object[key.to_sym] if object.key?(key.to_sym)
       end
     end
   end
