@@ -181,7 +181,7 @@ module Lakeraven
       end
 
       test "export honours _type parameter" do
-        post "/lakeraven-ehr/exports", params: { export_type: "patient", patient_dfn: "1", type: "Patient" }, headers: @headers
+        post "/lakeraven-ehr/exports", params: { export_type: "patient", patient_dfn: "1", _type: "Patient" }, headers: @headers
         export_body = JSON.parse(response.body)
         get "/lakeraven-ehr/exports/#{export_body['id']}", headers: @headers
         manifest = JSON.parse(response.body)
@@ -192,8 +192,22 @@ module Lakeraven
         refute_includes types, "Condition"
       end
 
+      test "export supports legacy type parameter" do
+        post "/lakeraven-ehr/exports", params: { export_type: "patient", patient_dfn: "1", type: "Patient" }, headers: @headers
+        assert_response :accepted
+      end
+
+      test "export refuses _type parameter with unsupported resource types with 400 Bad Request" do
+        post "/lakeraven-ehr/exports", params: { export_type: "patient", patient_dfn: "1", _type: "Immunization" }, headers: @headers
+        assert_response :bad_request
+
+        body = JSON.parse(response.body)
+        assert_equal "OperationOutcome", body["resourceType"]
+        assert_includes body.dig("issue", 0, "diagnostics"), "unsupported resource types: Immunization"
+      end
+
       test "export refuses _since parameter with 400 Bad Request" do
-        post "/lakeraven-ehr/exports", params: { export_type: "patient", patient_dfn: "1", since: "2026-01-01T00:00:00Z" }, headers: @headers
+        post "/lakeraven-ehr/exports", params: { export_type: "patient", patient_dfn: "1", _since: "2026-01-01T00:00:00Z" }, headers: @headers
         assert_response :bad_request
 
         body = JSON.parse(response.body)
@@ -340,7 +354,8 @@ module Lakeraven
           ])
           RpmsRpc.client.seed_keyed_collection(:vitals, "1", [
             { type: "PAIN", value: "4", units: "", recorded_date: DateTime.now },
-            { type: "T", value: "98.6", units: "Celsius", recorded_date: DateTime.now }
+            { type: "T", value: "98.6", units: "Celsius", recorded_date: DateTime.now },
+            { type: "BP", value: "Refused", units: "", recorded_date: DateTime.now }
           ])
 
           get "/lakeraven-ehr/patients/1", headers: @headers
@@ -350,6 +365,7 @@ module Lakeraven
           refute_match /cancelled/i, response.body, "Expected appointment status to not be relabelled to cancelled"
 
           assert_includes response.body, "PAIN", "Expected unmapped vital (PAIN) to be rendered"
+          assert_includes response.body, "Refused", "Expected non-numeric vital value to be rendered"
 
           get "/lakeraven-ehr/patients/1.json", headers: @headers
           assert_response :success
@@ -359,6 +375,12 @@ module Lakeraven
               e.dig("resource", "code", "coding")&.any? { |c| c["code"] == "8310-5" }
           end
           fhir_unit = temp_obs.dig("resource", "valueQuantity", "unit")
+
+          refused_obs = fhir_bundle["entry"].find do |e|
+            e.dig("resource", "resourceType") == "Observation" &&
+              e.dig("resource", "code", "coding")&.any? { |c| c["code"] == "85354-9" }
+          end
+          assert_equal "Refused", refused_obs.dig("resource", "valueString")
 
           get "/lakeraven-ehr/patients/1", headers: @headers
           assert_response :success
@@ -590,6 +612,37 @@ module Lakeraven
         refute_includes response.body, "120/80"
       end
 
+      test "H1: Screenings never invent a score when filter removes the score Observation" do
+        endpoint = WIRED_ENDPOINTS.find { |e| e[:name] == "screenings show" }
+        instance_exec(&endpoint[:setup])
+        path = instance_exec(&endpoint[:dynamic_path])
+
+        stub_egress_filter(->(payload) {
+          if payload.is_a?(Hash) && payload["resourceType"] == "Bundle"
+            payload = payload.deep_dup
+            payload["entry"].reject! { |e| e.dig("resource", "resourceType") == "Observation" }
+
+            # Also remove PHQ-9 item 9 to test safety flag
+            q_response = payload["entry"].find { |e| e.dig("resource", "resourceType") == "QuestionnaireResponse" }
+            if q_response && q_response["resource"]["item"]
+              q_response["resource"]["item"].reject! { |item| item["linkId"] == "69733-4" }
+            end
+          end
+          payload
+        }) do
+          get path
+        end
+
+        assert_response :success
+        # Score should be withheld
+        refute_includes response.body, "9"
+        refute_includes response.body, "Mild"
+        assert_includes response.body, "Withheld"
+
+        # Safety flag should not be derived from partial answers
+        refute_includes response.body, "Self-harm response recorded"
+      end
+
       WIRED_ENDPOINTS.each do |endpoint|
         test_name = endpoint[:name] || endpoint[:path]
 
@@ -680,19 +733,22 @@ module Lakeraven
             end
           end
 
-          assert_response :service_unavailable
-
-          if test_name == "exports file show"
-            refute_includes response.body, "resourceType"
-          else
+          if endpoint[:method] == :post && endpoint[:needs_registration_stub]
+            assert_response :created
+            assert_not_nil response.headers["Location"], "Expected Location header on refused POST representation"
             body = JSON.parse(response.body)
             assert_equal "OperationOutcome", body["resourceType"]
-            refute body.key?("entry")
-            refute_includes response.body, "Anderson"
-
-            if endpoint[:method] == :post && endpoint[:needs_registration_stub]
-              assert_nil response.headers["Location"], "Expected no Location header on refused POST"
-              refute_includes response.body, "123", "Expected no new DFN in refused POST response"
+            refute_includes response.body, "Test" # the name from the request
+            refute_includes response.body, "111-11-1111"
+          else
+            assert_response :service_unavailable
+            if test_name == "exports file show"
+              refute_includes response.body, "resourceType"
+            else
+              body = JSON.parse(response.body)
+              assert_equal "OperationOutcome", body["resourceType"]
+              refute body.key?("entry")
+              refute_includes response.body, "Anderson"
             end
           end
         end

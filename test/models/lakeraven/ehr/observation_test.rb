@@ -241,6 +241,26 @@ module Lakeraven
         assert_equal "http://terminology.hl7.org/CodeSystem/observation-category", coding[:system]
         assert_equal "vital-signs", coding[:code]
       end
+
+      test "H4: Observation built from vital row keeps recorded text in unit and uses UCUM code from map" do
+        hashes = [
+          { type: "T", value: "98.6", units: "Celsius", recorded_date: DateTime.now },
+          { type: "PAIN", value: "4", units: "", recorded_date: DateTime.now }
+        ]
+        obs = Observation.from_vital_hashes(hashes, patient_dfn: "1")
+
+        temp = obs.find { |o| o.code == Observation::VITAL_SIGNS_CODES[:temperature] }
+        temp_fhir = temp.to_fhir
+        assert_equal "Celsius", temp_fhir[:valueQuantity][:unit]
+        assert_equal "[degF]", temp_fhir[:valueQuantity][:code]
+        assert_equal "http://unitsofmeasure.org", temp_fhir[:valueQuantity][:system]
+
+        pain = obs.find { |o| o.display == "PAIN" }
+        pain_fhir = pain.to_fhir
+        assert_nil pain_fhir[:valueQuantity][:unit]
+        assert_nil pain_fhir[:valueQuantity][:code]
+        assert_nil pain_fhir[:valueQuantity][:system]
+      end
     end
   end
 end
