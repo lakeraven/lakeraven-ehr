@@ -22,6 +22,26 @@ module Lakeraven
         end
       end
 
+      test "psychiatric diagnostic evaluation rejects non-integer and fractional duration values" do
+        [ -0.5, "bad", false, 1.5 ].each do |minutes|
+          proposal = PsychotherapyVisitCodingRules.proposal(encounter_kind: EVAL, duration_minutes: minutes)
+
+          refute proposal.reportable?, "expected refusal at #{minutes.inspect} minutes"
+          assert_nil proposal.cpt_code
+          assert_equal :invalid_duration, proposal.blocking_reason
+        end
+      end
+
+      test "psychiatric diagnostic evaluation nil zero and positive integer minutes remain reportable as 90791" do
+        [ nil, 0, 1, 15 ].each do |minutes|
+          proposal = PsychotherapyVisitCodingRules.proposal(encounter_kind: EVAL, duration_minutes: minutes)
+
+          assert proposal.reportable?, "expected 90791 to be reportable at #{minutes.inspect} minutes"
+          assert_equal "90791", proposal.cpt_code
+          assert_nil proposal.blocking_reason
+        end
+      end
+
       test "individual psychotherapy duration band edges map to 90832 90834 90837" do
         expectations = {
           16 => "90832",

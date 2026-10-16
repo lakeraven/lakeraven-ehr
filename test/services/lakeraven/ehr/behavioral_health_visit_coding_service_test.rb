@@ -125,6 +125,90 @@ module Lakeraven
         assert_equal :cpt_code_incompatible_with_encounter_kind, result.error
         assert_equal 0, BehavioralHealthVisitCoding.count
       end
+
+      test "save refuses nonsensical individual psychotherapy duration without persisting or claim handoff" do
+        [ "45junk", 45.9, "45.9", "" ].each do |duration|
+          result = BehavioralHealthVisitCodingService.new(
+            patient_dfn: 8801,
+            encounter_ien: "2090061",
+            encounter_kind: INDIVIDUAL,
+            duration_minutes: duration,
+            documented_by_duz: "2843"
+          ).save
+
+          refute result.success?, "expected refusal for duration #{duration.inspect}"
+          assert_equal :invalid_duration, result.error
+          assert_nil result.claim_handoff
+          assert_equal 0, BehavioralHealthVisitCoding.count
+        end
+      end
+
+      test "save accepts integer and string whole-minute duration for individual psychotherapy" do
+        # One encounter per case: 45 and "45" would otherwise share an encounter IEN.
+        [ [ 45, "2090071" ], [ "45", "2090072" ] ].each do |duration, encounter_ien|
+          result = BehavioralHealthVisitCodingService.new(
+            patient_dfn: 8801,
+            encounter_ien: encounter_ien,
+            encounter_kind: INDIVIDUAL,
+            duration_minutes: duration,
+            documented_by_duz: "2843"
+          ).save
+
+          assert result.success?, "expected success for duration #{duration.inspect}: #{result.errors.inspect}"
+          assert result.record.persisted?
+          assert_equal "90834", result.record.cpt_code
+          assert_equal "90834", result.claim_handoff[:procedure_code]
+          assert_equal 45, result.claim_handoff[:duration_minutes]
+        end
+      end
+
+      test "save refuses missing patient_dfn with invalid_input and model validation errors" do
+        result = BehavioralHealthVisitCodingService.new(
+          patient_dfn: nil,
+          encounter_ien: "2090061",
+          encounter_kind: INDIVIDUAL,
+          duration_minutes: 45,
+          documented_by_duz: "2843"
+        ).save
+
+        refute result.success?
+        assert_equal :invalid_input, result.error
+        assert result.errors.present?, result.errors.inspect
+        assert_includes result.errors, "Patient dfn can't be blank"
+        assert_equal 0, BehavioralHealthVisitCoding.count
+      end
+
+      test "save refuses missing encounter_ien with invalid_input and model validation errors" do
+        result = BehavioralHealthVisitCodingService.new(
+          patient_dfn: 8801,
+          encounter_ien: nil,
+          encounter_kind: INDIVIDUAL,
+          duration_minutes: 45,
+          documented_by_duz: "2843"
+        ).save
+
+        refute result.success?
+        assert_equal :invalid_input, result.error
+        assert result.errors.present?, result.errors.inspect
+        assert_includes result.errors, "Encounter ien can't be blank"
+        assert_equal 0, BehavioralHealthVisitCoding.count
+      end
+
+      test "save refuses missing documented_by_duz with invalid_input and model validation errors" do
+        result = BehavioralHealthVisitCodingService.new(
+          patient_dfn: 8801,
+          encounter_ien: "2090061",
+          encounter_kind: INDIVIDUAL,
+          duration_minutes: 45,
+          documented_by_duz: nil
+        ).save
+
+        refute result.success?
+        assert_equal :invalid_input, result.error
+        assert result.errors.present?, result.errors.inspect
+        assert_includes result.errors, "Documented by duz can't be blank"
+        assert_equal 0, BehavioralHealthVisitCoding.count
+      end
     end
   end
 end

@@ -22,6 +22,10 @@ module Lakeraven
 
       def build(**overrides) = BehavioralHealthVisitCoding.new(attributes(**overrides))
 
+      def create_resolved(**overrides)
+        BehavioralHealthVisitCoding.create!(attributes(**overrides))
+      end
+
       test "a resolved individual visit stores the derived CPT code matching documented duration" do
         record = build(duration_minutes: 45)
 
@@ -129,6 +133,50 @@ module Lakeraven
         refute record.valid?
         refute record.resolved?
         assert_equal :missing_duration, record.blocking_reason
+      end
+
+      test "persisted resolved coding without unsaved attribute changes still yields claim handoff" do
+        record = create_resolved(duration_minutes: 45)
+
+        handoff = record.to_claim_procedure_handoff
+
+        assert_equal "90834", handoff[:procedure_code]
+        assert_equal 45, handoff[:duration_minutes]
+      end
+
+      test "persisted resolved coding with unsaved patient_dfn change yields nil claim handoff" do
+        record = create_resolved
+        record.patient_dfn = 9902
+
+        assert_nil record.to_claim_procedure_handoff
+      end
+
+      test "persisted resolved coding with unsaved encounter_ien change yields nil claim handoff" do
+        record = create_resolved
+        record.encounter_ien = "2090999"
+
+        assert_nil record.to_claim_procedure_handoff
+      end
+
+      test "persisted resolved coding with unsaved encounter_kind change yields nil claim handoff" do
+        record = create_resolved
+        record.encounter_kind = EVAL
+
+        assert_nil record.to_claim_procedure_handoff
+      end
+
+      test "persisted resolved coding with unsaved selected_cpt_code change yields nil claim handoff" do
+        record = create_resolved(selected_cpt_code: "90834")
+        record.selected_cpt_code = "90837"
+
+        assert_nil record.to_claim_procedure_handoff
+      end
+
+      test "persisted resolved coding with unsaved documented_by_duz change yields nil claim handoff" do
+        record = create_resolved
+        record.documented_by_duz = "9999"
+
+        assert_nil record.to_claim_procedure_handoff
       end
     end
   end
