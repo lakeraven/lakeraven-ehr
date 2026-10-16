@@ -564,21 +564,27 @@ module Lakeraven
       end
 
       [
-        "/lakeraven-ehr/Medication/1",
-        "/lakeraven-ehr/DiagnosticReport/1",
-        "/lakeraven-ehr/CarePlan/1"
-      ].each do |path|
+        [ "/lakeraven-ehr/Medication/1", "Lakeraven::EHR::MedicationsController" ],
+        [ "/lakeraven-ehr/DiagnosticReport/1", "Lakeraven::EHR::DiagnosticReportsController" ],
+        [ "/lakeraven-ehr/CarePlan/1", "Lakeraven::EHR::CarePlansController" ]
+      ].each do |path, controller_constant|
         test "missing member action for #{path} does not serve data and fails if later added without wiring" do
+          assert_nil controller_constant.safe_constantize,
+                     "#{controller_constant} must not be defined until wired to Part2EgressFilter and moved to WIRED_ACTIONS"
+
+          routing_error = nil
           begin
             get path, headers: @headers
-          rescue ActionController::RoutingError, ActionDispatch::MissingController, NameError, AbstractController::ActionNotFound
-            # Pass: no show action is wired yet (same as collection routes above).
-            assert true
-          else
-            refute_response :success,
-                             "The member action for #{path} was added. Wire it to Part2EgressFilter and move it to WIRED_ACTIONS."
-            refute_includes response.body, "Anderson", "Expected member read not to serve patient data without the egress seam"
+          rescue ActionController::RoutingError, ActionDispatch::MissingController => e
+            routing_error = e
+          rescue NameError => e
+            assert_equal controller_constant.demodulize, e.name.to_s.demodulize,
+                         "Expected NameError for missing #{controller_constant}, got #{e.name}: #{e.message}"
+            routing_error = e
           end
+
+          assert routing_error,
+                 "Expected GET #{path} to raise routing/missing-controller error, got HTTP #{response.status}"
         end
       end
 

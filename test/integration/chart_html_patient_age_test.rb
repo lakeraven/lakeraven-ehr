@@ -45,6 +45,13 @@ class ChartHtmlPatientAgeTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "HTML chart shows em dash for Age when egress bundle birthDate is after today" do
+    travel_to Time.zone.local(2026, 10, 16, 12, 0, 0) do
+      with_patient_birth_date_in_egress_bundle("2026-12-01") { get_chart_html }
+      assert_chart_age "—"
+    end
+  end
+
   test "HTML chart shows em dash for Age and DOB when egress bundle omits birthDate" do
     with_egress_bundle_after_filter(->(payload) {
       next payload unless payload.is_a?(Hash)
