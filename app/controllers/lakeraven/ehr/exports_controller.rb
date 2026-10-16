@@ -93,7 +93,11 @@ module Lakeraven
         export.fail!(EXPORT_FAILURE_DIAGNOSTIC)
       end
 
-      # EhiExportService emits :name. The download route stores that as file_name.
+      # EhiExportService emits :name and :type. The download route stores
+      # the name as file_name. `type` stays the Bulk Data manifest type
+      # (the FHIR resource name when the service set one). `file_type` is
+      # the service type the egress check branches on: fhir_ndjson,
+      # audit_csv, configuration, or manifest.
       def export_output_files(export, files)
         files.map { |file| export_output_file(export, file) }
       end
@@ -102,6 +106,7 @@ module Lakeraven
         name = file[:name]
         {
           "type" => file[:resource_type] || file[:type],
+          "file_type" => file[:type],
           "url" => export_file_url(export_id: export.id, file_name: name),
           "count" => file[:count] || 0,
           "file_name" => name,

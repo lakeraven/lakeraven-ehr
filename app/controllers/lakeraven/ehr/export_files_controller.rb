@@ -24,7 +24,7 @@ module Lakeraven
           return render_not_found("File", params[:file_name])
         end
 
-        render_ndjson_egress(file["content"])
+        render_export_file_egress(file)
       end
     end
   end

@@ -6,7 +6,7 @@ module Lakeraven
     #
     # Callers pass the payload they are about to send: C-CDA sections
     # (TransitionsOfCareController), a FHIR resource or Bundle hash, or
-    # an NDJSON export file (String). TransitionsOfCareController
+    # an export file (String: NDJSON, CSV, or JSON). TransitionsOfCareController
     # serializes sections and does not build a document when the return
     # value is not a sections hash. FHIR and NDJSON callers render the
     # return value, and refuse when it is nil or not usable for that
