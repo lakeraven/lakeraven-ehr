@@ -102,6 +102,35 @@ module Lakeraven
         assert_equal "PO daily", dosage_text
         refute_includes dosage_text.to_s, "tab"
       end
+
+      test "search entry does not map RPMS stop_date to authoredOn or dispense validityPeriod" do
+        stop_date = Date.new(2025, 1, 1)
+        RpmsRpc.client.seed_keyed_collection(:medication_list, "1",
+          [ { ien: 99, drug_name: "Aspirin 81mg", route: "PO", schedule: "daily", refills: 1,
+              stop_date: stop_date } ])
+
+        get "/lakeraven-ehr/MedicationRequest", params: { patient: "1" }, headers: @headers
+
+        assert_response :ok
+        resource = JSON.parse(response.body)["entry"]
+          .map { |e| e["resource"] }
+          .find { |r| r["id"] == "99" }
+        assert resource, "expected seeded medication with stop_date in the bundle"
+
+        assert_equal "unknown", resource["status"]
+        assert_nil resource["authoredOn"]
+        authored_dar = resource.dig("_authoredOn", "extension")&.find { |ext| ext["url"] == DATA_ABSENT_REASON_URL }
+        assert authored_dar, "expected data-absent-reason on _authoredOn"
+        assert_equal "unknown", authored_dar["valueCode"]
+        refute resource.dig("dispenseRequest", "validityPeriod"),
+               "stop_date must not appear as dispenseRequest.validityPeriod"
+
+        serialized = resource.to_json
+        [ stop_date.iso8601, RpmsRpc::FilemanDateParser.format_date(stop_date), "3250101" ].each do |fragment|
+          refute_includes serialized, fragment,
+                          "stop_date must not leak into FHIR resource (#{fragment})"
+        end
+      end
     end
   end
 end

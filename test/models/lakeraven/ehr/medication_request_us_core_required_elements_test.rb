@@ -33,6 +33,26 @@ module Lakeraven
         assert_equal "unknown", dar[:valueCode]
       end
 
+      def assert_stop_date_absent_from_fhir(fhir, stop_date)
+        refute fhir.dig(:dispenseRequest, :validityPeriod),
+               "stop_date must not appear as dispenseRequest.validityPeriod"
+
+        fragments = [ stop_date.to_s ]
+        if stop_date.is_a?(Date)
+          fragments << RpmsRpc::FilemanDateParser.format_date(stop_date)
+          fragments << stop_date.iso8601
+        elsif stop_date.to_s.match?(/\A\d{7}\z/)
+          parsed = RpmsRpc::FilemanDateParser.parse_date(stop_date)
+          fragments << parsed.iso8601 if parsed
+        end
+
+        serialized = fhir.deep_stringify_keys.to_json
+        fragments.compact.uniq.each do |fragment|
+          refute_includes serialized, fragment,
+                          "stop_date must not leak into FHIR serialization (#{fragment})"
+        end
+      end
+
       test "to_fhir emits authoredOn as ISO 8601 when authored_on is present" do
         dt = DateTime.new(2024, 6, 3, 14, 30, 0)
         mr = MedicationRequest.new(
@@ -118,6 +138,19 @@ module Lakeraven
 
         assert_authored_on_data_absent_unknown(fhir)
         assert_requester_data_absent_unknown(fhir[:requester])
+      end
+
+      test "from_rpms_row does not map stop_date to authoredOn, status, or dispense validityPeriod" do
+        [ Date.new(2025, 1, 1), "3250101" ].each do |stop_date|
+          fhir = MedicationRequest.from_rpms_row(
+            wire_medication_row(stop_date: stop_date),
+            patient_dfn: "1"
+          ).to_fhir
+
+          assert_equal "unknown", fhir[:status]
+          assert_authored_on_data_absent_unknown(fhir)
+          assert_stop_date_absent_from_fhir(fhir, stop_date)
+        end
       end
     end
   end
