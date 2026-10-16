@@ -13,8 +13,10 @@ module Lakeraven
       self.table_name = "lakeraven_ehr_bh_program_configurations"
 
       SEED_PATH = Engine.root.join("db/data/behavioral_health_program_review_intervals.yml")
-      # Calendar units only. Hours and smaller make Date + interval a Time,
-      # which is not a review due date.
+      # Calendar units only, largest first. Hours and smaller make Date +
+      # interval a Time, which is not a review due date. duration_from applies
+      # parts in this order: Date + duration follows the parts-hash order, and
+      # jsonb returns keys sorted, so days can arrive before months.
       PART_UNITS = %i[years months weeks days].freeze
 
       class UnknownProgram < StandardError; end
@@ -58,10 +60,10 @@ module Lakeraven
         raise ArgumentError, "unsupported duration parts: #{unknown.inspect}" if unknown.any?
         raise ArgumentError, "duration has no parts" if normalized.empty?
 
-        normalized.reduce(nil) do |duration, (unit, count)|
-          piece = duration_piece(unit, count)
-          duration ? duration + piece : piece
+        pieces = PART_UNITS.filter_map do |unit|
+          duration_piece(unit, normalized.fetch(unit)) if normalized.key?(unit)
         end
+        pieces.reduce { |duration, piece| duration + piece }
       end
 
       def self.durations_from_seed(intervals)

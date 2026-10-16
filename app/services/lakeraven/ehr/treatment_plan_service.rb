@@ -16,7 +16,9 @@ module Lakeraven
     # BehavioralHealthProgramConfiguration, so calendar months stay calendar
     # months. This class does not contain an interval of its own. A review
     # dated before the latest one is stored and does not pull the due date
-    # backward. A review dated in the future is refused.
+    # backward. The plan row is locked across that write so the due date is
+    # taken from the latest review on file. A review dated in the future
+    # is refused.
     #
     # The designated provider cannot concur as supervisor. That refusal is
     # reported on the Result; the concurrence row is not written. A plan has
@@ -136,8 +138,12 @@ module Lakeraven
         end
       end
 
+      # Lock the plan row until the due date is written. A concurrent review
+      # then sees this row when it reads the latest reviewed_on, or this call
+      # sees theirs.
       def write_progress_review(reviewed, reviewed_by_duz)
         @plan.transaction do
+          @plan.lock!
           @plan.progress_reviews.create!(reviewed_on: reviewed, reviewed_by_duz: reviewed_by_duz.to_s)
           @plan.update!(progress_review_due_on: progress_due_on(latest_reviewed_on(reviewed)))
         end
@@ -189,8 +195,10 @@ module Lakeraven
         false
       end
 
+      # Create has no plan. A nil key reaches for_program and fails as an
+      # unknown program.
       def program_key
-        @program_key || @plan.program_key
+        @program_key || @plan&.program_key
       end
     end
   end
