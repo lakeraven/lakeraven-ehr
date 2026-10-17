@@ -38,6 +38,7 @@ class RiskTierTest < ActiveSupport::TestCase
     "app/terminology/lakeraven/ehr/example_code_system.rb",
     "features/fhir/patient.feature",
     "docs/my notes.md",
+    "features/onc/vital_signs_compliance.feature",
     "./README.md"
   ].freeze
 
@@ -82,6 +83,42 @@ class RiskTierTest < ActiveSupport::TestCase
     "app/models/lakeraven/ehr/current_user.rb",
     "app/gateways/lakeraven/ehr/site_gateway.rb",
     "app/gateways/lakeraven/ehr/e_signature_gateway.rb",
+    "app/controllers/lakeraven/ehr/application_controller.rb",
+    "app/controllers/concerns/lakeraven/ehr/clinician_patient_context.rb",
+    "lib/lakeraven/ehr/engine.rb",
+    "app/controllers/concerns/lakeraven/ehr/export_ownership.rb",
+    "app/controllers/lakeraven/ehr/exports_controller.rb",
+    "app/controllers/lakeraven/ehr/export_files_controller.rb",
+    "test/controllers/lakeraven/ehr/exports_controller_test.rb",
+    "app/services/lakeraven/ehr/ehi_export_service.rb",
+    "test/services/lakeraven/ehr/ehi_export_service_test.rb",
+    "features/onc/ehi_export.feature",
+    "app/models/lakeraven/ehr/disclosure.rb",
+    "app/services/lakeraven/ehr/disclosure_service.rb",
+    "test/models/lakeraven/ehr/disclosure_test.rb",
+    "test/services/lakeraven/ehr/disclosure_service_test.rb",
+    "features/onc/accounting_of_disclosures.feature",
+    "features/step_definitions/onc_accounting_of_disclosures_steps.rb",
+    "test/integration/fhir_api_authorization_test.rb",
+    "app/models/lakeraven/ehr/security_incident.rb",
+    "test/models/lakeraven/ehr/security_incident_test.rb",
+    "features/breach_detection.feature",
+    "features/step_definitions/breach_detection_steps.rb",
+    "app/models/lakeraven/ehr/amendment_request.rb",
+    "app/services/lakeraven/ehr/amendment_service.rb",
+    "test/models/lakeraven/ehr/amendment_request_test.rb",
+    "test/services/lakeraven/ehr/amendment_service_test.rb",
+    "features/onc/patient_amendments.feature",
+    "features/rate_limiting.feature",
+    "app/services/lakeraven/ehr/vaers_export_service.rb",
+    "features/vaers_export.feature",
+    "app/services/lakeraven/ehr/qrda/category_one_exporter.rb",
+    "app/services/lakeraven/ehr/qrda/category_three_exporter.rb",
+    "test/dummy/app/controllers/csrf_probe_controller.rb",
+    "test/dummy/app/controllers/csrf_disabled_probe_controller.rb",
+    "features/bh_access_clock.feature",
+    "app/services/lakeraven/ehr/reportability_response_processor.rb",
+    "app/services/lakeraven/ehr/referral_origination_service.rb",
     "./.github/workflows/ci.yml"
   ].freeze
 
@@ -260,5 +297,42 @@ class RiskTierTest < ActiveSupport::TestCase
     forward = rules.select { |l| l.include?("[forward]") }.map { |l| l.split(/\s+#\s+/, 2).first.strip }
     unmatched = out.lines.map { |l| l.chomp.split("\t", 2) }.select { |n, _| n.to_i.zero? }.map(&:last)
     assert_empty unmatched - forward, "rules matching no tracked file and not marked [forward]"
+  end
+
+  # ---- the audit: a second list, independent of the rules ----------------------
+  #
+  # The rules file is a blocklist written by someone who knew which surfaces mattered, so it
+  # can only be as good as that person's memory. Gate round 1 on #633 found a dozen sensitive
+  # files (authorization tests, disclosure, export, breach, amendment) that no rule matched.
+  # This audit is a net under it: any tracked file whose path contains one of these words must
+  # be laptop-only, whatever the rules say. A new file with such a name that no rule covers
+  # fails here, so the gap is found by CI and not by a reader.
+  #
+  # A net, not a proof: a sensitive file with an unremarkable name passes straight through.
+  #
+  # Measured over `git ls-files` when this was written: "sign" is rejected because half of its
+  # four hits are features/onc/vital_signs_* (clinical vitals, not signatures); the signature
+  # files are caught by "signat". "key" is not added: of its three hits two are already oauth
+  # migrations and one is a program-key test with nothing to do with credentials. Keywords with
+  # no hits today (tenant, credential, secret, permission, privilege, segment, password, cipher)
+  # stay: they cost nothing and catch the file that does not exist yet.
+  AUDIT_KEYWORDS = %w[
+    auth token consent disclos export egress audit part2 tenant credential secret jwks oauth
+    smart scope permission privilege segment breach incident amend csrf throttle rate_limit
+    ehi session password login encrypt cipher signat
+  ].freeze
+  AUDIT_DIRS = %w[app lib config db test features docs].freeze
+
+  test "every tracked path containing a sensitive word is laptop-only, whatever the rules say" do
+    tracked, err, status = Open3.capture3("git", "ls-files", *AUDIT_DIRS, chdir: ROOT)
+    assert status.success?, err
+    candidates = tracked.lines.map(&:chomp).select { |p| AUDIT_KEYWORDS.any? { |k| p.downcase.include?(k) } }
+    assert_operator candidates.size, :>, 50, "the audit found almost nothing; is git ls-files empty?"
+    uncovered = candidates.reject { |p| classify(p).first == "laptop-only" }
+    assert_empty uncovered, "sensitive-sounding paths that classify phone-safe; add a rule for each"
+  end
+
+  test "the audit does not sweep in vital signs" do
+    refute AUDIT_KEYWORDS.any? { |k| "features/onc/vital_signs_compliance.feature".include?(k) }
   end
 end
