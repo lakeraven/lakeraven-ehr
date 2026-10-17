@@ -41,10 +41,6 @@ class RiskTierTest < ActiveSupport::TestCase
     "docs/BPRM_PARITY_PLAN.md",
     "docs/my notes.md",
     "docs/demo_patient_chart_runbook.md",
-    "app/views/lakeraven/ehr/dashboards/show.html.erb",
-    "app/views/lakeraven/ehr/charts/show.html.erb",
-    "app/views/lakeraven/ehr/screenings/index.html.erb",
-    "app/helpers/lakeraven/ehr/application_helper.rb",
     "app/assets/stylesheets/lakeraven/ehr/application.css",
     "config/locales/en.yml"
   ].freeze
@@ -53,6 +49,10 @@ class RiskTierTest < ActiveSupport::TestCase
   # the paths gate round 2 showed a blocklist classifying phone-safe, plus the ordinary
   # code, tests, features and config that used to be phone-safe by omission.
   UNLISTED = [
+    "app/views/lakeraven/ehr/dashboards/show.html.erb",
+    "app/views/lakeraven/ehr/charts/show.html.erb",
+    "app/views/lakeraven/ehr/screenings/index.html.erb",
+    "app/helpers/lakeraven/ehr/application_helper.rb",
     "app/controllers/lakeraven/ehr/web_controller.rb",
     "app/controllers/lakeraven/ehr/patients_controller.rb",
     "app/controllers/lakeraven/ehr/patient_contexts_controller.rb",
@@ -84,8 +84,11 @@ class RiskTierTest < ActiveSupport::TestCase
 
   # Views that carry more than display: the layout emits the CSRF and CSP meta tags, and the
   # sign-in and patient-context views post the forms those controllers authorize. They sit
-  # under app/views/** but are laptop-only by rule.
+  # under app/views/**; views are not on the safe-list at all, so these also match a rule that
+  # names why they are sensitive.
   SENSITIVE_VIEWS = [
+    "app/views/lakeraven/ehr/consent/new.html.erb",
+    "app/helpers/lakeraven/ehr/session_helper.rb",
     "app/views/layouts/lakeraven/ehr/application.html.erb",
     "app/views/lakeraven/ehr/sessions/new.html.erb",
     "app/views/lakeraven/ehr/patient_contexts/new.html.erb"
@@ -99,8 +102,6 @@ class RiskTierTest < ActiveSupport::TestCase
     "docs/token rotation.md",
     "docs/part2-overview.md",
     "docs/audit-trail.md",
-    "app/views/lakeraven/ehr/consent/new.html.erb",
-    "app/helpers/lakeraven/ehr/session_helper.rb",
     "config/locales/oauth.en.yml"
   ].freeze
 
@@ -240,7 +241,7 @@ class RiskTierTest < ActiveSupport::TestCase
   end
 
   test "a PR of only safe paths is phone-safe and says how many were read" do
-    tier, status, out = classify([ "README.md", "docs/BPRM_PARITY_PLAN.md", "app/views/lakeraven/ehr/dashboards/show.html.erb" ])
+    tier, status, out = classify([ "README.md", "docs/BPRM_PARITY_PLAN.md", "app/assets/stylesheets/lakeraven/ehr/application.css" ])
     assert_equal "phone-safe", tier
     assert_equal 0, status
     assert_match(/3 path/, out)
@@ -524,8 +525,6 @@ class RiskTierTest < ActiveSupport::TestCase
   SAFE_PATH_PATTERNS = [
     %r{\A(README|CHANGELOG)\.md\z}i,
     %r{\Adocs/.+\.md\z}i,
-    %r{\Aapp/views/.+\.erb\z}i,
-    %r{\Aapp/helpers/.+\.rb\z}i,
     %r{\Aapp/assets/stylesheets/.+\.css\z}i,
     %r{\Aapp/assets/images/.+\.(png|jpe?g|gif|ico)\z}i,
     %r{\Aconfig/locales/[^/]+\.yml\z}i
@@ -560,11 +559,25 @@ class RiskTierTest < ActiveSupport::TestCase
   end
 
   test "the safe patterns are really used: safe tracked files exist and are phone-safe when they match no rule" do
-    tracked, = Open3.capture2("git", "ls-files", "README.md", "docs", "app/views", "app/helpers", "app/assets", chdir: ROOT)
+    tracked, = Open3.capture2("git", "ls-files", "README.md", "docs", "app/assets", chdir: ROOT)
     safe = tracked.lines.map(&:chomp).select { |p| SAFE_PATH_PATTERNS.any? { |re| re.match?(p) } }
     assert_operator safe.size, :>, 5
     ok = safe.select { |p| classify(p).first == "phone-safe" }
     assert_operator ok.size, :>, 3, "the safe-list admits almost nothing; is it empty?"
+  end
+
+  test "no tracked view or helper is ever phone-safe: ERB and helpers run Ruby and render patient data" do
+    tracked, err, status = Open3.capture3("git", "ls-files", "app/views", "app/helpers", chdir: ROOT)
+    assert status.success?, err
+    paths = tracked.lines.map(&:chomp)
+    assert_operator paths.size, :>, 5, "no tracked views or helpers; is git ls-files empty?"
+    assert_empty paths - laptop_paths_in(paths), "views or helpers the classifier would call phone-safe"
+    assert paths.any? { |p| p.end_with?(".erb") }, "expected at least one tracked .erb"
+  end
+
+  test "the safe-list rules file names neither app/views nor app/helpers" do
+    safe = File.read(RULES).split(/^\[safe\]\s*$/, 2).last.to_s
+    refute_match(%r{^\s*app/(views|helpers)}, safe)
   end
 
   test "the audit does not sweep in vital signs" do
