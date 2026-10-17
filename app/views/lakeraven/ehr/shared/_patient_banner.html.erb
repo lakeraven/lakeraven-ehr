@@ -5,6 +5,10 @@
         signed-in surface, labeled as the search the empty state promises. %>
     <%= link_to "Chart search", dashboard_path %>
   <% else %>
+    <% if banner.notice.present? %>
+      <p><%= banner.notice %></p>
+    <% end %>
+
     <% if banner.demographics %>
       <div class="banner">
         <div>

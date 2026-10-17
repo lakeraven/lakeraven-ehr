@@ -8,7 +8,7 @@ module Lakeraven
       SEX_LABELS = { "F" => "Female", "M" => "Male", "U" => "Unknown" }.freeze
       MISSING = "—"
 
-      attr_reader :demographics, :allergies
+      attr_reader :demographics, :allergies, :notice
 
       def self.empty
         new(empty: true, show_clear: false, demographics: nil, allergies: nil)
@@ -19,6 +19,32 @@ module Lakeraven
         new(empty: false, show_clear: true, demographics: nil,
             allergies: AllergyListStatus.not_loaded)
       end
+
+      # The route names a patient the session has not opened. No demographics
+      # and no allergies: those would be the session patient's, on a page
+      # about someone else.
+      def self.unopened_route(route_dfn)
+        new(
+          empty: false, show_clear: true, demographics: nil, allergies: nil,
+          notice: unopened_notice(route_dfn)
+        )
+      end
+
+      # A name or a positive DFN is an identity. dfn 0 is what from_fhir
+      # produces from a hash that had no id, and that is not a patient.
+      def self.identifiable?(patient)
+        return false unless patient.respond_to?(:display_name) && patient.respond_to?(:dfn)
+
+        patient.display_name.to_s.strip.present? || patient.dfn.to_i.positive?
+      end
+
+      def self.unopened_notice(route_dfn)
+        label = route_dfn.to_s
+        return "This patient is not open" unless label.match?(/\A\d+\z/)
+
+        "Patient ##{label} is not open"
+      end
+      private_class_method :unopened_notice
 
       def self.for_chart(patient, allergies)
         for_patient(patient, allergies: allergies, show_clear: false)
@@ -33,11 +59,12 @@ module Lakeraven
         )
       end
 
-      def initialize(empty:, show_clear:, demographics:, allergies:)
+      def initialize(empty:, show_clear:, demographics:, allergies:, notice: nil)
         @empty = empty
         @show_clear = show_clear
         @demographics = demographics
         @allergies = allergies
+        @notice = notice
       end
 
       def empty?
