@@ -17,6 +17,9 @@ module Lakeraven
     # dropped -- an unattributable clinical resource cannot be shown to be this
     # patient's.
     class SupplementalClinicalResources
+      WireAllergyBatch = Struct.new(:records, :dropped_count, :assessed, :nka, keyword_init: true)
+      private_constant :WireAllergyBatch
+
       class << self
         def merged_observations_for_patient(dfn)
           merge(wire_observations(dfn),
@@ -32,9 +35,22 @@ module Lakeraven
         end
 
         def merged_allergy_intolerances_for_patient(dfn)
-          merge(wire_allergies(dfn),
-                owned_by(dfn, Lakeraven::EHR.configuration.supplemental_allergy_intolerances_provider,
-                         AllergyIntolerance))
+          allergy_intolerance_reading_for_patient(dfn)
+        end
+
+        # Rows plus ORQQAL's assessed/nka flags and how many wire rows were
+        # dropped for naming another patient. merged_allergy_intolerances_for_patient
+        # is this reading used as an Array, so FHIR search's return shape
+        # stays a list of AllergyIntolerance models.
+        def allergy_intolerance_reading_for_patient(dfn)
+          wire = wire_allergy_batch(dfn)
+          records = merge(wire.records, supplemental_allergies(dfn))
+          AllergyIntoleranceReading.new(
+            records,
+            dropped_count: wire.dropped_count,
+            assessed: wire.assessed,
+            nka: wire.nka
+          )
         end
 
         private
@@ -46,12 +62,78 @@ module Lakeraven
           Observation.from_vital_hashes(wire_vital_rows_for_patient(dfn), patient_dfn: dfn)
         end
 
-        def wire_allergies(dfn)
-          Array(AllergyIntolerance.for_patient(dfn)).filter_map do |row|
-            next unless wire_row_owned?(row, dfn)
+        def supplemental_allergies(dfn)
+          owned_by(
+            dfn,
+            Lakeraven::EHR.configuration.supplemental_allergy_intolerances_provider,
+            AllergyIntolerance
+          )
+        end
 
-            row.is_a?(Hash) ? allergy_from_wire(row, dfn) : verified(row, dfn)
+        def wire_allergy_batch(dfn)
+          assessed, nka, rows = wire_allergy_reply(dfn)
+          kept, dropped = split_owned_wire_allergies(rows, dfn)
+          WireAllergyBatch.new(
+            records: kept, dropped_count: dropped, assessed: assessed, nka: nka
+          )
+        end
+
+        # for_patient is what stubs replace. When that call is the gateway's,
+        # the rows are the assessment's own array and the flags are real;
+        # a stubbed list did not come from ORQQAL and cannot prove NKA.
+        def wire_allergy_reply(dfn)
+          begin_wire_assessment_capture
+          rows = Array(AllergyIntolerance.for_patient(dfn))
+          assessed, nka = assessment_flags(assessment_state_for(rows))
+          [ assessed, nka, rows ]
+        ensure
+          end_wire_assessment_capture
+        end
+
+        def assessment_state_for(rows)
+          gateway = AllergyIntolerance.gateway
+          return unless gateway.respond_to?(:take_assessment)
+
+          gateway.take_assessment(rows)
+        end
+
+        def begin_wire_assessment_capture
+          gateway = AllergyIntolerance.gateway
+          gateway.begin_assessment_capture! if gateway.respond_to?(:begin_assessment_capture!)
+        end
+
+        def end_wire_assessment_capture
+          gateway = AllergyIntolerance.gateway
+          gateway.end_assessment_capture! if gateway.respond_to?(:end_assessment_capture!)
+        end
+
+        def assessment_flags(state)
+          return [ false, false ] unless state.is_a?(Hash)
+
+          [ state[:assessed] == true, state[:nka] == true ]
+        end
+
+        # A dropped wire row is not this patient's allergy, and it is not
+        # evidence the list was empty. The count stays on the reading so
+        # display cannot turn the hole into "none recorded".
+        def split_owned_wire_allergies(rows, dfn)
+          kept = []
+          dropped = 0
+          Array(rows).each do |row|
+            record = kept_wire_allergy(row, dfn)
+            if record
+              kept << record
+            else
+              dropped += 1
+            end
           end
+          [ kept, dropped ]
+        end
+
+        def kept_wire_allergy(row, dfn)
+          return unless wire_row_owned?(row, dfn)
+
+          row.is_a?(Hash) ? allergy_from_wire(row, dfn) : verified(row, dfn)
         end
 
         # A wire row with no stated owner is the requested patient's: the RPC was
