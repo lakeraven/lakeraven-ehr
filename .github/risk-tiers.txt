@@ -99,6 +99,8 @@ lib/lakeraven/ehr/engine.rb # engine boot: Doorkeeper wiring and credential para
 *invoice*                   # [forward] invoices
 
 # --- views that carry more than display ---
+# (views and helpers are not on the safe-list either: ERB runs Ruby and renders patient data.
+# These rules stay so the output names why, instead of only "not on the safe-list".)
 app/views/layouts/*         # the layout emits the CSRF and CSP meta tags
 app/views/*/patient_contexts/*   # the form that binds a session to a patient (the cross-patient guard)
 
@@ -110,7 +112,7 @@ SOFTWARE-FACTORY*           # [forward] the review method itself
 
 # ======================================================================================
 # THE SAFE-LIST. Add a glob only for a path where a mistake cannot change who may see what
-# or what is stored: prose, markup that only displays, styling. Never code that decides,
+# or what is stored: prose, styling. Never code that decides,
 # controllers, services, models, serializers, tests, features, db, config or CI. Prefer
 # a narrow extension to a directory.
 # ======================================================================================
@@ -118,8 +120,6 @@ SOFTWARE-FACTORY*           # [forward] the review method itself
 README.md                   # prose
 CHANGELOG.md                # [forward] prose
 docs/*.md                   # prose (docs/adr, docs/compliance and docs/certification are laptop-only rules above)
-app/views/*.erb             # display templates (the layout, sign-in and patient-context views are laptop-only rules above)
-app/helpers/*.rb            # view helpers
 app/assets/stylesheets/*.css   # styling
 app/assets/images/*.png     # [forward] images
 app/assets/images/*.jpg     # [forward] images
