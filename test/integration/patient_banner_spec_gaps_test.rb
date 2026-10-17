@@ -6,6 +6,7 @@ require_relative "../support/patient_banner_test_helper"
 # Pins behaviour the adversarial review found missing from the #466 spec.
 class PatientBannerSpecGapsTest < ActionDispatch::IntegrationTest
   include PatientBannerTestHelper
+  include SupplementalProviderConfigHelper
   include ActiveSupport::Testing::TimeHelpers
 
   setup do
@@ -53,6 +54,53 @@ class PatientBannerSpecGapsTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "dropped supplemental allergy without patient dfn with NKA shows not-loaded not none recorded" do
+    orphan = Lakeraven::EHR::AllergyIntolerance.new(ien: "s1", allergen: "Latex")
+
+    with_demo_clinical_seeds do
+      sign_in_clinician!
+      open_patient_context!(1)
+      seed_nka_allergy_assessment!("1")
+
+      with_supplemental_providers(allergy_intolerances: ->(_dfn) { [ orphan ] }) do
+        assert_dashboard_and_chart_allergies_not_loaded!
+        refute_includes response.body, "Latex"
+      end
+    end
+  end
+
+  test "dropped supplemental allergy for another patient with NKA shows not-loaded not none recorded" do
+    foreign = Lakeraven::EHR::AllergyIntolerance.new(
+      ien: "s2",
+      patient_dfn: "2",
+      allergen: "Sulfa Drugs",
+      clinical_status: "active"
+    )
+
+    with_demo_clinical_seeds do
+      sign_in_clinician!
+      open_patient_context!(1)
+      seed_nka_allergy_assessment!("1")
+
+      with_supplemental_providers(allergy_intolerances: ->(_dfn) { [ foreign ] }) do
+        assert_dashboard_and_chart_allergies_not_loaded!
+        refute_includes response.body, "Sulfa Drugs"
+      end
+    end
+  end
+
+  test "non-array supplemental allergy provider with NKA shows not-loaded not none recorded" do
+    with_demo_clinical_seeds do
+      sign_in_clinician!
+      open_patient_context!(1)
+      seed_nka_allergy_assessment!("1")
+
+      with_supplemental_providers(allergy_intolerances: ->(_dfn) { { allergen: "oops" } }) do
+        assert_dashboard_and_chart_allergies_not_loaded!
+      end
+    end
+  end
+
   test "wire allergies owned by another patient show not-loaded not none recorded" do
     foreign_row = {
       ien: "foreign-1",
@@ -97,7 +145,37 @@ class PatientBannerSpecGapsTest < ActionDispatch::IntegrationTest
         refute_includes body, "May 15, 1980"
         refute_includes body, "Penicillin"
         refute_includes body, "Shellfish"
+        assert_patient_banner!
+        assert_allergies_state!("not-loaded")
       end
+    end
+  end
+
+  test "screenings index audit names session patient not query string id" do
+    with_demo_clinical_seeds do
+      sign_in_clinician!
+      open_patient_context!(1)
+      Lakeraven::EHR::AuditEvent.delete_all
+
+      get "#{MOUNT}/patients/1/screenings?id=777"
+      assert_response :ok
+      assert_patient_banner!
+      refute_audit_entity_identifier!("777")
+      assert_audit_includes_patient!("1")
+    end
+  end
+
+  test "screenings new audit names session patient not query string id" do
+    with_demo_clinical_seeds do
+      sign_in_clinician!
+      open_patient_context!(1)
+      Lakeraven::EHR::AuditEvent.delete_all
+
+      get "#{MOUNT}/patients/1/screenings/new?instrument=phq-9&id=777"
+      assert_response :ok
+      assert_patient_banner!
+      refute_audit_entity_identifier!("777")
+      assert_audit_includes_patient!("1")
     end
   end
 
