@@ -138,7 +138,7 @@
         <div class="items">
           <% @allergies.each do |a| %>
             <span class="achip">
-              <%= a.allergen %>
+              <%= a.display_allergen %>
               <% if a.reaction.present? %><span class="rx">&middot; <%= a.reaction %> (<span class="sev-<%= a.severity.to_s.downcase %>"><%= a.severity %></span>)</span><% end %>
             </span>
           <% end %>
@@ -253,7 +253,7 @@
               <tbody>
                 <% @allergies.each do |a| %>
                   <tr>
-                    <td><%= a.allergen %></td>
+                    <td><%= a.display_allergen %></td>
                     <td><%= a.reaction %></td>
                     <td><span class="badge <%= a.severity.present? ? "sev-#{a.severity.to_s.downcase}" : "inactive" %>"><%= a.severity.presence || "—" %></span></td>
                   </tr>

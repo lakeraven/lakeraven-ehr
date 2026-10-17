@@ -15,20 +15,23 @@ module Lakeraven
 
       def load
         patient = resolve_patient
-        return PatientBanner.closed if patient == :unavailable
+        # Allergy names only appear on a banner that also shows who they
+        # belong to. No identity means the closed state, and the list is
+        # not read — there is no one to attach it to.
+        return PatientBanner.closed unless PatientBanner.identifiable?(patient)
 
         PatientBanner.for_patient(patient, allergies: allergy_status, show_clear: true)
       end
 
       private
 
-      # nil: demographics are not authorized (allergies may still be).
-      # :unavailable: a Patient read was allowed and the record did not load.
+      # Missing Patient scope, a failed lookup, and an egress refusal are
+      # the same outcome. nil is not a signal to show allergies alone.
       def resolve_patient
         return nil unless @can_read.call("Patient")
 
         found = find_patient
-        return :unavailable if found.nil?
+        return nil if found.nil?
 
         filtered_patient(found)
       end
@@ -40,6 +43,9 @@ module Lakeraven
         nil
       end
 
+      # A filter that withholds the Patient, or raises, did not produce an
+      # identity. Callers treat nil as the closed banner and do not go on
+      # to read allergies.
       def filtered_patient(patient)
         filtered = @filter.call(patient.to_fhir)
         return nil unless filtered.is_a?(Hash)
@@ -54,11 +60,7 @@ module Lakeraven
         return AllergyListStatus.not_loaded unless @can_read.call("AllergyIntolerance")
 
         source = fetch_allergies
-        AllergyListStatus.from_counts(
-          source_status: source.status,
-          source_count: source.records.length,
-          filtered_names: filtered_allergy_names(source)
-        )
+        source.to_list_status(filtered_allergy_names(source))
       end
 
       def fetch_allergies

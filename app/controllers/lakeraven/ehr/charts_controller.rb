@@ -447,11 +447,7 @@ module Lakeraven
       end
 
       def chart_allergy_status
-        AllergyListStatus.from_counts(
-          source_status: @allergy_source.status,
-          source_count: @allergy_source.records.length,
-          filtered_names: @allergies.map { |allergy| allergy.allergen.to_s }
-        )
+        @allergy_source.to_list_status(@allergies.map(&:display_allergen))
       end
 
       def assign_chart_from_bundle(bundle)
@@ -526,10 +522,12 @@ module Lakeraven
       end
 
       def allergy_from_fhir(resource)
+        code = fhir_field(resource, "code")
         reaction = fhir_first(fhir_field(resource, "reaction"))
         manifestation = fhir_first(fhir_field(reaction, "manifestation"))
         AllergyIntolerance.new(
-          allergen: codeable_text(fhir_field(resource, "code")),
+          allergen: codeable_text(code),
+          allergen_code: fhir_coding_code(code),
           reaction: fhir_field(manifestation, "text"),
           severity: fhir_field(reaction, "severity")
         )
