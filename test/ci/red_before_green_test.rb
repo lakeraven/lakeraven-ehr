@@ -26,6 +26,11 @@ require "fileutils"
 # the base version in the scratch worktree.
 class RedBeforeGreenTest < Minitest::Test
   SCRIPT = File.expand_path("../../bin/red-before-green", __dir__)
+  WORKFLOW = File.expand_path("../../.github/workflows/red-before-green.yml", __dir__)
+
+  # What minitest prints just before its summary. The script reads the summary
+  # only from the block that follows this line (gate round 1, finding 1).
+  FIN = 'Finished in 0.1s, 1.0 runs/s, 1.0 assertions/s.\n\n'
 
   # A stand-in for `rails test`: prints a minitest-style summary that depends on
   # what app/greeter.rb says in the directory it runs in, and echoes its args.
@@ -34,10 +39,10 @@ class RedBeforeGreenTest < Minitest::Test
     src = File.exist?("app/greeter.rb") ? File.read("app/greeter.rb") : "<missing>"
     puts "SEEN: " + src.strip
     if src.include?("fixed")
-      puts "1 runs, 1 assertions, 0 failures, 0 errors, 0 skips"
+      puts "#{FIN}1 runs, 1 assertions, 0 failures, 0 errors, 0 skips"
     else
       puts "Failure:\\nGreeterTest#test_it [test/greeter_test.rb:3]:\\nExpected: \\"fixed\\""
-      puts "1 runs, 1 assertions, 1 failures, 0 errors, 0 skips"
+      puts "#{FIN}1 runs, 1 assertions, 1 failures, 0 errors, 0 skips"
       exit 1
     end
   RUBY
@@ -195,7 +200,7 @@ class RedBeforeGreenTest < Minitest::Test
     commit "adds a file"
     runner = <<~RUBY
       puts(File.exist?("app/brand_new.rb") ? "ADDED-FILE-PRESENT" : "ADDED-FILE-ABSENT")
-      puts "1 runs, 1 assertions, 1 failures, 0 errors, 0 skips"
+      puts "#{FIN}1 runs, 1 assertions, 1 failures, 0 errors, 0 skips"
       exit 1
     RUBY
 
@@ -211,7 +216,7 @@ class RedBeforeGreenTest < Minitest::Test
     commit "deletes a file"
     runner = <<~RUBY
       puts(File.exist?("lib/keep.rb") ? "DELETED-FILE-RESTORED" : "DELETED-FILE-GONE")
-      puts "1 runs, 1 assertions, 1 failures, 0 errors, 0 skips"
+      puts "#{FIN}1 runs, 1 assertions, 1 failures, 0 errors, 0 skips"
       exit 1
     RUBY
 
@@ -225,7 +230,7 @@ class RedBeforeGreenTest < Minitest::Test
     write "test/greeter_test.rb", "# a test that never looks at the change\n"
     commit "tests that do not test"
     passing = <<~RUBY
-      puts "5 runs, 9 assertions, 0 failures, 0 errors, 0 skips"
+      puts "#{FIN}5 runs, 9 assertions, 0 failures, 0 errors, 0 skips"
     RUBY
 
     out, status = run_script(env: fake_runner(passing))
@@ -239,7 +244,7 @@ class RedBeforeGreenTest < Minitest::Test
     errors = <<~RUBY
       puts "Error:\\nGreeterTest#test_it:\\nNameError: uninitialized constant Greeter\\n    app.rb:1"
       puts "Error:\\nGreeterTest#test_two:\\nNoMethodError: undefined method 'hello' for class Greeter"
-      puts "2 runs, 0 assertions, 0 failures, 2 errors, 0 skips"
+      puts "#{FIN}2 runs, 0 assertions, 0 failures, 2 errors, 0 skips"
       exit 1
     RUBY
 
@@ -255,7 +260,7 @@ class RedBeforeGreenTest < Minitest::Test
     mixed = <<~RUBY
       puts "Error:\\nGreeterTest#test_it:\\nNameError: uninitialized constant Greeter"
       puts "Failure:\\nGreeterTest#test_two [test/greeter_test.rb:9]:\\nExpected: 1\\n  Actual: 2"
-      puts "2 runs, 1 assertions, 1 failures, 1 errors, 0 skips"
+      puts "#{FIN}2 runs, 1 assertions, 1 failures, 1 errors, 0 skips"
       exit 1
     RUBY
 
@@ -269,7 +274,7 @@ class RedBeforeGreenTest < Minitest::Test
     fixed_pr
     other = <<~RUBY
       puts "Error:\\nGreeterTest#test_it:\\nActiveRecord::RecordInvalid: Validation failed"
-      puts "1 runs, 0 assertions, 0 failures, 1 errors, 0 skips"
+      puts "#{FIN}1 runs, 0 assertions, 0 failures, 1 errors, 0 skips"
       exit 1
     RUBY
 
@@ -294,13 +299,226 @@ class RedBeforeGreenTest < Minitest::Test
   def test_undetermined_when_zero_tests_ran
     fixed_pr
     nothing = <<~RUBY
-      puts "0 runs, 0 assertions, 0 failures, 0 errors, 0 skips"
+      puts "#{FIN}0 runs, 0 assertions, 0 failures, 0 errors, 0 skips"
     RUBY
 
     out, status = run_script(env: fake_runner(nothing))
 
     assert_equal 2, status.exitstatus, out
     assert_match(/^VERDICT: UNDETERMINED/, out)
+  end
+
+  # --- gate round 1 (gate/runs/lakeraven-ehr-632/r1/verify.md) --------------
+  # Spec amendment: written by the chair after the gate seats' findings, before
+  # the fixes. The builder does not edit these.
+
+  # Finding 1: any process in the run can print a line shaped like the summary.
+  def test_a_spoofed_summary_line_after_the_real_one_does_not_change_the_verdict
+    fixed_pr
+    spoofed = <<~RUBY
+      puts "Failure:\\nGreeterTest#test_it [test/greeter_test.rb:3]:\\nExpected: 1"
+      puts "#{FIN}1 runs, 1 assertions, 1 failures, 0 errors, 0 skips"
+      puts "1 runs, 1 assertions, 0 failures, 0 errors, 0 skips"
+      exit 1
+    RUBY
+
+    out, status = run_script(env: fake_runner(spoofed))
+
+    assert_equal 0, status.exitstatus, out
+    assert_match(/^VERDICT: RED$/, out)
+  end
+
+  def test_a_spoofed_failure_line_after_a_passing_run_does_not_make_it_red
+    fixed_pr
+    spoofed = <<~RUBY
+      puts "#{FIN}1 runs, 1 assertions, 0 failures, 0 errors, 0 skips"
+      puts "1 runs, 1 assertions, 1 failures, 0 errors, 0 skips"
+    RUBY
+
+    out, status = run_script(env: fake_runner(spoofed))
+
+    assert_equal 1, status.exitstatus, out
+    assert_match(/^VERDICT: GREEN-WITHOUT-FIX/, out)
+  end
+
+  def test_a_spoofed_second_finished_block_is_undetermined_not_a_verdict
+    fixed_pr
+    spoofed = <<~RUBY
+      puts "#{FIN}1 runs, 1 assertions, 1 failures, 0 errors, 0 skips"
+      puts "#{FIN}1 runs, 1 assertions, 0 failures, 0 errors, 0 skips"
+    RUBY
+
+    out, status = run_script(env: fake_runner(spoofed))
+
+    assert_equal 2, status.exitstatus, out
+    assert_match(/^VERDICT: UNDETERMINED/, out)
+  end
+
+  def test_a_summary_that_does_not_follow_a_finished_line_is_not_read
+    fixed_pr
+    bare = <<~RUBY
+      puts "1 runs, 1 assertions, 0 failures, 0 errors, 0 skips"
+    RUBY
+
+    out, status = run_script(env: fake_runner(bare))
+
+    assert_equal 2, status.exitstatus, out
+    assert_match(/^VERDICT: UNDETERMINED/, out)
+  end
+
+  def test_an_indented_or_embedded_summary_line_is_not_read
+    fixed_pr
+    indented = <<~RUBY
+      puts "#{FIN}  1 runs, 1 assertions, 0 failures, 0 errors, 0 skips"
+    RUBY
+    embedded = <<~RUBY
+      puts "#{FIN}ok: 1 runs, 1 assertions, 0 failures, 0 errors, 0 skips"
+    RUBY
+
+    [ indented, embedded ].each do |body|
+      out, status = run_script(env: fake_runner(body))
+
+      assert_equal 2, status.exitstatus, out
+      assert_match(/^VERDICT: UNDETERMINED/, out)
+    end
+  end
+
+  def test_every_test_skipped_is_undetermined
+    fixed_pr
+    skipped = <<~RUBY
+      puts "#{FIN}3 runs, 0 assertions, 0 failures, 0 errors, 3 skips"
+    RUBY
+
+    out, status = run_script(env: fake_runner(skipped))
+
+    assert_equal 2, status.exitstatus, out
+    assert_match(/^VERDICT: UNDETERMINED/, out)
+  end
+
+  def test_a_nonzero_runner_exit_with_no_failures_or_errors_is_undetermined
+    fixed_pr
+    odd = <<~RUBY
+      puts "#{FIN}2 runs, 2 assertions, 0 failures, 0 errors, 0 skips"
+      exit 1
+    RUBY
+
+    out, status = run_script(env: fake_runner(odd))
+
+    assert_equal 2, status.exitstatus, out
+    assert_match(/^VERDICT: UNDETERMINED/, out)
+  end
+
+  # Finding 4: errors are counted but none can be read, so "wrong reason" is a guess.
+  def test_errors_with_no_readable_exception_lines_are_undetermined
+    fixed_pr
+    unreadable = <<~RUBY
+      puts "    /gems/minitest.rb:1:in 'run'"
+      puts "#{FIN}2 runs, 0 assertions, 0 failures, 2 errors, 0 skips"
+      exit 1
+    RUBY
+
+    out, status = run_script(env: fake_runner(unreadable))
+
+    assert_equal 2, status.exitstatus, out
+    assert_match(/^VERDICT: UNDETERMINED/, out)
+    refute_match(/RED-FOR-WRONG-REASON/, out)
+  end
+
+  # Finding 3: a dependency or build-file change cannot be put back to the base
+  # by restoring app paths, so the check cannot say anything about it.
+  %w[Gemfile Gemfile.lock lakeraven-ehr.gemspec Rakefile].each do |dep|
+    define_method("test_a_change_to_#{dep.tr('.-', '__')}_with_a_test_change_is_undetermined") do
+      write dep, "# changed\n"
+      write "test/greeter_test.rb", "# new test\n"
+      commit "dependency change with a test"
+
+      out, status = run_script(env: fake_runner)
+
+      assert_equal 2, status.exitstatus, out
+      assert_match(/^VERDICT: UNDETERMINED/, out)
+      assert_match(/#{Regexp.escape(dep)}/, out)
+    end
+  end
+
+  def test_a_dependency_change_alongside_an_app_change_is_still_undetermined
+    write "Gemfile", "# changed\n"
+    fixed_pr
+
+    out, status = run_script(env: fake_runner)
+
+    assert_equal 2, status.exitstatus, out
+    assert_match(/^VERDICT: UNDETERMINED/, out)
+  end
+
+  def test_a_dependency_change_with_no_test_change_stays_exempt
+    write "Gemfile", "# changed\n"
+    commit "bump"
+
+    out, status = run_script
+
+    assert_equal 0, status.exitstatus, out
+    assert_match(/^VERDICT: EXEMPT/, out)
+  end
+
+  # Finding 2: the PR's own test harness is what runs the base app code.
+  [ "test/test_helper.rb", "test/support/helper.rb", "test/dummy/config/initializers/x.rb" ].each do |harness|
+    define_method("test_a_change_to_#{harness.tr('/.', '__')}_prints_a_harness_warning_but_still_gives_a_verdict") do
+      write harness, "# changed\n"
+      fixed_pr
+
+      out, status = run_script(env: fake_runner)
+
+      assert_equal 0, status.exitstatus, out
+      assert_match(/^VERDICT: RED$/, out)
+      assert_match(/HARNESS-CHANGED/, out)
+      assert_match(/#{Regexp.escape(harness)}/, out)
+    end
+  end
+
+  def test_no_harness_warning_when_the_harness_is_untouched
+    fixed_pr
+
+    out, = run_script(env: fake_runner)
+
+    refute_match(/HARNESS-CHANGED/, out)
+  end
+
+  # Finding 7: RED-FOR-WRONG-REASON and HARNESS-CHANGED exit 0 on an advisory job,
+  # so CI needs them as annotations, not only in the log.
+  def test_warnings_are_annotations_when_asked_and_plain_text_otherwise
+    write "test/test_helper.rb", "# changed\n"
+    fixed_pr
+    errors = <<~RUBY
+      puts "Error:\\nGreeterTest#test_it:\\nNameError: uninitialized constant Greeter"
+      puts "#{FIN}1 runs, 0 assertions, 0 failures, 1 errors, 0 skips"
+      exit 1
+    RUBY
+
+    annotated, = run_script(env: fake_runner(errors).merge("RBG_ANNOTATE" => "1"))
+    plain, = run_script(env: fake_runner(errors))
+
+    assert_match(/^::warning[^\n]*RED-FOR-WRONG-REASON/, annotated)
+    assert_match(/^::warning[^\n]*HARNESS-CHANGED/, annotated)
+    refute_match(/^::warning/, plain)
+  end
+
+  # Finding 5: the check cannot police a PR that edits the script it runs.
+  def test_the_script_and_workflow_state_that_a_pr_can_edit_the_check
+    script_head = File.read(SCRIPT).lines.first(60).join
+    workflow = File.read(WORKFLOW)
+
+    assert_match(/PR's own copy of this script/, script_head)
+    assert_match(/cannot police a PR that edits/, script_head)
+    assert_match(/PR's own copy of the script/, workflow)
+    assert_match(/cannot police a PR that edits/, workflow)
+  end
+
+  def test_the_workflow_stays_on_pull_request_because_it_runs_the_prs_tests
+    triggers = File.read(WORKFLOW)[/^on:.*?^jobs:/m]
+
+    assert_match(/^\s+pull_request:/, triggers)
+    refute_match(/pull_request_target/, triggers)
+    assert_match(/RBG_ANNOTATE/, File.read(WORKFLOW))
   end
 
   private
