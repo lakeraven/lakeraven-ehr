@@ -3,9 +3,15 @@
 #
 # It labels; it does not gate. A classified change exits 0 whichever tier it gets.
 #
-# A change is laptop-only if ANY path matches a rule in .github/risk-tiers.txt, and phone-safe
-# only when every path has been read and none matched. An empty list, a path that climbs out of
-# the repo, an unreadable or empty rules file, or a base ref that does not resolve is
+# This is a SAFE-LIST. .github/risk-tiers.txt has laptop-only rules, then a `[safe]` section.
+# A change is phone-safe only when EVERY path matches a `[safe]` glob and no laptop-only rule.
+# A path that matches a laptop-only rule is laptop-only; a path on neither list is laptop-only
+# ("not on the safe-list"); a path containing a control character is laptop-only. The rules
+# win over the safe-list. The default is the cautious tier because a blocklist cannot see a
+# privileged file with an unremarkable name (gate round 2 on #633).
+#
+# An empty list, a path that climbs out of the repo, an unreadable rules file, a rules file
+# with no laptop-only rules or no `[safe]` globs, or a base ref that does not resolve is
 # UNDETERMINED: the script prints `laptop-only` and exits 2. Absence of data is never verification.
 #
 # Usage:
@@ -13,9 +19,12 @@
 #   bin/risk-tier --base REF           paths from `git diff --no-renames --name-only REF...HEAD`
 #                                      (--no-renames so BOTH sides of a rename are judged)
 #   bin/risk-tier --rules FILE         use a different rules file
-#   bin/risk-tier --coverage           paths on stdin; print "<count>\t<glob>" for every rule
+#   bin/risk-tier --coverage           paths on stdin; print "<count>\t<glob>" for every rule,
+#                                      laptop-only and safe
 #
-# Output: first line is the tier. Each matched path follows as `  <path>  <- <glob> (<reason>)`.
+# Output: first line is the tier. Each path that made it laptop-only follows as
+#         `  <path>  <- <glob> (<reason>)`, or `  <path>  <- not on the safe-list`.
+#         A phone-safe answer says how many paths it read.
 # Exit:   0 classified    2 usage error or undetermined (output is still `laptop-only`)
 set -uo pipefail
 
@@ -41,21 +50,32 @@ done
 
 [ -r "$RULES" ] || undetermined "rules file '$RULES' is not readable"
 
-# Parse rules: "<glob>   # <reason>". Blank lines and lines starting with # are skipped.
-globs=(); reasons=()
+# Parse rules: "<glob>   # <reason>". Blank lines and lines starting with # are skipped. A line
+# that is just `[safe]` starts the safe-list; everything before it is a laptop-only rule.
+globs=(); reasons=(); safe_globs=(); safe_reasons=()
+section=laptop
 while IFS= read -r line || [ -n "$line" ]; do
   line="${line%$'\r'}"
   trimmed="${line#"${line%%[![:space:]]*}"}"
   [ -z "$trimmed" ] && continue
   [ "${trimmed:0:1}" = "#" ] && continue
+  case "${trimmed%"${trimmed##*[![:space:]]}"}" in
+    "[safe]") section=safe; continue ;;
+    "["*"]")  undetermined "rules file '$RULES' has an unknown section '$trimmed'" ;;
+  esac
   glob="${trimmed%%[[:space:]]#[[:space:]]*}"
   glob="${glob%"${glob##*[![:space:]]}"}"
   reason=""
   case "$trimmed" in *[[:space:]]#[[:space:]]*) reason="${trimmed#*[[:space:]]#[[:space:]]}" ;; esac
   [ -z "$glob" ] && continue
-  globs+=("$glob"); reasons+=("$reason")
+  if [ "$section" = safe ]; then
+    safe_globs+=("$glob"); safe_reasons+=("$reason")
+  else
+    globs+=("$glob"); reasons+=("$reason")
+  fi
 done < "$RULES"
-[ ${#globs[@]} -gt 0 ] || undetermined "rules file '$RULES' contains no rules"
+[ ${#globs[@]} -gt 0 ] || undetermined "rules file '$RULES' contains no laptop-only rules"
+[ ${#safe_globs[@]} -gt 0 ] || undetermined "rules file '$RULES' has no [safe] globs, so nothing could be phone-safe"
 
 # Collect the paths.
 paths=()
@@ -85,8 +105,8 @@ done
 shopt -s nocasematch
 
 if [ $COVERAGE -eq 1 ]; then
-  for i in "${!globs[@]}"; do
-    n=0; g="${globs[$i]}"
+  for g in "${globs[@]}" "${safe_globs[@]}"; do
+    n=0
     for p in ${clean[@]+"${clean[@]}"}; do
       # shellcheck disable=SC2053
       [[ "$p" == $g ]] && n=$((n + 1))
@@ -98,16 +118,30 @@ fi
 
 [ ${#clean[@]} -gt 0 ] || undetermined "no changed paths"
 
+# A path is phone-safe only if no laptop-only rule matches it AND a safe glob does.
 matches=()
 for p in "${clean[@]}"; do
+  if [[ "$p" == *[[:cntrl:]]* ]]; then
+    matches+=("  $(printf '%q' "$p")  <- control character in path (a name that is not one plain line cannot be judged)")
+    continue
+  fi
+  hit=0
   for i in "${!globs[@]}"; do
     g="${globs[$i]}"
     # shellcheck disable=SC2053
     if [[ "$p" == $g ]]; then
       matches+=("  $p  <- $g (${reasons[$i]})")
+      hit=1
       break
     fi
   done
+  [ $hit -eq 1 ] && continue
+  safe=0
+  for g in "${safe_globs[@]}"; do
+    # shellcheck disable=SC2053
+    if [[ "$p" == $g ]]; then safe=1; break; fi
+  done
+  [ $safe -eq 1 ] || matches+=("  $p  <- not on the safe-list")
 done
 
 if [ ${#matches[@]} -gt 0 ]; then
@@ -115,6 +149,6 @@ if [ ${#matches[@]} -gt 0 ]; then
   printf '%s\n' "${matches[@]}"
 else
   echo "phone-safe"
-  echo "  ${#clean[@]} path(s) read, none matched a laptop-only rule"
+  echo "  ${#clean[@]} path(s) read, all on the safe-list and none matched a laptop-only rule"
 fi
 exit 0

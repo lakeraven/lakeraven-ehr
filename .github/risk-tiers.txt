@@ -1,13 +1,18 @@
 # Risk-tier rules for bin/risk-tier. One rule per line:  <glob>   # <reason>
 #
-# A pull request that touches ANY path matching a rule is "laptop-only": it needs a laptop
-# review, not a phone merge. Everything else is "phone-safe". Matching is case-insensitive
-# and `*` crosses `/`, so `*consent*` matches any path with "consent" in it. Over-matching
-# is deliberate: a wrong laptop-only costs a few minutes, a wrong phone-safe costs a defect.
+# This is a SAFE-LIST. A pull request is "phone-safe" only if EVERY path it touches matches a
+# glob in the [safe] section at the bottom AND matches no laptop-only rule above it. Anything
+# on neither list is "laptop-only": it needs a laptop review, not a phone merge. The laptop-only
+# rules win over the safe-list, so a sensitive word in a docs or view path still flips the tier.
+# Matching is case-insensitive and `*` crosses `/`, so `*consent*` matches any path with
+# "consent" in it. Over-matching is deliberate: a wrong laptop-only costs a few minutes, a wrong
+# phone-safe costs a defect. Why a safe-list: a list of sensitive names can only be as good as
+# the memory of whoever wrote it, and gate round 2 found privileged files named
+# web_controller.rb and test_helper.rb that no name rule would ever catch.
 #
-# A rule marked [forward] matches nothing in the tree today and exists for the day a file
-# of that kind appears. Every other rule must match at least one tracked file; the test
-# suite enforces it. This file itself is a rule target, so editing the rules is laptop-only.
+# A glob marked [forward] matches nothing in the tree today and exists for the day a file of
+# that kind appears. Every other glob must match at least one tracked file; the test suite
+# enforces it. This file itself is a rule target, so editing the rules is laptop-only.
 
 # --- the machinery that decides what merges ---
 .github/*                   # CI, CODEOWNERS, dependabot and these rules themselves
@@ -93,8 +98,32 @@ lib/lakeraven/ehr/engine.rb # engine boot: Doorkeeper wiring and credential para
 *payment*                   # [forward] payments
 *invoice*                   # [forward] invoices
 
+# --- views that carry more than display ---
+app/views/layouts/*         # the layout emits the CSRF and CSP meta tags
+app/views/*/patient_contexts/*   # the form that binds a session to a patient (the cross-patient guard)
+
 # --- decisions and compliance record ---
 docs/adr/*                  # architecture decisions that bind later work
 docs/compliance/*           # compliance posture and disclosure audits
 docs/certification/*        # certification evidence
 SOFTWARE-FACTORY*           # [forward] the review method itself
+
+# ======================================================================================
+# THE SAFE-LIST. Add a glob only for a path where a mistake cannot change who may see what
+# or what is stored: prose, markup that only displays, styling. Never code that decides,
+# controllers, services, models, serializers, tests, features, db, config or CI. Prefer
+# a narrow extension to a directory.
+# ======================================================================================
+[safe]
+README.md                   # prose
+CHANGELOG.md                # [forward] prose
+docs/*.md                   # prose (docs/adr, docs/compliance and docs/certification are laptop-only rules above)
+app/views/*.erb             # display templates (the layout, sign-in and patient-context views are laptop-only rules above)
+app/helpers/*.rb            # view helpers
+app/assets/stylesheets/*.css   # styling
+app/assets/images/*.png     # [forward] images
+app/assets/images/*.jpg     # [forward] images
+app/assets/images/*.jpeg    # [forward] images
+app/assets/images/*.gif     # [forward] images
+app/assets/images/*.ico     # [forward] images
+config/locales/*.yml        # [forward] display strings
