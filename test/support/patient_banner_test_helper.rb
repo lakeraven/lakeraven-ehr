@@ -228,6 +228,17 @@ module PatientBannerTestHelper
     refute_includes field.text, "No Known Allergies"
   end
 
+  def assert_dashboard_and_chart_allergies_not_loaded!
+    get "#{MOUNT}/dashboard"
+    assert_response :ok
+    assert_allergies_unassessed_or_indeterminate!
+
+    setup_chart_bearer!
+    get "#{MOUNT}/patients/1", headers: @chart_headers
+    assert_response :ok
+    assert_allergies_unassessed_or_indeterminate!
+  end
+
   def allergies_label_text
     field = allergies_field_node
     assert field, "Expected allergies field inside #patient-banner"
