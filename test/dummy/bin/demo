@@ -7,8 +7,8 @@
 #   PORT=3001 test/dummy/bin/demo    # bind and print that port instead
 #   test/dummy/bin/demo -b 0.0.0.0   # if showing from another device
 #
-# Set PORT to choose the listen port. -p / --port are refused so they cannot
-# override that check.
+# Set PORT to choose the listen port. -p / --port, including attached values
+# and unique --port prefixes, are refused so they cannot override that check.
 set -e
 cd "$(dirname "$0")/.."
 
@@ -33,10 +33,13 @@ PORT=$port_num
 export PORT
 
 # Rails would append a later -p / --port after our guarded -p "$PORT" and bind
-# the unguarded one. The listen port comes only from PORT.
+# the unguarded one. Thor accepts -p=PORT and signed -p+N/-p-N (the sign is
+# not part of the number). Unique --port prefixes (--po, --por) are refused
+# too; --p also matches --pid, so it is left alone. The listen port comes
+# only from PORT.
 for arg in "$@"; do
   case "$arg" in
-    -p|--port|--port=*|-p[0-9]*)
+    -p|--port|--port=*|-p[0-9]*|-p=*|-p[+-][0-9]*|--po|--po=*|--por|--por=*)
       printf 'Set the listen port with PORT instead of %s (for example PORT=3001 test/dummy/bin/demo).\n' "$arg" >&2
       exit 1
       ;;
@@ -68,9 +71,10 @@ if command -v lsof >/dev/null 2>&1; then
   fi
 fi
 
-# Positive evidence only: exit 0 when 0.0.0.0 binds and ::1 binds or is n/a
-# (EADDRNOTAVAIL / EAFNOSUPPORT). Exit 10 when the port is busy. Anything else
-# is a probe failure and the shell fails closed.
+# Positive evidence only: exit 0 when 0.0.0.0 and 127.0.0.1 bind, and ::1 binds
+# or is n/a (EADDRNOTAVAIL / EAFNOSUPPORT). Exit 10 when the port is busy.
+# Anything else is a probe failure and the shell fails closed. On macOS/BSD,
+# TCPServer sets SO_REUSEADDR, so 0.0.0.0 can bind while 127.0.0.1 is held.
 if ! command -v ruby >/dev/null 2>&1; then
   printf 'Could not check whether port %s is free; the bind probe could not run: ruby was not found on PATH.\n' "$PORT" >&2
   exit 1
@@ -101,6 +105,13 @@ result = bind_result("0.0.0.0", port)
 exit 10 if result == "busy"
 unless result == "ok"
   warn "bind probe failed on 0.0.0.0"
+  exit 1
+end
+
+result = bind_result("127.0.0.1", port)
+exit 10 if result == "busy"
+unless result == "ok"
+  warn "bind probe failed on 127.0.0.1"
   exit 1
 end
 

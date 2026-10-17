@@ -9,6 +9,8 @@ Preferred — runs the preflight checks automatically (`PORT` selects the listen
     /Users/kimball/code/lakeraven/rpms/lakeraven-ehr/test/dummy/bin/demo
     PORT=3001 /Users/kimball/code/lakeraven/rpms/lakeraven-ehr/test/dummy/bin/demo
 
+The smoke-test and walkthrough URLs below use port 3000 by default; substitute your PORT if you set one.
+
 Equivalent manual start:
 
     cd test/dummy
