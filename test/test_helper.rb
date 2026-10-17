@@ -14,8 +14,10 @@ require "rpms_rpc/mock_client"
 # Needed to build the DDR GETS ENTRY DATA seed key below.
 require "rpms_rpc/api/ddr_fileman"
 
-# Configure RpmsRpc with mock client and seed data for all tests.
-RpmsRpc.mock! do |m|
+# Baseline RpmsRpc mock seeds. Installed at load and again before every
+# example (GlobalStoreIsolation) so a test that adds seeds cannot leak
+# them into the next example.
+BASELINE_MOCK_SEEDS = lambda do |m|
   # Patients (DFN 1-3)
   m.seed(:patient_select, "1", { name: "Anderson,Alice", sex: "F", dob: Date.parse("1980-05-15"), ssn: "111-11-1111", age: 45 })
   m.seed(:patient_select, "2", { name: "MOUSE,MICKEY M", sex: "M", dob: Date.parse("2010-02-14"), ssn: "000009999", age: 16 })
@@ -152,6 +154,8 @@ RpmsRpc.mock! do |m|
   m.seed(:referral_delete, "SR-PENDING-001", { success: true, message: "Referral deleted" })
   m.seed(:referral_delete, "SR-AUTHORIZED-001", { success: true, message: "Referral cancelled" })
 end
+
+RpmsRpc.mock!(&BASELINE_MOCK_SEEDS)
 
 # Scripted RPC broker for the BPRM reg/sched/ADT twin gateway tests.
 #

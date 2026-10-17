@@ -4,11 +4,14 @@
 # something clears them. Reset the whole list before every example.
 module GlobalStoreIsolation
   # Any new process-global in-memory store must be added here.
+  # BASELINE_MOCK_SEEDS is defined in test/test_helper.rb; the proc looks it
+  # up when reset! runs, after that constant exists.
   STORE_RESETS = [
     -> { Lakeraven::EHR::ProvenanceStore.reset_instance! },
     -> { Lakeraven::EHR::ExportsController.reset_store! },
     -> { Lakeraven::EHR::LoginThrottle.reset! },
-    -> { Lakeraven::EHR::ClinicalDecisionSupportService.rule_overrides.clear }
+    -> { Lakeraven::EHR::ClinicalDecisionSupportService.rule_overrides.clear },
+    -> { RpmsRpc.mock!(&BASELINE_MOCK_SEEDS) }
   ].freeze
 
   def self.reset!
