@@ -1,0 +1,76 @@
+name: red-before-green
+
+# Do the PR's new tests FAIL when its app code is put back to what main has?
+# A test that passes either way does not test the change. See bin/red-before-green
+# for the verdicts and what this does not prove.
+#
+# ADVISORY. Do NOT add "Red before green" to branch protection yet. Watch it on
+# about 10 real PRs first, read every RED-FOR-WRONG-REASON and GREEN-WITHOUT-FIX
+# verdict by hand, and only then require it. A required check that cries wolf
+# teaches everyone to ignore it (the failure mode ci.yml's cucumber job records).
+#
+# continue-on-error is set so that a GREEN-WITHOUT-FIX exit 1 shows as a visible
+# warning, not a red X that could be read as a required failure, while the check
+# is advisory. Remove it in the same change that makes the check required.
+#
+# This job runs the PR's own copy of the script, and the PR's own copy of this workflow,
+# so it cannot police a PR that edits either: such a PR can make it say anything. That
+# is the other reason it is advisory. It must also stay on `pull_request`, never
+# `pull_request_target`: it executes the PR's tests, and must not hold the secrets or
+# the write token the other trigger gives. Warnings (RED-FOR-WRONG-REASON,
+# HARNESS-CHANGED, GREEN-WITHOUT-FIX, UNDETERMINED) are emitted as annotations through
+# RBG_ANNOTATE so they show on the run even though the job never fails the PR.
+#
+# This is a known floor of an advisory check, stated here so nobody reads more into a verdict
+# than it holds: a single forged "Finished in" block, printed by any process in the run while the real
+# summary never appears, looks like minitest's own and can give a false RED or a false
+# GREEN-WITHOUT-FIX. The script cannot close that. Also, the database below is loaded from the
+# PR's schema BEFORE the script reverts app code, so a PR that changes the schema or a migration
+# is run against a database the base code never had; the script prints DB-CHANGED for that.
+#
+# Exempt a PR that is genuinely not testable this way (a pure refactor, say) by
+# adding the `red-green-exempt` label; the summary records that it was skipped.
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+jobs:
+  red-before-green:
+    name: Red before green
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    env:
+      RAILS_ENV: test
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/lakeraven_ehr_test
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The merge-base needs full history.
+          fetch-depth: 0
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+          bundler-cache: true
+      - run: bundle exec rails db:create db:schema:load
+      - name: Run the PR's new tests against main's app code
+        env:
+          RBG_EXEMPT: ${{ contains(github.event.pull_request.labels.*.name, 'red-green-exempt') && '1' || '0' }}
+          BASE_REF: ${{ github.base_ref }}
+          RBG_ANNOTATE: "1"
+        run: |
+          export RBG_REPORT="$GITHUB_STEP_SUMMARY"
+          bin/red-before-green --base "origin/$BASE_REF"
