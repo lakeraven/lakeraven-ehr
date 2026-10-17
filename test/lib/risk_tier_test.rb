@@ -10,10 +10,16 @@ require "tmpdir"
 #   bin/risk-tier --base REF      paths from `git diff --no-renames --name-only REF...HEAD`
 #   bin/risk-tier --coverage      paths on stdin; prints "<count>\t<glob>" for every rule
 #
-# First line of output is "laptop-only" or "phone-safe". Every matched path follows as
-# "  <path>  <- <rule>". A PR with ANY laptop-only path is laptop-only. An empty or
-# undeterminable list is laptop-only with exit 2: absence of data is never verification.
-# It labels; it does not gate, so a classified PR exits 0 either way.
+# First line of output is "laptop-only" or "phone-safe". Every path that made a PR
+# laptop-only follows as "  <path>  <- <rule>".
+#
+# The rules file is a SAFE-LIST with laptop-only overrides. A PR is phone-safe only if EVERY
+# changed path matches a glob in the `[safe]` section AND matches no laptop-only rule. A path
+# on neither list is laptop-only ("not on the safe-list"). Gate round 2 on #633 showed why: a
+# blocklist of sensitive names cannot see a privileged file with an unremarkable name
+# (web_controller.rb, patients_controller.rb, test_helper.rb), so the default has to be the
+# cautious tier. An empty or undeterminable list is laptop-only with exit 2: absence of data
+# is never verification. It labels; it does not gate, so a classified PR exits 0 either way.
 class RiskTierTest < ActiveSupport::TestCase
   ROOT = File.expand_path("../..", __dir__)
   SCRIPT = File.join(ROOT, "bin", "risk-tier")
@@ -30,16 +36,72 @@ class RiskTierTest < ActiveSupport::TestCase
 
   PHONE_SAFE = [
     "README.md",
+    "./README.md",
+    "CHANGELOG.md",
     "docs/BPRM_PARITY_PLAN.md",
+    "docs/my notes.md",
+    "docs/demo_patient_chart_runbook.md",
+    "app/views/lakeraven/ehr/dashboards/show.html.erb",
+    "app/views/lakeraven/ehr/charts/show.html.erb",
+    "app/views/lakeraven/ehr/screenings/index.html.erb",
+    "app/helpers/lakeraven/ehr/application_helper.rb",
+    "app/assets/stylesheets/lakeraven/ehr/application.css",
+    "config/locales/en.yml"
+  ].freeze
+
+  # Not on the safe-list, and matching no laptop-only rule: laptop-only by default. These are
+  # the paths gate round 2 showed a blocklist classifying phone-safe, plus the ordinary
+  # code, tests, features and config that used to be phone-safe by omission.
+  UNLISTED = [
+    "app/controllers/lakeraven/ehr/web_controller.rb",
     "app/controllers/lakeraven/ehr/patients_controller.rb",
+    "app/controllers/lakeraven/ehr/patient_contexts_controller.rb",
+    "app/controllers/lakeraven/ehr/transitions_of_care_controller.rb",
+    "app/controllers/lakeraven/ehr/charts_controller.rb",
+    "app/controllers/lakeraven/ehr/demo_visits_controller.rb",
+    "app/services/lakeraven/ehr/fhir/patient_serializer.rb",
+    "test/test_helper.rb",
+    "test/controllers/lakeraven/ehr/transitions_of_care_controller_test.rb",
+    "features/onc/transitions_of_care.feature",
     "test/integration/patient_search_total_test.rb",
     "config/measures/bmi_screening.yml",
-    "app/assets/stylesheets/lakeraven/ehr/application.css",
     "app/terminology/lakeraven/ehr/example_code_system.rb",
     "features/fhir/patient.feature",
-    "docs/my notes.md",
     "features/onc/vital_signs_compliance.feature",
-    "./README.md"
+    "app/views/lakeraven/ehr/screenings/show.json.jbuilder",
+    "app/views/lakeraven/ehr/charts/helper.rb",
+    "app/helpers/lakeraven/ehr/application_helper.txt",
+    "docs/diagram.png",
+    "docs/script.rb",
+    "config/locales/en.rb",
+    "app/assets/javascripts/lakeraven/ehr/application.js",
+    "app/assets/stylesheets/lakeraven/ehr/application.js",
+    "Rakefile.txt",
+    "cucumber.yml",
+    ".rubocop.yml",
+    ".gitignore"
+  ].freeze
+
+  # Views that carry more than display: the layout emits the CSRF and CSP meta tags, and the
+  # sign-in and patient-context views post the forms those controllers authorize. They sit
+  # under app/views/** but are laptop-only by rule.
+  SENSITIVE_VIEWS = [
+    "app/views/layouts/lakeraven/ehr/application.html.erb",
+    "app/views/lakeraven/ehr/sessions/new.html.erb",
+    "app/views/lakeraven/ehr/patient_contexts/new.html.erb"
+  ].freeze
+
+  # Safe by glob, laptop-only by override: a rule always wins over the safe-list.
+  SAFE_BUT_OVERRIDDEN = [
+    "docs/adr/0001-anything.md",
+    "docs/compliance/notes.md",
+    "docs/certification/matrix.md",
+    "docs/token rotation.md",
+    "docs/part2-overview.md",
+    "docs/audit-trail.md",
+    "app/views/lakeraven/ehr/consent/new.html.erb",
+    "app/helpers/lakeraven/ehr/session_helper.rb",
+    "config/locales/oauth.en.yml"
   ].freeze
 
   LAPTOP_ONLY = [
@@ -137,6 +199,80 @@ class RiskTierTest < ActiveSupport::TestCase
       assert_equal 0, status
       assert_includes out, path.delete_prefix("./"), "output must name the matched path"
       assert_match(/<- \S/, out, "output must name the rule that matched")
+    end
+  end
+
+  UNLISTED.each_with_index do |path, i|
+    test "unlisted path ##{i} is laptop-only by default: #{path}" do
+      tier, status, out = classify(path)
+      assert_equal "laptop-only", tier
+      assert_equal 0, status
+      assert_includes out, path
+      assert_match(/<- .*safe-list/i, out, "output must say the path is not on the safe-list")
+    end
+  end
+
+  SENSITIVE_VIEWS.each_with_index do |path, i|
+    test "view with more than display ##{i} is laptop-only: #{path}" do
+      tier, status, out = classify(path)
+      assert_equal "laptop-only", tier
+      assert_equal 0, status
+      assert_includes out, path
+    end
+  end
+
+  SAFE_BUT_OVERRIDDEN.each_with_index do |path, i|
+    test "a laptop-only rule overrides the safe-list ##{i}: #{path}" do
+      tier, status, out = classify(path)
+      assert_equal "laptop-only", tier
+      assert_equal 0, status
+      refute_match(/safe-list/i, out, "this path matches a laptop-only rule; it should be reported against that rule")
+    end
+  end
+
+  test "one unlisted path makes an otherwise safe PR laptop-only and only it is listed" do
+    tier, status, out = classify([ "README.md", "docs/BPRM_PARITY_PLAN.md", "app/controllers/lakeraven/ehr/web_controller.rb" ])
+    assert_equal "laptop-only", tier
+    assert_equal 0, status
+    assert_includes out, "app/controllers/lakeraven/ehr/web_controller.rb"
+    refute_includes out, "README.md"
+    refute_includes out, "BPRM_PARITY_PLAN"
+  end
+
+  test "a PR of only safe paths is phone-safe and says how many were read" do
+    tier, status, out = classify([ "README.md", "docs/BPRM_PARITY_PLAN.md", "app/views/lakeraven/ehr/dashboards/show.html.erb" ])
+    assert_equal "phone-safe", tier
+    assert_equal 0, status
+    assert_match(/3 path/, out)
+  end
+
+  test "a path with a control character is laptop-only, whatever the rest of it says" do
+    [ "docs/a\u0001b.md", "docs/a\rb.md", "docs/a\tb.md", "docs/a\u007fb.md", "docs/a\u001bb.md" ].each do |path|
+      tier, status, out = classify([ "README.md", path ])
+      assert_equal "laptop-only", tier, path.inspect
+      assert_equal 0, status, path.inspect
+      assert_match(/control character/i, out, path.inspect)
+    end
+  end
+
+  test "a rules file with no safe-list section can never produce phone-safe: exit 2" do
+    Dir.mktmpdir do |dir|
+      rules = File.join(dir, "rules.txt")
+      File.write(rules, "Gemfile   # dependencies\n")
+      out, _err, status = run_script("--rules", rules, stdin: "README.md\n")
+      assert_equal "laptop-only", out.lines.first.to_s.strip
+      assert_equal 2, status.exitstatus
+    end
+  end
+
+  test "a custom rules file: only the safe section's globs are phone-safe and laptop rules still win" do
+    Dir.mktmpdir do |dir|
+      rules = File.join(dir, "rules.txt")
+      File.write(rules, "Gemfile   # dependencies\nfoo/secret*   # secrets\n\n[safe]\nfoo/*.txt   # plain text\n")
+      assert_equal "phone-safe", run_script("--rules", rules, stdin: "foo/a.txt\n")[0].lines.first.strip
+      assert_equal "laptop-only", run_script("--rules", rules, stdin: "foo/b.rb\n")[0].lines.first.strip
+      assert_equal "laptop-only", run_script("--rules", rules, stdin: "foo/secret.txt\n")[0].lines.first.strip
+      assert_equal "laptop-only", run_script("--rules", rules, stdin: "foo/a.txt\nGemfile\n")[0].lines.first.strip
     end
   end
 
@@ -252,10 +388,25 @@ class RiskTierTest < ActiveSupport::TestCase
       File.write(File.join(dir, "README.md"), "x\n")
       commit_all(git, "base")
       git.call("checkout", "-q", "-b", "topic")
-      File.write(File.join(dir, "my notes.md"), "y\n")
+      FileUtils.mkdir_p(File.join(dir, "docs"))
+      File.write(File.join(dir, "docs/my notes.md"), "y\n")
       commit_all(git, "docs")
       out, _err, status = run_script("--base", "main", chdir: dir)
       assert_equal "phone-safe", out.lines.first.strip, out
+      assert_equal 0, status.exitstatus
+    end
+  end
+
+  test "git mode: a file name containing a newline is laptop-only" do
+    in_scratch_repo do |dir, git|
+      File.write(File.join(dir, "README.md"), "x\n")
+      commit_all(git, "base")
+      git.call("checkout", "-q", "-b", "topic")
+      FileUtils.mkdir_p(File.join(dir, "docs"))
+      File.write(File.join(dir, "docs/a\nREADME.md"), "y\n")
+      commit_all(git, "docs")
+      out, _err, status = run_script("--base", "main", chdir: dir)
+      assert_equal "laptop-only", out.lines.first.strip, out
       assert_equal 0, status.exitstatus
     end
   end
@@ -283,8 +434,40 @@ class RiskTierTest < ActiveSupport::TestCase
 
   # ---- the rules file --------------------------------------------------------
 
+  # Rule lines, with comments, blanks and the `[section]` headers removed.
+  def rule_lines
+    File.readlines(RULES, chomp: true).reject { |l| l.strip.empty? || l.start_with?("#") || l.strip.match?(/\A\[\w+\]\z/) }
+  end
+
+  def section_rule_lines(name)
+    inside = false
+    File.readlines(RULES, chomp: true).each_with_object([]) do |l, acc|
+      next if l.strip.empty? || l.start_with?("#")
+      if (m = l.strip.match(/\A\[(\w+)\]\z/))
+        inside = (m[1] == name)
+        next
+      end
+      acc << l if inside
+    end
+  end
+
+  test "the rules file has a [safe] section, after the laptop-only rules" do
+    headers = File.readlines(RULES, chomp: true).map(&:strip).grep(/\A\[\w+\]\z/)
+    assert_equal [ "[safe]" ], headers
+    refute_empty section_rule_lines("safe")
+    assert_operator rule_lines.size, :>, section_rule_lines("safe").size, "the laptop-only rules must still exist"
+  end
+
+  test "the safe-list is narrow: nothing that holds code, tests, features, db, config, bin or CI" do
+    section_rule_lines("safe").each do |l|
+      glob = l.split(/\s+#\s+/, 2).first.strip
+      refute_match(%r{\A(\*|app/(controllers|services|models|gateways|policies|jobs|lib|repositories|rulesets|decorators|terminology)|lib/|test|features|db|bin|\.github|Gemfile)}i, glob, "safe glob too broad: #{glob}")
+      refute_match(%r{\A(config/\*|config/measures|config/routes|config/initializers)}i, glob, "safe glob too broad: #{glob}")
+    end
+  end
+
   test "every rule carries a reason" do
-    rules = File.readlines(RULES, chomp: true).reject { |l| l.strip.empty? || l.start_with?("#") }
+    rules = rule_lines
     refute_empty rules
     rules.each { |l| assert_match(/\S\s+#\s+\S/, l, "rule without a reason: #{l.inspect}") }
   end
@@ -293,7 +476,7 @@ class RiskTierTest < ActiveSupport::TestCase
     tracked, = Open3.capture2("git", "ls-files", chdir: ROOT)
     out, err, status = run_script("--coverage", stdin: tracked)
     assert status.success?, err
-    rules = File.readlines(RULES, chomp: true).reject { |l| l.strip.empty? || l.start_with?("#") }
+    rules = rule_lines
     forward = rules.select { |l| l.include?("[forward]") }.map { |l| l.split(/\s+#\s+/, 2).first.strip }
     unmatched = out.lines.map { |l| l.chomp.split("\t", 2) }.select { |n, _| n.to_i.zero? }.map(&:last)
     assert_empty unmatched - forward, "rules matching no tracked file and not marked [forward]"
@@ -308,7 +491,8 @@ class RiskTierTest < ActiveSupport::TestCase
   # be laptop-only, whatever the rules say. A new file with such a name that no rule covers
   # fails here, so the gap is found by CI and not by a reader.
   #
-  # A net, not a proof: a sensitive file with an unremarkable name passes straight through.
+  # Under the safe-list this is the second net, under the safe globs: a docs or view file
+  # whose name contains one of these words stays laptop-only because a rule wins over a glob.
   #
   # Measured over `git ls-files` when this was written: "sign" is rejected because half of its
   # four hits are features/onc/vital_signs_* (clinical vitals, not signatures); the signature
@@ -330,6 +514,57 @@ class RiskTierTest < ActiveSupport::TestCase
     assert_operator candidates.size, :>, 50, "the audit found almost nothing; is git ls-files empty?"
     uncovered = candidates.reject { |p| classify(p).first == "laptop-only" }
     assert_empty uncovered, "sensitive-sounding paths that classify phone-safe; add a rule for each"
+  end
+
+  # ---- the whole tree against the safe-list -------------------------------------------------
+  #
+  # An independent statement of what MAY be phone-safe. Every tracked file outside it must be
+  # laptop-only, so a controller, service, serializer, test, feature or migration with any name
+  # at all cannot slip through, which is the hole the blocklist had.
+  SAFE_PATH_PATTERNS = [
+    %r{\A(README|CHANGELOG)\.md\z}i,
+    %r{\Adocs/.+\.md\z}i,
+    %r{\Aapp/views/.+\.erb\z}i,
+    %r{\Aapp/helpers/.+\.rb\z}i,
+    %r{\Aapp/assets/stylesheets/.+\.css\z}i,
+    %r{\Aapp/assets/images/.+\.(png|jpe?g|gif|ico)\z}i,
+    %r{\Aconfig/locales/[^/]+\.yml\z}i
+  ].freeze
+
+  def laptop_paths_in(tracked_paths)
+    out, err, status = run_script(stdin: tracked_paths.join("\n") + "\n")
+    assert status.success?, err
+    out.lines.drop(1).map { |l| l.chomp.sub(/\A  /, "").split("  <- ", 2).first }
+  end
+
+  test "every tracked path outside the safe patterns is laptop-only" do
+    tracked, err, status = Open3.capture3("git", "ls-files", chdir: ROOT)
+    assert status.success?, err
+    paths = tracked.lines.map(&:chomp)
+    assert_operator paths.size, :>, 500, "git ls-files returned almost nothing"
+    outside = paths.reject { |p| SAFE_PATH_PATTERNS.any? { |re| re.match?(p) } }
+    assert_operator outside.size, :>, 400
+    listed = laptop_paths_in(paths)
+    leaked = outside - listed
+    assert_empty leaked, "tracked paths outside the safe patterns that the classifier would call phone-safe"
+  end
+
+  test "controllers, services, serializers, models, tests, features, db and config are never phone-safe, by name" do
+    tracked, = Open3.capture2("git", "ls-files", chdir: ROOT)
+    paths = tracked.lines.map(&:chomp).select do |p|
+      p.start_with?("app/controllers/", "app/services/", "app/models/", "app/gateways/", "app/policies/", "app/jobs/", "app/lib/", "test/", "features/", "db/", "lib/", "bin/", ".github/") ||
+        (p.start_with?("config/") && !p.start_with?("config/locales/"))
+    end
+    assert_operator paths.size, :>, 300
+    assert_empty paths - laptop_paths_in(paths)
+  end
+
+  test "the safe patterns are really used: safe tracked files exist and are phone-safe when they match no rule" do
+    tracked, = Open3.capture2("git", "ls-files", "README.md", "docs", "app/views", "app/helpers", "app/assets", chdir: ROOT)
+    safe = tracked.lines.map(&:chomp).select { |p| SAFE_PATH_PATTERNS.any? { |re| re.match?(p) } }
+    assert_operator safe.size, :>, 5
+    ok = safe.select { |p| classify(p).first == "phone-safe" }
+    assert_operator ok.size, :>, 3, "the safe-list admits almost nothing; is it empty?"
   end
 
   test "the audit does not sweep in vital signs" do
