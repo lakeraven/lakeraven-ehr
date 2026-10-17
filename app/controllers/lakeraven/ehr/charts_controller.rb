@@ -157,7 +157,7 @@ module Lakeraven
         dfn = @patient.dfn.to_s
         @conditions    = readable?("Condition") ? build_conditions(dfn) : []
         @medications   = readable?("MedicationRequest") ? build_medications(dfn) : []
-        @allergies     = readable?("AllergyIntolerance") ? build_allergies(dfn) : []
+        @allergies     = build_allergies(dfn)
         # Through the seam, like the FHIR search: converting the raw vitals here
         # would stamp this patient's DFN over whatever a row stated, and would
         # omit a configured supplemental provider's rows from the chart while
@@ -239,8 +239,21 @@ module Lakeraven
       # disagree about the same wire row -- they previously read different keys
       # for the reaction -- and so a configured supplemental provider's rows are
       # in the chart rather than only in the search.
+      #
+      # Not `safe`. That helper turns a raise and a real [] into the same [],
+      # and the banner then cannot tell "not loaded" from "none recorded".
+      # Other sections still use `safe`.
       def build_allergies(dfn)
-        safe { SupplementalClinicalResources.merged_allergy_intolerances_for_patient(dfn) } || []
+        @allergy_source = chart_allergy_source(dfn)
+        @allergy_source.records
+      end
+
+      def chart_allergy_source(dfn)
+        return AllergySource.unauthorized unless readable?("AllergyIntolerance")
+
+        AllergySource.fetch(log_label: "[chart]") do
+          SupplementalClinicalResources.merged_allergy_intolerances_for_patient(dfn)
+        end
       end
 
       # ORQQAL LIST (the allergy RPC) returns ALLERGEN^REACTION^SEVERITY with no
@@ -380,7 +393,23 @@ module Lakeraven
         return refuse_unfiltered_fhir_egress unless bundle
 
         assign_chart_from_bundle(bundle)
+        assign_patient_banner
         render :show, layout: false
+      end
+
+      # The banner and the allergy sections both read the filtered bundle.
+      # Source status is what tells a withheld list from a genuinely empty one.
+      def assign_patient_banner
+        @allergy_list_status = chart_allergy_status
+        @patient_banner = PatientBanner.for_chart(@patient, @allergy_list_status)
+      end
+
+      def chart_allergy_status
+        AllergyListStatus.from_counts(
+          source_status: @allergy_source.status,
+          source_count: @allergy_source.records.length,
+          filtered_names: @allergies.map { |allergy| allergy.allergen.to_s }
+        )
       end
 
       def assign_chart_from_bundle(bundle)
