@@ -11,7 +11,7 @@ module Lakeraven
         dfn = patient_compartment_dfn
         observations = SupplementalClinicalResources.merged_observations_for_patient(dfn)
         observations = filter_observations(observations)
-        render_bundle(observations.map(&:to_fhir))
+        render_bundle_egress(observations.map(&:to_fhir))
       end
 
       def show

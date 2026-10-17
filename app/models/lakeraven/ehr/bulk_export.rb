@@ -81,10 +81,20 @@ module Lakeraven
 
       # -- Normalize types -----------------------------------------------------
 
+      # Strip, drop blanks, accept an array or a comma string. nil when
+      # the caller did not send a filter (distinct from a filter that
+      # normalizes to nothing). The same list is what the export runs.
+      def self.type_names(types)
+        return if types.blank?
+
+        Array(types).flat_map { |value| value.to_s.split(",") }.map(&:strip).reject(&:empty?).uniq
+      end
+
       def self.normalize_types(types)
-        return SUPPORTED_RESOURCES if types.blank?
-        requested = types.is_a?(String) ? types.split(",").map(&:strip) : types
-        requested & SUPPORTED_RESOURCES
+        names = type_names(types)
+        return SUPPORTED_RESOURCES if names.nil?
+
+        names & SUPPORTED_RESOURCES
       end
 
       # -- Status transitions --------------------------------------------------

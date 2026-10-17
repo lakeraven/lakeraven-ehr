@@ -10,7 +10,7 @@ module Lakeraven
       def index
         dfn = patient_compartment_dfn
         results = Procedure.for_patient(dfn)
-        render_bundle(results.map { |r| { resourceType: "Procedure" }.merge(r) })
+        render_bundle_egress(results.map { |r| { resourceType: "Procedure" }.merge(r) })
       end
     end
   end

@@ -9,9 +9,9 @@ module Lakeraven
 
       def index
         consents = Consent.for_patient(patient_compartment_dfn)
-        render_bundle(consents.map(&:to_fhir))
+        render_bundle_egress(consents.map(&:to_fhir))
       rescue => e
-        render_bundle([])
+        render_bundle_egress([])
       end
 
       def show

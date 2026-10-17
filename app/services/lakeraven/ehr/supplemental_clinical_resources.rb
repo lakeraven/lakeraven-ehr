@@ -24,9 +24,9 @@ module Lakeraven
                          Observation))
         end
 
-        # The raw wire vitals, compartment-checked. The HTML chart renders these
-        # hashes directly rather than models, and reading them straight from the
-        # gateway skipped the ownership check the FHIR paths apply.
+        # The raw wire vitals, compartment-checked. Observation models are built
+        # from these rows; reading them straight from the gateway skipped the
+        # ownership check the FHIR paths apply.
         def wire_vital_rows_for_patient(dfn)
           Array(ObservationGateway.for_patient(dfn)).select { |row| wire_row_owned?(row, dfn) }
         end

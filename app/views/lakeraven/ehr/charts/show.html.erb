@@ -7,7 +7,7 @@
 %>
 <%
   vital_labels = Lakeraven::EHR::Observation::VITAL_TYPE_MAP
-  patient_age = @patient.age || (@patient.dob ? ((Date.current - @patient.dob).to_i / 365) : nil)
+  patient_age = @patient.age_on(Date.current)
   sex_label = { "F" => "Female", "M" => "Male", "U" => "Unknown" }[@patient.sex] || @patient.sex
   fhir_url = url_for(dfn: @patient.dfn, format: "json", only_path: true)
 %>

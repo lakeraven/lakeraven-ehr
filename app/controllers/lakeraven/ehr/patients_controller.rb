@@ -26,10 +26,10 @@ module Lakeraven
           end
         end
 
-        render json: {
+        render_fhir_egress({
           resourceType: "Bundle", type: "searchset",
           total: entries.length, entry: entries
-        }, status: :ok, content_type: FHIR_CONTENT_TYPE
+        })
       end
 
       def show
@@ -45,7 +45,7 @@ module Lakeraven
           return
         end
 
-        render_fhir(patient.to_fhir)
+        render_fhir_egress(patient.to_fhir)
       end
 
       def create
@@ -65,8 +65,7 @@ module Lakeraven
         result = RegistrationGateway.register(reg)
 
         if result[:success] && result[:dfn].to_i.positive?
-          response.headers["Location"] = "#{request.base_url}#{request.path}/#{result[:dfn]}"
-          render_fhir(created_patient_fhir(result[:dfn], reg), status: :created)
+          publish_created_patient(result[:dfn], reg)
         elsif result[:success]
           render_operation_outcome(status: :bad_gateway, severity: "error", code: "exception",
             diagnostics: "Registration reported success but returned no patient identifier")
@@ -161,6 +160,26 @@ module Lakeraven
       def ssn_from_identifiers(identifiers)
         Array(identifiers).each { |i| return i["value"] if i.is_a?(Hash) && SSN_SYSTEMS.include?(i["system"]) }
         nil
+      end
+
+      # Registration has already succeeded by the time the filter refuses.
+      # 503 would invite a retry that registers a second patient. Location
+      # carries the new DFN; the body does not, and neither does any
+      # demographic from the request. The DFN is logged server-side.
+      def publish_created_patient(dfn, reg)
+        filtered = filter_fhir_for_egress(created_patient_fhir(dfn, reg))
+        response.headers["Location"] = "#{request.base_url}#{request.path}/#{dfn}"
+        if filtered
+          render json: filtered, status: :created, content_type: FHIR_CONTENT_TYPE
+        else
+          Rails.logger.warn("[patient] registered DFN #{dfn}; FHIR representation withheld")
+          render_operation_outcome(
+            status: :created,
+            severity: "information",
+            code: "suppressed",
+            diagnostics: "The representation is withheld"
+          )
+        end
       end
 
       def created_patient_fhir(dfn, reg)

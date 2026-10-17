@@ -37,11 +37,23 @@ module Lakeraven
       # the action's own transaction. This controller only supplies the
       # audit hooks below.
       include ClinicianPatientContext
+      include FHIRReadEgress
+
+      FHIR_CONTENT_TYPE = "application/fhir+json"
 
       # The item-level answers are what this surface reads and writes, and they
       # are the sensitive half of the feature (the score alone is an
       # Observation). Scope is asked for by that name.
       SCREENING_RESOURCE = "QuestionnaireResponse"
+
+      # What the HTML pages read back out of a filtered screening bundle.
+      ScreeningPage = Struct.new(
+        :id, :effective_at, :instrument, :total_score, :severity_band,
+        :encounter_ien, :answered_items, :safety_flagged,
+        keyword_init: true
+      ) do
+        def safety_flagged? = !!safety_flagged
+      end
 
       before_action :authenticate_smart_token!
       before_action :authorize_screening_scope!
@@ -58,7 +70,11 @@ module Lakeraven
       # Trend view: every scored screening for this patient, oldest first.
       # The charting work (#483) reads the same records.
       def index
-        @responses = displayable(ScreeningResponse.for_patient(@dfn))
+        records = displayable(ScreeningResponse.for_patient(@dfn))
+        filtered = filter_fhir_for_egress(screening_bundle(records))
+        return refuse_unfiltered_fhir_egress unless filtered
+
+        @responses = screening_pages(filtered)
       end
 
       # TODO(#480): `encounter_ien` arrives as a query param and is rendered as
@@ -103,26 +119,29 @@ module Lakeraven
       end
 
       def show
-        @response = ScreeningResponse.for_patient(@dfn).find_by(id: params[:id])
-        return render plain: "Screening not found", status: :not_found unless @response
-        return render_undisplayable unless @response.publishable?
+        record = ScreeningResponse.for_patient(@dfn).find_by(id: params[:id])
+        return render plain: "Screening not found", status: :not_found unless record
+        return render_undisplayable unless record.publishable?
 
-        @instrument = @response.instrument
+        filtered = filter_fhir_for_egress(screening_bundle([ record ]))
+        return refuse_unfiltered_fhir_egress unless filtered
+
+        @response = screening_pages(filtered).first
+        @instrument = @response&.instrument
       end
 
       private
 
-      # A replay wrote nothing. Saying "PHQ-9 recorded — score N" for a
-      # submission that recorded nothing is how a discarded administration goes
-      # unnoticed, so a collapse is reported as a collapse.
+      # The notice is a status, not a copy of the score. Show renders the
+      # total and the band only from the filtered bundle; putting them in
+      # the flash would publish a total the filter removed. A replay still
+      # has to say that nothing new was stored — "recorded" for a submission
+      # that wrote nothing is how a discarded administration goes unnoticed.
       def outcome_notice
-        record = @result.record
         if @result.duplicate?
-          "#{@instrument.short_title} was already recorded — " \
-            "score #{record.total_score}, #{record.severity_band}. Nothing was recorded again."
+          "#{@instrument.short_title} was already recorded. Nothing was recorded again."
         else
-          "#{@instrument.short_title} recorded — " \
-            "score #{record.total_score}, #{record.severity_band}."
+          "Screening recorded."
         end
       end
 
@@ -242,6 +261,199 @@ module Lakeraven
         return {} unless raw.respond_to?(:to_unsafe_h)
 
         raw.to_unsafe_h.slice(*@instrument.link_ids)
+      end
+
+      # -- Egress ---------------------------------------------------------------
+      # Index and show hand the resources a screening already maps to
+      # (QuestionnaireResponse and its score Observation) to Part2EgressFilter
+      # and render only the entries that come back. An empty bundle is a page
+      # with no answers and no score. Nil or an unusable payload is a 503.
+
+      def screening_bundle(records)
+        resources = records.flat_map(&:to_fhir_resources)
+        {
+          resourceType: "Bundle",
+          type: "searchset",
+          total: resources.length,
+          entry: resources.map { |resource| { resource: resource } }
+        }
+      end
+
+      def screening_pages(document)
+        resources = document_resources(document)
+        observations = resources.select { |resource| resource_type(resource) == "Observation" }
+        resources.select { |resource| resource_type(resource) == "QuestionnaireResponse" }.filter_map do |resource|
+          screening_page(resource, observations)
+        end
+      end
+
+      def screening_page(resource, observations)
+        fields = screening_page_fields(resource, observations)
+        ScreeningPage.new(**fields) if fields
+      end
+
+      # The score and the band come only from the score Observation that
+      # survived the filter. Summing the answers that remain invents a
+      # total the filter removed. A page with no score Observation still
+      # renders; the score and the band are withheld.
+      def screening_page_fields(resource, observations)
+        instrument = instrument_for(resource)
+        return if instrument.nil?
+
+        pairs = answered_pairs(resource, instrument)
+        effective_at = egress_time(fhir_value(resource, "authored"))
+        return if effective_at.nil?
+
+        total = observation_score(resource, instrument, observations)
+        band = instrument.band_label_for(total) unless total.nil?
+        return if !total.nil? && band.blank?
+
+        {
+          id: fhir_value(resource, "id"),
+          effective_at: effective_at,
+          instrument: instrument,
+          total_score: total,
+          severity_band: band,
+          encounter_ien: encounter_ien_from(resource),
+          answered_items: pairs,
+          safety_flagged: filtered_safety_flag(resource, instrument)
+        }
+      end
+
+      def document_resources(document)
+        if resource_type(document) == "Bundle"
+          bundle_entry_resources(document)
+        else
+          [ document ]
+        end
+      end
+
+      def resource_type(resource)
+        fhir_value(resource, "resourceType").to_s
+      end
+
+      def bundle_entry_resources(document)
+        Array(fhir_value(document, "entry")).filter_map do |entry|
+          resource = fhir_value(entry, "resource")
+          resource if resource.is_a?(Hash)
+        end
+      end
+
+      def instrument_for(resource)
+        canonical = fhir_value(resource, "questionnaire").to_s
+        ScreeningInstrument::ALL.find { |instrument| instrument.questionnaire_canonical == canonical }
+      end
+
+      def observation_score(questionnaire, instrument, observations)
+        return if instrument.nil?
+
+        id = "screening-#{instrument.key}-#{fhir_value(questionnaire, "id")}"
+        match = observations.find { |observation| fhir_value(observation, "id").to_s == id }
+        quantity_number(match)
+      end
+
+      def quantity_number(resource)
+        return if resource.nil?
+
+        number = Float(fhir_value(fhir_value(resource, "valueQuantity"), "value"))
+        (number % 1).zero? ? number.to_i : number
+      rescue ArgumentError, TypeError
+        nil
+      end
+
+      # The banner follows item 9 in the filtered bundle, not the stored
+      # flag and not a second read of ScreeningResponse. A missing item is
+      # not a negative screen: nothing is shown. Shown only when that item
+      # is present and its answer value is nonzero.
+      def filtered_safety_flag(resource, instrument)
+        ordinal = filtered_safety_ordinal(resource, instrument)
+        !ordinal.nil? && !ordinal.zero?
+      end
+
+      def filtered_safety_ordinal(resource, instrument)
+        link_id = instrument.safety_link_id
+        return if link_id.blank?
+
+        item = Array(fhir_value(resource, "item")).find do |entry|
+          fhir_value(entry, "linkId").to_s == link_id
+        end
+        safety_answer_ordinal(item) if item
+      end
+
+      # valueInteger, when the filtered answer carries one (including zero),
+      # is the answer value. Otherwise the value is the LOINC choice ordinal
+      # this app writes on valueCoding.
+      def safety_answer_ordinal(item)
+        answer = first_fhir(fhir_value(item, "answer"))
+        return unless answer.is_a?(Hash)
+
+        if answer.key?("valueInteger") || answer.key?(:valueInteger)
+          return Integer(fhir_value(answer, "valueInteger"), exception: false)
+        end
+
+        choice_from(item)&.value
+      end
+
+      def answered_pairs(resource, instrument)
+        return [] if instrument.nil?
+
+        Array(fhir_value(resource, "item")).filter_map { |item| answered_pair(item, instrument) }
+      end
+
+      def answered_pair(item, instrument)
+        link_id = fhir_value(item, "linkId").to_s
+        source = instrument.item_for(link_id)
+        choice = choice_from(item)
+        return if source.nil? || choice.nil?
+
+        [ display_item(source, item), choice ]
+      end
+
+      def display_item(source, item)
+        ScreeningInstrument::Item.new(
+          link_id: source.link_id,
+          position: source.position,
+          text: fhir_value(item, "text").presence || source.text
+        )
+      end
+
+      def choice_from(item)
+        coding = fhir_value(first_fhir(fhir_value(item, "answer")), "valueCoding")
+        code = fhir_value(coding, "code").to_s
+        known = ScreeningInstrument::CHOICES.find { |choice| choice.link_id == code }
+        return if known.nil?
+
+        ScreeningInstrument::Choice.new(
+          value: known.value,
+          link_id: known.link_id,
+          text: fhir_value(coding, "display").presence || known.text
+        )
+      end
+
+      def encounter_ien_from(resource)
+        reference = fhir_value(fhir_value(resource, "encounter"), "reference").to_s
+        prefix, ien = reference.split("/", 2)
+        ien if prefix == "Encounter" && ien.present?
+      end
+
+      def egress_time(value)
+        return value if value.respond_to?(:strftime)
+        return if value.blank?
+
+        Time.zone.parse(value.to_s)
+      rescue ArgumentError, TypeError
+        nil
+      end
+
+      def first_fhir(value)
+        value.is_a?(Array) ? value.first : value
+      end
+
+      def fhir_value(object, key)
+        return unless object.is_a?(Hash)
+        return object[key.to_s] if object.key?(key.to_s)
+
+        object[key.to_sym] if object.key?(key.to_sym)
       end
     end
   end
