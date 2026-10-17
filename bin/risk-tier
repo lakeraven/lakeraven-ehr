@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+# risk-tier — classify a change as `laptop-only` or `phone-safe` from the paths it touches.
+#
+# It labels; it does not gate. A classified change exits 0 whichever tier it gets.
+#
+# A change is laptop-only if ANY path matches a rule in .github/risk-tiers.txt, and phone-safe
+# only when every path has been read and none matched. An empty list, a path that climbs out of
+# the repo, an unreadable or empty rules file, or a base ref that does not resolve is
+# UNDETERMINED: the script prints `laptop-only` and exits 2. Absence of data is never verification.
+#
+# Usage:
+#   bin/risk-tier                      paths on stdin, one per line
+#   bin/risk-tier --base REF           paths from `git diff --no-renames --name-only REF...HEAD`
+#                                      (--no-renames so BOTH sides of a rename are judged)
+#   bin/risk-tier --rules FILE         use a different rules file
+#   bin/risk-tier --coverage           paths on stdin; print "<count>\t<glob>" for every rule
+#
+# Output: first line is the tier. Each matched path follows as `  <path>  <- <glob> (<reason>)`.
+# Exit:   0 classified    2 usage error or undetermined (output is still `laptop-only`)
+set -uo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RULES="$HERE/../.github/risk-tiers.txt"
+BASE=""
+COVERAGE=0
+
+undetermined() {
+  echo "laptop-only"
+  echo "  (undetermined: $1)"
+  exit 2
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --base)     [ $# -ge 2 ] || undetermined "--base needs a ref"; BASE="$2"; shift 2 ;;
+    --rules)    [ $# -ge 2 ] || undetermined "--rules needs a file"; RULES="$2"; shift 2 ;;
+    --coverage) COVERAGE=1; shift ;;
+    *)          undetermined "unknown argument '$1'" ;;
+  esac
+done
+
+[ -r "$RULES" ] || undetermined "rules file '$RULES' is not readable"
+
+# Parse rules: "<glob>   # <reason>". Blank lines and lines starting with # are skipped.
+globs=(); reasons=()
+while IFS= read -r line || [ -n "$line" ]; do
+  line="${line%$'\r'}"
+  trimmed="${line#"${line%%[![:space:]]*}"}"
+  [ -z "$trimmed" ] && continue
+  [ "${trimmed:0:1}" = "#" ] && continue
+  glob="${trimmed%%[[:space:]]#[[:space:]]*}"
+  glob="${glob%"${glob##*[![:space:]]}"}"
+  reason=""
+  case "$trimmed" in *[[:space:]]#[[:space:]]*) reason="${trimmed#*[[:space:]]#[[:space:]]}" ;; esac
+  [ -z "$glob" ] && continue
+  globs+=("$glob"); reasons+=("$reason")
+done < "$RULES"
+[ ${#globs[@]} -gt 0 ] || undetermined "rules file '$RULES' contains no rules"
+
+# Collect the paths.
+paths=()
+if [ -n "$BASE" ]; then
+  tmp="$(mktemp)" || undetermined "cannot create a temp file"
+  trap 'rm -f "$tmp"' EXIT
+  git diff --no-renames --name-only -z "$BASE...HEAD" > "$tmp" 2>/dev/null \
+    || undetermined "git could not diff '$BASE...HEAD'"
+  while IFS= read -r -d '' p; do paths+=("$p"); done < "$tmp"
+else
+  while IFS= read -r p || [ -n "$p" ]; do paths+=("${p%$'\r'}"); done
+fi
+
+# Normalise: drop blanks, strip leading ./, squeeze //, refuse anything that leaves the repo.
+clean=()
+for p in ${paths[@]+"${paths[@]}"}; do
+  [ -z "${p//[[:space:]]/}" ] && continue
+  while [ "${p:0:2}" = "./" ]; do p="${p:2}"; done
+  while [[ "$p" == *//* ]]; do p="${p//\/\//\/}"; done
+  case "/$p/" in
+    */../*) [ $COVERAGE -eq 1 ] && continue; undetermined "path '$p' climbs out of the repository" ;;
+  esac
+  [ "${p:0:1}" = "/" ] && { [ $COVERAGE -eq 1 ] && continue; undetermined "path '$p' is absolute"; }
+  clean+=("$p")
+done
+
+shopt -s nocasematch
+
+if [ $COVERAGE -eq 1 ]; then
+  for i in "${!globs[@]}"; do
+    n=0; g="${globs[$i]}"
+    for p in ${clean[@]+"${clean[@]}"}; do
+      # shellcheck disable=SC2053
+      [[ "$p" == $g ]] && n=$((n + 1))
+    done
+    printf '%s\t%s\n' "$n" "$g"
+  done
+  exit 0
+fi
+
+[ ${#clean[@]} -gt 0 ] || undetermined "no changed paths"
+
+matches=()
+for p in "${clean[@]}"; do
+  for i in "${!globs[@]}"; do
+    g="${globs[$i]}"
+    # shellcheck disable=SC2053
+    if [[ "$p" == $g ]]; then
+      matches+=("  $p  <- $g (${reasons[$i]})")
+      break
+    fi
+  done
+done
+
+if [ ${#matches[@]} -gt 0 ]; then
+  echo "laptop-only"
+  printf '%s\n' "${matches[@]}"
+else
+  echo "phone-safe"
+  echo "  ${#clean[@]} path(s) read, none matched a laptop-only rule"
+fi
+exit 0
