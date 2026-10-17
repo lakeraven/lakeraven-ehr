@@ -9,6 +9,8 @@ require "test_helper"
 module Lakeraven
   module EHR
     class ImmunizationRefusalGatewayTest < ActiveSupport::TestCase
+      include BrokerStubbing
+
       class FakeRefusalAPI
         attr_reader :calls
 
@@ -17,35 +19,58 @@ module Lakeraven
           @calls = []
         end
 
-        def record(dfn, vaccine_code, reason_code:, narrative: nil)
-          @calls << { method: :record, args: [ dfn, vaccine_code ],
-                      reason_code: reason_code, narrative: narrative }
-          @returns[:record] || { success: true, ien: 1, raw: "1" }
+        # Same keywords as RpmsRpc::ImmunizationRefusal.record, so a gateway
+        # that sends any other keyword raises here as it does on the gem.
+        def record(dfn, vaccine_ien, reason_ien:, narrative: nil, refusal_date: nil, provider_duz: nil)
+          @calls << { method: :record, args: [ dfn, vaccine_ien ],
+                      reason_ien: reason_ien, narrative: narrative }
+          @returns[:record] || { success: true, ien: nil, raw: "" }
         end
       end
 
       # --- via: nil ---
 
       test "record returns failure shape when no provider is available" do
-        result = ImmunizationRefusalGateway.record(1, "MMR",
-          reason_code: :parental, via: nil)
+        result = ImmunizationRefusalGateway.record(1, 42,
+          reason_ien: 3, via: nil)
 
         assert_equal({ success: false, ien: nil, raw: nil }, result)
       end
 
       # --- delegation ---
 
-      test "record delegates with dfn coerced and reason_code symbol passed through" do
-        fake = FakeRefusalAPI.new(returns: { record: { success: true, ien: 17, raw: "17" } })
+      test "record delegates with dfn coerced and the reason IEN passed as reason_ien" do
+        fake = FakeRefusalAPI.new(returns: { record: { success: true, ien: nil, raw: "" } })
 
-        result = ImmunizationRefusalGateway.record(1, "MMR",
-          reason_code: :religious, narrative: "Family declines",
+        result = ImmunizationRefusalGateway.record(1, 42,
+          reason_ien: 3, narrative: "Family declines",
           via: fake)
 
-        assert_equal({ success: true, ien: 17, raw: "17" }, result)
-        assert_equal [ "1", "MMR" ], fake.calls.first[:args]
-        assert_equal :religious, fake.calls.first[:reason_code]
+        assert_equal({ success: true, ien: nil, raw: "" }, result)
+        assert_equal [ "1", 42 ], fake.calls.first[:args]
+        assert_equal 3, fake.calls.first[:reason_ien]
         assert_equal "Family declines", fake.calls.first[:narrative]
+      end
+
+      # --- the real gem method (#583) ---
+      # No fake API in between: the gateway calls RpmsRpc::ImmunizationRefusal
+      # itself, so a keyword the gem does not take raises ArgumentError here.
+
+      test "record through the gem files the reason IEN as piece 8 of BGOREF SET" do
+        broker = FakeBroker.new.on("BGOREF SET", "")
+        use_broker(broker) do
+          result = ImmunizationRefusalGateway.record(1, 42,
+            reason_ien: 3, narrative: "Family declines")
+
+          assert result[:success]
+          assert_equal "BGOREF SET", broker.last_call[:rpc]
+          inp = broker.last_call[:params].first.split("^", -1)
+          assert_equal "IMMUNIZATION", inp[1]
+          assert_equal "42", inp[2]
+          assert_equal "1", inp[3]
+          assert_equal "Family declines", inp[5]
+          assert_equal "3", inp[7]
+        end
       end
 
       # --- default_provider ---
