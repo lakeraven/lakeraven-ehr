@@ -17,6 +17,10 @@ module Lakeraven
 
       include FHIRReadEgress
 
+      # Path keys that name a record. Query-string copies of these are not
+      # the route: `request.path_parameters` is, `params` is not.
+      ROUTE_RECORD_KEYS = %i[dfn id ien _id].freeze
+
       included do
         helper_method :patient_banner
       end
@@ -35,9 +39,14 @@ module Lakeraven
 
         dfn = open_banner_dfn
         return PatientBanner.empty if dfn.blank?
+        # The layout wraps the open-record page too. A route dfn that is not
+        # the session patient must not read that session patient's chart —
+        # screenings index/new/show/create all render through here.
+        return PatientBanner.unopened_route(route_param(:dfn)) if route_patient_disagrees?(dfn)
+
+        remember_banner_patient!(dfn) unless route_names_record?
         return PatientBanner.closed unless banner_read_allowed?
 
-        remember_banner_patient!(dfn)
         load_patient_banner(dfn)
       rescue StandardError => e
         Rails.logger.warn("[patient-banner] banner read failed: #{e.class}")
@@ -90,10 +99,11 @@ module Lakeraven
         nil
       end
 
-      # A page that already names a record keeps that name. The banner
-      # supplies a Patient reference only when the controller would otherwise
-      # record the access against nothing — the dashboard, not a screening
-      # refusal that already carries the dfn it refused.
+      # A page that already names a record in its route keeps that name.
+      # The banner supplies Patient/<session dfn> only when the route has
+      # no record segment. Query-string dfn/id must not: `params` merges
+      # them in, and the inherited identifier would audit a patient the
+      # page did not open.
       def fhir_resource_type
         return "Patient" if banner_supplies_entity?
 
@@ -101,21 +111,27 @@ module Lakeraven
       end
 
       def direct_audit_identifier
-        inherited = super
-        return inherited if inherited.present?
         return @patient_banner_audit_dfn if banner_supplies_entity?
 
-        inherited
+        super
       end
 
       def banner_supplies_entity?
-        @patient_banner_audit_dfn.present? && default_type_identifier.blank?
+        @patient_banner_audit_dfn.present? && !route_names_record?
       end
 
-      def default_type_identifier
-        type = self.class.name.demodulize.delete_suffix("Controller").singularize
-        keys = type == "Patient" ? %i[dfn ien id _id] : %i[id ien _id]
-        keys.lazy.filter_map { |key| params[key].presence }.first
+      def route_names_record?
+        ROUTE_RECORD_KEYS.any? { |key| route_param(key).present? }
+      end
+
+      def route_patient_disagrees?(session_dfn)
+        route_dfn = route_param(:dfn)
+        route_dfn.present? && route_dfn.to_s != session_dfn.to_s
+      end
+
+      def route_param(key)
+        path = request.path_parameters
+        path[key].presence || path[key.to_s].presence
       end
     end
   end
