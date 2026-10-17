@@ -217,6 +217,24 @@ class RiskTierWorkflowTest < ActiveSupport::TestCase
     #!/bin/sh
     # Stub gh: labels live in $GH_STATE, one per line; every call is appended to $GH_LOG.
     echo "$*" >> "$GH_LOG"
+    # Like the real gh: `label create <name>` takes only --color, --description (both with a
+    # non-empty value) and --force. Anything else is "unknown flag", which is what a mangled
+    # flag in the workflow does under `set -e`.
+    check_label_create() {
+      shift 2
+      case "${1:-}" in ""|-*) echo "gh: label name required" >&2; return 1 ;; esac
+      shift
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --force) shift ;;
+          --color|--description)
+            if [ -z "${2:-}" ]; then echo "gh: flag needs an argument: $1" >&2; return 1; fi
+            shift 2 ;;
+          *) echo "unknown flag: $1" >&2; return 1 ;;
+        esac
+      done
+    }
+    if [ "$1 $2" = "label create" ]; then check_label_create "$@" || exit 1; fi
     prev=""; jqexpr=""
     for a in "$@"; do
       case "$prev" in
@@ -286,6 +304,40 @@ class RiskTierWorkflowTest < ActiveSupport::TestCase
     assert_equal 2, log.count { |l| l.start_with?("label create") }
     first_edit = log.index { |l| l.start_with?("pr edit") }
     assert log.rindex { |l| l.start_with?("label create") } < first_edit
+  end
+
+  test "Apply gives every label it creates a non-empty description" do
+    body = step("Apply the label")["run"].gsub(/\\\n\s*/, " ")
+    creates = body.lines.select { |l| l =~ /\bgh label create\b/ }
+    assert_equal 2, creates.size
+    creates.each do |l|
+      assert_match(/--description\s+"[^"]{10,}"/, l, "label create without a real --description: #{l.strip}")
+    end
+  end
+
+  test "Apply removes a stale opposite label that was set before this run" do
+    statuses, labels, log = run_label_steps([ "Apply the label" ], tier: "laptop-only", labels: [ "risk:phone-safe", "risk:laptop-only" ])
+    assert_equal [ 0 ], statuses, "Apply must succeed: #{log.inspect}"
+    assert_equal [ "risk:laptop-only" ], labels.uniq # the stub appends; real GitHub de-duplicates
+    assert(log.any? { |l| l.include?("--remove-label risk:phone-safe") }, "the stale label must be removed: #{log.inspect}")
+  end
+
+  test "every gh call in the workflow uses only flags the workflow is known to need" do
+    allowed = %w[--color --description --force --jq --json --add-label --remove-label --repo --paginate]
+    steps.each do |st|
+      next unless st["run"]
+
+      st["run"].gsub(/\\\n\s*/, " ").lines.select { |l| l =~ /\bgh (api|pr|label|run|issue)\b/ }.each do |l|
+        flags = l.scan(/(?<=\s)--[A-Za-z][\w-]*/).uniq
+        unknown = flags - allowed
+        assert_empty unknown, "unknown gh flag(s) #{unknown.inspect} in step #{st['name'].inspect}: #{l.strip}"
+      end
+    end
+  end
+
+  test "the workflow carries no placeholder tokens" do
+    text = File.read(WORKFLOW)
+    refute_match(/(?<![A-Za-z])(XX+|TODO|FIXME|TBD)(?![A-Za-z])/, text)
   end
 
   test "Apply fails and adds nothing when the stale opposite label cannot be removed" do
