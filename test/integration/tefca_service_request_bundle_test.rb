@@ -48,10 +48,15 @@ class TefcaServiceRequestBundleTest < ActionDispatch::IntegrationTest
     entries = body["entry"]
     assert entries.is_a?(Array) && entries.any?, "ServiceRequest bundle should include entries"
     entries.each do |entry|
-      subject_ref = entry.dig("resource", "subject", "reference")
-      next unless subject_ref
-      assert_match(/Patient\/1\z/, subject_ref,
-        "ServiceRequest should reference queried patient")
+      resource = entry["resource"] || {}
+      subject_ref = resource.dig("subject", "reference")
+      if subject_ref
+        assert_match(/Patient\/1\z/, subject_ref,
+          "ServiceRequest should reference queried patient")
+      else
+        assert_includes [ 1, "1" ], resource["patient_dfn"],
+          "ServiceRequest entry must identify patient 1 via patient_dfn"
+      end
     end
   end
 

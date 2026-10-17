@@ -31,10 +31,16 @@ module Lakeraven
       end
 
       test "entries have correct resourceType" do
+        RpmsRpc.client.seed_keyed_collection(:problem_list, "1", [
+          { ien: 1, status: "A", icd_code: "E11.9", description: "Type 2 diabetes mellitus" }
+        ])
+
         get "/lakeraven-ehr/Condition", params: { patient: "1" }, headers: @headers
         assert_response :ok
         body = JSON.parse(response.body)
-        body["entry"]&.each do |entry|
+        entries = body["entry"]
+        assert entries.is_a?(Array) && entries.any?, "Condition bundle should include entries"
+        entries.each do |entry|
           assert_equal "Condition", entry.dig("resource", "resourceType")
         end
       end

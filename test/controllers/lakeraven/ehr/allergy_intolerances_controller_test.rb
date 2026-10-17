@@ -31,10 +31,16 @@ module Lakeraven
       end
 
       test "entries have correct resourceType" do
+        RpmsRpc.client.seed_keyed_collection(:allergy_list, "1", [
+          { ien: 1, allergen: "Penicillin", severity: "moderate", signs: "Hives" }
+        ])
+
         get "/lakeraven-ehr/AllergyIntolerance", params: { patient: "1" }, headers: @headers
         assert_response :ok
         body = JSON.parse(response.body)
-        body["entry"]&.each do |entry|
+        entries = body["entry"]
+        assert entries.is_a?(Array) && entries.any?, "AllergyIntolerance bundle should include entries"
+        entries.each do |entry|
           assert_equal "AllergyIntolerance", entry.dig("resource", "resourceType")
         end
       end
