@@ -6,12 +6,42 @@
 #   test/dummy/bin/demo              # http://localhost:3000/patients/1
 #   PORT=3001 test/dummy/bin/demo    # bind and print that port instead
 #   test/dummy/bin/demo -b 0.0.0.0   # if showing from another device
+#
+# Set PORT to choose the listen port. -p / --port are refused so they cannot
+# override that check.
 set -e
 cd "$(dirname "$0")/.."
 
 # PORT selects the listen port and the URL printed below. Default is 3000.
+# All digits, 1..65535. Leading zeros are accepted and normalized (08 is not octal).
 PORT="${PORT:-3000}"
+case "$PORT" in
+  *[!0-9]*)
+    printf 'PORT must be an integer from 1 to 65535 (got %s)\n' "$PORT" >&2
+    exit 1
+    ;;
+esac
+port_num=$PORT
+while [ "$port_num" != "${port_num#0}" ]; do
+  port_num=${port_num#0}
+done
+if [ -z "$port_num" ] || [ "${#port_num}" -gt 5 ] || [ "$port_num" -gt 65535 ]; then
+  printf 'PORT must be an integer from 1 to 65535 (got %s)\n' "$PORT" >&2
+  exit 1
+fi
+PORT=$port_num
 export PORT
+
+# Rails would append a later -p / --port after our guarded -p "$PORT" and bind
+# the unguarded one. The listen port comes only from PORT.
+for arg in "$@"; do
+  case "$arg" in
+    -p|--port|--port=*|-p[0-9]*)
+      printf 'Set the listen port with PORT instead of %s (for example PORT=3001 test/dummy/bin/demo).\n' "$arg" >&2
+      exit 1
+      ;;
+  esac
+done
 
 # 1. Postgres must be up — dev-mode CheckPending middleware hits the DB on
 #    every request, so a down Postgres 500s the whole demo.
@@ -20,11 +50,12 @@ if ! pg_isready -q; then
   exit 1
 fi
 
-# 2. Refuse a busy port. Report the holder and stop; never signal it.
-#    Without lsof, skip the check (do not fail closed) and do not signal anyone.
-port_is_free=0
+# 2. Name a holder with lsof when we can. Empty lsof output is not evidence
+#    the port is free: lsof may be missing, or the listener may be owned by
+#    another user (for example docker-proxy) and invisible to us. Never signal
+#    a holder. "Free" is decided only by a successful bind probe below.
 if command -v lsof >/dev/null 2>&1; then
-  listeners=$(lsof -nP -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null || true)
+  listeners=$(lsof +c 0 -nP -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null || true)
   holders=$(printf '%s\n' "$listeners" | awk '
     NR == 1 && $1 == "COMMAND" { next }
     $2 ~ /^[0-9][0-9]*$/ && !seen[$2] { seen[$2] = 1; print $2, $1 }
@@ -35,14 +66,70 @@ if command -v lsof >/dev/null 2>&1; then
     printf '%s\n' "choose another port, e.g. PORT=3001 test/dummy/bin/demo" >&2
     exit 1
   fi
-  port_is_free=1
 fi
 
-# Stale pidfile only after lsof confirms the port is free. A live server's
-# pidfile stays put, and without lsof we have not confirmed anything.
-if [ "$port_is_free" -eq 1 ]; then
-  rm -f tmp/pids/server.pid
+# Positive evidence only: exit 0 when 0.0.0.0 binds and ::1 binds or is n/a
+# (EADDRNOTAVAIL / EAFNOSUPPORT). Exit 10 when the port is busy. Anything else
+# is a probe failure and the shell fails closed.
+if ! command -v ruby >/dev/null 2>&1; then
+  printf 'Could not check whether port %s is free; the bind probe could not run: ruby was not found on PATH.\n' "$PORT" >&2
+  exit 1
 fi
+probe_rc=0
+probe_err=$(ruby -rsocket -e '
+port = Integer(ARGV[0])
+
+def bind_result(host, port)
+  server = TCPServer.new(host, port)
+  server.close
+  "ok"
+rescue Errno::EADDRINUSE
+  "busy"
+rescue Errno::EADDRNOTAVAIL, Errno::EAFNOSUPPORT
+  if host == "::1"
+    "na"
+  else
+    warn format("bind probe failed on %s: %s: %s", host, $!.class, $!.message)
+    exit 1
+  end
+rescue StandardError
+  warn format("bind probe failed on %s: %s: %s", host, $!.class, $!.message)
+  exit 1
+end
+
+result = bind_result("0.0.0.0", port)
+exit 10 if result == "busy"
+unless result == "ok"
+  warn "bind probe failed on 0.0.0.0"
+  exit 1
+end
+
+result = bind_result("::1", port)
+exit 10 if result == "busy"
+exit 0 if result == "ok" || result == "na"
+
+warn "bind probe failed on ::1"
+exit 1
+' "$PORT" 2>&1) || probe_rc=$?
+
+if [ "$probe_rc" -eq 10 ]; then
+  printf 'Port %s is already in use, but the holder could not be identified (lsof is missing or cannot see it, e.g. owned by another user such as docker-proxy).\n' "$PORT" >&2
+  printf 'Try: sudo lsof -nP -iTCP:%s -sTCP:LISTEN\n' "$PORT" >&2
+  printf '%s\n' "choose another port, e.g. PORT=3001 test/dummy/bin/demo" >&2
+  exit 1
+fi
+if [ "$probe_rc" -ne 0 ]; then
+  printf 'Could not check whether port %s is free; the bind probe failed' "$PORT" >&2
+  if [ -n "$probe_err" ]; then
+    printf ': %s\n' "$probe_err" >&2
+  else
+    printf ' (exit status %s).\n' "$probe_rc" >&2
+  fi
+  exit 1
+fi
+
+# Stale pidfile only after the probe proves the port is free.
+rm -f tmp/pids/server.pid
 
 # 3. A stray RPMS_RPC_PATH flips the Gemfile to a path source and bundler
 #    rejects the lockfile at boot — make sure it is unset.
