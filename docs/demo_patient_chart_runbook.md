@@ -7,7 +7,7 @@ Read-only demo patient chart (issue #452, PR #453). Synthetic data only — no P
 Preferred — runs the preflight checks automatically (`PORT` selects the listen port; default 3000):
 
     /Users/kimball/code/lakeraven/rpms/lakeraven-ehr/test/dummy/bin/demo
-    PORT=3001 /Users/kimball/code/lakeraven/rpms/lakeraven-ehr/test/dummy/bin/demo
+    PORT=3001 test/dummy/bin/demo
 
 The smoke-test and walkthrough URLs below use port 3000 by default; substitute your PORT if you set one.
 
