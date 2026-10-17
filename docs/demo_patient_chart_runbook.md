@@ -4,9 +4,12 @@ Read-only demo patient chart (issue #452, PR #453). Synthetic data only — no P
 
 ## Start (local, synthetic data only)
 
-Preferred — runs the preflight checks automatically:
+Preferred — runs the preflight checks automatically (`PORT` selects the listen port; default 3000):
 
     /Users/kimball/code/lakeraven/rpms/lakeraven-ehr/test/dummy/bin/demo
+    PORT=3001 test/dummy/bin/demo
+
+The smoke-test and walkthrough URLs below use port 3000 by default; substitute your PORT if you set one.
 
 Equivalent manual start:
 
@@ -23,8 +26,10 @@ Equivalent manual start:
 `bin/demo` does all of this for you; if starting manually:
 
 1. **Port 3000 free?** A previous dummy server (or its stale pidfile) is the most
-   likely failure. `lsof -ti:3000 | xargs kill; rm -f test/dummy/tmp/pids/server.pid`
-   — or just reuse the already-running server if it is serving `/patients/1` correctly.
+   likely failure. Find the holder (`lsof -nP -iTCP:3000 -sTCP:LISTEN`) and either
+   stop it yourself if it is yours or pick another port with
+   `PORT=3001 test/dummy/bin/demo`; never kill a process you did not start.
+   Or just reuse the already-running server if it is serving `/patients/1` correctly.
 2. **Postgres up?** `pg_isready || brew services start postgresql`. Dev-mode
    migration checking queries the DB on every request; a down Postgres 500s everything.
 3. **Clean env.** `unset RPMS_RPC_PATH` (flips the Gemfile to a path source →
