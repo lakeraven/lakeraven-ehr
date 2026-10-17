@@ -13,6 +13,9 @@ module Lakeraven
         patients = resolve_patient_search
 
         entries = patients.map { |p| build_patient_entry(p) }
+        # Same as render_bundle / fhir_search_bundle: total is the length of
+        # the match set. _revinclude rows are appended after this count.
+        total = entries.length
 
         # _revinclude hands the caller resources of ANOTHER type, so it needs
         # that type's read scope like any other read. A `user/Patient.read`
@@ -28,7 +31,7 @@ module Lakeraven
 
         render_fhir_egress({
           resourceType: "Bundle", type: "searchset",
-          total: entries.length, entry: entries
+          total: total, entry: entries
         })
       end
 
