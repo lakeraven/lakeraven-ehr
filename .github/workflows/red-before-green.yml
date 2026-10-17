@@ -13,6 +13,14 @@ name: red-before-green
 # warning, not a red X that could be read as a required failure, while the check
 # is advisory. Remove it in the same change that makes the check required.
 #
+# This job runs the PR's own copy of the script, and the PR's own copy of this workflow,
+# so it cannot police a PR that edits either: such a PR can make it say anything. That
+# is the other reason it is advisory. It must also stay on `pull_request`, never
+# `pull_request_target`: it executes the PR's tests, and must not hold the secrets or
+# the write token the other trigger gives. Warnings (RED-FOR-WRONG-REASON,
+# HARNESS-CHANGED, GREEN-WITHOUT-FIX, UNDETERMINED) are emitted as annotations through
+# RBG_ANNOTATE so they show on the run even though the job never fails the PR.
+#
 # Exempt a PR that is genuinely not testable this way (a pure refactor, say) by
 # adding the `red-green-exempt` label; the summary records that it was skipped.
 
@@ -55,6 +63,7 @@ jobs:
         env:
           RBG_EXEMPT: ${{ contains(github.event.pull_request.labels.*.name, 'red-green-exempt') && '1' || '0' }}
           BASE_REF: ${{ github.base_ref }}
+          RBG_ANNOTATE: "1"
         run: |
           export RBG_REPORT="$GITHUB_STEP_SUMMARY"
           bin/red-before-green --base "origin/$BASE_REF"

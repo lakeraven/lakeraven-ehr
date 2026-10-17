@@ -20,7 +20,19 @@
 #                               Printed as a WARNING: read them.
 #   GREEN-WITHOUT-FIX      1    every test passed without the fix
 #   UNDETERMINED           2    could not tell. Never a pass: no merge-base, no parseable
-#                               summary, zero tests run, every test skipped.
+#                               summary, zero tests run, every test skipped, unreadable errors,
+#                               or a Gemfile/lockfile/gemspec/Rakefile change (not revertible
+#                               by restoring app paths).
+#
+# The summary is read only from the single "Finished in" block minitest prints; a run
+# with no such block, or more than one, is UNDETERMINED (test output can imitate a summary).
+# HARNESS-CHANGED is printed when the PR also changes test/test_helper.rb, test/support or
+# test/dummy: the base run used the PR's version of those, so read the verdict with care.
+#
+# This runs the PR's own copy of this script. It therefore cannot police a PR that edits
+# the script (or its workflow) to say what it likes. That is why it is advisory, and why the
+# workflow must stay on `pull_request`: it executes the PR's tests, so it must never gain
+# the secrets or write token that `pull_request_target` would give it.
 #
 # Not checked: a modified existing test file can be RED because of one new test
 # while other tests in it are vacuous; a test file that fails for an unrelated
@@ -35,6 +47,7 @@
 #   RBG_TEST_CMD     the test command (default "bundle exec rails test"); changed test
 #                    files are appended as arguments
 #   RBG_REPORT=FILE  also append the verdict block to FILE (CI: $GITHUB_STEP_SUMMARY)
+#   RBG_ANNOTATE=1   also print ::warning:: workflow commands for warnings (CI sets it)
 set -uo pipefail
 
 BASE="${RBG_BASE:-origin/main}"
@@ -52,12 +65,23 @@ TEST_CMD="${RBG_TEST_CMD:-bundle exec rails test}"
 APP_PATHS="app lib config db"
 
 # verdict NAME EXIT_CODE [detail lines...] — print the verdict block and leave.
+HARNESS_FILES=""
 verdict() {
   local name="$1" code="$2"; shift 2
   local block="VERDICT: $name"
-  local line
+  local line harness_msg=""
   for line in "$@"; do block="$block"$'\n'"  $line"; done
+  if [ -n "$HARNESS_FILES" ]; then
+    harness_msg="HARNESS-CHANGED: the PR also changes $(printf '%s\n' "$HARNESS_FILES" | sed '/^$/d' | paste -sd' ' -); the base run used the PR's version of these, so this verdict may not reflect the app code alone."
+    block="$block"$'\n'"  WARNING $harness_msg"
+  fi
   echo "$block"
+  if [ "${RBG_ANNOTATE:-0}" = "1" ]; then
+    case "$name" in
+      RED-FOR-WRONG-REASON|GREEN-WITHOUT-FIX|UNDETERMINED) echo "::warning title=red-before-green::$name: $1" ;;
+    esac
+    [ -n "$harness_msg" ] && echo "::warning title=red-before-green::$harness_msg"
+  fi
   [ -n "${RBG_REPORT:-}" ] && printf '### Red before green\n\n```\n%s\n```\n' "$block" >> "$RBG_REPORT"
   exit "$code"
 }
@@ -80,11 +104,20 @@ CHANGED_TESTS=$(git diff --name-only --no-renames --diff-filter=ACMRT "$MB" HEAD
 MINITEST_FILES=$(printf '%s\n' "$CHANGED_TESTS" | grep -E '^test/.*_test\.rb$' | grep -v '^test/dummy/' || true)
 FEATURE_FILES=$(printf '%s\n' "$CHANGED_TESTS" | grep -E '^features/' || true)
 
+# Build and dependency files: putting app paths back cannot revert these.
+DEP_FILES=$(git diff --name-only --no-renames "$MB" HEAD -- Gemfile Gemfile.lock '*.gemspec' Rakefile) \
+  || verdict UNDETERMINED 2 "git diff failed against merge-base ${MB:0:7}"
+# The PR's test harness: what runs the base app code in the scratch worktree.
+HARNESS_FILES=$(git diff --name-only --no-renames "$MB" HEAD -- test/test_helper.rb test/support test/dummy) \
+  || verdict UNDETERMINED 2 "git diff failed against merge-base ${MB:0:7}"
+
 oneline() { printf '%s\n' "$1" | sed '/^$/d' | paste -sd' ' -; }
 
-EXEMPT_REASON=""
+EXEMPT_REASON=""; UNDET_REASON=""
 if [ "${RBG_EXEMPT:-0}" = "1" ]; then
   EXEMPT_REASON="RBG_EXEMPT=1 (the red-green-exempt label is set); a person chose to skip this check"
+elif [ -n "$DEP_FILES" ] && [ -n "$MINITEST_FILES" ]; then
+  UNDET_REASON="$(oneline "$DEP_FILES") changed alongside tests; reverting app paths cannot revert dependencies, so this check cannot tell whether the tests need the change"
 elif [ -z "$APP_FILES" ]; then
   EXEMPT_REASON="no app-code change (nothing under $APP_PATHS differs from the base)"
 elif [ -z "$MINITEST_FILES" ]; then
@@ -95,10 +128,14 @@ fi
 echo "base: ${MB:0:7} ($BASE)"
 echo "app: $(oneline "$APP_FILES")"
 echo "tests: $(oneline "$MINITEST_FILES")"
+[ -n "$DEP_FILES" ] && echo "deps: $(oneline "$DEP_FILES")"
+[ -n "$HARNESS_FILES" ] && echo "harness: $(oneline "$HARNESS_FILES")"
 [ -n "$FEATURE_FILES" ] && echo "features: $(oneline "$FEATURE_FILES")"
 if [ -n "$EXEMPT_REASON" ]; then echo "exempt: yes ($EXEMPT_REASON)"; else echo "exempt: no"; fi
+[ -n "$UNDET_REASON" ] && echo "undetermined: $UNDET_REASON"
 
 [ $DRY -eq 1 ] && exit 0
+[ -n "$UNDET_REASON" ] && verdict UNDETERMINED 2 "$UNDET_REASON"
 [ -n "$EXEMPT_REASON" ] && verdict EXEMPT 0 "$EXEMPT_REASON"
 
 # --- scratch worktree at HEAD with the app code put back to the base ---------
@@ -134,8 +171,15 @@ RC=$?
 cat "$LOG"
 echo
 
-SUMMARY=$(grep -E '^[0-9]+ runs, [0-9]+ assertions, [0-9]+ failures, [0-9]+ errors(, [0-9]+ skips)?' "$LOG" | tail -1)
-[ -n "$SUMMARY" ] || verdict UNDETERMINED 2 "the test run (exit $RC) printed no 'N runs, ... failures, ... errors' summary; it did not run to completion"
+# Read the summary only from the one "Finished in" block minitest prints: its first non-blank
+# line, anchored at the start of the line. Any process in the run can print a line shaped like
+# a summary, so a run with more than one such block is not trusted either.
+FINISHED=$(grep -c '^Finished in ' "$LOG" || true)
+[ "$FINISHED" = "1" ] \
+  || verdict UNDETERMINED 2 "the test run (exit $RC) printed ${FINISHED} 'Finished in' blocks, not exactly 1; it did not run to completion or its output cannot be trusted"
+SUMMARY=$(awk '/^Finished in / {f=1; next} f && NF == 0 {next} f {print; exit}' "$LOG" \
+  | grep -E '^[0-9]+ runs, [0-9]+ assertions, [0-9]+ failures, [0-9]+ errors(, [0-9]+ skips)?' || true)
+[ -n "$SUMMARY" ] || verdict UNDETERMINED 2 "no 'N runs, ... failures, ... errors' summary directly after the 'Finished in' line (exit $RC)"
 
 num() { printf '%s\n' "$SUMMARY" | sed -nE "s/.*[^0-9]([0-9]+) $1.*/\1/p;s/^([0-9]+) $1.*/\1/p" | head -1; }
 RUNS=$(num runs); FAILURES=$(num failures); ERRORS=$(num errors); SKIPS=$(num skips)
@@ -150,11 +194,15 @@ fi
 
 if [ "$ERRORS" -gt 0 ]; then
   # The exception line follows "Error:" and the test name.
-  EXC=$(awk '/^Error:$/ {getline; getline; print}' "$LOG")
+  EXC=$(awk '/^Error:$/ {getline; getline; print}' "$LOG" | sed '/^$/d')
+  READABLE=$(printf '%s\n' "$EXC" | sed '/^$/d' | wc -l | tr -d ' ')
   OTHER=$(printf '%s\n' "$EXC" | sed '/^$/d' | grep -Evc '^(NameError|LoadError|NoMethodError)' || true)
   if [ "${OTHER:-0}" -gt 0 ]; then
     verdict RED 0 "$SUMMARY" "$OTHER error(s) are not missing-code errors, so the tests are red for a real reason"
   fi
+  # "Every error is missing code" is only a claim when every error was read.
+  [ "$READABLE" -eq "$ERRORS" ] \
+    || verdict UNDETERMINED 2 "$SUMMARY" "$ERRORS error(s) reported but only $READABLE exception line(s) could be read, so they cannot be classed as missing code"
   verdict RED-FOR-WRONG-REASON 0 "$SUMMARY" \
     "WARNING: every error is a NameError / LoadError / NoMethodError. The tests may fail only because the" \
     "new code is absent, not because they check its behavior. Read them before trusting this."
