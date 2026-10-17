@@ -521,6 +521,121 @@ class RedBeforeGreenTest < Minitest::Test
     assert_match(/RBG_ANNOTATE/, File.read(WORKFLOW))
   end
 
+  # --- gate round 2 (gate/runs/lakeraven-ehr-632/r2/) -----------------------
+  # Spec amendment: written after the round-2 seats' findings, before the fixes.
+  # The builder does not edit these.
+
+  # GLM F2: db:schema:load runs on the PR's schema before the base run, so a PR that
+  # changes the schema or a migration is tested against a database the base code never had.
+  [ "db/schema.rb", "db/migrate/20260101000000_add_thing.rb" ].each do |db_file|
+    define_method("test_a_change_to_#{db_file.tr('/.', '__')}_prints_a_db_warning_but_still_gives_a_verdict") do
+      write db_file, "# changed\n"
+      fixed_pr
+
+      out, status = run_script(env: fake_runner)
+
+      assert_equal 0, status.exitstatus, out
+      assert_match(/^VERDICT: RED$/, out)
+      assert_match(/DB-CHANGED/, out)
+      assert_match(/#{Regexp.escape(db_file)}/, out)
+    end
+  end
+
+  def test_no_db_warning_when_the_schema_and_migrations_are_untouched
+    fixed_pr
+
+    out, = run_script(env: fake_runner)
+
+    refute_match(/DB-CHANGED/, out)
+  end
+
+  def test_the_db_warning_is_an_annotation_when_asked
+    write "db/schema.rb", "# changed\n"
+    fixed_pr
+
+    annotated, = run_script(env: fake_runner.merge("RBG_ANNOTATE" => "1"))
+    plain, = run_script(env: fake_runner)
+
+    assert_match(/^::warning[^\n]*DB-CHANGED/, annotated)
+    refute_match(/^::warning/, plain)
+  end
+
+  # Composer #6: bin/ scripts are neither app code nor a dependency file, so a bin/ change
+  # plus tests used to be EXEMPT ("no app-code change") although it can change behavior.
+  def test_a_bin_change_with_a_test_change_is_undetermined
+    write "bin/setup", "# changed\n"
+    write "test/greeter_test.rb", "# new test\n"
+    commit "bin change with a test"
+
+    out, status = run_script(env: fake_runner)
+
+    assert_equal 2, status.exitstatus, out
+    assert_match(/^VERDICT: UNDETERMINED/, out)
+    assert_match(%r{bin/setup}, out)
+  end
+
+  def test_a_bin_change_alongside_an_app_change_is_still_undetermined
+    write "bin/setup", "# changed\n"
+    fixed_pr
+
+    out, status = run_script(env: fake_runner)
+
+    assert_equal 2, status.exitstatus, out
+    assert_match(/^VERDICT: UNDETERMINED/, out)
+  end
+
+  def test_a_bin_change_with_no_test_change_stays_exempt
+    write "bin/setup", "# changed\n"
+    commit "script tweak"
+
+    out, status = run_script
+
+    assert_equal 0, status.exitstatus, out
+    assert_match(/^VERDICT: EXEMPT/, out)
+  end
+
+  # Composer #5: a runner that writes CRLF line endings must not turn a complete
+  # minitest run into UNDETERMINED.
+  def test_a_crlf_summary_is_still_read
+    fixed_pr
+    crlf = <<~RUBY
+      print "Failure:\\r\\nGreeterTest#test_it [test/greeter_test.rb:3]:\\r\\nExpected: 1\\r\\n"
+      print "Finished in 0.1s, 1.0 runs/s, 1.0 assertions/s.\\r\\n\\r\\n1 runs, 1 assertions, 1 failures, 0 errors, 0 skips\\r\\n"
+      exit 1
+    RUBY
+
+    out, status = run_script(env: fake_runner(crlf))
+
+    assert_equal 0, status.exitstatus, out
+    assert_match(/^VERDICT: RED$/, out)
+  end
+
+  # GLM F4: the annotation line reads $1 after the details are shifted away; under
+  # `set -u` a verdict with no detail line must still print its verdict and exit with its code.
+  def test_a_verdict_with_no_detail_line_survives_set_u_when_annotating
+    function = File.read(SCRIPT)[/^verdict\(\) \{.*?^\}$/m]
+    refute_nil function, "verdict() not found in #{SCRIPT}"
+    program = "set -uo pipefail\nHARNESS_FILES=''\nDB_FILES=''\n#{function}\nverdict UNDETERMINED 2\n"
+
+    out, status = Open3.capture2e({ "RBG_ANNOTATE" => "1" }, "bash", "-c", program)
+
+    assert_equal 2, status.exitstatus, out
+    assert_match(/^VERDICT: UNDETERMINED/, out)
+    refute_match(/unbound variable/, out)
+  end
+
+  # GLM F1 / Composer #7: one forged "Finished in" block printed by any process in the run is
+  # still trusted. The script cannot close that, so it has to say so where a reader will see it.
+  def test_the_script_and_workflow_name_the_single_forged_block_floor
+    script_header = File.read(SCRIPT)[/\A.*?^set -u/m]
+    workflow_header = File.read(WORKFLOW)[/\A.*?^on:/m]
+
+    [ script_header, workflow_header ].each do |header|
+      assert_match(/single forged "Finished in" block/, header)
+      assert_match(/known floor/, header)
+    end
+  end
+
   private
 
   def fixed_pr
