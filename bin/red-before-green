@@ -21,13 +21,21 @@
 #   GREEN-WITHOUT-FIX      1    every test passed without the fix
 #   UNDETERMINED           2    could not tell. Never a pass: no merge-base, no parseable
 #                               summary, zero tests run, every test skipped, unreadable errors,
-#                               or a Gemfile/lockfile/gemspec/Rakefile change (not revertible
-#                               by restoring app paths).
+#                               or a Gemfile/lockfile/gemspec/Rakefile or bin/ change alongside
+#                               tests (not revertible by restoring app paths).
 #
 # The summary is read only from the single "Finished in" block minitest prints; a run
 # with no such block, or more than one, is UNDETERMINED (test output can imitate a summary).
+# Known floor: a single forged "Finished in" block, printed by any process in the run (a test,
+# a subprocess, an at_exit hook) while the real summary never appears, is indistinguishable
+# from minitest's own and can give a false RED or a false GREEN-WITHOUT-FIX. This script
+# cannot close that; it is a known floor of an advisory check, which is why a RED is a
+# prompt to read the tests and not a proof that they test the change.
 # HARNESS-CHANGED is printed when the PR also changes test/test_helper.rb, test/support or
 # test/dummy: the base run used the PR's version of those, so read the verdict with care.
+# DB-CHANGED is printed when the PR also changes db/schema.rb, db/structure.sql or a
+# migration: the test database is loaded from the PR's schema before this script runs and is
+# not reverted, so the base app code ran against a schema it may not have had.
 #
 # This runs the PR's own copy of this script. It therefore cannot police a PR that edits
 # the script (or its workflow) to say what it likes. That is why it is advisory, and why the
@@ -65,22 +73,27 @@ TEST_CMD="${RBG_TEST_CMD:-bundle exec rails test}"
 APP_PATHS="app lib config db"
 
 # verdict NAME EXIT_CODE [detail lines...] — print the verdict block and leave.
-HARNESS_FILES=""
+HARNESS_FILES=""; DB_FILES=""
 verdict() {
   local name="$1" code="$2"; shift 2
   local block="VERDICT: $name"
-  local line harness_msg=""
+  local line harness_msg="" db_msg=""
   for line in "$@"; do block="$block"$'\n'"  $line"; done
   if [ -n "$HARNESS_FILES" ]; then
     harness_msg="HARNESS-CHANGED: the PR also changes $(printf '%s\n' "$HARNESS_FILES" | sed '/^$/d' | paste -sd' ' -); the base run used the PR's version of these, so this verdict may not reflect the app code alone."
     block="$block"$'\n'"  WARNING $harness_msg"
   fi
+  if [ -n "$DB_FILES" ]; then
+    db_msg="DB-CHANGED: the PR also changes $(printf '%s\n' "$DB_FILES" | sed '/^$/d' | paste -sd' ' -); the test database was loaded from the PR's schema before the base run and is not reverted, so the base app code may have run against a schema it never had."
+    block="$block"$'\n'"  WARNING $db_msg"
+  fi
   echo "$block"
   if [ "${RBG_ANNOTATE:-0}" = "1" ]; then
     case "$name" in
-      RED-FOR-WRONG-REASON|GREEN-WITHOUT-FIX|UNDETERMINED) echo "::warning title=red-before-green::$name: $1" ;;
+      RED-FOR-WRONG-REASON|GREEN-WITHOUT-FIX|UNDETERMINED) echo "::warning title=red-before-green::$name: ${1:-}" ;;
     esac
     [ -n "$harness_msg" ] && echo "::warning title=red-before-green::$harness_msg"
+    [ -n "$db_msg" ] && echo "::warning title=red-before-green::$db_msg"
   fi
   [ -n "${RBG_REPORT:-}" ] && printf '### Red before green\n\n```\n%s\n```\n' "$block" >> "$RBG_REPORT"
   exit "$code"
@@ -107,6 +120,12 @@ FEATURE_FILES=$(printf '%s\n' "$CHANGED_TESTS" | grep -E '^features/' || true)
 # Build and dependency files: putting app paths back cannot revert these.
 DEP_FILES=$(git diff --name-only --no-renames "$MB" HEAD -- Gemfile Gemfile.lock '*.gemspec' Rakefile) \
   || verdict UNDETERMINED 2 "git diff failed against merge-base ${MB:0:7}"
+# bin/ scripts are not app paths either: they can change behavior and are not put back.
+BIN_FILES=$(git diff --name-only --no-renames "$MB" HEAD -- bin) \
+  || verdict UNDETERMINED 2 "git diff failed against merge-base ${MB:0:7}"
+# The PR's schema and migrations: the test database is built from the PR's, not the base's.
+DB_FILES=$(git diff --name-only --no-renames "$MB" HEAD -- db/schema.rb db/structure.sql db/migrate) \
+  || verdict UNDETERMINED 2 "git diff failed against merge-base ${MB:0:7}"
 # The PR's test harness: what runs the base app code in the scratch worktree.
 HARNESS_FILES=$(git diff --name-only --no-renames "$MB" HEAD -- test/test_helper.rb test/support test/dummy) \
   || verdict UNDETERMINED 2 "git diff failed against merge-base ${MB:0:7}"
@@ -116,8 +135,9 @@ oneline() { printf '%s\n' "$1" | sed '/^$/d' | paste -sd' ' -; }
 EXEMPT_REASON=""; UNDET_REASON=""
 if [ "${RBG_EXEMPT:-0}" = "1" ]; then
   EXEMPT_REASON="RBG_EXEMPT=1 (the red-green-exempt label is set); a person chose to skip this check"
-elif [ -n "$DEP_FILES" ] && [ -n "$MINITEST_FILES" ]; then
-  UNDET_REASON="$(oneline "$DEP_FILES") changed alongside tests; reverting app paths cannot revert dependencies, so this check cannot tell whether the tests need the change"
+elif [ -n "$DEP_FILES$BIN_FILES" ] && [ -n "$MINITEST_FILES" ]; then
+  UNDET_REASON="$(oneline "$DEP_FILES
+$BIN_FILES") changed alongside tests; reverting app paths cannot revert dependencies or bin/ scripts, so this check cannot tell whether the tests need the change"
 elif [ -z "$APP_FILES" ]; then
   EXEMPT_REASON="no app-code change (nothing under $APP_PATHS differs from the base)"
 elif [ -z "$MINITEST_FILES" ]; then
@@ -129,6 +149,8 @@ echo "base: ${MB:0:7} ($BASE)"
 echo "app: $(oneline "$APP_FILES")"
 echo "tests: $(oneline "$MINITEST_FILES")"
 [ -n "$DEP_FILES" ] && echo "deps: $(oneline "$DEP_FILES")"
+[ -n "$BIN_FILES" ] && echo "bin: $(oneline "$BIN_FILES")"
+[ -n "$DB_FILES" ] && echo "db: $(oneline "$DB_FILES")"
 [ -n "$HARNESS_FILES" ] && echo "harness: $(oneline "$HARNESS_FILES")"
 [ -n "$FEATURE_FILES" ] && echo "features: $(oneline "$FEATURE_FILES")"
 if [ -n "$EXEMPT_REASON" ]; then echo "exempt: yes ($EXEMPT_REASON)"; else echo "exempt: no"; fi
@@ -170,14 +192,17 @@ EOF
 RC=$?
 cat "$LOG"
 echo
+# A runner on Windows-style line endings must not hide a complete run: parse a copy without CRs.
+CLEAN="$SCRATCH/run.clean.log"
+tr -d '\r' < "$LOG" > "$CLEAN"
 
 # Read the summary only from the one "Finished in" block minitest prints: its first non-blank
 # line, anchored at the start of the line. Any process in the run can print a line shaped like
 # a summary, so a run with more than one such block is not trusted either.
-FINISHED=$(grep -c '^Finished in ' "$LOG" || true)
+FINISHED=$(grep -c '^Finished in ' "$CLEAN" || true)
 [ "$FINISHED" = "1" ] \
   || verdict UNDETERMINED 2 "the test run (exit $RC) printed ${FINISHED} 'Finished in' blocks, not exactly 1; it did not run to completion or its output cannot be trusted"
-SUMMARY=$(awk '/^Finished in / {f=1; next} f && NF == 0 {next} f {print; exit}' "$LOG" \
+SUMMARY=$(awk '/^Finished in / {f=1; next} f && NF == 0 {next} f {print; exit}' "$CLEAN" \
   | grep -E '^[0-9]+ runs, [0-9]+ assertions, [0-9]+ failures, [0-9]+ errors(, [0-9]+ skips)?' || true)
 [ -n "$SUMMARY" ] || verdict UNDETERMINED 2 "no 'N runs, ... failures, ... errors' summary directly after the 'Finished in' line (exit $RC)"
 
@@ -194,7 +219,7 @@ fi
 
 if [ "$ERRORS" -gt 0 ]; then
   # The exception line follows "Error:" and the test name.
-  EXC=$(awk '/^Error:$/ {getline; getline; print}' "$LOG" | sed '/^$/d')
+  EXC=$(awk '/^Error:$/ {getline; getline; print}' "$CLEAN" | sed '/^$/d')
   READABLE=$(printf '%s\n' "$EXC" | sed '/^$/d' | wc -l | tr -d ' ')
   OTHER=$(printf '%s\n' "$EXC" | sed '/^$/d' | grep -Evc '^(NameError|LoadError|NoMethodError)' || true)
   if [ "${OTHER:-0}" -gt 0 ]; then

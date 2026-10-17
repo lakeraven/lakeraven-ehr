@@ -21,6 +21,13 @@ name: red-before-green
 # HARNESS-CHANGED, GREEN-WITHOUT-FIX, UNDETERMINED) are emitted as annotations through
 # RBG_ANNOTATE so they show on the run even though the job never fails the PR.
 #
+# This is a known floor of an advisory check, stated here so nobody reads more into a verdict
+# than it holds: a single forged "Finished in" block, printed by any process in the run while the real
+# summary never appears, looks like minitest's own and can give a false RED or a false
+# GREEN-WITHOUT-FIX. The script cannot close that. Also, the database below is loaded from the
+# PR's schema BEFORE the script reverts app code, so a PR that changes the schema or a migration
+# is run against a database the base code never had; the script prints DB-CHANGED for that.
+#
 # Exempt a PR that is genuinely not testable this way (a pure refactor, say) by
 # adding the `red-green-exempt` label; the summary records that it was skipped.
 
