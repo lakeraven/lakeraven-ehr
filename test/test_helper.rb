@@ -8,6 +8,7 @@ ActiveRecord::Migrator.migrations_paths = [ File.expand_path("../test/dummy/db/m
 ActiveRecord::Migrator.migrations_paths << File.expand_path("../db/migrate", __dir__)
 require "rails/test_help"
 require_relative "support/supplemental_provider_config_helper"
+require_relative "support/global_store_isolation"
 require "rpms_rpc/version"
 require "rpms_rpc/mock_client"
 # Needed to build the DDR GETS ENTRY DATA seed key below.
@@ -263,3 +264,5 @@ if ActiveSupport::TestCase.respond_to?(:fixture_paths=)
   ActiveSupport::TestCase.file_fixture_path = "#{File.expand_path('fixtures', __dir__)}/files"
   ActiveSupport::TestCase.fixtures :all
 end
+
+ActiveSupport::TestCase.include GlobalStoreIsolation
