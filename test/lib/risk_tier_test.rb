@@ -70,6 +70,18 @@ class RiskTierTest < ActiveSupport::TestCase
     "test/controllers/lakeraven/ehr/organization_boundary_test.rb",
     "features/part2_disclosure_gate.feature",
     "docs/consent form.md",
+    "app/controllers/lakeraven/ehr/backend_services_controller.rb",
+    "test/controllers/lakeraven/ehr/backend_services_controller_test.rb",
+    "app/models/concerns/lakeraven/ehr/backend_client_registration.rb",
+    "app/models/lakeraven/ehr/backend_assertion_jti.rb",
+    "app/services/lakeraven/ehr/assertion_replay_guard.rb",
+    "app/controllers/lakeraven/ehr/smart_launch_controller.rb",
+    "app/models/lakeraven/ehr/launch_context.rb",
+    "app/services/lakeraven/ehr/login_throttle.rb",
+    "app/models/lakeraven/ehr/kernel_user.rb",
+    "app/models/lakeraven/ehr/current_user.rb",
+    "app/gateways/lakeraven/ehr/site_gateway.rb",
+    "app/gateways/lakeraven/ehr/e_signature_gateway.rb",
     "./.github/workflows/ci.yml"
   ].freeze
 
