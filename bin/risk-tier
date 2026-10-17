@@ -14,6 +14,12 @@
 # with no laptop-only rules or no `[safe]` globs, or a base ref that does not resolve is
 # UNDETERMINED: the script prints `laptop-only` and exits 2. Absence of data is never verification.
 #
+# Glob semantics differ on purpose. A laptop-only glob is a bash pattern: `*` crosses `/`, so
+# `*consent*` catches a path anywhere in the tree (over-matching costs minutes). A `[safe]` glob
+# is matched per segment: `*` and `?` never match `/`, so `docs/*.md` is top-level docs only
+# and each directory level a safe path may sit at has to be spelled out (gate round 4 on #633:
+# a crossing `*` let docs/internal/master_key.md through).
+#
 # Usage:
 #   bin/risk-tier                      paths on stdin, one per line
 #   bin/risk-tier --base REF           paths from `git diff --no-renames --name-only REF...HEAD`
@@ -77,6 +83,25 @@ done < "$RULES"
 [ ${#globs[@]} -gt 0 ] || undetermined "rules file '$RULES' contains no laptop-only rules"
 [ ${#safe_globs[@]} -gt 0 ] || undetermined "rules file '$RULES' has no [safe] globs, so nothing could be phone-safe"
 
+# A safe glob becomes an anchored regex in which `*` and `?` stop at `/`; every other character
+# is literal. Plain bash patterns would let `*` cross `/` (see the header).
+glob_to_regex() {
+  local g="$1" out="" c i
+  for ((i = 0; i < ${#g}; i++)); do
+    c="${g:i:1}"
+    case "$c" in
+      '*')              out+='[^/]*' ;;
+      '?')              out+='[^/]' ;;
+      [A-Za-z0-9_/])    out+="$c" ;;
+      '^'|']'|'['|\\)     out+="\\$c" ;;
+      *)                out+="[$c]" ;;
+    esac
+  done
+  printf '^%s$' "$out"
+}
+safe_res=()
+for g in "${safe_globs[@]}"; do safe_res+=("$(glob_to_regex "$g")"); done
+
 # Collect the paths.
 paths=()
 if [ -n "$BASE" ]; then
@@ -105,13 +130,20 @@ done
 shopt -s nocasematch
 
 if [ $COVERAGE -eq 1 ]; then
-  for g in "${globs[@]}" "${safe_globs[@]}"; do
+  for g in "${globs[@]}"; do
     n=0
     for p in ${clean[@]+"${clean[@]}"}; do
       # shellcheck disable=SC2053
       [[ "$p" == $g ]] && n=$((n + 1))
     done
     printf '%s\t%s\n' "$n" "$g"
+  done
+  for i in "${!safe_globs[@]}"; do
+    n=0
+    for p in ${clean[@]+"${clean[@]}"}; do
+      [[ "$p" =~ ${safe_res[$i]} ]] && n=$((n + 1))
+    done
+    printf '%s\t%s\n' "$n" "${safe_globs[$i]}"
   done
   exit 0
 fi
@@ -137,9 +169,8 @@ for p in "${clean[@]}"; do
   done
   [ $hit -eq 1 ] && continue
   safe=0
-  for g in "${safe_globs[@]}"; do
-    # shellcheck disable=SC2053
-    if [[ "$p" == $g ]]; then safe=1; break; fi
+  for re in "${safe_res[@]}"; do
+    if [[ "$p" =~ $re ]]; then safe=1; break; fi
   done
   [ $safe -eq 1 ] || matches+=("  $p  <- not on the safe-list")
 done
