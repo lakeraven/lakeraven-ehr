@@ -76,8 +76,32 @@ class DemoScriptTest < ActiveSupport::TestCase
     assert_process_still_running(holder_pid)
     assert_port_held(port)
     assert_path_exists pidfile, "server.pid must remain when occupancy cannot be confirmed via lsof"
+    assert_match(/could not be identified/i, stderr,
+                 "stderr should explain the holder could not be identified via lsof")
+    assert_match(/sudo lsof/, stderr,
+                 "stderr should suggest sudo lsof to inspect the blind holder")
     refute rails_invoked?(tree[:rails_log]),
            "fake rails must not run when the port is already in use"
+  end
+
+  test "fails closed when the bind probe cannot run" do
+    port = find_free_port
+    install_ruby_probe_failure_stub(@stub_bin)
+
+    tree = build_demo_tree
+    pidfile = server_pidfile_path(tree)
+    File.write(pidfile, "31337\n")
+
+    env = demo_env(tree[:rails_log], "PORT" => port.to_s)
+
+    _stdout, stderr, status = run_demo(tree[:demo_path], env)
+
+    refute_predicate status, :success?,
+                     "expected failure when the bind probe exits with an error"
+    assert_match(/Could not check whether port/i, stderr)
+    assert_path_exists pidfile, "server.pid must remain when the bind probe fails"
+    refute rails_invoked?(tree[:rails_log]),
+           "fake rails must not run when the bind probe fails"
   end
 
   test "starts rails on free port from PORT with URL mentioning that port" do
@@ -97,23 +121,43 @@ class DemoScriptTest < ActiveSupport::TestCase
   end
 
   test "defaults to port 3000 when PORT is unset" do
-    skip "port 3000 is not free in this environment" unless port_free?(3000)
-
     tree = build_demo_tree
     env = demo_env(tree[:rails_log])
     env.delete("PORT")
+
+    _stdout, stderr, status = run_demo(tree[:demo_path], env)
+
+    if port_free?(3000)
+      assert_predicate status, :success?
+
+      argv, recorded_port = read_rails_invocation(tree[:rails_log])
+      assert_port_argv(argv, 3000)
+      assert_equal "3000", recorded_port
+    else
+      refute_predicate status, :success?,
+                       "expected failure when default port 3000 is busy"
+      assert_includes stderr, "3000", "stderr should name the default port"
+      refute rails_invoked?(tree[:rails_log]),
+             "fake rails must not run when default port 3000 is busy"
+    end
+  end
+
+  test "normalises PORT with a single leading zero" do
+    port = find_free_port
+    tree = build_demo_tree
+    env = demo_env(tree[:rails_log], "PORT" => "0#{port}")
 
     _stdout, _stderr, status = run_demo(tree[:demo_path], env)
 
     assert_predicate status, :success?
 
     argv, recorded_port = read_rails_invocation(tree[:rails_log])
-    assert_port_argv(argv, 3000)
-    assert_equal "3000", recorded_port
+    assert_port_argv(argv, port)
+    assert_equal port.to_s, recorded_port
   end
 
   test "rejects invalid PORT without starting rails" do
-    %w[foo 0 70000].each do |bad_port|
+    %w[foo 0 65536 70000].each do |bad_port|
       tree = build_demo_tree
       env = demo_env(tree[:rails_log], "PORT" => bad_port)
 
@@ -147,6 +191,15 @@ class DemoScriptTest < ActiveSupport::TestCase
     refute_predicate status2, :success?, "expected failure when --port overrides PORT"
     assert_match(/PORT/i, stderr2)
     refute rails_invoked?(tree2[:rails_log])
+
+    tree3 = build_demo_tree
+    env3 = demo_env(tree3[:rails_log], "PORT" => env_port.to_s)
+
+    _stdout, stderr3, status3 = run_demo(tree3[:demo_path], env3, "-p=#{bypass_port}")
+
+    refute_predicate status3, :success?, "expected failure when -p=<port> overrides PORT"
+    assert_match(/PORT/i, stderr3)
+    refute rails_invoked?(tree3[:rails_log])
   end
 
   test "forwards other rails server args after -p from PORT" do
@@ -243,6 +296,12 @@ class DemoScriptTest < ActiveSupport::TestCase
   def install_lsof_no_data_stub(stub_bin)
     path = File.join(stub_bin, "lsof")
     File.write(path, "#!/bin/sh\nexit 1\n")
+    File.chmod(0o755, path)
+  end
+
+  def install_ruby_probe_failure_stub(stub_bin)
+    path = File.join(stub_bin, "ruby")
+    File.write(path, "#!/bin/sh\necho probe boom >&2\nexit 3\n")
     File.chmod(0o755, path)
   end
 
