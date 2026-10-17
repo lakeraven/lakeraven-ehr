@@ -2,24 +2,38 @@ name: Risk tier
 
 # A LABEL, NOT A GATE. This job marks each pull request `risk:laptop-only` or
 # `risk:phone-safe` from the paths it touches, so a reviewer on a phone can tell at a glance
-# whether it is safe to merge without a laptop review. It never fails a pull request.
+# whether it is safe to merge without a laptop review. It is not a required check.
 #
 #   DO NOT add "Risk tier" to branch protection. A label that can block merges becomes a
 #   check people learn to route around, and a gate needs a stronger guarantee than a
-#   path-glob classifier can give.
+#   path-glob classifier can give. (It may FAIL visibly, e.g. when a stale label cannot be
+#   removed; that is deliberate and does not block a merge.)
+#
+# ======================================================================================
+# THIS WORKFLOW RUNS ON `pull_request_target`, SO IT RUNS THE BASE BRANCH'S COPY OF THIS FILE.
+#
+# That is the point. Under plain `pull_request` GitHub runs the workflow file from the pull
+# request itself, so a PR could edit the `run:` block below to print `phone-safe` and label
+# itself safe, even though the classifier and rules are read from the base. Gate round 1 on
+# #633 found exactly that.
+#
+# `pull_request_target` is dangerous when a job checks out or executes the PR's code, because
+# it runs with a write token. This job therefore MUST NEVER:
+#   - check out the PR head (only `github.event.pull_request.base.sha` is checked out),
+#   - run, source, build or install anything from the PR,
+#   - interpolate PR-controlled text (title, branch, body) into a shell command.
+# The PR's files are listed through the API and only their NAMES are read as data.
+# ======================================================================================
 #
 # The classifier and its rules are read from the BASE commit, not from the pull request.
-# Otherwise a PR could edit bin/risk-tier or .github/risk-tiers.txt to label itself
-# phone-safe. Both files are laptop-only paths under the base rules, so editing either one
-# gets the PR classified laptop-only.
+# Both files are laptop-only paths under the base rules, so editing either one gets the PR
+# classified laptop-only.
 #
-# Fail closed: if the file list cannot be read in full, or the classifier is missing from the
-# base, the PR is labelled laptop-only. Absence of data is never verification.
-#
-# Fork and Dependabot PRs get a read-only token. The tier is still computed and written to the
-# job summary; only the label step is skipped or warns.
+# Fail closed: only a classifier that exits 0 AND prints `phone-safe` first yields phone-safe.
+# Anything else (a missing classifier, an unreadable or truncated file list, exit 1 or 2, an
+# empty output) is laptop-only. Absence of data is never verification.
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
@@ -33,7 +47,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          # The BASE commit. Never the PR head: see the warning at the top of this file.
           ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
 
       - name: Classify
         id: classify
@@ -60,9 +76,15 @@ jobs:
               # A rename contributes BOTH its old and new path.
               jq -r '.[] | .filename, (.previous_filename // empty)' files.json > paths.txt
               out=$(bin/risk-tier < paths.txt)
+              rc=$?
               first=$(printf '%s\n' "$out" | head -n 1)
               detail=$(printf '%s\n' "$out" | tail -n +2)
-              if [ "$first" = "phone-safe" ]; then tier=phone-safe; fi
+              # The exit status is part of the contract, not only the first line.
+              if [ "$rc" -eq 0 ] && [ "$first" = "phone-safe" ]; then
+                tier=phone-safe
+              else
+                detail="${detail}${detail:+$'\n'}  (classifier exit $rc, first line '$first': treated as laptop-only)"
+              fi
             fi
           fi
 
@@ -75,19 +97,49 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           echo "tier=$tier" >> "$GITHUB_OUTPUT"
 
+      # No continue-on-error: a label that cannot be set must be visible, because a stale
+      # `risk:phone-safe` on a PR that is now laptop-only is the one failure that matters.
+      # The job is not a required check, so a red run costs nothing but attention.
       - name: Apply the label
-        # Never block the PR over a label. A read-only token (forks, Dependabot) cannot write one.
-        continue-on-error: true
-        if: github.event.pull_request.head.repo.full_name == github.repository
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
           TIER: ${{ steps.classify.outputs.tier }}
         run: |
+          set -eu
           gh label create "risk:laptop-only" --color D93F0B --force \
             --description "Touches auth, consent, Part 2, audit, tenancy, schema, CI or dependencies: review on a laptop"
           gh label create "risk:phone-safe" --color 0E8A16 --force \
             --description "Touches none of the laptop-only paths: reviewable and mergeable from a phone"
+
           if [ "$TIER" = "phone-safe" ]; then add=risk:phone-safe; drop=risk:laptop-only
           else add=risk:laptop-only; drop=risk:phone-safe; fi
-          gh pr edit "$PR" --add-label "$add" --remove-label "$drop"
+
+          has_label() {
+            gh pr view "$PR" --repo "$REPO" --json labels --jq '.labels[].name' | grep -qx "$1"
+          }
+
+          # Remove the opposite label FIRST. If that fails and the label is still there, stop:
+          # adding the new label would leave a PR carrying both.
+          if ! gh pr edit "$PR" --repo "$REPO" --remove-label "$drop"; then
+            if has_label "$drop"; then
+              echo "::error::could not remove $drop from PR #$PR; leaving the labels alone"
+              exit 1
+            fi
+          fi
+          gh pr edit "$PR" --repo "$REPO" --add-label "$add"
+
+      - name: Verify the label
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          TIER: ${{ steps.classify.outputs.tier }}
+        run: |
+          set -eu
+          labels=$(gh pr view "$PR" --repo "$REPO" --json labels --jq '[.labels[].name | select(startswith("risk:"))] | sort | join(",")')
+          if [ "$labels" != "risk:$TIER" ]; then
+            echo "::error::expected exactly risk:$TIER on PR #$PR, found '$labels'"
+            exit 1
+          fi

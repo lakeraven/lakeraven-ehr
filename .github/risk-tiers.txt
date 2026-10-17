@@ -45,6 +45,18 @@ config/initializers/*       # [forward] engine-level boot configuration
 *session*                   # sign-in sessions and session scope
 *policy*                    # authorization policies, redaction and CSP
 *compartment*               # patient compartment: what a caller may read
+*authoriz*                  # authorization code, and the tests that pin it
+*/ehr/application_controller.rb   # base controller: global before_actions, incl. FHIR scope authorization
+*clinician_patient_context* # session-scoped patient binding, the cross-patient guard
+lib/lakeraven/ehr/engine.rb # engine boot: Doorkeeper wiring and credential parameter filtering
+*csrf*                      # cross-site request forgery protection and its probes
+*rate_limit*                # brute-force and abuse throttling
+*password*                  # [forward] passwords
+*credential*                # [forward] credentials
+*secret*                    # [forward] secrets
+*permission*                # [forward] permission checks
+*privilege*                 # [forward] privilege checks
+*cipher*                    # [forward] ciphers
 
 # --- consent, Part 2 and egress ---
 *consent*                   # consent decides disclosure
@@ -56,11 +68,20 @@ config/initializers/*       # [forward] engine-level boot configuration
 *bulk_export*               # bulk data leaves in volume
 *break_glass*               # [forward] emergency override of access controls
 *emergency_access*          # emergency access to records
+*export*                    # data leaving: bulk, EHI, VAERS and QRDA exports and their ownership
+*ehi_*                      # electronic health information (ONC 170.315(b)(10))
+*disclos*                   # disclosures and the accounting of them
+*reportab*                  # public-health (eCR) reportability data leaving
+*referral_origination*      # referrals originated to other organizations
+*bh_access_clock*           # behavioral-health access-to-care timing (Part 2 adjacent)
 
 # --- audit and PHI handling ---
 *audit*                     # the PHI access trail
 *phi_*                      # PHI sanitising and handling
 *encrypt*                   # encryption and its verification
+*breach*                    # breach detection and notification
+*incident*                  # security incidents
+*amend*                     # a patient's right to amend their record
 
 # --- tenant boundary ---
 *organization*              # the organization/tenant boundary (ADR 0007)
