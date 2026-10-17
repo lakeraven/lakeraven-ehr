@@ -30,8 +30,8 @@ name: Risk tier
 # classified laptop-only.
 #
 # Fail closed: only a classifier that exits 0 AND prints `phone-safe` first yields phone-safe.
-# Anything else (a missing classifier, an unreadable or truncated file list, exit 1 or 2, an
-# empty output) is laptop-only. Absence of data is never verification.
+# Anything else (a missing classifier, an unreadable or truncated file list, a file name with
+# a control character, exit 1 or 2, an empty output) is laptop-only. Absence of data is never verification.
 on:
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
@@ -39,6 +39,13 @@ on:
 permissions:
   contents: read
   pull-requests: write
+
+# One run per pull request at a time; a newer push cancels the older run. Without this an
+# older run that classified an earlier head as phone-safe can finish LAST and relabel a head
+# that is now laptop-only (gate round 2 on #633).
+concurrency:
+  group: risk-tier-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   risk-tier:
@@ -72,6 +79,11 @@ jobs:
             got=$(jq length files.json)
             if [ "$got" != "$CHANGED" ] || [ "$CHANGED" -ge 3000 ]; then
               detail="  (undetermined: read $got of $CHANGED files; the API caps a PR at 3000)"
+            elif jq -e 'any(.[]; (.filename, .previous_filename // empty) | test("[\\x00-\\x1f\\x7f]"))' files.json > /dev/null; then
+              # A name with a newline would become two lines in paths.txt, each possibly a
+              # safe path on its own, and a trailing CR would be stripped. The classifier only
+              # sees lines, so the control character has to be caught here, in the JSON.
+              detail="  (a file name contains a control character and cannot be judged line by line: treated as laptop-only)"
             else
               # A rename contributes BOTH its old and new path.
               jq -r '.[] | .filename, (.previous_filename // empty)' files.json > paths.txt
@@ -111,7 +123,7 @@ jobs:
           gh label create "risk:laptop-only" --color D93F0B --force \
             --description "Touches auth, consent, Part 2, audit, tenancy, schema, CI or dependencies: review on a laptop"
           gh label create "risk:phone-safe" --color 0E8A16 --force \
-            --description "Touches none of the laptop-only paths: reviewable and mergeable from a phone"
+            --XX
 
           if [ "$TIER" = "phone-safe" ]; then add=risk:phone-safe; drop=risk:laptop-only
           else add=risk:laptop-only; drop=risk:phone-safe; fi
