@@ -4,9 +4,11 @@
 # glob in the [safe] section at the bottom AND matches no laptop-only rule above it. Anything
 # on neither list is "laptop-only": it needs a laptop review, not a phone merge. The laptop-only
 # rules win over the safe-list, so a sensitive word in a docs or view path still flips the tier.
-# Matching is case-insensitive and `*` crosses `/`, so `*consent*` matches any path with
-# "consent" in it. Over-matching is deliberate: a wrong laptop-only costs a few minutes, a wrong
-# phone-safe costs a defect. Why a safe-list: a list of sensitive names can only be as good as
+# Matching is case-insensitive. In a laptop-only rule `*` crosses `/`, so `*consent*` matches any
+# path with "consent" in it. In a [safe] glob `*` and `?` stop at `/`: `docs/*.md` is top-level
+# docs only, and each directory level a safe path may sit at is spelled out. Over-matching is
+# deliberate on the laptop side: a wrong laptop-only costs a few minutes, a wrong phone-safe
+# costs a defect. Why a safe-list: a list of sensitive names can only be as good as
 # the memory of whoever wrote it, and gate round 2 found privileged files named
 # web_controller.rb and test_helper.rb that no name rule would ever catch.
 #
@@ -119,8 +121,8 @@ SOFTWARE-FACTORY*           # [forward] the review method itself
 [safe]
 README.md                   # prose
 CHANGELOG.md                # [forward] prose
-docs/*.md                   # prose (docs/adr, docs/compliance and docs/certification are laptop-only rules above)
-app/assets/stylesheets/*.css   # styling
+docs/*.md                   # prose, top-level only (docs/adr, docs/compliance and docs/certification are laptop-only rules above)
+app/assets/stylesheets/lakeraven/ehr/*.css   # styling (the engine namespace; one level, no deeper)
 app/assets/images/*.png     # [forward] images
 app/assets/images/*.jpg     # [forward] images
 app/assets/images/*.jpeg    # [forward] images
