@@ -61,7 +61,7 @@ Given("patient {string} is the active patient context") do |name|
 end
 
 Given("the active patient has no recorded allergies in the chart source") do
-  # Patient 3 is seeded with an empty allergy list in LakeravenDemoSeeds.
+  seed_nka_allergy_assessment!(@dfn)
 end
 
 Given("the clinician is signed in with no patient in context") do

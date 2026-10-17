@@ -204,6 +204,73 @@ module PatientBannerTestHelper
   end
   private :banner_request
 
+  # Raw ORQQAL LIST lines for the in-memory mock (assessment sentinels are not
+  # allergy rows and cannot be seeded via seed_keyed_collection).
+  def seed_orqqal_reply!(dfn, lines)
+    client = RpmsRpc.configuration.client
+    mapping = RpmsRpc::DataMapper[:allergy_list]
+    rpc_name = mapping.rpc_name
+    keyed = (client.instance_variable_get(:@keyed_collections) || {}).dup
+    keyed[rpc_name] = (keyed[rpc_name] || {}).dup
+    keyed[rpc_name][dfn.to_s] = Array(lines)
+    client.instance_variable_set(:@keyed_collections, keyed)
+  end
+
+  def seed_nka_allergy_assessment!(dfn)
+    seed_orqqal_reply!(dfn, [ RpmsRpc::Allergy::NKA_SENTINEL ])
+  end
+
+  def assert_allergies_unassessed_or_indeterminate!
+    field = allergies_field_node
+    assert field, "Expected allergies field inside #patient-banner"
+    assert_equal "not-loaded", field["data-allergies-state"]
+    refute_includes field.text, "None recorded"
+    refute_includes field.text, "No Known Allergies"
+  end
+
+  def allergies_label_text
+    field = allergies_field_node
+    assert field, "Expected allergies field inside #patient-banner"
+    field.text.gsub(/\s*Allergies\s*/i, "").strip
+  end
+
+  def assert_audit_includes_patient!(dfn)
+    assert Lakeraven::EHR::AuditEvent.exists?(entity_type: "Patient", entity_identifier: dfn.to_s),
+           "Expected an AuditEvent row for Patient/#{dfn}"
+  end
+
+  def refute_audit_entity_identifier!(identifier)
+    refute Lakeraven::EHR::AuditEvent.exists?(entity_identifier: identifier.to_s),
+           "Unexpected AuditEvent with entity_identifier #{identifier.inspect}"
+  end
+
+  def refute_audit_patient!(dfn)
+    refute Lakeraven::EHR::AuditEvent.exists?(entity_type: "Patient", entity_identifier: dfn.to_s),
+           "Unexpected AuditEvent for Patient/#{dfn}"
+  end
+
+  def with_wire_allergies_for_patient(rows)
+    original = Lakeraven::EHR::AllergyIntolerance.gateway
+    gateway = Class.new do
+      define_singleton_method(:for_patient) { |_dfn| rows }
+    end
+    Lakeraven::EHR::AllergyIntolerance.gateway = gateway
+    yield
+  ensure
+    Lakeraven::EHR::AllergyIntolerance.gateway = original
+  end
+
+  def with_merged_allergies_for_patient(records)
+    klass = Lakeraven::EHR::SupplementalClinicalResources
+    original = klass.method(:merged_allergy_intolerances_for_patient)
+    klass.define_singleton_method(:merged_allergy_intolerances_for_patient) do |_dfn|
+      records
+    end
+    yield
+  ensure
+    klass.define_singleton_method(:merged_allergy_intolerances_for_patient, original)
+  end
+
   def with_allergy_source_raising
     klass = Lakeraven::EHR::SupplementalClinicalResources
     original = klass.method(:merged_allergy_intolerances_for_patient)
