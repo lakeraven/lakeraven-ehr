@@ -1,0 +1,344 @@
+# frozen_string_literal: true
+
+require "test_helper"
+require "open3"
+require "tmpdir"
+require "fileutils"
+
+# Contract for bin/red-before-green (written before the script; the builder
+# does not edit these tests).
+#
+# The script answers one question for a pull request that changes app code and
+# adds or changes minitest files: do those tests FAIL when the app code is put
+# back to what the base branch had? A test that passes either way does not test
+# the change.
+#
+#   verdict                exit  meaning
+#   EXEMPT                 0     nothing to check (and the reason is printed)
+#   RED                    0     at least one test failed without the fix
+#   RED-FOR-WRONG-REASON   0     only missing-code errors; warned loudly
+#   GREEN-WITHOUT-FIX      1     every test passed without the fix
+#   UNDETERMINED           2     could not tell; never treated as a pass
+#
+# The classification paths run on temp git repos with no Rails. The run paths
+# substitute the test command (RBG_TEST_CMD) with a fake that reads the app
+# file it is standing in for, so they prove the app code really was restored to
+# the base version in the scratch worktree.
+class RedBeforeGreenTest < Minitest::Test
+  SCRIPT = File.expand_path("../../bin/red-before-green", __dir__)
+
+  # A stand-in for `rails test`: prints a minitest-style summary that depends on
+  # what app/greeter.rb says in the directory it runs in, and echoes its args.
+  FAKE_RUNNER = <<~RUBY
+    puts "ARGS: " + ARGV.join(" ")
+    src = File.exist?("app/greeter.rb") ? File.read("app/greeter.rb") : "<missing>"
+    puts "SEEN: " + src.strip
+    if src.include?("fixed")
+      puts "1 runs, 1 assertions, 0 failures, 0 errors, 0 skips"
+    else
+      puts "Failure:\\nGreeterTest#test_it [test/greeter_test.rb:3]:\\nExpected: \\"fixed\\""
+      puts "1 runs, 1 assertions, 1 failures, 0 errors, 0 skips"
+      exit 1
+    end
+  RUBY
+
+  def setup
+    @dir = Dir.mktmpdir("rbg")
+    git "init", "-q", "-b", "main"
+    git "config", "user.email", "t@example.test"
+    git "config", "user.name", "T"
+    write "app/greeter.rb", "# broken\n"
+    write "lib/keep.rb", "# keep\n"
+    write "test/greeter_test.rb", "# old test\n"
+    write "README.md", "docs\n"
+    commit "base"
+    @base = git("rev-parse", "HEAD").strip
+    git "checkout", "-q", "-b", "pr"
+  end
+
+  def teardown
+    FileUtils.remove_entry(@dir) if @dir && File.exist?(@dir)
+  end
+
+  # --- classification -------------------------------------------------------
+
+  def test_app_and_test_change_is_classified_and_not_exempt
+    write "app/greeter.rb", "# fixed\n"
+    write "test/greeter_test.rb", "# new test\n"
+    commit "fix"
+
+    out, status = run_script("--dry-classify")
+
+    assert_equal 0, status.exitstatus, out
+    assert_match(%r{^app: .*app/greeter\.rb}, out)
+    assert_match(%r{^tests: .*test/greeter_test\.rb}, out)
+    assert_match(/^exempt: no/, out)
+  end
+
+  def test_docs_only_change_is_exempt_with_a_reason
+    write "README.md", "more docs\n"
+    commit "docs"
+
+    out, status = run_script("--dry-classify")
+
+    assert_equal 0, status.exitstatus, out
+    assert_match(/^exempt: yes/, out)
+    assert_match(/no app-code change/i, out)
+  end
+
+  def test_test_only_change_is_exempt_with_a_reason
+    write "test/greeter_test.rb", "# more tests\n"
+    commit "tests only"
+
+    out, status = run_script
+
+    assert_equal 0, status.exitstatus, out
+    assert_match(/^VERDICT: EXEMPT/, out)
+    assert_match(/no app-code change/i, out)
+  end
+
+  def test_app_only_change_is_exempt_because_no_tests_changed
+    write "app/greeter.rb", "# fixed\n"
+    commit "app only"
+
+    out, status = run_script
+
+    assert_equal 0, status.exitstatus, out
+    assert_match(/^VERDICT: EXEMPT/, out)
+    assert_match(/no changed minitest files/i, out)
+  end
+
+  def test_test_dummy_is_not_a_test_path
+    write "app/greeter.rb", "# fixed\n"
+    write "test/dummy/config/thing_test.rb", "# dummy\n"
+    commit "dummy only"
+
+    out, = run_script("--dry-classify")
+
+    assert_match(/^exempt: yes/, out)
+    refute_match(%r{test/dummy}, out.lines.grep(/^tests:/).join)
+  end
+
+  def test_features_alone_are_not_run_so_the_pr_is_exempt_loudly
+    write "app/greeter.rb", "# fixed\n"
+    write "features/greeting.feature", "Feature: greeting\n"
+    commit "feature only"
+
+    out, status = run_script
+
+    assert_equal 0, status.exitstatus, out
+    assert_match(/^VERDICT: EXEMPT/, out)
+    assert_match(/features/i, out)
+  end
+
+  def test_deleted_test_files_are_not_run
+    FileUtils.rm(File.join(@dir, "test/greeter_test.rb"))
+    write "app/greeter.rb", "# fixed\n"
+    commit "delete test"
+
+    out, = run_script("--dry-classify")
+
+    assert_match(/^exempt: yes/, out)
+  end
+
+  def test_rbg_exempt_env_skips_the_check_and_says_so
+    write "app/greeter.rb", "# fixed\n"
+    write "test/greeter_test.rb", "# new test\n"
+    commit "fix"
+
+    out, status = run_script(env: { "RBG_EXEMPT" => "1" })
+
+    assert_equal 0, status.exitstatus, out
+    assert_match(/^VERDICT: EXEMPT/, out)
+    assert_match(/RBG_EXEMPT/, out)
+  end
+
+  def test_unknown_base_is_undetermined_not_a_pass
+    write "app/greeter.rb", "# fixed\n"
+    commit "fix"
+
+    out, status = run_script("--base", "no-such-ref")
+
+    assert_equal 2, status.exitstatus, out
+    assert_match(/^VERDICT: UNDETERMINED/, out)
+  end
+
+  # --- verdicts -------------------------------------------------------------
+
+  def test_red_when_the_tests_fail_against_the_base_app_code
+    fixed_pr
+
+    out, status = run_script(env: fake_runner)
+
+    assert_equal 0, status.exitstatus, out
+    assert_match(/^VERDICT: RED$/, out)
+    # The scratch worktree ran with the BASE app code, not the PR's.
+    assert_match(/SEEN: # broken/, out)
+    # Only the changed minitest file was handed to the runner.
+    assert_match(%r{ARGS: test/greeter_test\.rb$}, out)
+  end
+
+  def test_the_pr_checkout_is_left_untouched
+    fixed_pr
+
+    run_script(env: fake_runner)
+
+    assert_equal "# fixed\n", File.read(File.join(@dir, "app/greeter.rb"))
+    assert_equal "", git("status", "--porcelain")
+    assert_equal 1, git("worktree", "list").lines.size, "scratch worktree was not removed"
+  end
+
+  def test_an_app_file_added_by_the_pr_is_absent_in_the_scratch_run
+    write "app/brand_new.rb", "# fixed\n"
+    write "app/greeter.rb", "# fixed\n"
+    write "test/greeter_test.rb", "# new test\n"
+    commit "adds a file"
+    runner = <<~RUBY
+      puts(File.exist?("app/brand_new.rb") ? "ADDED-FILE-PRESENT" : "ADDED-FILE-ABSENT")
+      puts "1 runs, 1 assertions, 1 failures, 0 errors, 0 skips"
+      exit 1
+    RUBY
+
+    out, status = run_script(env: fake_runner(runner))
+
+    assert_equal 0, status.exitstatus, out
+    assert_match(/ADDED-FILE-ABSENT/, out)
+  end
+
+  def test_a_deleted_app_file_is_restored_in_the_scratch_run
+    FileUtils.rm(File.join(@dir, "lib/keep.rb"))
+    write "test/greeter_test.rb", "# new test\n"
+    commit "deletes a file"
+    runner = <<~RUBY
+      puts(File.exist?("lib/keep.rb") ? "DELETED-FILE-RESTORED" : "DELETED-FILE-GONE")
+      puts "1 runs, 1 assertions, 1 failures, 0 errors, 0 skips"
+      exit 1
+    RUBY
+
+    out, = run_script(env: fake_runner(runner))
+
+    assert_match(/DELETED-FILE-RESTORED/, out)
+  end
+
+  def test_green_without_fix_when_every_test_passes_on_the_base_app_code
+    write "app/greeter.rb", "# cosmetic change\n"
+    write "test/greeter_test.rb", "# a test that never looks at the change\n"
+    commit "tests that do not test"
+    passing = <<~RUBY
+      puts "5 runs, 9 assertions, 0 failures, 0 errors, 0 skips"
+    RUBY
+
+    out, status = run_script(env: fake_runner(passing))
+
+    assert_equal 1, status.exitstatus, out
+    assert_match(/^VERDICT: GREEN-WITHOUT-FIX/, out)
+  end
+
+  def test_red_for_wrong_reason_when_only_missing_code_errors_occur
+    fixed_pr
+    errors = <<~RUBY
+      puts "Error:\\nGreeterTest#test_it:\\nNameError: uninitialized constant Greeter\\n    app.rb:1"
+      puts "Error:\\nGreeterTest#test_two:\\nNoMethodError: undefined method 'hello' for class Greeter"
+      puts "2 runs, 0 assertions, 0 failures, 2 errors, 0 skips"
+      exit 1
+    RUBY
+
+    out, status = run_script(env: fake_runner(errors))
+
+    assert_equal 0, status.exitstatus, out
+    assert_match(/^VERDICT: RED-FOR-WRONG-REASON/, out)
+    assert_match(/WARNING/, out)
+  end
+
+  def test_one_genuine_failure_among_missing_code_errors_is_red
+    fixed_pr
+    mixed = <<~RUBY
+      puts "Error:\\nGreeterTest#test_it:\\nNameError: uninitialized constant Greeter"
+      puts "Failure:\\nGreeterTest#test_two [test/greeter_test.rb:9]:\\nExpected: 1\\n  Actual: 2"
+      puts "2 runs, 1 assertions, 1 failures, 1 errors, 0 skips"
+      exit 1
+    RUBY
+
+    out, status = run_script(env: fake_runner(mixed))
+
+    assert_equal 0, status.exitstatus, out
+    assert_match(/^VERDICT: RED$/, out)
+  end
+
+  def test_an_error_that_is_not_missing_code_counts_as_red
+    fixed_pr
+    other = <<~RUBY
+      puts "Error:\\nGreeterTest#test_it:\\nActiveRecord::RecordInvalid: Validation failed"
+      puts "1 runs, 0 assertions, 0 failures, 1 errors, 0 skips"
+      exit 1
+    RUBY
+
+    out, = run_script(env: fake_runner(other))
+
+    assert_match(/^VERDICT: RED$/, out)
+  end
+
+  def test_undetermined_when_the_runner_prints_no_summary
+    fixed_pr
+    crash = <<~RUBY
+      puts "boom: could not connect to the database"
+      exit 0
+    RUBY
+
+    out, status = run_script(env: fake_runner(crash))
+
+    assert_equal 2, status.exitstatus, out
+    assert_match(/^VERDICT: UNDETERMINED/, out)
+  end
+
+  def test_undetermined_when_zero_tests_ran
+    fixed_pr
+    nothing = <<~RUBY
+      puts "0 runs, 0 assertions, 0 failures, 0 errors, 0 skips"
+    RUBY
+
+    out, status = run_script(env: fake_runner(nothing))
+
+    assert_equal 2, status.exitstatus, out
+    assert_match(/^VERDICT: UNDETERMINED/, out)
+  end
+
+  private
+
+  def fixed_pr
+    write "app/greeter.rb", "# fixed\n"
+    write "test/greeter_test.rb", "# new test\n"
+    commit "fix with test"
+  end
+
+  def fake_runner(body = FAKE_RUNNER)
+    # Outside the temp repo so it never shows up as a change.
+    path = File.join(Dir.mktmpdir("rbg-runner"), "runner.rb")
+    File.write(path, body)
+    { "RBG_TEST_CMD" => "ruby #{path}" }
+  end
+
+  def run_script(*args, env: {})
+    args = [ "--base", @base ] + args unless args.include?("--base")
+    out, status = Open3.capture2e({ "RBG_EXEMPT" => "0" }.merge(env), SCRIPT, *args, chdir: @dir)
+    [ out, status ]
+  end
+
+  def write(rel, content)
+    path = File.join(@dir, rel)
+    FileUtils.mkdir_p(File.dirname(path))
+    File.write(path, content)
+  end
+
+  def commit(message)
+    git "add", "--all"
+    git "commit", "-q", "-m", message
+  end
+
+  def git(*args)
+    out, status = Open3.capture2e("git", *args, chdir: @dir)
+    raise "git #{args.join(' ')} failed: #{out}" unless status.success?
+
+    out
+  end
+end
