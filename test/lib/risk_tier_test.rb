@@ -185,6 +185,31 @@ class RiskTierTest < ActiveSupport::TestCase
     "./.github/workflows/ci.yml"
   ].freeze
 
+  # A safe glob's `*` stops at a slash (gate round 4): `docs/*.md` is top-level docs only, not
+  # every markdown file in every subtree. Each of these used to be phone-safe because `*`
+  # crossed `/`; none matches a laptop-only rule, so "not on the safe-list" is the only thing
+  # standing between them and a phone merge.
+  NESTED_UNLISTED = [
+    "docs/internal/master_key.md",
+    "docs/internal/auth_bypass.md",
+    "docs/a/b/c.md",
+    "docs/runbooks/x.md",
+    "app/assets/stylesheets/x/y/z/w.css",
+    "app/assets/stylesheets/lakeraven/ehr/sub/extra.css",
+    "app/assets/stylesheets/application.css",
+    "config/locales/evil/deep.yml"
+  ].freeze
+
+  NESTED_UNLISTED.each_with_index do |path, i|
+    test "a safe glob does not reach into subtrees ##{i}: #{path}" do
+      tier, status, out = classify(path)
+      assert_equal "laptop-only", tier
+      assert_equal 0, status
+      assert_includes out, path
+      assert_match(/<- .*not on the safe-list/i, out, "output must say the path is not on the safe-list")
+    end
+  end
+
   PHONE_SAFE.each_with_index do |path, i|
     test "phone-safe path ##{i}: #{path}" do
       tier, status, = classify(path)
@@ -274,6 +299,44 @@ class RiskTierTest < ActiveSupport::TestCase
       assert_equal "laptop-only", run_script("--rules", rules, stdin: "foo/b.rb\n")[0].lines.first.strip
       assert_equal "laptop-only", run_script("--rules", rules, stdin: "foo/secret.txt\n")[0].lines.first.strip
       assert_equal "laptop-only", run_script("--rules", rules, stdin: "foo/a.txt\nGemfile\n")[0].lines.first.strip
+    end
+  end
+
+  test "in a safe glob `*` and `?` never match a slash; in a laptop rule `*` still crosses it" do
+    Dir.mktmpdir do |dir|
+      rules = File.join(dir, "rules.txt")
+      File.write(rules, "Gemfile   # dependencies\nfoo/secret*   # secrets\n\n[safe]\nfoo/*.txt   # plain text\nbar/*/baz.md   # one level\nq/a?b.txt   # one char\n")
+      tier = ->(path) { run_script("--rules", rules, stdin: "#{path}\n")[0].lines.first.strip }
+      assert_equal "phone-safe", tier.call("foo/a.txt")
+      assert_equal "laptop-only", tier.call("foo/sub/a.txt"), "foo/*.txt must not reach foo/sub/a.txt"
+      assert_equal "laptop-only", tier.call("foo/a/b/c.txt")
+      assert_equal "phone-safe", tier.call("bar/x/baz.md")
+      assert_equal "laptop-only", tier.call("bar/x/y/baz.md"), "bar/*/baz.md is exactly one level"
+      assert_equal "laptop-only", tier.call("bar/baz.md"), "bar/*/baz.md needs the middle segment"
+      assert_equal "phone-safe", tier.call("q/axb.txt")
+      assert_equal "laptop-only", tier.call("q/a/b.txt"), "? must not match a slash"
+      assert_equal "phone-safe", tier.call("FOO/A.TXT"), "matching stays case-insensitive"
+      assert_equal "laptop-only", tier.call("foo/secret/dir/x.txt"), "laptop rules keep their crossing semantics"
+    end
+  end
+
+  # Hard-coded, not derived from the rules (deriving it would be circular): the tracked paths
+  # that are phone-safe today and must stay so after the tightening.
+  STILL_PHONE_SAFE = [
+    "README.md",
+    "docs/BPRM_PARITY_PLAN.md",
+    "docs/BPRM_REG_SCHED_TWIN.md",
+    "docs/demo_patient_chart_runbook.md",
+    "app/assets/stylesheets/lakeraven/ehr/application.css"
+  ].freeze
+
+  test "the tracked prose and stylesheet paths that were phone-safe still are" do
+    tracked, = Open3.capture2("git", "ls-files", chdir: ROOT)
+    tracked = tracked.lines.map(&:chomp)
+    present = STILL_PHONE_SAFE & tracked
+    assert_operator present.size, :>=, 3, "the expected tracked safe paths are gone; update STILL_PHONE_SAFE"
+    present.each do |path|
+      assert_equal "phone-safe", classify(path).first, "#{path} should still be phone-safe"
     end
   end
 
@@ -524,9 +587,9 @@ class RiskTierTest < ActiveSupport::TestCase
   # at all cannot slip through, which is the hole the blocklist had.
   SAFE_PATH_PATTERNS = [
     %r{\A(README|CHANGELOG)\.md\z}i,
-    %r{\Adocs/.+\.md\z}i,
-    %r{\Aapp/assets/stylesheets/.+\.css\z}i,
-    %r{\Aapp/assets/images/.+\.(png|jpe?g|gif|ico)\z}i,
+    %r{\Adocs/[^/]+\.md\z}i,
+    %r{\Aapp/assets/stylesheets/lakeraven/ehr/[^/]+\.css\z}i,
+    %r{\Aapp/assets/images/[^/]+\.(png|jpe?g|gif|ico)\z}i,
     %r{\Aconfig/locales/[^/]+\.yml\z}i
   ].freeze
 
@@ -561,7 +624,7 @@ class RiskTierTest < ActiveSupport::TestCase
   test "the safe patterns are really used: safe tracked files exist and are phone-safe when they match no rule" do
     tracked, = Open3.capture2("git", "ls-files", "README.md", "docs", "app/assets", chdir: ROOT)
     safe = tracked.lines.map(&:chomp).select { |p| SAFE_PATH_PATTERNS.any? { |re| re.match?(p) } }
-    assert_operator safe.size, :>, 5
+    assert_operator safe.size, :>=, 5
     ok = safe.select { |p| classify(p).first == "phone-safe" }
     assert_operator ok.size, :>, 3, "the safe-list admits almost nothing; is it empty?"
   end
