@@ -1,0 +1,241 @@
+/*
+ * Lakeraven EHR engine styles (Tailwind CSS v4, via tailwindcss-rails).
+ *
+ * The engine ships no build of its own. A host app includes this file in ITS
+ * Tailwind build, the tailwindcss-rails engine convention:
+ *
+ *   bin/rails tailwindcss:engines   # writes app/assets/builds/tailwind/lakeraven_ehr.css
+ *   # then, in the host's app/assets/tailwind/application.css:
+ *   @import "../builds/tailwind/lakeraven_ehr";
+ *
+ * Nothing here may restyle the host's own pages. So there is no @theme (the
+ * host owns its tokens), and every element default is scoped to `.lr-ehr`,
+ * the class the engine layout puts on <body>.
+ */
+
+@source "../../../views";
+@source "../../../helpers";
+
+/* ---------------------------------------------------------------------------
+ * Element defaults inside engine pages.
+ *
+ * Tailwind's preflight strips browser defaults (heading sizes, margins, button
+ * chrome, list bullets). Engine views are mostly semantic HTML, so they get
+ * readable defaults back here. :where() keeps these at the lowest weight, and
+ * the base layer sits under components and utilities, so any class wins.
+ * ------------------------------------------------------------------------ */
+@layer base {
+  .lr-ehr :where(h1) {
+    @apply mb-2 text-2xl font-semibold tracking-tight text-slate-900;
+  }
+
+  .lr-ehr :where(h2) {
+    @apply mt-6 mb-2 text-lg font-semibold text-slate-900;
+  }
+
+  .lr-ehr :where(h3) {
+    @apply mt-4 mb-1 font-semibold text-slate-900;
+  }
+
+  .lr-ehr :where(p) {
+    @apply my-2;
+  }
+
+  .lr-ehr :where(main ul:not([class]), main ol:not([class])) {
+    @apply my-2 pl-6;
+  }
+
+  .lr-ehr :where(main ul:not([class])) {
+    @apply list-disc;
+  }
+
+  .lr-ehr :where(main ol:not([class])) {
+    @apply list-decimal;
+  }
+
+  .lr-ehr :where(a) {
+    @apply text-blue-700 underline underline-offset-2 hover:text-blue-900;
+  }
+
+  .lr-ehr :where(label) {
+    @apply font-medium text-slate-800;
+  }
+
+  .lr-ehr :where(input:not([type]), input[type="text"], input[type="password"], input[type="date"], input[type="search"], input[type="number"], select, textarea) {
+    @apply min-h-11 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base text-slate-900 shadow-xs;
+  }
+
+  .lr-ehr :where(button, input[type="submit"]) {
+    @apply inline-flex min-h-11 cursor-pointer items-center justify-center rounded-md bg-blue-700 px-4 py-2 font-semibold text-white shadow-xs hover:bg-blue-800;
+  }
+
+  .lr-ehr :where(fieldset) {
+    @apply rounded-lg border border-slate-300 p-4;
+  }
+
+  .lr-ehr :where(table) {
+    @apply w-full border-collapse text-left;
+  }
+
+  .lr-ehr :where(th, td) {
+    @apply border-b border-slate-200 px-2 py-2;
+  }
+
+  .lr-ehr :where(th) {
+    @apply font-semibold text-slate-700;
+  }
+
+  /* Focus is always visible, never removed: every engine form is keyboard
+     operable. */
+  .lr-ehr :where(a, button, input, select, textarea):focus-visible {
+    @apply outline-3 outline-offset-2 outline-blue-700;
+  }
+}
+
+@layer components {
+  /* Page chrome shared by engine views. */
+  .page-header {
+    @apply mb-6;
+  }
+
+  .page-header p {
+    @apply mt-1 text-slate-600;
+  }
+
+  .card {
+    @apply rounded-lg border border-slate-200 bg-white p-6 shadow-sm;
+  }
+
+  .alert {
+    @apply my-4 rounded-md border px-4 py-3;
+  }
+
+  .alert--error {
+    @apply border-red-300 bg-red-50 text-red-900;
+  }
+
+  .alert--notice {
+    @apply border-emerald-300 bg-emerald-50 text-emerald-900;
+  }
+
+  .summary-counts {
+    @apply grid gap-4 sm:grid-cols-3;
+  }
+
+  .summary-count {
+    @apply flex flex-col rounded-lg border border-slate-200 bg-white p-5 shadow-sm;
+  }
+
+  .summary-count__number {
+    @apply text-3xl font-semibold text-slate-900 tabular-nums;
+  }
+
+  .summary-count__label {
+    @apply mt-1 text-sm font-medium text-slate-600;
+  }
+
+  .hint {
+    @apply mt-1 text-sm text-slate-600;
+  }
+
+  /* -------------------------------------------------------------------------
+   * Scored screening instruments (PHQ-9 / GAD-7).
+   *
+   * Tuned for a shared clinic tablet: touch targets are at least 44px tall,
+   * the whole choice row is clickable via the <label>, and focus is always
+   * visible because the form is fully keyboard operable.
+   * ---------------------------------------------------------------------- */
+  .screening-preamble {
+    @apply mt-6 mb-2 font-semibold;
+  }
+
+  .screening-visit label {
+    @apply block font-semibold;
+  }
+
+  .screening-visit input {
+    @apply min-h-11 p-2.5 text-lg;
+  }
+
+  .screening-items {
+    @apply m-0 list-none p-0;
+  }
+
+  .screening-item {
+    @apply mb-4 rounded-lg border border-slate-300 bg-white p-4;
+  }
+
+  .screening-item legend {
+    @apply px-1 font-semibold;
+  }
+
+  .screening-item__n {
+    @apply tabular-nums;
+  }
+
+  .screening-item--missing {
+    @apply border-2 border-red-700;
+  }
+
+  .screening-item__error {
+    @apply my-1 font-semibold text-red-700;
+  }
+
+  .screening-choice {
+    @apply flex min-h-11 items-center gap-2.5;
+  }
+
+  .screening-choice label {
+    @apply flex-1 py-2 font-normal;
+  }
+
+  .screening-choice input[type="radio"] {
+    @apply size-5.5;
+  }
+
+  .screening-choice__score {
+    @apply text-slate-600 tabular-nums;
+  }
+
+  .screening-safety,
+  .screening-errors {
+    @apply my-4 rounded-lg border-2 border-red-700 p-4;
+  }
+
+  .screening-safety {
+    @apply bg-amber-50;
+  }
+
+  .screening-errors {
+    @apply bg-red-50;
+  }
+
+  .screening-safety h2,
+  .screening-errors h2 {
+    @apply mt-0 text-lg;
+  }
+
+  .screening-safety__ack {
+    @apply flex min-h-11 items-start gap-2.5;
+  }
+
+  .screening-safety__ack input[type="checkbox"] {
+    @apply mt-1 size-5.5;
+  }
+
+  .screening-actions {
+    @apply my-6 flex flex-wrap items-center gap-4;
+  }
+
+  .screening-actions button {
+    @apply min-h-12 px-6 py-3 text-lg;
+  }
+
+  .screening-score__number {
+    @apply text-4xl font-bold tabular-nums;
+  }
+
+  .screening-score__band {
+    @apply mt-0 text-xl font-semibold;
+  }
+}
