@@ -125,10 +125,12 @@ class DemoScriptTest < ActiveSupport::TestCase
     env = demo_env(tree[:rails_log])
     env.delete("PORT")
 
-    _stdout, stderr, status = run_demo(tree[:demo_path], env)
+    stdout, stderr, status = run_demo(tree[:demo_path], env)
 
     if port_free?(3000)
       assert_predicate status, :success?
+      assert_includes stdout, "http://localhost:3000/",
+                      "stdout URL should use default port 3000"
 
       argv, recorded_port = read_rails_invocation(tree[:rails_log])
       assert_port_argv(argv, 3000)
@@ -173,33 +175,32 @@ class DemoScriptTest < ActiveSupport::TestCase
   test "rejects -p and --port CLI overrides without starting rails" do
     env_port = find_free_port
     bypass_port = find_free_port
+    n = bypass_port.to_s
 
-    tree = build_demo_tree
-    env = demo_env(tree[:rails_log], "PORT" => env_port.to_s)
+    override_forms = [
+      [ "-p", n ],
+      [ "-p#{n}" ],
+      [ "-p=#{n}" ],
+      [ "--port", n ],
+      [ "--port=#{n}" ],
+      [ "-dp", n ],
+      [ "-Cp", n ],
+      [ "-pd", n ]
+    ]
 
-    _stdout, stderr, status = run_demo(tree[:demo_path], env, "-p", bypass_port.to_s)
+    override_forms.each do |form|
+      tree = build_demo_tree
+      env = demo_env(tree[:rails_log], "PORT" => env_port.to_s)
 
-    refute_predicate status, :success?, "expected failure when -p overrides PORT"
-    assert_match(/PORT/i, stderr)
-    refute rails_invoked?(tree[:rails_log])
+      _stdout, stderr, status = run_demo(tree[:demo_path], env, *form)
+      form_desc = form.inspect
 
-    tree2 = build_demo_tree
-    env2 = demo_env(tree2[:rails_log], "PORT" => env_port.to_s)
-
-    _stdout, stderr2, status2 = run_demo(tree2[:demo_path], env2, "--port=#{bypass_port}")
-
-    refute_predicate status2, :success?, "expected failure when --port overrides PORT"
-    assert_match(/PORT/i, stderr2)
-    refute rails_invoked?(tree2[:rails_log])
-
-    tree3 = build_demo_tree
-    env3 = demo_env(tree3[:rails_log], "PORT" => env_port.to_s)
-
-    _stdout, stderr3, status3 = run_demo(tree3[:demo_path], env3, "-p=#{bypass_port}")
-
-    refute_predicate status3, :success?, "expected failure when -p=<port> overrides PORT"
-    assert_match(/PORT/i, stderr3)
-    refute rails_invoked?(tree3[:rails_log])
+      refute_predicate status, :success?,
+                       "expected failure for CLI override #{form_desc}"
+      assert_match(/PORT/i, stderr, "stderr should mention PORT for #{form_desc}")
+      refute rails_invoked?(tree[:rails_log]),
+             "fake rails must not run for CLI override #{form_desc}"
+    end
   end
 
   test "forwards other rails server args after -p from PORT" do
@@ -207,7 +208,11 @@ class DemoScriptTest < ActiveSupport::TestCase
     tree = build_demo_tree
     env = demo_env(tree[:rails_log], "PORT" => port.to_s)
 
-    _stdout, _stderr, status = run_demo(tree[:demo_path], env, "-b", "0.0.0.0")
+    _stdout, _stderr, status = run_demo(
+      tree[:demo_path], env,
+      "-b", "0.0.0.0",
+      "-P", "tmp/pids/other.pid"
+    )
 
     assert_predicate status, :success?
 
@@ -216,6 +221,8 @@ class DemoScriptTest < ActiveSupport::TestCase
     assert_equal port.to_s, recorded_port
     assert_includes argv, "-b"
     assert_includes argv, "0.0.0.0"
+    assert_includes argv, "-P"
+    assert_includes argv, "tmp/pids/other.pid"
   end
 
   test "demo script source does not invoke kill on non-comment lines" do
@@ -244,7 +251,9 @@ class DemoScriptTest < ActiveSupport::TestCase
   end
 
   def port_free?(port)
-    bind_address_free?("0.0.0.0", port) && bind_address_free?("::1", port)
+    bind_address_free?("0.0.0.0", port) &&
+      bind_address_free?("127.0.0.1", port) &&
+      bind_address_free?("::1", port)
   end
 
   def bind_address_free?(host, port)
