@@ -1,0 +1,93 @@
+name: Risk tier
+
+# A LABEL, NOT A GATE. This job marks each pull request `risk:laptop-only` or
+# `risk:phone-safe` from the paths it touches, so a reviewer on a phone can tell at a glance
+# whether it is safe to merge without a laptop review. It never fails a pull request.
+#
+#   DO NOT add "Risk tier" to branch protection. A label that can block merges becomes a
+#   check people learn to route around, and a gate needs a stronger guarantee than a
+#   path-glob classifier can give.
+#
+# The classifier and its rules are read from the BASE commit, not from the pull request.
+# Otherwise a PR could edit bin/risk-tier or .github/risk-tiers.txt to label itself
+# phone-safe. Both files are laptop-only paths under the base rules, so editing either one
+# gets the PR classified laptop-only.
+#
+# Fail closed: if the file list cannot be read in full, or the classifier is missing from the
+# base, the PR is labelled laptop-only. Absence of data is never verification.
+#
+# Fork and Dependabot PRs get a read-only token. The tier is still computed and written to the
+# job summary; only the label step is skipped or warns.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  risk-tier:
+    name: Risk tier
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+
+      - name: Classify
+        id: classify
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          CHANGED: ${{ github.event.pull_request.changed_files }}
+        run: |
+          set +e
+          tier=laptop-only
+          detail=""
+
+          if [ ! -x bin/risk-tier ]; then
+            detail="  (undetermined: bin/risk-tier is not on the base branch yet)"
+          elif ! gh api --paginate "repos/$REPO/pulls/$PR/files" > pages.json; then
+            detail="  (undetermined: could not list the PR's files)"
+          else
+            jq -s 'add // []' pages.json > files.json
+            got=$(jq length files.json)
+            if [ "$got" != "$CHANGED" ] || [ "$CHANGED" -ge 3000 ]; then
+              detail="  (undetermined: read $got of $CHANGED files; the API caps a PR at 3000)"
+            else
+              # A rename contributes BOTH its old and new path.
+              jq -r '.[] | .filename, (.previous_filename // empty)' files.json > paths.txt
+              out=$(bin/risk-tier < paths.txt)
+              first=$(printf '%s\n' "$out" | head -n 1)
+              detail=$(printf '%s\n' "$out" | tail -n +2)
+              if [ "$first" = "phone-safe" ]; then tier=phone-safe; fi
+            fi
+          fi
+
+          {
+            echo "### Risk tier: \`$tier\`"
+            echo
+            echo '```'
+            printf '%s\n' "$detail"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "tier=$tier" >> "$GITHUB_OUTPUT"
+
+      - name: Apply the label
+        # Never block the PR over a label. A read-only token (forks, Dependabot) cannot write one.
+        continue-on-error: true
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          TIER: ${{ steps.classify.outputs.tier }}
+        run: |
+          gh label create "risk:laptop-only" --color D93F0B --force \
+            --description "Touches auth, consent, Part 2, audit, tenancy, schema, CI or dependencies: review on a laptop"
+          gh label create "risk:phone-safe" --color 0E8A16 --force \
+            --description "Touches none of the laptop-only paths: reviewable and mergeable from a phone"
+          if [ "$TIER" = "phone-safe" ]; then add=risk:phone-safe; drop=risk:laptop-only
+          else add=risk:laptop-only; drop=risk:phone-safe; fi
+          gh pr edit "$PR" --add-label "$add" --remove-label "$drop"

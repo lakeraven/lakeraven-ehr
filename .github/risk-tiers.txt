@@ -1,0 +1,79 @@
+# Risk-tier rules for bin/risk-tier. One rule per line:  <glob>   # <reason>
+#
+# A pull request that touches ANY path matching a rule is "laptop-only": it needs a laptop
+# review, not a phone merge. Everything else is "phone-safe". Matching is case-insensitive
+# and `*` crosses `/`, so `*consent*` matches any path with "consent" in it. Over-matching
+# is deliberate: a wrong laptop-only costs a few minutes, a wrong phone-safe costs a defect.
+#
+# A rule marked [forward] matches nothing in the tree today and exists for the day a file
+# of that kind appears. Every other rule must match at least one tracked file; the test
+# suite enforces it. This file itself is a rule target, so editing the rules is laptop-only.
+
+# --- the machinery that decides what merges ---
+.github/*                   # CI, CODEOWNERS, dependabot and these rules themselves
+bin/*                       # executables, including the scripts that gate merges
+*gemfile*                   # dependency set and versions (supply chain)
+*.gemspec                   # dependencies and what the gem ships
+Rakefile                    # task entry points that CI and releases run
+.ruby-version               # runtime version the whole suite is judged on
+SECURITY.md                 # security policy and disclosure contact
+MIT-LICENSE                 # license text
+
+# --- data shape and boot ---
+db/*                        # migrations: irreversible once run against real data
+test/dummy/db/*             # the schema the test database is loaded from
+config/routes.rb            # adds or removes endpoints
+test/dummy/config/initializers/*   # authentication and logging filters are configured here
+config/initializers/*       # [forward] engine-level boot configuration
+
+# --- authentication and authorization ---
+*authentication*            # who is calling
+*smart_*                    # SMART on FHIR launch, configuration and token handling
+*backend_*                  # SMART Backend Services: system-to-system client auth
+*assertion*                 # signed client assertions and their replay guard
+*login*                     # sign-in and its throttling
+*launch_context*            # what a launched session is scoped to
+*kernel_user*               # the RPMS user a session acts as
+*current_user*              # the user a request acts as
+*site_gateway*              # site selection at sign-on
+*e_signature*               # legal signature on clinical documents
+*doorkeeper*                # OAuth server configuration
+*oauth*                     # OAuth clients and access tokens
+*token*                     # bearer tokens and token bridges
+*jwks*                      # client key sets
+*jwt*                       # [forward] signed assertions
+*session*                   # sign-in sessions and session scope
+*policy*                    # authorization policies, redaction and CSP
+*compartment*               # patient compartment: what a caller may read
+
+# --- consent, Part 2 and egress ---
+*consent*                   # consent decides disclosure
+*part2*                     # 42 CFR Part 2 substance-use-disorder segmentation
+*part_2*                    # [forward] alternate spelling of the Part 2 surface
+*segmentation*              # [forward] data segmentation
+*redact*                    # redaction of what leaves the system
+*egress*                    # everything that leaves the system
+*bulk_export*               # bulk data leaves in volume
+*break_glass*               # [forward] emergency override of access controls
+*emergency_access*          # emergency access to records
+
+# --- audit and PHI handling ---
+*audit*                     # the PHI access trail
+*phi_*                      # PHI sanitising and handling
+*encrypt*                   # encryption and its verification
+
+# --- tenant boundary ---
+*organization*              # the organization/tenant boundary (ADR 0007)
+*tenant*                    # [forward] tenant stamping and isolation
+
+# --- money ---
+*billing*                   # [forward] money
+*claim*                     # [forward] claims
+*payment*                   # [forward] payments
+*invoice*                   # [forward] invoices
+
+# --- decisions and compliance record ---
+docs/adr/*                  # architecture decisions that bind later work
+docs/compliance/*           # compliance posture and disclosure audits
+docs/certification/*        # certification evidence
+SOFTWARE-FACTORY*           # [forward] the review method itself
