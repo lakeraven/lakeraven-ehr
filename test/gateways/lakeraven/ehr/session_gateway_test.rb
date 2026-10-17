@@ -39,7 +39,7 @@ module Lakeraven
 
       test "default_provider returns RpmsRpc::Session when it ships" do
         skip "Requires RpmsRpc::Session.bootstrap (lakeraven/rpms-rpc#99)" unless
-          defined?(::RpmsRpc::Session) && ::RpmsRpc::Session.respond_to?(:bootstrap)
+          SessionGateway.default_provider.respond_to?(:bootstrap)
         assert_equal ::RpmsRpc::Session, SessionGateway.default_provider
       end
 

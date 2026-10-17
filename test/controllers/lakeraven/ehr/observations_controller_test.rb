@@ -34,7 +34,9 @@ module Lakeraven
         get "/lakeraven-ehr/Observation", params: { patient: "1" }, headers: @headers
         assert_response :ok
         body = JSON.parse(response.body)
-        body["entry"]&.each do |entry|
+        entries = body["entry"]
+        assert entries.is_a?(Array) && entries.any?, "Observation bundle should include entries"
+        entries.each do |entry|
           assert_equal "Observation", entry.dig("resource", "resourceType")
         end
       end
