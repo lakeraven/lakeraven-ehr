@@ -56,11 +56,13 @@ module PatientBannerTestHelper
 
   def sign_in_clinician!(scopes: BANNER_SCOPES, duz: DUZ)
     @clinician_token = clinician_token(scopes: scopes, duz: duz)
-    post "#{MOUNT}/test_session",
-         params: {
-           duz: duz, user_type: "provider",
-           smart_token: @clinician_token.plaintext_token || @clinician_token.token
-         }
+    banner_request(
+      :post, "#{MOUNT}/test_session",
+      {
+        duz: duz, user_type: "provider",
+        smart_token: @clinician_token.plaintext_token || @clinician_token.token
+      }
+    )
     @csrf_token = nil
   end
 
@@ -88,7 +90,7 @@ module PatientBannerTestHelper
   end
 
   def open_patient_context!(dfn)
-    post "#{MOUNT}/patients/#{dfn}/context", params: { authenticity_token: csrf_token }
+    banner_request(:post, "#{MOUNT}/patients/#{dfn}/context", { authenticity_token: csrf_token })
     follow_redirect_if_needed!
   end
 
@@ -184,14 +186,23 @@ module PatientBannerTestHelper
     method = form.at_css('input[name="_method"]')&.[]("value") || form["method"] || "post"
     case method.to_s.downcase
     when "delete"
-      delete action, params: params
+      banner_request(:delete, action, params)
     when "patch"
-      patch action, params: params
+      banner_request(:patch, action, params)
     else
-      post action, params: params
+      banner_request(:post, action, params)
     end
     follow_redirect_if_needed!
   end
+
+  def banner_request(verb, path, params)
+    if respond_to?(:integration_session)
+      send(verb, path, params: params)
+    else
+      send(verb, path, params)
+    end
+  end
+  private :banner_request
 
   def with_allergy_source_raising
     klass = Lakeraven::EHR::SupplementalClinicalResources
