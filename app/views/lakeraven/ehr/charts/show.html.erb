@@ -7,8 +7,6 @@
 %>
 <%
   vital_labels = Lakeraven::EHR::Observation::VITAL_TYPE_MAP
-  patient_age = @patient.age_on(Date.current)
-  sex_label = { "F" => "Female", "M" => "Male", "U" => "Unknown" }[@patient.sex] || @patient.sex
   fhir_url = url_for(dfn: @patient.dfn, format: "json", only_path: true)
 %>
 <!DOCTYPE html>
@@ -129,21 +127,12 @@
       <a class="fhir-link" href="<%= fhir_url %>">View as FHIR &rarr;</a>
     </div>
 
-    <%# ---- Patient banner ---- %>
-    <div class="banner">
-      <div>
-        <h1><%= @patient.display_name %> <span class="demo-tag">Synthetic demo patient</span></h1>
-      </div>
-      <dl class="demoinfo">
-        <div><dt>DOB</dt><dd><%= @patient.dob&.strftime("%b %-d, %Y") || "—" %></dd></div>
-        <div><dt>Age</dt><dd><%= patient_age || "—" %></dd></div>
-        <div><dt>Sex</dt><dd><%= sex_label || "—" %></dd></div>
-        <div><dt>MRN / DFN</dt><dd><%= @patient.dfn %></dd></div>
-      </dl>
-    </div>
+    <%# ---- Patient banner (same partial as the layout) ---- %>
+    <%= render "lakeraven/ehr/shared/patient_banner", banner: @patient_banner %>
 
-    <%# ---- Allergy alert strip ---- %>
-    <% if @allergies.any? %>
+    <%# ---- Allergy alert strip. Same three states as the banner: a fetch
+          error or a withheld list is "Not loaded", never "No Known Allergies". ---- %>
+    <% if @allergy_list_status.loaded? %>
       <div class="allergy-strip">
         <div class="head">&#9888;&#xFE0E; Allergies &amp; Adverse Reactions (<%= @allergies.length %>)</div>
         <div class="items">
@@ -156,8 +145,8 @@
         </div>
       </div>
     <% else %>
-      <div class="allergy-strip none">
-        <div class="head">&#10003;&#xFE0E; No Known Allergies</div>
+      <div class="allergy-strip <%= "none" if @allergy_list_status.none_recorded? %>">
+        <div class="head"><%= @allergy_list_status.text %></div>
       </div>
     <% end %>
 
@@ -256,9 +245,9 @@
 
       <%# ---- Allergies (detail) ---- %>
       <div class="card">
-        <div class="card__head"><h2>Allergies</h2><span class="count"><%= @allergies.length %></span></div>
+        <div class="card__head"><h2>Allergies</h2><span class="count"><%= @allergy_list_status.count_label %></span></div>
         <div class="card__body">
-          <% if @allergies.any? %>
+          <% if @allergy_list_status.loaded? %>
             <table>
               <thead><tr><th>Allergen</th><th>Reaction</th><th>Severity</th></tr></thead>
               <tbody>
@@ -272,7 +261,7 @@
               </tbody>
             </table>
           <% else %>
-            <p class="empty">No known allergies.</p>
+            <p class="empty"><%= @allergy_list_status.text %></p>
           <% end %>
         </div>
       </div>
