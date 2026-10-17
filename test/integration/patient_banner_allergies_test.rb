@@ -23,6 +23,7 @@ class PatientBannerAllergiesTest < ActionDispatch::IntegrationTest
     with_demo_clinical_seeds do
       sign_in_clinician!
       open_patient_context!(3)
+      seed_nka_allergy_assessment!("3")
 
       get "#{MOUNT}/dashboard"
       assert_response :ok
