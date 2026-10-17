@@ -74,7 +74,7 @@ module Lakeraven
         "lakeraven/ehr/sessions#new",         # Web UI login
         "lakeraven/ehr/sessions#create",      # Web UI login
         "lakeraven/ehr/sessions#destroy",     # Web UI logout
-        "lakeraven/ehr/dashboards#show",      # Web UI dashboard
+        "lakeraven/ehr/dashboards#show",      # Web UI dashboard; banner patient/allergy via filter_fhir_for_egress
         "lakeraven/ehr/test_sessions#create", # Test only
         "lakeraven/ehr/smart_configuration#show", # Discovery
         "lakeraven/ehr/smart_launch#show",    # Discovery
@@ -85,6 +85,7 @@ module Lakeraven
         "lakeraven/ehr/exports#show",         # Status/kickoff
         "lakeraven/ehr/exports#destroy",      # Status/kickoff
         "lakeraven/ehr/patient_contexts#create", # Session context
+        "lakeraven/ehr/active_patient_contexts#destroy", # Closes session context, no clinical data
         "lakeraven/ehr/practitioners#index",  # Directory data
         "lakeraven/ehr/practitioners#show",   # Directory data
         "lakeraven/ehr/organizations#show",   # Directory data
