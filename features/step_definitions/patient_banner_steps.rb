@@ -34,8 +34,6 @@ Before("@patient_banner") do
   Doorkeeper::AccessToken.delete_all
   Doorkeeper::Application.delete_all
   Lakeraven::EHR::AuditEvent.delete_all
-  @demo_original_client = nil
-  @forgery_was = nil
 end
 
 After("@patient_banner") do
@@ -50,7 +48,8 @@ After("@patient_banner") do
 end
 
 Given("demo clinical seeds are loaded") do
-  with_demo_clinical_seeds { nil }
+  @demo_original_client = RpmsRpc.configuration.client
+  RpmsRpc.mock! { |m| LakeravenDemoSeeds.seed(m) }
 end
 
 Given("patient {string} is the active patient context") do |name|
