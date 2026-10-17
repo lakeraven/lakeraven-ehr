@@ -636,6 +636,64 @@ class RedBeforeGreenTest < Minitest::Test
     end
   end
 
+  # --- gate round 3 (gate/runs/lakeraven-ehr-632/r3/) -----------------------
+  # Spec amendment: tests only; each pins a mutation the round-2 suite let survive.
+
+  # GLM r3 F1: db/structure.sql (schema_format :sql) is in the DB glob but was never exercised.
+  def test_a_change_to_db_structure_sql_prints_a_db_warning_but_still_gives_a_verdict
+    write "db/structure.sql", "-- changed\n"
+    fixed_pr
+
+    out, status = run_script(env: fake_runner)
+
+    assert_equal 0, status.exitstatus, out
+    assert_match(/^VERDICT: RED$/, out)
+    assert_match(%r{DB-CHANGED.*db/structure\.sql}, out)
+  end
+
+  # GLM r3 F3: the warning is only useful because it says why. Pin the explanation.
+  def test_the_db_warning_explains_that_the_database_is_the_prs_and_is_not_reverted
+    write "db/schema.rb", "# changed\n"
+    fixed_pr
+
+    out, = run_script(env: fake_runner)
+    warning = out[/^.*DB-CHANGED.*$/].to_s
+
+    assert_match(/loaded from the PR's schema before the base run/, warning)
+    assert_match(/not reverted/, warning)
+    assert_match(/schema it never had/, warning)
+  end
+
+  # GLM r3 F2: the error-reading step must see CRLF output too. A CRLF run with only
+  # missing-code errors is RED-FOR-WRONG-REASON; with a real failure among them, RED.
+  def test_crlf_output_with_only_missing_code_errors_is_red_for_wrong_reason
+    fixed_pr
+    crlf = <<~RUBY
+      print "Error:\\r\\nGreeterTest#test_it:\\r\\nNameError: uninitialized constant Greeter\\r\\n    app.rb:1\\r\\n"
+      print "Finished in 0.1s, 1.0 runs/s, 1.0 assertions/s.\\r\\n\\r\\n1 runs, 0 assertions, 0 failures, 1 errors, 0 skips\\r\\n"
+      exit 1
+    RUBY
+
+    out, status = run_script(env: fake_runner(crlf))
+
+    assert_equal 0, status.exitstatus, out
+    assert_match(/^VERDICT: RED-FOR-WRONG-REASON/, out)
+  end
+
+  def test_crlf_output_with_a_non_missing_code_error_is_red
+    fixed_pr
+    crlf = <<~RUBY
+      print "Error:\\r\\nGreeterTest#test_it:\\r\\nActiveRecord::RecordInvalid: Validation failed\\r\\n"
+      print "Finished in 0.1s, 1.0 runs/s, 1.0 assertions/s.\\r\\n\\r\\n1 runs, 0 assertions, 0 failures, 1 errors, 0 skips\\r\\n"
+      exit 1
+    RUBY
+
+    out, status = run_script(env: fake_runner(crlf))
+
+    assert_equal 0, status.exitstatus, out
+    assert_match(/^VERDICT: RED$/, out)
+  end
+
   private
 
   def fixed_pr
