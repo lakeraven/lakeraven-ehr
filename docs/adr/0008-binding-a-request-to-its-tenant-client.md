@@ -1,6 +1,6 @@
 # ADR 0008: A request reaches RPMS only through its tenant's client, and fails closed when it has none
 
-**Status:** Proposed (draft; not yet through the gate)
+**Status:** Accepted by the maintainer, 2026-10-17. Not yet through the gate (see "Decisions" below).
 **Date:** 2026-10-17
 **Decides:** the mechanism ADR 0007 left open for lakeraven-ehr#553.
 
@@ -109,16 +109,14 @@ Consequences to accept with it:
 5. **Remove the interim guard** (#529's single-organization tripwire) once 3
    is live, as ADR 0007 states.
 
-## Decisions needed from the maintainer
+## Decisions (maintainer, 2026-10-17)
 
-1. **Accept B** over A and C?
-2. **December scope.** A single-clinic pilot has one organization, and the guard
-   in #529 blocks a second one at token issuance. The cheapest honest position is
-   steps 1 to 3 before December and step 4 before any second tenant. Is that the
-   line, or must step 4 also land first?
-3. **Gate level.** This is an authorization surface. It should go through the
-   hard panel (a spec seat other than the builder, two paid gate seats), not the
-   volume panel.
+1. **Option B is adopted**: a scoped client in rpms-rpc with `require_scoped_client`, bound once per request in the EHR.
+2. **December line:** steps 1 to 3 land before December; step 4 (tenant stamping) lands before any second tenant shares an instance.
+3. **Gate level:** this is an authorization surface, so it goes through the hard panel (a spec seat other than the builder, two paid gate seats), not the volume panel.
+
+The decisions were given as a one-word "ok" to the three questions this section previously asked. Acceptance is the maintainer's;
+the ADR text itself has not yet been through the gate, so it should be gated before step 2 or 3 is built against it.
 
 ## Not verified here
 
