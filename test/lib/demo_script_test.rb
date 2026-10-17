@@ -10,6 +10,7 @@ require "timeout"
 # killing foreign processes; honor PORT for bind and printed URL.
 class DemoScriptTest < ActiveSupport::TestCase
   DEMO_SCRIPT_SOURCE = File.expand_path("../dummy/bin/demo", __dir__)
+  SCRIPT_KILL_PATTERN = /\b(kill|pkill|killall)\b|fuser\s+-k/
 
   setup do
     @stub_bin = Dir.mktmpdir("demo_script_stub_bin_")
@@ -33,6 +34,9 @@ class DemoScriptTest < ActiveSupport::TestCase
     wait_for_port_listen(port, holder_pid)
 
     tree = build_demo_tree
+    pidfile = server_pidfile_path(tree)
+    File.write(pidfile, "99999\n")
+
     env = demo_env(tree[:rails_log], "PORT" => port.to_s)
 
     _stdout, stderr, status = run_demo(tree[:demo_path], env)
@@ -40,9 +44,38 @@ class DemoScriptTest < ActiveSupport::TestCase
     refute_predicate status, :success?, "expected failure when port #{port} is busy"
     assert_includes stderr, port.to_s, "stderr should name the port"
     assert_match(/\b#{holder_pid}\b/, stderr, "stderr should identify the holder PID")
+    assert_match(/ruby/i, stderr, "stderr should name the holder command")
     assert_match(/PORT/i, stderr, "stderr should suggest choosing another PORT")
 
-    assert_process_alive(holder_pid)
+    assert_process_still_running(holder_pid)
+    assert_port_held(port)
+    assert_path_exists pidfile, "server.pid must remain when the port is busy"
+    refute rails_invoked?(tree[:rails_log]),
+           "fake rails must not run when the port is already in use"
+  end
+
+  test "fails when lsof reports no listeners but the port is occupied" do
+    port = find_free_port
+    holder_pid = spawn_port_holder(port)
+    @port_holder_pids << holder_pid
+    wait_for_port_listen(port, holder_pid)
+
+    install_lsof_no_data_stub(@stub_bin)
+
+    tree = build_demo_tree
+    pidfile = server_pidfile_path(tree)
+    File.write(pidfile, "424242\n")
+
+    env = demo_env(tree[:rails_log], "PORT" => port.to_s)
+
+    _stdout, stderr, status = run_demo(tree[:demo_path], env)
+
+    refute_predicate status, :success?,
+                     "expected failure when port #{port} is held but lsof is blind"
+    assert_includes stderr, port.to_s, "stderr should name the port"
+    assert_process_still_running(holder_pid)
+    assert_port_held(port)
+    assert_path_exists pidfile, "server.pid must remain when occupancy cannot be confirmed via lsof"
     refute rails_invoked?(tree[:rails_log]),
            "fake rails must not run when the port is already in use"
   end
@@ -79,11 +112,68 @@ class DemoScriptTest < ActiveSupport::TestCase
     assert_equal "3000", recorded_port
   end
 
+  test "rejects invalid PORT without starting rails" do
+    %w[foo 0 70000].each do |bad_port|
+      tree = build_demo_tree
+      env = demo_env(tree[:rails_log], "PORT" => bad_port)
+
+      _stdout, stderr, status = run_demo(tree[:demo_path], env)
+
+      refute_predicate status, :success?, "PORT=#{bad_port.inspect} should be rejected"
+      assert_match(/PORT/i, stderr)
+      refute rails_invoked?(tree[:rails_log]),
+             "fake rails must not run for invalid PORT=#{bad_port.inspect}"
+    end
+  end
+
+  test "rejects -p and --port CLI overrides without starting rails" do
+    env_port = find_free_port
+    bypass_port = find_free_port
+
+    tree = build_demo_tree
+    env = demo_env(tree[:rails_log], "PORT" => env_port.to_s)
+
+    _stdout, stderr, status = run_demo(tree[:demo_path], env, "-p", bypass_port.to_s)
+
+    refute_predicate status, :success?, "expected failure when -p overrides PORT"
+    assert_match(/PORT/i, stderr)
+    refute rails_invoked?(tree[:rails_log])
+
+    tree2 = build_demo_tree
+    env2 = demo_env(tree2[:rails_log], "PORT" => env_port.to_s)
+
+    _stdout, stderr2, status2 = run_demo(tree2[:demo_path], env2, "--port=#{bypass_port}")
+
+    refute_predicate status2, :success?, "expected failure when --port overrides PORT"
+    assert_match(/PORT/i, stderr2)
+    refute rails_invoked?(tree2[:rails_log])
+  end
+
+  test "forwards other rails server args after -p from PORT" do
+    port = find_free_port
+    tree = build_demo_tree
+    env = demo_env(tree[:rails_log], "PORT" => port.to_s)
+
+    _stdout, _stderr, status = run_demo(tree[:demo_path], env, "-b", "0.0.0.0")
+
+    assert_predicate status, :success?
+
+    argv, recorded_port = read_rails_invocation(tree[:rails_log])
+    assert_port_argv(argv, port)
+    assert_equal port.to_s, recorded_port
+    assert_includes argv, "-b"
+    assert_includes argv, "0.0.0.0"
+  end
+
   test "demo script source does not invoke kill on non-comment lines" do
     File.readlines(DEMO_SCRIPT_SOURCE).each_with_index do |line, index|
       next if line.strip.start_with?("#")
 
-      assert_no_match(/\bkill\b/, line, "unexpected kill on line #{index + 1}: #{line.strip}")
+      assert_no_match(
+        SCRIPT_KILL_PATTERN,
+        line,
+        "unexpected kill/pkill/killall/fuser -k on line #{index + 1}: #{line.strip}"
+      )
     end
   end
 
@@ -101,11 +191,21 @@ class DemoScriptTest < ActiveSupport::TestCase
   end
 
   def port_free?(port)
-    server = TCPServer.new("127.0.0.1", port)
+    bind_address_free?("0.0.0.0", port) && bind_address_free?("::1", port)
+  end
+
+  def bind_address_free?(host, port)
+    server = TCPServer.new(host, port)
     server.close
     true
   rescue Errno::EADDRINUSE, Errno::EACCES
     false
+  rescue Errno::EADDRNOTAVAIL, Errno::EAFNOSUPPORT
+    true
+  end
+
+  def port_in_use?(port)
+    !bind_address_free?("127.0.0.1", port)
   end
 
   def spawn_port_holder(port)
@@ -113,7 +213,7 @@ class DemoScriptTest < ActiveSupport::TestCase
       RbConfig.ruby,
       "-rsocket",
       "-e",
-      'TCPServer.new("127.0.0.1", Integer(ARGV[0])); sleep',
+      'TCPServer.new("0.0.0.0", Integer(ARGV[0])); sleep',
       port.to_s,
       %i[out err] => "/dev/null"
     )
@@ -123,9 +223,9 @@ class DemoScriptTest < ActiveSupport::TestCase
   def wait_for_port_listen(port, holder_pid, timeout: 5)
     deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
     loop do
-      raise "port holder #{holder_pid} exited early" unless process_alive?(holder_pid)
+      raise "port holder #{holder_pid} exited early" unless process_still_running?(holder_pid)
 
-      return if port_free?(port) == false
+      return if port_in_use?(port)
 
       if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
         flunk "timed out waiting for holder to listen on port #{port}"
@@ -137,6 +237,12 @@ class DemoScriptTest < ActiveSupport::TestCase
   def install_pg_isready_stub(stub_bin)
     path = File.join(stub_bin, "pg_isready")
     File.write(path, "#!/bin/sh\nexit 0\n")
+    File.chmod(0o755, path)
+  end
+
+  def install_lsof_no_data_stub(stub_bin)
+    path = File.join(stub_bin, "lsof")
+    File.write(path, "#!/bin/sh\nexit 1\n")
     File.chmod(0o755, path)
   end
 
@@ -171,6 +277,10 @@ class DemoScriptTest < ActiveSupport::TestCase
     { root: root, demo_path: demo_path, rails_log: rails_log }
   end
 
+  def server_pidfile_path(tree)
+    File.join(tree[:root], "tmp", "pids", "server.pid")
+  end
+
   def demo_env(rails_log, extra = {})
     path = "#{@stub_bin}:#{ENV.fetch('PATH', '')}"
     {
@@ -179,8 +289,8 @@ class DemoScriptTest < ActiveSupport::TestCase
     }.merge(extra)
   end
 
-  def run_demo(demo_path, env)
-    Open3.capture3(env, demo_path)
+  def run_demo(demo_path, env, *args)
+    Open3.capture3(env, demo_path, *args)
   end
 
   def rails_invoked?(rails_log)
@@ -194,7 +304,7 @@ class DemoScriptTest < ActiveSupport::TestCase
     port_line = lines.shift
     recorded_port = port_line.sub(/^PORT=/, "")
     argv = lines
-    [argv, recorded_port]
+    [ argv, recorded_port ]
   end
 
   def assert_port_argv(argv, port)
@@ -208,15 +318,21 @@ class DemoScriptTest < ActiveSupport::TestCase
     end
   end
 
-  def assert_process_alive(pid)
-    assert process_alive?(pid), "expected holder process #{pid} to still be running"
+  def assert_process_still_running(pid)
+    assert process_still_running?(pid), "expected holder process #{pid} to still be running"
   end
 
-  def process_alive?(pid)
-    Process.kill(0, pid)
-    true
-  rescue Errno::ESRCH, Errno::EPERM
+  def process_still_running?(pid)
+    Process.waitpid(pid, Process::WNOHANG).nil?
+  rescue Errno::ECHILD
     false
+  end
+
+  def assert_port_held(port)
+    TCPServer.new("127.0.0.1", port)
+    flunk "expected port #{port} to remain in use"
+  rescue Errno::EADDRINUSE
+    nil
   end
 
   def terminate_pid(pid)
