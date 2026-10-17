@@ -61,7 +61,7 @@ module Lakeraven
 
       test "default_provider returns RpmsRpc::Capabilities when it ships" do
         skip "Requires RpmsRpc::Capabilities.imaging_user? (lakeraven/rpms-rpc#101)" unless
-          defined?(::RpmsRpc::Capabilities) && ::RpmsRpc::Capabilities.respond_to?(:imaging_user?)
+          CapabilitiesGateway.default_provider.respond_to?(:imaging_user?)
         assert_equal ::RpmsRpc::Capabilities, CapabilitiesGateway.default_provider
       end
 
