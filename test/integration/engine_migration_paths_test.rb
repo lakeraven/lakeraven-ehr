@@ -125,6 +125,8 @@ class EngineMigrationPathsTest < ActiveSupport::TestCase
   private
 
   def assert_dummy_schema_unchanged!
+    return if @original_dummy_schema_bytes.nil?
+
     current = File.binread(DUMMY_SCHEMA_PATH)
     assert_equal @original_dummy_schema_bytes, current,
                  "#{DUMMY_SCHEMA_PATH} was modified during the test (tracked file must not be written)"
@@ -147,9 +149,11 @@ class EngineMigrationPathsTest < ActiveSupport::TestCase
   end
 
   def expected_engine_migration_status_name(version)
-    filename = Dir.children(ENGINE_MIGRATE_DIR).find { |entry| entry.start_with?("#{version}_") }
-    raise "no migration file for version #{version}" unless filename
+    paths = Dir[File.join(ENGINE_MIGRATE_DIR, "**/[0-9]*_*.rb")]
+    path = paths.find { |entry| File.basename(entry)[/\A(\d+)/, 1] == version }
+    raise "no migration file for version #{version}" unless path
 
+    filename = File.basename(path)
     slug = filename.sub(/\.rb\z/, "").split("_", 2).last
     slug.humanize
   end
@@ -160,6 +164,10 @@ class EngineMigrationPathsTest < ActiveSupport::TestCase
       /define\(version:\s*\d+(?:_\d+)*\)/,
       "define(version: #{BUMPED_SCHEMA_VERSION})"
     )
+    if bumped == schema || !bumped.include?(BUMPED_SCHEMA_VERSION)
+      flunk "failed to bump schema version in #{DUMMY_SCHEMA_PATH}: " \
+            "define(...) line may have changed format"
+    end
     File.write(@bumped_schema_path, bumped)
   end
 
@@ -225,8 +233,15 @@ class EngineMigrationPathsTest < ActiveSupport::TestCase
     host = hash[:host]
     port = hash[:port]
 
-    if host.blank?
-      return "postgresql:///#{scratch_db}"
+    if host.blank? || host.start_with?("/")
+      query_parts = []
+      query_parts << "host=#{URI.encode_uri_component(host)}" if host.present?
+      query_parts << "port=#{URI.encode_uri_component(port.to_s)}" if port
+      query_parts << "username=#{URI.encode_uri_component(username)}" if username.present?
+      query_parts << "password=#{URI.encode_uri_component(password)}" if password
+
+      base = "postgresql:///#{scratch_db}"
+      return query_parts.empty? ? base : "#{base}?#{query_parts.join('&')}"
     end
 
     userinfo = encode_userinfo(username, password)
