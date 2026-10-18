@@ -183,12 +183,15 @@ module Lakeraven
 
         # [kept, dropped]. No provider is an empty slice: nothing was
         # configured, so there is no hole. [] is an answer that named no rows.
-        # A non-Array did not answer; the rows we can show are still none, and
-        # the drop count refuses verified absence over that hole.
+        # nil is that same answer — a supplemental provider's contract for
+        # "no rows for this patient" — so it is zero rows and zero drops.
+        # Any other non-Array did not answer; the rows we can show are still
+        # none, and the drop count refuses verified absence over that hole.
         def owned_slice(dfn, provider, expected)
           return [ [], 0 ] if provider.nil?
 
           produced = supplemental_provider_result(dfn, provider)
+          return [ [], 0 ] if produced.nil?
           return [ [], 1 ] unless produced.is_a?(Array)
 
           split_owned_supplemental(produced, dfn, expected)
@@ -287,12 +290,10 @@ module Lakeraven
           left.present? && left == right
         end
 
+        # Same rule as Patient.canonical_dfn, so an audit of the patient
+        # this row was kept for cannot spell the dfn a different way.
         def canonical(value)
-          numeric = value.to_s.strip
-          return "" unless numeric.match?(/\A\d+\z/)
-
-          i = numeric.to_i
-          i.positive? ? i.to_s : ""
+          Patient.canonical_dfn(value).to_s
         end
 
         # A FHIR searchset must not carry two entries with one id: a client
