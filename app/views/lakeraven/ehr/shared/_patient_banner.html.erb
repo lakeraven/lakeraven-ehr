@@ -26,6 +26,8 @@
     <% if banner.allergies %>
       <div class="patient-banner__allergies" data-allergies-state="<%= banner.allergies.state %>">
         <span>Allergies</span>
+        <%# Loaded is the names alone. Otherwise #text is "None recorded",
+            "Not loaded", or the known names plus the incomplete-list note. %>
         <% if banner.allergies.loaded? %>
           <% banner.allergies.names.each do |name| %>
             <span><%= name %></span>

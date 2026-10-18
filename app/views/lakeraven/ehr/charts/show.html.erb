@@ -40,7 +40,10 @@
       background:#fff;padding:6px 11px;border-radius:7px;color:var(--brand);font-weight:600;white-space:nowrap}
     .fhir-link:hover{border-color:var(--brand)}
 
-    /* Patient banner */
+    /* Patient banner. Sticky so the open chart stays identified while the
+       page scrolls; the background and z-index keep the rows underneath
+       from showing through. */
+    #patient-banner{position:sticky;top:0;z-index:20;background:var(--bg)}
     .banner{background:linear-gradient(180deg,#0e5a8a,#0b4a72);color:#fff;border-radius:14px;
       padding:18px 22px;display:flex;flex-wrap:wrap;align-items:center;gap:10px 28px;
       box-shadow:0 8px 24px rgba(11,74,114,.18)}
@@ -130,19 +133,29 @@
     <%# ---- Patient banner (same partial as the layout) ---- %>
     <%= render "lakeraven/ehr/shared/patient_banner", banner: @patient_banner %>
 
-    <%# ---- Allergy alert strip. Same three states as the banner: a fetch
-          error or a withheld list is "Not loaded", never "No Known Allergies". ---- %>
-    <% if @allergy_list_status.loaded? %>
+    <%# ---- Allergy alert strip. A fetch error or a withheld list is
+          "Not loaded", never "No Known Allergies". Names that passed egress
+          stay on the strip when the list is incomplete; AllergyListStatus#text
+          is that sentence for the strip, the detail, and the banner. ---- %>
+    <% if @allergy_list_status.loaded? || @allergies.any? %>
       <div class="allergy-strip">
-        <div class="head">&#9888;&#xFE0E; Allergies &amp; Adverse Reactions (<%= @allergies.length %>)</div>
-        <div class="items">
-          <% @allergies.each do |a| %>
-            <span class="achip">
-              <%= a.display_allergen %>
-              <% if a.reaction.present? %><span class="rx">&middot; <%= a.reaction %> (<span class="sev-<%= a.severity.to_s.downcase %>"><%= a.severity %></span>)</span><% end %>
-            </span>
+        <div class="head">
+          <% if @allergy_list_status.loaded? %>
+            &#9888;&#xFE0E; Allergies &amp; Adverse Reactions (<%= @allergies.length %>)
+          <% else %>
+            <%= @allergy_list_status.text %>
           <% end %>
         </div>
+        <% if @allergies.any? %>
+          <div class="items">
+            <% @allergies.each do |a| %>
+              <span class="achip">
+                <%= a.display_allergen %>
+                <% if a.reaction.present? %><span class="rx">&middot; <%= a.reaction %> (<span class="sev-<%= a.severity.to_s.downcase %>"><%= a.severity %></span>)</span><% end %>
+              </span>
+            <% end %>
+          </div>
+        <% end %>
       </div>
     <% else %>
       <div class="allergy-strip <%= "none" if @allergy_list_status.none_recorded? %>">
@@ -243,11 +256,16 @@
         </div>
       </div>
 
-      <%# ---- Allergies (detail) ---- %>
+      <%# ---- Allergies (detail). The count and the body read AllergyListStatus,
+            so a name that passed egress stays in the table when the list is
+            incomplete. ---- %>
       <div class="card">
         <div class="card__head"><h2>Allergies</h2><span class="count"><%= @allergy_list_status.count_label %></span></div>
         <div class="card__body">
-          <% if @allergy_list_status.loaded? %>
+          <% unless @allergy_list_status.loaded? %>
+            <p class="empty"><%= @allergy_list_status.text %></p>
+          <% end %>
+          <% if @allergy_list_status.loaded? || @allergies.any? %>
             <table>
               <thead><tr><th>Allergen</th><th>Reaction</th><th>Severity</th></tr></thead>
               <tbody>
@@ -260,8 +278,6 @@
                 <% end %>
               </tbody>
             </table>
-          <% else %>
-            <p class="empty"><%= @allergy_list_status.text %></p>
           <% end %>
         </div>
       </div>
