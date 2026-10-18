@@ -7,26 +7,35 @@ module Lakeraven
     # the egress filter passed that empty list through whole. A raise, a
     # missing scope, a nil filter, a filter that dropped entries, an
     # unassessed patient, or an indeterminate reply is "not loaded".
+    #
+    # Not-loaded does not hide a name that did load. A dropped row or a
+    # filter that withheld entries keeps the state not-loaded — never
+    # "none recorded" — and the banner, the chart strip, the detail, and
+    # the count all read this object. Names are only those the egress
+    # filter returned; a nil payload is not a list, so nothing from the
+    # unfiltered source is shown.
     class AllergyListStatus
       LOADED = "loaded"
       NONE_RECORDED = "none-recorded"
       NOT_LOADED = "not-loaded"
       UNNAMED_ALLERGY = "Unnamed allergy"
+      INCOMPLETE_LIST = "list incomplete, other entries not loaded"
 
       attr_reader :state, :names
 
-      def self.not_loaded
-        new(state: NOT_LOADED, names: [])
+      def self.not_loaded(names = [])
+        new(state: NOT_LOADED, names: names)
       end
 
       def self.from_counts(source_status:, source_count:, filtered_names:,
                            verified_absence: false, dropped_count: 0)
-        return not_loaded unless complete_reading?(
-          source_status, source_count, filtered_names, dropped_count
-        )
-        return recorded(source_count, filtered_names) if verified_absence || source_count.positive?
+        if complete_reading?(source_status, source_count, filtered_names, dropped_count)
+          return recorded(source_count, filtered_names) if verified_absence || source_count.positive?
 
-        not_loaded
+          return not_loaded
+        end
+
+        not_loaded(passed_names(filtered_names))
       end
 
       # Text, then a coding display, then the code itself. A code with none
@@ -64,15 +73,18 @@ module Lakeraven
       def text
         return names.join(", ") if loaded?
         return "None recorded" if none_recorded?
+        return "#{names.join(", ")} — #{INCOMPLETE_LIST}" if names.any?
 
         "Not loaded"
       end
 
+      # A dash is an unknown total. Known names still count: the badge
+      # would otherwise read as empty beside a list that has entries.
       def count_label
-        return names.length.to_s if loaded?
         return "0" if none_recorded?
+        return "—" if names.empty?
 
-        "—"
+        names.length.to_s
       end
 
       class << self
@@ -84,6 +96,12 @@ module Lakeraven
           else
             new(state: LOADED, names: filtered_names)
           end
+        end
+
+        # Nil is "the filter did not yield a countable list", not an
+        # empty one. Only an Array is names that passed egress.
+        def passed_names(filtered_names)
+          filtered_names.is_a?(Array) ? filtered_names : []
         end
 
         def complete_reading?(source_status, source_count, filtered_names, dropped_count)

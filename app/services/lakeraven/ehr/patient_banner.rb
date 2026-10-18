@@ -7,6 +7,10 @@ module Lakeraven
     class PatientBanner
       SEX_LABELS = { "F" => "Female", "M" => "Male", "U" => "Unknown" }.freeze
       MISSING = "—"
+      # Context is open, but the identity cannot be shown. No dfn: the
+      # failure is the point, and an identifier here would be the record
+      # the closed state exists to withhold.
+      CLOSED_NOTICE = "A patient record is open, but its details could not be shown."
 
       attr_reader :demographics, :allergies, :notice
 
@@ -14,10 +18,15 @@ module Lakeraven
         new(empty: true, show_clear: false, demographics: nil, allergies: nil)
       end
 
-      # Context is open, but nothing clinical may be shown.
+      # Context is open, but nothing clinical may be shown: no Patient
+      # scope, an unknown dfn, a failed lookup, an egress refusal, or an
+      # unusable token. Clear stays; the notice says why, with no identifier.
       def self.closed
-        new(empty: false, show_clear: true, demographics: nil,
-            allergies: AllergyListStatus.not_loaded)
+        new(
+          empty: false, show_clear: true, demographics: nil,
+          allergies: AllergyListStatus.not_loaded,
+          notice: CLOSED_NOTICE
+        )
       end
 
       # The route names a patient the session has not opened. Demographics
