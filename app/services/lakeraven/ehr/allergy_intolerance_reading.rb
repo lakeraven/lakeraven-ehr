@@ -6,8 +6,8 @@ module Lakeraven
     #
     # FHIR search still wants the rows. Display cannot: ORQQAL's record
     # list is [] for assessed-NKA, for "no assessment", and for an
-    # indeterminate reply, and a row dropped because it named another
-    # patient leaves the same hole. Those are not "none recorded".
+    # indeterminate reply, and a row dropped for ownership — wire or
+    # supplemental — leaves the same hole. Those are not "none recorded".
     class AllergyIntoleranceReading < Array
       attr_reader :dropped_count, :assessed, :nka
 
@@ -19,7 +19,7 @@ module Lakeraven
         @nka = nka == true
       end
 
-      # Assessed NKA, every wire row kept, and nothing left after the merge.
+      # Assessed NKA, nothing dropped, and nothing left after the merge.
       def verified_absence?
         assessed && nka && dropped_count.zero? && empty?
       end

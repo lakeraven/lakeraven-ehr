@@ -20,12 +20,14 @@ module Lakeraven
             allergies: AllergyListStatus.not_loaded)
       end
 
-      # The route names a patient the session has not opened. No demographics
-      # and no allergies: those would be the session patient's, on a page
-      # about someone else.
+      # The route names a patient the session has not opened. Demographics
+      # would be the session patient's, on a page about someone else, so
+      # they stay blank. Allergies are not fetched either. The field is
+      # still present — not loaded, and nothing of the session patient's list.
       def self.unopened_route(route_dfn)
         new(
-          empty: false, show_clear: true, demographics: nil, allergies: nil,
+          empty: false, show_clear: true, demographics: nil,
+          allergies: AllergyListStatus.not_loaded,
           notice: unopened_notice(route_dfn)
         )
       end
