@@ -228,6 +228,81 @@ module PatientBannerTestHelper
     refute_includes field.text, "No Known Allergies"
   end
 
+  def scopes_without_patient_read
+    [
+      "user/AllergyIntolerance.read",
+      "user/QuestionnaireResponse.read",
+      "user/QuestionnaireResponse.write"
+    ].join(" ")
+  end
+
+  def owned_and_foreign_wire_allergy_rows
+    [
+      { ien: 1, allergen: "Penicillin", reaction: "Hives", severity: "moderate",
+        clinical_status: "active" },
+      { ien: "foreign-1", patient_dfn: "2", allergen: "Sulfa Drugs", reaction: "Rash",
+        severity: "moderate", clinical_status: "active" }
+    ]
+  end
+
+  def assert_allergies_incomplete_with_known_names!(*names)
+    field = allergies_field_node
+    assert field, "Expected allergies field inside #patient-banner"
+    assert_equal "not-loaded", field["data-allergies-state"]
+    refute_includes field.text, "None recorded"
+    assert_match(/incomplete/i, field.text)
+    names.flatten.each do |name|
+      assert_includes field.text, name, "expected allergy #{name} in banner allergies field"
+    end
+  end
+
+  def assert_dashboard_and_chart_allergies_incomplete_with_known_names!(*names)
+    get "#{MOUNT}/dashboard"
+    assert_response :ok
+    assert_allergies_incomplete_with_known_names!(*names)
+
+    setup_chart_bearer!
+    get "#{MOUNT}/patients/1", headers: @chart_headers
+    assert_response :ok
+    assert_allergies_incomplete_with_known_names!(*names)
+    assert_chart_allergy_strip_incomplete_with_known_names!(*names)
+  end
+
+  def assert_chart_allergy_strip_incomplete_with_known_names!(*names)
+    doc = Nokogiri::HTML(html_response_body)
+    strip = doc.at_css(".allergy-strip")
+    assert strip, "Expected chart allergy strip"
+    strip_text = strip.text
+    assert_match(/incomplete/i, strip_text)
+    names.flatten.each do |name|
+      assert_includes strip_text, name, "expected allergy #{name} in chart allergy strip"
+    end
+    refute_includes strip_text, "None recorded"
+  end
+
+  def assert_banner_patient_details_unavailable!
+    banner = assert_patient_banner!
+    assert_match(/could not be shown/i, banner.text)
+    refute_includes banner.text, "Alice Anderson"
+    refute_includes banner.text, "May 15, 1980"
+    refute_includes banner.text, "Penicillin"
+    refute_includes banner.text, "Shellfish"
+    refute_match(/MRN\s*\/\s*DFN/i, banner.text)
+    refute_includes banner.text, "No patient selected"
+    clear = banner.css("button, input[type=submit]").find { |n| n.text.match?(/clear patient context/i) }
+    assert clear, "Expected Clear patient context control in banner"
+  end
+
+  def assert_chart_patient_banner_sticky!
+    body = html_response_body
+    banner = patient_banner_node
+    inline_sticky = banner["style"].to_s.match?(/position:\s*sticky/i)
+    page_sticky = body.match?(/#patient-banner[^{]*\{[^}]*position:\s*sticky/i)
+
+    assert inline_sticky || page_sticky,
+           "Expected chart HTML to make #patient-banner position: sticky (inline or in-page CSS)"
+  end
+
   def assert_dashboard_and_chart_allergies_not_loaded!
     get "#{MOUNT}/dashboard"
     assert_response :ok
