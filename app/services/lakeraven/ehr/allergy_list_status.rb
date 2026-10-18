@@ -3,7 +3,7 @@
 module Lakeraven
   module EHR
     # "None recorded" is a clinical finding. It is allowed only when ORQQAL
-    # assessed NKA, no wire row was dropped, the merged list is empty, and
+    # assessed NKA, nothing was dropped, the merged list is empty, and
     # the egress filter passed that empty list through whole. A raise, a
     # missing scope, a nil filter, a filter that dropped entries, an
     # unassessed patient, or an indeterminate reply is "not loaded".
