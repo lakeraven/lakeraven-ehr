@@ -135,8 +135,19 @@ module Lakeraven
 
       # AuditableClinicalAccess records entity_type from this; the chart is a
       # Patient-centric aggregate, so audit it against Patient + the dfn.
+      # The dfn is the route segment. `params` also carries the query string,
+      # so `?id=` or `?dfn=` must not name a record this chart did not open.
       def fhir_resource_type
         "Patient"
+      end
+
+      def direct_audit_identifier
+        chart_route_dfn || super
+      end
+
+      def chart_route_dfn
+        path = request.path_parameters
+        path[:dfn].presence || path["dfn"].presence
       end
 
       # AuditableClinicalAccess hook: demo-bypass requests carry no token but

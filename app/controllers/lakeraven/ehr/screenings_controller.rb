@@ -205,20 +205,23 @@ module Lakeraven
       #     ChartsController uses for a patient-centric aggregate.
       #
       # Never QuestionnaireResponse/<dfn>, which resolves to some other
-      # patient's screening. The reference rule itself (both halves derived
-      # together, sanitized) lives in the shared concern since #512; this
-      # surface only supplies the identifier a create cannot put in params.
+      # patient's screening. The id is the route segment, or the record a
+      # create just stored. `params` also carries the query string and the
+      # form body, so an `id` there must not name a screening this page did
+      # not open. The reference rule itself (both halves derived together,
+      # sanitized) lives in the shared concern since #512.
       def fhir_resource_type = audited_screening_id ? SCREENING_RESOURCE : "Patient"
 
-      def direct_audit_identifier = audited_screening_id || super
+      def direct_audit_identifier = audited_screening_id || route_param(:dfn) || super
 
       # On a create the id exists only once the action has run — the audit row
       # is written after `yield`, inside the same transaction, so the new
-      # record can name itself.
+      # record can name itself. A page with no :id segment — the history, the
+      # new form, a refused create — has none, and the patient is audited.
       def audited_screening_id
         return @result.record.id.to_s if @result&.record
 
-        params[:id].presence
+        route_param(:id)
       end
 
       # -- Loading --------------------------------------------------------------

@@ -50,6 +50,10 @@ module Lakeraven
       # resolver via #486's `browser_sso_token?`/`current_duz`.
       def audit_action = "E"
       def fhir_resource_type = "Patient"
+
+      # The patient is the route segment. A query-string id or dfn is not
+      # the record this open named.
+      def direct_audit_identifier = route_param(:dfn) || super
     end
   end
 end
