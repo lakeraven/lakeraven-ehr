@@ -136,8 +136,10 @@ module Lakeraven
         "Patient"
       end
 
+      # The route may say "01". The chart shows the patient the repository
+      # resolves, and the audit row names that same canonical dfn.
       def direct_audit_identifier
-        chart_route_dfn || super
+        Patient.canonical_dfn(chart_route_dfn) || chart_route_dfn || super
       end
 
       def chart_route_dfn
