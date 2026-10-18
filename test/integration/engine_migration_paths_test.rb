@@ -4,6 +4,7 @@ require "test_helper"
 require "open3"
 require "tmpdir"
 require "fileutils"
+require "uri"
 
 # Regression for lakeraven-ehr#558: the dummy app must register the engine's
 # db/migrate path so schema:load populates schema_migrations for every engine
@@ -18,17 +19,21 @@ class EngineMigrationPathsTest < ActiveSupport::TestCase
 
   setup do
     @scratch_db = "lakeraven_ehr_migpath_#{SecureRandom.hex(4)}"
-    @database_url = "postgresql:///#{@scratch_db}"
+    @database_url = scratch_database_url_for(@scratch_db)
     @tmpdir = Dir.mktmpdir("engine_migration_paths_")
     @bumped_schema_path = File.join(@tmpdir, "schema.rb")
     @migrated_schema_path = File.join(@tmpdir, "migrated_schema.rb")
     @original_dummy_schema_bytes = File.binread(DUMMY_SCHEMA_PATH)
     write_bumped_schema_copy!
     @engine_versions = engine_migration_versions
+    refute_empty @engine_versions,
+                 "expected at least one engine migration under #{ENGINE_MIGRATE_DIR} " \
+                 "(glob: **[0-9]*_*.rb)"
   end
 
   teardown do
     assert_dummy_schema_unchanged!
+  ensure
     drop_scratch_database!
     FileUtils.remove_entry(@tmpdir) if @tmpdir && Dir.exist?(@tmpdir)
   end
@@ -107,7 +112,7 @@ class EngineMigrationPathsTest < ActiveSupport::TestCase
       extra_env: { "SCHEMA" => @bumped_schema_path }
     )
     combined = "#{stdout}#{stderr}"
-    refute_match(/DuplicateMigration/i, combined, "duplicate migration error:\n#{combined}")
+    refute_match(/Duplicate ?migration/i, combined, "duplicate migration error:\n#{combined}")
     assert_predicate status, :success?, cli_failure_message("db:create db:schema:load", stdout, stderr, status)
 
     versions = schema_migration_versions(cwd: REPO_ROOT)
@@ -126,9 +131,9 @@ class EngineMigrationPathsTest < ActiveSupport::TestCase
   end
 
   def engine_migration_versions
-    Dir.children(ENGINE_MIGRATE_DIR)
-      .grep(/\.rb\z/)
-      .map { |filename| filename.split("_", 2).first }
+    Dir[File.join(ENGINE_MIGRATE_DIR, "**/[0-9]*_*.rb")]
+      .map { |path| File.basename(path)[/\A(\d+)/, 1] }
+      .compact
       .sort
   end
 
@@ -167,6 +172,8 @@ class EngineMigrationPathsTest < ActiveSupport::TestCase
   end
 
   def rails_cli(cwd:, argv:, extra_env: {})
+    flunk "rails_cli refused: @database_url is blank (would fall back to shared test database)" if @database_url.blank?
+
     env = rails_env.merge(extra_env)
     Open3.capture3(env, "bin/rails", *argv, chdir: cwd)
   end
@@ -179,14 +186,83 @@ class EngineMigrationPathsTest < ActiveSupport::TestCase
     stdout.split("\n").map(&:strip).reject(&:empty?)
   end
 
+  def scratch_database_url_for(scratch_db)
+    if ENV["DATABASE_URL"].present?
+      return scratch_database_url_from_env(scratch_db)
+    end
+
+    url = scratch_database_url_from_active_record(scratch_db)
+    return url if url
+
+    flunk "could not build scratch DATABASE_URL: ENV['DATABASE_URL'] is unset and " \
+          "ActiveRecord::Base.connection_db_config is missing or not PostgreSQL"
+  end
+
+  def scratch_database_url_from_env(scratch_db)
+    raw = ENV.fetch("DATABASE_URL")
+    uri = URI.parse(raw)
+    unless uri.scheme&.match?(/\A(?:postgres|postgresql)\z/i)
+      flunk "ENV['DATABASE_URL'] must use postgres or postgresql scheme " \
+            "(got #{uri.scheme.inspect}; url: #{redact_database_url(raw)})"
+    end
+
+    uri.path = "/#{scratch_db}"
+    uri.to_s
+  rescue URI::InvalidURIError => e
+    flunk "could not parse ENV['DATABASE_URL']: #{e.message}"
+  end
+
+  def scratch_database_url_from_active_record(scratch_db)
+    cfg = ActiveRecord::Base.connection_db_config
+    return nil unless cfg
+
+    hash = cfg.configuration_hash
+    adapter = hash[:adapter].to_s
+    return nil unless adapter.match?(/postgres/)
+
+    username = hash[:username] || hash[:user]
+    password = hash[:password]
+    host = hash[:host]
+    port = hash[:port]
+
+    if host.blank?
+      return "postgresql:///#{scratch_db}"
+    end
+
+    userinfo = encode_userinfo(username, password)
+    auth = userinfo ? "#{userinfo}@" : ""
+    port_fragment = port ? ":#{port}" : ""
+    "postgresql://#{auth}#{host}#{port_fragment}/#{scratch_db}"
+  end
+
+  def encode_userinfo(username, password)
+    return nil if username.blank?
+
+    user = URI.encode_uri_component(username)
+    return user unless password
+
+    "#{user}:#{URI.encode_uri_component(password)}"
+  end
+
+  def redact_database_url(url)
+    uri = URI.parse(url)
+    uri.userinfo = "[REDACTED]" if uri.userinfo
+    uri.to_s
+  rescue URI::InvalidURIError
+    "[invalid DATABASE_URL]"
+  end
+
   def drop_scratch_database!
-    rails_cli(
+    return unless @database_url.present? && @scratch_db.to_s.match?(/\Alakeraven_ehr_migpath_\h+\z/)
+
+    stdout, stderr, status = rails_cli(
       cwd: DUMMY_ROOT,
       argv: %w[db:drop],
       extra_env: { "DISABLE_DATABASE_ENVIRONMENT_CHECK" => "1" }
     )
-  rescue StandardError
-    nil
+    return if status.success?
+
+    flunk cli_failure_message("db:drop", stdout, stderr, status)
   end
 
   def cli_failure_message(label, stdout, stderr, status)
