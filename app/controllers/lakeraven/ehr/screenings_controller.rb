@@ -212,7 +212,12 @@ module Lakeraven
       # sanitized) lives in the shared concern since #512.
       def fhir_resource_type = audited_screening_id ? SCREENING_RESOURCE : "Patient"
 
-      def direct_audit_identifier = audited_screening_id || route_param(:dfn) || super
+      # A digit-string dfn is canonicalised the way the repository resolves
+      # it, so a route of "01" audits as the patient the banner shows. A
+      # screening id is not a dfn and is recorded unchanged.
+      def direct_audit_identifier
+        audited_screening_id || Patient.canonical_dfn(route_param(:dfn)) || route_param(:dfn) || super
+      end
 
       # On a create the id exists only once the action has run — the audit row
       # is written after `yield`, inside the same transaction, so the new

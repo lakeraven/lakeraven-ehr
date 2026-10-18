@@ -71,16 +71,32 @@ module Lakeraven
         banner_token.can_read?("Patient") || banner_token.can_read?("AllergyIntolerance")
       end
 
+      # The session may still hold the raw segment ("01"). The row names
+      # the patient the repository would resolve, and is replaced with the
+      # dfn actually on the banner once that patient is shown.
       def remember_banner_patient!(dfn)
-        @patient_banner_audit_dfn = dfn
+        @patient_banner_audit_dfn = audit_dfn(dfn)
       end
 
       def load_patient_banner(dfn)
-        PatientBannerLoader.new(
+        banner = PatientBannerLoader.new(
           dfn: dfn,
           can_read: banner_token.method(:can_read?),
           filter: method(:filter_fhir_for_egress)
         ).load
+        remember_displayed_patient!(banner)
+        banner
+      end
+
+      def remember_displayed_patient!(banner)
+        return unless banner_supplies_entity?
+
+        shown = audit_dfn(banner.demographics&.mrn)
+        @patient_banner_audit_dfn = shown if shown.present?
+      end
+
+      def audit_dfn(value)
+        Patient.canonical_dfn(value) || value.to_s.presence
       end
 
       def banner_token
