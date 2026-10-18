@@ -38,16 +38,19 @@ module Lakeraven
           allergy_intolerance_reading_for_patient(dfn)
         end
 
-        # Rows plus ORQQAL's assessed/nka flags and how many wire rows were
-        # dropped for naming another patient. merged_allergy_intolerances_for_patient
-        # is this reading used as an Array, so FHIR search's return shape
-        # stays a list of AllergyIntolerance models.
+        # Rows plus ORQQAL's assessed/nka flags and how many rows were not
+        # kept: a wire row naming another patient, a supplemental row owned_by
+        # refused (no owner, another patient, the wrong class), or a
+        # supplemental result that was not an Array. The merged list is what
+        # FHIR search returns; the count is what stops that hole reading as
+        # "none recorded".
         def allergy_intolerance_reading_for_patient(dfn)
           wire = wire_allergy_batch(dfn)
-          records = merge(wire.records, supplemental_allergies(dfn))
+          supplemental, supplemental_dropped = supplemental_allergy_slice(dfn)
+          records = merge(wire.records, supplemental)
           AllergyIntoleranceReading.new(
             records,
-            dropped_count: wire.dropped_count,
+            dropped_count: wire.dropped_count + supplemental_dropped,
             assessed: wire.assessed,
             nka: wire.nka
           )
@@ -62,8 +65,10 @@ module Lakeraven
           Observation.from_vital_hashes(wire_vital_rows_for_patient(dfn), patient_dfn: dfn)
         end
 
-        def supplemental_allergies(dfn)
-          owned_by(
+        # [kept rows, dropped count]. The rows are what owned_by would return;
+        # the count is the hole those callers do not see.
+        def supplemental_allergy_slice(dfn)
+          owned_slice(
             dfn,
             Lakeraven::EHR.configuration.supplemental_allergy_intolerances_provider,
             AllergyIntolerance
@@ -167,39 +172,66 @@ module Lakeraven
           )
         end
 
-        # nil / [] / a non-array all mean "no supplemental rows" -- ordinary
-        # states for a provider, not failures. A provider that RAISES is a
-        # failure and is surfaced rather than rescued into an empty slice, which
-        # would be indistinguishable from configuring no provider at all.
+        # Kept rows only. Observations and the other merged_* callers see this
+        # array and nothing else — a non-array result is still [], and a row
+        # that fails the checks below is still absent. The allergy reading
+        # uses owned_slice so those holes are counted.
+        def owned_by(dfn, provider, expected)
+          kept, = owned_slice(dfn, provider, expected)
+          kept
+        end
+
+        # [kept, dropped]. No provider is an empty slice: nothing was
+        # configured, so there is no hole. [] is an answer that named no rows.
+        # A non-Array did not answer; the rows we can show are still none, and
+        # the drop count refuses verified absence over that hole.
+        def owned_slice(dfn, provider, expected)
+          return [ [], 0 ] if provider.nil?
+
+          produced = supplemental_provider_result(dfn, provider)
+          return [ [], 1 ] unless produced.is_a?(Array)
+
+          split_owned_supplemental(produced, dfn, expected)
+        end
+
+        def supplemental_provider_result(dfn, provider)
+          provider.call(dfn.to_s)
+        rescue SupplementalProviderError
+          raise
+        rescue => e
+          raise SupplementalProviderError,
+            "supplemental provider failed for patient #{dfn}: #{e.class}: #{e.message}"
+        end
+
+        def split_owned_supplemental(produced, dfn, expected)
+          kept = []
+          dropped = 0
+          produced.each do |resource|
+            record = kept_supplemental(resource, dfn, expected)
+            if record
+              kept << record
+            else
+              dropped += 1
+            end
+          end
+          [ kept, dropped ]
+        end
+
         # `expected` is the resource type this provider is declared to supply.
         # Ownership alone is not enough: an AllergyIntolerance returned by the
         # OBSERVATION provider owns the right patient and would be serialized
         # into an Observation bundle, breaking the endpoint's resource-type
         # contract. An object of no known type would also fail later, outside
         # the provider-error wrapper, where the failure no longer names a cause.
-        def owned_by(dfn, provider, expected)
-          return [] if provider.nil?
+        #
+        # instance_of?, not is_a?: a subclass can override to_fhir to emit
+        # another resource type, and an object can override is_a? to pass a
+        # check it should fail. Only the engine's own model is accepted.
+        def kept_supplemental(resource, dfn, expected)
+          return unless resource.instance_of?(expected)
 
-          produced = begin
-            provider.call(dfn.to_s)
-          rescue SupplementalProviderError
-            raise
-          rescue => e
-            raise SupplementalProviderError,
-              "supplemental provider failed for patient #{dfn}: #{e.class}: #{e.message}"
-          end
-
-          return [] unless produced.is_a?(Array)
-
-          produced.filter_map do |resource|
-            # instance_of?, not is_a?: a subclass can override to_fhir to emit
-            # another resource type, and an object can override is_a? to pass a
-            # check it should fail. Only the engine's own model is accepted.
-            next unless resource.instance_of?(expected)
-
-            owner = stated_owner(resource)
-            verified(resource, dfn) if owner && same_patient?(owner, dfn)
-          end
+          owner = stated_owner(resource)
+          verified(resource, dfn) if owner && same_patient?(owner, dfn)
         end
 
         # The ownership check and the serialization are separate reads, so an
