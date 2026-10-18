@@ -20,6 +20,7 @@ class EngineMigrationPathsTest < ActiveSupport::TestCase
   setup do
     @scratch_db = "lakeraven_ehr_migpath_#{SecureRandom.hex(4)}"
     @database_url = scratch_database_url_for(@scratch_db)
+    assert_database_url_targets_scratch_db!
     @tmpdir = Dir.mktmpdir("engine_migration_paths_")
     @bumped_schema_path = File.join(@tmpdir, "schema.rb")
     @migrated_schema_path = File.join(@tmpdir, "migrated_schema.rb")
@@ -214,10 +215,17 @@ class EngineMigrationPathsTest < ActiveSupport::TestCase
             "(got #{uri.scheme.inspect}; url: #{redact_database_url(raw)})"
     end
 
+    if uri.query.present?
+      query_pairs = URI.decode_www_form(uri.query).reject do |key, _value|
+        %w[database dbname].include?(key)
+      end
+      uri.query = query_pairs.empty? ? nil : URI.encode_www_form(query_pairs)
+    end
+
     uri.path = "/#{scratch_db}"
     uri.to_s
-  rescue URI::InvalidURIError => e
-    flunk "could not parse ENV['DATABASE_URL']: #{e.message}"
+  rescue URI::InvalidURIError
+    flunk "could not parse ENV['DATABASE_URL'] (url: #{redact_database_url(raw)})"
   end
 
   def scratch_database_url_from_active_record(scratch_db)
@@ -267,8 +275,23 @@ class EngineMigrationPathsTest < ActiveSupport::TestCase
     "[invalid DATABASE_URL]"
   end
 
+  def assert_database_url_targets_scratch_db!
+    resolved_db = resolved_database_from_url(@database_url)
+    return if resolved_db == @scratch_db
+
+    flunk "DATABASE_URL resolves to #{resolved_db.inspect}, expected scratch database " \
+          "#{@scratch_db.inspect} (url: #{redact_database_url(@database_url)})"
+  end
+
+  def resolved_database_from_url(database_url)
+    require "active_record/database_configurations"
+
+    ActiveRecord::DatabaseConfigurations::ConnectionUrlResolver.new(database_url).to_hash[:database]
+  end
+
   def drop_scratch_database!
     return unless @database_url.present? && @scratch_db.to_s.match?(/\Alakeraven_ehr_migpath_\h+\z/)
+    return unless resolved_database_from_url(@database_url) == @scratch_db
 
     stdout, stderr, status = rails_cli(
       cwd: DUMMY_ROOT,
