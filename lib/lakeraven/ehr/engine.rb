@@ -35,6 +35,50 @@ module Lakeraven
           inflect.acronym "FHIR"
         end
       end
+
+      # The dummy app lives inside this engine and never copies migrations via
+      # `lakeraven_ehr:install:migrations`, so schema:load must see db/migrate
+      # here. A host app receives its own copies under new timestamps;
+      # appending this path there would run each migration twice. Append only
+      # when the app root is a directory inside the engine root.
+      #
+      # Repo-root bin/rails sets ENGINE_ROOT and Active Record appends that
+      # same directory again in db:load_config. Collapse paths that expand or
+      # realpath to one directory so Dir[] does not load each file twice.
+      initializer "lakeraven-ehr.append_migrations" do |app|
+        engine_root = File.realpath(root)
+        app_root = File.realpath(app.root)
+        next unless app_root.start_with?("#{engine_root}#{File::SEPARATOR}")
+
+        canonical_path = lambda do |path|
+          expanded = File.expand_path(path.to_s)
+          File.directory?(expanded) ? File.realpath(expanded) : expanded
+        end
+
+        migrate_paths = app.config.paths["db/migrate"]
+        seen = migrate_paths.to_a.map { |path| canonical_path.call(path) }
+        config.paths["db/migrate"].expanded.each do |expanded_path|
+          canonical = canonical_path.call(expanded_path)
+          next if seen.include?(canonical)
+
+          migrate_paths << expanded_path
+          seen << canonical
+        end
+
+        next unless defined?(Rake::Task)
+
+        %w[ db:load_config app:db:load_config ].each do |task_name|
+          load_config = Rake.application.lookup(task_name, Rake::Scope::EMPTY)
+          next unless load_config
+
+          load_config.enhance do
+            paths = ActiveRecord::Tasks::DatabaseTasks.migrations_paths
+            deduped = paths.uniq { |path| canonical_path.call(path) }
+            ActiveRecord::Tasks::DatabaseTasks.migrations_paths = deduped
+            ActiveRecord::Migrator.migrations_paths = deduped
+          end
+        end
+      end
     end
   end
 end
