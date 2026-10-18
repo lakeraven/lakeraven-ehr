@@ -13,6 +13,10 @@
 </head>
 <body>
 
+<% if (banner = patient_banner) %>
+  <%= render "lakeraven/ehr/shared/patient_banner", banner: banner %>
+<% end %>
+
 <%= yield %>
 
 </body>

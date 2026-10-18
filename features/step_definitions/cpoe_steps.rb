@@ -176,6 +176,8 @@ end
 def ensure_cpoe_medication_stubs!
   meds = @patient_medications || []
   allergies = @patient_allergies || []
-  Lakeraven::EHR::MedicationRequest.define_singleton_method(:for_patient) { |_dfn, **_opts| meds }
-  Lakeraven::EHR::AllergyIntolerance.define_singleton_method(:for_patient) { |_dfn| allergies }
+  # stub_gateway restores after the scenario. A bare singleton replacement
+  # survives into later features and makes an empty chart look unassessed.
+  stub_gateway(Lakeraven::EHR::MedicationRequest, :for_patient, meds)
+  stub_gateway(Lakeraven::EHR::AllergyIntolerance, :for_patient, allergies)
 end
