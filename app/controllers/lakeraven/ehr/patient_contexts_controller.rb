@@ -53,7 +53,12 @@ module Lakeraven
 
       # The patient is the route segment. A query-string id or dfn is not
       # the record this open named.
-      def direct_audit_identifier = route_param(:dfn) || super
+      # Opening "01" is opening patient 1. The session keeps the raw segment
+      # (ClinicianPatientContext compares it as stored); the audit row names
+      # the canonical dfn the repository resolves.
+      def direct_audit_identifier
+        Patient.canonical_dfn(route_param(:dfn)) || route_param(:dfn) || super
+      end
     end
   end
 end
