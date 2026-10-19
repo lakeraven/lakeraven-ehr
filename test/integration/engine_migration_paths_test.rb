@@ -229,35 +229,7 @@ class EngineMigrationPathsTest < ActiveSupport::TestCase
     adapter = hash[:adapter].to_s
     return nil unless adapter.match?(/postgres/)
 
-    username = hash[:username] || hash[:user]
-    password = hash[:password]
-    host = hash[:host]
-    port = hash[:port]
-
-    if host.blank? || host.start_with?("/")
-      query_parts = []
-      query_parts << "host=#{URI.encode_uri_component(host)}" if host.present?
-      query_parts << "port=#{URI.encode_uri_component(port.to_s)}" if port
-      query_parts << "username=#{URI.encode_uri_component(username)}" if username.present?
-      query_parts << "password=#{URI.encode_uri_component(password)}" if password
-
-      base = "postgresql:///#{scratch_db}"
-      return query_parts.empty? ? base : "#{base}?#{query_parts.join('&')}"
-    end
-
-    userinfo = encode_userinfo(username, password)
-    auth = userinfo ? "#{userinfo}@" : ""
-    port_fragment = port ? ":#{port}" : ""
-    "postgresql://#{auth}#{host}#{port_fragment}/#{scratch_db}"
-  end
-
-  def encode_userinfo(username, password)
-    return nil if username.blank?
-
-    user = URI.encode_uri_component(username)
-    return user unless password
-
-    "#{user}:#{URI.encode_uri_component(password)}"
+    DatabaseUrlHelpers.build_postgresql_url_from_config(hash, scratch_db)
   end
 
   def redact_database_url(url)
@@ -265,22 +237,22 @@ class EngineMigrationPathsTest < ActiveSupport::TestCase
   end
 
   def assert_database_url_targets_scratch_db!
-    resolved_db = resolved_database_from_url(@database_url)
+    resolved_db = DatabaseUrlHelpers.safe_resolved_database_from_url(@database_url)
+    if resolved_db.nil?
+      flunk "#{DatabaseUrlHelpers::CONNECTION_URL_RESOLUTION_FAILURE} " \
+            "(url: #{redact_database_url(@database_url)})"
+    end
     return if resolved_db == @scratch_db
 
     flunk "DATABASE_URL resolves to #{resolved_db.inspect}, expected scratch database " \
           "#{@scratch_db.inspect} (url: #{redact_database_url(@database_url)})"
   end
 
-  def resolved_database_from_url(database_url)
-    require "active_record/database_configurations"
-
-    ActiveRecord::DatabaseConfigurations::ConnectionUrlResolver.new(database_url).to_hash[:database]
-  end
-
   def drop_scratch_database!
     return unless @database_url.present? && @scratch_db.to_s.match?(/\Alakeraven_ehr_migpath_\h+\z/)
-    return unless resolved_database_from_url(@database_url) == @scratch_db
+    resolved_db = DatabaseUrlHelpers.safe_resolved_database_from_url(@database_url)
+    return if resolved_db.nil?
+    return unless resolved_db == @scratch_db
 
     stdout, stderr, status = rails_cli(
       cwd: DUMMY_ROOT,
