@@ -40,17 +40,17 @@ module Lakeraven
 
         # Rows plus ORQQAL's assessed/nka flags and how many rows were not
         # kept: a wire row naming another patient, a supplemental row owned_by
-        # refused (no owner, another patient, the wrong class), or a
-        # supplemental result that was not an Array. The merged list is what
-        # FHIR search returns; the count is what stops that hole reading as
-        # "none recorded".
+        # refused (no owner, another patient, the wrong class), a supplemental
+        # result that was not an Array, or a repeated ien that is a different
+        # allergy. The merged list is what FHIR search returns; the count is
+        # what stops that hole reading as "none recorded".
         def allergy_intolerance_reading_for_patient(dfn)
           wire = wire_allergy_batch(dfn)
           supplemental, supplemental_dropped = supplemental_allergy_slice(dfn)
-          records = merge(wire.records, supplemental)
+          records, differing_drops = merge_allergies(wire.records, supplemental)
           AllergyIntoleranceReading.new(
             records,
-            dropped_count: wire.dropped_count + supplemental_dropped,
+            dropped_count: wire.dropped_count + supplemental_dropped + differing_drops,
             assessed: wire.assessed,
             nka: wire.nka
           )
@@ -304,11 +304,51 @@ module Lakeraven
         def merge(wire, supplemental)
           seen = Set.new
           (wire + supplemental).select do |resource|
-            id = resource.respond_to?(:ien) ? resource.ien.to_s.strip : ""
+            id = merge_ien(resource)
             next true if id.empty?
 
             seen.add?(id) ? true : false
           end
+        end
+
+        # merge's kept rows, plus how many dropped repeats were a different
+        # allergy. Observations still use merge: a repeated id there is
+        # dropped and uncounted. A repeat counts here when AllergyIntolerance
+        # matching keys differ, or either key is nil. The same key is one
+        # allergy stated twice, not a hole in the list.
+        def merge_allergies(wire, supplemental)
+          [ merge(wire, supplemental), differing_allergy_drops(wire, supplemental) ]
+        end
+
+        def differing_allergy_drops(wire, supplemental)
+          seen = {}
+          drops = 0
+          (wire + supplemental).each do |resource|
+            id = merge_ien(resource)
+            next if id.empty?
+
+            prior = seen[id]
+            if prior
+              drops += 1 if differing_allergy?(prior, resource)
+            else
+              seen[id] = resource
+            end
+          end
+          drops
+        end
+
+        def merge_ien(resource)
+          resource.respond_to?(:ien) ? resource.ien.to_s.strip : ""
+        end
+
+        def differing_allergy?(kept, candidate)
+          left = matching_key_of(kept)
+          right = matching_key_of(candidate)
+          left.nil? || right.nil? || left != right
+        end
+
+        def matching_key_of(resource)
+          resource.matching_key if resource.respond_to?(:matching_key)
         end
       end
     end
