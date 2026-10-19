@@ -20,7 +20,7 @@ module Lakeraven
         # not read — there is no one to attach it to.
         return PatientBanner.closed unless PatientBanner.identifiable?(patient)
 
-        PatientBanner.for_patient(patient, allergies: allergy_status, show_clear: true)
+        PatientBanner.for_patient(patient, allergies: allergy_status(patient), show_clear: true)
       end
 
       private
@@ -56,16 +56,28 @@ module Lakeraven
         nil
       end
 
-      def allergy_status
+      def allergy_status(patient)
         return AllergyListStatus.not_loaded unless @can_read.call("AllergyIntolerance")
 
-        source = fetch_allergies
+        dfn = canonical_allergy_dfn(patient)
+        return AllergyListStatus.not_loaded unless dfn
+
+        source = fetch_allergies(dfn)
         source.to_list_status(filtered_allergy_names(source))
       end
 
-      def fetch_allergies
+      # The banner shows the patient find_by_dfn resolved. Allergies are read
+      # for that record's own dfn — already canonical — or for
+      # Patient.canonical_dfn of the session value. "01" and "1" are one
+      # patient; a read under the raw session spelling misses the list the
+      # chart loads with @patient.dfn. No canonical dfn means not loaded.
+      def canonical_allergy_dfn(patient)
+        Patient.canonical_dfn(patient.dfn) || Patient.canonical_dfn(@dfn)
+      end
+
+      def fetch_allergies(dfn)
         AllergySource.fetch(log_label: "[patient-banner]") do
-          SupplementalClinicalResources.merged_allergy_intolerances_for_patient(@dfn)
+          SupplementalClinicalResources.merged_allergy_intolerances_for_patient(dfn)
         end
       end
 
