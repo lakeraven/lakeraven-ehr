@@ -313,9 +313,14 @@ module Lakeraven
 
         # merge's kept rows, plus how many dropped repeats were a different
         # allergy. Observations still use merge: a repeated id there is
-        # dropped and uncounted. A repeat counts here when AllergyIntolerance
-        # matching keys differ, or either key is nil. The same key is one
-        # allergy stated twice, not a hole in the list.
+        # dropped and uncounted. Two rows are the same allergy when both
+        # carry an allergen code and the codes are equal after strip, or
+        # when at least one has no code and the names are equal after
+        # strip, downcase, and collapsed internal whitespace. A repeat
+        # counts when the codes differ, the names differ, a name needed for
+        # that comparison is blank, or a row does not respond to allergen
+        # or allergen_code. The same allergy stated twice is not a hole
+        # in the list.
         def merge_allergies(wire, supplemental)
           [ merge(wire, supplemental), differing_allergy_drops(wire, supplemental) ]
         end
@@ -342,13 +347,31 @@ module Lakeraven
         end
 
         def differing_allergy?(kept, candidate)
-          left = matching_key_of(kept)
-          right = matching_key_of(candidate)
-          left.nil? || right.nil? || left != right
+          return true unless reads_allergen_identity?(kept) && reads_allergen_identity?(candidate)
+
+          left_code = stripped_allergen_code(kept)
+          right_code = stripped_allergen_code(candidate)
+          return left_code != right_code if left_code && right_code
+
+          normalized_allergen_names_differ?(kept, candidate)
         end
 
-        def matching_key_of(resource)
-          resource.matching_key if resource.respond_to?(:matching_key)
+        def reads_allergen_identity?(resource)
+          resource.respond_to?(:allergen) && resource.respond_to?(:allergen_code)
+        end
+
+        def stripped_allergen_code(resource)
+          resource.allergen_code.to_s.strip.presence
+        end
+
+        def normalized_allergen_names_differ?(kept, candidate)
+          left = normalized_allergen_name(kept)
+          right = normalized_allergen_name(candidate)
+          left.blank? || right.blank? || left != right
+        end
+
+        def normalized_allergen_name(resource)
+          resource.allergen.to_s.squish.downcase
         end
       end
     end
