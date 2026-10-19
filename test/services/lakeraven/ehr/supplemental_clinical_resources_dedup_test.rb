@@ -13,6 +13,8 @@ module Lakeraven
       # sees assessed NKA with an empty allergy list.
       class NkaWireGateway
         class << self
+          attr_accessor :patient_wire_rows
+
           def begin_assessment_capture!
             @capture = true
             @mark = nil
@@ -23,8 +25,14 @@ module Lakeraven
           end
 
           def for_patient(_dfn)
-            rows = []
-            @mark = { assessed: true, nka: true, rows: rows } if @capture
+            rows = patient_wire_rows.nil? ? [] : Array(patient_wire_rows)
+            if @capture
+              @mark = if rows.empty?
+                { assessed: true, nka: true, rows: rows }
+              else
+                { assessed: true, nka: false, rows: rows }
+              end
+            end
             rows
           end
 
@@ -36,16 +44,18 @@ module Lakeraven
         end
       end
 
-      def with_nka_wire_gateway
+      def with_nka_wire_gateway(wire_rows: nil)
         original = AllergyIntolerance.gateway
+        NkaWireGateway.patient_wire_rows = wire_rows
         AllergyIntolerance.gateway = NkaWireGateway
         yield
       ensure
         AllergyIntolerance.gateway = original
+        NkaWireGateway.patient_wire_rows = nil
       end
 
-      def allergy_reading_for_patient(dfn, supplemental_rows)
-        with_nka_wire_gateway do
+      def allergy_reading_for_patient(dfn, supplemental_rows, wire_rows: nil)
+        with_nka_wire_gateway(wire_rows: wire_rows) do
           with_supplemental_providers(allergy_intolerances: ->(_dfn) { supplemental_rows }) do
             SupplementalClinicalResources.send(:allergy_intolerance_reading_for_patient, dfn)
           end
@@ -86,6 +96,72 @@ module Lakeraven
                      "same matching_key duplicate must not increase dropped_count"
         assert_equal 1, with_duplicates.size
         assert_equal [ "Latex" ], with_duplicates.map(&:allergen)
+      end
+
+      # Pin: two rows sharing an ien are the SAME allergy when (a) both carry
+      # allergen_code and codes match, or (b) at least one has no allergen_code
+      # and allergen names match after downcase/strip/whitespace squish. They are
+      # DIFFERENT (counted dropped) when both coded with different codes, names
+      # differ under (b), or a needed name is blank. Do not key same-ien solely
+      # on AllergyIntolerance#matching_key (rxnorm vs name).
+      def wire_allergy(ien:, allergen:, allergen_code: nil)
+        AllergyIntolerance.new(
+          ien: ien,
+          patient_dfn: DFN,
+          allergen: allergen,
+          allergen_code: allergen_code,
+          clinical_status: "active"
+        )
+      end
+
+      test "same ien coded supplemental mirror of uncoded wire row same name does not drop" do
+        wire = wire_allergy(ien: "5", allergen: "Penicillin")
+        mirror = wire_allergy(ien: "5", allergen: "Penicillin", allergen_code: "7980")
+
+        reading = allergy_reading_for_patient(DFN, [ mirror ], wire_rows: [ wire ])
+
+        assert_equal 0, reading.dropped_count,
+                     "uncoded ORQQAL row and coded supplemental mirror with same name share ien 5"
+      end
+
+      test "same ien coded supplemental mirror matches wire name case and whitespace" do
+        wire = wire_allergy(ien: "5", allergen: "Penicillin")
+        mirror = wire_allergy(ien: "5", allergen: "penicillin ", allergen_code: "7980")
+
+        reading = allergy_reading_for_patient(DFN, [ mirror ], wire_rows: [ wire ])
+
+        assert_equal 0, reading.dropped_count,
+                     "name comparison under (b) must ignore case and extra whitespace"
+      end
+
+      test "same ien both coded different codes same display name counts as dropped" do
+        wire = wire_allergy(ien: "5", allergen: "Penicillin", allergen_code: "7980")
+        other_code = wire_allergy(ien: "5", allergen: "Penicillin", allergen_code: "1234")
+
+        reading = allergy_reading_for_patient(DFN, [ other_code ], wire_rows: [ wire ])
+
+        assert reading.dropped_count >= 1,
+               "conflicting rxnorm codes on one ien must not read as one allergy"
+      end
+
+      test "same ien coded vs uncoded different names counts as dropped" do
+        wire = wire_allergy(ien: "5", allergen: "Latex")
+        coded = wire_allergy(ien: "5", allergen: "Peanut", allergen_code: "891658")
+
+        reading = allergy_reading_for_patient(DFN, [ coded ], wire_rows: [ wire ])
+
+        assert reading.dropped_count >= 1,
+               "Latex and Peanut on one ien must count as a list hole"
+      end
+
+      test "same ien both coded same code different name text does not drop" do
+        wire = wire_allergy(ien: "5", allergen: "Penicillin G", allergen_code: "7980")
+        alias_row = wire_allergy(ien: "5", allergen: "Penicillin", allergen_code: "7980")
+
+        reading = allergy_reading_for_patient(DFN, [ alias_row ], wire_rows: [ wire ])
+
+        assert_equal 0, reading.dropped_count,
+                     "matching rxnorm on one ien is one allergy despite label variation"
       end
     end
   end
