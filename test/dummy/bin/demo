@@ -39,11 +39,15 @@ export PORT
 # -pN, -p=N, -p+N, -dp, -Cp, -pd, ...). When the argument is only letters,
 # every letter is an option letter; otherwise only the first character is,
 # and the rest is an attached value. Unique --port prefixes (--po, --por)
-# are refused too; --p also matches --pid, so it is left alone. Capital -P
+# are refused too; --p also matches --pid, so it is left alone. Negated
+# --no-/--skip- forms are refused because Thor maps them to --port. Capital -P
 # is the pidfile and is forwarded. The listen port comes only from PORT.
 for arg in "$@"; do
   case "$arg" in
-    --port|--port=*|--po|--po=*|--por|--por=*)
+    --port|--port=*|--po|--po=*|--por|--por=*|\
+    --no-port|--no-port=*|--skip-port|--skip-port=*|\
+    --no-po|--no-po=*|--no-por|--no-por=*|\
+    --skip-po|--skip-po=*|--skip-por|--skip-por=*)
       printf 'Set the listen port with PORT instead of %s (for example PORT=3001 test/dummy/bin/demo).\n' "$arg" >&2
       exit 1
       ;;
