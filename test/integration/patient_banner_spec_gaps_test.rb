@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "test_helper"
+require "rpms_rpc/api/allergy"
 require_relative "../support/patient_banner_test_helper"
 
 # Pins behaviour the adversarial review found missing from the #466 spec.
@@ -354,6 +355,126 @@ class PatientBannerSpecGapsTest < ActionDispatch::IntegrationTest
         assert_response :ok
         assert_allergies_state!("loaded")
         assert allergies_label_text.present?, "Expected non-blank allergy label text"
+      end
+    end
+  end
+
+  test "banner allergies use canonical dfn when session dfn is zero-padded" do
+    latex = Lakeraven::EHR::AllergyIntolerance.new(
+      ien: "s9",
+      patient_dfn: "1",
+      allergen: "Latex",
+      clinical_status: "active"
+    )
+    provider_calls = []
+
+    with_demo_clinical_seeds do
+      sign_in_clinician!
+      seed_nka_allergy_assessment!("1")
+      open_patient_context!("01")
+
+      with_wire_allergies_for_patient([]) do
+        with_supplemental_providers(
+          allergy_intolerances: lambda { |dfn|
+            provider_calls << dfn.to_s
+            dfn.to_s == "1" ? [ latex ] : nil
+          }
+        ) do
+          get "#{MOUNT}/dashboard"
+          assert_response :ok
+          assert_patient_banner!
+          assert_allergies_state!("loaded")
+          assert_includes allergies_field_node.text, "Latex"
+        end
+      end
+
+      assert provider_calls.any?, "expected supplemental allergy provider to be called"
+      assert provider_calls.all? { |dfn| dfn == "1" },
+             "expected every supplemental call with canonical dfn \"1\", got: #{provider_calls.inspect}"
+      refute_includes provider_calls, "01"
+    end
+  end
+
+  test "zero-padded session dfn must not show none recorded when canonical allergies exist" do
+    latex = Lakeraven::EHR::AllergyIntolerance.new(
+      ien: "s9",
+      patient_dfn: "1",
+      allergen: "Latex",
+      clinical_status: "active"
+    )
+
+    with_demo_clinical_seeds do
+      sign_in_clinician!
+      seed_nka_allergy_assessment!("1")
+      open_patient_context!("01")
+
+      with_wire_allergies_for_patient([]) do
+        with_supplemental_providers(
+          allergy_intolerances: ->(dfn) { dfn.to_s == "1" ? [ latex ] : nil }
+        ) do
+          get "#{MOUNT}/dashboard"
+          assert_response :ok
+          assert_patient_banner!
+          refute_includes allergies_field_node.text, "None recorded"
+        end
+      end
+    end
+  end
+
+  test "duplicate supplemental ien with different allergens shows not-loaded on dashboard" do
+    latex = Lakeraven::EHR::AllergyIntolerance.new(
+      ien: "x",
+      patient_dfn: "1",
+      allergen: "Latex",
+      clinical_status: "active"
+    )
+    peanut = Lakeraven::EHR::AllergyIntolerance.new(
+      ien: "x",
+      patient_dfn: "1",
+      allergen: "Peanut",
+      clinical_status: "active"
+    )
+
+    with_demo_clinical_seeds do
+      sign_in_clinician!
+      open_patient_context!(1)
+
+      with_wire_allergies_for_patient([]) do
+        with_supplemental_providers(allergy_intolerances: ->(_dfn) { [ latex, peanut ] }) do
+          get "#{MOUNT}/dashboard"
+          assert_response :ok
+          assert_allergies_state!("not-loaded")
+          refute_includes allergies_field_node.text, "None recorded"
+        end
+      end
+    end
+  end
+
+  test "duplicate supplemental ien with same allergen stays loaded and lists allergen once" do
+    first = Lakeraven::EHR::AllergyIntolerance.new(
+      ien: "x",
+      patient_dfn: "1",
+      allergen: "Latex",
+      clinical_status: "active"
+    )
+    second = Lakeraven::EHR::AllergyIntolerance.new(
+      ien: "x",
+      patient_dfn: "1",
+      allergen: "Latex",
+      clinical_status: "active"
+    )
+
+    with_demo_clinical_seeds do
+      sign_in_clinician!
+      open_patient_context!(1)
+
+      with_wire_allergies_for_patient([]) do
+        with_supplemental_providers(allergy_intolerances: ->(_dfn) { [ first, second ] }) do
+          get "#{MOUNT}/dashboard"
+          assert_response :ok
+          assert_allergies_state!("loaded")
+          assert_equal 1, allergies_field_node.text.scan("Latex").size
+        end
       end
     end
   end
