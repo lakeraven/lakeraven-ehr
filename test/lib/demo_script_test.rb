@@ -192,7 +192,12 @@ class DemoScriptTest < ActiveSupport::TestCase
       [ "--skip-port=#{n}" ],
       [ "--no-po", n ],
       [ "--skip-po", n ],
-      [ "--no-por=#{n}" ]
+      [ "--no-por=#{n}" ],
+      [ "--no_port", n ],
+      [ "--skip_port", n ],
+      [ "--no_port=#{n}" ],
+      [ "--skip_port=#{n}" ],
+      [ "--no_po", n ]
     ]
 
     override_forms.each do |form|
@@ -208,6 +213,66 @@ class DemoScriptTest < ActiveSupport::TestCase
       refute rails_invoked?(tree[:rails_log]),
              "fake rails must not run for CLI override #{form_desc}"
     end
+  end
+
+  test "rejects binding URIs with embedded ports without starting rails" do
+    env_port = find_free_port
+    bypass_port = find_free_port
+    n = bypass_port.to_s
+
+    binding_forms = [
+      [ "-b", "ssl://127.0.0.1:#{n}?key=k&cert=c" ],
+      [ "-bssl://127.0.0.1:#{n}" ],
+      [ "-b=tcp://127.0.0.1:#{n}" ],
+      [ "--binding", "tcp://127.0.0.1:#{n}" ],
+      [ "--binding=ssl://127.0.0.1:#{n}" ]
+    ]
+
+    binding_forms.each do |form|
+      tree = build_demo_tree
+      env = demo_env(tree[:rails_log], "PORT" => env_port.to_s)
+
+      _stdout, stderr, status = run_demo(tree[:demo_path], env, *form)
+      form_desc = form.inspect
+
+      refute_predicate status, :success?,
+                       "expected failure for binding override #{form_desc}"
+      assert_match(/PORT|binding/i, stderr,
+                   "stderr should mention PORT or binding for #{form_desc}")
+      refute rails_invoked?(tree[:rails_log]),
+             "fake rails must not run for binding override #{form_desc}"
+    end
+  end
+
+  test "forwards plain host bindings without embedded port to rails" do
+    port = find_free_port
+    tree = build_demo_tree
+    env = demo_env(tree[:rails_log], "PORT" => port.to_s)
+
+    _stdout, _stderr, status = run_demo(tree[:demo_path], env, "-b", "127.0.0.1")
+    assert_predicate status, :success?, "expected success for -b 127.0.0.1"
+
+    argv, recorded_port = read_rails_invocation(tree[:rails_log])
+    assert_port_argv(argv, port)
+    assert_equal port.to_s, recorded_port
+    assert_includes argv, "-b"
+    assert_includes argv, "127.0.0.1"
+
+    tree = build_demo_tree
+    env = demo_env(tree[:rails_log], "PORT" => port.to_s)
+
+    _stdout, _stderr, status = run_demo(tree[:demo_path], env, "--binding=0.0.0.0")
+    assert_predicate status, :success?, "expected success for --binding=0.0.0.0"
+
+    argv, recorded_port = read_rails_invocation(tree[:rails_log])
+    assert_port_argv(argv, port)
+    assert_equal port.to_s, recorded_port
+    assert(
+      (argv.index("-b") && argv[argv.index("-b") + 1] == "0.0.0.0") ||
+        argv.include?("--binding=0.0.0.0") ||
+        (argv.index("--binding") && argv[argv.index("--binding") + 1] == "0.0.0.0"),
+      "expected 0.0.0.0 binding in argv: #{argv.inspect}"
+    )
   end
 
   test "forwards other rails server args after -p from PORT" do
