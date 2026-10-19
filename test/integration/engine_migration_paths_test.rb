@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "test_helper"
+require_relative "../support/database_url_helpers"
 require "open3"
 require "tmpdir"
 require "fileutils"
@@ -215,15 +216,7 @@ class EngineMigrationPathsTest < ActiveSupport::TestCase
             "(got #{uri.scheme.inspect}; url: #{redact_database_url(raw)})"
     end
 
-    if uri.query.present?
-      query_pairs = URI.decode_www_form(uri.query).reject do |key, _value|
-        %w[database dbname].include?(key)
-      end
-      uri.query = query_pairs.empty? ? nil : URI.encode_www_form(query_pairs)
-    end
-
-    uri.path = "/#{scratch_db}"
-    uri.to_s
+    DatabaseUrlHelpers.scratch_database_path_and_query(uri, scratch_db)
   rescue URI::InvalidURIError
     flunk "could not parse ENV['DATABASE_URL'] (url: #{redact_database_url(raw)})"
   end
@@ -268,11 +261,7 @@ class EngineMigrationPathsTest < ActiveSupport::TestCase
   end
 
   def redact_database_url(url)
-    uri = URI.parse(url)
-    uri.userinfo = "[REDACTED]" if uri.userinfo
-    uri.to_s
-  rescue URI::InvalidURIError
-    "[invalid DATABASE_URL]"
+    DatabaseUrlHelpers.redact_database_url(url)
   end
 
   def assert_database_url_targets_scratch_db!
