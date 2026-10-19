@@ -185,7 +185,14 @@ class DemoScriptTest < ActiveSupport::TestCase
       [ "--port=#{n}" ],
       [ "-dp", n ],
       [ "-Cp", n ],
-      [ "-pd", n ]
+      [ "-pd", n ],
+      [ "--no-port", n ],
+      [ "--skip-port", n ],
+      [ "--no-port=#{n}" ],
+      [ "--skip-port=#{n}" ],
+      [ "--no-po", n ],
+      [ "--skip-po", n ],
+      [ "--no-por=#{n}" ]
     ]
 
     override_forms.each do |form|
