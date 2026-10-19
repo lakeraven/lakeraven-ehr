@@ -9,7 +9,8 @@
 #
 # Set PORT to choose the listen port. A single-dash argument whose option
 # letters include a lowercase p, and --port including unique prefixes, are
-# refused so they cannot override that check.
+# refused so they cannot override that check. A -b/--binding value containing
+# "://" is refused too; set the host with a plain -b HOST.
 set -e
 cd "$(dirname "$0")/.."
 
@@ -40,21 +41,65 @@ export PORT
 # every letter is an option letter; otherwise only the first character is,
 # and the rest is an attached value. Unique --port prefixes (--po, --por)
 # are refused too; --p also matches --pid, so it is left alone. Negated
-# --no-/--skip- forms are refused because Thor maps them to --port. Capital -P
-# is the pidfile and is forwarded. The listen port comes only from PORT.
+# --no-/--skip- forms are refused because Thor maps them to --port. Thor
+# rewrites "_" to "-" in switch names, so the option name (the part before
+# "=") is matched after that same rewrite (--no_port, --skip_port=N, --no_po,
+# ...). Capital -P is the pidfile and is forwarded.
+# A -b/--binding value containing "://" is a URI (ssl://, tcp://, unix://, or
+# any other scheme). Puma listens on that URI instead of PORT. Refuse
+# -b VALUE (the value is the next argument), -bVALUE, -b=VALUE, --binding
+# VALUE, and --binding=VALUE, plus underscore spellings of the long name.
+# A letter cluster ending in b (-db, -Cb) is the same as -b: Thor splits it
+# and the next argument is the binding. Thor maps only the full --binding
+# switch (--bind and other shorter prefixes do not set it). A plain host
+# (-b 127.0.0.1, --binding=0.0.0.0) is forwarded unchanged. The listen port
+# comes only from PORT.
+prev=
 for arg in "$@"; do
-  case "$arg" in
-    --port|--port=*|--po|--po=*|--por|--por=*|\
-    --no-port|--no-port=*|--skip-port|--skip-port=*|\
-    --no-po|--no-po=*|--no-por|--no-por=*|\
-    --skip-po|--skip-po=*|--skip-por|--skip-por=*)
+  case "$prev" in
+    -b|--binding)
+      case "$arg" in
+        *://*)
+          printf 'Set the host with a plain -b HOST; the port comes from PORT (refusing %s).\n' "$arg" >&2
+          exit 1
+          ;;
+      esac
+      ;;
+  esac
+
+  # Option name only: Thor's tr("_", "-") does not touch the value after "=".
+  opt=${arg%%=*}
+  while [ "$opt" != "${opt%%_*}" ]; do
+    opt=${opt%%_*}-${opt#*_}
+  done
+
+  prev=
+  case "$opt" in
+    --port|--po|--por|\
+    --no-port|--skip-port|\
+    --no-po|--no-por|\
+    --skip-po|--skip-por)
       printf 'Set the listen port with PORT instead of %s (for example PORT=3001 test/dummy/bin/demo).\n' "$arg" >&2
       exit 1
+      ;;
+    --binding)
+      case "$arg" in
+        *://*)
+          printf 'Set the host with a plain -b HOST; the port comes from PORT (refusing %s).\n' "$arg" >&2
+          exit 1
+          ;;
+        *=*)
+          ;;
+        *)
+          prev=--binding
+          ;;
+      esac
       ;;
     --*)
       ;;
     -*)
-      letters=${arg#-}
+      body=${arg#-}
+      letters=$body
       case "$letters" in
         *[!A-Za-z]*)
           letters=${letters%"${letters#?}"}
@@ -64,6 +109,21 @@ for arg in "$@"; do
         *p*)
           printf 'Set the listen port with PORT instead of %s (for example PORT=3001 test/dummy/bin/demo).\n' "$arg" >&2
           exit 1
+          ;;
+      esac
+      case "$arg" in
+        -b*://*)
+          printf 'Set the host with a plain -b HOST; the port comes from PORT (refusing %s).\n' "$arg" >&2
+          exit 1
+          ;;
+      esac
+      # Bare -b, or a letters-only cluster whose last option is -b, takes the
+      # next argument as the host. -b=HOST and -bHOST already carry a value.
+      case "$body" in
+        *[!A-Za-z]*)
+          ;;
+        *b)
+          prev=-b
           ;;
       esac
       ;;
