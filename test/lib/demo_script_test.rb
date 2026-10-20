@@ -323,6 +323,102 @@ class DemoScriptTest < ActiveSupport::TestCase
         (argv.index("--binding") && argv[argv.index("--binding") + 1] == "0.0.0.0"),
       "expected 0.0.0.0 binding in argv: #{argv.inspect}"
     )
+
+    tree = build_demo_tree
+    env = demo_env(tree[:rails_log], "PORT" => port.to_s, "BINDING" => "localhost")
+
+    _stdout, _stderr, status = run_demo(tree[:demo_path], env)
+    assert_predicate status, :success?, "expected success for BINDING=localhost"
+
+    argv, recorded_port = read_rails_invocation(tree[:rails_log])
+    assert_port_argv(argv, port)
+    assert_equal port.to_s, recorded_port
+
+    tree = build_demo_tree
+    env = demo_env(tree[:rails_log], "PORT" => port.to_s)
+
+    _stdout, _stderr, status = run_demo(tree[:demo_path], env, "-b", "::1")
+    assert_predicate status, :success?, "expected success for -b ::1"
+
+    argv, recorded_port = read_rails_invocation(tree[:rails_log])
+    assert_port_argv(argv, port)
+    assert_equal port.to_s, recorded_port
+    assert_includes argv, "-b"
+    assert_includes argv, "::1"
+  end
+
+  test "rejects unix socket style BINDING without starting rails" do
+    env_port = find_free_port
+
+    %w[/tmp/demo.sock ./demo.sock @demo].each do |binding_value|
+      tree = build_demo_tree
+      env = demo_env(tree[:rails_log], "PORT" => env_port.to_s, "BINDING" => binding_value)
+
+      _stdout, stderr, status = run_demo(tree[:demo_path], env)
+      desc = "BINDING=#{binding_value.inspect}"
+
+      refute_predicate status, :success?, "expected failure for #{desc}"
+      assert_match(/BINDING|binding|PORT/i, stderr, "stderr should mention BINDING, binding, or PORT for #{desc}")
+      refute rails_invoked?(tree[:rails_log]),
+             "fake rails must not run for #{desc}"
+    end
+  end
+
+  test "rejects unix socket style CLI bindings without starting rails" do
+    env_port = find_free_port
+
+    socket_hosts = %w[/tmp/demo.sock ./demo.sock @demo]
+    binding_forms = socket_hosts.flat_map do |host|
+      [
+        [ "-b", host ],
+        [ "-b#{host}" ],
+        [ "-b=#{host}" ],
+        [ "--binding", host ],
+        [ "--binding=#{host}" ]
+      ]
+    end
+
+    binding_forms.each do |form|
+      tree = build_demo_tree
+      env = demo_env(tree[:rails_log], "PORT" => env_port.to_s)
+
+      _stdout, stderr, status = run_demo(tree[:demo_path], env, *form)
+      form_desc = form.inspect
+
+      refute_predicate status, :success?,
+                       "expected failure for socket-style binding #{form_desc}"
+      assert_match(/BINDING|binding|PORT/i, stderr,
+                   "stderr should mention BINDING, binding, or PORT for #{form_desc}")
+      refute rails_invoked?(tree[:rails_log]),
+             "fake rails must not run for socket-style binding #{form_desc}"
+    end
+  end
+
+  test "does not forward PUMA_INHERIT variables to rails" do
+    port = find_free_port
+    tree = build_demo_tree
+    inherit_0 = "9:tcp://localhost:#{port}"
+    inherit_1 = "10:tcp://127.0.0.1:42424"
+    env = demo_env(
+      tree[:rails_log],
+      "PORT" => port.to_s,
+      "PUMA_INHERIT_0" => inherit_0,
+      "PUMA_INHERIT_1" => inherit_1
+    )
+
+    _stdout, _stderr, status = run_demo(tree[:demo_path], env)
+
+    assert_predicate status, :success?
+
+    argv, recorded_port = read_rails_invocation(tree[:rails_log])
+    assert_port_argv(argv, port)
+    assert_equal port.to_s, recorded_port
+
+    inherit_env = read_puma_inherit_env(tree[:rails_log])
+    assert_equal "", inherit_env.fetch("PUMA_INHERIT_0"),
+                 "PUMA_INHERIT_0 must be unset when rails runs"
+    assert_equal "", inherit_env.fetch("PUMA_INHERIT_1"),
+                 "PUMA_INHERIT_1 must be unset when rails runs"
   end
 
   test "forwards other rails server args after -p from PORT" do
@@ -455,10 +551,15 @@ class DemoScriptTest < ActiveSupport::TestCase
       <<~STUB
         #!/bin/sh
         log="${DEMO_TEST_RAILS_LOG:?}"
+        inherit_log="${DEMO_TEST_PUMA_INHERIT_LOG:?}"
         {
           printf 'PORT=%s\\n' "${PORT:-}"
           printf '%s\\n' "$@"
         } > "$log"
+        {
+          printf 'PUMA_INHERIT_0=%s\\n' "${PUMA_INHERIT_0:-}"
+          printf 'PUMA_INHERIT_1=%s\\n' "${PUMA_INHERIT_1:-}"
+        } > "$inherit_log"
         exit 0
       STUB
     )
@@ -473,9 +574,11 @@ class DemoScriptTest < ActiveSupport::TestCase
 
   def demo_env(rails_log, extra = {})
     path = "#{@stub_bin}:#{ENV.fetch('PATH', '')}"
+    puma_inherit_log = File.join(File.dirname(rails_log), "puma_inherit_env.log")
     {
       "PATH" => path,
-      "DEMO_TEST_RAILS_LOG" => rails_log
+      "DEMO_TEST_RAILS_LOG" => rails_log,
+      "DEMO_TEST_PUMA_INHERIT_LOG" => puma_inherit_log
     }.merge(extra)
   end
 
@@ -495,6 +598,18 @@ class DemoScriptTest < ActiveSupport::TestCase
     recorded_port = port_line.sub(/^PORT=/, "")
     argv = lines
     [ argv, recorded_port ]
+  end
+
+  def read_puma_inherit_env(rails_log)
+    path = File.join(File.dirname(rails_log), "puma_inherit_env.log")
+    assert File.exist?(path), "expected puma inherit env log at #{path}"
+
+    values = {}
+    File.readlines(path, chomp: true).each do |line|
+      key, val = line.split("=", 2)
+      values[key] = val || ""
+    end
+    values
   end
 
   def assert_port_argv(argv, port)
