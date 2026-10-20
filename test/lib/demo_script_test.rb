@@ -244,6 +244,56 @@ class DemoScriptTest < ActiveSupport::TestCase
     end
   end
 
+  test "rejects BINDING URIs with embedded ports without starting rails" do
+    env_port = find_free_port
+    bypass_port = find_free_port
+    n = bypass_port.to_s
+
+    binding_values = [
+      "ssl://127.0.0.1:#{n}?key=k&cert=c",
+      "tcp://127.0.0.1:#{n}",
+      "unix:///tmp/demo.sock"
+    ]
+
+    binding_values.each do |binding_value|
+      tree = build_demo_tree
+      env = demo_env(tree[:rails_log], "PORT" => env_port.to_s, "BINDING" => binding_value)
+
+      _stdout, stderr, status = run_demo(tree[:demo_path], env)
+      desc = "BINDING=#{binding_value.inspect} without -b"
+
+      refute_predicate status, :success?, "expected failure for #{desc}"
+      assert_match(/BINDING/i, stderr, "stderr should mention BINDING for #{desc}")
+      refute rails_invoked?(tree[:rails_log]),
+             "fake rails must not run for #{desc}"
+
+      tree = build_demo_tree
+      env = demo_env(tree[:rails_log], "PORT" => env_port.to_s, "BINDING" => binding_value)
+
+      _stdout, stderr, status = run_demo(tree[:demo_path], env, "-b", "127.0.0.1")
+      desc = "BINDING=#{binding_value.inspect} with -b 127.0.0.1"
+
+      refute_predicate status, :success?, "expected failure for #{desc}"
+      assert_match(/BINDING/i, stderr, "stderr should mention BINDING for #{desc}")
+      refute rails_invoked?(tree[:rails_log]),
+             "fake rails must not run for #{desc}"
+    end
+  end
+
+  test "forwards plain host BINDING to rails on PORT" do
+    port = find_free_port
+    tree = build_demo_tree
+    env = demo_env(tree[:rails_log], "PORT" => port.to_s, "BINDING" => "127.0.0.1")
+
+    _stdout, _stderr, status = run_demo(tree[:demo_path], env)
+
+    assert_predicate status, :success?, "expected success for BINDING=127.0.0.1"
+
+    argv, recorded_port = read_rails_invocation(tree[:rails_log])
+    assert_port_argv(argv, port)
+    assert_equal port.to_s, recorded_port
+  end
+
   test "forwards plain host bindings without embedded port to rails" do
     port = find_free_port
     tree = build_demo_tree
