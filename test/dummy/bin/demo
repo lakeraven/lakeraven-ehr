@@ -10,8 +10,9 @@
 # Set PORT to choose the listen port. A single-dash argument whose option
 # letters include a lowercase p, and --port including unique prefixes, are
 # refused so they cannot override that check. A -b/--binding value containing
-# "://" is refused too; set the host with a plain -b HOST. BINDING containing
-# "://" is refused as well; set a plain host (the port comes from PORT).
+# "://" or a host starting with "/", ".", or "@" is refused too; set the host
+# with a plain -b HOST. BINDING is refused the same way; set a plain host
+# (the port comes from PORT).
 set -e
 cd "$(dirname "$0")/.."
 
@@ -47,27 +48,35 @@ export PORT
 # "=") is matched after that same rewrite (--no_port, --skip_port=N, --no_po,
 # ...). Capital -P is the pidfile and is forwarded.
 # A -b/--binding value containing "://" is a URI (ssl://, tcp://, unix://, or
-# any other scheme). Puma listens on that URI instead of PORT. Refuse
-# -b VALUE (the value is the next argument), -bVALUE, -b=VALUE, --binding
-# VALUE, and --binding=VALUE, plus underscore spellings of the long name.
-# A letter cluster ending in b (-db, -Cb) is the same as -b: Thor splits it
-# and the next argument is the binding. Thor maps only the full --binding
-# switch (--bind and other shorter prefixes do not set it). A plain host
-# (-b 127.0.0.1, --binding=0.0.0.0) is forwarded unchanged. BINDING containing
-# "://" is refused the same way, even when -b is also passed: Rails reads
-# BINDING when no -b is given, and Puma would listen on that URI instead of
-# PORT. A plain host in BINDING is forwarded unchanged. The listen port
-# comes only from PORT.
+# any other scheme). A host starting with "/", ".", or "@" is a unix socket
+# (a path, a relative path, or an abstract-namespace name). Puma binds that
+# socket and never listens on PORT. Refuse -b VALUE (the value is the next
+# argument), -bVALUE, -b=VALUE, --binding VALUE, and --binding=VALUE, plus
+# underscore spellings of the long name. A letter cluster ending in b (-db,
+# -Cb) is the same as -b: Thor splits it and the next argument is the binding.
+# Thor maps only the full --binding switch (--bind and other shorter prefixes
+# do not set it). A plain host (-b 127.0.0.1, --binding=0.0.0.0, localhost,
+# ::1) is forwarded unchanged. BINDING is refused the same way, even when -b
+# is also passed: Rails reads BINDING when no -b is given, and Puma would
+# listen on that socket or URI instead of PORT. A plain host in BINDING is
+# forwarded unchanged. The listen port comes only from PORT.
+# Status 0 when this host would not listen on PORT.
+refused_host() {
+  case "$1" in
+    *://*|/*|.*|@*)
+      return 0
+      ;;
+  esac
+  return 1
+}
 prev=
 for arg in "$@"; do
   case "$prev" in
     -b|--binding)
-      case "$arg" in
-        *://*)
-          printf 'Set the host with a plain -b HOST; the port comes from PORT (refusing %s).\n' "$arg" >&2
-          exit 1
-          ;;
-      esac
+      if refused_host "$arg"; then
+        printf 'Set the host with a plain -b HOST; the port comes from PORT (refusing %s).\n' "$arg" >&2
+        exit 1
+      fi
       ;;
   esac
 
@@ -88,11 +97,12 @@ for arg in "$@"; do
       ;;
     --binding)
       case "$arg" in
-        *://*)
-          printf 'Set the host with a plain -b HOST; the port comes from PORT (refusing %s).\n' "$arg" >&2
-          exit 1
-          ;;
         *=*)
+          host=${arg#*=}
+          if refused_host "$host"; then
+            printf 'Set the host with a plain -b HOST; the port comes from PORT (refusing %s).\n' "$arg" >&2
+            exit 1
+          fi
           ;;
         *)
           prev=--binding
@@ -115,10 +125,15 @@ for arg in "$@"; do
           exit 1
           ;;
       esac
+      # -bVALUE and -b=VALUE carry the host in this argument.
       case "$arg" in
-        -b*://*)
-          printf 'Set the host with a plain -b HOST; the port comes from PORT (refusing %s).\n' "$arg" >&2
-          exit 1
+        -b=*|-b?*)
+          host=${arg#-b}
+          host=${host#=}
+          if refused_host "$host"; then
+            printf 'Set the host with a plain -b HOST; the port comes from PORT (refusing %s).\n' "$arg" >&2
+            exit 1
+          fi
           ;;
       esac
       # Bare -b, or a letters-only cluster whose last option is -b, takes the
@@ -134,15 +149,13 @@ for arg in "$@"; do
   esac
 done
 
-# BINDING is the host Rails uses when -b is absent. A value containing "://"
-# is a URI and would ignore PORT, so refuse it even if -b is also passed.
-# A plain host is left unchanged for Rails.
-case "$BINDING" in
-  *://*)
-    printf 'Set BINDING to a plain host; the port comes from PORT (refusing %s).\n' "$BINDING" >&2
-    exit 1
-    ;;
-esac
+# BINDING is the host Rails uses when -b is absent. A URI ("://") or a
+# unix-socket host (starting with "/", ".", or "@") would ignore PORT, so
+# refuse it even if -b is also passed. A plain host is left unchanged.
+if refused_host "$BINDING"; then
+  printf 'Set BINDING to a plain host; the port comes from PORT (refusing %s).\n' "$BINDING" >&2
+  exit 1
+fi
 
 # 1. Postgres must be up — dev-mode CheckPending middleware hits the DB on
 #    every request, so a down Postgres 500s the whole demo.
@@ -244,7 +257,41 @@ rm -f tmp/pids/server.pid
 #    rejects the lockfile at boot — make sure it is unset.
 unset RPMS_RPC_PATH
 
-# 4. Both flags are required, and both are honored ONLY in development:
+# 4. Puma's binder treats every PUMA_INHERIT_<n>=FD:url as the already-open
+#    listener for that url, so PUMA_INHERIT_0=9:tcp://localhost:$PORT would
+#    serve on whatever fd 9 holds instead of the port just probed. Unset every
+#    PUMA_INHERIT_* name. A value may contain newlines, so a later physical
+#    line of `env` can look like an assignment; only a name the shell actually
+#    has set is unset. The unset runs in this shell — a pipeline would be a
+#    subshell and the variables would survive into exec.
+_puma_inherit_names=$(
+  env | while IFS= read -r _puma_inherit_line || [ -n "$_puma_inherit_line" ]; do
+    case "$_puma_inherit_line" in
+      PUMA_INHERIT_*=*)
+        _puma_inherit_name=${_puma_inherit_line%%=*}
+        case "$_puma_inherit_name" in
+          *[!A-Za-z0-9_]*)
+            ;;
+          *)
+            printf '%s\n' "$_puma_inherit_name"
+            ;;
+        esac
+        ;;
+    esac
+  done
+)
+while IFS= read -r _puma_inherit_name || [ -n "$_puma_inherit_name" ]; do
+  case "$_puma_inherit_name" in
+    PUMA_INHERIT_*)
+      eval "case \${$_puma_inherit_name+x} in x) unset $_puma_inherit_name ;; esac"
+      ;;
+  esac
+done <<END_PUMA_INHERIT
+$_puma_inherit_names
+END_PUMA_INHERIT
+unset _puma_inherit_names _puma_inherit_name
+
+# 5. Both flags are required, and both are honored ONLY in development:
 #    SPIKE_MOCK_RPC=1  seeds the in-memory RPMS mock (else 404/empty chart)
 #    CHART_DEMO_OPEN=1 dev-only auth bypass (else 401 without a token)
 echo "Starting demo server -> http://localhost:$PORT/patients/1"
