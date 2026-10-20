@@ -311,19 +311,28 @@ module Lakeraven
           end
         end
 
-        # merge's kept rows, plus how many dropped repeats were a different
-        # allergy. Observations still use merge: a repeated id there is
-        # dropped and uncounted. merge still keeps the first row for an ien.
-        # Drop counting remembers every row already seen for that ien and
-        # counts a repeat when it is a different allergy from ANY of them.
-        # An allergen_code identifies a row only when it matches /\A\d+\z/
-        # after strip; any other code is uncoded. Two rows are the same
-        # allergy when both codes are numeric and equal, or when at least
-        # one row is uncoded and the names are equal after strip, downcase,
-        # and collapsed internal whitespace. A repeat counts when the numeric
-        # codes differ, the names differ, a name needed for that comparison
-        # is blank, or a row does not respond to allergen or allergen_code.
-        # The same allergy stated twice is not a hole in the list.
+        # merge's kept rows stay unchanged: the first row for an ien wins.
+        # Observations still use merge, where a repeated id is dropped and
+        # uncounted. The pair is those kept rows plus how many dropped
+        # repeats were a different allergy.
+        #
+        # Two rows sharing an ien are the same allergy only when their
+        # normalised names (to_s, strip, downcase, squish) are both
+        # non-blank and equal and, when both rows carry a valid code, the
+        # codes are equal. A valid code is all digits after strip and not
+        # all zeros; codes compare with leading zeros removed. Non-numeric,
+        # placeholder (UNK and the like), and all-zero codes are ignored,
+        # as if absent. Anything else counts the repeat as dropped:
+        # different names, a blank name on either row, different valid
+        # codes, or a row that does not respond to allergen or
+        # allergen_code. The same allergy stated twice is not a hole.
+        #
+        # Per ien only the distinct identities are kept, each
+        # [normalised_name, valid_code_or_nil]. A repeat whose identity was
+        # already seen is the same allergy and costs a constant-time
+        # lookup; that shortcut is valid when the normalised name is
+        # non-blank. A new identity is compared only against those
+        # distinct ones.
         def merge_allergies(wire, supplemental)
           [ merge(wire, supplemental), differing_allergy_drops(wire, supplemental) ]
         end
@@ -335,46 +344,61 @@ module Lakeraven
             id = merge_ien(resource)
             next if id.empty?
 
-            priors = (seen[id] ||= [])
-            drops += 1 if priors.any? { |prior| differing_allergy?(prior, resource) }
-            priors << resource
+            drops += differing_allergy_drop(seen, id, resource)
           end
           drops
+        end
+
+        def differing_allergy_drop(seen, id, resource)
+          identities = (seen[id] ||= Set.new)
+          identity = allergen_identity(resource)
+          return 0 if seen_same_allergy?(identities, identity)
+
+          differed = identities.any? { |prior| differing_allergy?(prior, identity) }
+          identities.add(identity)
+          differed ? 1 : 0
+        end
+
+        # Blank names, and rows that cannot state an allergen identity, are
+        # never the same allergy, including a repeat of that same identity.
+        def seen_same_allergy?(identities, identity)
+          identity.is_a?(Array) && identity.first.present? && identities.include?(identity)
+        end
+
+        def allergen_identity(resource)
+          return unless reads_allergen_identity?(resource)
+
+          [ normalized_allergen_name(resource), valid_allergen_code(resource) ]
+        end
+
+        # prior and candidate are [normalised_name, valid_code_or_nil], or
+        # nil when that row does not respond to allergen and allergen_code.
+        def differing_allergy?(prior, candidate)
+          return true unless prior.is_a?(Array) && candidate.is_a?(Array)
+
+          prior_name, prior_code = prior
+          candidate_name, candidate_code = candidate
+          return true if prior_name.blank? || candidate_name.blank? || prior_name != candidate_name
+
+          prior_code.present? && candidate_code.present? && prior_code != candidate_code
         end
 
         def merge_ien(resource)
           resource.respond_to?(:ien) ? resource.ien.to_s.strip : ""
         end
 
-        def differing_allergy?(kept, candidate)
-          return true unless reads_allergen_identity?(kept) && reads_allergen_identity?(candidate)
-
-          left_code = numeric_allergen_code(kept)
-          right_code = numeric_allergen_code(candidate)
-          return left_code != right_code if left_code && right_code
-
-          normalized_allergen_names_differ?(kept, candidate)
-        end
-
         def reads_allergen_identity?(resource)
           resource.respond_to?(:allergen) && resource.respond_to?(:allergen_code)
         end
 
-        # Identity only. A placeholder such as "UNK" is not a code; the row
-        # is uncoded and the name comparison decides.
-        def numeric_allergen_code(resource)
-          code = resource.allergen_code.to_s.strip
-          code if code.match?(/\A\d+\z/)
-        end
-
-        def normalized_allergen_names_differ?(kept, candidate)
-          left = normalized_allergen_name(kept)
-          right = normalized_allergen_name(candidate)
-          left.blank? || right.blank? || left != right
+        # Digits only, and not all zeros. Leading zeros are not part of the code.
+        def valid_allergen_code(resource)
+          canonical = resource.allergen_code.to_s.strip.sub(/\A0+/, "")
+          canonical if canonical.match?(/\A\d+\z/)
         end
 
         def normalized_allergen_name(resource)
-          resource.allergen.to_s.squish.downcase
+          resource.allergen.to_s.strip.downcase.squish
         end
       end
     end
