@@ -163,6 +163,72 @@ module Lakeraven
         assert_equal 0, reading.dropped_count,
                      "matching rxnorm on one ien is one allergy despite label variation"
       end
+
+      # Adversarial review (issue 466): repeat ien must count dropped when ANY prior row
+      # on that ien is a different allergy, not only the first kept row.
+      test "(a) same ien uncoded wire then two conflicting coded supplemental rows counts dropped" do
+        wire = wire_allergy(ien: "5", allergen: "Penicillin")
+        coded_7980 = wire_allergy(ien: "5", allergen: "Penicillin", allergen_code: "7980")
+        coded_1234 = wire_allergy(ien: "5", allergen: "Penicillin", allergen_code: "1234")
+
+        reading = allergy_reading_for_patient(DFN, [ coded_7980, coded_1234 ], wire_rows: [ wire ])
+
+        assert reading.dropped_count >= 1,
+               "7980 and 1234 on one ien must count as dropped even when first repeat matched uncoded wire by name"
+      end
+
+      test "(b) same ien coded wire then uncoded and conflicting coded supplemental counts dropped" do
+        wire = wire_allergy(ien: "5", allergen: "Penicillin", allergen_code: "7980")
+        uncoded = wire_allergy(ien: "5", allergen: "Penicillin")
+        coded_1234 = wire_allergy(ien: "5", allergen: "Penicillin", allergen_code: "1234")
+
+        reading = allergy_reading_for_patient(DFN, [ uncoded, coded_1234 ], wire_rows: [ wire ])
+
+        assert reading.dropped_count >= 1,
+               "conflicting rxnorm on one ien must count dropped regardless of row order"
+      end
+
+      test "(c) same ien uncoded wire coded mirror and normalised-name duplicate does not drop" do
+        wire = wire_allergy(ien: "5", allergen: "Penicillin")
+        coded_7980 = wire_allergy(ien: "5", allergen: "Penicillin", allergen_code: "7980")
+        uncoded_alias = wire_allergy(ien: "5", allergen: "penicillin ")
+
+        reading = allergy_reading_for_patient(DFN, [ coded_7980, uncoded_alias ], wire_rows: [ wire ])
+
+        assert_equal 0, reading.dropped_count,
+                     "all rows are the same allergy under coded-or-name rules"
+      end
+
+      # Placeholder allergen_code values must not identify an allergy unless numeric.
+      test "(d) same ien equal non-numeric placeholder codes different names counts dropped" do
+        penicillin_unk = wire_allergy(ien: "5", allergen: "Penicillin", allergen_code: "UNK")
+        peanut_unk = wire_allergy(ien: "5", allergen: "Peanut", allergen_code: "UNK")
+
+        reading = allergy_reading_for_patient(DFN, [ penicillin_unk, peanut_unk ])
+
+        assert reading.dropped_count >= 1,
+               "UNK must not make Penicillin and Peanut the same allergy on one ien"
+      end
+
+      test "(e) same ien numeric zero code different names does not drop" do
+        penicillin_zero = wire_allergy(ien: "5", allergen: "Penicillin", allergen_code: "0")
+        peanut_zero = wire_allergy(ien: "5", allergen: "Peanut", allergen_code: "0")
+
+        reading = allergy_reading_for_patient(DFN, [ penicillin_zero, peanut_zero ])
+
+        assert_equal 0, reading.dropped_count,
+                     "0 is numeric so matching codes mean one allergy despite label text"
+      end
+
+      test "(f) same ien equal non-numeric placeholder codes same name does not drop" do
+        first = wire_allergy(ien: "5", allergen: "Penicillin", allergen_code: "UNK")
+        second = wire_allergy(ien: "5", allergen: "Penicillin", allergen_code: "UNK")
+
+        reading = allergy_reading_for_patient(DFN, [ first, second ])
+
+        assert_equal 0, reading.dropped_count,
+                     "duplicate Penicillin rows with UNK placeholder are one allergy"
+      end
     end
   end
 end
