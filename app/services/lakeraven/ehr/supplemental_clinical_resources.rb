@@ -313,14 +313,17 @@ module Lakeraven
 
         # merge's kept rows, plus how many dropped repeats were a different
         # allergy. Observations still use merge: a repeated id there is
-        # dropped and uncounted. Two rows are the same allergy when both
-        # carry an allergen code and the codes are equal after strip, or
-        # when at least one has no code and the names are equal after
-        # strip, downcase, and collapsed internal whitespace. A repeat
-        # counts when the codes differ, the names differ, a name needed for
-        # that comparison is blank, or a row does not respond to allergen
-        # or allergen_code. The same allergy stated twice is not a hole
-        # in the list.
+        # dropped and uncounted. merge still keeps the first row for an ien.
+        # Drop counting remembers every row already seen for that ien and
+        # counts a repeat when it is a different allergy from ANY of them.
+        # An allergen_code identifies a row only when it matches /\A\d+\z/
+        # after strip; any other code is uncoded. Two rows are the same
+        # allergy when both codes are numeric and equal, or when at least
+        # one row is uncoded and the names are equal after strip, downcase,
+        # and collapsed internal whitespace. A repeat counts when the numeric
+        # codes differ, the names differ, a name needed for that comparison
+        # is blank, or a row does not respond to allergen or allergen_code.
+        # The same allergy stated twice is not a hole in the list.
         def merge_allergies(wire, supplemental)
           [ merge(wire, supplemental), differing_allergy_drops(wire, supplemental) ]
         end
@@ -332,12 +335,9 @@ module Lakeraven
             id = merge_ien(resource)
             next if id.empty?
 
-            prior = seen[id]
-            if prior
-              drops += 1 if differing_allergy?(prior, resource)
-            else
-              seen[id] = resource
-            end
+            priors = (seen[id] ||= [])
+            drops += 1 if priors.any? { |prior| differing_allergy?(prior, resource) }
+            priors << resource
           end
           drops
         end
@@ -349,8 +349,8 @@ module Lakeraven
         def differing_allergy?(kept, candidate)
           return true unless reads_allergen_identity?(kept) && reads_allergen_identity?(candidate)
 
-          left_code = stripped_allergen_code(kept)
-          right_code = stripped_allergen_code(candidate)
+          left_code = numeric_allergen_code(kept)
+          right_code = numeric_allergen_code(candidate)
           return left_code != right_code if left_code && right_code
 
           normalized_allergen_names_differ?(kept, candidate)
@@ -360,8 +360,11 @@ module Lakeraven
           resource.respond_to?(:allergen) && resource.respond_to?(:allergen_code)
         end
 
-        def stripped_allergen_code(resource)
-          resource.allergen_code.to_s.strip.presence
+        # Identity only. A placeholder such as "UNK" is not a code; the row
+        # is uncoded and the name comparison decides.
+        def numeric_allergen_code(resource)
+          code = resource.allergen_code.to_s.strip
+          code if code.match?(/\A\d+\z/)
         end
 
         def normalized_allergen_names_differ?(kept, candidate)
