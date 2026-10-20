@@ -98,12 +98,12 @@ module Lakeraven
         assert_equal [ "Latex" ], with_duplicates.map(&:allergen)
       end
 
-      # Pin: two rows sharing an ien are the SAME allergy when (a) both carry
-      # allergen_code and codes match, or (b) at least one has no allergen_code
-      # and allergen names match after downcase/strip/whitespace squish. They are
-      # DIFFERENT (counted dropped) when both coded with different codes, names
-      # differ under (b), or a needed name is blank. Do not key same-ien solely
-      # on AllergyIntolerance#matching_key (rxnorm vs name).
+      # Pin (fail closed): two rows sharing an ien are the SAME allergy only when
+      # normalised names (strip, downcase, squish) are both non-blank and equal,
+      # AND when both rows carry a valid code the codes are equal. A valid code is
+      # all digits after strip and not all zeros; compare with leading zeros removed.
+      # Placeholder/non-numeric/all-zero codes are ignored (no code). Anything else
+      # counts toward dropped_count.
       def wire_allergy(ien:, allergen:, allergen_code: nil)
         AllergyIntolerance.new(
           ien: ien,
@@ -154,14 +154,14 @@ module Lakeraven
                "Latex and Peanut on one ien must count as a list hole"
       end
 
-      test "same ien both coded same code different name text does not drop" do
+      test "same ien both coded same code different name text counts as dropped" do
         wire = wire_allergy(ien: "5", allergen: "Penicillin G", allergen_code: "7980")
         alias_row = wire_allergy(ien: "5", allergen: "Penicillin", allergen_code: "7980")
 
         reading = allergy_reading_for_patient(DFN, [ alias_row ], wire_rows: [ wire ])
 
-        assert_equal 0, reading.dropped_count,
-                     "matching rxnorm on one ien is one allergy despite label variation"
+        assert reading.dropped_count >= 1,
+               "equal codes without equal normalised names must not read as one allergy"
       end
 
       # Adversarial review (issue 466): repeat ien must count dropped when ANY prior row
@@ -210,14 +210,90 @@ module Lakeraven
                "UNK must not make Penicillin and Peanut the same allergy on one ien"
       end
 
-      test "(e) same ien numeric zero code different names does not drop" do
+      test "(e) same ien all-zero numeric placeholder code different names counts dropped" do
         penicillin_zero = wire_allergy(ien: "5", allergen: "Penicillin", allergen_code: "0")
         peanut_zero = wire_allergy(ien: "5", allergen: "Peanut", allergen_code: "0")
 
         reading = allergy_reading_for_patient(DFN, [ penicillin_zero, peanut_zero ])
 
+        assert reading.dropped_count >= 1,
+               "0 is not a valid code; Penicillin and Peanut on one ien must count as dropped"
+      end
+
+      test "(e2) same ien triple-zero placeholder code different names counts dropped" do
+        penicillin = wire_allergy(ien: "5", allergen: "Penicillin", allergen_code: "000")
+        peanut = wire_allergy(ien: "5", allergen: "Peanut", allergen_code: "000")
+
+        reading = allergy_reading_for_patient(DFN, [ penicillin, peanut ])
+
+        assert reading.dropped_count >= 1,
+               "000 is not a valid code; differing names on one ien must count as dropped"
+      end
+
+      test "same ien blank-named coded row then coded Peanut counts as dropped" do
+        blank_first = wire_allergy(ien: "5", allergen: "", allergen_code: "7980")
+        peanut = wire_allergy(ien: "5", allergen: "Peanut", allergen_code: "7980")
+
+        reading = allergy_reading_for_patient(DFN, [ blank_first, peanut ])
+
+        assert reading.dropped_count >= 1,
+               "blank name cannot match Peanut; Peanut must not be hidden as a duplicate"
+      end
+
+      test "same ien coded codes equal after stripping leading zeros does not drop" do
+        leading_zeros = wire_allergy(ien: "5", allergen: "Penicillin", allergen_code: "07980")
+        canonical = wire_allergy(ien: "5", allergen: "Penicillin", allergen_code: "7980")
+
+        reading = allergy_reading_for_patient(DFN, [ canonical ], wire_rows: [ leading_zeros ])
+
         assert_equal 0, reading.dropped_count,
-                     "0 is numeric so matching codes mean one allergy despite label text"
+                     "07980 and 7980 are the same valid code with matching names"
+      end
+
+      test "same ien both coded same code normalised name match does not drop" do
+        first = wire_allergy(ien: "5", allergen: "Penicillin", allergen_code: "7980")
+        second = wire_allergy(ien: "5", allergen: "penicillin ", allergen_code: "7980")
+
+        reading = allergy_reading_for_patient(DFN, [ second ], wire_rows: [ first ])
+
+        assert_equal 0, reading.dropped_count,
+                     "7980 rows with equal normalised names are one allergy"
+      end
+
+      test "same ien supplemental only uncoded Penicillin and coded 7980 mirror does not drop" do
+        uncoded = wire_allergy(ien: "5", allergen: "Penicillin")
+        coded = wire_allergy(ien: "5", allergen: "Penicillin", allergen_code: "7980")
+
+        reading = allergy_reading_for_patient(DFN, [ uncoded, coded ])
+
+        assert_equal 0, reading.dropped_count,
+                     "uncoded row with valid coded mirror and same name is one allergy"
+      end
+
+      test "same ien both coded different valid codes same name counts as dropped" do
+        code_7980 = wire_allergy(ien: "5", allergen: "Penicillin", allergen_code: "7980")
+        code_1234 = wire_allergy(ien: "5", allergen: "Penicillin", allergen_code: "1234")
+
+        reading = allergy_reading_for_patient(DFN, [ code_1234 ], wire_rows: [ code_7980 ])
+
+        assert reading.dropped_count >= 1,
+               "7980 and 1234 on one ien with same display name must count as dropped"
+      end
+
+      test "same ien three thousand identical coded rows completes under one second" do
+        rows = Array.new(3_000) do
+          wire_allergy(ien: "5", allergen: "Penicillin", allergen_code: "7980")
+        end
+
+        started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        reading = allergy_reading_for_patient(DFN, rows)
+        elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+
+        assert_operator elapsed, :<, 1.0,
+                        "3000 same-ien rows must not take quadratic time (was ~7.2s at head)"
+        assert_equal 0, reading.dropped_count,
+                     "identical rows are one allergy"
+        assert_equal 1, reading.size
       end
 
       test "(f) same ien equal non-numeric placeholder codes same name does not drop" do
