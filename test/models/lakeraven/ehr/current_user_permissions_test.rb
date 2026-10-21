@@ -15,7 +15,7 @@ module Lakeraven
         USER_TYPE_CASES.product(KEY_SETS_FOR_MATRIX).each do |user_type, key_set|
           user = build_user(user_type: user_type, security_keys: key_set)
 
-          PERMISSION_SYMBOLS.each do |permission|
+          PERMISSIONS_FOR_MATRIX.each do |permission|
             assert_equal expected_can?(user_type, key_set, permission),
               user.can?(permission),
               "can?(#{permission}) for user_type=#{user_type.inspect} keys=#{key_set.inspect}"

@@ -31,7 +31,14 @@ module HostRoleExpectations
 
   UNKNOWN_PERMISSION = :not_a_real_permission
 
-  USER_TYPES_FOR_MATRIX = %w[provider nurse clerk case_manager admin user].freeze
+  USER_TYPES_FOR_MATRIX = (
+    %w[provider nurse clerk case_manager admin user] +
+    [ :admin, :provider, "ADMIN", "Provider", " provider " ]
+  ).freeze
+
+  PERMISSIONS_FOR_MATRIX = (
+    PERMISSION_SYMBOLS + [ "view_patients", "VIEW_PATIENTS", :VIEW_PATIENTS ]
+  ).freeze
 
   UNKNOWN_USER_TYPE = "synthetic_unknown_role"
 
@@ -64,7 +71,7 @@ module HostRoleExpectations
     ]
   ).freeze
 
-  AUTH_USER_TYPES_FOR_MATRIX = %w[admin provider nurse clerk].freeze
+  AUTH_USER_TYPES_FOR_MATRIX = %w[admin provider nurse clerk user case_manager].freeze
 
   RPMS_KEY_STRING_BY_SYMBOL = {
     prc_supervisor: "PRCFA SUPERVISOR",
@@ -85,7 +92,7 @@ module HostRoleExpectations
   module_function
 
   def effective_user_type(user_type)
-    user_type.nil? ? "user" : user_type.to_s
+    user_type.nil? ? "user" : user_type
   end
 
   def role_permissions_for(user_type)

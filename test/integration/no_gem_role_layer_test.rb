@@ -7,7 +7,7 @@ module Lakeraven
     class NoGemRoleLayerTest < ActiveSupport::TestCase
       ROOT = File.expand_path("../..", __dir__).freeze
 
-      SCAN_ROOTS = %w[app lib config test].map { |dir| File.join(ROOT, dir) }.freeze
+      SCAN_ROOTS = %w[app lib config features test].map { |dir| File.join(ROOT, dir) }.freeze
 
       SKIP_PATH_SEGMENTS = [
         File.join("test", "dummy", "log"),
@@ -23,18 +23,43 @@ module Lakeraven
       USER_ROLES_FILE = "user" + "_roles"
       CAPABILITIES_MOD = "Cap" + "abilities"
       USER_ROLES_MOD = "User" + "Roles"
-      RPMS_RPC_NS = "Rpms" + "Rpc"
 
-      LINE_PATTERNS = [
-        /require\s+["']#{RPMS_RPC_GEM}\/#{CAPABILITIES_FILE}["']/,
-        /require\s+["']#{RPMS_RPC_GEM}\/#{USER_ROLES_FILE}["']/,
-        /#{RPMS_RPC_NS}::\w*const_get\(\s*:#{CAPABILITIES_MOD}\b/,
-        /#{RPMS_RPC_NS}::\w*const_get\(\s*["']#{CAPABILITIES_MOD}["']/,
-        /#{RPMS_RPC_NS}::\w*const_get\(\s*:#{USER_ROLES_MOD}\b/,
-        /#{RPMS_RPC_NS}::\w*const_get\(\s*["']#{USER_ROLES_MOD}["']/
+      CONST_GET_ARG_PATTERNS = [
+        /const_get\s*\(\s*:#{CAPABILITIES_MOD}\b/,
+        /const_get\s*\(\s*["']#{CAPABILITIES_MOD}["']/,
+        /const_get\s*\(\s*:#{USER_ROLES_MOD}\b/,
+        /const_get\s*\(\s*["']#{USER_ROLES_MOD}["']/
       ].freeze
 
-      test "no references to gem role or capability modules remain in app lib config or test" do
+      LINE_PATTERNS = (
+        [
+          /require\s+["']#{RPMS_RPC_GEM}\/#{CAPABILITIES_FILE}["']/,
+          /require\s+["']#{RPMS_RPC_GEM}\/#{USER_ROLES_FILE}["']/,
+          /require\s*\(\s*["']#{RPMS_RPC_GEM}\/["']\s*["']#{CAPABILITIES_FILE}["']\s*\)/,
+          /require\s*\(\s*["']#{RPMS_RPC_GEM}\/["']\s*["']#{USER_ROLES_FILE}["']\s*\)/
+        ] + CONST_GET_ARG_PATTERNS
+      ).freeze
+
+      test "line matcher flags forbidden gem role layer references and ignores innocent lines" do
+        forbidden_samples = [
+          "LEGACY = ::RpmsRpc.const_get(:#{CAPABILITIES_MOD})",
+          "RpmsRpc.const_get(:#{CAPABILITIES_MOD})",
+          %(::RpmsRpc.const_get("#{USER_ROLES_MOD}")),
+          %(Object.const_get("RpmsRpc").const_get(:#{CAPABILITIES_MOD})),
+          %(require("rpms_rpc/" "capabilities")),
+          %(require("rpms_rpc/" "user_roles")),
+          %(require 'rpms_rpc/capabilities'),
+          %(require 'rpms_rpc/user_roles')
+        ]
+
+        forbidden_samples.each do |line|
+          assert forbidden_line?(line), "expected forbidden: #{line}"
+        end
+
+        assert_not forbidden_line?("RpmsRpc::SecurityKeys.symbolize(raw_keys)")
+      end
+
+      test "no references to gem role or capability modules remain in app lib config features or test" do
         hits = []
         this_file = File.expand_path(__FILE__)
 
@@ -45,23 +70,20 @@ module Lakeraven
             next if SKIP_PATH_SEGMENTS.any? { |segment| path.include?(segment) }
 
             scan_file_lines(path).each do |line_no, line|
-              FORBIDDEN.each do |needle|
-                next unless line.include?(needle)
+              next unless forbidden_line?(line)
 
-                hits << "#{path.sub("#{ROOT}/", '')}:#{line_no}: #{line.strip}"
-              end
-
-              LINE_PATTERNS.each do |pattern|
-                next unless line.match?(pattern)
-
-                hits << "#{path.sub("#{ROOT}/", '')}:#{line_no}: #{line.strip}"
-              end
+              hits << "#{path.sub("#{ROOT}/", '')}:#{line_no}: #{line.strip}"
             end
           end
         end
 
         assert_empty hits,
           "remove gem role layer references (issue #638):\n#{hits.join("\n")}"
+      end
+
+      def forbidden_line?(line)
+        FORBIDDEN.any? { |needle| line.include?(needle) } ||
+          LINE_PATTERNS.any? { |pattern| line.match?(pattern) }
       end
 
       def scan_file_lines(path)
