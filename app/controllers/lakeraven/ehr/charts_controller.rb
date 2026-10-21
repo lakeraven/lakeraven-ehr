@@ -327,12 +327,27 @@ module Lakeraven
       # appointment yields the same resolvable fullUrl on every request. If a
       # real visit IEN ever flows through, Encounter#to_fhir uses it and this
       # fallback is skipped.
-      def encounter_to_fhir(encounter, source = {})
+      #
+      # APPTLST datetimes are date-only, so distinct appointments on the same
+      # day compute the same fallback. chart_encounter_entries counts those
+      # fallbacks and passes fallback_id only when that value belongs to one
+      # Encounter in the bundle. When the same fallback would be used by more
+      # than one Encounter, it is not set on any of them (fail closed);
+      # entry_full_url then gives each a urn:uuid. A unique fallback keeps its
+      # id. An Encounter whose to_fhir already returned an id is unchanged.
+      def encounter_to_fhir(encounter, source = {}, fallback_id: nil)
         fhir = encounter.to_fhir
-        fhir[:id] ||= appointment_fhir_id(encounter)
+        assign_fallback_encounter_id(fhir, fallback_id)
         stamp_location_display(fhir, source[:location] || source["location"])
         stamp_rpms_status(fhir, source[:status] || source["status"])
         fhir
+      end
+
+      def assign_fallback_encounter_id(fhir, fallback_id)
+        return if fhir[:id].present?
+        return if fallback_id.blank?
+
+        fhir[:id] = fallback_id
       end
 
       def appointment_fhir_id(encounter)
@@ -360,9 +375,36 @@ module Lakeraven
       end
 
       def chart_encounter_entries
-        @encounters.zip(@encounter_resources).map do |source, encounter|
-          encounter_to_fhir(encounter, source)
+        rows = encounter_fallback_rows
+        counts = fallback_id_counts(rows)
+        rows.map do |row|
+          encounter_to_fhir(row[:encounter], row[:source], fallback_id: sole_fallback_id(row[:fallback], counts))
         end
+      end
+
+      def encounter_fallback_rows
+        @encounters.zip(@encounter_resources).map do |source, encounter|
+          { source: source, encounter: encounter, fallback: appointment_fallback_for(encounter) }
+        end
+      end
+
+      # Appointment-derived Encounters are those Encounter#to_fhir left without
+      # an id. A real visit IEN is already on the resource and is not a fallback.
+      def appointment_fallback_for(encounter)
+        return if encounter.to_fhir[:id].present?
+
+        appointment_fhir_id(encounter)
+      end
+
+      def fallback_id_counts(rows)
+        rows.filter_map { |row| row[:fallback] }.tally
+      end
+
+      def sole_fallback_id(fallback, counts)
+        return if fallback.blank?
+        return if counts[fallback] > 1
+
+        fallback
       end
 
       def render_chart
