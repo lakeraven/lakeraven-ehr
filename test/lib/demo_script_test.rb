@@ -503,6 +503,94 @@ class DemoScriptTest < ActiveSupport::TestCase
     end
   end
 
+  NEWLINE_PUMA_INHERIT_ENV_NAMES = [
+    "A\nPUMA_INHERIT_0",
+    "PUMA_INHERIT_0\n",
+    "PUMA_INHERIT_0\nB",
+    "XPUMA_INHERIT_3\nB"
+  ].freeze
+
+  test "refuses under bash when env name contains newline and PUMA_INHERIT_<digit>" do
+    skip "bash not on PATH; required to reproduce bash env passthrough" unless shell_available?("bash")
+
+    NEWLINE_PUMA_INHERIT_ENV_NAMES.each do |bad_name|
+      port = find_free_port
+      tree = build_demo_tree
+      env = demo_env(
+        tree[:rails_log],
+        "PORT" => port.to_s,
+        bad_name => "9:tcp://localhost:#{port}"
+      )
+
+      _stdout, stderr, status = run_demo_with_shell("bash", tree[:demo_path], env)
+
+      refute_predicate status, :success?,
+                       "demo must refuse when env name #{bad_name.inspect} escapes env-text scans"
+      assert_match(/PUMA_INHERIT/i, stderr)
+      refute rails_invoked?(tree[:rails_log]),
+             "fake rails must not run when #{bad_name.inspect} remains in the environment"
+    end
+  end
+
+  test "under bash refuses or strips PUMA_INHERIT when env is hidden by BASH_FUNC_env%%" do
+    skip "bash not on PATH; required to reproduce bash env passthrough" unless shell_available?("bash")
+
+    port = find_free_port
+    tree = build_demo_tree
+    env = demo_env(
+      tree[:rails_log],
+      "PORT" => port.to_s,
+      "PUMA_INHERIT_0" => "9:tcp://localhost:#{port}",
+      "BASH_FUNC_env%%" => '() { command env "$@" | command grep -v PUMA_INHERIT; }'
+    )
+
+    _stdout, stderr, status = run_demo_with_shell("bash", tree[:demo_path], env)
+
+    if status.success?
+      argv, recorded_port = read_rails_invocation(tree[:rails_log])
+      assert_port_argv(argv, port)
+      assert_equal port.to_s, recorded_port
+      assert_no_puma_inherit_digit_env_names!(tree[:rails_log])
+    else
+      assert_match(/PUMA_INHERIT/i, stderr)
+      refute rails_invoked?(tree[:rails_log]),
+             "fake rails must not run when PUMA_INHERIT_<digit> cannot be cleared"
+    end
+  end
+
+  test "under bash forwards X_PUMA_INHERIT_FOO and strips valid-identifier PUMA_INHERIT_<digit> names" do
+    skip "bash not on PATH; required to verify bash pre-exec PUMA_INHERIT guard" unless shell_available?("bash")
+
+    port = find_free_port
+    inherit_0 = "9:tcp://localhost:#{port}"
+    tree = build_demo_tree
+    env = demo_env(
+      tree[:rails_log],
+      "PORT" => port.to_s,
+      "PUMA_INHERIT_0" => inherit_0,
+      "PUMA_INHERIT_1" => "10:tcp://127.0.0.1:42424",
+      "X_PUMA_INHERIT_FOO" => "keep"
+    )
+
+    _stdout, _stderr, status = run_demo_with_shell("bash", tree[:demo_path], env)
+
+    assert_predicate status, :success?,
+                     "expected success when valid-identifier PUMA_INHERIT names are stripped under bash"
+
+    argv, recorded_port = read_rails_invocation(tree[:rails_log])
+    assert_port_argv(argv, port)
+    assert_equal port.to_s, recorded_port
+    assert_no_puma_inherit_digit_env_names!(tree[:rails_log])
+
+    inherit_env = read_puma_inherit_env(tree[:rails_log])
+    assert_equal "keep", inherit_env.fetch("X_PUMA_INHERIT_FOO"),
+                 "X_PUMA_INHERIT_FOO must reach rails when it has no PUMA_INHERIT_<digit> segment"
+    assert_equal "", inherit_env.fetch("PUMA_INHERIT_0"),
+                 "PUMA_INHERIT_0 must be unset when rails runs"
+    assert_equal "", inherit_env.fetch("PUMA_INHERIT_1"),
+                 "PUMA_INHERIT_1 must be unset when rails runs"
+  end
+
   test "forwards PUMA_INHERIT-like names without a trailing digit to rails" do
     port = find_free_port
     tree = build_demo_tree
