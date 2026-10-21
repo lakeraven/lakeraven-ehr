@@ -3,7 +3,7 @@
 require "test_helper"
 
 # Tests for CapabilitiesGateway — imaging-access predicate fired on every
-# chart open. Wraps RpmsRpc::Capabilities.imaging_user? (lakeraven/rpms-rpc#101).
+# chart open. Delegates to a configurable provider (see lakeraven/rpms-rpc#101).
 module Lakeraven
   module EHR
     class CapabilitiesGatewayTest < ActiveSupport::TestCase
@@ -59,28 +59,37 @@ module Lakeraven
 
       # --- default_provider ---
 
-      test "default_provider returns RpmsRpc::Capabilities when it ships" do
-        skip "Requires RpmsRpc::Capabilities.imaging_user? (lakeraven/rpms-rpc#101)" unless
-          CapabilitiesGateway.default_provider.respond_to?(:imaging_user?)
-        assert_equal ::RpmsRpc::Capabilities, CapabilitiesGateway.default_provider
+      test "default_provider is nil so imaging_user? fails closed with no shipped provider" do
+        assert_nil CapabilitiesGateway.default_provider
+        refute CapabilitiesGateway.imaging_user?("301")
+      end
+
+      test "imaging_user? with default provider fails closed without imaging RPC" do
+        before = RpmsRpc.client.received_calls.length
+
+        refute CapabilitiesGateway.imaging_user?("301")
+
+        imaging_calls = RpmsRpc.client.received_calls.drop(before).count do |call|
+          call[:rpc].to_s.include?("MAGG") || call[:rpc].to_s.include?("IMAG")
+        end
+
+        assert_equal 0, imaging_calls,
+          "default imaging_user? must not call RPMS imaging RPCs (fail closed)"
       end
 
       # --- end-to-end against the real provider ---
 
-      test "imaging_user? caches across calls end-to-end" do
-        skip "Requires RpmsRpc::Capabilities.imaging_user? (lakeraven/rpms-rpc#101)" unless
-          CapabilitiesGateway.default_provider
-
-        RpmsRpc::Capabilities.clear_imaging_cache!
+      test "imaging_user? with default provider does not grant imaging from seeded keys" do
         RpmsRpc.client.seed_keyed_collection(:imaging_user_keys, "301", [ { key_name: "MAG WINDOWS" } ])
 
         before = RpmsRpc.client.received_calls.length
-        5.times { CapabilitiesGateway.imaging_user?("301") }
-        new_calls = RpmsRpc.client.received_calls.length - before
+        5.times { refute CapabilitiesGateway.imaging_user?("301") }
+        imaging_calls = RpmsRpc.client.received_calls.drop(before).count do |call|
+          call[:rpc].to_s.include?("MAGG") || call[:rpc].to_s.include?("IMAG")
+        end
 
-        assert_equal 1, new_calls
-      ensure
-        RpmsRpc::Capabilities.clear_imaging_cache! if defined?(RpmsRpc::Capabilities)
+        assert_equal 0, imaging_calls,
+          "default imaging_user? must not call RPMS imaging RPCs even when keys are seeded"
       end
     end
   end

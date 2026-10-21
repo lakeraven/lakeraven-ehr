@@ -1,11 +1,15 @@
 # frozen_string_literal: true
 
-require "rpms_rpc/capabilities"
-
 module Lakeraven
   module EHR
     # Imaging-access predicate fired on every chart open.
-    # Wraps RpmsRpc::Capabilities.imaging_user?
+    #
+    # No provider ships with the engine. At the pinned gem version
+    # imaging_user? still exists over MAGGUSERKEYS, an RPC no built 9.0
+    # image registers (rpms-rpc#207); upstream removed it. The engine no
+    # longer uses it, and the default fails closed: default_provider is
+    # nil, so imaging_user? with no via: returns false and sends no RPC.
+    # A caller can still inject a provider through via:.
     #
     # Accepts a plain DUZ string/integer at the engine boundary and adapts
     # to the user-shaped object the underlying predicate expects.
@@ -21,7 +25,7 @@ module Lakeraven
       end
 
       def self.default_provider
-        ::RpmsRpc::Capabilities
+        nil
       end
     end
   end

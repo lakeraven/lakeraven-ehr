@@ -9,6 +9,7 @@ ActiveRecord::Migrator.migrations_paths << File.expand_path("../db/migrate", __d
 require "rails/test_help"
 require_relative "support/supplemental_provider_config_helper"
 require_relative "support/global_store_isolation"
+require_relative "support/host_role_expectations"
 require "rpms_rpc/version"
 require "rpms_rpc/mock_client"
 # Needed to build the DDR GETS ENTRY DATA seed key below.
