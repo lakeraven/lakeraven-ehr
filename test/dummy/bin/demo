@@ -263,20 +263,26 @@ unset RPMS_RPC_PATH
 #    in X_PUMA_INHERIT_0 — would serve on whatever fd that value names instead
 #    of the port just probed. Unset every valid identifier containing
 #    PUMA_INHERIT_ followed by a digit (*PUMA_INHERIT_[0-9]*). A value may
-#    contain newlines, so a later physical line of `env` can look like an
+#    contain newlines, so a later physical line of env text can look like an
 #    assignment; only a [A-Za-z_][A-Za-z0-9_]* name the shell actually has set
 #    (${name+x}) is unset, and only such a name is interpolated into eval.
-#    A name that is not a valid identifier cannot be unset; bash keeps it in
-#    the environment passed to exec, so Puma would inherit that fd. The unset
-#    runs in this shell — a pipeline would be a subshell and the variables
-#    would survive into exec. After the unset, refuse to exec when a valid
-#    identifier is still set (${name+x}), or when any `env` line has a name
-#    (the text before the first "=") that contains PUMA_INHERIT_ followed by
-#    a digit and is not a valid identifier. Detect that name by text only;
-#    never eval it. A multi-line value that fakes such a line is refused too
-#    (fail closed).
+#    Parse `command env`, not `env`, so an exported bash function named env
+#    (BASH_FUNC_env%%) cannot hide those names. A name that is not a valid
+#    identifier cannot be unset; bash keeps it in the environment passed to
+#    exec, so Puma would inherit that fd. The unset runs in this shell — a
+#    pipeline would be a subshell and the variables would survive into exec.
+#    After the unset, refuse to exec when a valid identifier is still set
+#    (${name+x}), or when any `command env` line has a name (the text before
+#    the first "=") that contains PUMA_INHERIT_ followed by a digit and is not
+#    a valid identifier. Detect that name by text only; never eval it. A
+#    multi-line value that fakes such a line is refused too (fail closed).
+#    A name that itself contains a newline is split across those lines, so
+#    this scan cannot see it. Just before exec, after every unset, Ruby checks
+#    the real environment for /PUMA_INHERIT_\d+/ and refuses to start if any
+#    key matches. The check prints those names only, never their values. Ruby
+#    is already required for the bind probe above.
 _puma_inherit_names=$(
-  env | while IFS= read -r _puma_inherit_line || [ -n "$_puma_inherit_line" ]; do
+  command env | while IFS= read -r _puma_inherit_line || [ -n "$_puma_inherit_line" ]; do
     case "$_puma_inherit_line" in
       *PUMA_INHERIT_[0-9]*=*)
         _puma_inherit_name=${_puma_inherit_line%%=*}
@@ -307,7 +313,7 @@ done <<END_PUMA_INHERIT
 $_puma_inherit_names
 END_PUMA_INHERIT
 _puma_inherit_left=$(
-  env | while IFS= read -r _puma_inherit_line || [ -n "$_puma_inherit_line" ]; do
+  command env | while IFS= read -r _puma_inherit_line || [ -n "$_puma_inherit_line" ]; do
     case "$_puma_inherit_line" in
       *PUMA_INHERIT_[0-9]*=*)
         _puma_inherit_name=${_puma_inherit_line%%=*}
@@ -339,4 +345,7 @@ unset _puma_inherit_names _puma_inherit_name _puma_inherit_left
 #    SPIKE_MOCK_RPC=1  seeds the in-memory RPMS mock (else 404/empty chart)
 #    CHART_DEMO_OPEN=1 dev-only auth bypass (else 401 without a token)
 echo "Starting demo server -> http://localhost:$PORT/patients/1"
+# Real keys, not a line split of env text. Fail closed: a non-zero ruby
+# status (including ruby missing) refuses to start. Names only, never values.
+ruby -e 'k = ENV.keys.grep(/PUMA_INHERIT_\d+/); exit 0 if k.empty?; warn "Refusing to start: env still contains a PUMA_INHERIT_<digit> name, which Puma would inherit as an open listener:"; k.each { |x| warn x.inspect }; exit 1' || exit 1
 exec env RAILS_ENV=development CHART_DEMO_OPEN=1 SPIKE_MOCK_RPC=1 bin/rails server -p "$PORT" "$@"
