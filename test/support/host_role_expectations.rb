@@ -35,20 +35,34 @@ module HostRoleExpectations
 
   UNKNOWN_USER_TYPE = "synthetic_unknown_role"
 
-  KEY_SETS_FOR_MATRIX = [
-    [],
-    nil,
-    [ :prc_supervisor ],
-    [ :prc_manager ],
-    [ :prc_tech ],
-    [ :consult_manager ],
-    [ :eligibility_verify ],
-    [ :scheduling_admin ],
-    [ :bh_provider ],
-    [ :dental_supervisor ],
-    [ "prc_manager" ],
-    [ :unknown_key ]
+  # Mirrors the key symbols in the pinned rpms-rpc SecurityKeys registry.
+  REGISTRY_KEY_SYMBOLS = %i[
+    prc_supervisor prc_tech prc_manager chs_approve chs_clerk
+    consult_manager eligibility_verify scheduling_admin
+    bh_provider bh_supervisor dental_provider dental_supervisor
+    cprs_gui_chart
   ].freeze
+
+  CHS_PRC_RELEVANT_KEYS = %i[
+    prc_supervisor prc_manager prc_tech chs_approve chs_clerk consult_manager
+  ].freeze
+
+  CHS_PRC_KEY_PAIRS = CHS_PRC_RELEVANT_KEYS
+    .combination(2)
+    .map { |left, right| [ left, right ] }
+    .freeze
+
+  KEY_SETS_FOR_MATRIX = (
+    [
+      [],
+      nil,
+      *REGISTRY_KEY_SYMBOLS.map { |symbol| [ symbol ] },
+      *CHS_PRC_KEY_PAIRS,
+      REGISTRY_KEY_SYMBOLS.dup,
+      [ "prc_manager" ],
+      [ :unknown_key ]
+    ]
+  ).freeze
 
   AUTH_USER_TYPES_FOR_MATRIX = %w[admin provider nurse clerk].freeze
 
@@ -56,13 +70,16 @@ module HostRoleExpectations
     prc_supervisor: "PRCFA SUPERVISOR",
     prc_tech: "PRCFA TECH",
     prc_manager: "BPRC MANAGER",
+    chs_approve: "BGOZ CHS APPROVE",
+    chs_clerk: "BGOZ CHS CLERK",
     consult_manager: "GMRC MGR",
     eligibility_verify: "APCL VERIFY",
     scheduling_admin: "SD SUPERVISOR",
     bh_provider: "BGMH PROVIDER",
     bh_supervisor: "BGMH SUPERVISOR",
     dental_provider: "DENTP PROVIDER",
-    dental_supervisor: "DENTP SUPERVISOR"
+    dental_supervisor: "DENTP SUPERVISOR",
+    cprs_gui_chart: "OR CPRS GUI CHART"
   }.freeze
 
   module_function
