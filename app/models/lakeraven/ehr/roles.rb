@@ -91,9 +91,12 @@ module Lakeraven
           REVERSE_CLASS_MAP[role.to_s]
         end
 
+        # Call security_keys.include?(:prc_supervisor) ||
+        # security_keys.include?(:prc_manager) directly, with no Array()
+        # wrap. Nil keys raise, so sign-on fails closed rather than granting
+        # a role without key data, and a Hash checks its keys.
         def resolve(user_class:, security_keys:)
-          keys = Array(security_keys)
-          if keys.include?(:prc_supervisor) || keys.include?(:prc_manager)
+          if security_keys.include?(:prc_supervisor) || security_keys.include?(:prc_manager)
             "case_manager"
           else
             for_class(user_class)

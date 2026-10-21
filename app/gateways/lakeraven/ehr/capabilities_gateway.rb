@@ -4,11 +4,12 @@ module Lakeraven
   module EHR
     # Imaging-access predicate fired on every chart open.
     #
-    # No provider ships with the engine. The imaging check that used to
-    # live in the RPC gem called MAGGUSERKEYS, an RPC no built 9.0 image
-    # registers (rpms-rpc#207), so default_provider is nil. imaging_user?
-    # with no via: returns false and sends no RPC. A caller can still
-    # inject a provider through via:.
+    # No provider ships with the engine. At the pinned gem version
+    # imaging_user? still exists over MAGGUSERKEYS, an RPC no built 9.0
+    # image registers (rpms-rpc#207); upstream removed it. The engine no
+    # longer uses it, and the default fails closed: default_provider is
+    # nil, so imaging_user? with no via: returns false and sends no RPC.
+    # A caller can still inject a provider through via:.
     #
     # Accepts a plain DUZ string/integer at the engine boundary and adapts
     # to the user-shaped object the underlying predicate expects.
