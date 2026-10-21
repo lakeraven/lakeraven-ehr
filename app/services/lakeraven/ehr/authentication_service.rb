@@ -2,7 +2,6 @@
 
 require "rpms_rpc/api/authentication"
 require "rpms_rpc/security_keys"
-require "rpms_rpc/user_roles"
 
 module Lakeraven
   module EHR
@@ -57,19 +56,17 @@ module Lakeraven
         raw_keys = fetch_raw_security_keys(duz_s)
         symbolic_keys = RpmsRpc::SecurityKeys.symbolize(raw_keys)
 
-        # Authentication already resolved user_type from the AV CODE response's
-        # user_class. Round-trip back to the user_class short code so
-        # UserRoles.resolve's security-key elevation rules (e.g.,
-        # PRCFA SUPERVISOR → case_manager) still apply on top.
-        user_class = RpmsRpc::UserRoles.class_for(auth[:user_type])
-
+        # auth[:user_type] is the role already resolved from the AV user
+        # class. Round-trip it through the short code so :prc_supervisor
+        # or :prc_manager still elevates to "case_manager". A class the
+        # map does not know stays "user".
         Result.new(
           success?: true,
           error: nil,
           value: {
             duz: duz_s,
             name: user_info&.dig(:name) || auth[:name].to_s,
-            user_type: RpmsRpc::UserRoles.resolve(user_class: user_class, security_keys: symbolic_keys),
+            user_type: Roles.resolve_signon(user_type: auth[:user_type], security_keys: symbolic_keys),
             security_keys: symbolic_keys,
             # RPMS said this verify code must be changed (admin reset, or aged
             # out). Dropping the flag granted a full session on a temporary
