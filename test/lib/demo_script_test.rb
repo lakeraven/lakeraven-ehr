@@ -419,6 +419,52 @@ class DemoScriptTest < ActiveSupport::TestCase
                  "PUMA_INHERIT_0 must be unset when rails runs"
     assert_equal "", inherit_env.fetch("PUMA_INHERIT_1"),
                  "PUMA_INHERIT_1 must be unset when rails runs"
+    assert_no_puma_inherit_digit_env_names!(tree[:rails_log])
+  end
+
+  test "does not forward env names containing PUMA_INHERIT_<digit> anywhere to rails" do
+    port = find_free_port
+    tree = build_demo_tree
+    inherit_0 = "9:tcp://localhost:#{port}"
+    env = demo_env(
+      tree[:rails_log],
+      "PORT" => port.to_s,
+      "X_PUMA_INHERIT_0" => inherit_0,
+      "MY_PUMA_INHERIT_12" => "x",
+      "puma_PUMA_INHERIT_1" => "y"
+    )
+
+    _stdout, _stderr, status = run_demo(tree[:demo_path], env)
+
+    assert_predicate status, :success?
+
+    argv, recorded_port = read_rails_invocation(tree[:rails_log])
+    assert_port_argv(argv, port)
+    assert_equal port.to_s, recorded_port
+    assert_no_puma_inherit_digit_env_names!(tree[:rails_log])
+  end
+
+  test "forwards PUMA_INHERIT-like names without a trailing digit to rails" do
+    port = find_free_port
+    tree = build_demo_tree
+    env = demo_env(
+      tree[:rails_log],
+      "PORT" => port.to_s,
+      "X_PUMA_INHERIT_FOO" => "keep"
+    )
+
+    _stdout, _stderr, status = run_demo(tree[:demo_path], env)
+
+    assert_predicate status, :success?
+
+    argv, recorded_port = read_rails_invocation(tree[:rails_log])
+    assert_port_argv(argv, port)
+    assert_equal port.to_s, recorded_port
+    assert_no_puma_inherit_digit_env_names!(tree[:rails_log])
+
+    inherit_env = read_puma_inherit_env(tree[:rails_log])
+    assert_equal "keep", inherit_env.fetch("X_PUMA_INHERIT_FOO"),
+                 "X_PUMA_INHERIT_FOO must reach rails when it has no PUMA_INHERIT_<digit> segment"
   end
 
   test "forwards other rails server args after -p from PORT" do
@@ -552,6 +598,7 @@ class DemoScriptTest < ActiveSupport::TestCase
         #!/bin/sh
         log="${DEMO_TEST_RAILS_LOG:?}"
         inherit_log="${DEMO_TEST_PUMA_INHERIT_LOG:?}"
+        match_log="${DEMO_TEST_PUMA_INHERIT_MATCH_LOG:?}"
         {
           printf 'PORT=%s\\n' "${PORT:-}"
           printf '%s\\n' "$@"
@@ -559,7 +606,9 @@ class DemoScriptTest < ActiveSupport::TestCase
         {
           printf 'PUMA_INHERIT_0=%s\\n' "${PUMA_INHERIT_0:-}"
           printf 'PUMA_INHERIT_1=%s\\n' "${PUMA_INHERIT_1:-}"
+          printf 'X_PUMA_INHERIT_FOO=%s\\n' "${X_PUMA_INHERIT_FOO:-}"
         } > "$inherit_log"
+        env | grep -E '^[^=]*PUMA_INHERIT_[0-9]' > "$match_log" || true
         exit 0
       STUB
     )
@@ -574,11 +623,14 @@ class DemoScriptTest < ActiveSupport::TestCase
 
   def demo_env(rails_log, extra = {})
     path = "#{@stub_bin}:#{ENV.fetch('PATH', '')}"
-    puma_inherit_log = File.join(File.dirname(rails_log), "puma_inherit_env.log")
+    log_dir = File.dirname(rails_log)
+    puma_inherit_log = File.join(log_dir, "puma_inherit_env.log")
+    puma_inherit_match_log = File.join(log_dir, "puma_inherit_digit_env.log")
     {
       "PATH" => path,
       "DEMO_TEST_RAILS_LOG" => rails_log,
-      "DEMO_TEST_PUMA_INHERIT_LOG" => puma_inherit_log
+      "DEMO_TEST_PUMA_INHERIT_LOG" => puma_inherit_log,
+      "DEMO_TEST_PUMA_INHERIT_MATCH_LOG" => puma_inherit_match_log
     }.merge(extra)
   end
 
@@ -610,6 +662,19 @@ class DemoScriptTest < ActiveSupport::TestCase
       values[key] = val || ""
     end
     values
+  end
+
+  def read_puma_inherit_digit_env_lines(rails_log)
+    path = File.join(File.dirname(rails_log), "puma_inherit_digit_env.log")
+    assert File.exist?(path), "expected PUMA_INHERIT_<digit> env grep log at #{path}"
+
+    File.readlines(path, chomp: true).reject(&:empty?)
+  end
+
+  def assert_no_puma_inherit_digit_env_names!(rails_log)
+    lines = read_puma_inherit_digit_env_lines(rails_log)
+    assert_empty lines,
+                 "no env name matching /PUMA_INHERIT_\\d/ may reach rails; got: #{lines.inspect}"
   end
 
   def assert_port_argv(argv, port)
