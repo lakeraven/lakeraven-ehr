@@ -306,6 +306,56 @@ module Lakeraven
                      "duplicate Penicillin rows with UNK placeholder are one allergy"
       end
 
+      # Pin fail-closed: allergen bytes tagged UTF-8 but invalid must not raise
+      # during normalisation; unreadable names are never the same allergy (like
+      # malformed codes).
+      def invalid_utf8_allergen_label
+        (+"Synth\xC9").force_encoding("UTF-8")
+      end
+
+      def merge_allergies_result(wire_rows, supplemental_rows)
+        SupplementalClinicalResources.send(:merge_allergies, wire_rows, supplemental_rows)
+      end
+
+      test "invalid utf8 allergen name on separate ien does not raise and keeps wire row" do
+        wire = wire_allergy(ien: "5", allergen: "Penicillin")
+        unreadable = wire_allergy(ien: "9", allergen: invalid_utf8_allergen_label)
+
+        records, _dropped = merge_allergies_result([ wire ], [ unreadable ])
+
+        assert_equal 2, records.size
+        assert_includes records.map(&:allergen), "Penicillin"
+      end
+
+      test "invalid utf8 name on same ien as readable row does not raise and counts dropped" do
+        readable = wire_allergy(ien: "5", allergen: "Penicillin")
+        unreadable = wire_allergy(ien: "5", allergen: invalid_utf8_allergen_label)
+
+        _records, dropped = merge_allergies_result([ readable ], [ unreadable ])
+
+        assert dropped >= 1,
+               "unreadable name must not match Penicillin on the same ien"
+      end
+
+      test "invalid utf8 duplicate names on one ien do not raise and count dropped" do
+        unreadable_a = wire_allergy(ien: "5", allergen: invalid_utf8_allergen_label)
+        unreadable_b = wire_allergy(ien: "5", allergen: invalid_utf8_allergen_label.dup)
+
+        _records, dropped = merge_allergies_result([], [ unreadable_a, unreadable_b ])
+
+        assert dropped >= 1,
+               "unreadable identity must not match even a repeat of the same bytes"
+      end
+
+      test "reading path keeps Penicillin when supplemental row has invalid utf8 name on other ien" do
+        wire = wire_allergy(ien: "5", allergen: "Penicillin")
+        unreadable = wire_allergy(ien: "9", allergen: invalid_utf8_allergen_label)
+
+        reading = allergy_reading_for_patient(DFN, [ unreadable ], wire_rows: [ wire ])
+
+        assert_includes reading.map(&:allergen), "Penicillin"
+      end
+
       # Issue 466 option (b): normalise code forms before valid/placeholder/differing
       # decisions (ASCII digits, Unicode whitespace, integral *.0 decimals).
       CODE_PAIR_EXPECT_ONE_DROP = [
