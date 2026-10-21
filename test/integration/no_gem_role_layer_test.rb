@@ -33,8 +33,8 @@ module Lakeraven
 
       LINE_PATTERNS = (
         [
-          /require\s+["']#{RPMS_RPC_GEM}\/#{CAPABILITIES_FILE}["']/,
-          /require\s+["']#{RPMS_RPC_GEM}\/#{USER_ROLES_FILE}["']/,
+          /require\s*\(?\s*["']#{RPMS_RPC_GEM}\/#{CAPABILITIES_FILE}["']/,
+          /require\s*\(?\s*["']#{RPMS_RPC_GEM}\/#{USER_ROLES_FILE}["']/,
           /require\s*\(\s*["']#{RPMS_RPC_GEM}\/["']\s*["']#{CAPABILITIES_FILE}["']\s*\)/,
           /require\s*\(\s*["']#{RPMS_RPC_GEM}\/["']\s*["']#{USER_ROLES_FILE}["']\s*\)/
         ] + CONST_GET_ARG_PATTERNS
@@ -49,7 +49,9 @@ module Lakeraven
           %(require("rpms_rpc/" "capabilities")),
           %(require("rpms_rpc/" "user_roles")),
           %(require 'rpms_rpc/capabilities'),
-          %(require 'rpms_rpc/user_roles')
+          %(require 'rpms_rpc/user_roles'),
+          %(require("rpms_rpc/capabilities")),
+          %(require("rpms_rpc/user_roles"))
         ]
 
         forbidden_samples.each do |line|
