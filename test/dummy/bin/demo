@@ -257,22 +257,29 @@ rm -f tmp/pids/server.pid
 #    rejects the lockfile at boot — make sure it is unset.
 unset RPMS_RPC_PATH
 
-# 4. Puma's binder treats every PUMA_INHERIT_<n>=FD:url as the already-open
-#    listener for that url, so PUMA_INHERIT_0=9:tcp://localhost:$PORT would
-#    serve on whatever fd 9 holds instead of the port just probed. Unset every
-#    PUMA_INHERIT_* name. A value may contain newlines, so a later physical
-#    line of `env` can look like an assignment; only a name the shell actually
-#    has set is unset. The unset runs in this shell — a pipeline would be a
-#    subshell and the variables would survive into exec.
+# 4. Puma's binder treats an env name as an already-open listener when it
+#    matches /PUMA_INHERIT_\d+/ anywhere (Puma 8.0.2 binder.rb), not only as a
+#    leading prefix. PUMA_INHERIT_0=9:tcp://localhost:$PORT — or the same value
+#    in X_PUMA_INHERIT_0 — would serve on whatever fd that value names instead
+#    of the port just probed. Unset every name containing PUMA_INHERIT_
+#    followed by a digit (*PUMA_INHERIT_[0-9]*). A value may contain newlines,
+#    so a later physical line of `env` can look like an assignment; only a
+#    [A-Za-z0-9_] name the shell actually has set (${name+x}) is unset, and
+#    only a name that starts with a letter or underscore is interpolated into
+#    eval. The unset runs in this shell — a pipeline would be a subshell and
+#    the variables would survive into exec. If env still shows such a name
+#    (for example one the shell cannot unset), refuse to exec.
 _puma_inherit_names=$(
   env | while IFS= read -r _puma_inherit_line || [ -n "$_puma_inherit_line" ]; do
     case "$_puma_inherit_line" in
-      PUMA_INHERIT_*=*)
+      *PUMA_INHERIT_[0-9]*=*)
         _puma_inherit_name=${_puma_inherit_line%%=*}
         case "$_puma_inherit_name" in
           *[!A-Za-z0-9_]*)
             ;;
-          *)
+          [!A-Za-z_]*)
+            ;;
+          *PUMA_INHERIT_[0-9]*)
             printf '%s\n' "$_puma_inherit_name"
             ;;
         esac
@@ -282,14 +289,40 @@ _puma_inherit_names=$(
 )
 while IFS= read -r _puma_inherit_name || [ -n "$_puma_inherit_name" ]; do
   case "$_puma_inherit_name" in
-    PUMA_INHERIT_*)
-      eval "case \${$_puma_inherit_name+x} in x) unset $_puma_inherit_name ;; esac"
+    *[!A-Za-z0-9_]*|[!A-Za-z_]*)
+      ;;
+    *PUMA_INHERIT_[0-9]*)
+      # `command` keeps a failed unset (readonly name) from aborting the shell
+      # so the env check below can refuse to exec.
+      eval "case \${$_puma_inherit_name+x} in x) command unset $_puma_inherit_name ;; esac" || true
       ;;
   esac
 done <<END_PUMA_INHERIT
 $_puma_inherit_names
 END_PUMA_INHERIT
-unset _puma_inherit_names _puma_inherit_name
+_puma_inherit_left=$(
+  env | while IFS= read -r _puma_inherit_line || [ -n "$_puma_inherit_line" ]; do
+    case "$_puma_inherit_line" in
+      *PUMA_INHERIT_[0-9]*=*)
+        _puma_inherit_name=${_puma_inherit_line%%=*}
+        case "$_puma_inherit_name" in
+          *[!A-Za-z0-9_]*)
+            ;;
+          [!A-Za-z_]*)
+            ;;
+          *PUMA_INHERIT_[0-9]*)
+            eval "case \${$_puma_inherit_name+x} in x) printf '%s\n' '$_puma_inherit_name' ;; esac"
+            ;;
+        esac
+        ;;
+    esac
+  done
+)
+if [ -n "$_puma_inherit_left" ]; then
+  printf 'Refusing to start: env still contains a PUMA_INHERIT_<digit> name, which Puma would inherit as an open listener:\n%s\n' "$_puma_inherit_left" >&2
+  exit 1
+fi
+unset _puma_inherit_names _puma_inherit_name _puma_inherit_left
 
 # 5. Both flags are required, and both are honored ONLY in development:
 #    SPIKE_MOCK_RPC=1  seeds the in-memory RPMS mock (else 404/empty chart)
