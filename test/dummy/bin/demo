@@ -12,8 +12,19 @@
 # refused so they cannot override that check. A -b/--binding value containing
 # "://" or a host starting with "/", ".", or "@" is refused too; set the host
 # with a plain -b HOST. BINDING is refused the same way; set a plain host
-# (the port comes from PORT).
+# (the port comes from PORT). -u/--using must be exactly puma: -u VALUE,
+# -uVALUE, -u=VALUE, --using=VALUE, a letter cluster ending in u, and the
+# unique --using prefixes Thor maps, after "_" in the option name is rewritten
+# to "-". Any other Rack handler, including cgi, never listens on PORT.
+# RACKUP_HANDLER and RACK_HANDLER are unset for the same reason.
 set -e
+# Bash imports BASH_FUNC_<name>%% as a shell function before this script runs.
+# A function named ruby, command, env, or lsof would replace the bind probe,
+# the PUMA_INHERIT scan, or the final Ruby check (a stub that returns 0 lets
+# a name such as A<newline>PUMA_INHERIT_0 through). Drop those shadows, and
+# the other commands used below, before any of them run. POSIX unset -f;
+# missing functions are not worth aborting for (harmless in dash).
+unset -f ruby command env lsof awk printf cd exec pg_isready rm 2>/dev/null || true
 cd "$(dirname "$0")/.."
 
 # PORT selects the listen port and the URL printed below. Default is 3000.
@@ -60,6 +71,19 @@ export PORT
 # is also passed: Rails reads BINDING when no -b is given, and Puma would
 # listen on that socket or URI instead of PORT. A plain host in BINDING is
 # forwarded unchanged. The listen port comes only from PORT.
+# -u/--using selects the Rack handler. cgi and every handler other than puma
+# never listen on PORT, so the value must be exactly puma. That covers -u
+# VALUE (the next argument), -uVALUE, -u=VALUE, --using VALUE, and
+# --using=VALUE, plus unique prefixes Thor maps onto --using (--u, --us,
+# --usi, --usin). --using is the only server switch that starts with u, so
+# those prefixes are unique (unlike --p, which also matches --pid and is
+# left alone). A letter cluster ending
+# in u (-du, -Cu) is the same as -u: Thor splits it and the next argument is
+# the handler. Thor rewrites "_" to "-" in the option name (the part before
+# "="), so --no_using, --skip_using=cgi, and --no_us are matched after that
+# rewrite. Negated --no-/--skip- forms set the handler to nil, not puma, so
+# they are refused. A bare -u or --using with no value is refused too: Thor
+# would use the name "using", which is not puma.
 # Status 0 when this host would not listen on PORT.
 refused_host() {
   case "$1" in
@@ -75,6 +99,12 @@ for arg in "$@"; do
     -b|--binding)
       if refused_host "$arg"; then
         printf 'Set the host with a plain -b HOST; the port comes from PORT (refusing %s).\n' "$arg" >&2
+        exit 1
+      fi
+      ;;
+    -u|--using)
+      if [ "$arg" != "puma" ]; then
+        printf 'Set the Rack handler to puma so the server listens on PORT (refusing %s).\n' "$arg" >&2
         exit 1
       fi
       ;;
@@ -109,6 +139,25 @@ for arg in "$@"; do
           ;;
       esac
       ;;
+    --using|--usin|--usi|--us|--u)
+      case "$arg" in
+        *=*)
+          handler=${arg#*=}
+          if [ "$handler" != "puma" ]; then
+            printf 'Set the Rack handler to puma so the server listens on PORT (refusing %s).\n' "$arg" >&2
+            exit 1
+          fi
+          ;;
+        *)
+          prev=--using
+          ;;
+      esac
+      ;;
+    --no-using|--no-usin|--no-usi|--no-us|--no-u|\
+    --skip-using|--skip-usin|--skip-usi|--skip-us|--skip-u)
+      printf 'Set the Rack handler to puma so the server listens on PORT (refusing %s).\n' "$arg" >&2
+      exit 1
+      ;;
     --*)
       ;;
     -*)
@@ -136,18 +185,41 @@ for arg in "$@"; do
           fi
           ;;
       esac
+      # -uVALUE and -u=VALUE carry the handler in this argument.
+      case "$arg" in
+        -u=*|-u?*)
+          handler=${arg#-u}
+          handler=${handler#=}
+          if [ "$handler" != "puma" ]; then
+            printf 'Set the Rack handler to puma so the server listens on PORT (refusing %s).\n' "$arg" >&2
+            exit 1
+          fi
+          ;;
+      esac
       # Bare -b, or a letters-only cluster whose last option is -b, takes the
       # next argument as the host. -b=HOST and -bHOST already carry a value.
+      # Bare -u, or a letters-only cluster whose last option is -u, takes the
+      # next argument as the handler. -u=HANDLER and -uHANDLER already carry one.
       case "$body" in
         *[!A-Za-z]*)
           ;;
         *b)
           prev=-b
           ;;
+        *u)
+          prev=-u
+          ;;
       esac
       ;;
   esac
 done
+
+case "$prev" in
+  -u|--using)
+    printf 'Set the Rack handler to puma so the server listens on PORT (refusing %s).\n' "$prev" >&2
+    exit 1
+    ;;
+esac
 
 # BINDING is the host Rails uses when -b is absent. A URI ("://") or a
 # unix-socket host (starting with "/", ".", or "@") would ignore PORT, so
@@ -257,6 +329,11 @@ rm -f tmp/pids/server.pid
 #    rejects the lockfile at boot — make sure it is unset.
 unset RPMS_RPC_PATH
 
+# Rackup::Handler.default prefers RACKUP_HANDLER, then RACK_HANDLER, when
+# -u/--using is absent. cgi (and any handler other than puma) never listens
+# on the port just probed. Drop both so the server stays on Puma and PORT.
+unset RACKUP_HANDLER RACK_HANDLER
+
 # 4. Puma's binder treats an env name as an already-open listener when it
 #    matches /PUMA_INHERIT_\d+/ anywhere (Puma 8.0.2 binder.rb), not only as a
 #    leading prefix. PUMA_INHERIT_0=9:tcp://localhost:$PORT — or the same value
@@ -266,8 +343,9 @@ unset RPMS_RPC_PATH
 #    contain newlines, so a later physical line of env text can look like an
 #    assignment; only a [A-Za-z_][A-Za-z0-9_]* name the shell actually has set
 #    (${name+x}) is unset, and only such a name is interpolated into eval.
-#    Parse `command env`, not `env`, so an exported bash function named env
-#    (BASH_FUNC_env%%) cannot hide those names. A name that is not a valid
+#    Parse `command env`, not `env`. Bash functions named env and command
+#    (BASH_FUNC_env%%, BASH_FUNC_command%%) are dropped at the top of the
+#    script; `command` still forces the builtin. A name that is not a valid
 #    identifier cannot be unset; bash keeps it in the environment passed to
 #    exec, so Puma would inherit that fd. The unset runs in this shell — a
 #    pipeline would be a subshell and the variables would survive into exec.
@@ -279,8 +357,10 @@ unset RPMS_RPC_PATH
 #    A name that itself contains a newline is split across those lines, so
 #    this scan cannot see it. Just before exec, after every unset, Ruby checks
 #    the real environment for /PUMA_INHERIT_\d+/ and refuses to start if any
-#    key matches. The check prints those names only, never their values. Ruby
-#    is already required for the bind probe above.
+#    key matches. The check prints those names only, never their values. An
+#    exported function named ruby is dropped at the top, so this is the real
+#    interpreter (the same one the bind probe requires), not a stub that
+#    returns 0.
 _puma_inherit_names=$(
   command env | while IFS= read -r _puma_inherit_line || [ -n "$_puma_inherit_line" ]; do
     case "$_puma_inherit_line" in
@@ -347,5 +427,6 @@ unset _puma_inherit_names _puma_inherit_name _puma_inherit_left
 echo "Starting demo server -> http://localhost:$PORT/patients/1"
 # Real keys, not a line split of env text. Fail closed: a non-zero ruby
 # status (including ruby missing) refuses to start. Names only, never values.
+# The ruby function, if a parent bash exported one, was already unset.
 ruby -e 'k = ENV.keys.grep(/PUMA_INHERIT_\d+/); exit 0 if k.empty?; warn "Refusing to start: env still contains a PUMA_INHERIT_<digit> name, which Puma would inherit as an open listener:"; k.each { |x| warn x.inspect }; exit 1' || exit 1
 exec env RAILS_ENV=development CHART_DEMO_OPEN=1 SPIKE_MOCK_RPC=1 bin/rails server -p "$PORT" "$@"
