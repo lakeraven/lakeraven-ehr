@@ -558,6 +558,161 @@ class DemoScriptTest < ActiveSupport::TestCase
     end
   end
 
+  test "under bash refuses when BASH_FUNC_ruby%% stubs the final PUMA_INHERIT ruby check" do
+    skip "bash not on PATH; required to reproduce bash function shadowing" unless shell_available?("bash")
+
+    port = find_free_port
+    tree = build_demo_tree
+    bad_name = "A\nPUMA_INHERIT_0"
+    env = demo_env(
+      tree[:rails_log],
+      "PORT" => port.to_s,
+      bad_name => "9:x:",
+      "BASH_FUNC_ruby%%" => "() { return 0; }"
+    )
+
+    _stdout, stderr, status = run_demo_with_shell("bash", tree[:demo_path], env)
+
+    refute_predicate status, :success?,
+                     "demo must refuse when ruby no longer enforces PUMA_INHERIT_<digit> keys"
+    assert_match(/PUMA_INHERIT/i, stderr)
+    refute rails_invoked?(tree[:rails_log]),
+           "fake rails must not run when the PUMA_INHERIT guard is bypassed via BASH_FUNC_ruby%%"
+  end
+
+  test "under bash refuses or strips PUMA_INHERIT when command env is hidden by BASH_FUNC_command%%" do
+    skip "bash not on PATH; required to reproduce bash function shadowing" unless shell_available?("bash")
+
+    port = find_free_port
+    tree = build_demo_tree
+    env = demo_env(
+      tree[:rails_log],
+      "PORT" => port.to_s,
+      "PUMA_INHERIT_0" => "9:x",
+      "BASH_FUNC_ruby%%" => "() { return 0; }",
+      "BASH_FUNC_command%%" => "() { return 0; }"
+    )
+
+    _stdout, stderr, status = run_demo_with_shell("bash", tree[:demo_path], env)
+
+    if status.success?
+      argv, recorded_port = read_rails_invocation(tree[:rails_log])
+      assert_port_argv(argv, port)
+      assert_equal port.to_s, recorded_port
+      assert_no_puma_inherit_digit_env_names!(tree[:rails_log])
+    else
+      refute rails_invoked?(tree[:rails_log]),
+             "fake rails must not run when PUMA_INHERIT_<digit> cannot be cleared"
+      assert_match(/PUMA_INHERIT/i, stderr)
+    end
+  end
+
+  test "under bash still refuses busy port when BASH_FUNC_lsof%% stubs lsof" do
+    skip "bash not on PATH; required to reproduce bash function shadowing" unless shell_available?("bash")
+
+    port = find_free_port
+    holder_pid = spawn_port_holder(port)
+    @port_holder_pids << holder_pid
+    wait_for_port_listen(port, holder_pid)
+
+    tree = build_demo_tree
+    env = demo_env(
+      tree[:rails_log],
+      "PORT" => port.to_s,
+      "BASH_FUNC_lsof%%" => "() { return 0; }"
+    )
+
+    _stdout, stderr, status = run_demo_with_shell("bash", tree[:demo_path], env)
+
+    refute_predicate status, :success?,
+                     "expected failure when port #{port} is busy even if lsof is stubbed"
+    assert_includes stderr, port.to_s, "stderr should name the port"
+    refute rails_invoked?(tree[:rails_log]),
+           "fake rails must not run when the port is already in use"
+    assert_process_still_running(holder_pid)
+    assert_port_held(port)
+  end
+
+  CGI_HANDLER_ENV_VARS = %w[RACKUP_HANDLER RACK_HANDLER].freeze
+
+  CGI_HANDLER_CLI_FORMS = [
+    [ "-u", "cgi" ],
+    [ "--using", "cgi" ],
+    [ "--using=cgi" ],
+    [ "-ucgi" ]
+  ].freeze
+
+  PUMA_HANDLER_CLI_FORMS = [
+    [ "-u", "puma" ],
+    [ "--using=puma" ]
+  ].freeze
+
+  test "under bash drops or refuses RACKUP_HANDLER and RACK_HANDLER cgi" do
+    skip "bash not on PATH; required for handler env contract" unless shell_available?("bash")
+
+    CGI_HANDLER_ENV_VARS.each do |var|
+      port = find_free_port
+      tree = build_demo_tree
+      env = demo_env(tree[:rails_log], "PORT" => port.to_s, var => "cgi")
+
+      _stdout, _stderr, status = run_demo_with_shell("bash", tree[:demo_path], env)
+
+      if status.success?
+        argv, recorded_port = read_rails_invocation(tree[:rails_log])
+        assert_port_argv(argv, port)
+        assert_equal port.to_s, recorded_port
+        rack_env = read_rack_handler_env(tree[:rails_log])
+        assert_equal "", rack_env.fetch(var),
+                     "#{var}=cgi must not reach rails (handler would not listen on PORT)"
+      else
+        refute rails_invoked?(tree[:rails_log]),
+               "fake rails must not run when #{var}=cgi is refused"
+      end
+    end
+  end
+
+  test "under bash refuses cgi handler CLI overrides without starting rails" do
+    skip "bash not on PATH; required for handler CLI contract" unless shell_available?("bash")
+
+    port = find_free_port
+
+    CGI_HANDLER_CLI_FORMS.each do |form|
+      tree = build_demo_tree
+      env = demo_env(tree[:rails_log], "PORT" => port.to_s)
+
+      _stdout, stderr, status = run_demo_with_shell("bash", tree[:demo_path], env, *form)
+      form_desc = form.inspect
+
+      refute_predicate status, :success?,
+                       "expected failure for handler override #{form_desc}"
+      assert_match(/handler|puma|cgi/i, stderr,
+                   "stderr should mention handler, puma, or cgi for #{form_desc}")
+      refute rails_invoked?(tree[:rails_log]),
+             "fake rails must not run for handler override #{form_desc}"
+    end
+  end
+
+  test "under bash forwards puma handler CLI overrides to rails" do
+    skip "bash not on PATH; required for handler CLI contract" unless shell_available?("bash")
+
+    port = find_free_port
+
+    PUMA_HANDLER_CLI_FORMS.each do |form|
+      tree = build_demo_tree
+      env = demo_env(tree[:rails_log], "PORT" => port.to_s)
+
+      _stdout, _stderr, status = run_demo_with_shell("bash", tree[:demo_path], env, *form)
+      form_desc = form.inspect
+
+      assert_predicate status, :success?, "expected success for handler override #{form_desc}"
+
+      argv, recorded_port = read_rails_invocation(tree[:rails_log])
+      assert_port_argv(argv, port)
+      assert_equal port.to_s, recorded_port
+      assert_handler_argv_includes_puma!(argv, form)
+    end
+  end
+
   test "under bash forwards X_PUMA_INHERIT_FOO and strips valid-identifier PUMA_INHERIT_<digit> names" do
     skip "bash not on PATH; required to verify bash pre-exec PUMA_INHERIT guard" unless shell_available?("bash")
 
@@ -749,7 +904,10 @@ class DemoScriptTest < ActiveSupport::TestCase
 
         File.write(log, ["PORT=#{ENV['PORT']}", *ARGV].join("\n") + "\n")
 
-        inherit_keys = %w[PUMA_INHERIT_0 PUMA_INHERIT_1 X_PUMA_INHERIT_FOO]
+        inherit_keys = %w[
+          PUMA_INHERIT_0 PUMA_INHERIT_1 X_PUMA_INHERIT_FOO
+          RACKUP_HANDLER RACK_HANDLER
+        ]
         inherit_lines = inherit_keys.map { |key| "#{key}=#{ENV.fetch(key, '')}" }
         File.write(inherit_log, inherit_lines.join("\n") + "\n")
 
@@ -817,6 +975,28 @@ class DemoScriptTest < ActiveSupport::TestCase
       values[key] = val || ""
     end
     values
+  end
+
+  def read_rack_handler_env(rails_log)
+    env = read_puma_inherit_env(rails_log)
+    CGI_HANDLER_ENV_VARS.each do |key|
+      env[key] = "" unless env.key?(key)
+    end
+    env
+  end
+
+  def assert_handler_argv_includes_puma!(argv, form)
+    if form == [ "-u", "puma" ]
+      idx = argv.index("-u")
+      assert idx, "expected -u in argv: #{argv.inspect}"
+      assert_equal "puma", argv[idx + 1]
+    elsif form == [ "--using=puma" ]
+      assert argv.include?("--using=puma") ||
+               (argv.index("--using") && argv[argv.index("--using") + 1] == "puma"),
+             "expected puma handler in argv: #{argv.inspect}"
+    else
+      flunk "unexpected handler form: #{form.inspect}"
+    end
   end
 
   def read_puma_inherit_digit_env_lines(rails_log)
