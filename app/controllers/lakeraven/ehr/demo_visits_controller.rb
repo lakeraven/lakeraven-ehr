@@ -15,6 +15,11 @@ module Lakeraven
     # (development? && CHART_DEMO_OPEN=1 && SPIKE_MOCK_RPC=1); it 404s
     # everywhere else, so it can never front a real backend or ship to prod.
     class DemoVisitsController < ActionController::Base
+      # Dev-only and synthetic, and audited anyway. A charting surface that
+      # records vitals, a purpose of visit and a signed note is the shape of
+      # thing that must never be able to run unaudited — the day it is pointed
+      # at a real backend must not also be the day auditing gets added.
+      include AuditableClinicalAccess
       # Deterministic demo gateways: they mirror the production gateway
       # interfaces the services call, and always report success. Nothing is
       # persisted here — the controller records what the provider entered in
@@ -193,6 +198,48 @@ module Lakeraven
           ENV["CHART_DEMO_OPEN"] == "1" &&
           ENV["SPIKE_MOCK_RPC"] == "1"
         head :not_found unless demo
+      end
+
+      # The demo has no sign-on, so it names a fixed service actor rather than
+      # leaving the rows attributed to nobody. It is a Patient-centric
+      # surface, keyed on the route dfn — no extra PHI enters the log.
+      #
+      # Attribution safety (S2's twin on #507): this is a bypass surface, so
+      # the shared resolver in AuditableClinicalAccess must never file a
+      # demo action under whatever browser session the request happens to
+      # carry. The fail-closed core (#512) does that by refusing session
+      # attribution wherever `unauthenticated_audit_actor` is set — this
+      # method IS that signal. On a build without the core, the base concern
+      # never consulted the session in the first place, so the demo is safe
+      # either way; declaring the actor keeps it that way when the core lands.
+      def unauthenticated_audit_actor = "demo-visit"
+
+      # This surface carries no bearer token — it is the dev-only demo. The
+      # audit concern asks for one; answer honestly with nil rather than
+      # leaving the method undefined, which on the base (best-effort) concern
+      # raises NoMethodError inside the audit and is swallowed — a demo that
+      # only LOOKS audited. Defined, it records under the service actor on
+      # every concern version.
+      def current_token = nil
+
+      def fhir_resource_type = "Patient"
+
+      # S8's twin, carried by this surface alone: the walk-in flow
+      # accumulates the provider's entries — vitals, POV narrative, signed
+      # NOTE TEXT — in the session so the page can render them back. When an
+      # access cannot be recorded and is refused, that session state must not
+      # survive: the fail-closed core (#512) rolls the whole session back to
+      # its pre-action snapshot, and this override is the surface-specific
+      # belt to it — the hook the core created for exactly this case, whose
+      # only implementer is this controller. Dropping the in-progress visit
+      # is harmless (it is disposable demo state) and closes the leak
+      # regardless of how the core's generic rollback evolves.
+      #
+      # `respond_to?(:session, true)` guard: no-op on any stack without a
+      # session, and it is only ever called by the core's deny path — absent
+      # the core it is inert, so this branch is safe to land alone.
+      def rollback_unrecorded_access
+        session.delete(:demo_visits) if respond_to?(:session, true)
       end
 
       def visit_state(dfn)
