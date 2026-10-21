@@ -5,7 +5,7 @@ module Lakeraven
     class MeasureReportsController < ApplicationController
       def index
         # Simplified: returns empty bundle. Full implementation needs patient data access.
-        render_bundle([])
+        render_bundle_egress([])
       end
     end
   end

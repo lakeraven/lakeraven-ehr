@@ -162,6 +162,20 @@ module Lakeraven
         dfn.present? && dfn.to_i.positive?
       end
 
+      # Completed years from dob to date. A Feb 29 birth's anniversary is March 1
+      # in a non-leap year. Nil when dob is blank or after the date.
+      def age_on(date)
+        born = dob&.to_date
+        return nil unless born
+
+        on = date.to_date
+        return nil if born > on
+
+        years = on.year - born.year
+        years -= 1 if on < anniversary_in(born, on.year)
+        years
+      end
+
       # -- Clinical data accessors (ported from the predecessor app) ------------------
 
       def service_requests
@@ -369,6 +383,12 @@ module Lakeraven
       end
 
       private
+
+      def anniversary_in(born, year)
+        return Date.new(year, 3, 1) if born.month == 2 && born.day == 29 && !Date.leap?(year)
+
+        Date.new(year, born.month, born.day)
+      end
 
       def persistable_attributes
         {

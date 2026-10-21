@@ -1,6 +1,9 @@
 # frozen_string_literal: true
 
 require "test_helper"
+# capture_problem_calls touches RpmsRpc::Problem before ConditionGateway (which requires it)
+# is first referenced; without this the file fails on any order that runs a capture test first.
+require "rpms_rpc/api/problem"
 
 # Tests for ConditionGateway — engine wrapper around RpmsRpc::Problem.
 # Engine vocabulary is "Condition" (matches app/models/lakeraven/ehr/condition.rb);

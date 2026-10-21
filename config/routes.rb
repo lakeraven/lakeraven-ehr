@@ -74,7 +74,11 @@ Lakeraven::EHR::Engine.routes.draw do
 
   # Exports — ONC §170.315(b)(10) + (g)(10)
   resources :exports, only: [ :create, :show, :destroy ] do
-    resources :files, only: [ :show ], controller: "export_files", param: :file_name
+    # The documented file URL ends in "patient.ndjson". `format: false`
+    # drops the format suffix; the file_name constraint is what lets the
+    # dot through, because "." is still a segment separator without it.
+    resources :files, only: [ :show ], controller: "export_files", param: :file_name,
+      format: false, file_name: %r{[^/]+}
   end
 
   # SMART discovery + EHR Launch

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_24_000000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_15_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -59,6 +59,29 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_24_000000) do
     t.string "jti", null: false
     t.index [ "client_id", "jti" ], name: "idx_backend_assertion_jti_uniqueness", unique: true
     t.index [ "expires_at" ], name: "index_lakeraven_ehr_backend_assertion_jtis_on_expires_at"
+  end
+
+  create_table "lakeraven_ehr_behavioral_health_visit_codings", force: :cascade do |t|
+    t.string "cpt_code"
+    t.datetime "created_at", null: false
+    t.string "documented_by_duz", null: false
+    t.integer "duration_minutes"
+    t.string "encounter_ien", null: false
+    t.string "encounter_kind", null: false
+    t.integer "patient_dfn", null: false
+    t.string "selected_cpt_code"
+    t.datetime "updated_at", null: false
+    t.index [ "patient_dfn", "encounter_ien" ], name: "index_lakeraven_ehr_bh_visit_codings_on_patient_encounter", unique: true
+    t.check_constraint "(encounter_kind::text = 'psychiatric_diagnostic_evaluation'::text AND NOT cpt_code::text IS DISTINCT FROM '90791'::text AND (selected_cpt_code IS NULL OR selected_cpt_code::text = '90791'::text) AND (duration_minutes IS NULL OR duration_minutes >= 0) OR encounter_kind::text = 'individual_psychotherapy'::text AND duration_minutes IS NOT NULL AND duration_minutes > 0 AND (selected_cpt_code IS NULL OR (selected_cpt_code::text = ANY (ARRAY['90832'::character varying, '90834'::character varying, '90837'::character varying]::text[]))) AND (duration_minutes < 16 AND cpt_code IS NULL OR duration_minutes >= 16 AND duration_minutes <= 37 AND ((selected_cpt_code IS NULL OR selected_cpt_code::text = '90832'::text) AND NOT cpt_code::text IS DISTINCT FROM '90832'::text OR selected_cpt_code IS NOT NULL AND selected_cpt_code::text <> '90832'::text AND cpt_code IS NULL) OR duration_minutes >= 38 AND duration_minutes <= 52 AND ((selected_cpt_code IS NULL OR selected_cpt_code::text = '90834'::text) AND NOT cpt_code::text IS DISTINCT FROM '90834'::text OR selected_cpt_code IS NOT NULL AND selected_cpt_code::text <> '90834'::text AND cpt_code IS NULL) OR duration_minutes >= 53 AND ((selected_cpt_code IS NULL OR selected_cpt_code::text = '90837'::text) AND NOT cpt_code::text IS DISTINCT FROM '90837'::text OR selected_cpt_code IS NOT NULL AND selected_cpt_code::text <> '90837'::text AND cpt_code IS NULL))) IS TRUE", name: "bh_visit_coding_duration_and_cpt_consistent"
+  end
+
+  create_table "lakeraven_ehr_bh_program_configurations", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.jsonb "end_of_treatment_review_interval_parts", null: false
+    t.string "program_key", null: false
+    t.jsonb "progress_review_interval_parts", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "program_key" ], name: "index_ehr_bh_program_configs_on_program_key", unique: true
   end
 
   create_table "lakeraven_ehr_disclosures", force: :cascade do |t|
@@ -184,6 +207,40 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_24_000000) do
     t.check_constraint "source::text <> 'clinician'::text OR administered_by IS NOT NULL", name: "screening_clinician_requires_administrator"
   end
 
+  create_table "lakeraven_ehr_treatment_plan_concurrences", force: :cascade do |t|
+    t.datetime "concurred_at", null: false
+    t.datetime "created_at", null: false
+    t.string "supervisor_duz", null: false
+    t.bigint "treatment_plan_id", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "treatment_plan_id" ], name: "index_ehr_tp_concurrences_on_plan", unique: true
+  end
+
+  create_table "lakeraven_ehr_treatment_plan_progress_reviews", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.date "reviewed_on", null: false
+    t.string "reviewed_by_duz", null: false
+    t.bigint "treatment_plan_id", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "treatment_plan_id" ], name: "index_ehr_tp_progress_reviews_on_plan"
+  end
+
+  create_table "lakeraven_ehr_treatment_plans", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.date "date_established", null: false
+    t.string "designated_provider_duz", null: false
+    t.date "end_of_treatment_review_due_on"
+    t.text "narrative", null: false
+    t.integer "patient_dfn", null: false
+    t.jsonb "problems_goals", default: [], null: false
+    t.string "program_key", null: false
+    t.date "progress_review_due_on"
+    t.datetime "updated_at", null: false
+    t.index [ "patient_dfn" ], name: "index_lakeraven_ehr_treatment_plans_on_patient_dfn"
+    t.index [ "program_key" ], name: "index_lakeraven_ehr_treatment_plans_on_program_key"
+    t.index [ "progress_review_due_on" ], name: "index_lakeraven_ehr_treatment_plans_on_progress_review_due_on"
+  end
+
   create_table "oauth_access_grants", force: :cascade do |t|
     t.integer "application_id", null: false
     t.datetime "created_at", null: false
@@ -232,6 +289,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_24_000000) do
   end
 
   add_foreign_key "lakeraven_ehr_reconciliation_items", "lakeraven_ehr_reconciliation_sessions", column: "reconciliation_session_id"
+  add_foreign_key "lakeraven_ehr_treatment_plan_concurrences", "lakeraven_ehr_treatment_plans", column: "treatment_plan_id"
+  add_foreign_key "lakeraven_ehr_treatment_plan_progress_reviews", "lakeraven_ehr_treatment_plans", column: "treatment_plan_id"
   add_foreign_key "oauth_access_grants", "oauth_applications", column: "application_id"
   add_foreign_key "oauth_access_tokens", "oauth_applications", column: "application_id"
 end

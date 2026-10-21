@@ -31,10 +31,21 @@ module Lakeraven
       end
 
       test "entries have correct resourceType" do
+        RpmsRpc.client.seed_keyed_collection(:immunization_list, "1", [
+          { ien: 7001, vaccine_code: "207", vaccine_display: "COVID-19 Pfizer-BioNTech, mRNA",
+            status: "completed", lot_number: "EX1234",
+            occurrence_datetime: Time.utc(2026, 1, 15, 10, 0, 0),
+            site: "Left deltoid", route: "IM", performer_duz: "301",
+            dose_quantity: 0.3, dose_unit: "mL", manufacturer: "Pfizer-BioNTech",
+            vfc_eligibility_code: "V04", funding_source: "VFC" }
+        ])
+
         get "/lakeraven-ehr/Immunization", params: { patient: "1" }, headers: @headers
         assert_response :ok
         body = JSON.parse(response.body)
-        body["entry"]&.each do |entry|
+        entries = body["entry"]
+        assert entries.is_a?(Array) && entries.any?, "Immunization bundle should include entries"
+        entries.each do |entry|
           assert_equal "Immunization", entry.dig("resource", "resourceType")
         end
       end

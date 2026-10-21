@@ -10,7 +10,7 @@ module Lakeraven
       def index
         dfn = patient_compartment_dfn
         results = MedicationRequest.for_patient(dfn)
-        render_bundle(results.map { |r| { resourceType: "MedicationRequest" }.merge(r) })
+        render_bundle_egress(results.map { |r| MedicationRequest.from_rpms_row(r, patient_dfn: dfn).to_fhir })
       end
 
       def show

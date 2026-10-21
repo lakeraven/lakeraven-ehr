@@ -68,6 +68,23 @@ module Lakeraven
         assert_response :unauthorized
       end
 
+      test "POST /exports with _type containing leading space either exports Patient or is refused 400" do
+        post "/lakeraven-ehr/exports", params: { _type: [ " Patient" ] }, headers: @headers
+
+        if response.status == 400
+          assert_response :bad_request
+        else
+          assert_response :accepted
+          export_id = JSON.parse(response.body)["id"]
+
+          get "/lakeraven-ehr/exports/#{export_id}", headers: @headers
+          assert_response :ok
+          body = JSON.parse(response.body)
+          has_patient = body["output"]&.any? { |f| f["type"] == "Patient" }
+          assert has_patient, "Expected manifest to list Patient's NDJSON if not 400"
+        end
+      end
+
       test "completed export shows output files" do
         post "/lakeraven-ehr/exports", headers: @headers
         export_id = JSON.parse(response.body)["id"]
