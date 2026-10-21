@@ -8,7 +8,7 @@ module Lakeraven
       include HostRoleExpectations
 
       USER_TYPE_CASES = (
-        USER_TYPES_FOR_MATRIX + [UNKNOWN_USER_TYPE, nil]
+        USER_TYPES_FOR_MATRIX + [ UNKNOWN_USER_TYPE, nil ]
       ).freeze
 
       test "permissions and capabilities match pinned role and key matrix" do

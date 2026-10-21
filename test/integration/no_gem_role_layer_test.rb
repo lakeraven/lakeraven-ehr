@@ -16,7 +16,7 @@ module Lakeraven
 
       CAPABILITIES_REF = "RpmsRpc::" + "Capabilities"
       USER_ROLES_REF = "RpmsRpc::" + "UserRoles"
-      FORBIDDEN = [CAPABILITIES_REF, USER_ROLES_REF].freeze
+      FORBIDDEN = [ CAPABILITIES_REF, USER_ROLES_REF ].freeze
 
       test "no references to gem role or capability modules remain in app lib config or test" do
         hits = []

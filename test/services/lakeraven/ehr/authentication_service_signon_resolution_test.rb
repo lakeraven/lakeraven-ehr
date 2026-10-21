@@ -9,7 +9,7 @@ module Lakeraven
       include HostRoleExpectations
 
       AUTH_USER_TYPES = (
-        AUTH_USER_TYPES_FOR_MATRIX + ["synthetic_unknown_auth_role"]
+        AUTH_USER_TYPES_FOR_MATRIX + [ "synthetic_unknown_auth_role" ]
       ).freeze
 
       test "resolve_signon user_type matches pinned auth role and security key matrix" do

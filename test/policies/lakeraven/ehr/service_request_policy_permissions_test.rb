@@ -57,9 +57,9 @@ module Lakeraven
       CHS_KEY_EXPECTATIONS.each do |label, expectations|
         test "clerk with #{label} CHS keys matches pinned approve/deny gate" do
           keys = case label
-                 when :string_prc_manager then ["prc_manager"]
-                 else [label]
-                 end
+          when :string_prc_manager then [ "prc_manager" ]
+          else [ label ]
+          end
           policy = ServiceRequestPolicy.new(build_user("clerk", keys), nil)
 
           expectations.each do |method, expected|

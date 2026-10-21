@@ -38,16 +38,16 @@ module HostRoleExpectations
   KEY_SETS_FOR_MATRIX = [
     [],
     nil,
-    [:prc_supervisor],
-    [:prc_manager],
-    [:prc_tech],
-    [:consult_manager],
-    [:eligibility_verify],
-    [:scheduling_admin],
-    [:bh_provider],
-    [:dental_supervisor],
-    ["prc_manager"],
-    [:unknown_key]
+    [ :prc_supervisor ],
+    [ :prc_manager ],
+    [ :prc_tech ],
+    [ :consult_manager ],
+    [ :eligibility_verify ],
+    [ :scheduling_admin ],
+    [ :bh_provider ],
+    [ :dental_supervisor ],
+    [ "prc_manager" ],
+    [ :unknown_key ]
   ].freeze
 
   AUTH_USER_TYPES_FOR_MATRIX = %w[admin provider nurse clerk].freeze
