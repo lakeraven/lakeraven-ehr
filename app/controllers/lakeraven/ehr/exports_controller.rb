@@ -14,6 +14,9 @@ module Lakeraven
       compartment_bound :create, param: :patient_dfn
       before_action :authorize_export_owner!, only: %i[show destroy]
 
+      # Shown on the status OperationOutcome. The exception text stays in the log.
+      EXPORT_FAILURE_DIAGNOSTIC = "Export failed"
+
       # POST /exports
       #
       # A bulk export is a WRITE (it creates a job and materialises a record
@@ -26,6 +29,15 @@ module Lakeraven
       # block when the two branches merge.
       before_action :authorize_fhir_write_scope!, only: :create
       def create
+        return render_since_unsupported if since_requested?
+
+        # One list for the 400 check and the export. Normalizing again
+        # inside BulkExport.normalize_types dropped a stripped name such
+        # as " Patient" after this check had already accepted it.
+        type_names = BulkExport.type_names(requested_type_param)
+        unsupported = unsupported_type_names(type_names)
+        return render_unsupported_types(unsupported) if unsupported.any?
+
         export = BulkExport.new(
           id: SecureRandom.uuid,
           export_type: params[:export_type] || "patient",
@@ -33,11 +45,10 @@ module Lakeraven
           request_url: request.original_url,
           output_format: "application/fhir+ndjson",
           client_id: export_owner_identity,
-          since_timestamp: params[:since],
-          type_filters: params[:type]
+          type_filters: requested_type_param
         )
         export.set_defaults!
-        export.requested_types = BulkExport.normalize_types(params[:type])
+        export.requested_types = type_names.nil? ? BulkExport.normalize_types(nil) : type_names
 
         self.class.store[export.id] = export
         run_export(export)
@@ -80,25 +91,79 @@ module Lakeraven
 
       def run_export(export)
         export.start_processing!
-        service = EhiExportService.new(patient_dfn: params[:patient_dfn] || "1")
-        result = service.export(
-          resource_types: export.requested_types,
-          since: export.since_timestamp
+        service = EhiExportService.new(
+          patient_dfn: params[:patient_dfn].presence || "1",
+          resource_types: export.requested_types
         )
-
-        files = (result[:files] || []).map do |file|
-          {
-            "type" => file[:resource_type] || file[:type],
-            "url" => export_file_url(export_id: export.id, file_name: file[:file_name]),
-            "count" => file[:count] || 0,
-            "file_name" => file[:file_name],
-            "content" => file[:content]
-          }
+        result = service.export
+        if result[:success]
+          export.complete!(export_output_files(export, result[:files] || []))
+        else
+          # The diagnostic shown to the caller stays generic. The real
+          # reason (unknown patient, a fetch that raised) stays in the log.
+          Rails.logger.error("[export] #{Array(result[:errors]).join("; ")}")
+          export.fail!(EXPORT_FAILURE_DIAGNOSTIC)
         end
-
-        export.complete!(files)
       rescue => e
-        export.fail!(e.message)
+        Rails.logger.error("[export] #{e.full_message}")
+        export.fail!(EXPORT_FAILURE_DIAGNOSTIC)
+      end
+
+      # FHIR Bulk Data names these `_since` and `_type`. This route has
+      # always read the unprefixed params; accept either spelling.
+      def since_requested?
+        params[:since].present? || params[:_since].present?
+      end
+
+      def requested_type_param
+        params[:_type].presence || params[:type]
+      end
+
+      def render_since_unsupported
+        render_operation_outcome(
+          status: :bad_request,
+          severity: "error",
+          code: "not-supported",
+          diagnostics: "The _since parameter is not supported"
+        )
+      end
+
+      # EhiExportService writes a fixed set of FHIR files. A _type (or the
+      # legacy type param) that names anything outside that set used to
+      # complete with the type silently dropped. Refuse at kickoff instead.
+      # `names` is BulkExport.type_names — nil when the caller sent no filter.
+      def unsupported_type_names(names)
+        Array(names).reject { |name| EhiExportService::FHIR_RESOURCE_TYPES.include?(name) }
+      end
+
+      def render_unsupported_types(names)
+        render_operation_outcome(
+          status: :bad_request,
+          severity: "error",
+          code: "not-supported",
+          diagnostics: "unsupported resource types: #{names.join(', ')}"
+        )
+      end
+
+      # EhiExportService emits :name and :type. The download route stores
+      # the name as file_name. `type` stays the Bulk Data manifest type
+      # (the FHIR resource name when the service set one). `file_type` is
+      # the service type the egress check branches on: fhir_ndjson,
+      # audit_csv, configuration, or manifest.
+      def export_output_files(export, files)
+        files.map { |file| export_output_file(export, file) }
+      end
+
+      def export_output_file(export, file)
+        name = file[:name]
+        {
+          "type" => file[:resource_type] || file[:type],
+          "file_type" => file[:type],
+          "url" => export_file_url(export_id: export.id, file_name: name),
+          "count" => file[:count] || 0,
+          "file_name" => name,
+          "content" => file[:content]
+        }
       end
     end
   end

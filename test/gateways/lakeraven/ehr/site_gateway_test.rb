@@ -77,7 +77,7 @@ module Lakeraven
 
       test "default_provider returns RpmsRpc::Site when it ships" do
         skip "Requires RpmsRpc::Site (lakeraven/rpms-rpc#100)" unless
-          defined?(::RpmsRpc::Site) && ::RpmsRpc::Site.respond_to?(:list)
+          SiteGateway.default_provider.respond_to?(:list)
         assert_equal ::RpmsRpc::Site, SiteGateway.default_provider
       end
 

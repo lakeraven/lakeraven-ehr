@@ -7,7 +7,7 @@
 %>
 <%
   vital_labels = Lakeraven::EHR::Observation::VITAL_TYPE_MAP
-  patient_age = @patient.age || (@patient.dob ? ((Date.current - @patient.dob).to_i / 365) : nil)
+  patient_age = @patient.age_on(Date.current)
   sex_label = { "F" => "Female", "M" => "Male", "U" => "Unknown" }[@patient.sex] || @patient.sex
   fhir_url = url_for(dfn: @patient.dfn, format: "json", only_path: true)
 %>
@@ -97,7 +97,7 @@
     .badge{display:inline-block;border-radius:999px;padding:2px 9px;font-size:11px;font-weight:700;
       text-transform:capitalize}
     .badge.active{background:var(--ok-bg);color:var(--ok)}
-    .badge.inactive{background:#f1f5f9;color:var(--muted)}
+    .badge.inactive,.badge.unknown{background:#f1f5f9;color:var(--muted)}
     .badge.sev-severe{background:var(--danger-bg);color:var(--danger)}
     .badge.sev-moderate{background:var(--warn-bg);color:var(--warn)}
     .badge.sev-mild{background:#eff6ff;color:#1d4ed8}
@@ -174,7 +174,7 @@
                   <tr>
                     <td><%= c.display %></td>
                     <td class="mono"><%= c.code %></td>
-                    <td><span class="badge <%= c.clinical_status %>"><%= c.clinical_status %></span></td>
+                    <td><span class="badge <%= c.clinical_status.presence || "unknown" %>"><%= c.clinical_status.presence || "Unknown" %></span></td>
                   </tr>
                 <% end %>
               </tbody>
@@ -197,7 +197,9 @@
                   <tr>
                     <td><%= m.medication_display %></td>
                     <td><%= m.dosage_instruction %></td>
-                    <td><span class="badge <%= m.status == "active" ? "active" : "inactive" %>"><%= m.status %></span></td>
+                    <% med_status = m.status.presence || "unknown" %>
+                    <% med_badge = med_status == "active" ? "active" : (med_status == "unknown" ? "unknown" : "inactive") %>
+                    <td><span class="badge <%= med_badge %>"><%= med_status == "unknown" ? "Unknown" : med_status %></span></td>
                   </tr>
                 <% end %>
               </tbody>
