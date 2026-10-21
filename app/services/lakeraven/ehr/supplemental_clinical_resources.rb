@@ -321,8 +321,15 @@ module Lakeraven
         # Two rows sharing an ien are the same allergy only when their
         # normalised names (to_s, strip, downcase, squish) are both
         # non-blank and equal and, when both rows carry a valid code, the
-        # codes are equal. Each allergen_code is normalised first: NFKC
-        # (compatibility digits, including full-width, become ASCII), then
+        # codes are equal. A name whose bytes are not valid UTF-8 is not
+        # normalised: the check is a duplicate forced to UTF-8, so a binary
+        # string that is not valid UTF-8 fails it too. That identity is
+        # non-comparable. It matches no row, including the same bytes, so
+        # it counts as dropped, and it does not raise. An ASCII-8BIT wire
+        # string whose bytes are valid UTF-8 is still normalised in that
+        # encoding, so its match does not change. Each allergen_code is
+        # normalised first: NFKC (compatibility digits, including
+        # full-width, become ASCII), then
         # leading and trailing Unicode space is removed with [[:space:]]
         # and \p{Space} (NBSP included), then an integral decimal (ASCII
         # digits, a dot, and zeros) becomes those integer digits. Blank,
@@ -330,18 +337,18 @@ module Lakeraven
         # code. A valid code is ASCII digits with leading zeros removed.
         # Any other code is malformed: that row is a different allergy
         # whatever the other row holds. Differing spellings, a blank name,
-        # a code-only row, different valid codes, or a row that does not
-        # respond to allergen and allergen_code also count as dropped. The
-        # same allergy stated twice is not a hole.
+        # an unreadable name, a code-only row, different valid codes, or a
+        # row that does not respond to allergen and allergen_code also
+        # count as dropped. The same allergy stated twice is not a hole.
         #
         # Per ien only the distinct identities are kept, each
         # [normalised_name, valid_code_or_nil]. A repeat whose identity was
         # already seen is the same allergy and costs a constant-time
         # lookup. That shortcut applies only to a comparable identity: a
-        # non-blank name and a code that is not malformed. A malformed
-        # code is never that identity, so the shortcut cannot treat it as
-        # already seen. A new identity is compared only against the
-        # distinct ones kept for that ien.
+        # non-blank readable name and a code that is not malformed. A
+        # malformed code or an unreadable name is never that identity, so
+        # the shortcut cannot treat it as already seen. A new identity is
+        # compared only against the distinct ones kept for that ien.
         def merge_allergies(wire, supplemental)
           [ merge(wire, supplemental), differing_allergy_drops(wire, supplemental) ]
         end
@@ -368,10 +375,11 @@ module Lakeraven
           differed ? 1 : 0
         end
 
-        # Blank names, malformed codes, and rows that cannot state an
-        # allergen identity are never the same allergy, including a repeat
-        # of that same text. The shortcut matches only a comparable identity
-        # already kept for the ien, so a malformed code cannot hit it.
+        # Blank names, unreadable names, malformed codes, and rows that
+        # cannot state an allergen identity are never the same allergy,
+        # including a repeat of that same text. The shortcut matches only a
+        # comparable identity already kept for the ien, so a malformed code
+        # or an unreadable name cannot hit it.
         def seen_same_allergy?(identities, identity)
           comparable_allergen_identity?(identity) && identities.include?(identity)
         end
@@ -402,7 +410,8 @@ module Lakeraven
 
         # prior and candidate are [normalised_name, valid_code_or_nil], or
         # a non-array when the row cannot be compared: it does not respond
-        # to allergen and allergen_code, or its code is malformed. A
+        # to allergen and allergen_code, or its code is malformed. A blank
+        # or unreadable name is an array and is still not comparable. A
         # non-comparable row differs from every row, including itself.
         def differing_allergy?(prior, candidate)
           return true unless comparable_allergen_identity?(prior) && comparable_allergen_identity?(candidate)
@@ -464,8 +473,20 @@ module Lakeraven
           text.empty? || text.match?(/\Aunk\z/i) || text.match?(/\A0+\z/)
         end
 
+        # to_s, strip, downcase, squish. Nil when the bytes are not valid
+        # UTF-8: that name cannot be read, so the identity is non-comparable,
+        # the same way a blank name is. The check is a duplicate forced to
+        # UTF-8, which also rejects a binary string that is not valid UTF-8.
+        # The original string is what gets normalised, so an ASCII-8BIT wire
+        # string of valid UTF-8 bytes keeps its encoding and its match.
         def normalized_allergen_name(resource)
-          resource.allergen.to_s.strip.downcase.squish
+          text = resource.allergen.to_s
+          utf8 = text.dup.force_encoding(Encoding::UTF_8)
+          return unless utf8.valid_encoding?
+
+          text.strip.downcase.squish
+        rescue ArgumentError, EncodingError
+          nil
         end
       end
     end
