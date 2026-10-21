@@ -18,7 +18,9 @@ module Lakeraven
     # patient's.
     class SupplementalClinicalResources
       WireAllergyBatch = Struct.new(:records, :dropped_count, :assessed, :nka, keyword_init: true)
-      private_constant :WireAllergyBatch
+      # Not a placeholder and not ASCII digits. Never an identity that can match.
+      MALFORMED_ALLERGEN_CODE = :malformed
+      private_constant :WireAllergyBatch, :MALFORMED_ALLERGEN_CODE
 
       class << self
         def merged_observations_for_patient(dfn)
@@ -319,20 +321,27 @@ module Lakeraven
         # Two rows sharing an ien are the same allergy only when their
         # normalised names (to_s, strip, downcase, squish) are both
         # non-blank and equal and, when both rows carry a valid code, the
-        # codes are equal. A valid code is all digits after strip and not
-        # all zeros; codes compare with leading zeros removed. Non-numeric,
-        # placeholder (UNK and the like), and all-zero codes are ignored,
-        # as if absent. Anything else counts the repeat as dropped:
-        # different names, a blank name on either row, different valid
-        # codes, or a row that does not respond to allergen or
-        # allergen_code. The same allergy stated twice is not a hole.
+        # codes are equal. Each allergen_code is normalised first: NFKC
+        # (compatibility digits, including full-width, become ASCII), then
+        # leading and trailing Unicode space is removed with [[:space:]]
+        # and \p{Space} (NBSP included), then an integral decimal (ASCII
+        # digits, a dot, and zeros) becomes those integer digits. Blank,
+        # UNK in any case, and all zeros are placeholders and count as no
+        # code. A valid code is ASCII digits with leading zeros removed.
+        # Any other code is malformed: that row is a different allergy
+        # whatever the other row holds. Differing spellings, a blank name,
+        # a code-only row, different valid codes, or a row that does not
+        # respond to allergen and allergen_code also count as dropped. The
+        # same allergy stated twice is not a hole.
         #
         # Per ien only the distinct identities are kept, each
         # [normalised_name, valid_code_or_nil]. A repeat whose identity was
         # already seen is the same allergy and costs a constant-time
-        # lookup; that shortcut is valid when the normalised name is
-        # non-blank. A new identity is compared only against those
-        # distinct ones.
+        # lookup. That shortcut applies only to a comparable identity: a
+        # non-blank name and a code that is not malformed. A malformed
+        # code is never that identity, so the shortcut cannot treat it as
+        # already seen. A new identity is compared only against the
+        # distinct ones kept for that ien.
         def merge_allergies(wire, supplemental)
           [ merge(wire, supplemental), differing_allergy_drops(wire, supplemental) ]
         end
@@ -359,26 +368,49 @@ module Lakeraven
           differed ? 1 : 0
         end
 
-        # Blank names, and rows that cannot state an allergen identity, are
-        # never the same allergy, including a repeat of that same identity.
+        # Blank names, malformed codes, and rows that cannot state an
+        # allergen identity are never the same allergy, including a repeat
+        # of that same text. The shortcut matches only a comparable identity
+        # already kept for the ien, so a malformed code cannot hit it.
         def seen_same_allergy?(identities, identity)
-          identity.is_a?(Array) && identity.first.present? && identities.include?(identity)
+          comparable_allergen_identity?(identity) && identities.include?(identity)
+        end
+
+        def comparable_allergen_identity?(identity)
+          identity.is_a?(Array) && identity.first.present? && !malformed_allergen_identity?(identity)
+        end
+
+        # The symbol itself, or a pair whose code slot is that symbol.
+        # Either shape must miss the per-ien shortcut.
+        def malformed_allergen_identity?(identity)
+          malformed_allergen_code?(identity) ||
+            (identity.is_a?(Array) && malformed_allergen_code?(identity[1]))
+        end
+
+        def malformed_allergen_code?(code)
+          code == MALFORMED_ALLERGEN_CODE
         end
 
         def allergen_identity(resource)
           return unless reads_allergen_identity?(resource)
 
-          [ normalized_allergen_name(resource), valid_allergen_code(resource) ]
+          code = classified_allergen_code(resource.allergen_code)
+          return code if malformed_allergen_code?(code)
+
+          [ normalized_allergen_name(resource), code ]
         end
 
         # prior and candidate are [normalised_name, valid_code_or_nil], or
-        # nil when that row does not respond to allergen and allergen_code.
+        # a non-array when the row cannot be compared: it does not respond
+        # to allergen and allergen_code, or its code is malformed. A
+        # non-comparable row differs from every row, including itself.
         def differing_allergy?(prior, candidate)
-          return true unless prior.is_a?(Array) && candidate.is_a?(Array)
+          return true unless comparable_allergen_identity?(prior) && comparable_allergen_identity?(candidate)
 
           prior_name, prior_code = prior
           candidate_name, candidate_code = candidate
           return true if prior_name.blank? || candidate_name.blank? || prior_name != candidate_name
+          return true if malformed_allergen_code?(prior_code) || malformed_allergen_code?(candidate_code)
 
           prior_code.present? && candidate_code.present? && prior_code != candidate_code
         end
@@ -391,10 +423,45 @@ module Lakeraven
           resource.respond_to?(:allergen) && resource.respond_to?(:allergen_code)
         end
 
-        # Digits only, and not all zeros. Leading zeros are not part of the code.
-        def valid_allergen_code(resource)
-          canonical = resource.allergen_code.to_s.strip.sub(/\A0+/, "")
-          canonical if canonical.match?(/\A\d+\z/)
+        # Placeholder (nil), canonical ASCII digits, or MALFORMED_ALLERGEN_CODE.
+        # Nil counts as no code. Malformed matches nothing.
+        def classified_allergen_code(raw)
+          text = normalized_allergen_code_text(raw)
+          return MALFORMED_ALLERGEN_CODE if text.nil?
+          return if placeholder_allergen_code?(text)
+          return MALFORMED_ALLERGEN_CODE unless text.match?(/\A[0-9]+\z/)
+
+          text.sub(/\A0+/, "")
+        end
+
+        # NFKC, then trim Unicode spaces, then an integral decimal (digits,
+        # ".", zeros) becomes those integer digits. Nil when the bytes are
+        # not valid UTF-8: that code cannot be read, so it is malformed.
+        def normalized_allergen_code_text(raw)
+          text = nfkc_allergen_code(raw.to_s)
+          return if text.nil?
+
+          strip_unicode_space(text).sub(/\A([0-9]+)\.0+\z/, '\1')
+        end
+
+        def nfkc_allergen_code(text)
+          utf8 = text.dup.force_encoding(Encoding::UTF_8)
+          return unless utf8.valid_encoding?
+
+          utf8.unicode_normalize(:nfkc)
+        rescue ArgumentError, EncodingError
+          nil
+        end
+
+        # [[:space:]] and \p{Space} are one set here, and both include NBSP
+        # plus the separators String#strip leaves in place.
+        def strip_unicode_space(text)
+          text.gsub(/\A[[:space:]\p{Space}]+|[[:space:]\p{Space}]+\z/, "")
+        end
+
+        # Blank, UNK in any case, or all ASCII zeros. Not a code.
+        def placeholder_allergen_code?(text)
+          text.empty? || text.match?(/\Aunk\z/i) || text.match?(/\A0+\z/)
         end
 
         def normalized_allergen_name(resource)
