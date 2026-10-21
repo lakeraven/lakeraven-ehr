@@ -261,14 +261,20 @@ unset RPMS_RPC_PATH
 #    matches /PUMA_INHERIT_\d+/ anywhere (Puma 8.0.2 binder.rb), not only as a
 #    leading prefix. PUMA_INHERIT_0=9:tcp://localhost:$PORT — or the same value
 #    in X_PUMA_INHERIT_0 — would serve on whatever fd that value names instead
-#    of the port just probed. Unset every name containing PUMA_INHERIT_
-#    followed by a digit (*PUMA_INHERIT_[0-9]*). A value may contain newlines,
-#    so a later physical line of `env` can look like an assignment; only a
-#    [A-Za-z0-9_] name the shell actually has set (${name+x}) is unset, and
-#    only a name that starts with a letter or underscore is interpolated into
-#    eval. The unset runs in this shell — a pipeline would be a subshell and
-#    the variables would survive into exec. If env still shows such a name
-#    (for example one the shell cannot unset), refuse to exec.
+#    of the port just probed. Unset every valid identifier containing
+#    PUMA_INHERIT_ followed by a digit (*PUMA_INHERIT_[0-9]*). A value may
+#    contain newlines, so a later physical line of `env` can look like an
+#    assignment; only a [A-Za-z_][A-Za-z0-9_]* name the shell actually has set
+#    (${name+x}) is unset, and only such a name is interpolated into eval.
+#    A name that is not a valid identifier cannot be unset; bash keeps it in
+#    the environment passed to exec, so Puma would inherit that fd. The unset
+#    runs in this shell — a pipeline would be a subshell and the variables
+#    would survive into exec. After the unset, refuse to exec when a valid
+#    identifier is still set (${name+x}), or when any `env` line has a name
+#    (the text before the first "=") that contains PUMA_INHERIT_ followed by
+#    a digit and is not a valid identifier. Detect that name by text only;
+#    never eval it. A multi-line value that fakes such a line is refused too
+#    (fail closed).
 _puma_inherit_names=$(
   env | while IFS= read -r _puma_inherit_line || [ -n "$_puma_inherit_line" ]; do
     case "$_puma_inherit_line" in
@@ -306,12 +312,17 @@ _puma_inherit_left=$(
       *PUMA_INHERIT_[0-9]*=*)
         _puma_inherit_name=${_puma_inherit_line%%=*}
         case "$_puma_inherit_name" in
-          *[!A-Za-z0-9_]*)
-            ;;
-          [!A-Za-z_]*)
-            ;;
           *PUMA_INHERIT_[0-9]*)
-            eval "case \${$_puma_inherit_name+x} in x) printf '%s\n' '$_puma_inherit_name' ;; esac"
+            case "$_puma_inherit_name" in
+              *[!A-Za-z0-9_]*|[!A-Za-z_]*)
+                # Not a valid identifier, so the shell cannot unset it.
+                # Detect by text only; never interpolate into eval.
+                printf '%s\n' "$_puma_inherit_name"
+                ;;
+              *)
+                eval "case \${$_puma_inherit_name+x} in x) printf '%s\n' '$_puma_inherit_name' ;; esac"
+                ;;
+            esac
             ;;
         esac
         ;;
