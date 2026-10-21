@@ -305,6 +305,54 @@ module Lakeraven
         assert_equal 0, reading.dropped_count,
                      "duplicate Penicillin rows with UNK placeholder are one allergy"
       end
+
+      # Issue 466 option (b): normalise code forms before valid/placeholder/differing
+      # decisions (ASCII digits, Unicode whitespace, integral *.0 decimals).
+      CODE_PAIR_EXPECT_ONE_DROP = [
+        [ "1234", "5678.0" ],
+        [ "111", "２２２" ],
+        [ "123", "\u00a0456" ],
+        [ "1234", "ABC" ],
+        [ "1234", "12-34" ],
+        [ "1234", "5678.5" ]
+      ].freeze
+
+      CODE_PAIR_EXPECT_NO_DROP = [
+        [ "1234", "UNK" ],
+        [ "1234", "unk " ],
+        [ "1234", "0" ],
+        [ "1234", "000" ],
+        [ "7980", "7980.0" ],
+        [ "7980", "０７９８０" ],
+        [ "7980", " \u00a07980\u00a0" ],
+        [ "7980", "07980" ]
+      ].freeze
+
+      def assert_allergy_code_pair_dropped_count(expected_drops, code_a, code_b, pair_label)
+        row_a = wire_allergy(ien: "5", allergen: "Penicillin", allergen_code: code_a)
+        row_b = wire_allergy(ien: "5", allergen: "Penicillin", allergen_code: code_b)
+
+        [
+          allergy_reading_for_patient(DFN, [ row_b ], wire_rows: [ row_a ]),
+          allergy_reading_for_patient(DFN, [ row_a ], wire_rows: [ row_b ])
+        ].each do |reading|
+          assert_equal expected_drops, reading.dropped_count, pair_label
+        end
+      end
+
+      test "option (b) code normalisation pairs that must count as different allergy on one ien" do
+        CODE_PAIR_EXPECT_ONE_DROP.each do |code_a, code_b|
+          pair_label = %(expected dropped_count 1 for #{code_a.inspect} vs #{code_b.inspect})
+          assert_allergy_code_pair_dropped_count(1, code_a, code_b, pair_label)
+        end
+      end
+
+      test "option (b) code normalisation pairs that remain the same allergy on one ien" do
+        CODE_PAIR_EXPECT_NO_DROP.each do |code_a, code_b|
+          pair_label = %(expected dropped_count 0 for #{code_a.inspect} vs #{code_b.inspect})
+          assert_allergy_code_pair_dropped_count(0, code_a, code_b, pair_label)
+        end
+      end
     end
   end
 end
