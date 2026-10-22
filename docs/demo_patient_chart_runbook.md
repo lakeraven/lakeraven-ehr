@@ -11,6 +11,8 @@ Preferred — runs the preflight checks automatically (`PORT` selects the listen
 
 The smoke-test and walkthrough URLs below use port 3000 by default; substitute your PORT if you set one.
 
+On a busy port, `test/dummy/bin/demo` exits 1. It names the holder (PID and command), or says the holder could not be identified and suggests `sudo lsof`. It suggests a PORT it has probed free, or says none was found.
+
 Equivalent manual start:
 
     cd test/dummy
@@ -38,7 +40,7 @@ process (a reused PID included). If that PID is not your dev server, remove
 
 ## Preflight (5 minutes before)
 
-`bin/demo` does all of this for you; if starting manually:
+`test/dummy/bin/demo` does all of this for you; if starting manually:
 
 1. **Port 3000 free?** A previous dummy server is the most likely failure.
    Find the holder (`lsof -nP -iTCP:3000 -sTCP:LISTEN`) and either
@@ -56,7 +58,7 @@ process (a reused PID included). If that PID is not your dev server, remove
    bundler rejects the lockfile) and make sure no stray `RAILS_ENV` is exported —
    both demo flags are honored **only in development**.
 4. **Remote screen?** Puma binds localhost. Showing from another device on the
-   network needs `bin/demo -b 0.0.0.0`. A local browser needs nothing.
+   network needs `test/dummy/bin/demo -b 0.0.0.0`. A local browser needs nothing.
 5. **Smoke test:** open http://localhost:3000/patients/1 (expect Alice Anderson) and
    http://localhost:3000/patients/1.json (expect a FHIR Bundle).
 
