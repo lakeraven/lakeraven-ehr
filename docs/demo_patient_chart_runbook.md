@@ -21,6 +21,17 @@ Equivalent manual start:
 
 **URL:** http://localhost:3000/patients/1
 
+## Threat model
+
+Whoever controls the environment that runs `test/dummy/bin/demo` is trusted.
+The guards (PORT validation, `-p`/`--port` and `--no-port` forms, `-b`/`BINDING`,
+`-u` puma only, the `PUMA_INHERIT` scan, unsetting `RACK_HANDLER` and
+`RACKUP_HANDLER`, and `unset -f` of shadowing functions) protect against
+mistakes and stray inherited state, not against a hostile environment. Under
+bash, an exported function (`BASH_FUNC_<name>%%`) can override any command,
+including `exit`, `unset`, and `[`, so a deny-list cannot defend against that
+party. The script never kills or signals another process.
+
 ## Preflight (5 minutes before)
 
 `bin/demo` does all of this for you; if starting manually:
