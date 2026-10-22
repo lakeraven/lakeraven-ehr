@@ -10,7 +10,10 @@
 # Set PORT to choose the listen port. A single-dash argument whose option
 # letters include a lowercase p, and --port including prefix forms, are
 # refused so they cannot override that check. Those prefix forms are refused
-# defensively; Thor 1.5 rejects them anyway. A -b/--binding value containing
+# defensively; Thor 1.5 rejects them anyway. A bare -- anywhere in the
+# arguments is refused before any other parsing. Thor treats that separator
+# as the next argument being the option value, so it could set a binding or
+# handler this script never checked. A -b/--binding value containing
 # "://" or a host starting with "/", ".", or "@" is refused too; set the host
 # with a plain -b HOST. BINDING is refused the same way; set a plain host
 # (the port comes from PORT). -u/--using must be exactly puma: -u VALUE,
@@ -28,8 +31,10 @@
 # including exit, unset, and [, so a deny-list cannot defend against whoever
 # controls the environment. That party is trusted. The script never kills or
 # signals another process, and it never removes tmp/pids/server.pid. Rackup
-# check_pid! removes a stale pidfile and refuses to start when the pidfile
-# names a live server.
+# check_pid! removes a stale pidfile and refuses to start whenever the PID
+# in tmp/pids/server.pid is a running process (a reused PID included). If
+# that PID is not your dev server, remove test/dummy/tmp/pids/server.pid
+# yourself.
 set -e
 # Bash imports BASH_FUNC_<name>%% as a shell function before this script runs.
 # A function named ruby, command, env, or lsof would replace the bind probe,
@@ -39,6 +44,17 @@ set -e
 # missing functions are not worth aborting for (harmless in dash).
 unset -f ruby command env lsof awk printf cd exec pg_isready 2>/dev/null || true
 cd "$(dirname "$0")/.."
+
+# Before any other parsing. A bare "--" is Thor's separator: the next argument
+# becomes the option value, so "-b -- /tmp/x.sock" or "--binding -- ssl://..."
+# could set a binding or handler this script never checked.
+for _arg in "$@"; do
+  if [ "$_arg" = "--" ]; then
+    printf '%s\n' "-- is refused because Thor treats the next argument as the option value (a separator), so it could set a binding or handler the script never checked." >&2
+    exit 1
+  fi
+done
+unset _arg
 
 # PORT selects the listen port and the URL printed below. Default is 3000.
 # All digits, 1..65535. Leading zeros are accepted and normalized (08 is not octal).
@@ -249,44 +265,15 @@ if ! pg_isready -q; then
   exit 1
 fi
 
-# Suggest PORT+1, or PORT-1 when PORT is already 65535, so the hint is not
-# the port that just failed.
-alternate_port() {
-  if [ "$PORT" -eq 65535 ]; then
-    printf '%s' "$((PORT - 1))"
-  else
-    printf '%s' "$((PORT + 1))"
-  fi
-}
-
-# 2. Name a holder with lsof when we can. Empty lsof output is not evidence
-#    the port is free: lsof may be missing, or the listener may be owned by
-#    another user (for example docker-proxy) and invisible to us. Never signal
-#    a holder. "Free" is decided only by a successful bind probe below.
-if command -v lsof >/dev/null 2>&1; then
-  listeners=$(lsof +c 0 -nP -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null || true)
-  holders=$(printf '%s\n' "$listeners" | awk '
-    NR == 1 && $1 == "COMMAND" { next }
-    $2 ~ /^[0-9][0-9]*$/ && !seen[$2] { seen[$2] = 1; print $2, $1 }
-  ' || true)
-  if [ -n "$holders" ]; then
-    printf 'Port %s is already in use:\n' "$PORT" >&2
-    printf '%s\n' "$holders" | awk '{ printf "PID %s command %s\n", $1, $2 }' >&2
-    printf 'choose another port, e.g. PORT=%s test/dummy/bin/demo\n' "$(alternate_port)" >&2
-    exit 1
-  fi
-fi
-
 # Positive evidence only: exit 0 when 0.0.0.0 and 127.0.0.1 bind, and ::1 binds
 # or is n/a (EADDRNOTAVAIL / EAFNOSUPPORT). Exit 10 when the port is busy.
 # Anything else is a probe failure and the shell fails closed. On macOS/BSD,
 # TCPServer sets SO_REUSEADDR, so 0.0.0.0 can bind while 127.0.0.1 is held.
-if ! command -v ruby >/dev/null 2>&1; then
-  printf 'Could not check whether port %s is free; the bind probe could not run: ruby was not found on PATH.\n' "$PORT" >&2
-  exit 1
-fi
-probe_rc=0
-probe_err=$(ruby -rsocket -e '
+# probe_rc and probe_err are left set. This returns 0 either way so set -e
+# does not abort on a busy port (ruby exits 10) or a probe error.
+bind_probe() {
+  probe_rc=0
+  probe_err=$(ruby -rsocket -e '
 port = Integer(ARGV[0])
 
 def bind_result(host, port)
@@ -327,12 +314,85 @@ exit 0 if result == "ok" || result == "na"
 
 warn "bind probe failed on ::1"
 exit 1
-' "$PORT" 2>&1) || probe_rc=$?
+' "$1" 2>&1) || probe_rc=$?
+}
+
+# First free port among up to 20 candidates, printed with no trailing newline.
+# Candidates run upward from PORT+1. When PORT+k would pass 65535, the rest
+# run downward from PORT-1 and stop at 1. Free means the same bind probe used
+# for PORT exits 0. A busy result or a probe failure is not free. Prints
+# nothing when none of the candidates is free. Never signals a process.
+free_alternate_port() {
+  _alt_n=0
+  _alt_cand=$((PORT + 1))
+  _alt_down=0
+  while [ "$_alt_n" -lt 20 ]; do
+    if [ "$_alt_down" -eq 0 ] && [ "$_alt_cand" -gt 65535 ]; then
+      _alt_down=1
+      _alt_cand=$((PORT - 1))
+    fi
+    if [ "$_alt_cand" -lt 1 ] || [ "$_alt_cand" -gt 65535 ]; then
+      break
+    fi
+    bind_probe "$_alt_cand"
+    if [ "$probe_rc" -eq 0 ]; then
+      printf '%s' "$_alt_cand"
+      return 0
+    fi
+    _alt_n=$((_alt_n + 1))
+    if [ "$_alt_down" -eq 0 ]; then
+      _alt_cand=$((_alt_cand + 1))
+    else
+      _alt_cand=$((_alt_cand - 1))
+    fi
+  done
+  return 0
+}
+
+# Suggest the first free candidate. When none is free, say so and do not
+# invent a PORT= value.
+print_alternate_port_hint() {
+  if ! command -v ruby >/dev/null 2>&1; then
+    printf 'no free port found near %s; choose another\n' "$PORT" >&2
+    return 0
+  fi
+  _alt=$(free_alternate_port)
+  if [ -n "$_alt" ]; then
+    printf 'choose another port, e.g. PORT=%s test/dummy/bin/demo\n' "$_alt" >&2
+  else
+    printf 'no free port found near %s; choose another\n' "$PORT" >&2
+  fi
+  unset _alt
+}
+
+# 2. Name a holder with lsof when we can. Empty lsof output is not evidence
+#    the port is free: lsof may be missing, or the listener may be owned by
+#    another user (for example docker-proxy) and invisible to us. Never signal
+#    a holder. "Free" is decided only by a successful bind probe.
+if command -v lsof >/dev/null 2>&1; then
+  listeners=$(lsof +c 0 -nP -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null || true)
+  holders=$(printf '%s\n' "$listeners" | awk '
+    NR == 1 && $1 == "COMMAND" { next }
+    $2 ~ /^[0-9][0-9]*$/ && !seen[$2] { seen[$2] = 1; print $2, $1 }
+  ' || true)
+  if [ -n "$holders" ]; then
+    printf 'Port %s is already in use:\n' "$PORT" >&2
+    printf '%s\n' "$holders" | awk '{ printf "PID %s command %s\n", $1, $2 }' >&2
+    print_alternate_port_hint
+    exit 1
+  fi
+fi
+
+if ! command -v ruby >/dev/null 2>&1; then
+  printf 'Could not check whether port %s is free; the bind probe could not run: ruby was not found on PATH.\n' "$PORT" >&2
+  exit 1
+fi
+bind_probe "$PORT"
 
 if [ "$probe_rc" -eq 10 ]; then
   printf 'Port %s is already in use, but the holder could not be identified (lsof is missing or cannot see it, e.g. owned by another user such as docker-proxy).\n' "$PORT" >&2
   printf 'Try: sudo lsof -nP -iTCP:%s -sTCP:LISTEN\n' "$PORT" >&2
-  printf 'choose another port, e.g. PORT=%s test/dummy/bin/demo\n' "$(alternate_port)" >&2
+  print_alternate_port_hint
   exit 1
 fi
 if [ "$probe_rc" -ne 0 ]; then
@@ -444,7 +504,7 @@ unset _puma_inherit_names _puma_inherit_name _puma_inherit_left
 # 5. Both flags are required, and both are honored ONLY in development:
 #    SPIKE_MOCK_RPC=1  seeds the in-memory RPMS mock (else 404/empty chart)
 #    CHART_DEMO_OPEN=1 dev-only auth bypass (else 401 without a token)
-echo "Starting demo server -> http://localhost:$PORT/patients/1"
+echo "Launching Rails on PORT $PORT; the chart will be at http://localhost:$PORT/patients/1 once it is up"
 # Real keys, not a line split of env text. Fail closed: a non-zero ruby
 # status (including ruby missing) refuses to start. Names only, never values.
 # The ruby function, if a parent bash exported one, was already unset.
