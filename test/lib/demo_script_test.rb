@@ -532,57 +532,27 @@ class DemoScriptTest < ActiveSupport::TestCase
     assert_equal port.to_s, recorded_port
   end
 
-  test "forwards plain host bindings without embedded port to rails" do
+  test "forwards allowlisted plain host bindings without embedded port to rails" do
     port = find_free_port
-    tree = build_demo_tree
-    env = demo_env(tree[:rails_log], "PORT" => port.to_s)
 
-    _stdout, _stderr, status = run_demo(tree[:demo_path], env, "-b", "127.0.0.1")
-    assert_predicate status, :success?, "expected success for -b 127.0.0.1"
+    [
+      [ [ "-b", "127.0.0.1" ], "127.0.0.1" ],
+      [ [ "-b=127.0.0.1" ], "127.0.0.1" ],
+      [ [ "--binding", "0.0.0.0" ], "0.0.0.0" ],
+      [ [ "--binding=::1" ], "::1" ]
+    ].each do |form, host|
+      tree = build_demo_tree
+      env = demo_env(tree[:rails_log], "PORT" => port.to_s)
 
-    argv, recorded_port = read_rails_invocation(tree[:rails_log])
-    assert_port_argv(argv, port)
-    assert_equal port.to_s, recorded_port
-    assert_includes argv, "-b"
-    assert_includes argv, "127.0.0.1"
+      _stdout, _stderr, status = run_demo(tree[:demo_path], env, *form)
+      form_desc = form.inspect
+      assert_predicate status, :success?, "expected success for #{form_desc}"
 
-    tree = build_demo_tree
-    env = demo_env(tree[:rails_log], "PORT" => port.to_s)
-
-    _stdout, _stderr, status = run_demo(tree[:demo_path], env, "--binding=0.0.0.0")
-    assert_predicate status, :success?, "expected success for --binding=0.0.0.0"
-
-    argv, recorded_port = read_rails_invocation(tree[:rails_log])
-    assert_port_argv(argv, port)
-    assert_equal port.to_s, recorded_port
-    assert(
-      (argv.index("-b") && argv[argv.index("-b") + 1] == "0.0.0.0") ||
-        argv.include?("--binding=0.0.0.0") ||
-        (argv.index("--binding") && argv[argv.index("--binding") + 1] == "0.0.0.0"),
-      "expected 0.0.0.0 binding in argv: #{argv.inspect}"
-    )
-
-    tree = build_demo_tree
-    env = demo_env(tree[:rails_log], "PORT" => port.to_s, "BINDING" => "localhost")
-
-    _stdout, _stderr, status = run_demo(tree[:demo_path], env)
-    assert_predicate status, :success?, "expected success for BINDING=localhost"
-
-    argv, recorded_port = read_rails_invocation(tree[:rails_log])
-    assert_port_argv(argv, port)
-    assert_equal port.to_s, recorded_port
-
-    tree = build_demo_tree
-    env = demo_env(tree[:rails_log], "PORT" => port.to_s)
-
-    _stdout, _stderr, status = run_demo(tree[:demo_path], env, "-b", "::1")
-    assert_predicate status, :success?, "expected success for -b ::1"
-
-    argv, recorded_port = read_rails_invocation(tree[:rails_log])
-    assert_port_argv(argv, port)
-    assert_equal port.to_s, recorded_port
-    assert_includes argv, "-b"
-    assert_includes argv, "::1"
+      argv, recorded_port = read_rails_invocation(tree[:rails_log])
+      assert_port_argv(argv, port)
+      assert_equal port.to_s, recorded_port
+      assert_binding_host_in_argv!(argv, host, form_desc)
+    end
   end
 
   test "rejects unix socket style BINDING without starting rails" do
@@ -930,7 +900,7 @@ class DemoScriptTest < ActiveSupport::TestCase
     end
   end
 
-  test "under bash forwards puma handler CLI overrides to rails" do
+  test "under bash refuses puma handler CLI overrides without starting rails" do
     skip "bash not on PATH; required for handler CLI contract" unless shell_available?("bash")
 
     port = find_free_port
@@ -939,15 +909,14 @@ class DemoScriptTest < ActiveSupport::TestCase
       tree = build_demo_tree
       env = demo_env(tree[:rails_log], "PORT" => port.to_s)
 
-      _stdout, _stderr, status = run_demo_with_shell("bash", tree[:demo_path], env, *form)
+      _stdout, stderr, status = run_demo_with_shell("bash", tree[:demo_path], env, *form)
       form_desc = form.inspect
 
-      assert_predicate status, :success?, "expected success for handler override #{form_desc}"
-
-      argv, recorded_port = read_rails_invocation(tree[:rails_log])
-      assert_port_argv(argv, port)
-      assert_equal port.to_s, recorded_port
-      assert_handler_argv_includes_puma!(argv, form)
+      refute_predicate status, :success?,
+                       "expected failure for handler override #{form_desc}"
+      assert_stderr_lists_accepted_binding_forms(stderr, form_desc)
+      refute rails_invoked?(tree[:rails_log]),
+             "fake rails must not run for handler override #{form_desc}"
     end
   end
 
@@ -1007,26 +976,41 @@ class DemoScriptTest < ActiveSupport::TestCase
                  "X_PUMA_INHERIT_FOO must reach rails when it has no PUMA_INHERIT_<digit> segment"
   end
 
-  test "forwards other rails server args after -p from PORT" do
-    port = find_free_port
-    tree = build_demo_tree
-    env = demo_env(tree[:rails_log], "PORT" => port.to_s)
+  test "rejects non-allowlisted CLI arguments without starting rails or running bind probe" do
+    env_port = find_free_port
+    pid_path = File.join(Dir.mktmpdir("demo_script_pid_refusal_"), "x.pid")
 
-    _stdout, _stderr, status = run_demo(
-      tree[:demo_path], env,
-      "-b", "0.0.0.0",
-      "-P", "tmp/pids/other.pid"
-    )
+    refused_forms = [
+      [ "-e", "production" ],
+      [ "-e", "development" ],
+      [ "-P", pid_path ],
+      [ "--pid=#{pid_path}" ],
+      [ "-d" ],
+      [ "-C" ],
+      [ "-u", "puma" ],
+      [ "-b192.0.2.10" ],
+      [ "-b0.0.0.0" ],
+      [ "-b" ],
+      [ "-b", "-d" ],
+      [ "-b", "127.0.0.1", "-b", "127.0.0.2" ],
+      [ "foo" ]
+    ]
 
-    assert_predicate status, :success?
+    refused_forms.each do |form|
+      tree = build_demo_tree
+      env = demo_env(tree[:rails_log], "PORT" => env_port.to_s)
 
-    argv, recorded_port = read_rails_invocation(tree[:rails_log])
-    assert_port_argv(argv, port)
-    assert_equal port.to_s, recorded_port
-    assert_includes argv, "-b"
-    assert_includes argv, "0.0.0.0"
-    assert_includes argv, "-P"
-    assert_includes argv, "tmp/pids/other.pid"
+      _stdout, stderr, status = run_demo(tree[:demo_path], env, *form)
+      form_desc = form.inspect
+
+      refute_predicate status, :success?,
+                       "expected failure for non-allowlisted argv #{form_desc}"
+      assert_stderr_lists_accepted_binding_forms(stderr, form_desc)
+      refute rails_invoked?(tree[:rails_log]),
+             "fake rails must not run for non-allowlisted argv #{form_desc}"
+    end
+  ensure
+    FileUtils.remove_entry(File.dirname(pid_path)) if pid_path && Dir.exist?(File.dirname(pid_path))
   end
 
   test "demo script source does not invoke kill on non-comment lines" do
@@ -1319,6 +1303,23 @@ class DemoScriptTest < ActiveSupport::TestCase
     assert_match(/--/, stderr, "stderr should mention --#{context}")
     assert_match(/Thor|separator|next argument/i, stderr,
                  "stderr should name why -- is refused#{context}: #{stderr}")
+  end
+
+  def assert_stderr_lists_accepted_binding_forms(stderr, form_desc = nil)
+    context = form_desc ? " for #{form_desc}" : ""
+    assert_match(/-b\b/, stderr, "stderr should list -b HOST#{context}: #{stderr}")
+    assert_match(/-b=/, stderr, "stderr should list -b=HOST#{context}: #{stderr}")
+    assert_match(/--binding\b/, stderr, "stderr should list --binding HOST#{context}: #{stderr}")
+    assert_match(/--binding=/, stderr, "stderr should list --binding=HOST#{context}: #{stderr}")
+  end
+
+  def assert_binding_host_in_argv!(argv, host, form_desc = nil)
+    context = form_desc ? " (#{form_desc})" : ""
+    ok = (argv.index("-b") && argv[argv.index("-b") + 1] == host) ||
+         argv.include?("-b=#{host}") ||
+         (argv.index("--binding") && argv[argv.index("--binding") + 1] == host) ||
+         argv.include?("--binding=#{host}")
+    assert ok, "expected #{host} binding in argv#{context}: #{argv.inspect}"
   end
 
   def assert_suggested_alternate_port_not_busy(stderr, busy_port)
