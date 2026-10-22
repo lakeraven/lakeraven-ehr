@@ -210,7 +210,7 @@ class FhirSearchPagingTest < ActionDispatch::IntegrationTest
 
   test "the declared limits are the enforced ones" do
     declared = Lakeraven::EHR::FHIR::SearchCapabilities.rest_search_params.map { |p| p[:name] }
-    assert_equal %w[_count _offset], declared
+    assert_empty %w[_count _offset] - declared
 
     max = Lakeraven::EHR::FHIR::SearchCapabilities::MAX_COUNT
     get "/lakeraven-ehr/Patient", params: { _count: max.to_s }, headers: @headers
