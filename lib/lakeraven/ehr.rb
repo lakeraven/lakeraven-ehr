@@ -10,6 +10,10 @@ module Lakeraven
     class Configuration
       attr_accessor :tenant_resolver, :facility_resolver, :eligibility_adapter
 
+      # The backend the gateways talk to, by its BackendRegistry name.
+      # `rpms` is the only one registered today (#646).
+      attr_accessor :backend
+
       # Absolute URL of the OAuth token endpoint as published in
       # .well-known/smart-configuration. When set, it is the ONLY audience
       # accepted for backend-services client assertions — the expected aud is
@@ -51,6 +55,7 @@ module Lakeraven
           value.empty? ? nil : value
         }
         @eligibility_adapter = MockEligibilityAdapter.new
+        @backend = :rpms
       end
     end
 
