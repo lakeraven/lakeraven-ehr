@@ -54,6 +54,24 @@ class DemoScriptTest < ActiveSupport::TestCase
            "fake rails must not run when the port is already in use"
   end
 
+  test "suggests an alternate PORT different from the busy port when lsof names the holder" do
+    skip "lsof not on PATH; required for port-holder detection" unless lsof_available?
+
+    port = default_busy_port_for_suggestion_contract
+    holder_pid = ensure_port_holder(port)
+    @port_holder_pids << holder_pid if holder_pid
+    wait_for_port_listen(port, holder_pid) if holder_pid
+    skip "port #{port} must be busy for alternate-port suggestion contract" unless port_in_use?(port)
+
+    tree = build_demo_tree
+    env = demo_env(tree[:rails_log], "PORT" => port.to_s)
+
+    _stdout, stderr, status = run_demo(tree[:demo_path], env)
+
+    refute_predicate status, :success?, "expected failure when port #{port} is busy"
+    assert_suggested_alternate_port_not_busy(stderr, port)
+  end
+
   test "fails when lsof reports no listeners but the port is occupied" do
     port = find_free_port
     holder_pid = spawn_port_holder(port)
@@ -82,6 +100,57 @@ class DemoScriptTest < ActiveSupport::TestCase
                  "stderr should suggest sudo lsof to inspect the blind holder")
     refute rails_invoked?(tree[:rails_log]),
            "fake rails must not run when the port is already in use"
+  end
+
+  test "suggests an alternate PORT different from the busy port when lsof cannot see the holder" do
+    port = default_busy_port_for_suggestion_contract
+    holder_pid = ensure_port_holder(port)
+    @port_holder_pids << holder_pid if holder_pid
+    wait_for_port_listen(port, holder_pid) if holder_pid
+    skip "port #{port} must be busy for alternate-port suggestion contract" unless port_in_use?(port)
+
+    install_lsof_no_data_stub(@stub_bin)
+
+    tree = build_demo_tree
+    env = demo_env(tree[:rails_log], "PORT" => port.to_s)
+
+    _stdout, stderr, status = run_demo(tree[:demo_path], env)
+
+    refute_predicate status, :success?,
+                     "expected failure when port #{port} is held but lsof is blind"
+    assert_suggested_alternate_port_not_busy(stderr, port)
+  end
+
+  test "does not remove server.pid when PORT is free and pidfile references live server on another port" do
+    skip "lsof not on PATH; required for port-holder detection" unless lsof_available?
+
+    holder_port = find_free_port
+    request_port = find_free_port
+    refute_equal holder_port, request_port,
+                 "holder and request ports must differ for this scenario"
+
+    holder_pid = spawn_port_holder(holder_port)
+    @port_holder_pids << holder_pid
+    wait_for_port_listen(holder_port, holder_pid)
+
+    tree = build_demo_tree
+    pidfile = server_pidfile_path(tree)
+    File.write(pidfile, "#{holder_pid}\n")
+
+    env = demo_env(tree[:rails_log], "PORT" => request_port.to_s)
+
+    _stdout, _stderr, status = run_demo(tree[:demo_path], env)
+
+    assert_predicate status, :success?,
+                     "expected success when PORT=#{request_port} is free"
+    assert rails_invoked?(tree[:rails_log]),
+           "fake rails should run when the requested port is free"
+    assert_path_exists pidfile,
+                       "server.pid must remain when another server holds a different port"
+    assert_equal "#{holder_pid}\n", File.read(pidfile),
+                 "server.pid must still reference the live holder PID"
+    assert_process_still_running(holder_pid)
+    assert_port_held(holder_port)
   end
 
   test "fails closed when the bind probe cannot run" do
@@ -1038,6 +1107,32 @@ class DemoScriptTest < ActiveSupport::TestCase
     flunk "expected port #{port} to remain in use"
   rescue Errno::EADDRINUSE
     nil
+  end
+
+  # Demo's static example port when PORT is unset is 3000; the busy-port message
+  # currently hard-codes 3001 — that must not be reused when 3001 is the busy port.
+  DEFAULT_SUGGESTED_ALTERNATE_PORT = 3001
+
+  def default_busy_port_for_suggestion_contract
+    DEFAULT_SUGGESTED_ALTERNATE_PORT
+  end
+
+  def ensure_port_holder(port)
+    return spawn_port_holder(port) unless port_in_use?(port)
+
+    nil
+  end
+
+  def suggested_alternate_port(stderr)
+    match = stderr.match(/choose another port.*PORT=(\d+)/i)
+    match ? match[1].to_i : nil
+  end
+
+  def assert_suggested_alternate_port_not_busy(stderr, busy_port)
+    suggested = suggested_alternate_port(stderr)
+    assert suggested, "stderr should suggest an alternate PORT= number: #{stderr}"
+    refute_equal busy_port, suggested,
+                 "suggested PORT=#{suggested} must differ from busy port #{busy_port}"
   end
 
   def terminate_pid(pid)
