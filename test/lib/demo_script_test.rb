@@ -182,6 +182,36 @@ class DemoScriptTest < ActiveSupport::TestCase
     assert_port_held(holder_port)
   end
 
+  test "busy port stderr explains when alternate-port search cannot run without ruby on PATH" do
+    skip "lsof not on PATH; required for port-holder detection" unless lsof_available?
+
+    port = find_free_port
+    holder_pid = spawn_port_holder(port)
+    @port_holder_pids << holder_pid
+    wait_for_port_listen(port, holder_pid)
+
+    tree = build_demo_tree
+    env = demo_env(
+      tree[:rails_log],
+      "PORT" => port.to_s,
+      "PATH" => path_without_ruby
+    )
+
+    _stdout, stderr, status = run_demo(tree[:demo_path], env)
+
+    refute_predicate status, :success?,
+                     "expected failure when port #{port} is busy and ruby is not on PATH"
+    assert_includes stderr, port.to_s, "stderr should name the port"
+    assert_match(/alternate.port search could not run/i, stderr,
+                 "stderr should explain the alternate-port search could not run: #{stderr}")
+    assert_match(/ruby/i, stderr, "stderr should mention ruby: #{stderr}")
+    refute_match(/no free port found/i, stderr,
+                 "must not claim no free port when ruby was unavailable for the search")
+    assert_process_still_running(holder_pid)
+    refute rails_invoked?(tree[:rails_log]),
+           "fake rails must not run when the port is already in use"
+  end
+
   test "fails closed when the bind probe cannot run" do
     port = find_free_port
     install_ruby_probe_failure_stub(@stub_bin)
@@ -220,8 +250,7 @@ class DemoScriptTest < ActiveSupport::TestCase
 
   test "defaults to port 3000 when PORT is unset" do
     tree = build_demo_tree
-    env = demo_env(tree[:rails_log])
-    env.delete("PORT")
+    env = demo_env(tree[:rails_log], "PORT" => nil)
 
     stdout, stderr, status = run_demo(tree[:demo_path], env)
 
@@ -1061,8 +1090,23 @@ class DemoScriptTest < ActiveSupport::TestCase
       "PATH" => path,
       "DEMO_TEST_RAILS_LOG" => rails_log,
       "DEMO_TEST_PUMA_INHERIT_LOG" => puma_inherit_log,
-      "DEMO_TEST_PUMA_INHERIT_MATCH_LOG" => puma_inherit_match_log
+      "DEMO_TEST_PUMA_INHERIT_MATCH_LOG" => puma_inherit_match_log,
+      "PORT" => nil,
+      "BINDING" => nil,
+      "RACK_HANDLER" => nil,
+      "RACKUP_HANDLER" => nil
     }.merge(extra)
+  end
+
+  def path_without_ruby
+    segments = [ @stub_bin ]
+    ENV.fetch("PATH", "").split(":").each do |dir|
+      next if dir.empty?
+      next if File.executable?(File.join(dir, "ruby"))
+
+      segments << dir
+    end
+    segments.join(":")
   end
 
   def shell_available?(shell)
