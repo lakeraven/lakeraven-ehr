@@ -21,8 +21,20 @@ module Lakeraven
       # governs which ROWS come back, not merely which patient is named.
       compartment_bound :index, param: :patient
 
+      # Paged in the query, not in memory: the audit log only grows.
+      #
+      # Oldest first, so paging is stable. Every read of this endpoint writes
+      # an audit row of its own, so newest-first shifted every later page by
+      # one per request and a client walking the pages saw a row twice. In
+      # write order a new row lands after the last page and the pages already
+      # walked do not move. id breaks ties between rows written in the same
+      # instant.
       def index
-        render_bundle_egress(scoped_events.recent.limit(100).map(&:to_fhir))
+        events = scoped_events
+        page = events.order(:created_at, :id)
+                     .offset(fhir_paging[:offset]).limit(fhir_paging[:count])
+        entries = page.map { |event| { resource: event.to_fhir } }
+        render_fhir_egress(paged_search_bundle(entries, total: events.count))
       end
 
       def show

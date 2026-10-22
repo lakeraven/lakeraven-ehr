@@ -6,11 +6,15 @@ module Lakeraven
       include SmartAuthentication
       include AuditableClinicalAccess
       include FHIRReadEgress
+      include FHIRSearchBundle
 
       FHIR_CONTENT_TYPE = "application/fhir+json"
 
       before_action :authenticate_smart_token!
       before_action :authorize_fhir_scope!
+      # Every index here is a FHIR search. Paging is checked after the token, so
+      # an unauthenticated or out-of-scope caller learns nothing from a 400.
+      before_action :validate_fhir_paging!, if: :fhir_search?
 
       # Actions that DISCLOSE clinical data even though they are shaped as
       # writes — generating a C-CDA, running a bulk export, requesting an

@@ -10,12 +10,14 @@ module Lakeraven
       before_action :require_registration_scope!, only: :create
 
       def index
-        patients = resolve_patient_search
+        matches = resolve_patient_search
+        # Same as render_bundle / fhir_search_bundle: total is the length of
+        # the whole match set, not of this page. _revinclude rows are appended
+        # after the page and are not counted.
+        total = matches.length
+        patients = fhir_page(matches)
 
         entries = patients.map { |p| build_patient_entry(p) }
-        # Same as render_bundle / fhir_search_bundle: total is the length of
-        # the match set. _revinclude rows are appended after this count.
-        total = entries.length
 
         # _revinclude hands the caller resources of ANOTHER type, so it needs
         # that type's read scope like any other read. A `user/Patient.read`
@@ -29,10 +31,7 @@ module Lakeraven
           end
         end
 
-        render_fhir_egress({
-          resourceType: "Bundle", type: "searchset",
-          total: total, entry: entries
-        })
+        render_fhir_egress(paged_search_bundle(entries, total: total))
       end
 
       def show
