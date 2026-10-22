@@ -54,6 +54,35 @@ class DemoScriptTest < ActiveSupport::TestCase
            "fake rails must not run when the port is already in use"
   end
 
+  test "suggests a free alternate PORT when PORT and PORT+1 are both busy" do
+    skip "lsof not on PATH; required for port-holder detection" unless lsof_available?
+
+    port = find_free_port
+    while !port_free?(port + 1)
+      port = find_free_port
+    end
+
+    holder_pid = spawn_port_holder(port)
+    @port_holder_pids << holder_pid
+    wait_for_port_listen(port, holder_pid)
+
+    holder_pid_plus_one = spawn_port_holder(port + 1)
+    @port_holder_pids << holder_pid_plus_one
+    wait_for_port_listen(port + 1, holder_pid_plus_one)
+
+    tree = build_demo_tree
+    env = demo_env(tree[:rails_log], "PORT" => port.to_s)
+
+    _stdout, stderr, status = run_demo(tree[:demo_path], env)
+
+    refute_predicate status, :success?,
+                     "expected failure when ports #{port} and #{port + 1} are busy"
+    assert_suggested_alternate_port_not_busy(stderr, port)
+    suggested = suggested_alternate_port(stderr)
+    refute_equal port + 1, suggested,
+                 "suggested PORT=#{suggested} must not be busy PORT+1 (#{port + 1})"
+  end
+
   test "suggests an alternate PORT different from the busy port when lsof names the holder" do
     skip "lsof not on PATH; required for port-holder detection" unless lsof_available?
 
@@ -281,6 +310,34 @@ class DemoScriptTest < ActiveSupport::TestCase
       assert_match(/PORT/i, stderr, "stderr should mention PORT for #{form_desc}")
       refute rails_invoked?(tree[:rails_log]),
              "fake rails must not run for CLI override #{form_desc}"
+    end
+  end
+
+  test "rejects -- anywhere in CLI arguments without starting rails" do
+    env_port = find_free_port
+    bypass_port = find_free_port
+    ssl_binding = "ssl://127.0.0.1:#{bypass_port}?key=k&cert=c"
+
+    double_dash_forms = [
+      [ "-b", "--", "/tmp/demo.sock" ],
+      [ "--binding", "--", ssl_binding ],
+      [ "-db", "--", "unix:///tmp/x.sock" ],
+      [ "-u", "--", "puma" ],
+      [ "--" ]
+    ]
+
+    double_dash_forms.each do |form|
+      tree = build_demo_tree
+      env = demo_env(tree[:rails_log], "PORT" => env_port.to_s)
+
+      _stdout, stderr, status = run_demo(tree[:demo_path], env, *form)
+      form_desc = form.inspect
+
+      refute_predicate status, :success?,
+                       "expected failure when argv contains -- (#{form_desc})"
+      assert_stderr_refuses_double_dash(stderr, form_desc)
+      refute rails_invoked?(tree[:rails_log]),
+             "fake rails must not run when argv contains -- (#{form_desc})"
     end
   end
 
@@ -1109,12 +1166,8 @@ class DemoScriptTest < ActiveSupport::TestCase
     nil
   end
 
-  # Demo's static example port when PORT is unset is 3000; the busy-port message
-  # currently hard-codes 3001 — that must not be reused when 3001 is the busy port.
-  DEFAULT_SUGGESTED_ALTERNATE_PORT = 3001
-
   def default_busy_port_for_suggestion_contract
-    DEFAULT_SUGGESTED_ALTERNATE_PORT
+    find_free_port
   end
 
   def ensure_port_holder(port)
@@ -1128,11 +1181,20 @@ class DemoScriptTest < ActiveSupport::TestCase
     match ? match[1].to_i : nil
   end
 
+  def assert_stderr_refuses_double_dash(stderr, form_desc = nil)
+    context = form_desc ? " for #{form_desc}" : ""
+    assert_match(/--/, stderr, "stderr should mention --#{context}")
+    assert_match(/Thor|separator|next argument/i, stderr,
+                 "stderr should name why -- is refused#{context}: #{stderr}")
+  end
+
   def assert_suggested_alternate_port_not_busy(stderr, busy_port)
     suggested = suggested_alternate_port(stderr)
     assert suggested, "stderr should suggest an alternate PORT= number: #{stderr}"
     refute_equal busy_port, suggested,
                  "suggested PORT=#{suggested} must differ from busy port #{busy_port}"
+    refute port_in_use?(suggested),
+           "suggested PORT=#{suggested} must not be in use at assertion time"
   end
 
   def terminate_pid(pid)
