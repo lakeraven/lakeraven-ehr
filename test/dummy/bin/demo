@@ -14,9 +14,12 @@
 # arguments is refused before any other parsing. Thor treats that separator
 # as the next argument being the option value, so it could set a binding or
 # handler this script never checked. A -b/--binding value containing
-# "://" or a host starting with "/", ".", or "@" is refused too; set the host
-# with a plain -b HOST. BINDING is refused the same way; set a plain host
-# (the port comes from PORT). -u/--using must be exactly puma: -u VALUE,
+# "://", a host starting with "/", ".", or "@", or a scheme-less host:port
+# (127.0.0.1:4000, localhost:4000) is refused; set the host with a plain
+# -b HOST. An IPv6 address (two or more ":", optionally in [brackets], such
+# as ::1 or [::1]) is a plain host and is forwarded. BINDING is refused the
+# same way; set a plain host (the port comes from PORT). -u/--using must be
+# exactly puma: -u VALUE,
 # -uVALUE, -u=VALUE, --using=VALUE, a letter cluster ending in u, and the
 # --using prefix forms, after "_" in the option name is rewritten
 # to "-". Those prefix forms are refused defensively; Thor 1.5 rejects them
@@ -30,7 +33,10 @@
 # bash, an exported function (BASH_FUNC_<name>%%) can override any command,
 # including exit, unset, and [, so a deny-list cannot defend against whoever
 # controls the environment. That party is trusted. The script never kills or
-# signals another process, and it never removes tmp/pids/server.pid. Rackup
+# signals another process, and it never removes tmp/pids/server.pid.
+# --restart is refused because Rails prepare_restart deletes that pidfile
+# (railties server_command.rb:251-252); --no-restart and --skip-restart are
+# refused with it because Thor maps them onto --restart. Rackup
 # check_pid! removes a stale pidfile and refuses to start whenever the PID
 # in tmp/pids/server.pid is a running process (a reused PID included). If
 # that PID is not your dev server, remove test/dummy/tmp/pids/server.pid
@@ -88,20 +94,29 @@ export PORT
 # rewrites "_" to "-" in switch names, so the option name (the part before
 # "=") is matched after that same rewrite (--no_port, --skip_port=N, --no_po,
 # ...). Capital -P is the pidfile and is forwarded.
+# --restart, --no-restart, and --skip-restart are refused in this loop, the
+# same way --port is. Rails prepare_restart deletes tmp/pids/server.pid
+# (railties server_command.rb:251-252) when --restart is set. Thor maps
+# --no-restart and --skip-restart onto that option. The option name (the
+# part before "=") is matched after "_" is rewritten to "-".
 # A -b/--binding value containing "://" is a URI (ssl://, tcp://, unix://, or
 # any other scheme). A host starting with "/", ".", or "@" is a unix socket
-# (a path, a relative path, or an abstract-namespace name). Puma binds that
-# socket and never listens on PORT. Refuse -b VALUE (the value is the next
+# (a path, a relative path, or an abstract-namespace name). A host that
+# contains ":" and is not an IPv6 address is a scheme-less host:port
+# (127.0.0.1:4000, localhost:4000) and carries a port this script never
+# probed. An IPv6 address has two or more ":" and may be wrapped in
+# [brackets] (::1, [::1]). Puma binds a URI, a socket, or that host:port and
+# never listens on PORT. Refuse -b VALUE (the value is the next
 # argument), -bVALUE, -b=VALUE, --binding VALUE, and --binding=VALUE, plus
 # underscore spellings of the long name. A letter cluster ending in b (-db,
 # -Cb) is the same as -b: Thor splits it and the next argument is the binding.
 # Only the full --binding switch sets the host. Thor 1.5 rejects shorter
 # prefixes such as --bind (InvocationError); they are not mapped onto it.
-# A plain host (-b 127.0.0.1, --binding=0.0.0.0, localhost, ::1) is
+# A plain host (-b 127.0.0.1, --binding=0.0.0.0, localhost, ::1, [::1]) is
 # forwarded unchanged. BINDING is refused the same way, even when -b
 # is also passed: Rails reads BINDING when no -b is given, and Puma would
-# listen on that socket or URI instead of PORT. A plain host in BINDING is
-# forwarded unchanged. The listen port comes only from PORT.
+# listen on that socket, URI, or host:port instead of PORT. A plain host in
+# BINDING is forwarded unchanged. The listen port comes only from PORT.
 # -u/--using selects the Rack handler. cgi and every handler other than puma
 # never listen on PORT, so the value must be exactly puma. That covers -u
 # VALUE (the next argument), -uVALUE, -u=VALUE, --using VALUE, and
@@ -113,10 +128,49 @@ export PORT
 # rewrite. Negated --no-/--skip- forms set the handler to nil, not puma, so
 # they are refused. A bare -u or --using with no value is refused too: Thor
 # would use the name "using", which is not puma.
-# Status 0 when this host would not listen on PORT.
+# Status 0 when this host would not listen on PORT: a URI ("://"), a
+# unix-socket host (starting with "/", ".", or "@"), or a host that contains
+# ":" and is not an IPv6 address. An IPv6 address has two or more ":" and may
+# be wrapped in [brackets] (::1, [::1]). A scheme-less host:port such as
+# 127.0.0.1:4000 or localhost:4000 is refused.
+# Status 0 when $1 is an IPv6 address under that rule.
+ipv6_host() {
+  _rh=$1
+  case "$_rh" in
+    \[*\])
+      _rh=${_rh#\[}
+      _rh=${_rh%\]}
+      case "$_rh" in
+        *\[*|*\]*)
+          return 1
+          ;;
+      esac
+      ;;
+    *\[*|*\]*)
+      return 1
+      ;;
+  esac
+  _rh_rest=$_rh
+  _rh_n=0
+  while [ "$_rh_rest" != "${_rh_rest#*:}" ]; do
+    _rh_rest=${_rh_rest#*:}
+    _rh_n=$((_rh_n + 1))
+  done
+  if [ "$_rh_n" -ge 2 ]; then
+    return 0
+  fi
+  return 1
+}
+
 refused_host() {
   case "$1" in
     *://*|/*|.*|@*)
+      return 0
+      ;;
+    *:*)
+      if ipv6_host "$1"; then
+        return 1
+      fi
       return 0
       ;;
   esac
@@ -152,6 +206,10 @@ for arg in "$@"; do
     --no-po|--no-por|\
     --skip-po|--skip-por)
       printf 'Set the listen port with PORT instead of %s (for example PORT=3001 test/dummy/bin/demo).\n' "$arg" >&2
+      exit 1
+      ;;
+    --restart|--no-restart|--skip-restart)
+      printf 'Refusing %s: Rails prepare_restart deletes tmp/pids/server.pid (railties server_command.rb:251-252).\n' "$arg" >&2
       exit 1
       ;;
     --binding)
@@ -250,9 +308,10 @@ case "$prev" in
     ;;
 esac
 
-# BINDING is the host Rails uses when -b is absent. A URI ("://") or a
-# unix-socket host (starting with "/", ".", or "@") would ignore PORT, so
-# refuse it even if -b is also passed. A plain host is left unchanged.
+# BINDING is the host Rails uses when -b is absent. A URI ("://"), a
+# unix-socket host (starting with "/", ".", or "@"), or a scheme-less
+# host:port would ignore PORT, so refuse it even if -b is also passed.
+# An IPv6 address (::1, [::1]) is a plain host and is left unchanged.
 if refused_host "$BINDING"; then
   printf 'Set BINDING to a plain host; the port comes from PORT (refusing %s).\n' "$BINDING" >&2
   exit 1
@@ -317,12 +376,17 @@ exit 1
 ' "$1" 2>&1) || probe_rc=$?
 }
 
-# First free port among up to 20 candidates, printed with no trailing newline.
-# Candidates run upward from PORT+1. When PORT+k would pass 65535, the rest
-# run downward from PORT-1 and stop at 1. Free means the same bind probe used
-# for PORT exits 0. A busy result or a probe failure is not free. Prints
-# nothing when none of the candidates is free. Never signals a process.
+# First free port among up to 20 candidates. Sets _alt to that port, or leaves
+# it empty when none is free. Candidates run upward from PORT+1. When PORT+k
+# would pass 65535, the rest run downward from PORT-1 and stop at 1. Free
+# means the same bind probe used for PORT exits 0. Exit 10 is busy. Any other
+# status is a probe error: _alt_probe_failed is set and _alt_probe_err is the
+# first such error, one line. A later free port still wins. Never signals a
+# process. Not called in a subshell, so those variables stay visible.
 free_alternate_port() {
+  _alt=
+  _alt_probe_err=
+  _alt_probe_failed=0
   _alt_n=0
   _alt_cand=$((PORT + 1))
   _alt_down=0
@@ -336,8 +400,14 @@ free_alternate_port() {
     fi
     bind_probe "$_alt_cand"
     if [ "$probe_rc" -eq 0 ]; then
-      printf '%s' "$_alt_cand"
+      _alt=$_alt_cand
       return 0
+    fi
+    if [ "$probe_rc" -ne 10 ] && [ "$_alt_probe_failed" -eq 0 ]; then
+      _alt_probe_failed=1
+      _alt_nl='
+'
+      _alt_probe_err=${probe_err%%"$_alt_nl"*}
     fi
     _alt_n=$((_alt_n + 1))
     if [ "$_alt_down" -eq 0 ]; then
@@ -350,20 +420,24 @@ free_alternate_port() {
 }
 
 # Suggest the first free candidate. When none is free, say so and do not
-# invent a PORT= value. When ruby is not on PATH the search cannot run;
-# say that, rather than claiming no free port was found.
+# invent a PORT= value. When ruby is not on PATH, or no candidate was free
+# and any probe errored, the search cannot run; say that, rather than
+# claiming no free port was found:
+#   alternate port search could not run: <first probe error, one line>; choose another port
 print_alternate_port_hint() {
   if ! command -v ruby >/dev/null 2>&1; then
     printf 'alternate port search could not run: ruby was not found on PATH; choose another port\n' >&2
     return 0
   fi
-  _alt=$(free_alternate_port)
+  free_alternate_port
   if [ -n "$_alt" ]; then
     printf 'choose another port, e.g. PORT=%s test/dummy/bin/demo\n' "$_alt" >&2
+  elif [ "$_alt_probe_failed" -ne 0 ]; then
+    printf 'alternate port search could not run: %s; choose another port\n' "$_alt_probe_err" >&2
   else
     printf 'no free port found near %s; choose another\n' "$PORT" >&2
   fi
-  unset _alt
+  unset _alt _alt_probe_err _alt_probe_failed _alt_nl
 }
 
 # Host printed in the chart URL: the last plain -b/--binding value the guard

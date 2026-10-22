@@ -11,7 +11,7 @@ Preferred — runs the preflight checks automatically (`PORT` selects the listen
 
 The smoke-test and walkthrough URLs below use port 3000 by default; substitute your PORT if you set one.
 
-On a busy port, `test/dummy/bin/demo` exits 1. It names the holder (PID and command), or says the holder could not be identified and suggests `sudo lsof`. It suggests a PORT it has probed free, or says none was found.
+On a busy port, `test/dummy/bin/demo` exits 1. It names the holder (PID and command), or says the holder could not be identified and suggests `sudo lsof`. It suggests a PORT it has probed free, or says none was found. If the search cannot run (ruby missing or erroring) it says so.
 
 Equivalent manual start:
 
@@ -33,7 +33,9 @@ mistakes and stray inherited state, not against a hostile environment. Under
 bash, an exported function (`BASH_FUNC_<name>%%`) can override any command,
 including `exit`, `unset`, and `[`, so a deny-list cannot defend against that
 party. The script never kills or signals another process, and it never
-removes `tmp/pids/server.pid`. Rackup `check_pid!` removes a stale pidfile
+removes `tmp/pids/server.pid`. `--restart` is refused because Rails
+`prepare_restart` deletes `tmp/pids/server.pid` (railties
+`server_command.rb:251-252`). Rackup `check_pid!` removes a stale pidfile
 and refuses to start whenever the PID in `tmp/pids/server.pid` is a running
 process (a reused PID included). If that PID is not your dev server, remove
 `test/dummy/tmp/pids/server.pid` yourself.
@@ -46,7 +48,9 @@ process (a reused PID included). If that PID is not your dev server, remove
    Find the holder (`lsof -nP -iTCP:3000 -sTCP:LISTEN`) and either
    stop it yourself if it is yours or pick another port with
    `PORT=3001 test/dummy/bin/demo`; never kill a process you did not start.
-   The script never removes `tmp/pids/server.pid`. Rackup `check_pid!`
+   The script never removes `tmp/pids/server.pid`. `--restart` is refused
+   because Rails `prepare_restart` deletes it (railties
+   `server_command.rb:251-252`). Rackup `check_pid!`
    removes a stale pidfile and refuses to start whenever the PID in
    `tmp/pids/server.pid` is a running process (a reused PID included).
    If that PID is not your dev server, remove
