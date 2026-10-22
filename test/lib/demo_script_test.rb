@@ -212,6 +212,54 @@ class DemoScriptTest < ActiveSupport::TestCase
            "fake rails must not run when the port is already in use"
   end
 
+  test "busy port stderr explains when alternate-port search cannot run when ruby on PATH errors" do
+    skip "lsof not on PATH; required for port-holder detection" unless lsof_available?
+
+    port = find_free_port
+    holder_pid = spawn_port_holder(port)
+    @port_holder_pids << holder_pid
+    wait_for_port_listen(port, holder_pid)
+
+    install_ruby_shim_failure_stub(@stub_bin)
+
+    tree = build_demo_tree
+    env = demo_env(tree[:rails_log], "PORT" => port.to_s)
+
+    _stdout, stderr, status = run_demo(tree[:demo_path], env)
+
+    refute_predicate status, :success?,
+                     "expected failure when port #{port} is busy and ruby probes error"
+    assert_includes stderr, port.to_s, "stderr should name the port"
+    assert_match(/search could not run/i, stderr,
+                 "stderr should explain the alternate-port search could not run: #{stderr}")
+    refute_match(/no free port found/i, stderr,
+                 "must not claim no free port when ruby probes failed during the search")
+    assert_process_still_running(holder_pid)
+    refute rails_invoked?(tree[:rails_log]),
+           "fake rails must not run when the port is already in use"
+  end
+
+  test "refuses rails server restart flags without starting rails or touching server.pid" do
+    port = find_free_port
+    pid_contents = "424242\n"
+
+    %w[--restart --no-restart --skip-restart].each do |flag|
+      tree = build_demo_tree
+      pidfile = server_pidfile_path(tree)
+      File.write(pidfile, pid_contents)
+      env = demo_env(tree[:rails_log], "PORT" => port.to_s)
+
+      _stdout, stderr, status = run_demo(tree[:demo_path], env, flag)
+
+      refute_predicate status, :success?, "expected failure for #{flag}"
+      assert_match(/restart/i, stderr, "stderr should mention restart for #{flag}")
+      assert_equal pid_contents, File.read(pidfile),
+                   "server.pid must remain unchanged when #{flag} is refused"
+      refute rails_invoked?(tree[:rails_log]),
+             "fake rails must not run when #{flag} is refused"
+    end
+  end
+
   test "fails closed when the bind probe cannot run" do
     port = find_free_port
     install_ruby_probe_failure_stub(@stub_bin)
@@ -246,6 +294,38 @@ class DemoScriptTest < ActiveSupport::TestCase
     assert_includes argv, "server"
     assert_port_argv(argv, port)
     assert_equal port.to_s, recorded_port
+  end
+
+  test "launch line chart URL reflects binding host" do
+    port = find_free_port
+
+    tree = build_demo_tree
+    env = demo_env(tree[:rails_log], "PORT" => port.to_s)
+    stdout, _stderr, status = run_demo(tree[:demo_path], env, "-b", "127.0.0.1")
+    assert_predicate status, :success?, "expected success for -b 127.0.0.1"
+    assert_includes stdout, "http://127.0.0.1:#{port}/patients/1",
+                    "stdout should print chart URL for 127.0.0.1 bind"
+
+    tree = build_demo_tree
+    env = demo_env(tree[:rails_log], "PORT" => port.to_s)
+    stdout, _stderr, status = run_demo(tree[:demo_path], env, "-b", "0.0.0.0")
+    assert_predicate status, :success?, "expected success for -b 0.0.0.0"
+    assert_includes stdout, "http://localhost:#{port}/",
+                    "stdout should print localhost URL for 0.0.0.0 bind"
+
+    tree = build_demo_tree
+    env = demo_env(tree[:rails_log], "PORT" => port.to_s)
+    stdout, _stderr, status = run_demo(tree[:demo_path], env, "-b", "::1")
+    assert_predicate status, :success?, "expected success for -b ::1"
+    assert_includes stdout, "http://[::1]:#{port}/",
+                    "stdout should print bracketed IPv6 URL for ::1 bind"
+
+    tree = build_demo_tree
+    env = demo_env(tree[:rails_log], "PORT" => port.to_s, "BINDING" => "127.0.0.1")
+    stdout, _stderr, status = run_demo(tree[:demo_path], env)
+    assert_predicate status, :success?, "expected success for BINDING=127.0.0.1"
+    assert_includes stdout, "http://127.0.0.1:#{port}/",
+                    "stdout should print chart URL for BINDING=127.0.0.1"
   end
 
   test "defaults to port 3000 when PORT is unset" do
@@ -380,7 +460,9 @@ class DemoScriptTest < ActiveSupport::TestCase
       [ "-bssl://127.0.0.1:#{n}" ],
       [ "-b=tcp://127.0.0.1:#{n}" ],
       [ "--binding", "tcp://127.0.0.1:#{n}" ],
-      [ "--binding=ssl://127.0.0.1:#{n}" ]
+      [ "--binding=ssl://127.0.0.1:#{n}" ],
+      [ "-b", "127.0.0.1:#{n}" ],
+      [ "--binding=127.0.0.1:#{n}" ]
     ]
 
     binding_forms.each do |form|
@@ -407,6 +489,7 @@ class DemoScriptTest < ActiveSupport::TestCase
     binding_values = [
       "ssl://127.0.0.1:#{n}?key=k&cert=c",
       "tcp://127.0.0.1:#{n}",
+      "127.0.0.1:#{n}",
       "unix:///tmp/demo.sock"
     ]
 
@@ -1032,6 +1115,12 @@ class DemoScriptTest < ActiveSupport::TestCase
   def install_ruby_probe_failure_stub(stub_bin)
     path = File.join(stub_bin, "ruby")
     File.write(path, "#!/bin/sh\necho probe boom >&2\nexit 3\n")
+    File.chmod(0o755, path)
+  end
+
+  def install_ruby_shim_failure_stub(stub_bin)
+    path = File.join(stub_bin, "ruby")
+    File.write(path, "#!/bin/sh\necho 'rbenv: version not installed' >&2\nexit 1\n")
     File.chmod(0o755, path)
   end
 
