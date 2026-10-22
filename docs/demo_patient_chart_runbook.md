@@ -11,6 +11,8 @@ Preferred — runs the preflight checks automatically (`PORT` selects the listen
 
 The smoke-test and walkthrough URLs below use port 3000 by default; substitute your PORT if you set one.
 
+The only arguments accepted are `-b HOST`, `-b=HOST`, `--binding HOST`, and `--binding=HOST` (at most once). PORT sets the port. Every other rails server switch is refused, because those switches changed the port, the host, the environment, or the files the script checked.
+
 On a busy port, `test/dummy/bin/demo` exits 1. It names the holder (PID and command), or says the holder could not be identified and suggests `sudo lsof`. It suggests a PORT it has probed free, or says none was found. If the search cannot run (ruby missing or erroring) it says so.
 
 Equivalent manual start:
@@ -26,19 +28,20 @@ Equivalent manual start:
 ## Threat model
 
 Whoever controls the environment that runs `test/dummy/bin/demo` is trusted.
-The guards (PORT validation, `-p`/`--port` and `--no-port` forms, `-b`/`BINDING`,
-`-u` puma only, the `PUMA_INHERIT` scan, unsetting `RACK_HANDLER` and
-`RACKUP_HANDLER`, and `unset -f` of shadowing functions) protect against
-mistakes and stray inherited state, not against a hostile environment. Under
-bash, an exported function (`BASH_FUNC_<name>%%`) can override any command,
-including `exit`, `unset`, and `[`, so a deny-list cannot defend against that
-party. The script never kills or signals another process, and it never
-removes `tmp/pids/server.pid`. `--restart` is refused because Rails
-`prepare_restart` deletes `tmp/pids/server.pid` (railties
-`server_command.rb:251-252`). Rackup `check_pid!` removes a stale pidfile
-and refuses to start whenever the PID in `tmp/pids/server.pid` is a running
-process (a reused PID included). If that PID is not your dev server, remove
-`test/dummy/tmp/pids/server.pid` yourself.
+The script accepts only `-b HOST`, `-b=HOST`, `--binding HOST`, and
+`--binding=HOST` (at most once). PORT sets the port. Every other rails
+server switch is refused, because those switches changed the port, the host,
+the environment, or the files the script checked. The other guards (PORT
+validation, the BINDING check, the `PUMA_INHERIT` scan, unsetting
+`RACK_HANDLER` and `RACKUP_HANDLER`, and `unset -f` of shadowing functions)
+protect against mistakes and stray inherited state, not against a hostile
+environment. Under bash, an exported function (`BASH_FUNC_<name>%%`) can
+override any command, including `exit`, `unset`, and `[`, so these checks
+cannot defend against that party. The script never kills or signals another
+process, and it never removes `tmp/pids/server.pid`. Rackup `check_pid!`
+removes a stale pidfile and refuses to start whenever the PID in
+`tmp/pids/server.pid` is a running process (a reused PID included). If that
+PID is not your dev server, remove `test/dummy/tmp/pids/server.pid` yourself.
 
 ## Preflight (5 minutes before)
 
@@ -48,9 +51,10 @@ process (a reused PID included). If that PID is not your dev server, remove
    Find the holder (`lsof -nP -iTCP:3000 -sTCP:LISTEN`) and either
    stop it yourself if it is yours or pick another port with
    `PORT=3001 test/dummy/bin/demo`; never kill a process you did not start.
-   The script never removes `tmp/pids/server.pid`. `--restart` is refused
-   because Rails `prepare_restart` deletes it (railties
-   `server_command.rb:251-252`). Rackup `check_pid!`
+   The script never removes `tmp/pids/server.pid`. It accepts only a binding
+   host (`-b` / `--binding`); every other rails server switch is refused
+   because those switches changed the port, the host, the environment, or
+   the files the script checked. Rackup `check_pid!`
    removes a stale pidfile and refuses to start whenever the PID in
    `tmp/pids/server.pid` is a running process (a reused PID included).
    If that PID is not your dev server, remove
