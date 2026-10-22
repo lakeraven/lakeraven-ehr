@@ -32,7 +32,9 @@ bash, an exported function (`BASH_FUNC_<name>%%`) can override any command,
 including `exit`, `unset`, and `[`, so a deny-list cannot defend against that
 party. The script never kills or signals another process, and it never
 removes `tmp/pids/server.pid`. Rackup `check_pid!` removes a stale pidfile
-and refuses to start when the pidfile names a live server.
+and refuses to start whenever the PID in `tmp/pids/server.pid` is a running
+process (a reused PID included). If that PID is not your dev server, remove
+`test/dummy/tmp/pids/server.pid` yourself.
 
 ## Preflight (5 minutes before)
 
@@ -43,8 +45,10 @@ and refuses to start when the pidfile names a live server.
    stop it yourself if it is yours or pick another port with
    `PORT=3001 test/dummy/bin/demo`; never kill a process you did not start.
    The script never removes `tmp/pids/server.pid`. Rackup `check_pid!`
-   removes a stale pidfile and refuses to start when the pidfile names a
-   live server.
+   removes a stale pidfile and refuses to start whenever the PID in
+   `tmp/pids/server.pid` is a running process (a reused PID included).
+   If that PID is not your dev server, remove
+   `test/dummy/tmp/pids/server.pid` yourself.
    Or just reuse the already-running server if it is serving `/patients/1` correctly.
 2. **Postgres up?** `pg_isready || brew services start postgresql`. Dev-mode
    migration checking queries the DB on every request; a down Postgres 500s everything.
