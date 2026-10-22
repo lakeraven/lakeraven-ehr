@@ -8,14 +8,16 @@
 #   test/dummy/bin/demo -b 0.0.0.0   # if showing from another device
 #
 # Set PORT to choose the listen port. A single-dash argument whose option
-# letters include a lowercase p, and --port including unique prefixes, are
-# refused so they cannot override that check. A -b/--binding value containing
+# letters include a lowercase p, and --port including prefix forms, are
+# refused so they cannot override that check. Those prefix forms are refused
+# defensively; Thor 1.5 rejects them anyway. A -b/--binding value containing
 # "://" or a host starting with "/", ".", or "@" is refused too; set the host
 # with a plain -b HOST. BINDING is refused the same way; set a plain host
 # (the port comes from PORT). -u/--using must be exactly puma: -u VALUE,
 # -uVALUE, -u=VALUE, --using=VALUE, a letter cluster ending in u, and the
-# unique --using prefixes Thor maps, after "_" in the option name is rewritten
-# to "-". Any other Rack handler, including cgi, never listens on PORT.
+# --using prefix forms, after "_" in the option name is rewritten
+# to "-". Those prefix forms are refused defensively; Thor 1.5 rejects them
+# anyway. Any other Rack handler, including cgi, never listens on PORT.
 # RACKUP_HANDLER and RACK_HANDLER are unset for the same reason.
 #
 # Threat model. The guards protect against mistakes and stray inherited state,
@@ -25,7 +27,9 @@
 # bash, an exported function (BASH_FUNC_<name>%%) can override any command,
 # including exit, unset, and [, so a deny-list cannot defend against whoever
 # controls the environment. That party is trusted. The script never kills or
-# signals another process.
+# signals another process, and it never removes tmp/pids/server.pid. Rackup
+# check_pid! removes a stale pidfile and refuses to start when the pidfile
+# names a live server.
 set -e
 # Bash imports BASH_FUNC_<name>%% as a shell function before this script runs.
 # A function named ruby, command, env, or lsof would replace the bind probe,
@@ -33,7 +37,7 @@ set -e
 # a name such as A<newline>PUMA_INHERIT_0 through). Drop those shadows, and
 # the other commands used below, before any of them run. POSIX unset -f;
 # missing functions are not worth aborting for (harmless in dash).
-unset -f ruby command env lsof awk printf cd exec pg_isready rm 2>/dev/null || true
+unset -f ruby command env lsof awk printf cd exec pg_isready 2>/dev/null || true
 cd "$(dirname "$0")/.."
 
 # PORT selects the listen port and the URL printed below. Default is 3000.
@@ -61,8 +65,9 @@ export PORT
 # per letter, so refuse any whose option letters include a lowercase p (-p,
 # -pN, -p=N, -p+N, -dp, -Cp, -pd, ...). When the argument is only letters,
 # every letter is an option letter; otherwise only the first character is,
-# and the rest is an attached value. Unique --port prefixes (--po, --por)
-# are refused too; --p also matches --pid, so it is left alone. Negated
+# and the rest is an attached value. Prefix forms (--po, --por) are refused
+# defensively; Thor 1.5 rejects them anyway. --p is left alone because it is
+# also a prefix of --pid. Negated
 # --no-/--skip- forms are refused because Thor maps them to --port. Thor
 # rewrites "_" to "-" in switch names, so the option name (the part before
 # "=") is matched after that same rewrite (--no_port, --skip_port=N, --no_po,
@@ -74,19 +79,18 @@ export PORT
 # argument), -bVALUE, -b=VALUE, --binding VALUE, and --binding=VALUE, plus
 # underscore spellings of the long name. A letter cluster ending in b (-db,
 # -Cb) is the same as -b: Thor splits it and the next argument is the binding.
-# Thor maps only the full --binding switch (--bind and other shorter prefixes
-# do not set it). A plain host (-b 127.0.0.1, --binding=0.0.0.0, localhost,
-# ::1) is forwarded unchanged. BINDING is refused the same way, even when -b
+# Only the full --binding switch sets the host. Thor 1.5 rejects shorter
+# prefixes such as --bind (InvocationError); they are not mapped onto it.
+# A plain host (-b 127.0.0.1, --binding=0.0.0.0, localhost, ::1) is
+# forwarded unchanged. BINDING is refused the same way, even when -b
 # is also passed: Rails reads BINDING when no -b is given, and Puma would
 # listen on that socket or URI instead of PORT. A plain host in BINDING is
 # forwarded unchanged. The listen port comes only from PORT.
 # -u/--using selects the Rack handler. cgi and every handler other than puma
 # never listen on PORT, so the value must be exactly puma. That covers -u
 # VALUE (the next argument), -uVALUE, -u=VALUE, --using VALUE, and
-# --using=VALUE, plus unique prefixes Thor maps onto --using (--u, --us,
-# --usi, --usin). --using is the only server switch that starts with u, so
-# those prefixes are unique (unlike --p, which also matches --pid and is
-# left alone). A letter cluster ending
+# --using=VALUE. Prefix forms (--u, --us, --usi, --usin) are refused
+# defensively; Thor 1.5 rejects them anyway. A letter cluster ending
 # in u (-du, -Cu) is the same as -u: Thor splits it and the next argument is
 # the handler. Thor rewrites "_" to "-" in the option name (the part before
 # "="), so --no_using, --skip_using=cgi, and --no_us are matched after that
@@ -245,6 +249,16 @@ if ! pg_isready -q; then
   exit 1
 fi
 
+# Suggest PORT+1, or PORT-1 when PORT is already 65535, so the hint is not
+# the port that just failed.
+alternate_port() {
+  if [ "$PORT" -eq 65535 ]; then
+    printf '%s' "$((PORT - 1))"
+  else
+    printf '%s' "$((PORT + 1))"
+  fi
+}
+
 # 2. Name a holder with lsof when we can. Empty lsof output is not evidence
 #    the port is free: lsof may be missing, or the listener may be owned by
 #    another user (for example docker-proxy) and invisible to us. Never signal
@@ -258,7 +272,7 @@ if command -v lsof >/dev/null 2>&1; then
   if [ -n "$holders" ]; then
     printf 'Port %s is already in use:\n' "$PORT" >&2
     printf '%s\n' "$holders" | awk '{ printf "PID %s command %s\n", $1, $2 }' >&2
-    printf '%s\n' "choose another port, e.g. PORT=3001 test/dummy/bin/demo" >&2
+    printf 'choose another port, e.g. PORT=%s test/dummy/bin/demo\n' "$(alternate_port)" >&2
     exit 1
   fi
 fi
@@ -318,7 +332,7 @@ exit 1
 if [ "$probe_rc" -eq 10 ]; then
   printf 'Port %s is already in use, but the holder could not be identified (lsof is missing or cannot see it, e.g. owned by another user such as docker-proxy).\n' "$PORT" >&2
   printf 'Try: sudo lsof -nP -iTCP:%s -sTCP:LISTEN\n' "$PORT" >&2
-  printf '%s\n' "choose another port, e.g. PORT=3001 test/dummy/bin/demo" >&2
+  printf 'choose another port, e.g. PORT=%s test/dummy/bin/demo\n' "$(alternate_port)" >&2
   exit 1
 fi
 if [ "$probe_rc" -ne 0 ]; then
@@ -330,9 +344,6 @@ if [ "$probe_rc" -ne 0 ]; then
   fi
   exit 1
 fi
-
-# Stale pidfile only after the probe proves the port is free.
-rm -f tmp/pids/server.pid
 
 # 3. A stray RPMS_RPC_PATH flips the Gemfile to a path source and bundler
 #    rejects the lockfile at boot — make sure it is unset.
