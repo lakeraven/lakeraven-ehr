@@ -350,10 +350,11 @@ free_alternate_port() {
 }
 
 # Suggest the first free candidate. When none is free, say so and do not
-# invent a PORT= value.
+# invent a PORT= value. When ruby is not on PATH the search cannot run;
+# say that, rather than claiming no free port was found.
 print_alternate_port_hint() {
   if ! command -v ruby >/dev/null 2>&1; then
-    printf 'no free port found near %s; choose another\n' "$PORT" >&2
+    printf 'alternate port search could not run: ruby was not found on PATH; choose another port\n' >&2
     return 0
   fi
   _alt=$(free_alternate_port)
@@ -363,6 +364,63 @@ print_alternate_port_hint() {
     printf 'no free port found near %s; choose another\n' "$PORT" >&2
   fi
   unset _alt
+}
+
+# Host printed in the chart URL: the last plain -b/--binding value the guard
+# forwarded, otherwise BINDING. Rails uses that same host (development
+# default is localhost when neither is set). A wildcard bind is not a URL
+# host, so unset, 0.0.0.0, ::, and [::] print as localhost. A bare IPv6
+# address is wrapped in brackets; one already wrapped is left as-is.
+chart_url_host() {
+  _url_host=
+  _url_prev=
+  for _url_arg in "$@"; do
+    case "$_url_prev" in
+      -b|--binding)
+        _url_host=$_url_arg
+        ;;
+    esac
+    _url_prev=
+    case "$_url_arg" in
+      --binding=*)
+        _url_host=${_url_arg#--binding=}
+        ;;
+      --binding)
+        _url_prev=--binding
+        ;;
+      -b=*|-b?*)
+        _url_host=${_url_arg#-b}
+        _url_host=${_url_host#=}
+        ;;
+      -*)
+        _url_body=${_url_arg#-}
+        case "$_url_body" in
+          *[!A-Za-z]*)
+            ;;
+          *b)
+            _url_prev=-b
+            ;;
+        esac
+        ;;
+    esac
+  done
+  if [ -z "$_url_host" ] && [ -n "$BINDING" ]; then
+    _url_host=$BINDING
+  fi
+  case "$_url_host" in
+    ""|0.0.0.0|::|"[::]")
+      printf '%s' "localhost"
+      ;;
+    \[*\])
+      printf '%s' "$_url_host"
+      ;;
+    *:*:*)
+      printf '[%s]' "$_url_host"
+      ;;
+    *)
+      printf '%s' "$_url_host"
+      ;;
+  esac
 }
 
 # 2. Name a holder with lsof when we can. Empty lsof output is not evidence
@@ -504,7 +562,9 @@ unset _puma_inherit_names _puma_inherit_name _puma_inherit_left
 # 5. Both flags are required, and both are honored ONLY in development:
 #    SPIKE_MOCK_RPC=1  seeds the in-memory RPMS mock (else 404/empty chart)
 #    CHART_DEMO_OPEN=1 dev-only auth bypass (else 401 without a token)
-echo "Launching Rails on PORT $PORT; the chart will be at http://localhost:$PORT/patients/1 once it is up"
+_chart_host=$(chart_url_host "$@")
+printf 'Launching Rails on PORT %s; the chart will be at http://%s:%s/patients/1 once it is up\n' \
+  "$PORT" "$_chart_host" "$PORT"
 # Real keys, not a line split of env text. Fail closed: a non-zero ruby
 # status (including ruby missing) refuses to start. Names only, never values.
 # The ruby function, if a parent bash exported one, was already unset.
