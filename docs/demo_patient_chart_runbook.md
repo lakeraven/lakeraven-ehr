@@ -6,7 +6,7 @@ Read-only demo patient chart (issue #452, PR #453). Synthetic data only — no P
 
 Preferred — runs the preflight checks automatically (`PORT` selects the listen port; default 3000):
 
-    /Users/kimball/code/lakeraven/rpms/lakeraven-ehr/test/dummy/bin/demo
+    test/dummy/bin/demo
     PORT=3001 test/dummy/bin/demo
 
 The smoke-test and walkthrough URLs below use port 3000 by default; substitute your PORT if you set one.
@@ -30,16 +30,21 @@ The guards (PORT validation, `-p`/`--port` and `--no-port` forms, `-b`/`BINDING`
 mistakes and stray inherited state, not against a hostile environment. Under
 bash, an exported function (`BASH_FUNC_<name>%%`) can override any command,
 including `exit`, `unset`, and `[`, so a deny-list cannot defend against that
-party. The script never kills or signals another process.
+party. The script never kills or signals another process, and it never
+removes `tmp/pids/server.pid`. Rackup `check_pid!` removes a stale pidfile
+and refuses to start when the pidfile names a live server.
 
 ## Preflight (5 minutes before)
 
 `bin/demo` does all of this for you; if starting manually:
 
-1. **Port 3000 free?** A previous dummy server (or its stale pidfile) is the most
-   likely failure. Find the holder (`lsof -nP -iTCP:3000 -sTCP:LISTEN`) and either
+1. **Port 3000 free?** A previous dummy server is the most likely failure.
+   Find the holder (`lsof -nP -iTCP:3000 -sTCP:LISTEN`) and either
    stop it yourself if it is yours or pick another port with
    `PORT=3001 test/dummy/bin/demo`; never kill a process you did not start.
+   The script never removes `tmp/pids/server.pid`. Rackup `check_pid!`
+   removes a stale pidfile and refuses to start when the pidfile names a
+   live server.
    Or just reuse the already-running server if it is serving `/patients/1` correctly.
 2. **Postgres up?** `pg_isready || brew services start postgresql`. Dev-mode
    migration checking queries the DB on every request; a down Postgres 500s everything.
