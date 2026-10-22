@@ -17,6 +17,15 @@
 # unique --using prefixes Thor maps, after "_" in the option name is rewritten
 # to "-". Any other Rack handler, including cgi, never listens on PORT.
 # RACKUP_HANDLER and RACK_HANDLER are unset for the same reason.
+#
+# Threat model. The guards protect against mistakes and stray inherited state,
+# not against a hostile environment. They are PORT validation, -p/--port and
+# --no-port forms, -b/BINDING, -u puma only, the PUMA_INHERIT scan, unsetting
+# RACK_HANDLER and RACKUP_HANDLER, and unset -f of shadowing functions. Under
+# bash, an exported function (BASH_FUNC_<name>%%) can override any command,
+# including exit, unset, and [, so a deny-list cannot defend against whoever
+# controls the environment. That party is trusted. The script never kills or
+# signals another process.
 set -e
 # Bash imports BASH_FUNC_<name>%% as a shell function before this script runs.
 # A function named ruby, command, env, or lsof would replace the bind probe,
