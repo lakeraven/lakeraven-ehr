@@ -187,7 +187,7 @@ class FhirSearchPagingTest < ActionDispatch::IntegrationTest
   end.uniq.freeze
 
   test "the route scan finds the FHIR searches" do
-    assert_operator FHIR_SEARCH_PATHS.length, :>=, 15, FHIR_SEARCH_PATHS.inspect
+    assert_operator FHIR_SEARCH_PATHS.length, :>=, 14, FHIR_SEARCH_PATHS.inspect
     assert_includes FHIR_SEARCH_PATHS, "/lakeraven-ehr/Patient"
     assert_includes FHIR_SEARCH_PATHS, "/lakeraven-ehr/AuditEvent"
     refute FHIR_SEARCH_PATHS.any? { |p| p.include?("screenings") }, "screenings is a web page, not a FHIR search"

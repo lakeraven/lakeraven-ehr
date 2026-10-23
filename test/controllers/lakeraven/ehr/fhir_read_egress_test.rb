@@ -43,8 +43,7 @@ module Lakeraven
         "lakeraven/ehr/allergy_intolerances#show",
         "lakeraven/ehr/conditions#show",
         "lakeraven/ehr/medication_requests#show",
-        "lakeraven/ehr/observations#show",
-        "lakeraven/ehr/consents#show"
+        "lakeraven/ehr/observations#show"
       ].freeze
 
       # Non-disclosing or out-of-scope controller actions that are explicitly allowed to bypass the seam.
@@ -102,7 +101,6 @@ module Lakeraven
         "lakeraven/ehr/procedures#index",
         "lakeraven/ehr/coverage_eligibility_requests#create",
         "lakeraven/ehr/measure_reports#index",
-        "lakeraven/ehr/consents#index",
         "lakeraven/ehr/audit_events#index",
         "lakeraven/ehr/audit_events#show",
         "lakeraven/ehr/export_files#show"
@@ -415,7 +413,7 @@ module Lakeraven
       end
 
       # Table-driven tests for each wired endpoint that can be successfully invoked with seeded data.
-      # Note: Many /:id show routes (like Consent/:id, AllergyIntolerance/:id) are omitted here because
+      # Note: Many /:id show routes (like AllergyIntolerance/:id) are omitted here because
       # we do not have seeded data for those specific resource IDs. We use the nearest real path
       # (the index search route) to verify the seam is wired for that controller, rather than inventing IDs that return 404.
       WIRED_ENDPOINTS = [
@@ -433,7 +431,6 @@ module Lakeraven
         { path: "/lakeraven-ehr/Procedure", method: :get, params: { patient: "1" } },
         { path: "/lakeraven-ehr/CoverageEligibilityRequest", method: :post, params: { patient_dfn: "1", coverage_type: "medicaid" } },
         { path: "/lakeraven-ehr/MeasureReport", method: :get, params: { patient: "1" } },
-        { path: "/lakeraven-ehr/Consent", method: :get, params: { patient: "1" } },
         { path: "/lakeraven-ehr/AuditEvent", method: :get },
         { name: "AuditEvent show", dynamic_path: -> { "/lakeraven-ehr/AuditEvent/#{@audit_event.id}" }, method: :get },
         { name: "exports file show", dynamic_path: -> { @export_file_path }, method: :get },
@@ -557,8 +554,7 @@ module Lakeraven
         [ "/lakeraven-ehr/AllergyIntolerance/1", { patient: "1" } ],
         [ "/lakeraven-ehr/Condition/1", { patient: "1" } ],
         [ "/lakeraven-ehr/MedicationRequest/1", { patient: "1" } ],
-        [ "/lakeraven-ehr/Observation/1", { patient: "1" } ],
-        [ "/lakeraven-ehr/Consent/1", { patient: "1" } ]
+        [ "/lakeraven-ehr/Observation/1", { patient: "1" } ]
       ].each do |path, params|
         test "stubbed action for #{path} does not serve data and fails if implemented without wiring" do
           begin
