@@ -187,29 +187,6 @@ module Lakeraven
         gateway = method_name == :for_patient ? ImmunizationGateway : RegistrationGateway
         capability = method_name == :for_patient ? :ihs_immunization : :bprm_registration
 
-        test "guard bypass: #{gateway.name}.#{method_name} survives hand alias stub/restore" do
-          stub_name = :"__ihs_feature_stub_#{method_name}"
-          eigen = gateway.singleton_class
-          eigen.alias_method stub_name, method_name
-          eigen.define_method(method_name) { |*_args, **_kwargs| raise "stub body must not run" }
-
-          with_restricted_backend do
-            assert_feature_unavailable(capability) do
-              if method_name == :register
-                gateway.register(name: "SYNTH,TEST")
-              else
-                gateway.for_patient(1)
-              end
-            end
-          end
-        ensure
-          if eigen.method_defined?(method_name)
-            eigen.remove_method(method_name)
-            eigen.alias_method method_name, stub_name
-          end
-          eigen.remove_method(stub_name) if eigen.method_defined?(stub_name)
-        end
-
         test "guard bypass: restored #{gateway.name}.#{method_name} works on rpms and stays guarded when restricted" do
           stub_name = :"__ihs_feature_stub_#{method_name}"
           eigen = gateway.singleton_class
