@@ -6,6 +6,7 @@ module Lakeraven
       include PatientCompartment
 
       compartment_bound :index, param: :patient, require_param: true
+      before_action :refuse_system_qualified_tokens!, only: :index
 
       def index
         dfn = patient_compartment_dfn
@@ -19,6 +20,17 @@ module Lakeraven
       end
 
       private
+
+      # category and code compare the code alone. A system|code value used to
+      # be compared whole against the code, so it matched nothing and read as
+      # "no observations"; it is refused instead, until the system is matched.
+      def refuse_system_qualified_tokens!
+        %i[category code].each do |name|
+          next unless params[name].to_s.include?("|")
+
+          return refuse_search_parameter(name, "a code without a system")
+        end
+      end
 
       def filter_observations(observations)
         observations = observations.select { |o| o.category == params[:category] } if params[:category].present?

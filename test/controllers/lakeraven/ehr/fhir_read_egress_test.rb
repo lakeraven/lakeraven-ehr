@@ -37,17 +37,6 @@ module Lakeraven
         teardown_smart_auth
       end
 
-      # Routed but NO controller exists on origin/main.
-      # When implemented, they must be wired to Part2EgressFilter.
-      UNIMPLEMENTED_ACTIONS = [
-        "lakeraven/ehr/medications#index",
-        "lakeraven/ehr/medications#show",
-        "lakeraven/ehr/diagnostic_reports#index",
-        "lakeraven/ehr/diagnostic_reports#show",
-        "lakeraven/ehr/care_plans#index",
-        "lakeraven/ehr/care_plans#show"
-      ].freeze
-
       # STUBBED_ACTIONS: actions that exist but render 404 or empty content.
       # When implemented with data, they must be wired to Part2EgressFilter and moved to WIRED_ACTIONS.
       STUBBED_ACTIONS = [
@@ -55,8 +44,7 @@ module Lakeraven
         "lakeraven/ehr/conditions#show",
         "lakeraven/ehr/medication_requests#show",
         "lakeraven/ehr/observations#show",
-        "lakeraven/ehr/consents#show",
-        "lakeraven/ehr/encounters#show"
+        "lakeraven/ehr/consents#show"
       ].freeze
 
       # Non-disclosing or out-of-scope controller actions that are explicitly allowed to bypass the seam.
@@ -78,6 +66,7 @@ module Lakeraven
         "lakeraven/ehr/test_sessions#create", # Test only
         "lakeraven/ehr/smart_configuration#show", # Discovery
         "lakeraven/ehr/smart_launch#show",    # Discovery
+        "lakeraven/ehr/capability_statements#show", # Discovery
         "lakeraven/ehr/backend_services#token", # Auth
         "lakeraven/ehr/transitions_of_care#create", # Wired separately in #568
         "lakeraven/ehr/ccda_imports#create",  # Ingress
@@ -127,7 +116,7 @@ module Lakeraven
           "#{controller}##{action}" if controller && action
         end.compact.uniq
 
-        untested = controller_actions - ALLOWED_WITHOUT_SEAM - WIRED_ACTIONS - UNIMPLEMENTED_ACTIONS - STUBBED_ACTIONS
+        untested = controller_actions - ALLOWED_WITHOUT_SEAM - WIRED_ACTIONS - STUBBED_ACTIONS
 
         assert_empty untested, "Found routes that might disclose clinical data but are not explicitly tested for seam wiring or allowlisted."
       end
@@ -545,46 +534,22 @@ module Lakeraven
         }
       ].freeze
 
-      [
-        [ "/lakeraven-ehr/Medication", { patient: "1" } ],
-        [ "/lakeraven-ehr/DiagnosticReport", { patient: "1" } ],
-        [ "/lakeraven-ehr/CarePlan", { patient: "1" } ]
-      ].each do |path, params|
-        test "missing controller for #{path} does not serve data and fails if later added without wiring" do
-          begin
-            get path, params: params, headers: @headers
-          rescue ActionController::RoutingError, ActionDispatch::MissingController, NameError, AbstractController::ActionNotFound
-            # Pass: The controller doesn't exist, which is expected for now.
-            assert true
-          else
-            refute_response :success, "The controller for #{path} was added. You must wire it to Part2EgressFilter and move it to WIRED_ACTIONS in the test."
-            refute_includes response.body, "Anderson", "Expected not to serve patient data"
-          end
-        end
-      end
+      # Medication, DiagnosticReport and CarePlan were routed with no
+      # controller, and Encounter's show with no action, so each raised (#574).
+      # They are not routed now. Adding one back puts its action in front of
+      # the completeness test above, which then requires it to be wired or
+      # allowlisted.
+      %w[
+        /lakeraven-ehr/Medication /lakeraven-ehr/Medication/1
+        /lakeraven-ehr/DiagnosticReport /lakeraven-ehr/DiagnosticReport/1
+        /lakeraven-ehr/CarePlan /lakeraven-ehr/CarePlan/1
+        /lakeraven-ehr/Encounter/1
+      ].each do |path|
+        test "#{path} is not routed and serves nothing" do
+          get path, params: { patient: "1" }, headers: @headers
 
-      [
-        [ "/lakeraven-ehr/Medication/1", "Lakeraven::EHR::MedicationsController" ],
-        [ "/lakeraven-ehr/DiagnosticReport/1", "Lakeraven::EHR::DiagnosticReportsController" ],
-        [ "/lakeraven-ehr/CarePlan/1", "Lakeraven::EHR::CarePlansController" ]
-      ].each do |path, controller_constant|
-        test "missing member action for #{path} does not serve data and fails if later added without wiring" do
-          assert_nil controller_constant.safe_constantize,
-                     "#{controller_constant} must not be defined until wired to Part2EgressFilter and moved to WIRED_ACTIONS"
-
-          routing_error = nil
-          begin
-            get path, headers: @headers
-          rescue ActionController::RoutingError, ActionDispatch::MissingController => e
-            routing_error = e
-          rescue NameError => e
-            assert_equal controller_constant.demodulize, e.name.to_s.demodulize,
-                         "Expected NameError for missing #{controller_constant}, got #{e.name}: #{e.message}"
-            routing_error = e
-          end
-
-          assert routing_error,
-                 "Expected GET #{path} to raise routing/missing-controller error, got HTTP #{response.status}"
+          assert_response :not_found
+          refute_includes response.body, "Anderson", "Expected not to serve patient data"
         end
       end
 
@@ -593,8 +558,7 @@ module Lakeraven
         [ "/lakeraven-ehr/Condition/1", { patient: "1" } ],
         [ "/lakeraven-ehr/MedicationRequest/1", { patient: "1" } ],
         [ "/lakeraven-ehr/Observation/1", { patient: "1" } ],
-        [ "/lakeraven-ehr/Consent/1", { patient: "1" } ],
-        [ "/lakeraven-ehr/Encounter/1", { patient: "1" } ]
+        [ "/lakeraven-ehr/Consent/1", { patient: "1" } ]
       ].each do |path, params|
         test "stubbed action for #{path} does not serve data and fails if implemented without wiring" do
           begin

@@ -35,7 +35,7 @@ module Lakeraven
       # takes that shift. id breaks ties between rows written in the same
       # instant.
       def index
-        events = scoped_events
+        events = filter_by_patient(scoped_events)
         page = events.order(audit_sort_order)
                      .offset(fhir_paging[:offset]).limit(fhir_paging[:count])
         entries = page.map { |event| { resource: event.to_fhir, search: { mode: "match" } } }
@@ -52,6 +52,16 @@ module Lakeraven
       end
 
       private
+
+      # `?patient=` narrows to the rows recorded against that patient: the
+      # same provably-attributable rows a token bound to it sees (scoped_events).
+      # It used to bind the compartment and filter nothing, so an unbound
+      # token asking for one patient's trail got every patient's.
+      def filter_by_patient(events)
+        return events if params[:patient].blank?
+
+        events.where(entity_type: PATIENT_ENTITY_TYPE, entity_identifier: patient_compartment_dfn)
+      end
 
       def audit_sort_order
         order = fhir_sort_keys.to_h { |name, _sort, descending| [ SORT_COLUMNS.fetch(name), descending ? :desc : :asc ] }

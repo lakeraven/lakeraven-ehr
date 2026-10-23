@@ -32,8 +32,10 @@ module Lakeraven
     # so. Includes go into the same Bundle as the matches, so
     # render_bundle_egress hands both to the Part 2 egress seam.
     #
-    # A `_sort` or `_include` value this resource does not declare is refused
-    # with a 400 OperationOutcome naming it, like a bad `_count`.
+    # A `_sort`, `_include` or `_revinclude` value this resource does not
+    # declare is refused with a 400 OperationOutcome naming it, like a bad
+    # `_count`. The controller follows a declared `_revinclude` itself
+    # (PatientsController: Provenance:target).
     #
     # FHIR::SearchCapabilities declares all of this for the
     # CapabilityStatement, and is what this enforces.
@@ -76,6 +78,7 @@ module Lakeraven
       def validate_fhir_sort_and_include!
         @fhir_sort = parse_fhir_sort
         @fhir_includes = parse_fhir_includes unless performed?
+        validate_fhir_revincludes unless performed?
       end
 
       # nil when the parameter is absent, :invalid when it is present and not
@@ -116,6 +119,18 @@ module Lakeraven
 
           inclusion
         end.uniq
+      end
+
+      # Every _revinclude value declared for this resource. Like _include, a
+      # modifier is refused rather than read as the plain parameter.
+      def validate_fhir_revincludes
+        modified = raw_query.keys.find { |key| key.start_with?("_revinclude:") }
+        return refuse_unsupported(modified, Array(raw_query[modified]).first.to_s, []) if modified
+
+        declared = FHIR::SearchCapabilities.revincludes_for(fhir_resource_type)
+        Array(raw_query["_revinclude"]).each do |value|
+          return refuse_unsupported("_revinclude", value, declared) unless declared.include?(value)
+        end
       end
 
       def fhir_sorts
