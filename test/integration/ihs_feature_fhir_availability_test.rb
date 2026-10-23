@@ -13,6 +13,9 @@ class IhsFeatureFhirAvailabilityTest < ActionDispatch::IntegrationTest
 
   setup do
     setup_smart_auth(scopes: "system/*.read system/Patient.write")
+    # The Rails test client's default Accept is browser-style (text/html;q=0.9
+    # with */*;q=0.5); a FHIR client names the type it wants.
+    @headers = @headers.merge("Accept" => "application/fhir+json")
   end
 
   teardown do
