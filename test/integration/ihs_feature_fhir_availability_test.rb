@@ -79,10 +79,12 @@ class IhsFeatureFhirAvailabilityTest < ActionDispatch::IntegrationTest
     end
 
     test "GET ServiceRequest with #{label} on a restricted backend is not-supported, not a 400" do
+      before = RpmsRpc.client.received_calls.length
       with_restricted_backend do
         get "/lakeraven-ehr/ServiceRequest", params: { patient: PATIENT_DFN }.merge(extra), headers: @headers
         assert_fhir_feature_unavailable(response, capability: :prc_referrals)
       end
+      assert_empty rpc_calls_since(before)
     end
   end
 
@@ -116,6 +118,89 @@ class IhsFeatureFhirAvailabilityTest < ActionDispatch::IntegrationTest
       get "/lakeraven-ehr/Immunization", params: { patient: PATIENT_DFN },
         headers: @headers.merge("Accept" => "application/xml;q=1, text/html;q=0.2, application/fhir+json;q=0.9, */*;q=0.5")
       assert_fhir_feature_unavailable(response, capability: :ihs_immunization)
+    end
+  end
+
+  # Gate round 1 (#659): every non-blank Accept goes through the one comparator.
+  # Before, a header with no comma-adjacent */* fell through to Rails' own format
+  # negotiation, which ignores q=0 and quality ranking.
+  {
+    "a lone wildcard" => "*/*",
+    "text/html refused with q=0" => "text/html;q=0",
+    "text/html refused with q=0 beside FHIR JSON" => "text/html;q=0, application/fhir+json",
+    "text/html refused with q=0 beside a wildcard" => "text/html;q=0, */*;q=0.5",
+    "a malformed q on text/html" => "text/html;q=abc",
+    "a malformed q on FHIR JSON beside text/html" => "text/html, application/fhir+json;q=oops",
+    "a q above 1" => "text/html;q=5",
+    "text/html and FHIR JSON named at equal quality" => "text/html, application/fhir+json"
+  }.each do |label, accept|
+    test "feature unavailable renders FHIR JSON for #{label}" do
+      with_restricted_backend do
+        get "/lakeraven-ehr/Immunization", params: { patient: PATIENT_DFN },
+          headers: @headers.merge("Accept" => accept)
+        assert_fhir_feature_unavailable(response, capability: :ihs_immunization)
+      end
+    end
+  end
+
+  {
+    "text/html alone" => "text/html",
+    "text/html ahead of a lower FHIR JSON" => "text/html, application/fhir+json;q=0.5",
+    "text/html tied with a wildcard" => "text/html, */*",
+    "a type wildcard" => "text/*",
+    "a browser navigation header" =>
+      "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+  }.each do |label, accept|
+    test "feature unavailable renders HTML for #{label}" do
+      with_restricted_backend do
+        get "/lakeraven-ehr/Immunization", params: { patient: PATIENT_DFN },
+          headers: @headers.merge("Accept" => accept)
+        assert_response :not_found
+        assert_match(/not available on this system/i, response.body)
+        refute_equal "application/fhir+json", response.media_type
+      end
+    end
+  end
+
+  test "feature unavailable renders FHIR JSON when Accept is blank" do
+    with_restricted_backend do
+      get "/lakeraven-ehr/Immunization", params: { patient: PATIENT_DFN },
+        headers: @headers.merge("Accept" => "")
+      assert_fhir_feature_unavailable(response, capability: :ihs_immunization)
+    end
+  end
+
+  # Gate round 1 (#659): the capability check sits AFTER authentication and scope,
+  # so a withheld endpoint never answers an unauthenticated or out-of-scope caller
+  # with 404/400 (which would tell them the capability is missing).
+  {
+    "Immunization" => :ihs_immunization,
+    "ServiceRequest" => :prc_referrals
+  }.each do |type, capability|
+    test "GET #{type} with a bad _count on a restricted backend and no token is a 401" do
+      before = RpmsRpc.client.received_calls.length
+      with_restricted_backend do
+        get "/lakeraven-ehr/#{type}", params: { patient: PATIENT_DFN, _count: "invalid" }
+        assert_response :unauthorized
+        refute_match(/not available/i, response.body)
+      end
+      assert_empty rpc_calls_since(before)
+    end
+
+    test "GET #{type} with a bad _count on a restricted backend and an out-of-scope token is a 403" do
+      headers = headers_for_scopes("system/Patient.read")
+      with_restricted_backend do
+        get "/lakeraven-ehr/#{type}", params: { patient: PATIENT_DFN, _count: "invalid" }, headers: headers
+        assert_response :forbidden
+        refute_match(/not available/i, response.body)
+      end
+    end
+
+    test "GET #{type} on a restricted backend with an in-scope token is the not-supported 404 (#{capability})" do
+      with_restricted_backend do
+        get "/lakeraven-ehr/#{type}", params: { patient: PATIENT_DFN, _count: "invalid" }, headers: @headers
+        assert_fhir_feature_unavailable(response, capability: capability)
+      end
     end
   end
 
@@ -204,6 +289,15 @@ class IhsFeatureFhirAvailabilityTest < ActionDispatch::IntegrationTest
   end
 
   private
+
+  # A second, narrower token without disturbing @headers.
+  def headers_for_scopes(scopes)
+    saved = @headers
+    setup_smart_auth(scopes: scopes)
+    @headers
+  ensure
+    @headers = saved
+  end
 
   def registration_patient_json
     {
