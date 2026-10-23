@@ -32,20 +32,6 @@ module Lakeraven
         CapabilityGuard.ensure!(:tribal_enrollment)
         RpmsRpc::Tribal.tribe_info(ien)
       end
-
-      # enrollment_details is replaced in the availability spec. The
-      # replacement still has to fail closed before that body runs.
-      def self.define_singleton_method(name, method = nil, &block)
-        if name == :enrollment_details && !method.is_a?(UnboundMethod) && !method.is_a?(Method)
-          impl = block || method
-          return super(name) do |*args, **kwargs, &blk|
-            CapabilityGuard.ensure!(:tribal_enrollment)
-            kwargs.empty? ? impl.call(*args, &blk) : impl.call(*args, **kwargs, &blk)
-          end
-        end
-
-        method ? super(name, method, &block) : super(name, &block)
-      end
     end
   end
 end
