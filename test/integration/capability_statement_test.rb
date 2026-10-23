@@ -69,6 +69,15 @@ class CapabilityStatementTest < ActionDispatch::IntegrationTest
       ids = search_ids("AuditEvent", patient: "Patient/1", _count: "100")
       assert_includes ids, mine.id.to_s
       refute_includes ids, theirs.id.to_s
+    },
+    %w[MedicationRequest status] => lambda {
+      RpmsRpc.client.seed_text(:medication_active, "1", <<~WIRE)
+        ~OP^1R;O^LISINOPRIL 10MG TAB^^3271231^3^^^120001^ACTIVE
+        ~OP^2R;O^METFORMIN 500MG TAB^^3271231^1^^^120002^DISCONTINUED
+      WIRE
+      assert_equal %w[1R-O], search_ids("MedicationRequest", patient: "1", status: "active")
+      assert_equal %w[2R-O], search_ids("MedicationRequest", patient: "1", status: "stopped")
+      assert_refused("MedicationRequest", patient: "1", status: "http://hl7.org/fhir/CodeSystem/medicationrequest-status|active")
     }
   }.freeze
 
@@ -78,8 +87,7 @@ class CapabilityStatementTest < ActionDispatch::IntegrationTest
   PATIENT_SEEDS = {
     "AllergyIntolerance" => [ :allergy_list, { allergen: "Penicillin", reaction: "Hives", severity: "moderate" } ],
     "Condition" => [ :problem_list, { ien: 11, status: "A", icd_code: "E11.9", description: "Type 2 diabetes" } ],
-    "MedicationRequest" => [ :medication_list, { id: "11", name: "Metformin 500mg", sig: "1 tab PO BID",
-                                                 status: "active" } ],
+    "MedicationRequest" => [ :medication_active, "~OP^11R;O^METFORMIN 500MG TAB^^3271231^1^^^120011^ACTIVE\n" ],
     "Procedure" => [ :procedure_list, { ien: 7001, name: "Office visit", date: Date.new(2026, 3, 10),
                                         provider: "MARTINEZ,SARAH", status: "C" } ]
   }.freeze
@@ -191,7 +199,11 @@ class CapabilityStatementTest < ActionDispatch::IntegrationTest
 
   test "the patient parameter is required and selects the patient" do
     PATIENT_SEEDS.each do |type, (collection, row)|
-      RpmsRpc.client.seed_keyed_collection(collection, "1", [ row ])
+      if row.is_a?(String)
+        RpmsRpc.client.seed_text(collection, "1", row)
+      else
+        RpmsRpc.client.seed_keyed_collection(collection, "1", [ row ])
+      end
     end
 
     patient_compartment_types.each do |type|
