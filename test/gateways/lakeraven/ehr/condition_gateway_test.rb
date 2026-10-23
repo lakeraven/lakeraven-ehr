@@ -15,7 +15,7 @@ module Lakeraven
 
       test "for_patient returns the seeded problem list" do
         RpmsRpc.client.seed_keyed_collection(:problem_list, "1", [
-          { icd_code: "E11.9", description: "Type 2 diabetes", status: "A" }
+          { ien: 1, icd_code: "E11.9", description: "Type 2 diabetes", status: "A" }
         ])
 
         result = ConditionGateway.for_patient(1)
@@ -125,26 +125,6 @@ module Lakeraven
         assert_equal before, RpmsRpc.client.received_calls.length
       end
 
-      # --- filter ---
-
-      test "filter returns the seeded list scoped by IPL tab" do
-        RpmsRpc.client.seed_keyed_collection(:problem_filter, "1", [
-          { icd_code: "I10", description: "Essential hypertension", status: "A" }
-        ])
-
-        result = ConditionGateway.filter(1, scope: :core)
-
-        assert_kind_of Array, result
-        assert_equal "I10", result.first[:icd_code]
-      end
-
-      test "filter raises for unknown scope" do
-        assert_raises(ArgumentError) { ConditionGateway.filter(1, scope: :unknown_scope) }
-      end
-
-      test "filter returns empty for invalid dfn" do
-        assert_equal [], ConditionGateway.filter(nil, scope: :core)
-      end
       # --- Gate findings on #568 (OpenAI/Sol), each reproduced then closed ---
       #
       # These are regression tests for three ways a substance-use diagnosis

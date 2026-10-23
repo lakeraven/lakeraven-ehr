@@ -31,9 +31,11 @@ module Lakeraven
       end
 
       test "entries have correct resourceType" do
+        # BGOVCPT GET rows: the visit date as MM/DD/YYYY, and no status (V CPT
+        # has none; rpms-rpc #375).
         RpmsRpc.client.seed_keyed_collection(:procedure_list, "1", [
-          { ien: 7001, name: "Office visit, established", date: Date.new(2026, 3, 10),
-            provider: "MARTINEZ,SARAH", status: "C" }
+          { ien: 7001, visit_ien: 2090061, date: "03/10/2026", cpt_code: "99213",
+            name: "Office visit, established", provider: "MARTINEZ,SARAH" }
         ])
 
         get "/lakeraven-ehr/Procedure", params: { patient: "1" }, headers: @headers

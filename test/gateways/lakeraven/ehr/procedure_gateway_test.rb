@@ -10,9 +10,11 @@ module Lakeraven
       # --- read: for_patient ---
 
       test "for_patient returns the seeded procedure list" do
+        # BGOVCPT GET rows: the visit date as MM/DD/YYYY, and no status (V CPT
+        # has none; rpms-rpc #375).
         RpmsRpc.client.seed_keyed_collection(:procedure_list, "1", [
-          { ien: 7001, name: "Office visit, established", date: Date.new(2026, 3, 10),
-            provider: "MARTINEZ,SARAH", status: "C" }
+          { ien: 7001, visit_ien: 2090061, date: "03/10/2026", cpt_code: "99213",
+            name: "Office visit, established", provider: "MARTINEZ,SARAH" }
         ])
 
         result = ProcedureGateway.for_patient(1)
