@@ -1196,15 +1196,25 @@ class DemoScriptTest < ActiveSupport::TestCase
     }.merge(extra)
   end
 
+  # A PATH with every command the real one has except `ruby`. Dropping whole
+  # directories is not enough: on a usr-merged Linux runner sh, env and lsof sit
+  # beside the system ruby, so the demo's `#!/usr/bin/env sh` would not even
+  # start. Each other command is linked into a private directory instead.
   def path_without_ruby
-    segments = [ @stub_bin ]
+    bin = Dir.mktmpdir("demo_script_no_ruby_bin_")
+    @trees << bin
     ENV.fetch("PATH", "").split(":").each do |dir|
-      next if dir.empty?
-      next if File.executable?(File.join(dir, "ruby"))
+      next if dir.empty? || !File.directory?(dir)
 
-      segments << dir
+      Dir.children(dir).each do |name|
+        source = File.join(dir, name)
+        link = File.join(bin, name)
+        next if name == "ruby" || File.symlink?(link) || !File.file?(source) || !File.executable?(source)
+
+        File.symlink(source, link)
+      end
     end
-    segments.join(":")
+    "#{@stub_bin}:#{bin}"
   end
 
   def shell_available?(shell)
