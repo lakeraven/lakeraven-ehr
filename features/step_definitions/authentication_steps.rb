@@ -116,7 +116,7 @@ def setup_user_with_role(role, security_keys = nil)
   end
 
   attrs = { duz: duz, name: "TEST,#{role.upcase}", user_type: role }
-  attrs[:security_keys] = RpmsRpc::SecurityKeys.symbolize(security_keys) if security_keys
+  attrs[:security_keys] = Lakeraven::EHR::Roles.symbolize_keys(security_keys) if security_keys
 
   @current_user = Lakeraven::EHR::CurrentUser.new(attrs)
   @logged_in = true

@@ -31,7 +31,40 @@ module Lakeraven
         "user" => %i[view_own_referrals]
       }.freeze
 
+      # Symbolic key => the SECURITY KEY name RPMS reports for a user. The host
+      # owns this table (rpms-rpc ADR 0010). rpms-rpc #337 narrowed the gem's
+      # SecurityKeys::REGISTRY to names that are SECURITY KEYs (#19.1) on the
+      # pinned build, which left only scheduling_admin of the names below. They
+      # are carried unchanged from the gem's earlier registry, so sign-on grants
+      # what it granted before the upgrade: a name no user holds grants nothing.
+      # Which of them are real keys, and the real keys that replace the rest, is
+      # lakeraven-ehr#578.
+      KEY_NAMES = {
+        prc_supervisor: "PRCFA SUPERVISOR",
+        prc_tech: "PRCFA TECH",
+        prc_manager: "BPRC MANAGER",
+        chs_approve: "BGOZ CHS APPROVE",
+        chs_clerk: "BGOZ CHS CLERK",
+        consult_manager: "GMRC MGR",
+        eligibility_verify: "APCL VERIFY",
+        scheduling_admin: "SD SUPERVISOR",
+        bh_provider: "BGMH PROVIDER",
+        bh_supervisor: "BGMH SUPERVISOR",
+        dental_provider: "DENTP PROVIDER",
+        dental_supervisor: "DENTP SUPERVISOR",
+        cprs_gui_chart: "OR CPRS GUI CHART"
+      }.freeze
+
+      KEY_SYMBOLS = KEY_NAMES.invert.freeze
+
       class << self
+        # The symbolic keys for the key names RPMS reported. A name the table
+        # does not list is dropped: a local key the EHR does not model grants
+        # nothing.
+        def symbolize_keys(names)
+          Array(names).filter_map { |name| KEY_SYMBOLS[name] }
+        end
+
         def can?(user, permission)
           permissions_for(user).include?(permission.to_sym)
         end
