@@ -32,9 +32,14 @@ name: Risk tier
 # Fail closed: only a classifier that exits 0 AND prints `phone-safe` first yields phone-safe.
 # Anything else (a missing classifier, an unreadable or truncated file list, a file name with
 # a control character, exit 1 or 2, an empty output) is laptop-only. Absence of data is never verification.
+# `edited` is here for one reason: retargeting a PR at another base branch emits it, and the
+# new base can put controllers or migrations into a diff that was docs-only. A title or body
+# edit reruns the same classification and lands on the same label. The job deliberately has no
+# `if`: the concurrency group below cancels the older run when a newer one starts, so a
+# skipped newer run would leave nothing.
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, edited]
 
 permissions:
   contents: read
@@ -74,19 +79,29 @@ jobs:
             detail="  (undetermined: bin/risk-tier is not on the base branch yet)"
           elif ! gh api --paginate "repos/$REPO/pulls/$PR/files" > pages.json; then
             detail="  (undetermined: could not list the PR's files)"
+          elif ! jq -s 'add // []' pages.json > files.json; then
+            detail="  (undetermined: could not merge the pages of the PR's file list)"
+          elif ! got=$(jq length files.json); then
+            detail="  (undetermined: could not count the PR's files)"
+          elif [ "$got" != "$CHANGED" ] || [ "$CHANGED" -ge 3000 ]; then
+            detail="  (undetermined: read $got of $CHANGED files; the API caps a PR at 3000)"
           else
-            jq -s 'add // []' pages.json > files.json
-            got=$(jq length files.json)
-            if [ "$got" != "$CHANGED" ] || [ "$CHANGED" -ge 3000 ]; then
-              detail="  (undetermined: read $got of $CHANGED files; the API caps a PR at 3000)"
-            elif jq -e 'any(.[]; (.filename, .previous_filename // empty) | test("[\\x00-\\x1f\\x7f]"))' files.json > /dev/null; then
-              # A name with a newline would become two lines in paths.txt, each possibly a
-              # safe path on its own, and a trailing CR would be stripped. The classifier only
-              # sees lines, so the control character has to be caught here, in the JSON.
+            # A name with a newline would become two lines in paths.txt, each possibly a
+            # safe path on its own, and a trailing CR would be stripped. The classifier only
+            # sees lines, so the control character has to be caught here, in the JSON.
+            # jq -e: 0 = found one, 1 = none. Anything else is a jq that failed, and a failed
+            # check is not a clean one.
+            jq -e 'any(.[]; (.filename, .previous_filename // empty) | test("[\\x00-\\x1f\\x7f]"))' files.json > /dev/null
+            ctl=$?
+            if [ "$ctl" -eq 0 ]; then
               detail="  (a file name contains a control character and cannot be judged line by line: treated as laptop-only)"
+            elif [ "$ctl" -ne 1 ]; then
+              detail="  (undetermined: the control-character check failed with jq exit $ctl)"
+            # A rename contributes BOTH its old and new path. A jq that dies partway leaves a
+            # short paths.txt that could look entirely safe.
+            elif ! jq -r '.[] | .filename, (.previous_filename // empty)' files.json > paths.txt; then
+              detail="  (undetermined: could not write out the PR's file names)"
             else
-              # A rename contributes BOTH its old and new path.
-              jq -r '.[] | .filename, (.previous_filename // empty)' files.json > paths.txt
               out=$(bin/risk-tier < paths.txt)
               rc=$?
               first=$(printf '%s\n' "$out" | head -n 1)
@@ -128,15 +143,20 @@ jobs:
           if [ "$TIER" = "phone-safe" ]; then add=risk:phone-safe; drop=risk:laptop-only
           else add=risk:laptop-only; drop=risk:phone-safe; fi
 
+          # 0 = the label is on the PR, 1 = a successful read shows it is not, 2 = the read failed.
+          # A failed read says nothing about the label, so it is never "absent".
           has_label() {
-            gh pr view "$PR" --repo "$REPO" --json labels --jq '.labels[].name' | grep -qx "$1"
+            names=$(gh pr view "$PR" --repo "$REPO" --json labels --jq '.labels[].name') || return 2
+            printf '%s\n' "$names" | grep -qx "$1"
           }
 
-          # Remove the opposite label FIRST. If that fails and the label is still there, stop:
-          # adding the new label would leave a PR carrying both.
+          # Remove the opposite label FIRST. If that fails and the label is still there, or
+          # cannot be checked, stop: adding the new label could leave a PR carrying both.
           if ! gh pr edit "$PR" --repo "$REPO" --remove-label "$drop"; then
-            if has_label "$drop"; then
-              echo "::error::could not remove $drop from PR #$PR; leaving the labels alone"
+            present=0
+            has_label "$drop" || present=$?
+            if [ "$present" -ne 1 ]; then
+              echo "::error::could not remove $drop from PR #$PR (label check exit $present); leaving the labels alone"
               exit 1
             fi
           fi
