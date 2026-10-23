@@ -13,6 +13,9 @@ module Lakeraven
       # lands it renders `rest_search_params` into `rest[].searchParam`, which
       # is where FHIR R4 puts parameters common to every resource, and
       # `resource_capabilities(type)` into each `rest[].resource`.
+      #
+      # `search` lists the type's own search parameters: only the ones its
+      # controller applies.
       module SearchCapabilities
         DEFAULT_COUNT = 20
         MAX_COUNT = 100
@@ -25,6 +28,10 @@ module Lakeraven
         # A forward reference `_include` follows: where the reference sits in
         # the resource, and the one resource type it may point at.
         Include = Data.define(:paths, :target)
+
+        # A resource's own search parameter: its FHIR search type, and what
+        # this server does with it.
+        Param = Data.define(:type, :documentation)
 
         ID = Sort.new(paths: [ %i[id] ], type: :string)
         NAME = Sort.new(paths: [ [ :name, 0, :family ], [ :name, 0, :given, 0 ] ], type: :string)
@@ -54,6 +61,13 @@ module Lakeraven
             include: { "Condition:patient" => SUBJECT, "Condition:subject" => SUBJECT }
           },
           "MedicationRequest" => {
+            search: {
+              "status" => Param.new(
+                type: "token",
+                documentation: "Comma-separated status codes, any of which matches, mapped from the RPMS " \
+                               "order status. A system|code value is refused with a 400 OperationOutcome."
+              )
+            },
             sort: { "_id" => ID, "status" => STATUS },
             include: { "MedicationRequest:patient" => SUBJECT, "MedicationRequest:subject" => SUBJECT }
           },
@@ -109,6 +123,10 @@ module Lakeraven
           RESOURCES.dig(type, :include) || {}
         end
 
+        def self.search_params_for(type)
+          RESOURCES.dig(type, :search) || {}
+        end
+
         def self.rest_search_params
           [
             {
@@ -140,19 +158,25 @@ module Lakeraven
           ]
         end
 
-        # The parts of a CapabilityStatement rest.resource entry that _sort
-        # and _include contribute.
+        # The search parts of a CapabilityStatement rest.resource entry: the
+        # type's own parameters, its _sort parameters, and what _include may
+        # follow.
         def self.resource_capabilities(type)
           sorts = sorts_for(type).keys
-          capabilities = {}
-          capabilities[:searchInclude] = includes_for(type).keys if includes_for(type).any?
+          params = search_params_for(type).map do |name, param|
+            { name: name, type: param.type, documentation: param.documentation }
+          end
           if sorts.any?
-            capabilities[:searchParam] = [ {
+            params << {
               name: "_sort",
               type: "string",
               documentation: "Sorts on: #{sorts.join(', ')}. Prefix - for descending."
-            } ]
+            }
           end
+
+          capabilities = {}
+          capabilities[:searchInclude] = includes_for(type).keys if includes_for(type).any?
+          capabilities[:searchParam] = params if params.any?
           capabilities
         end
       end
