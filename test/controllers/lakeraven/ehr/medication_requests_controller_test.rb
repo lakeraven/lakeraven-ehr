@@ -32,7 +32,7 @@ module Lakeraven
 
       test "entries have correct resourceType" do
         RpmsRpc.client.seed_keyed_collection(:medication_list, "1", [
-          { ien: 1, drug_name: "Lisinopril 10mg", route: "PO", schedule: "daily", refills: 3, stop_date: nil }
+          { id: "1", name: "Lisinopril 10mg", route: "PO", schedule: "daily", refills: 3, stop_date: nil }
         ])
 
         get "/lakeraven-ehr/MedicationRequest", params: { patient: "1" }, headers: @headers

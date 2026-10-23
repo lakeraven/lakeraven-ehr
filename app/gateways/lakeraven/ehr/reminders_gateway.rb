@@ -4,12 +4,17 @@ require "rpms_rpc/api/reminders"
 
 module Lakeraven
   module EHR
-    # Clinical reminders relevant to a specific encounter.
-    # Wraps RpmsRpc::Reminders.for_visit.
+    # Clinical reminders as the RPMS reminder engine evaluates them for a
+    # patient at a hospital location (#44). Wraps RpmsRpc::Reminders.applicable
+    # (ORQQPXRM REMINDERS APPLICABLE, rpms-rpc #329). RPMS has no
+    # visit-keyed reminder read, so an encounter's reminders are the ones
+    # for its location. Each row's :status is :applicable, :due,
+    # :not_applicable, :error or :cannot_be_determined, as the engine's due
+    # flag says; not-applicable rows come back as RPMS returns them.
     class RemindersGateway
-      def self.for_visit(dfn, visit_ien, via: default_provider)
+      def self.applicable(dfn, location_ien, via: default_provider)
         return [] if via.nil?
-        via.for_visit(dfn.to_s, visit_ien.to_s)
+        via.applicable(dfn.to_s, location_ien&.to_s)
       end
 
       def self.default_provider
