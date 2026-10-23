@@ -78,7 +78,7 @@ class CapabilityStatementTest < ActionDispatch::IntegrationTest
   PATIENT_SEEDS = {
     "AllergyIntolerance" => [ :allergy_list, { allergen: "Penicillin", reaction: "Hives", severity: "moderate" } ],
     "Condition" => [ :problem_list, { ien: 11, status: "A", icd_code: "E11.9", description: "Type 2 diabetes" } ],
-    "MedicationRequest" => [ :medication_list, { ien: 11, drug_name: "Metformin 500mg", sig: "1 tab PO BID",
+    "MedicationRequest" => [ :medication_list, { id: "11", name: "Metformin 500mg", sig: "1 tab PO BID",
                                                  status: "active" } ],
     "Procedure" => [ :procedure_list, { ien: 7001, name: "Office visit", date: Date.new(2026, 3, 10),
                                         provider: "MARTINEZ,SARAH", status: "C" } ]
