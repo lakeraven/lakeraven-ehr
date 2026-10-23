@@ -4,6 +4,7 @@ require "test_helper"
 require "open3"
 require "tmpdir"
 require "fileutils"
+require "yaml"
 
 # Contract for bin/red-before-green (written before the script; the builder
 # does not edit these tests).
@@ -692,6 +693,60 @@ class RedBeforeGreenTest < Minitest::Test
 
     assert_equal 0, status.exitstatus, out
     assert_match(/^VERDICT: RED$/, out)
+  end
+
+  # --- Copilot round (PR #632 thread on the workflow's bundler-cache) --------
+  # Spec amendment: written after the finding, before the fix. The builder does not
+  # edit these.
+  #
+  # ruby/setup-ruby with bundler-cache installs gems under the checkout's vendor/bundle
+  # and records that path with `bundle config --local`, i.e. in the checkout's own
+  # .bundle/config. That file is gitignored, so the scratch worktree the script runs the
+  # tests in does not have it, and `bundle exec rails test` there cannot find the gems
+  # (verdict UNDETERMINED, no tests run). BUNDLE_PATH in the environment is read by every
+  # bundler process, whatever its directory, so the step must pass it, and it must be
+  # absolute: a relative path would resolve against the scratch worktree.
+
+  def script_step
+    steps = YAML.load_file(WORKFLOW).fetch("jobs").fetch("red-before-green").fetch("steps")
+    steps.find { |step| step["run"].to_s.include?("bin/red-before-green") } or flunk("no step runs bin/red-before-green")
+  end
+
+  def test_the_workflow_installs_gems_with_the_setup_ruby_bundler_cache
+    setup = YAML.load_file(WORKFLOW).fetch("jobs").fetch("red-before-green").fetch("steps")
+      .find { |step| step["uses"].to_s.start_with?("ruby/setup-ruby") }
+
+    assert setup, "the workflow must install ruby with ruby/setup-ruby"
+    assert_equal true, setup.fetch("with").fetch("bundler-cache")
+  end
+
+  def test_the_script_step_hands_the_scratch_worktree_an_absolute_bundle_path
+    bundle_path = script_step.fetch("env", {})["BUNDLE_PATH"].to_s
+
+    refute_empty bundle_path, "the step that runs the script must set BUNDLE_PATH for the scratch worktree"
+    assert_match(%r{\A(/|\$\{\{ github\.workspace \}\}/)}, bundle_path, "BUNDLE_PATH must be absolute")
+  end
+
+  def test_the_bundle_path_is_where_setup_ruby_installed_the_gems
+    bundle_path = script_step.fetch("env", {})["BUNDLE_PATH"].to_s
+
+    assert_match(%r{/vendor/bundle\z}, bundle_path)
+  end
+
+  # Not red before the fix (the script already runs the tests with its own environment):
+  # it pins that the script must keep passing BUNDLE_PATH through to the test command.
+  def test_a_bundle_path_in_the_environment_reaches_the_test_command_in_the_scratch_worktree
+    write "app/greeter.rb", "# fixed\n"
+    write "test/greeter_test.rb", "# new test\n"
+    commit "pr"
+    runner = "puts \"BUNDLE_PATH=\#{ENV['BUNDLE_PATH']}\"\nputs \"PWD=\#{Dir.pwd}\"\n" \
+             "puts \"#{FIN}1 runs, 1 assertions, 0 failures, 0 errors, 0 skips\""
+    # The fake runner is a plain ruby process: keep the outer bundle exec's setup out of it.
+    env = fake_runner(runner).merge("BUNDLE_PATH" => "/abs/vendor/bundle", "RUBYOPT" => nil, "BUNDLE_GEMFILE" => nil)
+    out, = run_script(env: env)
+
+    assert_match(%r{^BUNDLE_PATH=/abs/vendor/bundle$}, out)
+    refute_includes out[/^PWD=.*$/].to_s, @dir, "the tests must run in the scratch worktree, not the PR checkout"
   end
 
   private
