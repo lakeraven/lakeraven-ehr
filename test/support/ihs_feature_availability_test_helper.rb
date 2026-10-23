@@ -1,20 +1,5 @@
 # frozen_string_literal: true
 
-# Production defines this under app/; the helper supplies the contract shape
-# until then so gateway specs fail on missing behaviour, not NameError.
-module Lakeraven
-  module EHR
-    class FeatureUnavailable < StandardError
-      attr_reader :capability
-
-      def initialize(capability)
-        @capability = capability
-        super("#{capability} is not available on this system")
-      end
-    end unless const_defined?(:FeatureUnavailable)
-  end
-end
-
 # Shared setup for #647 — backends that lack IHS-only capabilities.
 module IhsFeatureAvailabilityTestHelper
   RESTRICTED_BACKEND = :ihs_restricted_test
@@ -57,6 +42,14 @@ module IhsFeatureAvailabilityTestHelper
     assert_equal "not-supported", issue["code"]
     assert_match(/not available/i, issue["diagnostics"])
     assert_match(/#{capability}/, issue["diagnostics"])
+  end
+
+  def rpc_calls_since(before_length)
+    RpmsRpc.client.received_calls.drop(before_length)
+  end
+
+  def assert_no_rpc_calls_since(before_length)
+    assert_empty rpc_calls_since(before_length), "expected no RpmsRpc.client calls, got: #{rpc_calls_since(before_length).inspect}"
   end
 
   def sign_in_for_dashboard(username: "lindarodriguez", password: "test123")

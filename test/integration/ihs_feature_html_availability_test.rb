@@ -48,7 +48,29 @@ class IhsFeatureHtmlAvailabilityTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "chart Immunizations card reports a load failure instead of an empty list when the gateway raises" do
+    with_restricted_backend(capabilities: [ :ihs_immunization ]) do
+      with_gateway_method(Lakeraven::EHR::ImmunizationGateway, :for_patient, ->(*) { raise RpmsRpc::Client::RpcError, "broker timeout" }) do
+        get_chart_html
+        assert_response :ok
+        assert_includes response.body, ">Immunizations</h2>"
+        assert_match(/immunizations could not be loaded/i, response.body)
+        refute_includes response.body, "No immunizations on file."
+        refute_match(/Immunizations<\/h2><span class="count">0<\/span>/, response.body)
+      end
+    end
+  end
+
   private
+
+  def with_gateway_method(gateway, name, impl)
+    singleton = gateway.singleton_class
+    original = singleton.instance_method(name)
+    gateway.define_singleton_method(name, impl)
+    yield
+  ensure
+    gateway.define_singleton_method(name, original)
+  end
 
   def get_chart_html
     get "/lakeraven-ehr/patients/#{PATIENT_DFN}", headers: @headers
