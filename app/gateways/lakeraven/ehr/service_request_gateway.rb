@@ -6,10 +6,12 @@ module Lakeraven
   module EHR
     class ServiceRequestGateway
       def self.for_patient(dfn)
+        CapabilityGuard.ensure!(:prc_referrals)
         RpmsRpc::Referral.for_patient(dfn.to_s)
       end
 
       def self.create(dfn, params)
+        CapabilityGuard.ensure!(:prc_referrals)
         RpmsRpc::Referral.create(dfn.to_s, params)
       end
 
@@ -20,6 +22,7 @@ module Lakeraven
       # takes none: a reason asked for and then dropped would look recorded.
       # A refusal or a broker error comes back as a failure with its message.
       def self.cancel(ien)
+        CapabilityGuard.ensure!(:prc_referrals)
         result = RpmsRpc::Referral.cancel(ien.to_s)
         if result[:success]
           { success: true, message: "Referral cancelled", ien: ien }
@@ -29,9 +32,6 @@ module Lakeraven
       rescue RpmsRpc::Client::RpcError, RpmsRpc::Client::ConnectionError => e
         { success: false, error: PhiSanitizer.sanitize_message(e.message), ien: ien }
       end
-
-      # PRC referrals are IHS-only (#647).
-      CapabilityGuard.protect(self, :prc_referrals, :for_patient, :create, :cancel)
     end
   end
 end

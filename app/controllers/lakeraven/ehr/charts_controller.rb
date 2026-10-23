@@ -48,6 +48,10 @@ module Lakeraven
 
       FHIR_CONTENT_TYPE = "application/fhir+json"
 
+      # Chart sections an IHS capability owns. A backend that withholds one
+      # adds an outcome entry instead of those resources (#647).
+      CHART_CAPABILITY_RESOURCES = { ihs_immunization: "Immunization" }.freeze
+
       before_action :authenticate_chart_request!
       before_action :require_patient_scope!
       before_action :enforce_patient_context!
@@ -173,10 +177,22 @@ module Lakeraven
 
       # Immunizations are an IHS-only chart section. A backend without the
       # capability never sees the gateway call, and the card is omitted.
+      # A read that raises is a failed card, not an empty list.
       def ihs_immunizations(dfn)
         return [] unless readable?("Immunization") && BackendRegistry.current.provides?(:ihs_immunization)
 
-        safe { Immunization.for_patient(dfn) }
+        Immunization.for_patient(dfn)
+      rescue StandardError => error
+        record_immunization_load_failure(error)
+        []
+      end
+
+      def record_immunization_load_failure(error)
+        @immunizations_load_failed = true
+        Rails.logger.warn(
+          "[chart] immunizations could not be loaded: #{error.class}: " \
+          "#{PhiSanitizer.sanitize_message(error.message)}"
+        )
       end
 
       # Scored screening instruments (#474). Engine-owned records rather than an
@@ -317,6 +333,10 @@ module Lakeraven
         resources.concat(@procedures.map(&:to_fhir))
         resources.concat(chart_encounter_entries)
 
+        entries = resources.map do |resource|
+          { fullUrl: entry_full_url(resource), resource: resource, search: { mode: "match" } }
+        end
+
         {
           resourceType: "Bundle",
           id: SecureRandom.uuid,
@@ -324,9 +344,29 @@ module Lakeraven
           type: "searchset",
           total: resources.length,
           link: [ { relation: "self", url: request.original_url } ],
-          entry: resources.map do |r|
-            { fullUrl: entry_full_url(r), resource: r, search: { mode: "match" } }
-          end
+          entry: entries + withheld_chart_outcomes
+        }
+      end
+
+      def withheld_chart_outcomes
+        CHART_CAPABILITY_RESOURCES.filter_map do |capability, resource_type|
+          next if BackendRegistry.current.provides?(capability)
+
+          chart_feature_outcome(resource_type)
+        end
+      end
+
+      def chart_feature_outcome(resource_type)
+        {
+          resource: {
+            resourceType: "OperationOutcome",
+            issue: [ {
+              severity: "error",
+              code: "not-supported",
+              diagnostics: "#{resource_type} is not available on this system"
+            } ]
+          },
+          search: { mode: "outcome" }
         }
       end
 

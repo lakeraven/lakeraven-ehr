@@ -11,6 +11,7 @@ module Lakeraven
       FAILURE = { success: false, ien: nil, raw: nil }.freeze
 
       def self.add(dfn, visit_ien, measurement_type, value, units:, qualifier: nil, via: default_provider)
+        CapabilityGuard.ensure!(:pcc_screens)
         return FAILURE if via.nil?
 
         via.add(dfn.to_s, visit_ien.to_s, measurement_type, value,
@@ -20,8 +21,6 @@ module Lakeraven
       def self.default_provider
         ::RpmsRpc::Measurement
       end
-
-      CapabilityGuard.protect(self, :pcc_screens, :add)
     end
   end
 end

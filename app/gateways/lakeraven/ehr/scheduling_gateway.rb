@@ -61,6 +61,7 @@ module Lakeraven
         # is passed through as the BSDX RESOURCE; end time is derived from the
         # requested length.
         def book(clinic_ien, dfn, at:, minutes:, note: nil)
+          CapabilityGuard.ensure!(:bprm_scheduling)
           return validation_error("clinic is required") unless valid_id?(clinic_ien)
           return validation_error("dfn is required") unless valid_id?(dfn)
 
@@ -83,6 +84,7 @@ module Lakeraven
         # Confirmed: RpmsRpc::Scheduling.cancel_appointment → BSDX CANCEL
         # APPOINTMENT → $$CANCEL^BSDAPI. Empty-ERRORID==success handled by the gem.
         def cancel(appointment_id, cancel_type:, reason:, note: nil)
+          CapabilityGuard.ensure!(:bprm_scheduling)
           return validation_error("appointment id is required") unless valid_id?(appointment_id)
           return validation_error("reason is required") if blank?(reason)
 
@@ -99,6 +101,7 @@ module Lakeraven
         # Confirmed: RpmsRpc::Scheduling.mark_no_show → BSDX NOSHOW. The gem owns
         # the INVERTED-polarity ERRORID (1 == success) and the set/clear flag.
         def no_show(appointment_id, undo: false)
+          CapabilityGuard.ensure!(:bprm_scheduling)
           return validation_error("appointment id is required") unless valid_id?(appointment_id)
 
           RpcSupport.with_broker(UNAVAILABLE) do
@@ -115,6 +118,7 @@ module Lakeraven
         # APPOINTMENT ("0"/empty ERRORID == success, handled by the gem). Undo
         # has no stock RPC and stays on the PROVISIONAL placeholder below.
         def check_in(appointment_id, at: nil, undo: false)
+          CapabilityGuard.ensure!(:bprm_scheduling)
           return validation_error("appointment id is required") unless valid_id?(appointment_id)
           return uncheck_in(appointment_id) if undo
 
@@ -139,6 +143,7 @@ module Lakeraven
         # no appointment. If the (validated) new slot is still refused by the
         # broker, the cancel is rolled back by re-booking the original slot.
         def rebook(appointment_id, clinic_ien:, at:, reason:, dfn:, minutes: 20, original_at:)
+          CapabilityGuard.ensure!(:bprm_scheduling)
           return validation_error("appointment id is required") unless valid_id?(appointment_id)
           return validation_error("clinic is required") unless valid_id?(clinic_ien)
           return validation_error("dfn is required") unless valid_id?(dfn)
@@ -160,6 +165,7 @@ module Lakeraven
         # slots this endpoint returns — so it is not a drop-in and awaits a
         # trace capture of the open-slot RPC.
         def availability(clinic_ien, date)
+          CapabilityGuard.ensure!(:bprm_scheduling)
           return validation_error("clinic is required") unless valid_id?(clinic_ien)
           return validation_error("date is invalid") unless RpcSupport.valid_fm_date?(date)
 
@@ -173,6 +179,7 @@ module Lakeraven
         # --- #6 Access-block configuration (read) --------------------------
         # PROVISIONAL: unconfirmed against #8994 — needs trace capture.
         def access_blocks(clinic_ien)
+          CapabilityGuard.ensure!(:bprm_scheduling)
           return validation_error("clinic is required") unless valid_id?(clinic_ien)
 
           RpcSupport.with_broker(UNAVAILABLE) do
@@ -184,6 +191,7 @@ module Lakeraven
         # --- #11 Clinic day schedule (GET /clinics/:ien/schedule) ----------
         # PROVISIONAL: unconfirmed against #8994 — needs trace capture.
         def clinic_schedule(clinic_ien, date, include_cancelled: false)
+          CapabilityGuard.ensure!(:bprm_scheduling)
           return validation_error("clinic is required") unless valid_id?(clinic_ien)
           return validation_error("date is invalid") unless RpcSupport.valid_fm_date?(date)
 
@@ -222,6 +230,7 @@ module Lakeraven
         # --- #13 Waiting list report (GET /clinics/:ien/waiting_list) ------
         # PROVISIONAL: unconfirmed against #8994 — needs trace capture.
         def waiting_list(clinic_ien)
+          CapabilityGuard.ensure!(:bprm_scheduling)
           return validation_error("clinic is required") unless valid_id?(clinic_ien)
 
           RpcSupport.with_broker(UNAVAILABLE) do
@@ -234,6 +243,7 @@ module Lakeraven
         # PROVISIONAL: unconfirmed against #8994 — needs trace capture. Must
         # ultimately file through the BSDWL API / ^DIE, never a raw global set.
         def waiting_list_add(clinic_ien, dfn, priority: "routine", reason: nil)
+          CapabilityGuard.ensure!(:bprm_scheduling)
           return validation_error("clinic is required") unless valid_id?(clinic_ien)
           return validation_error("dfn is required") unless valid_id?(dfn)
           if [ priority, reason ].any? { |v| RpcSupport.unsafe_field?(v) }
@@ -254,6 +264,7 @@ module Lakeraven
         # writes must file through the scheduling API / ^DIE on BSDX ACCESS
         # BLOCK (9002018.3) + ACCESS TYPE (9002018.35), never a raw global set.
         def set_availability_config(clinic_ien, days:, start_time:, end_time:, minutes:)
+          CapabilityGuard.ensure!(:bprm_scheduling)
           return validation_error("clinic is required") unless valid_id?(clinic_ien)
           if [ *Array(days), start_time, end_time ].any? { |v| RpcSupport.unsafe_field?(v) }
             return validation_error("availability fields contain unsupported characters")
@@ -270,6 +281,7 @@ module Lakeraven
 
         # PROVISIONAL: unconfirmed against #8994 — needs trace capture.
         def add_holiday(clinic_ien, date, label:)
+          CapabilityGuard.ensure!(:bprm_scheduling)
           return validation_error("label contains unsupported characters") if RpcSupport.unsafe_field?(label)
 
           holiday_write(ADD_HOLIDAY_RPC, clinic_ien, date, [ label ], status: 201)
@@ -277,6 +289,7 @@ module Lakeraven
 
         # PROVISIONAL: unconfirmed against #8994 — needs trace capture.
         def remove_holiday(clinic_ien, date)
+          CapabilityGuard.ensure!(:bprm_scheduling)
           holiday_write(DEL_HOLIDAY_RPC, clinic_ien, date, [], status: 200)
         end
 
@@ -425,10 +438,7 @@ module Lakeraven
 
       # BSDX scheduling writes and reports are IHS-only (#647). Stock ORWPT
       # APPTLST reads (patient_appointments, cancelled_appointments,
-      # routing_slip) stay outside the guard.
-      CapabilityGuard.protect(self, :bprm_scheduling, :book, :cancel, :no_show, :check_in, :rebook,
-        :availability, :access_blocks, :clinic_schedule, :waiting_list, :waiting_list_add,
-        :set_availability_config, :add_holiday, :remove_holiday)
+      # routing_slip) are not checked here.
     end
   end
 end
