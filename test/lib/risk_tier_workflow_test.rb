@@ -237,6 +237,13 @@ class RiskTierWorkflowTest < ActiveSupport::TestCase
     assert_equal "laptop-only", tier
   end
 
+  # Copilot round on #633: a file named only with spaces is a changed path. The workflow wrote it
+  # to paths.txt and the classifier dropped it as blank, so README.md plus that file was phone-safe.
+  test "a file whose name is only spaces makes the PR laptop-only" do
+    tier, summary = run_classify(files: [ file("README.md"), file("   ") ])
+    assert_equal "laptop-only", tier, summary
+  end
+
   # Copilot round on #633: a jq that dies must never read as "no control characters" or as a
   # complete list of names. Both used to fall through to phone-safe.
   test "a control-character check that errors is laptop-only, not 'no control characters'" do

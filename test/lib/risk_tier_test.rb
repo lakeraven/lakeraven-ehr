@@ -281,6 +281,67 @@ class RiskTierTest < ActiveSupport::TestCase
     end
   end
 
+  # Copilot round on #633: a name made only of whitespace is a real file name, not a blank line.
+  # It used to be dropped before classification, so README.md plus a file called "   " came out
+  # phone-safe although one changed path was never judged.
+  test "a path made only of spaces is laptop-only, not silently dropped" do
+    [ " ", "   ", "\u3000" ].each do |name|
+      tier, status, out = classify([ "README.md", name ])
+      assert_equal "laptop-only", tier, name.inspect
+      assert_equal 0, status, name.inspect
+      assert_match(/not on the safe-list/, out, name.inspect)
+    end
+  end
+
+  test "a path made only of a tab is laptop-only, not silently dropped" do
+    tier, status, out = classify([ "README.md", "\t" ])
+    assert_equal "laptop-only", tier
+    assert_equal 0, status
+    assert_match(/control character/i, out)
+  end
+
+  test "a list holding only a whitespace-only name is classified, not treated as empty" do
+    tier, status, out = classify([ "   " ])
+    assert_equal "laptop-only", tier
+    assert_equal 0, status, "one path was read, so this is a classification (exit 0), not an empty list (exit 2)"
+    assert_match(/1 path|not on the safe-list/, out)
+  end
+
+  test "genuinely empty lines are still ignored" do
+    out, _err, status = run_script(stdin: "README.md\n\n\nCHANGELOG.md\n\n")
+    assert_equal "phone-safe", out.lines.first.strip, out
+    assert_equal 0, status.exitstatus
+    assert_match(/2 path/, out)
+  end
+
+  test "a CRLF blank line is still ignored, and a CRLF line keeps its name" do
+    out, _err, status = run_script(stdin: "README.md\r\n\r\nCHANGELOG.md\r\n")
+    assert_equal "phone-safe", out.lines.first.strip, out
+    assert_equal 0, status.exitstatus
+  end
+
+  test "whitespace around a real name is part of the name and never trims into a safe match" do
+    [ " docs/a.md", "docs/a.md ", " README.md", "README.md " ].each do |name|
+      tier, _status, out = classify([ name ])
+      assert_equal "laptop-only", tier, name.inspect
+      assert_match(/not on the safe-list/, out, name.inspect)
+    end
+  end
+
+  test "git mode: a file whose name is only spaces makes the PR laptop-only" do
+    in_scratch_repo do |dir, git|
+      File.write(File.join(dir, "README.md"), "x\n")
+      commit_all(git, "base")
+      git.call("checkout", "-q", "-b", "topic")
+      File.write(File.join(dir, "README.md"), "y\n")
+      File.write(File.join(dir, "   "), "z\n")
+      commit_all(git, "edit readme and add a blank-named file")
+      out, _err, status = run_script("--base", "main", chdir: dir)
+      assert_equal "laptop-only", out.lines.first.strip, out
+      assert_equal 0, status.exitstatus
+    end
+  end
+
   test "a rules file with no safe-list section can never produce phone-safe: exit 2" do
     Dir.mktmpdir do |dir|
       rules = File.join(dir, "rules.txt")
