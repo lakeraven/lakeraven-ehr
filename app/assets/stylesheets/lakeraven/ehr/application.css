@@ -14,6 +14,15 @@
  *= require_self
  */
 
+/* Stays on screen while a long chart scrolls, so the clinician can still
+   see which patient they are documenting on. */
+#patient-banner {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: #f8fafc;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
