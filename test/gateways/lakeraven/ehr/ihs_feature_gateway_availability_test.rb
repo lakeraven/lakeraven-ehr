@@ -140,6 +140,121 @@ module Lakeraven
         refute called
       end
 
+      GUARD_BYPASS_CASES = {
+        "ImmunizationGateway.for_patient via method().call" => {
+          capability: :ihs_immunization,
+          invoke: -> { ImmunizationGateway.method(:for_patient).call(1) },
+          track_rpc: true
+        },
+        "ImmunizationGateway.for_patient via instance_method#bind_call" => {
+          capability: :ihs_immunization,
+          invoke: lambda {
+            ImmunizationGateway.singleton_class
+                               .instance_method(:for_patient)
+                               .bind_call(ImmunizationGateway, 1)
+          },
+          track_rpc: true
+        },
+        "RegistrationGateway.register via method().call" => {
+          capability: :bprm_registration,
+          invoke: -> { RegistrationGateway.method(:register).call(name: "SYNTH,TEST") },
+          track_rpc: false
+        },
+        "RegistrationGateway.register via instance_method#bind_call" => {
+          capability: :bprm_registration,
+          invoke: lambda {
+            RegistrationGateway.singleton_class
+                                .instance_method(:register)
+                                .bind_call(RegistrationGateway, name: "SYNTH,TEST")
+          },
+          track_rpc: false
+        }
+      }.freeze
+
+      GUARD_BYPASS_CASES.each do |label, config|
+        test "guard bypass: #{label} raises FeatureUnavailable with no backend call" do
+          before_rpc = RpmsRpc.client.received_calls.length
+          fake = FakeBroker.new.on(RegistrationGateway::REGISTER_RPC, "1^99^")
+          with_restricted_backend(client: fake) do
+            assert_feature_unavailable(config.fetch(:capability)) { config.fetch(:invoke).call }
+          end
+          assert_empty fake.calls
+          assert_no_rpc_calls_since(before_rpc) if config.fetch(:track_rpc)
+        end
+      end
+
+      %i[for_patient register].each do |method_name|
+        gateway = method_name == :for_patient ? ImmunizationGateway : RegistrationGateway
+        capability = method_name == :for_patient ? :ihs_immunization : :bprm_registration
+
+        test "guard bypass: #{gateway.name}.#{method_name} survives hand alias stub/restore" do
+          stub_name = :"__ihs_feature_stub_#{method_name}"
+          eigen = gateway.singleton_class
+          eigen.alias_method stub_name, method_name
+          eigen.define_method(method_name) { |*_args, **_kwargs| raise "stub body must not run" }
+
+          with_restricted_backend do
+            assert_feature_unavailable(capability) do
+              if method_name == :register
+                gateway.register(name: "SYNTH,TEST")
+              else
+                gateway.for_patient(1)
+              end
+            end
+          end
+        ensure
+          if eigen.method_defined?(method_name)
+            eigen.remove_method(method_name)
+            eigen.alias_method method_name, stub_name
+          end
+          eigen.remove_method(stub_name) if eigen.method_defined?(stub_name)
+        end
+
+        test "guard bypass: restored #{gateway.name}.#{method_name} works on rpms and stays guarded when restricted" do
+          stub_name = :"__ihs_feature_stub_#{method_name}"
+          eigen = gateway.singleton_class
+          eigen.alias_method stub_name, method_name
+          eigen.define_method(method_name) { |*_args, **_kwargs| :stubbed }
+          eigen.remove_method(method_name)
+          eigen.alias_method method_name, stub_name
+          eigen.remove_method(stub_name)
+
+          assert_equal :rpms, Lakeraven::EHR.configuration.backend
+          if method_name == :for_patient
+            assert_kind_of Array, gateway.for_patient(1)
+          else
+            fake = FakeBroker.new.on(RegistrationGateway::REGISTER_RPC, "1^12345^")
+            use_broker(fake) { assert gateway.register(name: "SYNTH,TEST")[:success] }
+          end
+
+          with_restricted_backend do
+            assert_feature_unavailable(capability) do
+              if method_name == :register
+                gateway.register(name: "SYNTH,TEST")
+              else
+                gateway.for_patient(1)
+              end
+            end
+          end
+        end
+      end
+
+      test "pcc_screens: ProcedureGateway.add raises without an RPC call" do
+        before = RpmsRpc.client.received_calls.length
+        with_restricted_backend do
+          assert_feature_unavailable(:pcc_screens) { ProcedureGateway.add(1, 2090061, "99213") }
+        end
+        assert_no_rpc_calls_since(before)
+      end
+
+      test "pcc_screens: ProcedureGateway.add still delegates on rpms" do
+        assert_equal :rpms, Lakeraven::EHR.configuration.backend
+        RpmsRpc.client.seed_scalar(:procedure_save, "1", "42")
+        result = ProcedureGateway.add(1, 2090061, "99213")
+        assert result[:success]
+        assert_equal 42, result[:ien]
+      end
+
       # PCC V-file writes (BGO *SET via rpms-rpc) — gated under :pcc_screens (#647).
       PCC_SCREEN_WRITES = {
         "ExamComponentGateway.add" => {

@@ -21,20 +21,41 @@ class IhsFeatureFhirAvailabilityTest < ActionDispatch::IntegrationTest
   end
 
   test "GET ServiceRequest returns not-supported without prc_referrals and makes no broker call" do
-    fake = FakeBroker.new
-    with_restricted_backend(client: fake) do
+    before = RpmsRpc.client.received_calls.length
+    with_restricted_backend do
       get "/lakeraven-ehr/ServiceRequest", params: { patient: PATIENT_DFN }, headers: @headers
       assert_fhir_feature_unavailable(response, capability: :prc_referrals)
-      assert_empty fake.calls
+      assert_no_rpc_calls_since(before)
     end
   end
 
+  test "GET ServiceRequest on rpms records RpmsRpc.client calls so the guard assertion can fail" do
+    before = RpmsRpc.client.received_calls.length
+    get "/lakeraven-ehr/ServiceRequest", params: { patient: PATIENT_DFN }, headers: @headers
+    assert_response :ok
+    refute_empty rpc_calls_since(before), "expected ServiceRequest search to reach RpmsRpc.client on rpms"
+  end
+
   test "GET Immunization returns not-supported without ihs_immunization and makes no broker call" do
-    fake = FakeBroker.new
-    with_restricted_backend(client: fake) do
+    before = RpmsRpc.client.received_calls.length
+    with_restricted_backend do
       get "/lakeraven-ehr/Immunization", params: { patient: PATIENT_DFN }, headers: @headers
       assert_fhir_feature_unavailable(response, capability: :ihs_immunization)
-      assert_empty fake.calls
+      assert_no_rpc_calls_since(before)
+    end
+  end
+
+  test "GET Immunization on rpms records RpmsRpc.client calls so the guard assertion can fail" do
+    before = RpmsRpc.client.received_calls.length
+    get "/lakeraven-ehr/Immunization", params: { patient: PATIENT_DFN }, headers: @headers
+    assert_response :ok
+    refute_empty rpc_calls_since(before), "expected Immunization search to reach RpmsRpc.client on rpms"
+  end
+
+  test "GET Immunization without patient on a restricted backend returns not-supported before param validation" do
+    with_restricted_backend do
+      get "/lakeraven-ehr/Immunization", headers: @headers
+      assert_fhir_feature_unavailable(response, capability: :ihs_immunization)
     end
   end
 
@@ -57,6 +78,41 @@ class IhsFeatureFhirAvailabilityTest < ActionDispatch::IntegrationTest
       assert_response :not_found
       assert_match(/not available on this system/i, response.body)
       refute_equal "application/fhir+json", response.media_type
+    end
+  end
+
+  test "feature unavailable prefers FHIR when Accept lists text/html with lower q than application/fhir+json" do
+    with_restricted_backend do
+      get "/lakeraven-ehr/Immunization",
+        params: { patient: PATIENT_DFN },
+        headers: @headers.merge("Accept" => "text/html;q=0.1, application/fhir+json")
+      assert_fhir_feature_unavailable(response, capability: :ihs_immunization)
+    end
+  end
+
+  test "chart FHIR bundle on a restricted backend includes an outcome for withheld Immunization resources" do
+    with_restricted_backend do
+      get "/lakeraven-ehr/patients/#{PATIENT_DFN}",
+        headers: @headers.merge("Accept" => "application/fhir+json")
+      assert_response :ok
+      body = JSON.parse(response.body)
+      assert_equal "Bundle", body["resourceType"]
+      outcomes = body.fetch("entry").select { |e| e.dig("search", "mode") == "outcome" }
+      assert outcomes.any?, "expected at least one outcome entry"
+      immunization_outcome = outcomes.find do |entry|
+        issue = entry.dig("resource", "issue", 0)
+        issue["code"] == "not-supported" && issue["diagnostics"].to_s.match?(/immunization/i)
+      end
+      assert immunization_outcome, "expected a not-supported outcome naming immunizations"
+    end
+  end
+
+  test "feature unavailable honors ?_format=json for a browser Accept header" do
+    with_restricted_backend do
+      get "/lakeraven-ehr/Immunization",
+        params: { patient: PATIENT_DFN, _format: "json" },
+        headers: @headers.merge("Accept" => "text/html,application/xhtml+xml")
+      assert_fhir_feature_unavailable(response, capability: :ihs_immunization)
     end
   end
 
