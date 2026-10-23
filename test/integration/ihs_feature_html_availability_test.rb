@@ -78,14 +78,14 @@ class IhsFeatureHtmlAvailabilityTest < ActionDispatch::IntegrationTest
 
   def seed_chart_rows
     RpmsRpc.client.seed_keyed_collection(:patient_appointments, PATIENT_DFN, [ KEPT_ENCOUNTER, SCHEDULED_APPT ])
-    RpmsRpc.client.seed_keyed_collection(:immunization_list, PATIENT_DFN, [
-      { ien: 9001, vaccine_code: "207", vaccine_display: "Synthetic COVID-19",
+    RpmsRpc.client.seed_keyed_collection(:immunization_list, "#{PATIENT_DFN}^I", [
+      { record_type: "I", ien: 9001, vaccine_code: "207", vaccine_display: "Synthetic COVID-19",
         status: "completed", occurrence_datetime: Time.utc(2026, 1, 10, 9, 0, 0) }
     ])
   end
 
   def reset_chart_rows
     RpmsRpc.client.seed_keyed_collection(:patient_appointments, PATIENT_DFN, [])
-    RpmsRpc.client.seed_keyed_collection(:immunization_list, PATIENT_DFN, [])
+    RpmsRpc.client.seed_keyed_collection(:immunization_list, "#{PATIENT_DFN}^I", [])
   end
 end

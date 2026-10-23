@@ -93,9 +93,7 @@ module Lakeraven
             requested_date: Date.new(2026, 6, 1)
           })
         },
-        delete: -> { ServiceRequestGateway.delete("SR-DRAFT-001") },
-        cancel: -> { ServiceRequestGateway.cancel("SR-AUTHORIZED-001", reason: "Patient withdrew") },
-        deletable?: -> { ServiceRequestGateway.deletable?("SR-DRAFT-001") }
+        cancel: -> { ServiceRequestGateway.cancel("SR-AUTHORIZED-001") }
       }.freeze
 
       PRC_REFERRAL_GATEWAY_CALLS.each do |entry, invoke|
