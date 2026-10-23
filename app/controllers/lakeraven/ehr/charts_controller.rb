@@ -344,7 +344,7 @@ module Lakeraven
           type: "searchset",
           total: resources.length,
           link: [ { relation: "self", url: request.original_url } ],
-          entry: entries + withheld_chart_outcomes
+          entry: entries + withheld_chart_outcomes + immunization_load_outcomes
         }
       end
 
@@ -352,18 +352,29 @@ module Lakeraven
         CHART_CAPABILITY_RESOURCES.filter_map do |capability, resource_type|
           next if BackendRegistry.current.provides?(capability)
 
-          chart_feature_outcome(resource_type)
+          chart_feature_outcome(
+            code: "not-supported",
+            diagnostics: "#{resource_type} is not available on this system"
+          )
         end
       end
 
-      def chart_feature_outcome(resource_type)
+      # The capability is present, but the read failed. The diagnostics stay
+      # fixed: the exception message can carry broker detail and stays in the log.
+      def immunization_load_outcomes
+        return [] unless @immunizations_load_failed
+
+        [ chart_feature_outcome(code: "exception", diagnostics: "Immunizations could not be loaded.") ]
+      end
+
+      def chart_feature_outcome(code:, diagnostics:)
         {
           resource: {
             resourceType: "OperationOutcome",
             issue: [ {
               severity: "error",
-              code: "not-supported",
-              diagnostics: "#{resource_type} is not available on this system"
+              code: code,
+              diagnostics: diagnostics
             } ]
           },
           search: { mode: "outcome" }
