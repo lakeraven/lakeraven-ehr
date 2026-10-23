@@ -269,8 +269,9 @@ class FhirSearchSortIncludeTest < ActionDispatch::IntegrationTest
     medication = caps.resource_capabilities("MedicationRequest")
 
     assert_equal %w[MedicationRequest:patient MedicationRequest:subject], medication[:searchInclude]
-    assert_equal "_sort", medication[:searchParam].first[:name]
-    assert_includes medication[:searchParam].first[:documentation], "status"
+    assert_equal %w[status _sort], medication[:searchParam].map { |param| param[:name] }
+    sort = medication[:searchParam].find { |param| param[:name] == "_sort" }
+    assert_includes sort[:documentation], "status"
     assert_equal({}, caps.resource_capabilities("Encounter"))
   end
 
@@ -337,10 +338,12 @@ class FhirSearchSortIncludeTest < ActionDispatch::IntegrationTest
   end
 
   def seed_two_medications
-    RpmsRpc.client.seed_keyed_collection(:medication_list, "1", [
-      { id: "1", name: "Lisinopril 10mg", route: "PO", schedule: "daily", refills: 3, stop_date: nil },
-      { id: "2", name: "Metformin 500mg", route: "PO", schedule: "bid", refills: 1, stop_date: nil }
-    ])
+    RpmsRpc.client.seed_text(:medication_active, "1", <<~WIRE)
+      ~OP^1R;O^LISINOPRIL 10MG TAB^^3271231^3^^^120001^ACTIVE
+      \\ Sig: TAKE 1 TABLET BY MOUTH DAILY
+      ~OP^2R;O^METFORMIN 500MG TAB^^3271231^1^^^120002^ACTIVE
+      \\ Sig: TAKE 1 TABLET BY MOUTH TWICE A DAY
+    WIRE
   end
 
   def patient_token!(scopes, dfn:)

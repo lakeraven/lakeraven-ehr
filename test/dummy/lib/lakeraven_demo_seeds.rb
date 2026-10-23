@@ -35,8 +35,8 @@ module LakeravenDemoSeeds
         { ien: 22, status: "A", icd_code: "N18.3", description: "Chronic kidney disease, stage 3" }
       ],
       medications: [
-        { id: "21", name: "Lisinopril 20mg", sig: "1 tab PO daily", status: "active" },
-        { id: "22", name: "Amlodipine 5mg",  sig: "1 tab PO daily", status: "active" }
+        { id: "21", name: "Lisinopril 20mg", sig: "1 tab PO daily", status: "ACTIVE" },
+        { id: "22", name: "Amlodipine 5mg",  sig: "1 tab PO daily", status: "ACTIVE" }
       ],
       allergies: [
         { ien: 21, allergen: "Sulfa Drugs", reaction: "Rash", severity: "moderate" }
@@ -53,8 +53,8 @@ module LakeravenDemoSeeds
         { ien: 32, status: "A", icd_code: "D50.9",  description: "Iron deficiency anemia" }
       ],
       medications: [
-        { id: "31", name: "Prenatal Vitamin", sig: "1 tab PO daily", status: "active" },
-        { id: "32", name: "Ferrous Sulfate 325mg", sig: "1 tab PO daily", status: "active" }
+        { id: "31", name: "Prenatal Vitamin", sig: "1 tab PO daily", status: "ACTIVE" },
+        { id: "32", name: "Ferrous Sulfate 325mg", sig: "1 tab PO daily", status: "ACTIVE" }
       ],
       allergies: [],
       vitals: [
@@ -69,8 +69,8 @@ module LakeravenDemoSeeds
         { ien: 42, status: "A", icd_code: "E78.5",  description: "Hyperlipidemia" }
       ],
       medications: [
-        { id: "41", name: "Metformin 1000mg",   sig: "1 tab PO BID",   status: "active" },
-        { id: "42", name: "Atorvastatin 40mg",  sig: "1 tab PO qHS",   status: "active" }
+        { id: "41", name: "Metformin 1000mg",   sig: "1 tab PO BID",   status: "ACTIVE" },
+        { id: "42", name: "Atorvastatin 40mg",  sig: "1 tab PO qHS",   status: "ACTIVE" }
       ],
       allergies: [],
       vitals: [
@@ -85,7 +85,7 @@ module LakeravenDemoSeeds
         { ien: 52, status: "A", icd_code: "F41.1", description: "Generalized anxiety disorder" }
       ],
       medications: [
-        { id: "51", name: "Sertraline 100mg", sig: "1 tab PO daily", status: "active" }
+        { id: "51", name: "Sertraline 100mg", sig: "1 tab PO daily", status: "ACTIVE" }
       ],
       allergies: [],
       vitals: [
@@ -99,8 +99,8 @@ module LakeravenDemoSeeds
         { ien: 61, status: "A", icd_code: "J45.909", description: "Unspecified asthma, uncomplicated" }
       ],
       medications: [
-        { id: "61", name: "Albuterol HFA 90mcg", sig: "2 puffs INH q4-6h PRN", status: "active" },
-        { id: "62", name: "Fluticasone HFA 44mcg", sig: "2 puffs INH BID", status: "active" }
+        { id: "61", name: "Albuterol HFA 90mcg", sig: "2 puffs INH q4-6h PRN", status: "ACTIVE" },
+        { id: "62", name: "Fluticasone HFA 44mcg", sig: "2 puffs INH BID", status: "ACTIVE" }
       ],
       allergies: [
         { ien: 61, allergen: "Peanuts", reaction: "Hives", severity: "moderate" }
@@ -118,9 +118,9 @@ module LakeravenDemoSeeds
         { ien: 73, status: "A", icd_code: "N18.3",  description: "Chronic kidney disease, stage 3" }
       ],
       medications: [
-        { id: "71", name: "Metformin 500mg",   sig: "1 tab PO daily",  status: "active" },
-        { id: "72", name: "Losartan 50mg",     sig: "1 tab PO daily",  status: "active" },
-        { id: "73", name: "Atorvastatin 20mg", sig: "1 tab PO qHS",    status: "active" }
+        { id: "71", name: "Metformin 500mg",   sig: "1 tab PO daily",  status: "ACTIVE" },
+        { id: "72", name: "Losartan 50mg",     sig: "1 tab PO daily",  status: "ACTIVE" },
+        { id: "73", name: "Atorvastatin 20mg", sig: "1 tab PO qHS",    status: "ACTIVE" }
       ],
       allergies: [
         { ien: 71, allergen: "Codeine", reaction: "Nausea", severity: "mild" }
@@ -200,10 +200,11 @@ module LakeravenDemoSeeds
         { measurement_ien: 2021, type: "WT", value: "180",    units: "[lb_av]",  recorded_date: vitals_taken },
         { measurement_ien: 2022, type: "T",  value: "98.6",   units: "[degF]",   recorded_date: vitals_taken } ])
 
-    # Medications (ORQQPS LIST) — MedicationRequest
-    m.seed_keyed_collection(:medication_list, "1",
-      [ { id: "1", name: "Lisinopril 10mg", sig: "1 tab PO daily", status: "active" },
-        { id: "2", name: "Metformin 500mg", sig: "1 tab PO BID", status: "active" } ])
+    # Medications (ORWPS ACTIVE) — MedicationRequest
+    m.seed_text(:medication_active, "1", active_medication_wire(
+      [ { id: "1", name: "Lisinopril 10mg", sig: "1 tab PO daily", status: "ACTIVE" },
+        { id: "2", name: "Metformin 500mg", sig: "1 tab PO BID", status: "ACTIVE" } ]
+    ))
     m.seed(:medication_detail, "1",
       "Drug: Lisinopril 10mg\nSIG: Take 1 tablet by mouth daily\nStatus: Active\nRefills: 3")
 
@@ -229,6 +230,12 @@ module LakeravenDemoSeeds
       "01/15/2026  COVID-19 Vaccine  LOT-ABC  Site: Left Deltoid")
   end
 
+  # ORWPS ACTIVE as RPMS sends it: one ~OP header per outpatient order
+  # (order id, drug, CPRS order number, status), then its sig line.
+  def active_medication_wire(meds)
+    meds.map { |med| "~OP^#{med[:id]}R;O^#{med[:name]}^^^^^^#{med[:id]}^#{med[:status]}\n\\ Sig: #{med[:sig]}" }.join("\n")
+  end
+
   # Seed the DEMOPATIENT panel (DFNs 2-7) — demographics + per-patient
   # clinical lists keyed by DFN so each chart renders its own data.
   def seed_panel(m)
@@ -246,7 +253,7 @@ module LakeravenDemoSeeds
       m.seed(:patient_ssn, bare_ssn, { dfn: p[:dfn], name: p[:name], ssn: bare_ssn })
 
       m.seed_keyed_collection(:problem_list, dfn, p[:problems])
-      m.seed_keyed_collection(:medication_list, dfn, p[:medications])
+      m.seed_text(:medication_active, dfn, active_medication_wire(p[:medications]))
       m.seed_keyed_collection(:allergy_list, dfn, p[:allergies])
       m.seed_keyed_collection(:vitals, dfn, p[:vitals])
 
