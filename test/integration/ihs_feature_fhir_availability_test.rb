@@ -107,6 +107,33 @@ class IhsFeatureFhirAvailabilityTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "chart FHIR bundle includes an exception outcome when immunization read fails with ihs_immunization" do
+    raw_message = "broker timeout with sensitive internal detail"
+    gateway = Lakeraven::EHR::ImmunizationGateway
+    original = gateway.singleton_class.instance_method(:for_patient)
+    gateway.define_singleton_method(:for_patient) { |*| raise RpmsRpc::Client::RpcError, raw_message }
+
+    with_restricted_backend(capabilities: [ :ihs_immunization ]) do
+      get "/lakeraven-ehr/patients/#{PATIENT_DFN}",
+        headers: @headers.merge("Accept" => "application/fhir+json")
+      assert_response :ok
+      body = JSON.parse(response.body)
+      outcomes = body.fetch("entry").select { |e| e.dig("search", "mode") == "outcome" }
+      failure_outcome = outcomes.find do |entry|
+        issue = entry.dig("resource", "issue", 0)
+        issue["severity"] == "error" &&
+          issue["code"] == "exception" &&
+          issue["diagnostics"].to_s.match?(/immunizations could not be loaded/i)
+      end
+      assert failure_outcome, "expected an exception outcome for a failed immunization read"
+      diagnostics = failure_outcome.dig("resource", "issue", 0, "diagnostics")
+      refute_includes diagnostics, raw_message
+      refute_match(/sensitive internal detail/i, diagnostics)
+    end
+  ensure
+    gateway.define_singleton_method(:for_patient, original)
+  end
+
   test "feature unavailable honors ?_format=json for a browser Accept header" do
     with_restricted_backend do
       get "/lakeraven-ehr/Immunization",

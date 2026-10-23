@@ -82,24 +82,59 @@ module Lakeraven
         RpmsRpc.client.seed_keyed_collection(:patient_appointments, "1", [])
       end
 
-      test "prc_referrals: ServiceRequestGateway.for_patient raises without calling Referral" do
-        called = false
-        with_restricted_backend do
-          with_gateway_method(ServiceRequestGateway, :for_patient, ->(*) { called = true; [] }) do
-            assert_feature_unavailable(:prc_referrals) { ServiceRequestGateway.for_patient(1) }
+      PRC_REFERRAL_GATEWAY_CALLS = {
+        for_patient: -> { ServiceRequestGateway.for_patient(1) },
+        create: lambda {
+          ServiceRequestGateway.create(1, {
+            provider_ien: 99999,
+            specialty: "Cardiology",
+            reason: "Chest pain workup",
+            priority: "ROUTINE",
+            requested_date: Date.new(2026, 6, 1)
+          })
+        },
+        delete: -> { ServiceRequestGateway.delete("SR-DRAFT-001") },
+        cancel: -> { ServiceRequestGateway.cancel("SR-AUTHORIZED-001", reason: "Patient withdrew") },
+        deletable?: -> { ServiceRequestGateway.deletable?("SR-DRAFT-001") }
+      }.freeze
+
+      PRC_REFERRAL_GATEWAY_CALLS.each do |entry, invoke|
+        test "prc_referrals: ServiceRequestGateway.#{entry} raises without an RPC call" do
+          before = RpmsRpc.client.received_calls.length
+          with_restricted_backend do
+            assert_feature_unavailable(:prc_referrals) { invoke.call }
           end
+          assert_no_rpc_calls_since(before)
         end
-        refute called
       end
 
-      test "tribal_enrollment: TribalEnrollmentGateway.enrollment_details raises without a backend call" do
-        called = false
-        with_restricted_backend do
-          with_gateway_method(TribalEnrollmentGateway, :enrollment_details, ->(*) { called = true; {} }) do
-            assert_feature_unavailable(:tribal_enrollment) { TribalEnrollmentGateway.enrollment_details(1) }
+      TRIBAL_ENROLLMENT_GATEWAY_CALLS = {
+        enrollment_details: -> { TribalEnrollmentGateway.enrollment_details(1) },
+        validate: -> { TribalEnrollmentGateway.validate("EXNH-12345") },
+        eligibility: -> { TribalEnrollmentGateway.eligibility(1) },
+        service_unit: -> { TribalEnrollmentGateway.service_unit(1) },
+        tribe_info: -> { TribalEnrollmentGateway.tribe_info(1) }
+      }.freeze
+
+      TRIBAL_ENROLLMENT_GATEWAY_CALLS.each do |entry, invoke|
+        test "tribal_enrollment: TribalEnrollmentGateway.#{entry} raises without an RPC call" do
+          before = RpmsRpc.client.received_calls.length
+          with_restricted_backend do
+            assert_feature_unavailable(:tribal_enrollment) { invoke.call }
           end
+          assert_no_rpc_calls_since(before)
         end
-        refute called
+      end
+
+      test "tribal_enrollment: host may replace TribalEnrollmentGateway.enrollment_details on a restricted backend" do
+        gw = TribalEnrollmentGateway
+        original = gw.method(:enrollment_details)
+        with_restricted_backend do
+          gw.define_singleton_method(:enrollment_details) { |_dfn| { replaced: true } }
+          assert_equal({ replaced: true }, gw.enrollment_details(1))
+        end
+      ensure
+        gw.define_singleton_method(:enrollment_details, original)
       end
 
       test "bprm_registration: RegistrationGateway.register raises without a broker call" do
@@ -285,15 +320,35 @@ module Lakeraven
         end
       end
 
-      test "tribal_enrollment: Patient tribal_enrollment_details raises without calling the gateway" do
+      test "tribal_enrollment: Patient tribal_enrollment_details raises without an RPC call" do
         patient = Patient.new(dfn: 1, name: "Anderson,Alice", tribal_enrollment_number: "EXNH-12345")
-        called = false
+        before = RpmsRpc.client.received_calls.length
         with_restricted_backend do
-          with_gateway_method(TribalEnrollmentGateway, :enrollment_details, ->(*) { called = true; {} }) do
-            assert_feature_unavailable(:tribal_enrollment) { patient.tribal_enrollment_details }
-          end
+          assert_feature_unavailable(:tribal_enrollment) { patient.tribal_enrollment_details }
         end
-        refute called
+        assert_no_rpc_calls_since(before)
+      end
+
+      IHS_IMMUNIZATION_ELIGIBILITY_CALLS = {
+        patient_eligibility: -> { EligibilityGateway.patient_eligibility("1") },
+        list_codes: -> { EligibilityGateway.list_codes }
+      }.freeze
+
+      IHS_IMMUNIZATION_ELIGIBILITY_CALLS.each do |entry, invoke|
+        test "ihs_immunization: EligibilityGateway.#{entry} raises without an RPC call" do
+          before = RpmsRpc.client.received_calls.length
+          with_restricted_backend do
+            assert_feature_unavailable(:ihs_immunization) { invoke.call }
+          end
+          assert_no_rpc_calls_since(before)
+        end
+      end
+
+      test "ihs_immunization: EligibilityGateway still delegates on rpms" do
+        assert_equal :rpms, Lakeraven::EHR.configuration.backend
+        result = EligibilityGateway.patient_eligibility("1")
+        assert_equal "V04", result[:code]
+        assert EligibilityGateway.list_codes.any?
       end
 
       private
@@ -315,14 +370,6 @@ module Lakeraven
                   .on(SchedulingGateway::UNCHECKIN_RPC, "1^")
       end
 
-      def with_gateway_method(gateway, name, impl)
-        singleton = gateway.singleton_class
-        original = singleton.instance_method(name)
-        gateway.define_singleton_method(name, impl)
-        yield
-      ensure
-        gateway.define_singleton_method(name, original)
-      end
     end
   end
 end

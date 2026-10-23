@@ -56,13 +56,4 @@ module IhsFeatureAvailabilityTestHelper
     post "/lakeraven-ehr/login", params: { username: username, password: password }
     assert_equal "304", session[:duz], "expected a clinician session for dashboard/chart HTML specs"
   end
-
-  def open_patient_chart(dfn)
-    sign_in_for_dashboard
-    post "/lakeraven-ehr/patients/#{dfn}/context", params: {
-      authenticity_token: form_authenticity_token
-    }
-    follow_redirect!
-    get "/lakeraven-ehr/patients/#{dfn}"
-  end
 end

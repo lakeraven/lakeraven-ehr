@@ -39,7 +39,9 @@ module Lakeraven
         },
         ihs_immunization: {
           "ImmunizationGateway.for_patient" => "BGOVIMM GET",
-          "ImmunizationRefusalGateway.record" => "BGOREF SET"
+          "ImmunizationRefusalGateway.record" => "BGOREF SET",
+          "EligibilityGateway.patient_eligibility" => "BGOVIMM GETVFC",
+          "EligibilityGateway.list_codes" => "BGOVIMM2 GETELIG"
         }
       }.freeze
 
