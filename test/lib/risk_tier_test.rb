@@ -41,8 +41,7 @@ class RiskTierTest < ActiveSupport::TestCase
     "docs/BPRM_PARITY_PLAN.md",
     "docs/my notes.md",
     "docs/demo_patient_chart_runbook.md",
-    "app/assets/stylesheets/lakeraven/ehr/application.css",
-    "config/locales/en.yml"
+    "app/assets/stylesheets/lakeraven/ehr/application.css"
   ].freeze
 
   # Not on the safe-list, and matching no laptop-only rule: laptop-only by default. These are
@@ -559,6 +558,63 @@ class RiskTierTest < ActiveSupport::TestCase
     end
   end
 
+  # ---- locale YAML runs code when it loads (Copilot round 3) ------------------------------
+  #
+  # I18n's YAML backend loads with YAML.unsafe_load_file (i18n 1.15.2, Psych 5), so a locale
+  # file can carry a Ruby object tag and run application code at load time. It is not display
+  # text, so it is not phone-safe. Owner decision: locale YAML leaves the safe-list.
+  LOCALE_YAML = [
+    "config/locales/en.yml",
+    "config/locales/es.yml",
+    "config/locales/devise.en.yml",
+    "config/locales/EN.YML"
+  ].freeze
+
+  LOCALE_YAML.each_with_index do |path, i|
+    test "locale YAML is not on the safe-list ##{i}: #{path}" do
+      tier, status, out = classify(path)
+      assert_equal "laptop-only", tier, out
+      assert_equal 0, status
+      assert_match(/not on the safe-list/, out)
+    end
+  end
+
+  test "a prose change with a locale file in it is laptop-only" do
+    tier, status, out = classify([ "README.md", "docs/a.md", "config/locales/en.yml" ])
+    assert_equal "laptop-only", tier, out
+    assert_equal 0, status
+  end
+
+  test "the rules file no longer lists locale YAML as safe" do
+    safe_section = File.read(RULES)[/^\[safe\]\s*$.*?(?=^\[|\z)/m].to_s
+    refute_match(%r{locales}, safe_section.lines.reject { |l| l.strip.start_with?("#") }.join)
+  end
+
+  # ---- an explicit --base must name a ref (Copilot round 3) --------------------------------
+  #
+  # `--base ""` used to be treated as "no --base given", so the script fell through to reading
+  # stdin and classified paths nobody had diffed. An explicit but empty ref is an error.
+  test "an empty --base is undetermined even when paths arrive on stdin" do
+    in_scratch_repo do |dir, git|
+      File.write(File.join(dir, "README.md"), "x\n")
+      commit_all(git, "base")
+      out, _err, status = run_script("--base", "", stdin: "README.md\n", chdir: dir)
+      assert_equal "laptop-only", out.lines.first.strip, out
+      assert_equal 2, status.exitstatus
+      assert_match(/--base/, out)
+    end
+  end
+
+  test "an empty --base with nothing on stdin is also undetermined" do
+    in_scratch_repo do |dir, git|
+      File.write(File.join(dir, "README.md"), "x\n")
+      commit_all(git, "base")
+      out, _err, status = run_script("--base", "", chdir: dir)
+      assert_equal "laptop-only", out.lines.first.strip, out
+      assert_equal 2, status.exitstatus
+    end
+  end
+
   # ---- the rules file --------------------------------------------------------
 
   # Rule lines, with comments, blanks and the `[section]` headers removed.
@@ -652,8 +708,7 @@ class RiskTierTest < ActiveSupport::TestCase
     %r{\A(README|CHANGELOG)\.md\z}i,
     %r{\Adocs/[^/]+\.md\z}i,
     %r{\Aapp/assets/stylesheets/lakeraven/ehr/[^/]+\.css\z}i,
-    %r{\Aapp/assets/images/[^/]+\.(png|jpe?g|gif|ico)\z}i,
-    %r{\Aconfig/locales/[^/]+\.yml\z}i
+    %r{\Aapp/assets/images/[^/]+\.(png|jpe?g|gif|ico)\z}i
   ].freeze
 
   def laptop_paths_in(tracked_paths)
@@ -678,7 +733,7 @@ class RiskTierTest < ActiveSupport::TestCase
     tracked, = Open3.capture2("git", "ls-files", chdir: ROOT)
     paths = tracked.lines.map(&:chomp).select do |p|
       p.start_with?("app/controllers/", "app/services/", "app/models/", "app/gateways/", "app/policies/", "app/jobs/", "app/lib/", "test/", "features/", "db/", "lib/", "bin/", ".github/") ||
-        (p.start_with?("config/") && !p.start_with?("config/locales/"))
+        p.start_with?("config/")
     end
     assert_operator paths.size, :>, 300
     assert_empty paths - laptop_paths_in(paths)
