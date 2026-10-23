@@ -117,6 +117,10 @@ SOFTWARE-FACTORY*           # [forward] the review method itself
 # or what is stored: prose, styling. Never code that decides,
 # controllers, services, models, serializers, tests, features, db, config or CI. Prefer
 # a narrow extension to a directory.
+#
+# Deliberately NOT listed: config/locales/*.yml. I18n loads locale files with
+# YAML.unsafe_load_file, so a locale file can carry a Ruby object tag and run application code
+# when it loads. It is not display text; it is laptop-only (Copilot round 3).
 # ======================================================================================
 [safe]
 README.md                   # prose
@@ -128,4 +132,3 @@ app/assets/images/*.jpg     # [forward] images
 app/assets/images/*.jpeg    # [forward] images
 app/assets/images/*.gif     # [forward] images
 app/assets/images/*.ico     # [forward] images
-config/locales/*.yml        # [forward] display strings
