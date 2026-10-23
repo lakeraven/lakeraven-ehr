@@ -71,6 +71,11 @@ jobs:
           RBG_EXEMPT: ${{ contains(github.event.pull_request.labels.*.name, 'red-green-exempt') && '1' || '0' }}
           BASE_REF: ${{ github.base_ref }}
           RBG_ANNOTATE: "1"
+          # setup-ruby's bundler-cache keeps the gems in vendor/bundle and records that in the
+          # checkout's gitignored .bundle/config, which the script's scratch worktree does not
+          # have. BUNDLE_PATH in the environment reaches every bundler process, from any
+          # directory; it must be absolute or it would resolve inside the scratch worktree.
+          BUNDLE_PATH: ${{ github.workspace }}/vendor/bundle
         run: |
           export RBG_REPORT="$GITHUB_STEP_SUMMARY"
           bin/red-before-green --base "origin/$BASE_REF"
