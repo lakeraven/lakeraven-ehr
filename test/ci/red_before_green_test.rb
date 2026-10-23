@@ -730,7 +730,8 @@ class RedBeforeGreenTest < Minitest::Test
   def test_the_bundle_path_is_where_setup_ruby_installed_the_gems
     bundle_path = script_step.fetch("env", {})["BUNDLE_PATH"].to_s
 
-    assert_match(%r{/vendor/bundle\z}, bundle_path)
+    assert_equal "${{ github.workspace }}/vendor/bundle", bundle_path,
+      "setup-ruby's bundler-cache installs into the checkout's vendor/bundle, so BUNDLE_PATH must name exactly that"
   end
 
   # Not red before the fix (the script already runs the tests with its own environment):
