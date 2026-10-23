@@ -37,10 +37,10 @@ class FhirSearchSortIncludeTest < ActionDispatch::IntegrationTest
   end
 
   test "_sort by name ignores case" do
-    RpmsRpc.client.seed_collection(:patient_list, [
+    seed_patients([
       { dfn: 1, name: "BAKER,BOB", sex: "M", dob: Date.new(1980, 1, 1) },
       { dfn: 2, name: "adams,amy", sex: "F", dob: Date.new(1980, 1, 1) }
-    ], filter_field: :name)
+    ])
 
     get "/lakeraven-ehr/Patient", params: { _sort: "name" }, headers: @headers
 
@@ -74,10 +74,10 @@ class FhirSearchSortIncludeTest < ActionDispatch::IntegrationTest
 
   test "dates sort chronologically and a match with no date sorts last both ways" do
     RpmsRpc.client.seed_keyed_collection(:vitals, "1", [
-      { type: "P", value: "70", units: "/min", recorded_date: Time.new(2025, 3, 1, 9, 0, 0) },
-      { type: "P", value: "71", units: "/min", recorded_date: nil },
-      { type: "P", value: "72", units: "/min", recorded_date: Time.new(2024, 12, 31, 23, 0, 0) },
-      { type: "P", value: "73", units: "/min", recorded_date: Time.new(2025, 1, 1, 8, 0, 0) }
+      { measurement_ien: 3001, type: "P", value: "70", units: "/min", recorded_date: Time.new(2025, 3, 1, 9, 0, 0) },
+      { measurement_ien: 3002, type: "P", value: "71", units: "/min", recorded_date: nil },
+      { measurement_ien: 3003, type: "P", value: "72", units: "/min", recorded_date: Time.new(2024, 12, 31, 23, 0, 0) },
+      { measurement_ien: 3004, type: "P", value: "73", units: "/min", recorded_date: Time.new(2025, 1, 1, 8, 0, 0) }
     ])
 
     get "/lakeraven-ehr/Observation", params: { patient: "1", _sort: "date" }, headers: @headers
@@ -155,10 +155,9 @@ class FhirSearchSortIncludeTest < ActionDispatch::IntegrationTest
   end
 
   test "repeated _include values are each followed, and the links repeat them" do
-    RpmsRpc.client.seed_keyed_collection(:immunization_list, "1", [
-      { ien: 1, vaccine_code: "208", vaccine_display: "COVID-19 Vaccine", status: "completed",
-        occurrence_datetime: DateTime.new(2026, 1, 15, 9, 0, 0), performer_duz: "101",
-        performer_name: "MARTINEZ,SARAH" }
+    RpmsRpc.client.seed_keyed_collection(:immunization_list, "1^I", [
+      { record_type: "I", ien: 1, vaccine_display: "COVID-19 Vaccine",
+        occurrence_datetime: DateTime.new(2026, 1, 15, 9, 0, 0), performer: "101~MARTINEZ,SARAH" }
     ])
 
     get "/lakeraven-ehr/Immunization?patient=1&_include=Immunization:patient&_include=Immunization:performer",
@@ -323,14 +322,24 @@ class FhirSearchSortIncludeTest < ActionDispatch::IntegrationTest
   end
 
   def seed_patient_list(dfns)
-    rows = dfns.map { |dfn| { dfn: dfn.to_i, name: "PATIENT,#{dfn}", sex: "F", dob: Date.new(1980, 1, 1) } }
-    RpmsRpc.client.seed_collection(:patient_list, rows, filter_field: :name)
+    seed_patients(dfns.map { |dfn| { dfn: dfn.to_i, name: "PATIENT,#{dfn}", sex: "F", dob: Date.new(1980, 1, 1) } })
+  end
+
+  # ORWPT LIST ALL rows carry the DFN and name only; the search reads each
+  # match with ORWPT SELECT and ORWPT ID INFO (rpms-rpc #352), so each
+  # patient is seeded on all three.
+  def seed_patients(patients)
+    RpmsRpc.client.seed_collection(:patient_list, patients.map { |p| p.slice(:dfn, :name) })
+    patients.each do |p|
+      RpmsRpc.client.seed(:patient_select, p[:dfn].to_s, p.slice(:name, :sex, :dob))
+      RpmsRpc.client.seed(:patient_id_info, p[:dfn].to_s, p.slice(:name, :sex, :dob))
+    end
   end
 
   def seed_two_medications
     RpmsRpc.client.seed_keyed_collection(:medication_list, "1", [
-      { ien: 1, drug_name: "Lisinopril 10mg", route: "PO", schedule: "daily", refills: 3, stop_date: nil },
-      { ien: 2, drug_name: "Metformin 500mg", route: "PO", schedule: "bid", refills: 1, stop_date: nil }
+      { id: "1", name: "Lisinopril 10mg", route: "PO", schedule: "daily", refills: 3, stop_date: nil },
+      { id: "2", name: "Metformin 500mg", route: "PO", schedule: "bid", refills: 1, stop_date: nil }
     ])
   end
 

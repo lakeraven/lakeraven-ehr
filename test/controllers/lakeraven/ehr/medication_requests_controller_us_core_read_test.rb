@@ -66,8 +66,8 @@ module Lakeraven
 
       test "search entries use data-absent-reason for authoredOn and requester when RPMS does not supply them" do
         RpmsRpc.client.seed_keyed_collection(:medication_list, "1",
-          [ { ien: 1, drug_name: "Lisinopril 10mg", route: "PO", schedule: "daily", refills: 3, stop_date: nil },
-            { ien: 42, drug_name: "Metformin 500mg", route: "PO", schedule: "BID", refills: 2, stop_date: nil } ])
+          [ { id: "1", name: "Lisinopril 10mg", route: "PO", schedule: "daily", refills: 3, stop_date: nil },
+            { id: "42", name: "Metformin 500mg", route: "PO", schedule: "BID", refills: 2, stop_date: nil } ])
 
         get "/lakeraven-ehr/MedicationRequest", params: { patient: "1" }, headers: @headers
 
@@ -88,7 +88,7 @@ module Lakeraven
 
       test "search entries expose dosageInstruction text from route and schedule" do
         RpmsRpc.client.seed_keyed_collection(:medication_list, "1",
-          [ { ien: 1, drug_name: "Lisinopril 10mg", route: "PO", schedule: "daily", refills: 3, stop_date: nil } ])
+          [ { id: "1", name: "Lisinopril 10mg", route: "PO", schedule: "daily", refills: 3, stop_date: nil } ])
 
         get "/lakeraven-ehr/MedicationRequest", params: { patient: "1" }, headers: @headers
 
@@ -106,7 +106,7 @@ module Lakeraven
       test "search entry does not map RPMS stop_date to authoredOn or dispense validityPeriod" do
         stop_date = Date.new(2025, 1, 1)
         RpmsRpc.client.seed_keyed_collection(:medication_list, "1",
-          [ { ien: 99, drug_name: "Aspirin 81mg", route: "PO", schedule: "daily", refills: 1,
+          [ { id: "99", name: "Aspirin 81mg", route: "PO", schedule: "daily", refills: 1,
               stop_date: stop_date } ])
 
         get "/lakeraven-ehr/MedicationRequest", params: { patient: "1" }, headers: @headers

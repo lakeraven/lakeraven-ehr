@@ -62,9 +62,11 @@ module Lakeraven
 
       def self.from_rpms_row(row, patient_dfn:)
         new(
-          ien: row[:ien]&.to_s,
+          # ORQQPS LIST rows: id is the pharmacy order id, name the drug
+          # name and form (LIST^ORQQPS, rpms-rpc #188).
+          ien: row[:id]&.to_s,
           patient_dfn: patient_dfn,
-          medication_display: row[:drug_name],
+          medication_display: row[:name],
           dosage_instruction: dosage_text(row),
           status: rpms_status(row[:status]),
           intent: "order"

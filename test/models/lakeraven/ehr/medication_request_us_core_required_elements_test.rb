@@ -9,8 +9,8 @@ module Lakeraven
 
       def wire_medication_row(overrides = {})
         {
-          ien: "42",
-          drug_name: "Metformin 500mg",
+          id: "42",
+          name: "Metformin 500mg",
           stop_date: nil,
           route: "PO",
           schedule: "BID",

@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require "rpms_rpc/api/authentication"
-require "rpms_rpc/security_keys"
 
 module Lakeraven
   module EHR
@@ -18,7 +17,7 @@ module Lakeraven
       # Sign on and resolve everything the session is built from.
       #
       # This spans SEVERAL calls into the gem — authenticate, then the user
-      # lookup, then ORWU USERKEYS — and they all read from one process-global
+      # lookup, the user class, then the user's keys — and they all read from one process-global
       # broker session. Locking each one individually is not enough: a second
       # sign-on landing between them returns THIS caller the other clinician's
       # name and security keys, which is to say their scopes. The whole
@@ -53,20 +52,25 @@ module Lakeraven
 
         duz_s = auth[:duz].to_s
         user_info = RpmsRpc::Authentication.user_info(duz_s)
+        # The user class is the server's USRCLS from ORWU USERINFO, read for
+        # the signed-on DUZ (rpms-rpc #236): XUS AV CODE carries no class
+        # (its line 5 is the post-sign-on message count). user_type raises
+        # when the class cannot be read, so the sign-on fails closed as
+        # unavailable rather than defaulting a role.
+        server_user_type = RpmsRpc::Authentication.user_type(duz_s)
         raw_keys = fetch_raw_security_keys(duz_s)
-        symbolic_keys = RpmsRpc::SecurityKeys.symbolize(raw_keys)
+        symbolic_keys = Roles.symbolize_keys(raw_keys)
 
-        # auth[:user_type] is the role already resolved from the AV user
-        # class. Round-trip it through the short code so :prc_supervisor
-        # or :prc_manager still elevates to "case_manager". A class the
-        # map does not know stays "user".
+        # Round-trip the server's user type through the short code so
+        # :prc_supervisor or :prc_manager still elevates to "case_manager".
+        # A class the map does not know stays "user".
         Result.new(
           success?: true,
           error: nil,
           value: {
             duz: duz_s,
             name: user_info&.dig(:name) || auth[:name].to_s,
-            user_type: Roles.resolve_signon(user_type: auth[:user_type], security_keys: symbolic_keys),
+            user_type: Roles.resolve_signon(user_type: server_user_type, security_keys: symbolic_keys),
             security_keys: symbolic_keys,
             # RPMS said this verify code must be changed (admin reset, or aged
             # out). Dropping the flag granted a full session on a temporary

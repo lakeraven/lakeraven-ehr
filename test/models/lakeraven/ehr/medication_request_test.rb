@@ -220,7 +220,7 @@ module Lakeraven
 
         row = MedicationRequest.for_patient("1").first
         assert_kind_of Hash, row
-        assert_equal "Lisinopril 10mg", row[:drug_name]
+        assert_equal "Lisinopril 10mg", row[:name]
         refute row.key?(:status), "ORQQPS LIST row must not include RPMS order status"
         refute row.key?(:sig), "ORQQPS LIST row must not include sig text"
 
@@ -261,8 +261,8 @@ module Lakeraven
 
       def wire_medication_row(overrides = {})
         {
-          ien: "42",
-          drug_name: "Metformin 500mg",
+          id: "42",
+          name: "Metformin 500mg",
           stop_date: nil,
           route: "PO",
           schedule: "BID",

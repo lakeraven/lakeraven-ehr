@@ -5,8 +5,6 @@ require "rpms_rpc/api/referral"
 module Lakeraven
   module EHR
     class ServiceRequestGateway
-      DELETABLE_STATUSES = %w[draft pending submitted].freeze
-
       def self.for_patient(dfn)
         RpmsRpc::Referral.for_patient(dfn.to_s)
       end
@@ -15,57 +13,22 @@ module Lakeraven
         RpmsRpc::Referral.create(dfn.to_s, params)
       end
 
-      def self.delete(ien, reason: nil)
-        referral = find_referral(ien)
-        return { success: false, error: "Referral not found", ien: ien } unless referral
-
-        status = referral[:status]&.downcase || "unknown"
-
-        unless DELETABLE_STATUSES.include?(status)
-          return { success: false, error: "Cannot delete #{status} referral", ien: ien }
-        end
-
-        if status != "draft" && reason.blank?
-          return { success: false, error: "Reason required for #{status} referral", ien: ien }
-        end
-
-        result = RpmsRpc::Referral.delete(ien, reason: reason)
-        if result && result[:success]
-          { success: true, message: "Referral deleted", ien: ien }
-        else
-          { success: false, error: result&.dig(:message) || "Delete failed", ien: ien }
-        end
-      rescue => e
-        { success: false, error: PhiSanitizer.sanitize_message(e.message), ien: ien }
-      end
-
-      def self.cancel(ien, reason: nil)
-        return { success: false, error: "Reason required for cancellation" } if reason.blank?
-
-        referral = find_referral(ien)
-        return { success: false, error: "Referral not found" } unless referral
-
-        result = RpmsRpc::Referral.delete(ien, reason: reason)
-        if result && result[:success]
+      # Cancel a referral: RCIS files its status as cancelled through BMC
+      # REFERRAL STATUS UPDATE (RpmsRpc::Referral.cancel, rpms-rpc #380). RCIS
+      # has no delete (the BMCRPC DELREFRL name the old delete sent is in no
+      # option on a built image), and the routine files no reason, so this
+      # takes none: a reason asked for and then dropped would look recorded.
+      # A refusal or a broker error comes back as a failure with its message.
+      def self.cancel(ien)
+        result = RpmsRpc::Referral.cancel(ien.to_s)
+        if result[:success]
           { success: true, message: "Referral cancelled", ien: ien }
         else
-          { success: false, error: result&.dig(:message) || "Cancellation failed", ien: ien }
+          { success: false, error: result[:message] || "Cancellation failed", ien: ien }
         end
-      rescue => e
+      rescue RpmsRpc::Client::RpcError, RpmsRpc::Client::ConnectionError => e
         { success: false, error: PhiSanitizer.sanitize_message(e.message), ien: ien }
       end
-
-      def self.deletable?(ien)
-        referral = find_referral(ien)
-        return false unless referral
-
-        DELETABLE_STATUSES.include?(referral[:status]&.downcase)
-      end
-
-      def self.find_referral(ien)
-        RpmsRpc::Referral.find(ien.to_s)
-      end
-      private_class_method :find_referral
     end
   end
 end

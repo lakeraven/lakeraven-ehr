@@ -34,7 +34,7 @@ end
 
 Given("the encounter has {int} active reminder(s)") do |count|
   reminders = Array.new(count) { |i| { id: i + 1, name: "Reminder #{i + 1}", status: :due } }
-  stub_gateway(Lakeraven::EHR::RemindersGateway, :for_visit, reminders)
+  stub_gateway(Lakeraven::EHR::RemindersGateway, :applicable, reminders)
 end
 
 Given("the patient has {int} active allergy(ies)") do |count|

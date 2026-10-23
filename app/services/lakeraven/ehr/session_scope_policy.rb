@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require "rpms_rpc/security_keys"
-
 module Lakeraven
   module EHR
     # Translates a clinician's RPMS security keys into SMART scopes.
@@ -20,8 +18,8 @@ module Lakeraven
     # to them. Closing #496 is what makes the stronger statement true; until
     # then this constrains the browser path only.
     #
-    # Keys are the symbolic names in RpmsRpc::SecurityKeys::REGISTRY, resolved
-    # from ORWU USERKEYS at sign-on. Each entry grants only the resource types
+    # Keys are the symbolic names in Roles::KEY_NAMES, resolved from the
+    # user's KEYS at sign-on. Each entry grants only the resource types
     # that key's own RPMS workflow owns — the CPRS chart key grants reading a
     # chart, the CHS approval key grants acting on a referral, and neither
     # grants the other.

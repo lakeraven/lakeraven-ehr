@@ -41,7 +41,7 @@ module Lakeraven
         AUTH_USER_TYPES.product(KEY_SETS_FOR_MATRIX).each do |auth_user_type, key_set|
           symbolic_keys = security_keys_array(key_set).grep(Symbol)
           raw_keys = raw_security_keys_for_symbolic(symbolic_keys)
-          expected_keys = RpmsRpc::SecurityKeys.symbolize(raw_keys)
+          expected_keys = raw_keys.filter_map { |name| HostRoleExpectations::RPMS_KEY_STRING_BY_SYMBOL.key(name) }
 
           with_auth_stubs(auth_user_type: auth_user_type, raw_keys: raw_keys) do
             result = AuthenticationService.new.authenticate(
@@ -66,9 +66,14 @@ module Lakeraven
             success: true,
             duz: "501",
             name: "SYNTH,USER",
-            user_type: auth_user_type,
             verify_needs_change: false
           }
+        end
+
+        # The class is the server's USRCLS from ORWU USERINFO, read after
+        # sign-on; XUS AV CODE carries none (rpms-rpc #236).
+        RpmsRpc::Authentication.define_singleton_method(:user_type) do |_duz|
+          auth_user_type
         end
 
         RpmsRpc::Authentication.define_singleton_method(:user_info) do |_duz|
@@ -85,6 +90,7 @@ module Lakeraven
       ensure
         RpmsRpc::Authentication.singleton_class.send(:remove_method, :authenticate)
         RpmsRpc::Authentication.singleton_class.send(:remove_method, :user_info)
+        RpmsRpc::Authentication.singleton_class.send(:remove_method, :user_type)
         RpmsRpc::Authentication.singleton_class.send(:remove_method, :user_security_keys)
       end
     end
