@@ -369,7 +369,6 @@ module Lakeraven
                   .on(SchedulingGateway::DEL_HOLIDAY_RPC, "1^")
                   .on(SchedulingGateway::UNCHECKIN_RPC, "1^")
       end
-
     end
   end
 end
