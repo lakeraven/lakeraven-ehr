@@ -15,17 +15,23 @@ module Lakeraven
         # the whole match set, not of this page. _revinclude rows are appended
         # after the page and are not counted.
         total = matches.length
-        patients = fhir_page(matches)
+        # A sort reads FHIR elements, so a sorted search builds every match
+        # before paging; an unsorted one builds only the page.
+        page = if fhir_sort_keys.any?
+          fhir_page(fhir_sort(matches.map(&:to_fhir)))
+        else
+          fhir_page(matches).map(&:to_fhir)
+        end
 
-        entries = patients.map { |p| build_patient_entry(p) }
+        entries = page.map { |resource| { resource: resource, search: { mode: "match" } } }
 
         # _revinclude hands the caller resources of ANOTHER type, so it needs
         # that type's read scope like any other read. A `user/Patient.read`
         # token used to receive Provenance entries — including their agent
         # references — because the inclusion was never authorized.
         if params[:_revinclude] == "Provenance:target" && readable_included_types(%w[Provenance]).any?
-          patients.each do |p|
-            ProvenanceStore.instance.for_target("Patient", "rpms-#{p.dfn}").each do |prov|
+          page.each do |resource|
+            ProvenanceStore.instance.for_target("Patient", "rpms-#{resource[:id]}").each do |prov|
               entries << { resource: prov.to_fhir, search: { mode: "include" } }
             end
           end
@@ -135,10 +141,6 @@ module Lakeraven
         return patients unless sex_code
 
         patients.select { |p| p.sex == sex_code }
-      end
-
-      def build_patient_entry(patient)
-        { resource: patient.to_fhir, search: { mode: "match" } }
       end
 
       SSN_SYSTEMS = [
