@@ -140,6 +140,59 @@ module Lakeraven
         refute called
       end
 
+      # PCC V-file writes (BGO *SET via rpms-rpc) — gated under :pcc_screens (#647).
+      PCC_SCREEN_WRITES = {
+        "ExamComponentGateway.add" => {
+          provider_method: :add,
+          invoke: lambda { |fake|
+            ExamComponentGateway.add(1, 2090061, "SKIN", finding: "Normal", via: fake)
+          }
+        },
+        "HealthFactorGateway.add" => {
+          provider_method: :add,
+          invoke: lambda { |fake|
+            HealthFactorGateway.add(1, 2090061, "TOB-CURRENT", level: "MODERATE", via: fake)
+          }
+        },
+        "MeasurementGateway.add" => {
+          provider_method: :add,
+          invoke: lambda { |fake|
+            MeasurementGateway.add(1, 2090061, "WT", 75, units: "kg", via: fake)
+          }
+        },
+        "PovGateway.add" => {
+          provider_method: :add,
+          invoke: lambda { |fake|
+            PovGateway.add(1, 2090061, "J45.909", narrative: "Asthma", via: fake)
+          }
+        }
+      }.freeze
+
+      PCC_SCREEN_WRITES.each do |label, config|
+        test "pcc_screens: #{label} raises without a provider call" do
+          called = false
+          fake = Object.new
+          fake.define_singleton_method(config.fetch(:provider_method)) { |*| called = true; { success: true } }
+          with_restricted_backend do
+            assert_feature_unavailable(:pcc_screens) { config.fetch(:invoke).call(fake) }
+          end
+          refute called
+        end
+
+        test "pcc_screens: #{label} still delegates on rpms" do
+          assert_equal :rpms, Lakeraven::EHR.configuration.backend
+          calls = []
+          fake = Object.new
+          fake.define_singleton_method(config.fetch(:provider_method)) do |*args, **kwargs|
+            calls << { args: args, kwargs: kwargs }
+            { success: true, ien: 1, raw: "1" }
+          end
+          result = config.fetch(:invoke).call(fake)
+          assert_equal 1, calls.size
+          assert result[:success]
+        end
+      end
+
       test "tribal_enrollment: Patient tribal_enrollment_details raises without calling the gateway" do
         patient = Patient.new(dfn: 1, name: "Anderson,Alice", tribal_enrollment_number: "EXNH-12345")
         called = false
