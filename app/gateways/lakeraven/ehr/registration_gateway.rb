@@ -62,6 +62,7 @@ module Lakeraven
         # ^DPT/^AUPN*; AG's own add path files through FileMan so the .01
         # name xref, SSN xref, and registration audit fire.
         def register(params)
+          CapabilityGuard.ensure!(:bprm_registration)
           params = params.to_h.transform_keys(&:to_sym)
           return validation_error("name is required") if blank?(params[:name])
 
@@ -82,6 +83,7 @@ module Lakeraven
         # (AgSetCorrectPatientName/CellNumber/DateOfDeath/Mbi). File each
         # through ^DIE so the FileMan audit (DD "AUDIT") records the change.
         def update(dfn, changes)
+          CapabilityGuard.ensure!(:bprm_registration)
           changes = changes.to_h.transform_keys(&:to_sym)
           return validation_error("dfn is required") unless valid_id?(dfn)
           return validation_error("no changes given") if changes.empty?
@@ -100,6 +102,7 @@ module Lakeraven
         # in-gateway. RPC name/encoding unconfirmed against #8994 — the
         # confirmed stock search is ORWPT LIST ALL (RpmsRpc::Patient.search).
         def search(query, dob: nil)
+          CapabilityGuard.ensure!(:bprm_registration)
           RpcSupport.with_broker("Patient lookup service unavailable") do
             raw = RpcSupport.broker.call_rpc(SEARCH_RPC, query.to_s)
             patients = RpcSupport.lines(raw).filter_map { |line| parse_search_row(line) }
@@ -111,6 +114,7 @@ module Lakeraven
         # --- #4 Face sheet (GET /patients/:dfn/face_sheet) -----------------
         # AgGetPatientFaceSheet + AgGetPatientErrorsAndWarnings (read).
         def face_sheet(dfn)
+          CapabilityGuard.ensure!(:bprm_registration)
           return validation_error("dfn is required") unless valid_id?(dfn)
 
           RpcSupport.with_broker("Patient lookup service unavailable") do
@@ -123,6 +127,7 @@ module Lakeraven
 
         # --- #3 List insurances (GET /patients/:dfn/insurances) ------------
         def insurances(dfn)
+          CapabilityGuard.ensure!(:bprm_registration)
           return validation_error("dfn is required") unless valid_id?(dfn)
 
           RpcSupport.with_broker("Insurance service unavailable") do
@@ -135,6 +140,7 @@ module Lakeraven
         # TODO(sql-mutate→reimpl): file the policy-number change through ^DIE
         # on the patient-insurance multiple rather than a raw UPDATE.
         def update_insurance(dfn, insurance_id, policy_number:)
+          CapabilityGuard.ensure!(:bprm_registration)
           return validation_error("dfn is required") unless valid_id?(dfn)
           return validation_error("insurance id is required") unless valid_id?(insurance_id)
           if RpcSupport.unsafe_field?(policy_number)
@@ -159,6 +165,7 @@ module Lakeraven
         # in-use policy must be refused (409) before any dependent row is
         # touched.
         def delete_insurance(dfn, insurance_id)
+          CapabilityGuard.ensure!(:bprm_registration)
           return validation_error("dfn is required") unless valid_id?(dfn)
           return validation_error("insurance id is required") unless valid_id?(insurance_id)
 
@@ -302,9 +309,7 @@ module Lakeraven
       end
 
       # BPRM registration writes are IHS-only (#647). Stock patient reads
-      # stay on PatientGateway (ORWPT SELECT) and are not guarded here.
-      CapabilityGuard.protect(self, :bprm_registration, :register, :update, :search, :face_sheet,
-        :insurances, :update_insurance, :delete_insurance)
+      # stay on PatientGateway (ORWPT SELECT) and are not checked here.
     end
   end
 end

@@ -18,6 +18,8 @@ module Lakeraven
       # nothing from a 400.
       before_action :validate_fhir_paging!, if: :fhir_search?
       before_action :validate_fhir_sort_and_include!, if: :fhir_search?
+      # Before a subclass's patient-param before_action (#647).
+      before_action :ensure_backend_supports_interaction!
 
       # Actions that DISCLOSE clinical data even though they are shaped as
       # writes — generating a C-CDA, running a bulk export, requesting an
