@@ -114,10 +114,13 @@ else
   while IFS= read -r p || [ -n "$p" ]; do paths+=("${p%$'\r'}"); done
 fi
 
-# Normalise: drop blanks, strip leading ./, squeeze //, refuse anything that leaves the repo.
+# Normalise: drop empty lines, strip leading ./, squeeze //, refuse anything that leaves the repo.
+# Only a ZERO-length line is ignored (a trailing-newline artifact). A line with any character,
+# whitespace included, is a changed path and gets classified: a file named "   " is not on the
+# safe-list, so it must make the PR laptop-only rather than vanish from the list.
 clean=()
 for p in ${paths[@]+"${paths[@]}"}; do
-  [ -z "${p//[[:space:]]/}" ] && continue
+  [ -z "$p" ] && continue
   while [ "${p:0:2}" = "./" ]; do p="${p:2}"; done
   while [[ "$p" == *//* ]]; do p="${p//\/\//\/}"; done
   case "/$p/" in
