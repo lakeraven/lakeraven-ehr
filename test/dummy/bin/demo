@@ -173,6 +173,12 @@ if [ -n "$_expect_host" ]; then
 fi
 unset _expect_host _host _bind_seen _arg
 
+# Rails reads ENV.fetch("BINDING", "localhost"), so an exported empty
+# BINDING would override the localhost default and bind every interface.
+if [ -z "${BINDING-}" ]; then
+  unset BINDING
+fi
+
 # BINDING is the host Rails uses when -b is absent. A URI ("://"), a
 # unix-socket host (starting with "/", ".", or "@"), or a scheme-less
 # host:port would ignore PORT, so refuse it even if -b is also passed.
