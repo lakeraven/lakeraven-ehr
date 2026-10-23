@@ -422,6 +422,13 @@ module Lakeraven
           { success: false, status: 422, error: message }
         end
       end
+
+      # BSDX scheduling writes and reports are IHS-only (#647). Stock ORWPT
+      # APPTLST reads (patient_appointments, cancelled_appointments,
+      # routing_slip) stay outside the guard.
+      CapabilityGuard.protect(self, :bprm_scheduling, :book, :cancel, :no_show, :check_in, :rebook,
+        :availability, :access_blocks, :clinic_schedule, :waiting_list, :waiting_list_add,
+        :set_availability_config, :add_holiday, :remove_holiday)
     end
   end
 end

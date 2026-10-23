@@ -20,6 +20,8 @@ module Lakeraven
       def self.default_provider
         ::RpmsRpc::ImmunizationRefusal
       end
+
+      CapabilityGuard.protect(self, :ihs_immunization, :record)
     end
   end
 end

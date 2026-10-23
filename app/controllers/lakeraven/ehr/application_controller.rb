@@ -7,6 +7,7 @@ module Lakeraven
       include AuditableClinicalAccess
       include FHIRReadEgress
       include FHIRSearchBundle
+      include FeatureUnavailableRendering
 
       FHIR_CONTENT_TYPE = "application/fhir+json"
 

@@ -27,6 +27,17 @@ module Lakeraven
         pcc_screens
       ].freeze
 
+      # FHIR types each IHS capability owns (#574, #647). The supported set
+      # is this map filtered by BackendRegistry.current.provides?.
+      CAPABILITY_FHIR_RESOURCE_TYPES = {
+        prc_referrals: %w[ServiceRequest].freeze,
+        tribal_enrollment: [].freeze,
+        bprm_registration: %w[Patient].freeze,
+        bprm_scheduling: [].freeze,
+        ihs_immunization: %w[Immunization].freeze,
+        pcc_screens: [].freeze
+      }.freeze
+
       # A registered backend: a client source (called on every request, so a
       # client swapped in configuration is picked up) and its capabilities.
       # It carries no name, so nothing can branch on one.
@@ -72,6 +83,15 @@ module Lakeraven
 
         def current
           fetch(Lakeraven::EHR.configuration.backend)
+        end
+
+        def capability_fhir_resource_types
+          CAPABILITY_FHIR_RESOURCE_TYPES
+        end
+
+        def supported_fhir_resource_types
+          provided = CAPABILITY_FHIR_RESOURCE_TYPES.select { |capability, _| current.provides?(capability) }
+          provided.values.flatten.uniq
         end
 
         private

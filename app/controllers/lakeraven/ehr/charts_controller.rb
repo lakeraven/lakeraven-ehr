@@ -35,6 +35,7 @@ module Lakeraven
     # serializers; only the RPMS data source is mocked (see
     # test/dummy/lib/lakeraven_demo_seeds.rb).
     class ChartsController < ActionController::Base
+      helper ApplicationHelper
       include SmartAuthentication
       # FAIL-CLOSED audit, the same terms the clinician screening surface is
       # held to. The chart now carries scored screenings (#474), so it serves
@@ -163,11 +164,19 @@ module Lakeraven
         # omit a configured supplemental provider's rows from the chart while
         # showing them in the search.
         @observations  = readable?("Observation") ? safe { SupplementalClinicalResources.merged_observations_for_patient(dfn) } || [] : []
-        @immunizations = readable?("Immunization") ? safe { Immunization.for_patient(dfn) } : []
+        @immunizations = ihs_immunizations(dfn)
         @procedures    = readable?("Procedure") ? build_procedures(dfn) : []
         @encounters    = readable?("Encounter") ? safe { EncounterGateway.for_patient(dfn) } : []
         @encounter_resources = build_encounter_resources(dfn)
         load_screenings(dfn)
+      end
+
+      # Immunizations are an IHS-only chart section. A backend without the
+      # capability never sees the gateway call, and the card is omitted.
+      def ihs_immunizations(dfn)
+        return [] unless readable?("Immunization") && BackendRegistry.current.provides?(:ihs_immunization)
+
+        safe { Immunization.for_patient(dfn) }
       end
 
       # Scored screening instruments (#474). Engine-owned records rather than an

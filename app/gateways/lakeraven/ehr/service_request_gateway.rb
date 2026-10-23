@@ -29,6 +29,9 @@ module Lakeraven
       rescue RpmsRpc::Client::RpcError, RpmsRpc::Client::ConnectionError => e
         { success: false, error: PhiSanitizer.sanitize_message(e.message), ien: ien }
       end
+
+      # PRC referrals are IHS-only (#647).
+      CapabilityGuard.protect(self, :prc_referrals, :for_patient, :create, :cancel)
     end
   end
 end
