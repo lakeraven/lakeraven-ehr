@@ -51,12 +51,9 @@ module Lakeraven
       end
 
       # FHIR JSON is the default. HTML is only when the client prefers it.
-      # `_format` (and a format extension) win. Otherwise Rails request
-      # formats honour Accept q-values. A browser-like Accept contains */*,
-      # which makes Rails substitute HTML without reading those q-values;
-      # text/html wins only when its effective q is at least FHIR JSON's.
-      BROWSER_LIKE_ACCEPT = /,\s*\*\/\*|\*\/\*\s*,/
-
+      # `_format` (and a format extension) win. Every other non-blank Accept goes
+      # through one comparator (text_html_preferred?); Rails' own negotiation is
+      # not consulted, because it ignores q=0 and quality ranking.
       def feature_unavailable_html?
         override = explicit_fhir_format
         if override
@@ -66,9 +63,8 @@ module Lakeraven
 
         header = request.headers["Accept"].to_s
         return false if header.blank?
-        return text_html_preferred?(header) if header.match?(BROWSER_LIKE_ACCEPT)
 
-        html_format?(request.format)
+        text_html_preferred?(header)
       end
 
       def explicit_fhir_format
@@ -89,28 +85,48 @@ module Lakeraven
       HTML_TYPE = "text/html"
       FHIR_JSON_TYPE = "application/fhir+json"
 
+      # A quality value per RFC 9110: 0 to 1 with at most three decimals.
+      QUALITY = /\A(?:0(?:\.\d{0,3})?|1(?:\.0{0,3})?)\z/
+
+      # HTML wins only when it outranks FHIR JSON, or ties with it and is the
+      # more specific match (so `text/html, */*` is HTML, a lone `*/*` and two
+      # equally named types stay FHIR JSON). A header with any malformed q value
+      # is unusable and falls to the FHIR JSON default.
       def text_html_preferred?(header)
         ranges = accept_qualities(header)
+        return false unless ranges
+
         html_q = effective_quality(ranges, HTML_TYPE)
-        html_q.positive? && html_q >= effective_quality(ranges, FHIR_JSON_TYPE)
+        json_q = effective_quality(ranges, FHIR_JSON_TYPE)
+        return false unless html_q.positive?
+
+        html_q > json_q || (html_q == json_q && specificity(ranges, HTML_TYPE) > specificity(ranges, FHIR_JSON_TYPE))
       end
 
       def effective_quality(ranges, type)
         ranges[type] || ranges["#{type.split('/').first}/*"] || ranges["*/*"] || 0.0
       end
 
+      # 2 for an exact range, 1 for type/*, 0 for */*, -1 for no match.
+      def specificity(ranges, type)
+        return 2 if ranges.key?(type)
+        return 1 if ranges.key?("#{type.split('/').first}/*")
+
+        ranges.key?("*/*") ? 0 : -1
+      end
+
+      # { "type/subtype" => q }, or nil when any q is malformed.
       def accept_qualities(header)
         header.split(",").each_with_object({}) do |part, qualities|
           type, *params = part.split(";").map(&:strip)
           next if type.empty?
 
           q_param = params.find { |param| param.downcase.start_with?("q=") }
-          qualities[type.downcase] = q_param ? q_param.split("=", 2).last.to_f : 1.0
-        end
-      end
+          q = q_param ? q_param.split("=", 2).last.to_s.strip : "1"
+          return nil unless q.match?(QUALITY)
 
-      def html_format?(mime)
-        mime.respond_to?(:symbol) && mime.symbol == :html
+          qualities[type.downcase] = q.to_f
+        end
       end
 
       # Runs from ApplicationController after the token checks and before the
