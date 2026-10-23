@@ -49,10 +49,6 @@ module Lakeraven
           "ServiceRequest" => { interactions: %w[search-type], source: "RPMS referrals, through rpms-rpc." },
           "Immunization" => { interactions: %w[search-type], source: "RPMS, through rpms-rpc." },
           "Procedure" => { interactions: %w[search-type], source: "RPMS, through rpms-rpc." },
-          "Consent" => {
-            interactions: %w[search-type],
-            source: "Not served yet: a search always returns an empty Bundle. #{SEARCH_ONLY_STUB}"
-          },
           "AuditEvent" => { interactions: %w[read search-type], source: "This server's own audit log." },
           "Measure" => { interactions: %w[search-type], source: "Measure definitions shipped with the engine." },
           "MeasureReport" => {
