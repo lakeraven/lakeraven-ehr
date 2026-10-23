@@ -21,8 +21,25 @@ module Lakeraven
       # governs which ROWS come back, not merely which patient is named.
       compartment_bound :index, param: :patient
 
+      # The column each declared _sort parameter (FHIR::SearchCapabilities)
+      # orders by.
+      SORT_COLUMNS = { "_id" => :id, "date" => :created_at }.freeze
+
+      # Paged and sorted in the query, not in memory: the audit log only grows.
+      #
+      # Oldest first by default, so paging is stable. Every read of this
+      # endpoint writes an audit row of its own, so newest-first shifted every
+      # later page by one per request and a client walking the pages saw a row
+      # twice. In write order a new row lands after the last page and the pages
+      # already walked do not move. `_sort=-date` asks for newest-first and
+      # takes that shift. id breaks ties between rows written in the same
+      # instant.
       def index
-        render_bundle_egress(scoped_events.recent.limit(100).map(&:to_fhir))
+        events = scoped_events
+        page = events.order(audit_sort_order)
+                     .offset(fhir_paging[:offset]).limit(fhir_paging[:count])
+        entries = page.map { |event| { resource: event.to_fhir, search: { mode: "match" } } }
+        render_fhir_egress(paged_search_bundle(entries, total: events.count))
       end
 
       def show
@@ -35,6 +52,13 @@ module Lakeraven
       end
 
       private
+
+      def audit_sort_order
+        order = fhir_sort_keys.to_h { |name, _sort, descending| [ SORT_COLUMNS.fetch(name), descending ? :desc : :asc ] }
+        order[:created_at] ||= :asc
+        order[:id] ||= :asc
+        order
+      end
 
       # FHIR type these rows are attributed to for a patient. Audit writes set
       # entity_type from the accessed resource's FHIR type, so a row directly
