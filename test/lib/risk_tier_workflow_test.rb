@@ -85,7 +85,28 @@ class RiskTierWorkflowTest < ActiveSupport::TestCase
 
   # ---- the Classify step, executed ------------------------------------------------------
 
-  def run_classify(files:, classifier: :real, gh_fails: false, changed: nil)
+  # A stand-in `jq` that behaves like the real one except for the one call named by `jq_fail`:
+  #   :slurp   `jq -s`        merging the API pages          -> exit 5, no output
+  #   :count   `jq length`    counting the files             -> exit 5, no output
+  #   :check   `jq -e`        the control-character check    -> exit 5, no output
+  #   :extract `jq -r`        writing the names to paths.txt -> first line, then exit 5
+  # Each is a jq that dies (out of memory, a bad build, a killed process): the step must not
+  # read a dead jq as "nothing wrong".
+  JQ_STUB = <<~'SH'
+    #!/bin/sh
+    case "$JQ_FAIL:$1" in
+      slurp:-s|check:-e) echo "jq: error: boom" >&2; exit 5 ;;
+      count:length) echo "jq: error: boom" >&2; exit 5 ;;
+      extract:-r) "$REAL_JQ" "$@" | head -n 1; echo "jq: error: boom" >&2; exit 5 ;;
+    esac
+    exec "$REAL_JQ" "$@"
+  SH
+
+  def real_jq
+    ENV["PATH"].split(File::PATH_SEPARATOR).map { |d| File.join(d, "jq") }.find { |f| File.executable?(f) }
+  end
+
+  def run_classify(files:, classifier: :real, gh_fails: false, changed: nil, jq_fail: nil)
     Dir.mktmpdir do |dir|
       FileUtils.mkdir_p(File.join(dir, "bin"))
       FileUtils.mkdir_p(File.join(dir, ".github"))
@@ -109,6 +130,10 @@ class RiskTierWorkflowTest < ActiveSupport::TestCase
         #{gh_fails ? 'echo "gh: boom" >&2; exit 1' : "cat #{pages}"}
       SH
       FileUtils.chmod(0o755, File.join(dir, "stubs", "gh"))
+      if jq_fail
+        File.write(File.join(dir, "stubs", "jq"), JQ_STUB)
+        FileUtils.chmod(0o755, File.join(dir, "stubs", "jq"))
+      end
       File.write(File.join(dir, "step.sh"), step("classify")["run"])
 
       summary = File.join(dir, "summary.md")
@@ -116,6 +141,7 @@ class RiskTierWorkflowTest < ActiveSupport::TestCase
       FileUtils.touch([ summary, output ])
       env = { "PATH" => "#{File.join(dir, 'stubs')}:#{ENV['PATH']}", "GH_TOKEN" => "x", "REPO" => "o/r", "PR" => "1",
               "CHANGED" => (changed || files.size).to_s, "GITHUB_STEP_SUMMARY" => summary, "GITHUB_OUTPUT" => output }
+      env.merge!("JQ_FAIL" => jq_fail.to_s, "REAL_JQ" => real_jq) if jq_fail
       _out, err, status = Open3.capture3(env, "bash", "step.sh", chdir: dir)
       assert status.success?, "the Classify step itself must not fail: #{err}"
       [ File.read(output)[/tier=(\S+)/, 1], File.read(summary) ]
@@ -211,6 +237,50 @@ class RiskTierWorkflowTest < ActiveSupport::TestCase
     assert_equal "laptop-only", tier
   end
 
+  # Copilot round on #633: a jq that dies must never read as "no control characters" or as a
+  # complete list of names. Both used to fall through to phone-safe.
+  test "a control-character check that errors is laptop-only, not 'no control characters'" do
+    tier, summary = run_classify(files: [ file("README.md") ], jq_fail: :check)
+    assert_equal "laptop-only", tier
+    assert_match(/undetermined/i, summary)
+  end
+
+  test "a name extraction that dies halfway is laptop-only, not the half that was written" do
+    tier, summary = run_classify(files: [ file("README.md"), file("app/models/lakeraven/ehr/disclosure.rb") ], jq_fail: :extract)
+    assert_equal "laptop-only", tier
+    assert_match(/undetermined/i, summary)
+  end
+
+  test "a file list that cannot be merged is laptop-only" do
+    tier, = run_classify(files: [ file("README.md") ], jq_fail: :slurp)
+    assert_equal "laptop-only", tier
+  end
+
+  test "a file count that cannot be taken is laptop-only" do
+    tier, = run_classify(files: [ file("README.md") ], jq_fail: :count)
+    assert_equal "laptop-only", tier
+  end
+
+  test "the stand-in jq changes nothing when it is not told to fail (the guard is honest)" do
+    tier, = run_classify(files: [ file("README.md") ], jq_fail: :none)
+    assert_equal "phone-safe", tier
+  end
+
+  # ---- when it runs ---------------------------------------------------------------------
+
+  # Retargeting a PR emits `edited`. The new base can put controllers or migrations into a
+  # diff that was docs-only, so the label has to be recomputed.
+  test "a change of the PR's base branch reclassifies it" do
+    assert_includes triggers.dig("pull_request_target", "types"), "edited"
+  end
+
+  # The concurrency group cancels an in-flight run when a new one starts. A job-level `if`
+  # that then skips the new run (say, a title edit) would cancel a real classification and
+  # replace it with nothing, so the job must always run.
+  test "the job has no condition that could skip the run that cancelled another" do
+    refute workflow.dig("jobs", "risk-tier").key?("if")
+  end
+
   # ---- the Apply and Verify steps, executed -----------------------------------------------
 
   LABEL_GH = <<~'SH'
@@ -249,13 +319,15 @@ class RiskTierWorkflowTest < ActiveSupport::TestCase
       prev="$a"
     done
     case "$1 $2" in
-      "pr view") jq -n --rawfile s "$GH_STATE" '{labels: ($s | split("\n") | map(select(length > 0)) | map({name: .}))}' | jq -r "$jqexpr" ;;
+      "pr view")
+        if [ -n "$GH_FAIL_VIEW" ]; then echo "gh: cannot read the PR" >&2; exit 1; fi
+        jq -n --rawfile s "$GH_STATE" '{labels: ($s | split("\n") | map(select(length > 0)) | map({name: .}))}' | jq -r "$jqexpr" ;;
     esac
     exit 0
   SH
 
   # Runs the named steps in order against the stub. Returns [exit statuses, final labels, log].
-  def run_label_steps(step_names, tier:, labels: [], fail_remove: false, fail_add: false)
+  def run_label_steps(step_names, tier:, labels: [], fail_remove: false, fail_add: false, fail_view: false)
     Dir.mktmpdir do |dir|
       FileUtils.mkdir_p(File.join(dir, "stubs"))
       File.write(File.join(dir, "stubs", "gh"), LABEL_GH)
@@ -268,6 +340,7 @@ class RiskTierWorkflowTest < ActiveSupport::TestCase
               "TIER" => tier, "GH_STATE" => state, "GH_LOG" => log }
       env["GH_FAIL_REMOVE"] = "1" if fail_remove
       env["GH_FAIL_ADD"] = "1" if fail_add
+      env["GH_FAIL_VIEW"] = "1" if fail_view
       statuses = step_names.map do |name|
         File.write(File.join(dir, "step.sh"), step(name)["run"])
         _out, _err, status = Open3.capture3(env, "bash", "step.sh", chdir: dir)
@@ -347,6 +420,22 @@ class RiskTierWorkflowTest < ActiveSupport::TestCase
     assert_equal [ "risk:phone-safe" ], labels, "it must not leave a PR carrying both labels"
     refute(log.any? { |l| l.include?("--add-label") }, "nothing may be added after a failed removal")
     assert_operator statuses.last, :>, 0, "Verify must also fail: the PR is still mislabeled"
+  end
+
+  # Copilot round on #633: when the removal fails, the label read decides whether to go on.
+  # A read that also fails is not "the label is gone".
+  test "Apply stops, adding nothing, when the removal fails and the labels cannot be read" do
+    statuses, labels, log = run_label_steps([ "Apply the label" ], tier: "laptop-only",
+                                           labels: [ "risk:phone-safe" ], fail_remove: true, fail_view: true)
+    assert_operator statuses.first, :>, 0, "Apply must fail visibly"
+    assert_equal [ "risk:phone-safe" ], labels
+    refute(log.any? { |l| l.include?("--add-label") }, "nothing may be added when the labels are unreadable: #{log.inspect}")
+  end
+
+  test "Apply goes on when the removal fails but a successful read shows the label is already gone" do
+    statuses, labels, = run_label_steps([ "Apply the label" ], tier: "laptop-only", labels: [], fail_remove: true)
+    assert_equal [ 0 ], statuses
+    assert_equal [ "risk:laptop-only" ], labels
   end
 
   test "Apply fails when the new label cannot be added" do
