@@ -54,7 +54,7 @@ module Lakeraven
       # `_format` (and a format extension) win. Otherwise Rails request
       # formats honour Accept q-values. A browser-like Accept contains */*,
       # which makes Rails substitute HTML without reading those q-values;
-      # text/html counts only when its q is at least as high as the rest.
+      # text/html wins only when its effective q is at least FHIR JSON's.
       BROWSER_LIKE_ACCEPT = /,\s*\*\/\*|\*\/\*\s*,/
 
       def feature_unavailable_html?
@@ -82,10 +82,21 @@ module Lakeraven
         end
       end
 
+      # The two representations this renderer can produce. Only they compete:
+      # a range it cannot serve (application/xml) never decides, and each
+      # type takes the quality of its most specific matching range, so an
+      # explicit application/fhir+json;q=0.1 is not overridden by */*;q=1.
+      HTML_TYPE = "text/html"
+      FHIR_JSON_TYPE = "application/fhir+json"
+
       def text_html_preferred?(header)
-        qualities = accept_qualities(header)
-        html_q = qualities.fetch("text/html", 0.0)
-        qualities.all? { |_type, quality| html_q >= quality }
+        ranges = accept_qualities(header)
+        html_q = effective_quality(ranges, HTML_TYPE)
+        html_q.positive? && html_q >= effective_quality(ranges, FHIR_JSON_TYPE)
+      end
+
+      def effective_quality(ranges, type)
+        ranges[type] || ranges["#{type.split('/').first}/*"] || ranges["*/*"] || 0.0
       end
 
       def accept_qualities(header)
@@ -102,9 +113,9 @@ module Lakeraven
         mime.respond_to?(:symbol) && mime.symbol == :html
       end
 
-      # Runs from ApplicationController after the token checks and before a
-      # subclass patient-param callback, so a withheld capability is
-      # not-supported rather than a missing-parameter 400.
+      # Runs from ApplicationController after the token checks and before the
+      # search-parameter validators and any subclass patient-param callback,
+      # so a withheld capability is not-supported rather than a 400.
       def ensure_backend_supports_interaction!
         interaction = FHIR_ACTION_INTERACTIONS[action_name]
         capability = BackendRegistry.capability_for_fhir_interaction(fhir_resource_type, interaction)
