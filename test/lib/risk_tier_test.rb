@@ -427,7 +427,9 @@ class RiskTierTest < ActiveSupport::TestCase
   end
 
   test "an empty list is undetermined: laptop-only, exit 2" do
-    [ "", "\n", "\n\n   \n" ].each do |stdin|
+    # "\n\n   \n" used to be listed here. A line of spaces is a file name, not nothing, so it is
+    # classified (see "a list holding only a whitespace-only name") and no longer counts as empty.
+    [ "", "\n", "\n\n\n" ].each do |stdin|
       out, _err, status = run_script(stdin: stdin)
       assert_equal "laptop-only", out.lines.first.to_s.strip, stdin.inspect
       assert_equal 2, status.exitstatus, stdin.inspect
