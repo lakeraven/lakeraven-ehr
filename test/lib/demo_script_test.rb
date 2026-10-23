@@ -182,6 +182,31 @@ class DemoScriptTest < ActiveSupport::TestCase
     assert_port_held(holder_port)
   end
 
+  # On a usr-merged Linux runner, sh, env and lsof live in the same directory as
+  # the system ruby (/usr/bin, and /bin is a symlink to it). Dropping every PATH
+  # directory that holds a ruby therefore also dropped sh, so the demo's
+  # `#!/usr/bin/env sh` line failed ("env: 'sh': No such file or directory")
+  # before the script could say anything. The helper must remove ruby, not the
+  # directories that happen to contain it.
+  test "the ruby-less PATH keeps every other command reachable when it shares a directory with ruby" do
+    shared = Dir.mktmpdir("demo_script_shared_bin_")
+    @trees << shared
+    File.write(File.join(shared, "ruby"), "#!/bin/sh\nexit 0\n")
+    File.chmod(0o755, File.join(shared, "ruby"))
+    File.symlink("/bin/sh", File.join(shared, "sh"))
+    original = ENV["PATH"]
+    ENV["PATH"] = shared
+    begin
+      resolved = path_without_ruby
+    ensure
+      ENV["PATH"] = original
+    end
+
+    found = ->(name) { resolved.split(":").any? { |dir| File.executable?(File.join(dir, name)) } }
+    assert found.call("sh"), "sh must stay reachable: #{resolved}"
+    refute found.call("ruby"), "ruby must not be reachable: #{resolved}"
+  end
+
   test "busy port stderr explains when alternate-port search cannot run without ruby on PATH" do
     skip "lsof not on PATH; required for port-holder detection" unless lsof_available?
 
