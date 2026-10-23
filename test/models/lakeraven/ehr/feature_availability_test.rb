@@ -40,14 +40,19 @@ module Lakeraven
         end
       end
 
+      # Walks everything actually advertised (capability-owned and base), and
+      # fails if it finds no read at all, so it cannot pass by iterating nothing.
       test "every advertised read interaction has a show route" do
         shows = Lakeraven::EHR::Engine.routes.routes.select { |r| r.defaults[:action] == "show" }
           .map { |r| r.defaults[:controller] }
-        BackendRegistry.capability_fhir_interactions.values.flatten(1)
-          .select { |_type, interaction| interaction == "read" }.each do |type, _|
-            controller = "lakeraven/ehr/#{type.underscore.pluralize}"
-            assert_includes shows, controller, "#{type} is advertised as readable but has no show route"
-          end
+        reads = BackendRegistry.supported_fhir_resource_types.select do |type|
+          BackendRegistry.supported_fhir_interactions(type).include?("read")
+        end
+        refute_empty reads, "expected at least one advertised read (Patient) so this check can fail"
+        reads.each do |type|
+          controller = "lakeraven/ehr/#{type.underscore.pluralize}"
+          assert_includes shows, controller, "#{type} is advertised as readable but has no show route"
+        end
       end
 
       test "supported_fhir_resource_types on rpms lists every IHS-owned type plus Patient" do
