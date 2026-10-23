@@ -557,6 +557,24 @@ class DemoScriptTest < ActiveSupport::TestCase
     assert_equal port.to_s, recorded_port
   end
 
+  # Rails reads ENV.fetch("BINDING", "localhost"), so an exported empty
+  # BINDING overrides the localhost default and Puma binds every interface
+  # with the demo's auth bypass on. The script must drop it, not forward it.
+  test "an empty BINDING never reaches rails" do
+    port = find_free_port
+    tree = build_demo_tree
+    env = demo_env(tree[:rails_log], "PORT" => port.to_s, "BINDING" => "")
+
+    stdout, _stderr, status = run_demo(tree[:demo_path], env)
+
+    assert_predicate status, :success?, "expected success for BINDING=\"\""
+    read_rails_invocation(tree[:rails_log])
+    binding_log = File.join(File.dirname(tree[:rails_log]), "binding_env.log")
+    assert_equal "unset", File.read(binding_log).strip,
+                 "an empty BINDING must be unset before rails starts"
+    assert_includes stdout, "http://localhost:#{port}/"
+  end
+
   test "forwards allowlisted plain host bindings without embedded port to rails" do
     port = find_free_port
 
@@ -1079,8 +1097,10 @@ class DemoScriptTest < ActiveSupport::TestCase
     true
   end
 
+  # Every address the script probes. On macOS, SO_REUSEADDR lets a loopback
+  # bind succeed beside a 0.0.0.0 holder, so loopback alone reads as free.
   def port_in_use?(port)
-    !bind_address_free?("127.0.0.1", port)
+    !port_free?(port)
   end
 
   def spawn_port_holder(port)
@@ -1163,6 +1183,9 @@ class DemoScriptTest < ActiveSupport::TestCase
         ]
         inherit_lines = inherit_keys.map { |key| "#{key}=#{ENV.fetch(key, '')}" }
         File.write(inherit_log, inherit_lines.join("\n") + "\n")
+
+        binding_state = ENV.key?("BINDING") ? "set:#{ENV['BINDING']}" : "unset"
+        File.write(File.join(File.dirname(log), "binding_env.log"), binding_state + "\n")
 
         digit_keys = ENV.keys.grep(/PUMA_INHERIT_\d/)
         File.write(match_log, digit_keys.join("\n") + (digit_keys.empty? ? "" : "\n"))
@@ -1312,10 +1335,7 @@ class DemoScriptTest < ActiveSupport::TestCase
   end
 
   def assert_port_held(port)
-    TCPServer.new("127.0.0.1", port)
-    flunk "expected port #{port} to remain in use"
-  rescue Errno::EADDRINUSE
-    nil
+    refute port_free?(port), "expected port #{port} to remain in use"
   end
 
   def default_busy_port_for_suggestion_contract
