@@ -353,9 +353,9 @@ module Lakeraven
             { datetime: Date.new(2026, 2, 1), location_ien: 1, location: "Clinic", status: "no show" }
           ])
           RpmsRpc.client.seed_keyed_collection(:vitals, "1", [
-            { type: "PAIN", value: "4", units: "", recorded_date: DateTime.now },
-            { type: "T", value: "98.6", units: "Celsius", recorded_date: DateTime.now },
-            { type: "BP", value: "Refused", units: "", recorded_date: DateTime.now }
+            { measurement_ien: 4001, type: "PAIN", value: "4", units: "", recorded_date: DateTime.now },
+            { measurement_ien: 4002, type: "T", value: "98.6", units: "Celsius", recorded_date: DateTime.now },
+            { measurement_ien: 4003, type: "BP", value: "Refused", units: "", recorded_date: DateTime.now }
           ])
 
           get "/lakeraven-ehr/patients/1", headers: @headers
@@ -392,13 +392,13 @@ module Lakeraven
         ensure
           RpmsRpc.client.seed_keyed_collection(:patient_appointments, "1", [])
           RpmsRpc.client.seed_keyed_collection(:vitals, "1", [
-            { type: "BP",  value: "120/80", units: "mm[Hg]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
-            { type: "P",   value: "72",     units: "/min",   recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
-            { type: "T",   value: "98.6",   units: "[degF]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
-            { type: "R",   value: "16",     units: "/min",   recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
-            { type: "POX", value: "98",     units: "%",      recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
-            { type: "WT",  value: "150",    units: "[lb_av]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
-            { type: "HT",  value: "65",     units: "[in_i]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) }
+            { measurement_ien: 4004, type: "BP",  value: "120/80", units: "mm[Hg]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
+            { measurement_ien: 4005, type: "P",   value: "72",     units: "/min",   recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
+            { measurement_ien: 4006, type: "T",   value: "98.6",   units: "[degF]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
+            { measurement_ien: 4007, type: "R",   value: "16",     units: "/min",   recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
+            { measurement_ien: 4008, type: "POX", value: "98",     units: "%",      recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
+            { measurement_ien: 4009, type: "WT",  value: "150",    units: "[lb_av]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
+            { measurement_ien: 4010, type: "HT",  value: "65",     units: "[in_i]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) }
           ])
         end
       end

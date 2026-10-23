@@ -35,16 +35,16 @@ module LakeravenDemoSeeds
         { ien: 22, status: "A", icd_code: "N18.3", description: "Chronic kidney disease, stage 3" }
       ],
       medications: [
-        { ien: 21, drug_name: "Lisinopril 20mg", sig: "1 tab PO daily", status: "active" },
-        { ien: 22, drug_name: "Amlodipine 5mg",  sig: "1 tab PO daily", status: "active" }
+        { id: "21", name: "Lisinopril 20mg", sig: "1 tab PO daily", status: "active" },
+        { id: "22", name: "Amlodipine 5mg",  sig: "1 tab PO daily", status: "active" }
       ],
       allergies: [
         { ien: 21, allergen: "Sulfa Drugs", reaction: "Rash", severity: "moderate" }
       ],
       vitals: [
-        { type: "BP", value: "150/92", units: "mm[Hg]",  recorded_date: VITALS_TAKEN },
-        { type: "P",  value: "68",     units: "/min",    recorded_date: VITALS_TAKEN },
-        { type: "WT", value: "201",    units: "[lb_av]", recorded_date: VITALS_TAKEN }
+        { measurement_ien: 2001, type: "BP", value: "150/92", units: "mm[Hg]",  recorded_date: VITALS_TAKEN },
+        { measurement_ien: 2002, type: "P",  value: "68",     units: "/min",    recorded_date: VITALS_TAKEN },
+        { measurement_ien: 2003, type: "WT", value: "201",    units: "[lb_av]", recorded_date: VITALS_TAKEN }
       ] },
     { dfn: 3, name: "DEMOPATIENT,MARA", sex: "F", dob: Date.new(1997, 6, 30),
       ssn: "900-00-0103",
@@ -53,14 +53,14 @@ module LakeravenDemoSeeds
         { ien: 32, status: "A", icd_code: "D50.9",  description: "Iron deficiency anemia" }
       ],
       medications: [
-        { ien: 31, drug_name: "Prenatal Vitamin", sig: "1 tab PO daily", status: "active" },
-        { ien: 32, drug_name: "Ferrous Sulfate 325mg", sig: "1 tab PO daily", status: "active" }
+        { id: "31", name: "Prenatal Vitamin", sig: "1 tab PO daily", status: "active" },
+        { id: "32", name: "Ferrous Sulfate 325mg", sig: "1 tab PO daily", status: "active" }
       ],
       allergies: [],
       vitals: [
-        { type: "BP", value: "112/70", units: "mm[Hg]",  recorded_date: VITALS_TAKEN },
-        { type: "P",  value: "82",     units: "/min",    recorded_date: VITALS_TAKEN },
-        { type: "WT", value: "158",    units: "[lb_av]", recorded_date: VITALS_TAKEN }
+        { measurement_ien: 2004, type: "BP", value: "112/70", units: "mm[Hg]",  recorded_date: VITALS_TAKEN },
+        { measurement_ien: 2005, type: "P",  value: "82",     units: "/min",    recorded_date: VITALS_TAKEN },
+        { measurement_ien: 2006, type: "WT", value: "158",    units: "[lb_av]", recorded_date: VITALS_TAKEN }
       ] },
     { dfn: 4, name: "DEMOPATIENT,JOE", sex: "M", dob: Date.new(1972, 1, 15),
       ssn: "900-00-0104",
@@ -69,14 +69,14 @@ module LakeravenDemoSeeds
         { ien: 42, status: "A", icd_code: "E78.5",  description: "Hyperlipidemia" }
       ],
       medications: [
-        { ien: 41, drug_name: "Metformin 1000mg",   sig: "1 tab PO BID",   status: "active" },
-        { ien: 42, drug_name: "Atorvastatin 40mg",  sig: "1 tab PO qHS",   status: "active" }
+        { id: "41", name: "Metformin 1000mg",   sig: "1 tab PO BID",   status: "active" },
+        { id: "42", name: "Atorvastatin 40mg",  sig: "1 tab PO qHS",   status: "active" }
       ],
       allergies: [],
       vitals: [
-        { type: "BP", value: "136/84", units: "mm[Hg]",  recorded_date: VITALS_TAKEN },
-        { type: "P",  value: "78",     units: "/min",    recorded_date: VITALS_TAKEN },
-        { type: "WT", value: "224",    units: "[lb_av]", recorded_date: VITALS_TAKEN }
+        { measurement_ien: 2007, type: "BP", value: "136/84", units: "mm[Hg]",  recorded_date: VITALS_TAKEN },
+        { measurement_ien: 2008, type: "P",  value: "78",     units: "/min",    recorded_date: VITALS_TAKEN },
+        { measurement_ien: 2009, type: "WT", value: "224",    units: "[lb_av]", recorded_date: VITALS_TAKEN }
       ] },
     { dfn: 5, name: "DEMOPATIENT,TESSA", sex: "F", dob: Date.new(1990, 9, 8),
       ssn: "900-00-0105",
@@ -85,13 +85,13 @@ module LakeravenDemoSeeds
         { ien: 52, status: "A", icd_code: "F41.1", description: "Generalized anxiety disorder" }
       ],
       medications: [
-        { ien: 51, drug_name: "Sertraline 100mg", sig: "1 tab PO daily", status: "active" }
+        { id: "51", name: "Sertraline 100mg", sig: "1 tab PO daily", status: "active" }
       ],
       allergies: [],
       vitals: [
-        { type: "BP", value: "118/76", units: "mm[Hg]",  recorded_date: VITALS_TAKEN },
-        { type: "P",  value: "72",     units: "/min",    recorded_date: VITALS_TAKEN },
-        { type: "WT", value: "146",    units: "[lb_av]", recorded_date: VITALS_TAKEN }
+        { measurement_ien: 2010, type: "BP", value: "118/76", units: "mm[Hg]",  recorded_date: VITALS_TAKEN },
+        { measurement_ien: 2011, type: "P",  value: "72",     units: "/min",    recorded_date: VITALS_TAKEN },
+        { measurement_ien: 2012, type: "WT", value: "146",    units: "[lb_av]", recorded_date: VITALS_TAKEN }
       ] },
     { dfn: 6, name: "DEMOPATIENT,RAY", sex: "M", dob: Date.new(2016, 4, 12),
       ssn: "900-00-0106",
@@ -99,16 +99,16 @@ module LakeravenDemoSeeds
         { ien: 61, status: "A", icd_code: "J45.909", description: "Unspecified asthma, uncomplicated" }
       ],
       medications: [
-        { ien: 61, drug_name: "Albuterol HFA 90mcg", sig: "2 puffs INH q4-6h PRN", status: "active" },
-        { ien: 62, drug_name: "Fluticasone HFA 44mcg", sig: "2 puffs INH BID", status: "active" }
+        { id: "61", name: "Albuterol HFA 90mcg", sig: "2 puffs INH q4-6h PRN", status: "active" },
+        { id: "62", name: "Fluticasone HFA 44mcg", sig: "2 puffs INH BID", status: "active" }
       ],
       allergies: [
         { ien: 61, allergen: "Peanuts", reaction: "Hives", severity: "moderate" }
       ],
       vitals: [
-        { type: "P",  value: "96",   units: "/min",    recorded_date: VITALS_TAKEN },
-        { type: "T",  value: "98.6", units: "[degF]",  recorded_date: VITALS_TAKEN },
-        { type: "WT", value: "62",   units: "[lb_av]", recorded_date: VITALS_TAKEN }
+        { measurement_ien: 2013, type: "P",  value: "96",   units: "/min",    recorded_date: VITALS_TAKEN },
+        { measurement_ien: 2014, type: "T",  value: "98.6", units: "[degF]",  recorded_date: VITALS_TAKEN },
+        { measurement_ien: 2015, type: "WT", value: "62",   units: "[lb_av]", recorded_date: VITALS_TAKEN }
       ] },
     { dfn: 7, name: "DEMOPATIENT,IRENE", sex: "F", dob: Date.new(1948, 2, 27),
       ssn: "900-00-0107",
@@ -118,17 +118,17 @@ module LakeravenDemoSeeds
         { ien: 73, status: "A", icd_code: "N18.3",  description: "Chronic kidney disease, stage 3" }
       ],
       medications: [
-        { ien: 71, drug_name: "Metformin 500mg",   sig: "1 tab PO daily",  status: "active" },
-        { ien: 72, drug_name: "Losartan 50mg",     sig: "1 tab PO daily",  status: "active" },
-        { ien: 73, drug_name: "Atorvastatin 20mg", sig: "1 tab PO qHS",    status: "active" }
+        { id: "71", name: "Metformin 500mg",   sig: "1 tab PO daily",  status: "active" },
+        { id: "72", name: "Losartan 50mg",     sig: "1 tab PO daily",  status: "active" },
+        { id: "73", name: "Atorvastatin 20mg", sig: "1 tab PO qHS",    status: "active" }
       ],
       allergies: [
         { ien: 71, allergen: "Codeine", reaction: "Nausea", severity: "mild" }
       ],
       vitals: [
-        { type: "BP", value: "148/86", units: "mm[Hg]",  recorded_date: VITALS_TAKEN },
-        { type: "P",  value: "70",     units: "/min",    recorded_date: VITALS_TAKEN },
-        { type: "WT", value: "168",    units: "[lb_av]", recorded_date: VITALS_TAKEN }
+        { measurement_ien: 2016, type: "BP", value: "148/86", units: "mm[Hg]",  recorded_date: VITALS_TAKEN },
+        { measurement_ien: 2017, type: "P",  value: "70",     units: "/min",    recorded_date: VITALS_TAKEN },
+        { measurement_ien: 2018, type: "WT", value: "168",    units: "[lb_av]", recorded_date: VITALS_TAKEN }
       ] }
   ].freeze
 
@@ -144,9 +144,9 @@ module LakeravenDemoSeeds
                                     dob: Date.parse("1980-05-15"), ssn: "111-11-1111", age: 45 })
     m.seed(:patient_id_info, "1", {
       ssn: "111-11-1111", dob: Date.parse("1980-05-15"), sex: "F",
-      race_code: "I", site_ien: 7819, name: "Anderson,Alice"
+      veteran: "", ward_location: "", name: "Anderson,Alice"
     })
-    m.seed(:patient_ssn, "111-11-1111", { dfn: 1, name: "Anderson,Alice", ssn: "111-11-1111" })
+    m.seed(:patient_ssn, "111111111", { dfn: 1, name: "Anderson,Alice", ssn: "111111111" })
 
     # Tribal detail for DFN 1 — #9000001 (^AUPNPAT) read via DDR GETS ENTRY
     # DATA, which is where RPMS actually stores this. ORWPT ID INFO does NOT
@@ -172,11 +172,10 @@ module LakeravenDemoSeeds
         9000001^1^1118^Example Community^Example Community
       REPLY
 
-    # Patient search (lookup/select beat): Alice + the whole DEMOPATIENT panel.
-    panel_rows = PANEL.map { |p| { dfn: p[:dfn], name: p[:name], sex: p[:sex], dob: p[:dob] } }
-    m.seed_collection(:patient_list,
-      [ { dfn: 1, name: "Anderson,Alice", sex: "F", dob: Date.parse("1980-05-15") } ] + panel_rows,
-      filter_field: :name)
+    # Patient search (lookup/select beat): Alice + the whole DEMOPATIENT
+    # panel, as the one page of the name index ORWPT LIST ALL answers.
+    panel_rows = PANEL.map { |p| { dfn: p[:dfn], name: p[:name] } }
+    m.seed_collection(:patient_list, [ { dfn: 1, name: "Anderson,Alice" } ] + panel_rows)
   end
 
   def seed_clinical(m)
@@ -196,32 +195,35 @@ module LakeravenDemoSeeds
     # profile) and the deterministic per-vital FHIR id.
     vitals_taken = DateTime.new(2026, 2, 1, 9, 30, 0)
     m.seed_keyed_collection(:vitals, "1",
-      [ { type: "BP", value: "128/82", units: "mm[Hg]",   recorded_date: vitals_taken },
-        { type: "P",  value: "74",     units: "/min",     recorded_date: vitals_taken },
-        { type: "WT", value: "180",    units: "[lb_av]",  recorded_date: vitals_taken },
-        { type: "T",  value: "98.6",   units: "[degF]",   recorded_date: vitals_taken } ])
+      [ { measurement_ien: 2019, type: "BP", value: "128/82", units: "mm[Hg]",   recorded_date: vitals_taken },
+        { measurement_ien: 2020, type: "P",  value: "74",     units: "/min",     recorded_date: vitals_taken },
+        { measurement_ien: 2021, type: "WT", value: "180",    units: "[lb_av]",  recorded_date: vitals_taken },
+        { measurement_ien: 2022, type: "T",  value: "98.6",   units: "[degF]",   recorded_date: vitals_taken } ])
 
     # Medications (ORQQPS LIST) — MedicationRequest
     m.seed_keyed_collection(:medication_list, "1",
-      [ { ien: 1, drug_name: "Lisinopril 10mg", sig: "1 tab PO daily", status: "active" },
-        { ien: 2, drug_name: "Metformin 500mg", sig: "1 tab PO BID", status: "active" } ])
+      [ { id: "1", name: "Lisinopril 10mg", sig: "1 tab PO daily", status: "active" },
+        { id: "2", name: "Metformin 500mg", sig: "1 tab PO BID", status: "active" } ])
     m.seed(:medication_detail, "1",
       "Drug: Lisinopril 10mg\nSIG: Take 1 tablet by mouth daily\nStatus: Active\nRefills: 3")
 
-    # Procedures (ORWPCE PROCEDURE LIST) — Procedure
+    # Procedures (BGOVCPT GET, V CPT) — Procedure. The visit date comes as
+    # MM/DD/YYYY; V CPT carries no status.
     m.seed_keyed_collection(:procedure_list, "1",
-      [ { ien: 1, name: "Comprehensive metabolic panel", date: Date.new(2026, 1, 15), status: "completed" } ])
+      [ { ien: 1, visit_ien: 1, date: "01/15/2026", cpt_code: "80053",
+          name: "Comprehensive metabolic panel" } ])
 
     # Appointments (ORWPT APPTLST) — Encounter
     m.seed_keyed_collection(:patient_appointments, "1",
       [ { datetime: Date.new(2026, 2, 1), location_ien: 1,
           location: "Riverbend Family Health Clinic", status: "scheduled" } ])
 
-    # Immunizations — structured list (BIPC IMMLIST) drives Immunization.for_patient;
-    # the text summary (BEHOCIR GETTXT) is seeded too for parity with the RPC surface.
-    m.seed_keyed_collection(:immunization_list, "1",
-      [ { ien: 1, vaccine_code: "208", vaccine_display: "COVID-19 Vaccine", status: "completed",
-          lot_number: "LOT-ABC", site: "Left Deltoid", route: "Intramuscular",
+    # Immunizations — V IMMUNIZATION through BGOVIMM GET ("DFN^I") drives
+    # Immunization.for_patient; the text summary (BEHOCIR GETTXT) is seeded
+    # too for parity with the RPC surface.
+    m.seed_keyed_collection(:immunization_list, "1^I",
+      [ { record_type: "I", ien: 1, vaccine_display: "COVID-19 Vaccine",
+          lot_number: "LOT-ABC", site: "1~Left Deltoid",
           occurrence_datetime: DateTime.new(2026, 1, 15, 9, 0, 0), manufacturer: "Synthetic Bio" } ])
     m.seed(:immunization_text, "1",
       "01/15/2026  COVID-19 Vaccine  LOT-ABC  Site: Left Deltoid")
@@ -238,9 +240,10 @@ module LakeravenDemoSeeds
                                       dob: p[:dob], ssn: p[:ssn], age: age })
       m.seed(:patient_id_info, dfn, {
         ssn: p[:ssn], dob: p[:dob], sex: p[:sex],
-        race_code: "I", site_ien: 7819, name: p[:name]
+        veteran: "", ward_location: "", name: p[:name]
       })
-      m.seed(:patient_ssn, p[:ssn], { dfn: p[:dfn], name: p[:name], ssn: p[:ssn] })
+      bare_ssn = p[:ssn].delete("-")
+      m.seed(:patient_ssn, bare_ssn, { dfn: p[:dfn], name: p[:name], ssn: bare_ssn })
 
       m.seed_keyed_collection(:problem_list, dfn, p[:problems])
       m.seed_keyed_collection(:medication_list, dfn, p[:medications])
@@ -255,7 +258,7 @@ module LakeravenDemoSeeds
       # Keep sections that would otherwise fall through to another patient's
       # unkeyed data explicitly empty instead.
       m.seed_keyed_collection(:procedure_list, dfn, [])
-      m.seed_keyed_collection(:immunization_list, dfn, [])
+      m.seed_keyed_collection(:immunization_list, "#{dfn}^I", [])
     end
   end
 end
