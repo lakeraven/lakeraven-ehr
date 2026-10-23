@@ -300,6 +300,11 @@ module Lakeraven
           { success: false, status: 422, error: message }
         end
       end
+
+      # BPRM registration writes are IHS-only (#647). Stock patient reads
+      # stay on PatientGateway (ORWPT SELECT) and are not guarded here.
+      CapabilityGuard.protect(self, :bprm_registration, :register, :update, :search, :face_sheet,
+        :insurances, :update_insurance, :delete_insurance)
     end
   end
 end

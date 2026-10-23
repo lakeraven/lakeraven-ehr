@@ -20,6 +20,8 @@ module Lakeraven
       def self.default_provider
         ::RpmsRpc::Measurement
       end
+
+      CapabilityGuard.protect(self, :pcc_screens, :add)
     end
   end
 end

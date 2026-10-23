@@ -277,28 +277,30 @@
         </div>
       </div>
 
-      <%# ---- Immunizations ---- %>
-      <div class="card">
-        <div class="card__head"><h2>Immunizations</h2><span class="count"><%= @immunizations.length %></span></div>
-        <div class="card__body">
-          <% if @immunizations.any? %>
-            <table>
-              <thead><tr><th>Vaccine</th><th>Date</th><th>Status</th></tr></thead>
-              <tbody>
-                <% @immunizations.each do |i| %>
-                  <tr>
-                    <td><%= i.vaccine_display %></td>
-                    <td class="mono"><%= i.occurrence_datetime&.strftime("%b %-d, %Y") %></td>
-                    <td><span class="badge <%= %w[completed active].include?(i.status) ? "active" : "inactive" %>"><%= i.status %></span></td>
-                  </tr>
-                <% end %>
-              </tbody>
-            </table>
-          <% else %>
-            <p class="empty">No immunizations on file.</p>
-          <% end %>
+      <%# ---- Immunizations (IHS-only, #647) ---- %>
+      <% if feature_available?(:ihs_immunization) %>
+        <div class="card">
+          <div class="card__head"><h2>Immunizations</h2><span class="count"><%= @immunizations.length %></span></div>
+          <div class="card__body">
+            <% if @immunizations.any? %>
+              <table>
+                <thead><tr><th>Vaccine</th><th>Date</th><th>Status</th></tr></thead>
+                <tbody>
+                  <% @immunizations.each do |i| %>
+                    <tr>
+                      <td><%= i.vaccine_display %></td>
+                      <td class="mono"><%= i.occurrence_datetime&.strftime("%b %-d, %Y") %></td>
+                      <td><span class="badge <%= %w[completed active].include?(i.status) ? "active" : "inactive" %>"><%= i.status %></span></td>
+                    </tr>
+                  <% end %>
+                </tbody>
+              </table>
+            <% else %>
+              <p class="empty">No immunizations on file.</p>
+            <% end %>
+          </div>
         </div>
-      </div>
+      <% end %>
 
       <%# ---- Encounters / Appointments ---- %>
       <div class="card span">

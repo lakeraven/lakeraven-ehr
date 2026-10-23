@@ -27,6 +27,10 @@ module Lakeraven
       def self.tribe_info(ien)
         RpmsRpc::Tribal.tribe_info(ien)
       end
+
+      # Tribal enrollment is IHS-only (#647).
+      CapabilityGuard.protect(self, :tribal_enrollment,
+        :enrollment_details, :validate, :eligibility, :service_unit, :tribe_info)
     end
   end
 end

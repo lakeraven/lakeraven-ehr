@@ -31,6 +31,10 @@ module Lakeraven
       def self.default_provider
         ::RpmsRpc::Immunization
       end
+
+      # IHS immunization reads (#647). default_provider names the gem class
+      # and does not call the backend, so it stays outside the guard.
+      CapabilityGuard.protect(self, :ihs_immunization, :for_patient, :find)
     end
   end
 end
