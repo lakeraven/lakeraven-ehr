@@ -39,6 +39,12 @@ Lakeraven::EHR::Engine.routes.draw do
   get  "patients/:dfn/screenings/new", to: "screenings#new",    as: :new_patient_screening, constraints: { dfn: /\d+/ }
   get  "patients/:dfn/screenings/:id", to: "screenings#show",   as: :patient_screening, constraints: { dfn: /\d+/, id: /\d+/ }
 
+  # FHIR CapabilityStatement (#574). Every FHIR type routed below is declared
+  # in FHIR::CapabilityStatement, and a route with no controller action
+  # behind it is not routed: Medication, DiagnosticReport and CarePlan were,
+  # and Encounter's show, and each raised instead of answering.
+  get "metadata", to: "capability_statements#show"
+
   # Doorkeeper models (Application, AccessToken) are used directly;
   # routes are NOT mounted here because the engine provides its own
   # BackendServicesController for OAuth token issuance.
@@ -47,11 +53,8 @@ Lakeraven::EHR::Engine.routes.draw do
   resources :allergy_intolerances, path: "AllergyIntolerance", only: %i[index show]
   resources :conditions, path: "Condition", only: %i[index show]
   resources :medication_requests, path: "MedicationRequest", only: %i[index show]
-  resources :medications, path: "Medication", only: %i[index show]
   resources :observations, path: "Observation", only: %i[index show]
-  resources :diagnostic_reports, path: "DiagnosticReport", only: %i[index show]
-  resources :care_plans, path: "CarePlan", only: %i[index show]
-  resources :encounters, path: "Encounter", only: %i[index show]
+  resources :encounters, path: "Encounter", only: %i[index]
   resources :organizations, path: "Organization", only: %i[show], param: :ien
   resources :locations, path: "Location", only: %i[show], param: :ien
   resources :service_requests, path: "ServiceRequest", only: %i[index]

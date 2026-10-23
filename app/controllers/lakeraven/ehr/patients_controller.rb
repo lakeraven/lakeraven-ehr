@@ -7,6 +7,7 @@ module Lakeraven
 
       before_action :enforce_patient_context!, only: :show
       before_action :enforce_patient_search_context!, only: :index
+      before_action :validate_patient_search_values!, only: :index
       before_action :require_registration_scope!, only: :create
 
       def index
@@ -102,21 +103,32 @@ module Lakeraven
         render_forbidden("Patient registration requires a user- or system-level write scope")
       end
 
+      # Every parameter given narrows the match set: FHIR search parameters
+      # combine with AND. birthdate and gender used to apply only alongside
+      # name, and _id discarded every other parameter, so `?birthdate=` alone
+      # or `?_id=1&gender=male` returned patients the search had excluded.
+      # Each parameter here is declared in FHIR::SearchCapabilities; identifier
+      # is not (see there).
       def resolve_patient_search
-        if params[:_id].present?
+        results = if params[:_id].present?
           patient = Patient.find_by_dfn(params[:_id])
           patient ? [ patient ] : []
         elsif params[:identifier].present?
           ssn = extract_ssn_from_identifier(params[:identifier])
           ssn ? Patient.search_by_ssn(ssn) : []
-        elsif params[:name].present?
-          results = Patient.search(params[:name])
-          results = filter_by_birthdate(results) if params[:birthdate].present?
-          results = filter_by_gender(results) if params[:gender].present?
-          results
         else
-          Patient.search("")
+          Patient.search(params[:name].to_s)
         end
+        results = filter_by_name(results) if params[:name].present? && (params[:_id].present? || params[:identifier].present?)
+        results = filter_by_birthdate(results) if params.key?(:birthdate)
+        results = filter_by_gender(results) if params.key?(:gender)
+        results
+      end
+
+      # The patients the name lookup itself would return, among these.
+      def filter_by_name(patients)
+        named = Patient.search(params[:name]).map { |p| p.dfn.to_s }
+        patients.select { |p| named.include?(p.dfn.to_s) }
       end
 
       def extract_ssn_from_identifier(identifier)
@@ -126,21 +138,35 @@ module Lakeraven
       end
 
       def filter_by_birthdate(patients)
-        target = Date.parse(params[:birthdate]) rescue nil
-        return patients unless target
-
+        target = Date.iso8601(params[:birthdate])
         patients.select { |p| p.dob == target }
       end
 
+      # Compared as served: PatientSerializer is what turns RPMS sex into a
+      # FHIR gender, so a patient matches the gender its own resource shows.
       def filter_by_gender(patients)
-        sex_code = case params[:gender]
-        when "male" then "M"
-        when "female" then "F"
-        else nil
-        end
-        return patients unless sex_code
+        patients.select { |p| p.to_fhir[:gender] == params[:gender] }
+      end
 
-        patients.select { |p| p.sex == sex_code }
+      BIRTHDATE = /\A\d{4}-\d{2}-\d{2}\z/
+      GENDERS = %w[male female other unknown].freeze
+
+      # A value these filters cannot apply is refused, not skipped: skipping
+      # it answers a search the client did not send. birthdate takes one day;
+      # the date prefixes (ge, lt, ...) and partial dates are not implemented.
+      def validate_patient_search_values!
+        if params.key?(:birthdate) && !valid_birthdate?(params[:birthdate])
+          return refuse_search_parameter("birthdate", "one day, YYYY-MM-DD")
+        end
+        return unless params.key?(:gender) && GENDERS.exclude?(params[:gender])
+
+        refuse_search_parameter("gender", "one of #{GENDERS.join(', ')}")
+      end
+
+      def valid_birthdate?(value)
+        value.is_a?(String) && value.match?(BIRTHDATE) && Date.iso8601(value)
+      rescue Date::Error
+        false
       end
 
       SSN_SYSTEMS = [

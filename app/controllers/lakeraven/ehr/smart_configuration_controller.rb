@@ -5,6 +5,8 @@ module Lakeraven
     # SMART App Launch Framework - Well-Known Configuration
     # ONC 170.315(g)(10) — SMART on FHIR discovery endpoint
     class SmartConfigurationController < ActionController::API
+      include SmartEndpoints
+
       def show
         render json: smart_configuration, status: :ok
       end
@@ -13,20 +15,16 @@ module Lakeraven
 
       def smart_configuration
         {
-          authorization_endpoint: "#{base_url}oauth/authorize",
-          token_endpoint: "#{base_url}oauth/token",
-          userinfo_endpoint: "#{base_url}oauth/userinfo",
-          jwks_uri: "#{base_url}.well-known/jwks.json",
+          authorization_endpoint: "#{smart_base_url}oauth/authorize",
+          token_endpoint: smart_token_endpoint,
+          userinfo_endpoint: "#{smart_base_url}oauth/userinfo",
+          jwks_uri: "#{smart_base_url}.well-known/jwks.json",
           scopes_supported: supported_scopes,
           response_types_supported: [ "code" ],
           grant_types_supported: %w[authorization_code client_credentials refresh_token],
           code_challenge_methods_supported: [ "S256" ],
           capabilities: capabilities
         }
-      end
-
-      def base_url
-        request.base_url + "/"
       end
 
       def supported_scopes
