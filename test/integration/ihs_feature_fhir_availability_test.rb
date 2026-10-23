@@ -59,6 +59,63 @@ class IhsFeatureFhirAvailabilityTest < ActionDispatch::IntegrationTest
     end
   end
 
+  # Copilot round (#659): a withheld endpoint reports unavailability before any
+  # search-parameter validation, so a malformed parameter cannot turn it into a 400.
+  {
+    "_count=invalid" => { _count: "invalid" },
+    "an unsupported _sort" => { _sort: "not-a-search-parameter" },
+    "an unsupported _include" => { _include: "Immunization:not-a-reference" }
+  }.each do |label, extra|
+    test "GET Immunization with #{label} on a restricted backend is not-supported, not a 400" do
+      before = RpmsRpc.client.received_calls.length
+      with_restricted_backend do
+        get "/lakeraven-ehr/Immunization", params: { patient: PATIENT_DFN }.merge(extra), headers: @headers
+        assert_fhir_feature_unavailable(response, capability: :ihs_immunization)
+      end
+      assert_empty rpc_calls_since(before)
+    end
+
+    test "GET ServiceRequest with #{label} on a restricted backend is not-supported, not a 400" do
+      with_restricted_backend do
+        get "/lakeraven-ehr/ServiceRequest", params: { patient: PATIENT_DFN }.merge(extra), headers: @headers
+        assert_fhir_feature_unavailable(response, capability: :prc_referrals)
+      end
+    end
+  end
+
+  test "an invalid _count is still a 400 where the capability is present" do
+    get "/lakeraven-ehr/Immunization", params: { patient: PATIENT_DFN, _count: "invalid" }, headers: @headers
+    assert_response :bad_request
+  end
+
+  # Only the representations this renderer can produce compete: HTML and FHIR JSON.
+  # A range it cannot serve (application/xml) never decides, and a specific range
+  # outranks the wildcard that also matches it.
+  {
+    "an unsupported range with a higher q" =>
+      "application/xml;q=1, text/html;q=0.8, application/fhir+json;q=0.1, */*;q=0.01",
+    "a wildcard with a higher q than an explicit FHIR JSON" =>
+      "text/html;q=0.9, application/fhir+json;q=0.1, */*;q=1"
+  }.each do |label, accept|
+    test "feature unavailable renders HTML when HTML is the preferred supported type: #{label}" do
+      with_restricted_backend do
+        get "/lakeraven-ehr/Immunization", params: { patient: PATIENT_DFN },
+          headers: @headers.merge("Accept" => accept)
+        assert_response :not_found
+        assert_match(/not available on this system/i, response.body)
+        refute_equal "application/fhir+json", response.media_type
+      end
+    end
+  end
+
+  test "feature unavailable renders FHIR JSON when it outranks HTML among the supported types" do
+    with_restricted_backend do
+      get "/lakeraven-ehr/Immunization", params: { patient: PATIENT_DFN },
+        headers: @headers.merge("Accept" => "application/xml;q=1, text/html;q=0.2, application/fhir+json;q=0.9, */*;q=0.5")
+      assert_fhir_feature_unavailable(response, capability: :ihs_immunization)
+    end
+  end
+
   test "POST Patient returns not-supported without bprm_registration and makes no broker call" do
     fake = FakeBroker.new.on(Lakeraven::EHR::RegistrationGateway::REGISTER_RPC, "1^12345^")
     with_restricted_backend(client: fake) do

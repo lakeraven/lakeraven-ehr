@@ -14,7 +14,6 @@ module Lakeraven
 
       PINNED_CAPABILITY_FHIR_INTERACTIONS = {
         prc_referrals: [
-          %w[ServiceRequest read],
           %w[ServiceRequest search-type]
         ],
         tribal_enrollment: [],
@@ -23,7 +22,6 @@ module Lakeraven
         ],
         bprm_scheduling: [],
         ihs_immunization: [
-          %w[Immunization read],
           %w[Immunization search-type]
         ],
         pcc_screens: []
@@ -32,6 +30,24 @@ module Lakeraven
       test "each registered capability maps to the FHIR interactions it owns" do
         assert_equal PINNED_CAPABILITY_FHIR_INTERACTIONS,
                      BackendRegistry.capability_fhir_interactions
+      end
+
+      # The engine routes ServiceRequest and Immunization as index only, so the
+      # map must not advertise a read it does not serve (Copilot round, #659).
+      test "ServiceRequest and Immunization advertise search-type only, because they have no show route" do
+        %w[ServiceRequest Immunization].each do |type|
+          assert_equal [ "search-type" ], BackendRegistry.supported_fhir_interactions(type), type
+        end
+      end
+
+      test "every advertised read interaction has a show route" do
+        shows = Lakeraven::EHR::Engine.routes.routes.select { |r| r.defaults[:action] == "show" }
+          .map { |r| r.defaults[:controller] }
+        BackendRegistry.capability_fhir_interactions.values.flatten(1)
+          .select { |_type, interaction| interaction == "read" }.each do |type, _|
+            controller = "lakeraven/ehr/#{type.underscore.pluralize}"
+            assert_includes shows, controller, "#{type} is advertised as readable but has no show route"
+          end
       end
 
       test "supported_fhir_resource_types on rpms lists every IHS-owned type plus Patient" do
