@@ -789,7 +789,7 @@ class RiskTierTest < ActiveSupport::TestCase
   test "the safe patterns are really used: safe tracked files exist and are phone-safe when they match no rule" do
     tracked, = Open3.capture2("git", "ls-files", "README.md", "docs", "app/assets", chdir: ROOT)
     safe = tracked.lines.map(&:chomp).select { |p| SAFE_PATH_PATTERNS.any? { |re| re.match?(p) } }
-    assert_operator safe.size, :>=, 5
+    assert_operator safe.size, :>=, 4 # the engine stylesheet was the fifth until CSS left the safe-list
     ok = safe.select { |p| classify(p).first == "phone-safe" }
     assert_operator ok.size, :>, 3, "the safe-list admits almost nothing; is it empty?"
   end
