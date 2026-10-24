@@ -138,7 +138,7 @@ jobs:
           gh label create "risk:laptop-only" --color D93F0B --force \
             --description "Touches auth, consent, Part 2, audit, tenancy, schema, CI or dependencies: review on a laptop"
           gh label create "risk:phone-safe" --color 0E8A16 --force \
-            --description "Every changed path is on the safe-list (docs, stylesheets, images, locales): reviewable from a phone"
+            --description "Every changed path is on the safe-list (docs, stylesheets, images): reviewable from a phone"
 
           if [ "$TIER" = "phone-safe" ]; then add=risk:phone-safe; drop=risk:laptop-only
           else add=risk:laptop-only; drop=risk:phone-safe; fi
