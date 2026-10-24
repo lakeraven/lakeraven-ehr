@@ -39,13 +39,22 @@ name: Risk tier
 #     API does not return file modes. The contents API cannot stand in for it: GitHub answers
 #     {"type":"file"} for a symlink whose target is a tracked file ("the API responds with the
 #     content of the file"), and only a link to a directory reads as a symlink. So when the
-#     classifier says phone-safe, the PR head's git tree is read in ONE call (git/trees/
-#     refs/pull/N/head?recursive=1 on this repo: no head SHA, no head repo, nothing checked out)
-#     and every changed path that still exists must be a blob with mode 100644 or 100755. A
-#     symlink (120000), submodule (160000) or directory, a path missing from the tree, a truncated
-#     or unreadable tree, or any failed call is laptop-only. A truncated tree (the API caps one at
-#     100,000 entries or 7 MB) therefore sends a very large repository to laptop-only; this
-#     repository's tree is about a thousand entries.
+#     classifier says phone-safe, the PR head's git tree is read in ONE call (git/trees/<head
+#     commit>?recursive=1 on this repo; nothing is checked out or run) and every changed path
+#     that still exists must be a blob with mode 100644 or 100755. A symlink (120000), submodule
+#     (160000) or directory, a path missing from the tree, a truncated or unreadable tree, or any
+#     failed call is laptop-only. A truncated tree (the API caps one at 100,000 entries or 7 MB)
+#     therefore sends a very large repository to laptop-only; this repository's tree is about a
+#     thousand entries.
+#   - One commit for the list and the tree. They are two API calls, so a push between them could
+#     leave a list for one commit and a tree for another. The PR's head commit is read as data
+#     BEFORE the files are listed, the tree is requested by that commit and must echo it (the
+#     trees API returns the commit it was asked for), and the head is read again at the end:
+#     anything but the same 40-hex commit all the way through is laptop-only. The window is
+#     closed only while the head stays put; a head that moves mid-run leaves the label to the run
+#     the new push starts, which drops any phone-safe first. Tree entries must list each path
+#     once. NOT covered here: this has only run against stubs and read-only API probes, because
+#     pull_request_target runs the copy on main.
 #   - A file list that repeats a name has the right length and a missing file.
 #
 # Fail closed: only a classifier that exits 0 AND prints `phone-safe` first yields phone-safe.
@@ -120,6 +129,13 @@ jobs:
 
           if [ ! -x bin/risk-tier ]; then
             detail="  (undetermined: bin/risk-tier is not on the base branch yet)"
+          # The file list and the tree are two API calls. Pin both to ONE commit: read the PR's head
+          # commit now (data only: nothing is checked out or run), ask for the tree by that commit, and
+          # read it again at the end. A push in between means the list and the tree may describe
+          # different commits, and a run that cannot show they match is laptop-only.
+          elif ! head_before=$(gh api "repos/$REPO/pulls/$PR" --jq .head.sha </dev/null) \
+               || ! printf '%s' "$head_before" | grep -Eq '^[0-9a-f]{40}$'; then
+            detail="  (undetermined: could not read the PR's head commit)"
           elif ! gh api --paginate "repos/$REPO/pulls/$PR/files" > pages.json; then
             detail="  (undetermined: could not list the PR's files)"
           elif ! jq -s 'add // []' pages.json > files.json; then
@@ -158,20 +174,24 @@ jobs:
                 tier=phone-safe
                 # A safe NAME is not a safe FILE. The files API gives names, never modes, and the
                 # contents API reports a symlink to a tracked file as a regular file, so read the PR
-                # head's git tree (one call) and require every path that still exists to be a blob
-                # with mode 100644 or 100755. Anything else, a path missing from the tree, a
-                # truncated or unreadable tree, or a failed call is laptop-only.
+                # head's git tree (one call, by the head commit read above) and require every path that
+                # still exists to be a blob with mode 100644 or 100755. Anything else, a path missing
+                # from the tree, a truncated, unreadable or other-commit tree, or a failed call is
+                # laptop-only.
                 if ! jq -r '.[] | select(.status != "removed") | .filename' files.json > existing.txt; then
                   tier=laptop-only
                   detail="${detail}${detail:+$'\n'}  (undetermined: could not list the paths that still exist)"
                 elif [ ! -s existing.txt ]; then
                   : # nothing that still exists: removing files cannot add a symlink
-                elif ! gh api "repos/$REPO/git/trees/refs/pull/$PR/head?recursive=1" > tree.json </dev/null; then
+                elif ! gh api "repos/$REPO/git/trees/$head_before?recursive=1" > tree.json </dev/null; then
                   tier=laptop-only
                   detail="${detail}${detail:+$'\n'}  (undetermined: could not read the PR head's git tree)"
-                elif ! jq -e '(.truncated == false) and ((.tree | type) == "array")' tree.json > /dev/null; then
+                # The trees API echoes the COMMIT it was asked for in `sha` (the tree's own sha is not
+                # there). A reply for another commit, a missing or non-false `truncated`, or a path listed
+                # twice (from_entries would keep the last one) cannot be trusted to give every mode.
+                elif ! jq -e --arg h "$head_before" '(.truncated == false) and ((.tree | type) == "array") and (.sha == $h) and ((.tree | map(.path) | unique | length) == (.tree | length))' tree.json > /dev/null; then
                   tier=laptop-only
-                  detail="${detail}${detail:+$'\n'}  (undetermined: the PR head's git tree is truncated or unreadable, so file modes cannot be verified)"
+                  detail="${detail}${detail:+$'\n'}  (undetermined: the PR head's git tree is truncated, unreadable, for another commit than the one asked for, or lists a path twice, so file modes cannot be verified)"
                 elif ! jq -rn --slurpfile t tree.json --rawfile p existing.txt '
                     def kind($e):
                       if $e == null then "not found in the PR head tree"
@@ -190,6 +210,17 @@ jobs:
                 elif [ -s notregular.txt ]; then
                   tier=laptop-only
                   detail="${detail}${detail:+$'\n'}$(cat notregular.txt)"
+                fi
+                # Still the same commit that the list and the tree were read for? Unchanged all the way
+                # through means the list and the tree describe one commit; anything else is undetermined.
+                if [ "$tier" = phone-safe ]; then
+                  if ! head_after=$(gh api "repos/$REPO/pulls/$PR" --jq .head.sha </dev/null); then
+                    tier=laptop-only
+                    detail="${detail}${detail:+$'\n'}  (undetermined: could not re-read the PR's head commit after judging it)"
+                  elif [ "$head_after" != "$head_before" ]; then
+                    tier=laptop-only
+                    detail="${detail}${detail:+$'\n'}  (undetermined: the PR's head commit moved while it was judged, so the file list and the tree may be for different commits)"
+                  fi
                 fi
               else
                 detail="${detail}${detail:+$'\n'}  (classifier exit $rc, first line '$first': treated as laptop-only)"
