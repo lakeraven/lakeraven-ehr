@@ -90,10 +90,14 @@ class RiskTierWorkflowTest < ActiveSupport::TestCase
   #   :count   `jq length`    counting the files             -> exit 5, no output
   #   :check   `jq -e`        the control-character check    -> exit 5, no output
   #   :extract `jq -r`        writing the names to paths.txt -> first line, then exit 5
+  #   :existing `jq` with "removed" in its filter: listing the paths that still exist -> exit 5
   # Each is a jq that dies (out of memory, a bad build, a killed process): the step must not
   # read a dead jq as "nothing wrong".
   JQ_STUB = <<~'SH'
     #!/bin/sh
+    case "$JQ_FAIL:$*" in
+      existing:*removed*) echo "jq: error: boom" >&2; exit 5 ;;
+    esac
     case "$JQ_FAIL:$1" in
       slurp:-s|check:-e) echo "jq: error: boom" >&2; exit 5 ;;
       count:length) echo "jq: error: boom" >&2; exit 5 ;;
@@ -106,7 +110,24 @@ class RiskTierWorkflowTest < ActiveSupport::TestCase
     ENV["PATH"].split(File::PATH_SEPARATOR).map { |d| File.join(d, "jq") }.find { |f| File.executable?(f) }
   end
 
-  def run_classify(files:, classifier: :real, gh_fails: false, changed: nil, jq_fail: nil)
+  # What the stub `gh` answers for GET /repos/o/r/contents/<path>?ref=refs/pull/1/head, keyed by file
+  # name. Anything not named is a regular file. The stub applies the caller's own --jq filter with the
+  # real jq, as gh does, so a body that is not an object or not JSON fails the way it would live.
+  CONTENT_BODIES = {
+    file: '{"type":"file","path":"x"}',
+    symlink: '{"type":"symlink","path":"x","target":"../../../config/master.key"}',
+    submodule: '{"type":"submodule","path":"x"}',
+    dir: '[{"type":"file","path":"x/a"}]',
+    garbage: "not json{",
+    typeless: "{}",
+    error: "ERROR"
+  }.freeze
+
+  def uri_path(path)
+    path.split("/", -1).map { |seg| ERB::Util.url_encode(seg) }.join("/")
+  end
+
+  def run_classify(files:, classifier: :real, gh_fails: false, changed: nil, jq_fail: nil, contents: {}, calls: nil)
     Dir.mktmpdir do |dir|
       FileUtils.mkdir_p(File.join(dir, "bin"))
       FileUtils.mkdir_p(File.join(dir, ".github"))
@@ -125,9 +146,31 @@ class RiskTierWorkflowTest < ActiveSupport::TestCase
 
       pages = File.join(dir, "stubs", "pages.json")
       File.write(pages, JSON.generate(files))
+      tsv = File.join(dir, "stubs", "contents.tsv")
+      File.write(tsv, contents.map { |path, kind| "#{uri_path(path)}\t#{kind.is_a?(Symbol) ? CONTENT_BODIES.fetch(kind) : JSON.generate(kind)}\n" }.join)
+      call_log = File.join(dir, "gh_calls")
+      FileUtils.touch(call_log)
       File.write(File.join(dir, "stubs", "gh"), <<~SH)
         #!/bin/sh
-        #{gh_fails ? 'echo "gh: boom" >&2; exit 1' : "cat #{pages}"}
+        echo "$*" >> #{call_log}
+        #{gh_fails ? 'echo "gh: boom" >&2; exit 1' : ''}
+        case "$*" in
+          *"/contents/"*)
+            url=""; filter="."; prev=""
+            for a in "$@"; do
+              case "$prev" in --jq) filter="$a" ;; esac
+              case "$a" in repos/*) url="$a" ;; esac
+              prev="$a"
+            done
+            enc="${url#*/contents/}"; enc="${enc%%\?*}"
+            body=$(awk -F'\t' -v k="$enc" '$1==k {print $2; exit}' #{tsv})
+            [ -z "$body" ] && body='#{CONTENT_BODIES[:file]}'
+            if [ "$body" = ERROR ]; then echo "gh: HTTP 404" >&2; exit 1; fi
+            printf '%s\n' "$body" | "$REAL_JQ" -r "$filter"
+            exit $?
+            ;;
+        esac
+        cat #{pages}
       SH
       FileUtils.chmod(0o755, File.join(dir, "stubs", "gh"))
       if jq_fail
@@ -141,15 +184,17 @@ class RiskTierWorkflowTest < ActiveSupport::TestCase
       FileUtils.touch([ summary, output ])
       env = { "PATH" => "#{File.join(dir, 'stubs')}:#{ENV['PATH']}", "GH_TOKEN" => "x", "REPO" => "o/r", "PR" => "1",
               "CHANGED" => (changed || files.size).to_s, "GITHUB_STEP_SUMMARY" => summary, "GITHUB_OUTPUT" => output }
-      env.merge!("JQ_FAIL" => jq_fail.to_s, "REAL_JQ" => real_jq) if jq_fail
+      env["REAL_JQ"] = real_jq
+      env["JQ_FAIL"] = jq_fail.to_s if jq_fail
       _out, err, status = Open3.capture3(env, "bash", "step.sh", chdir: dir)
       assert status.success?, "the Classify step itself must not fail: #{err}"
+      calls&.concat(File.readlines(call_log, chomp: true))
       [ File.read(output)[/tier=(\S+)/, 1], File.read(summary) ]
     end
   end
 
-  def file(name, previous: nil)
-    { "filename" => name, "previous_filename" => previous }.compact
+  def file(name, previous: nil, status: "modified")
+    { "filename" => name, "previous_filename" => previous, "status" => status }.compact
   end
 
   test "a docs-only change is phone-safe" do
@@ -242,6 +287,133 @@ class RiskTierWorkflowTest < ActiveSupport::TestCase
   test "a file whose name is only spaces makes the PR laptop-only" do
     tier, summary = run_classify(files: [ file("README.md"), file("   ") ])
     assert_equal "laptop-only", tier, summary
+  end
+
+  # ---- a safe-named path must be a regular file (panel round on #633) ----------------------
+  #
+  # The files API gives names and statuses, never file modes. A symlink named logo.png, or docs/x.md,
+  # classifies phone-safe by name, and an asset pipeline follows the link when it precompiles. When
+  # the classifier says phone-safe, every changed path that still exists must read back as a
+  # regular file at the PR head (refs/pull/N/head on the base repo: no head SHA, no head repo).
+  # Anything else, or any call that fails, is laptop-only.
+  test "a safe-named path that is a symlink makes the PR laptop-only" do
+    tier, summary = run_classify(files: [ file("README.md"), file("app/assets/images/logo.png") ],
+                                 contents: { "app/assets/images/logo.png" => :symlink })
+    assert_equal "laptop-only", tier, summary
+    assert_match(/symlink/i, summary)
+  end
+
+  test "a safe-named doc that is a symlink makes the PR laptop-only" do
+    tier, = run_classify(files: [ file("docs/notes.md") ], contents: { "docs/notes.md" => :symlink })
+    assert_equal "laptop-only", tier
+  end
+
+  test "a safe-named path that is a submodule makes the PR laptop-only" do
+    tier, summary = run_classify(files: [ file("docs/vendor.md") ], contents: { "docs/vendor.md" => :submodule })
+    assert_equal "laptop-only", tier, summary
+    assert_match(/submodule/i, summary)
+  end
+
+  test "a safe-named path that is a directory makes the PR laptop-only" do
+    tier, = run_classify(files: [ file("docs/odd.md") ], contents: { "docs/odd.md" => :dir })
+    assert_equal "laptop-only", tier
+  end
+
+  test "a contents call that fails makes the PR laptop-only, not 'nothing wrong'" do
+    tier, summary = run_classify(files: [ file("README.md") ], contents: { "README.md" => :error })
+    assert_equal "laptop-only", tier, summary
+    assert_match(/undetermined/i, summary)
+  end
+
+  test "a contents reply that is not JSON makes the PR laptop-only" do
+    tier, = run_classify(files: [ file("README.md") ], contents: { "README.md" => :garbage })
+    assert_equal "laptop-only", tier
+  end
+
+  test "a contents reply with no type makes the PR laptop-only" do
+    tier, = run_classify(files: [ file("README.md") ], contents: { "README.md" => :typeless })
+    assert_equal "laptop-only", tier
+  end
+
+  test "one symlink among regular files makes the PR laptop-only" do
+    tier, = run_classify(files: [ file("README.md"), file("docs/a.md"), file("docs/b.md") ], contents: { "docs/b.md" => :symlink })
+    assert_equal "laptop-only", tier
+  end
+
+  test "a regular file at the PR head keeps a docs-only PR phone-safe" do
+    tier, summary = run_classify(files: [ file("README.md"), file("docs/a.md") ])
+    assert_equal "phone-safe", tier, summary
+  end
+
+  test "a renamed file is checked under its new name" do
+    tier, = run_classify(files: [ file("docs/new.md", previous: "docs/old.md", status: "renamed") ], contents: { "docs/new.md" => :symlink })
+    assert_equal "laptop-only", tier
+  end
+
+  test "a removed file is not looked up, because it no longer exists at the head" do
+    calls = []
+    tier, summary = run_classify(files: [ file("README.md"), file("docs/gone.md", status: "removed") ],
+                                 contents: { "docs/gone.md" => :error }, calls: calls)
+    assert_equal "phone-safe", tier, summary
+    refute(calls.any? { |c| c.include?("docs/gone.md") }, calls.inspect)
+  end
+
+  test "a file name with a space is looked up URL-encoded" do
+    calls = []
+    tier, = run_classify(files: [ file("docs/my notes.md") ], calls: calls)
+    assert_equal "phone-safe", tier
+    assert(calls.any? { |c| c.include?("contents/docs/my%20notes.md") }, calls.inspect)
+  end
+
+  test "the lookup reads the PR ref on the base repo and never a head SHA or a head repo" do
+    calls = []
+    run_classify(files: [ file("README.md") ], calls: calls)
+    lookup = calls.find { |c| c.include?("/contents/") }
+    assert lookup, calls.inspect
+    assert_match(%r{repos/o/r/contents/README\.md\?ref=refs/pull/1/head}, lookup)
+  end
+
+  test "a laptop-only classification makes no contents calls" do
+    calls = []
+    run_classify(files: [ file("README.md"), file("app/models/lakeraven/ehr/disclosure.rb") ], calls: calls)
+    refute(calls.any? { |c| c.include?("/contents/") }, calls.inspect)
+  end
+
+  test "up to 100 existing safe paths are verified one by one and stay phone-safe" do
+    files = (1..100).map { |i| file("docs/n#{i}.md") }
+    calls = []
+    tier, summary = run_classify(files: files, calls: calls)
+    assert_equal "phone-safe", tier, summary
+    assert_equal 100, calls.count { |c| c.include?("/contents/") }
+  end
+
+  test "more than 100 existing safe paths are laptop-only: they cannot all be verified as regular files" do
+    files = (1..101).map { |i| file("docs/n#{i}.md") }
+    calls = []
+    tier, summary = run_classify(files: files, calls: calls)
+    assert_equal "laptop-only", tier, summary
+    assert_match(/101/, summary)
+    assert_equal 0, calls.count { |c| c.include?("/contents/") }, "no lookups once the bound is known to be exceeded"
+  end
+
+  test "a jq that dies while listing the existing paths is laptop-only" do
+    tier, summary = run_classify(files: [ file("README.md") ], jq_fail: :existing)
+    assert_equal "laptop-only", tier, summary
+  end
+
+  # ---- duplicate names pass the count check (panel round on #633) --------------------------
+  #
+  # [README.md, README.md] has the right length for CHANGED=2, but a second real file was never
+  # seen (the head moved mid-pagination). The names must be distinct as well as the right number.
+  test "a file list with a repeated name is laptop-only even when its length matches" do
+    tier, summary = run_classify(files: [ file("README.md"), file("README.md") ])
+    assert_equal "laptop-only", tier, summary
+    assert_match(/duplicate|repeated|distinct/i, summary)
+  end
+
+  test "distinct names of the right count are still phone-safe" do
+    tier, = run_classify(files: [ file("README.md"), file("CHANGELOG.md") ])
+    assert_equal "phone-safe", tier
   end
 
   # Copilot round on #633: a jq that dies must never read as "no control characters" or as a
@@ -402,6 +574,59 @@ class RiskTierWorkflowTest < ActiveSupport::TestCase
     creates.each do |l|
       refute_match(/locale/i, l, "locale YAML can run Ruby when I18n loads it, so it is not on the safe-list: #{l.strip}")
     end
+  end
+
+  test "no label description claims stylesheets are phone-safe" do
+    body = step("Apply the label")["run"].gsub(/\\\n\s*/, " ")
+    creates = body.lines.select { |l| l =~ /\bgh label create\b/ }
+    assert_equal 2, creates.size
+    creates.each do |l|
+      refute_match(/stylesheet|\bcss\b/i, l, "a stylesheet can leak a CSRF token or hide a safety prompt, so it is not phone-safe: #{l.strip}")
+    end
+  end
+
+  # ---- a stale risk:phone-safe must not outlive the run that started (panel round) -----------
+  STALE = "Drop a stale phone-safe label"
+
+  test "the stale-label step is the first thing that runs after checkout, before Classify" do
+    run_steps = steps.select { |s| s.key?("run") }
+    assert_equal STALE, run_steps.first["name"]
+    assert_operator steps.index { |s| s["name"] == STALE }, :<, steps.index { |s| s["name"] == "Classify" }
+  end
+
+  test "the stale-label step cannot be skipped or swallowed" do
+    refute step(STALE).key?("continue-on-error")
+    refute step(STALE).key?("if")
+  end
+
+  test "the stale-label step removes risk:phone-safe and nothing else" do
+    statuses, labels, log = run_label_steps([ STALE ], tier: "phone-safe", labels: [ "risk:phone-safe", "risk:laptop-only", "bug" ])
+    assert_equal [ 0 ], statuses
+    assert_equal [ "bug", "risk:laptop-only" ], labels
+    assert(log.any? { |l| l.include?("--remove-label risk:phone-safe") }, log.inspect)
+    refute(log.any? { |l| l.include?("--add-label") }, log.inspect)
+  end
+
+  test "the stale-label step succeeds when there is no label to remove" do
+    statuses, labels, = run_label_steps([ STALE ], tier: "laptop-only", labels: [ "bug" ])
+    assert_equal [ 0 ], statuses
+    assert_equal [ "bug" ], labels
+  end
+
+  test "the stale-label step carries on when the removal fails but the label is confirmed gone" do
+    statuses, = run_label_steps([ STALE ], tier: "phone-safe", labels: [ "bug" ], fail_remove: true)
+    assert_equal [ 0 ], statuses
+  end
+
+  test "the stale-label step fails, and leaves the labels, when the removal fails and the label is still there" do
+    statuses, labels, = run_label_steps([ STALE ], tier: "phone-safe", labels: [ "risk:phone-safe" ], fail_remove: true)
+    assert_equal [ 1 ], statuses
+    assert_equal [ "risk:phone-safe" ], labels
+  end
+
+  test "the stale-label step fails when the removal fails and the labels cannot be read" do
+    statuses, = run_label_steps([ STALE ], tier: "phone-safe", labels: [ "risk:phone-safe" ], fail_remove: true, fail_view: true)
+    assert_equal [ 1 ], statuses
   end
 
   test "Apply removes a stale opposite label that was set before this run" do

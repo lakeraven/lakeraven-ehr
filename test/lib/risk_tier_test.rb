@@ -40,8 +40,7 @@ class RiskTierTest < ActiveSupport::TestCase
     "CHANGELOG.md",
     "docs/BPRM_PARITY_PLAN.md",
     "docs/my notes.md",
-    "docs/demo_patient_chart_runbook.md",
-    "app/assets/stylesheets/lakeraven/ehr/application.css"
+    "docs/demo_patient_chart_runbook.md"
   ].freeze
 
   # Not on the safe-list, and matching no laptop-only rule: laptop-only by default. These are
@@ -265,7 +264,7 @@ class RiskTierTest < ActiveSupport::TestCase
   end
 
   test "a PR of only safe paths is phone-safe and says how many were read" do
-    tier, status, out = classify([ "README.md", "docs/BPRM_PARITY_PLAN.md", "app/assets/stylesheets/lakeraven/ehr/application.css" ])
+    tier, status, out = classify([ "README.md", "docs/BPRM_PARITY_PLAN.md", "CHANGELOG.md" ])
     assert_equal "phone-safe", tier
     assert_equal 0, status
     assert_match(/3 path/, out)
@@ -386,11 +385,10 @@ class RiskTierTest < ActiveSupport::TestCase
     "README.md",
     "docs/BPRM_PARITY_PLAN.md",
     "docs/BPRM_REG_SCHED_TWIN.md",
-    "docs/demo_patient_chart_runbook.md",
-    "app/assets/stylesheets/lakeraven/ehr/application.css"
+    "docs/demo_patient_chart_runbook.md"
   ].freeze
 
-  test "the tracked prose and stylesheet paths that were phone-safe still are" do
+  test "the tracked prose paths that were phone-safe still are" do
     tracked, = Open3.capture2("git", "ls-files", chdir: ROOT)
     tracked = tracked.lines.map(&:chomp)
     present = STILL_PHONE_SAFE & tracked
@@ -590,6 +588,56 @@ class RiskTierTest < ActiveSupport::TestCase
     refute_match(%r{locales}, safe_section.lines.reject { |l| l.strip.start_with?("#") }.join)
   end
 
+  # ---- stylesheets are not display-only (panel round on #633) ------------------------------
+  #
+  # application.css does `require_tree .`, so any new file in the engine stylesheet directory is
+  # served on every page, including sign-in, the cross-patient guard form and the screening
+  # pages. The layout also emits the CSRF meta tag, and the repo ships no Content-Security-Policy.
+  # A stylesheet can `@import` a remote sheet, leak a token with attribute selectors and `url()`,
+  # or hide the self-harm safety prompt. It is not phone-safe. Owner decision: CSS leaves the
+  # safe-list.
+  STYLESHEETS = [
+    "app/assets/stylesheets/lakeraven/ehr/application.css",
+    "app/assets/stylesheets/lakeraven/ehr/new_theme.css",
+    "app/assets/stylesheets/lakeraven/ehr/APP.CSS"
+  ].freeze
+
+  STYLESHEETS.each_with_index do |path, i|
+    test "a stylesheet is not on the safe-list ##{i}: #{path}" do
+      tier, status, out = classify(path)
+      assert_equal "laptop-only", tier, out
+      assert_equal 0, status
+      assert_match(/not on the safe-list/, out)
+    end
+  end
+
+  test "a prose change with a stylesheet in it is laptop-only" do
+    tier, status, out = classify([ "README.md", "docs/a.md", "app/assets/stylesheets/lakeraven/ehr/application.css" ])
+    assert_equal "laptop-only", tier, out
+    assert_equal 0, status
+  end
+
+  test "the rules file no longer lists stylesheets as safe" do
+    safe_section = File.read(RULES)[/^\[safe\]\s*$.*?(?=^\[|\z)/m].to_s
+    refute_match(/stylesheets|\.css/, safe_section.lines.reject { |l| l.strip.start_with?("#") }.join)
+  end
+
+  test "the rules file says why stylesheets are laptop-only" do
+    comments = File.read(RULES).lines.select { |l| l.strip.start_with?("#") }.join
+    assert_match(/stylesheet/i, comments)
+    assert_match(/require_tree|CSRF|exfiltrat|@import/i, comments)
+  end
+
+  # The macOS /bin/sh is bash 3.2, where a NUL ends the line: `docs/x.md\0app/x.rb` reads as
+  # `docs/x.md` only. The workflow's jq check rejects control characters before the classifier
+  # runs and CI runs bash 5, so CI is not exposed; the limit is documented where a person
+  # who pipes paths in by hand will read it.
+  test "the script header documents the bash 3.2 NUL limit" do
+    header = File.read(File.join(ROOT, "bin", "risk-tier")).lines.first(70).join
+    assert_match(/NUL/, header)
+    assert_match(/3\.2/, header)
+  end
+
   # ---- an explicit --base must name a ref (Copilot round 3) --------------------------------
   #
   # `--base ""` used to be treated as "no --base given", so the script fell through to reading
@@ -707,7 +755,6 @@ class RiskTierTest < ActiveSupport::TestCase
   SAFE_PATH_PATTERNS = [
     %r{\A(README|CHANGELOG)\.md\z}i,
     %r{\Adocs/[^/]+\.md\z}i,
-    %r{\Aapp/assets/stylesheets/lakeraven/ehr/[^/]+\.css\z}i,
     %r{\Aapp/assets/images/[^/]+\.(png|jpe?g|gif|ico)\z}i
   ].freeze
 
