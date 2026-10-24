@@ -22,6 +22,25 @@ module Lakeraven
       # repeat them.
       class CapabilityStatement
         FHIR_VERSION = "4.0.1"
+        US_CORE_IG = "http://hl7.org/fhir/us/core/ImplementationGuide/hl7.fhir.us.core|6.1.0"
+        US_CORE = "http://hl7.org/fhir/us/core/StructureDefinition"
+
+        # US Core 6.1.0 profiles, declared only for a type whose served output
+        # the HL7 validator passes with no errors. test/us_core/validate.rb (the
+        # "US Core" CI job) checks what the engine serves against every profile
+        # declared here and fails on an error; a type joins this list when its
+        # output validates, never before. The others are listed in that job's
+        # report with their errors.
+        US_CORE_PROFILES = {
+          "Patient" => %w[us-core-patient],
+          "Practitioner" => %w[us-core-practitioner],
+          "Location" => %w[us-core-location],
+          "AllergyIntolerance" => %w[us-core-allergyintolerance],
+          "Condition" => %w[us-core-condition-problems-health-concerns],
+          "MedicationRequest" => %w[us-core-medicationrequest],
+          "Observation" => %w[us-core-vital-signs],
+          "Immunization" => %w[us-core-immunization]
+        }.transform_values { |names| names.map { |name| "#{US_CORE}/#{name}" }.freeze }.freeze
         OAUTH_URIS = "http://fhir-registry.smarthealthit.org/StructureDefinition/oauth-uris"
         SEARCH_ONLY_STUB = "No read by id: GET [type]/[id] is routed and always returns 404."
 
@@ -90,6 +109,7 @@ module Lakeraven
             software: { name: "Lakeraven EHR", version: Lakeraven::EHR::VERSION },
             implementation: { description: implementation_description, url: @base_url },
             fhirVersion: FHIR_VERSION,
+            implementationGuide: [ US_CORE_IG ],
             format: %w[json application/fhir+json],
             rest: [ {
               mode: "server",
@@ -137,6 +157,7 @@ module Lakeraven
           {
             type: type,
             documentation: declaration[:source],
+            supportedProfile: US_CORE_PROFILES[type],
             interaction: declaration[:interactions].map { |code| { code: code } },
             operation: declaration[:operations]
           }.compact.merge(SearchCapabilities.resource_capabilities(type))

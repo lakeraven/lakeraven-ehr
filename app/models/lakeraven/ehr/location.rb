@@ -121,6 +121,7 @@ module Lakeraven
       # FHIR SERIALIZATION
       # =============================================================================
 
+      # FHIR forbids an empty array: an element with no values is left out.
       def to_fhir
         {
           resourceType: "Location",
@@ -135,7 +136,7 @@ module Lakeraven
           address: build_fhir_address,
           telecom: build_fhir_telecom,
           managingOrganization: build_fhir_managing_organization
-        }.compact
+        }.reject { |_key, value| value.nil? || value == [] }
       end
 
       def self.resource_class
