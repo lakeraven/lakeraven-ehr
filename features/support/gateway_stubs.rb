@@ -1,8 +1,12 @@
 # frozen_string_literal: true
 
-# Per-scenario gateway stubbing — replaces a Class.singleton_method with a
-# fixed return value for the duration of one scenario, then restores. Prevents
-# the "removed production method bleeds into later scenarios" failure mode.
+require_relative "../../test/support/stub_helpers"
+
+# Per-scenario gateway stubbing. install_singleton_stub is the same
+# save-and-restore with_stub uses, so a production singleton method is put
+# back after the scenario, including when a step overwrites the stub or the
+# scenario fails. Step definitions, and part2 steps that push their own
+# restore procs, share @gateway_stubs.
 
 Before do
   @gateway_stubs = []
@@ -14,12 +18,5 @@ After do
 end
 
 def stub_gateway(klass, method_name, return_value)
-  sc = klass.singleton_class
-  if sc.method_defined?(method_name) && sc.instance_method(method_name).owner == sc
-    original = sc.instance_method(method_name)
-    @gateway_stubs << -> { sc.send(:define_method, method_name, original) }
-  else
-    @gateway_stubs << -> { sc.send(:remove_method, method_name) if sc.method_defined?(method_name) }
-  end
-  klass.define_singleton_method(method_name) { |*_a, **_kw| return_value }
+  @gateway_stubs << StubHelpers.install_singleton_stub(klass, method_name, return_value)
 end
