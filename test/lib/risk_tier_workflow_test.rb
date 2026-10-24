@@ -421,6 +421,11 @@ class RiskTierWorkflowTest < ActiveSupport::TestCase
     assert_equal "laptop-only", tier
   end
 
+  test "a renamed file's old name is not looked up: it no longer exists at the head" do
+    tier, summary = run_classify(files: [ file("docs/new.md", previous: "docs/old.md", status: "renamed") ])
+    assert_equal "phone-safe", tier, summary
+  end
+
   test "a removed file needs no entry in the tree, because it no longer exists at the head" do
     tier, summary = run_classify(files: [ file("README.md"), file("docs/gone.md", status: "removed") ])
     assert_equal "phone-safe", tier, summary
