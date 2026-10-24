@@ -15,7 +15,7 @@ lakeraven-ehr needs an authorization layer to control what authenticated users c
 - **RPMS is the source of truth** for roles and security keys. The authorization library must consume externally-defined roles, not manage its own role storage.
 - **Rails engine architecture.** lakeraven-ehr is a mountable engine. The host app (a commercial SaaS template) handles authentication (Devise). Authorization must compose cleanly — the engine defines policies for its resources, the host app can override or extend them.
 - **Multiple engines.** corvid and rook are independent engines that need the same RPMS role/key data. Authorization logic must not couple engines to each other.
-- *(Superseded by ADR 0010: mappings now live in this engine.)* - **rpms-rpc owns RPMS details.** RPMS key strings (`"PRCFA SUPERVISOR"`), user class numbers (`"4"` = nurse), and key-to-capability mappings belong in rpms-rpc, not in engine code.
+- **rpms-rpc owns RPMS details.** *(Superseded by ADR 0010: mappings now live in this engine.)* RPMS key strings (`"PRCFA SUPERVISOR"`), user class numbers (`"4"` = nurse), and key-to-capability mappings belong in rpms-rpc, not in engine code.
 
 ### Options considered
 
