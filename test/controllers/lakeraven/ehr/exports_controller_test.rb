@@ -10,23 +10,6 @@ module Lakeraven
 
       private
 
-      def ensure_export_test_patient!
-        return if Patient.find_by_dfn(EXPORT_TEST_PATIENT_DFN)
-
-        @_orig_find_by_dfn ||= Patient.method(:find_by_dfn)
-        dfn = EXPORT_TEST_PATIENT_DFN
-        Patient.define_singleton_method(:find_by_dfn) do |lookup|
-          lookup.to_s == dfn ? Patient.new(dfn: dfn.to_i, name: "Anderson,Alice", sex: "F", dob: 50.years.ago.to_date) : nil
-        end
-      end
-
-      def restore_export_test_patient_stub!
-        return unless @_orig_find_by_dfn
-
-        Patient.define_singleton_method(:find_by_dfn, @_orig_find_by_dfn)
-        @_orig_find_by_dfn = nil
-      end
-
       def kickoff_and_fetch_completed_export
         post "/lakeraven-ehr/exports",
           params: { export_type: "patient", patient_dfn: EXPORT_TEST_PATIENT_DFN },
@@ -96,11 +79,11 @@ module Lakeraven
         # these used to pass on the default read-only token.
         setup_smart_auth(scopes: "system/*.read system/*.write")
         ExportsController.reset_store!
-        ensure_export_test_patient!
+        assert Patient.find_by_dfn(EXPORT_TEST_PATIENT_DFN),
+          "Expected patient DFN #{EXPORT_TEST_PATIENT_DFN} from BASELINE_MOCK_SEEDS in test/test_helper.rb"
       end
 
       teardown do
-        restore_export_test_patient_stub!
         teardown_smart_auth
         ExportsController.reset_store!
       end
@@ -197,11 +180,11 @@ module Lakeraven
         # these used to pass on the default read-only token.
         setup_smart_auth(scopes: "system/*.read system/*.write")
         ExportsController.reset_store!
-        ensure_export_test_patient!
+        assert Patient.find_by_dfn(EXPORT_TEST_PATIENT_DFN),
+          "Expected patient DFN #{EXPORT_TEST_PATIENT_DFN} from BASELINE_MOCK_SEEDS in test/test_helper.rb"
       end
 
       teardown do
-        restore_export_test_patient_stub!
         teardown_smart_auth
         ExportsController.reset_store!
       end
