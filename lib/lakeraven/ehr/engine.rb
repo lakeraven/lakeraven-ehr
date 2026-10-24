@@ -42,6 +42,13 @@ module Lakeraven
       # appending this path there would run each migration twice. Append only
       # when the app root is a directory inside the engine root.
       #
+      # Known edge: a host whose root is a SUBDIRECTORY of an engine checkout
+      # (for example a host app vendored under this repository) also matches
+      # the guard and would get the engine path next to its install:migrations
+      # copies. A host installed the usual way (the gem under the gems
+      # directory, the app elsewhere) never matches. Pinned by
+      # test/integration/engine_migration_paths_test.rb (host app outside).
+      #
       # Repo-root bin/rails sets ENGINE_ROOT and Active Record appends that
       # same directory again in db:load_config. Collapse paths that expand or
       # realpath to one directory so Dir[] does not load each file twice.

@@ -114,6 +114,11 @@ class EngineMigrationPathsTest < ActiveSupport::TestCase
     end
   end
 
+  # What this proves: `db:migrate` from the repo root succeeds (a duplicated
+  # migration path raises DuplicateMigrationNameError, which fails the status
+  # assertion) and every engine version is recorded. What it does not prove:
+  # schema_migrations.version is a primary key, so a row can never appear twice
+  # and the `count == 1` assertion can only catch a MISSING row, not a duplicate.
   test "repo-root db:migrate applies each engine migration exactly once" do
     stdout, stderr, status = rails_cli(
       cwd: REPO_ROOT,
