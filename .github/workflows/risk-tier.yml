@@ -29,6 +29,18 @@ name: Risk tier
 # Both files are laptop-only paths under the base rules, so editing either one gets the PR
 # classified laptop-only.
 #
+# Three things beyond path names (panel round on #633):
+#   - The first action of every run is to remove `risk:phone-safe`, so a label that described an
+#     earlier head never outlives the run that started. It is put back only by a run that finishes
+#     and still says phone-safe. NOT covered: a run that never starts (e.g. a skipped workflow),
+#     a PR retargeted at a branch that has no copy of this workflow, and rule changes on main,
+#     which relabel nothing until the next push.
+#   - Names are not enough: a symlink called logo.png is a path to something else, and the files
+#     API does not return file modes. When the classifier says phone-safe, every changed path that
+#     still exists is read back at the PR head (refs/pull/N/head on this repo) and must be a
+#     regular file. At most 100 such paths are verified (one API call each); more is laptop-only.
+#   - A file list that repeats a name has the right length and a missing file.
+#
 # Fail closed: only a classifier that exits 0 AND prints `phone-safe` first yields phone-safe.
 # Anything else (a missing classifier, an unreadable or truncated file list, a file name with
 # a control character, exit 1 or 2, an empty output) is laptop-only. Absence of data is never verification.
@@ -63,6 +75,30 @@ jobs:
           ref: ${{ github.event.pull_request.base.sha }}
           persist-credentials: false
 
+      # FIRST ACTION. A `risk:phone-safe` from an earlier push describes a head that no longer
+      # exists. It is removed before anything is classified, so it cannot outlive this run. If it
+      # cannot be removed and is not confirmed gone, the job stops here and nothing downstream runs.
+      - name: Drop a stale phone-safe label
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -eu
+          # 0 = the label is on the PR, 1 = a successful read shows it is not, 2 = the read failed.
+          has_label() {
+            names=$(gh pr view "$PR" --repo "$REPO" --json labels --jq '.labels[].name') || return 2
+            printf '%s\n' "$names" | grep -qx "$1"
+          }
+          if ! gh pr edit "$PR" --repo "$REPO" --remove-label "risk:phone-safe"; then
+            present=0
+            has_label "risk:phone-safe" || present=$?
+            if [ "$present" -ne 1 ]; then
+              echo "::error::could not remove a stale risk:phone-safe from PR #$PR (label check exit $present)"
+              exit 1
+            fi
+          fi
+
       - name: Classify
         id: classify
         env:
@@ -85,6 +121,10 @@ jobs:
             detail="  (undetermined: could not count the PR's files)"
           elif [ "$got" != "$CHANGED" ] || [ "$CHANGED" -ge 3000 ]; then
             detail="  (undetermined: read $got of $CHANGED files; the API caps a PR at 3000)"
+          elif ! distinct=$(jq '[.[].filename] | unique | length' files.json); then
+            detail="  (undetermined: could not check the PR's file names for repeats)"
+          elif [ "$distinct" != "$got" ]; then
+            detail="  (undetermined: the file list repeats a name, $distinct distinct of $got; the head may have moved while it was read)"
           else
             # A name with a newline would become two lines in paths.txt, each possibly a
             # safe path on its own, and a trailing CR would be stripped. The classifier only
@@ -109,6 +149,38 @@ jobs:
               # The exit status is part of the contract, not only the first line.
               if [ "$rc" -eq 0 ] && [ "$first" = "phone-safe" ]; then
                 tier=phone-safe
+                # A safe NAME is not a safe FILE. Read every path that still exists back at the PR
+                # head and require a regular file; a symlink, submodule or directory, a failed or
+                # unreadable call, or more paths than can be checked is laptop-only.
+                if ! jq -r '.[] | select(.status != "removed") | .filename' files.json > existing.txt; then
+                  tier=laptop-only
+                  detail="${detail}${detail:+$'\n'}  (undetermined: could not list the paths that still exist)"
+                else
+                  n=$(awk 'END { print NR }' existing.txt)
+                  if [ "$n" -gt 100 ]; then
+                    tier=laptop-only
+                    detail="${detail}${detail:+$'\n'}  (undetermined: $n existing paths; at most 100 can be verified as regular files)"
+                  else
+                    while IFS= read -r path || [ -n "$path" ]; do
+                      if ! enc=$(jq -rn --arg p "$path" '$p | split("/") | map(@uri) | join("/")'); then
+                        tier=laptop-only
+                        detail="${detail}${detail:+$'\n'}  (undetermined: could not encode '$path' for the lookup)"
+                        break
+                      fi
+                      if ! kind=$(gh api "repos/$REPO/contents/$enc?ref=refs/pull/$PR/head" \
+                            --jq 'if type == "object" then (.type // "none") else "not-a-file" end' </dev/null); then
+                        tier=laptop-only
+                        detail="${detail}${detail:+$'\n'}  (undetermined: could not read '$path' at the PR head)"
+                        break
+                      fi
+                      if [ "$kind" != "file" ]; then
+                        tier=laptop-only
+                        detail="${detail}${detail:+$'\n'}  $path  <- not a regular file at the PR head (type: $kind): treated as laptop-only"
+                        break
+                      fi
+                    done < existing.txt
+                  fi
+                fi
               else
                 detail="${detail}${detail:+$'\n'}  (classifier exit $rc, first line '$first': treated as laptop-only)"
               fi
@@ -138,7 +210,7 @@ jobs:
           gh label create "risk:laptop-only" --color D93F0B --force \
             --description "Touches auth, consent, Part 2, audit, tenancy, schema, CI or dependencies: review on a laptop"
           gh label create "risk:phone-safe" --color 0E8A16 --force \
-            --description "Every changed path is on the safe-list (docs, stylesheets, images): reviewable from a phone"
+            --description "Every changed path is on the safe-list (docs, images): reviewable from a phone"
 
           if [ "$TIER" = "phone-safe" ]; then add=risk:phone-safe; drop=risk:laptop-only
           else add=risk:laptop-only; drop=risk:phone-safe; fi

@@ -20,6 +20,12 @@
 # and each directory level a safe path may sit at has to be spelled out (gate round 4 on #633:
 # a crossing `*` let docs/internal/master_key.md through).
 #
+# Known limit (bash 3.2, the macOS /bin/sh): a NUL byte ends the line, so
+# `printf 'docs/x.md\0app/x.rb\n' | bin/risk-tier` reads only `docs/x.md` and prints phone-safe
+# there; bash 4+ and 5 print laptop-only. The workflow is not exposed: its jq check rejects any
+# control character, NUL included, before the classifier runs, and its runner has bash 5. Do not
+# pipe untrusted names into this script by hand on a Mac.
+#
 # Usage:
 #   bin/risk-tier                      paths on stdin, one per line
 #   bin/risk-tier --base REF           paths from `git diff --no-renames --name-only REF...HEAD`

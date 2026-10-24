@@ -114,19 +114,29 @@ SOFTWARE-FACTORY*           # [forward] the review method itself
 
 # ======================================================================================
 # THE SAFE-LIST. Add a glob only for a path where a mistake cannot change who may see what
-# or what is stored: prose, styling. Never code that decides,
+# or what is stored: prose and images. Never code that decides,
 # controllers, services, models, serializers, tests, features, db, config or CI. Prefer
 # a narrow extension to a directory.
 #
 # Deliberately NOT listed: config/locales/*.yml. I18n loads locale files with
 # YAML.unsafe_load_file, so a locale file can carry a Ruby object tag and run application code
 # when it loads. It is not display text; it is laptop-only (Copilot round 3).
+#
+# Deliberately NOT listed: stylesheets (app/assets/stylesheets/**). application.css does
+# `require_tree .`, so any new stylesheet is served on every page, including sign-in, the
+# cross-patient guard form and the screening pages; the layout carries the CSRF meta tag and the
+# repo ships no Content-Security-Policy. A stylesheet can @import a remote sheet, exfiltrate a
+# token or a hidden form value with attribute selectors and url(), or hide the self-harm safety
+# prompt. Styling is not display-only; it is laptop-only (panel round on #633).
+#
+# Images are listed by name only. A name says nothing about the file mode: a symlink called
+# logo.png is a path to something else. The workflow therefore reads every changed path back at
+# the PR head and treats anything that is not a regular file as laptop-only.
 # ======================================================================================
 [safe]
 README.md                   # prose
 CHANGELOG.md                # [forward] prose
 docs/*.md                   # prose, top-level only (docs/adr, docs/compliance and docs/certification are laptop-only rules above)
-app/assets/stylesheets/lakeraven/ehr/*.css   # styling (the engine namespace; one level, no deeper)
 app/assets/images/*.png     # [forward] images
 app/assets/images/*.jpg     # [forward] images
 app/assets/images/*.jpeg    # [forward] images
