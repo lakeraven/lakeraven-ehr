@@ -55,6 +55,34 @@ module Lakeraven
       # OWNER (patient_identifier)
       # =============================================================================
 
+      test "add raises and stores nothing when patient_identifier and patient_dfn are both blank" do
+        enc = Encounter.new(
+          ien: 1,
+          patient_dfn: nil,
+          patient_identifier: nil,
+          status: "finished",
+          class_code: "AMB"
+        )
+        store = EncounterStore.instance
+
+        assert_raises(ArgumentError) { store.add(enc) }
+        assert_equal 0, store.count
+      end
+
+      test "seed! raises when any encounter has both patient_identifier and patient_dfn blank" do
+        bad = Encounter.new(
+          ien: 3,
+          patient_dfn: "",
+          patient_identifier: "",
+          status: "finished",
+          class_code: "AMB"
+        )
+        store = EncounterStore.instance
+
+        assert_raises(ArgumentError) { store.seed!([ bad ]) }
+        assert_equal 0, store.count
+      end
+
       test "add raises and stores nothing when patient_identifier is blank" do
         enc = Encounter.new(
           ien: 1,
@@ -252,6 +280,26 @@ module Lakeraven
       # SEED VALIDATION
       # =============================================================================
 
+      test "add nil raises and leaves prior contents intact" do
+        enc = build_encounter(ien: 1, patient_identifier: "10")
+        store = EncounterStore.instance
+        store.seed!([ enc ])
+
+        assert_raises(ArgumentError) { store.add(nil) }
+        assert_equal 1, store.count
+        assert_equal [ enc ], store.all
+      end
+
+      test "seed! with nil element raises and leaves prior contents intact" do
+        enc = build_encounter(ien: 1, patient_identifier: "10")
+        store = EncounterStore.instance
+        store.seed!([ enc ])
+
+        assert_raises(ArgumentError) { store.seed!([ nil ]) }
+        assert_equal 1, store.count
+        assert_equal [ enc ], store.all
+      end
+
       test "seed! with nil argument raises and leaves prior contents intact" do
         enc = build_encounter(ien: 1, patient_identifier: "10")
         store = EncounterStore.instance
@@ -273,7 +321,8 @@ module Lakeraven
       end
 
       test "seed! rolls back when one record fails validation leaving prior contents intact" do
-        good = build_encounter(ien: 1, patient_identifier: "10")
+        other = build_encounter(ien: 99, patient_identifier: "99", patient_dfn: 99)
+        good = build_encounter(ien: 1, patient_identifier: "10", patient_dfn: 10)
         bad = Encounter.new(
           ien: 2,
           patient_dfn: 1,
@@ -282,11 +331,29 @@ module Lakeraven
           class_code: "AMB"
         )
         store = EncounterStore.instance
-        store.seed!([ good ])
+        store.seed!([ other ])
 
         assert_raises(ArgumentError) { store.seed!([ good, bad ]) }
         assert_equal 1, store.count
-        assert_equal [ good ], store.all
+        assert_equal [ other ], store.all
+      end
+
+      test "seed! rolls back when first record fails validation leaving prior contents intact" do
+        other = build_encounter(ien: 99, patient_identifier: "99", patient_dfn: 99)
+        good = build_encounter(ien: 1, patient_identifier: "10", patient_dfn: 10)
+        bad = Encounter.new(
+          ien: 2,
+          patient_dfn: 1,
+          patient_identifier: "999999",
+          status: "finished",
+          class_code: "AMB"
+        )
+        store = EncounterStore.instance
+        store.seed!([ other ])
+
+        assert_raises(ArgumentError) { store.seed!([ bad, good ]) }
+        assert_equal 1, store.count
+        assert_equal [ other ], store.all
       end
     end
   end

@@ -123,8 +123,48 @@ module Lakeraven
       end
 
       # =============================================================================
+      # FHIR ID
+      # =============================================================================
+
+      test "add raises and stores nothing when fhir_id is blank" do
+        med = MedicationEntry.new(fhir_id: "")
+        store = MedicationStore.instance
+
+        assert_raises(ArgumentError) { store.add(med) }
+        assert_equal 0, store.count
+      end
+
+      test "seed! raises when any medication has blank fhir_id" do
+        bad = MedicationEntry.new(fhir_id: nil)
+        store = MedicationStore.instance
+
+        assert_raises(ArgumentError) { store.seed!([ bad ]) }
+        assert_equal 0, store.count
+      end
+
+      # =============================================================================
       # SEED VALIDATION
       # =============================================================================
+
+      test "add nil raises and leaves prior contents intact" do
+        med = build_medication(fhir_id: "1")
+        store = MedicationStore.instance
+        store.seed!([ med ])
+
+        assert_raises(ArgumentError) { store.add(nil) }
+        assert_equal 1, store.count
+        assert_equal [ med ], store.all
+      end
+
+      test "seed! with nil element raises and leaves prior contents intact" do
+        med = build_medication(fhir_id: "1")
+        store = MedicationStore.instance
+        store.seed!([ med ])
+
+        assert_raises(ArgumentError) { store.seed!([ nil ]) }
+        assert_equal 1, store.count
+        assert_equal [ med ], store.all
+      end
 
       test "seed! with nil argument raises and leaves prior contents intact" do
         med = build_medication(fhir_id: "1")
@@ -144,6 +184,30 @@ module Lakeraven
         assert_raises(ArgumentError) { store.seed!("not-an-array") }
         assert_equal 1, store.count
         assert_equal [ med ], store.all
+      end
+
+      test "seed! rolls back when one record fails validation leaving prior contents intact" do
+        other = build_medication(fhir_id: "other")
+        good = build_medication(fhir_id: "good")
+        bad = MedicationEntry.new(fhir_id: "")
+        store = MedicationStore.instance
+        store.seed!([ other ])
+
+        assert_raises(ArgumentError) { store.seed!([ good, bad ]) }
+        assert_equal 1, store.count
+        assert_equal [ other ], store.all
+      end
+
+      test "seed! rolls back when first record fails validation leaving prior contents intact" do
+        other = build_medication(fhir_id: "other")
+        good = build_medication(fhir_id: "good")
+        bad = MedicationEntry.new(fhir_id: nil)
+        store = MedicationStore.instance
+        store.seed!([ other ])
+
+        assert_raises(ArgumentError) { store.seed!([ bad, good ]) }
+        assert_equal 1, store.count
+        assert_equal [ other ], store.all
       end
     end
   end

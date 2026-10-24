@@ -189,6 +189,26 @@ module Lakeraven
       # SEED VALIDATION
       # =============================================================================
 
+      test "add nil raises and leaves prior contents intact" do
+        report = build_report(ien: "1", patient_dfn: "10")
+        store = DiagnosticReportStore.instance
+        store.seed!([ report ])
+
+        assert_raises(ArgumentError) { store.add(nil) }
+        assert_equal 1, store.count
+        assert_equal [ report ], store.all
+      end
+
+      test "seed! with nil element raises and leaves prior contents intact" do
+        report = build_report(ien: "1", patient_dfn: "10")
+        store = DiagnosticReportStore.instance
+        store.seed!([ report ])
+
+        assert_raises(ArgumentError) { store.seed!([ nil ]) }
+        assert_equal 1, store.count
+        assert_equal [ report ], store.all
+      end
+
       test "seed! with nil argument raises and leaves prior contents intact" do
         report = build_report(ien: "1", patient_dfn: "10")
         store = DiagnosticReportStore.instance
@@ -210,6 +230,7 @@ module Lakeraven
       end
 
       test "seed! rolls back when one record fails validation leaving prior contents intact" do
+        other = build_report(ien: "99", patient_dfn: "99")
         good = build_report(ien: "1", patient_dfn: "10")
         bad = DiagnosticReport.new(
           ien: "2",
@@ -219,11 +240,29 @@ module Lakeraven
           category: "LAB"
         )
         store = DiagnosticReportStore.instance
-        store.seed!([ good ])
+        store.seed!([ other ])
 
         assert_raises(ArgumentError) { store.seed!([ good, bad ]) }
         assert_equal 1, store.count
-        assert_equal [ good ], store.all
+        assert_equal [ other ], store.all
+      end
+
+      test "seed! rolls back when first record fails validation leaving prior contents intact" do
+        other = build_report(ien: "99", patient_dfn: "99")
+        good = build_report(ien: "1", patient_dfn: "10")
+        bad = DiagnosticReport.new(
+          ien: "2",
+          patient_dfn: nil,
+          code_display: "Bad owner",
+          status: "final",
+          category: "LAB"
+        )
+        store = DiagnosticReportStore.instance
+        store.seed!([ other ])
+
+        assert_raises(ArgumentError) { store.seed!([ bad, good ]) }
+        assert_equal 1, store.count
+        assert_equal [ other ], store.all
       end
     end
   end
