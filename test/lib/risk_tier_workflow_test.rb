@@ -198,7 +198,7 @@ class RiskTierWorkflowTest < ActiveSupport::TestCase
       tsv = File.join(dir, "stubs", "contents.tsv")
       File.write(tsv, modes.reject { |_, m| m == :absent || m == :nomode }.map { |path, mode| "#{uri_path(path)}\t#{contents_body(mode)}\n" }.join)
       tree_out = File.join(dir, "stubs", "tree.out")
-      File.write(tree_out, tree_body(tree, tree_entries(files, modes, types: types, extra: extra), sha: tree_sha || heads.first.to_s))
+      File.write(tree_out, tree_body(tree, tree_entries(files, modes, types: types, extra: extra), sha: tree_sha || (heads.first == :garbage ? "not-a-sha" : heads.first.to_s)))
       # What `GET pulls/N` says the head commit is on the 1st, 2nd, ... read (the last value repeats).
       # :error is a failed call, :garbage a reply that is not a commit sha.
       heads_file = File.join(dir, "stubs", "heads.txt")
@@ -523,9 +523,11 @@ class RiskTierWorkflowTest < ActiveSupport::TestCase
     assert_match(/undetermined/i, summary)
   end
 
-  test "a head commit that is not a 40-hex sha makes the PR laptop-only" do
-    tier, = run_classify(files: [ file("README.md") ], heads: [ :garbage ])
-    assert_equal "laptop-only", tier
+  test "a head commit that is not a 40-hex sha makes the PR laptop-only, even when the tree echoes the same text" do
+    # the stub's tree reply echoes exactly what the head read printed, so only the 40-hex check can stop it
+    tier, summary = run_classify(files: [ file("README.md") ], heads: [ :garbage ])
+    assert_equal "laptop-only", tier, summary
+    assert_match(/head commit/i, summary)
   end
 
   test "a head commit that cannot be re-read after the tree makes the PR laptop-only" do
