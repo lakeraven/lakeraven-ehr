@@ -130,8 +130,9 @@ SOFTWARE-FACTORY*           # [forward] the review method itself
 # prompt. Styling is not display-only; it is laptop-only (panel round on #633).
 #
 # Images are listed by name only. A name says nothing about the file mode: a symlink called
-# logo.png is a path to something else. The workflow therefore reads every changed path back at
-# the PR head and treats anything that is not a regular file as laptop-only.
+# logo.png is a path to something else. The workflow therefore reads the PR head's git tree and
+# treats any changed path that is not a blob with mode 100644 or 100755 as laptop-only. (The
+# contents API cannot do this: it reports a symlink to a tracked file as a regular file.)
 # ======================================================================================
 [safe]
 README.md                   # prose

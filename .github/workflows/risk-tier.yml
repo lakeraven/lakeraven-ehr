@@ -36,9 +36,16 @@ name: Risk tier
 #     a PR retargeted at a branch that has no copy of this workflow, and rule changes on main,
 #     which relabel nothing until the next push.
 #   - Names are not enough: a symlink called logo.png is a path to something else, and the files
-#     API does not return file modes. When the classifier says phone-safe, every changed path that
-#     still exists is read back at the PR head (refs/pull/N/head on this repo) and must be a
-#     regular file. At most 100 such paths are verified (one API call each); more is laptop-only.
+#     API does not return file modes. The contents API cannot stand in for it: GitHub answers
+#     {"type":"file"} for a symlink whose target is a tracked file ("the API responds with the
+#     content of the file"), and only a link to a directory reads as a symlink. So when the
+#     classifier says phone-safe, the PR head's git tree is read in ONE call (git/trees/
+#     refs/pull/N/head?recursive=1 on this repo: no head SHA, no head repo, nothing checked out)
+#     and every changed path that still exists must be a blob with mode 100644 or 100755. A
+#     symlink (120000), submodule (160000) or directory, a path missing from the tree, a truncated
+#     or unreadable tree, or any failed call is laptop-only. A truncated tree (the API caps one at
+#     100,000 entries or 7 MB) therefore sends a very large repository to laptop-only; this
+#     repository's tree is about a thousand entries.
 #   - A file list that repeats a name has the right length and a missing file.
 #
 # Fail closed: only a classifier that exits 0 AND prints `phone-safe` first yields phone-safe.
@@ -149,37 +156,40 @@ jobs:
               # The exit status is part of the contract, not only the first line.
               if [ "$rc" -eq 0 ] && [ "$first" = "phone-safe" ]; then
                 tier=phone-safe
-                # A safe NAME is not a safe FILE. Read every path that still exists back at the PR
-                # head and require a regular file; a symlink, submodule or directory, a failed or
-                # unreadable call, or more paths than can be checked is laptop-only.
+                # A safe NAME is not a safe FILE. The files API gives names, never modes, and the
+                # contents API reports a symlink to a tracked file as a regular file, so read the PR
+                # head's git tree (one call) and require every path that still exists to be a blob
+                # with mode 100644 or 100755. Anything else, a path missing from the tree, a
+                # truncated or unreadable tree, or a failed call is laptop-only.
                 if ! jq -r '.[] | select(.status != "removed") | .filename' files.json > existing.txt; then
                   tier=laptop-only
                   detail="${detail}${detail:+$'\n'}  (undetermined: could not list the paths that still exist)"
-                else
-                  n=$(awk 'END { print NR }' existing.txt)
-                  if [ "$n" -gt 100 ]; then
-                    tier=laptop-only
-                    detail="${detail}${detail:+$'\n'}  (undetermined: $n existing paths; at most 100 can be verified as regular files)"
-                  else
-                    while IFS= read -r path || [ -n "$path" ]; do
-                      if ! enc=$(jq -rn --arg p "$path" '$p | split("/") | map(@uri) | join("/")'); then
-                        tier=laptop-only
-                        detail="${detail}${detail:+$'\n'}  (undetermined: could not encode '$path' for the lookup)"
-                        break
-                      fi
-                      if ! kind=$(gh api "repos/$REPO/contents/$enc?ref=refs/pull/$PR/head" \
-                            --jq 'if type == "object" then (.type // "none") else "not-a-file" end' </dev/null); then
-                        tier=laptop-only
-                        detail="${detail}${detail:+$'\n'}  (undetermined: could not read '$path' at the PR head)"
-                        break
-                      fi
-                      if [ "$kind" != "file" ]; then
-                        tier=laptop-only
-                        detail="${detail}${detail:+$'\n'}  $path  <- not a regular file at the PR head (type: $kind): treated as laptop-only"
-                        break
-                      fi
-                    done < existing.txt
-                  fi
+                elif [ ! -s existing.txt ]; then
+                  : # nothing that still exists: removing files cannot add a symlink
+                elif ! gh api "repos/$REPO/git/trees/refs/pull/$PR/head?recursive=1" > tree.json </dev/null; then
+                  tier=laptop-only
+                  detail="${detail}${detail:+$'\n'}  (undetermined: could not read the PR head's git tree)"
+                elif ! jq -e '(.truncated == false) and ((.tree | type) == "array")' tree.json > /dev/null; then
+                  tier=laptop-only
+                  detail="${detail}${detail:+$'\n'}  (undetermined: the PR head's git tree is truncated or unreadable, so file modes cannot be verified)"
+                elif ! jq -rn --slurpfile t tree.json --rawfile p existing.txt '
+                    def kind($e):
+                      if $e == null then "not found in the PR head tree"
+                      elif $e.mode == "120000" then "a symlink (mode 120000)"
+                      elif $e.mode == "160000" then "a submodule (mode 160000)"
+                      elif $e.type == "tree" then "a directory"
+                      else "mode \($e.mode // "none"), type \($e.type // "none")" end;
+                    ($t[0].tree | map({key: .path, value: .}) | from_entries) as $m
+                    | ($p | split("\n") | map(select(length > 0)))[]
+                    | . as $path | $m[$path] as $e
+                    | select((($e != null) and ($e.type == "blob") and (($e.mode == "100644") or ($e.mode == "100755"))) | not)
+                    | "  \($path)  <- not a regular file at the PR head (\(kind($e))): treated as laptop-only"
+                  ' > notregular.txt; then
+                  tier=laptop-only
+                  detail="${detail}${detail:+$'\n'}  (undetermined: could not check the file modes in the PR head's tree)"
+                elif [ -s notregular.txt ]; then
+                  tier=laptop-only
+                  detail="${detail}${detail:+$'\n'}$(cat notregular.txt)"
                 fi
               else
                 detail="${detail}${detail:+$'\n'}  (classifier exit $rc, first line '$first': treated as laptop-only)"
