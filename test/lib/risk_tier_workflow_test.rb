@@ -162,7 +162,7 @@ class RiskTierWorkflowTest < ActiveSupport::TestCase
               case "$a" in repos/*) url="$a" ;; esac
               prev="$a"
             done
-            enc="${url#*/contents/}"; enc="${enc%%\?*}"
+            enc="${url#*/contents/}"; enc="${enc%%\\?*}"
             body=$(awk -F'\t' -v k="$enc" '$1==k {print $2; exit}' #{tsv})
             [ -z "$body" ] && body='#{CONTENT_BODIES[:file]}'
             if [ "$body" = ERROR ]; then echo "gh: HTTP 404" >&2; exit 1; fi
