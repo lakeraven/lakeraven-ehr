@@ -413,8 +413,11 @@ unset RACKUP_HANDLER RACK_HANDLER
 #    exported function named ruby is dropped at the top, so this is the real
 #    interpreter (the same one the bind probe requires), not a stub that
 #    returns 0.
-_puma_inherit_names=$(
-  command env | while IFS= read -r _puma_inherit_line || [ -n "$_puma_inherit_line" ]; do
+# The scan is a function, not inline in $( ): bash 3.2 (macOS /bin/sh) mis-parses
+# a case pattern list inside a command substitution, and the launcher must parse
+# there. Keep any `case` out of $( ).
+_puma_inherit_scan() {
+  while IFS= read -r _puma_inherit_line || [ -n "$_puma_inherit_line" ]; do
     case "$_puma_inherit_line" in
       *PUMA_INHERIT_[0-9]*=*)
         _puma_inherit_name=${_puma_inherit_line%%=*}
@@ -430,7 +433,9 @@ _puma_inherit_names=$(
         ;;
     esac
   done
-)
+}
+_puma_inherit_names=$(command env | _puma_inherit_scan)
+unset -f _puma_inherit_scan
 while IFS= read -r _puma_inherit_name || [ -n "$_puma_inherit_name" ]; do
   case "$_puma_inherit_name" in
     *[!A-Za-z0-9_]*|[!A-Za-z_]*)
@@ -444,8 +449,8 @@ while IFS= read -r _puma_inherit_name || [ -n "$_puma_inherit_name" ]; do
 done <<END_PUMA_INHERIT
 $_puma_inherit_names
 END_PUMA_INHERIT
-_puma_inherit_left=$(
-  command env | while IFS= read -r _puma_inherit_line || [ -n "$_puma_inherit_line" ]; do
+_puma_inherit_find_left() {
+  while IFS= read -r _puma_inherit_line || [ -n "$_puma_inherit_line" ]; do
     case "$_puma_inherit_line" in
       *PUMA_INHERIT_[0-9]*=*)
         _puma_inherit_name=${_puma_inherit_line%%=*}
@@ -466,7 +471,9 @@ _puma_inherit_left=$(
         ;;
     esac
   done
-)
+}
+_puma_inherit_left=$(command env | _puma_inherit_find_left)
+unset -f _puma_inherit_find_left
 if [ -n "$_puma_inherit_left" ]; then
   printf 'Refusing to start: env still contains a PUMA_INHERIT_<digit> name, which Puma would inherit as an open listener:\n%s\n' "$_puma_inherit_left" >&2
   exit 1
