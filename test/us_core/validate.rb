@@ -1,9 +1,9 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# us-core-validate -- validate the FHIR the engine serves against US Core 6.1.0.
+# test/us_core/validate.rb -- validate the FHIR the engine serves against US Core 6.1.0.
 #
-# Usage: bin/us-core-validate SAMPLES_DIR
+# Usage: test/us_core/validate.rb SAMPLES_DIR
 #   SAMPLES_DIR is what test/us_core/fhir_samples_export.rb wrote: manifest.json,
 #   metadata.json (the served CapabilityStatement) and the sampled resources.
 # Env:
@@ -73,7 +73,7 @@ def describe(issue)
   [ where, text ].compact.join(": ")
 end
 
-samples_dir = ARGV.fetch(0) { abort "usage: bin/us-core-validate SAMPLES_DIR" }
+samples_dir = ARGV.fetch(0) { abort "usage: test/us_core/validate.rb SAMPLES_DIR" }
 jar = ENV.fetch("US_CORE_VALIDATOR_JAR", "validator_cli.jar")
 abort "validator jar not found: #{jar}" unless File.file?(jar)
 

@@ -9,7 +9,7 @@ require_relative "../dummy/lib/lakeraven_demo_seeds"
 # Run it on its own, then validate what it wrote:
 #
 #   US_CORE_SAMPLES_DIR=tmp/us-core-samples bin/rails test test/us_core/fhir_samples_export.rb
-#   bin/us-core-validate tmp/us-core-samples
+#   test/us_core/validate.rb tmp/us-core-samples
 #
 # Every read and search the CapabilityStatement declares is requested over
 # HTTP against the demo seeds, so the samples are what a client receives, not

@@ -56,7 +56,7 @@ jobs:
     # The FHIR the engine serves, checked by the official HL7 validator
     # against US Core 6.1.0. test/us_core/fhir_samples_export.rb requests every
     # declared read and search over HTTP against the demo seeds and writes the
-    # responses; bin/us-core-validate validates each resource against its US
+    # responses; test/us_core/validate.rb validates each resource against its US
     # Core profile. It fails on any error for a profile the CapabilityStatement
     # declares (supportedProfile), and reports every other type's errors and
     # all warnings in the job summary without failing.
@@ -105,7 +105,7 @@ jobs:
       - name: Export what the engine serves
         run: US_CORE_SAMPLES_DIR=tmp/us-core-samples bundle exec rails test test/us_core/fhir_samples_export.rb
       - name: Validate against US Core 6.1.0
-        run: US_CORE_VALIDATOR_JAR="$RUNNER_TEMP/validator_cli.jar" bin/us-core-validate tmp/us-core-samples
+        run: US_CORE_VALIDATOR_JAR="$RUNNER_TEMP/validator_cli.jar" test/us_core/validate.rb tmp/us-core-samples
       - name: Keep the samples and the validator output
         if: always()
         uses: actions/upload-artifact@v4

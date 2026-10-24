@@ -26,7 +26,7 @@ module Lakeraven
         US_CORE = "http://hl7.org/fhir/us/core/StructureDefinition"
 
         # US Core 6.1.0 profiles, declared only for a type whose served output
-        # the HL7 validator passes with no errors. bin/us-core-validate (the
+        # the HL7 validator passes with no errors. test/us_core/validate.rb (the
         # "US Core" CI job) checks what the engine serves against every profile
         # declared here and fails on an error; a type joins this list when its
         # output validates, never before. The others are listed in that job's
