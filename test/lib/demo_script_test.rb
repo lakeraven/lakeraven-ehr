@@ -30,9 +30,9 @@ class DemoScriptTest < ActiveSupport::TestCase
   # so the script has to parse under every sh the machine has, not only under the
   # dash or bash 5 that Linux CI runs. `-n` reads the script and runs nothing.
   [
-    ["/bin/sh"],
-    ["bash", "--posix"],
-    ["dash"]
+    [ "/bin/sh" ],
+    [ "bash", "--posix" ],
+    [ "dash" ]
   ].each do |shell|
     test "bin/demo parses under #{shell.join(' ')}" do
       skip "#{shell.first} is not installed" unless shell.first.start_with?("/") ? File.executable?(shell.first) : system("command -v #{shell.first} >/dev/null 2>&1")
