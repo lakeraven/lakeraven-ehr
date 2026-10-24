@@ -50,8 +50,15 @@ class RiskTierWorkflowTest < ActiveSupport::TestCase
     # the explanatory header may name these; only the executable parts are checked
     code = steps.map { |s| [ s["run"], s.dig("with", "ref"), s["env"]&.values ].flatten.compact.join("\n") }.join("\n")
     assert text.include?("pull_request_target")
-    [ "pull_request.head", "head_ref", "head.sha", "head.ref", "pull_request.title", "pull_request.body" ].each do |bad|
+    [ "pull_request.head", "head_ref", "head.ref", "head.repo", "pull_request.title", "pull_request.body" ].each do |bad|
       refute_includes code, bad, "executable workflow content must not reference #{bad}"
+    end
+    # The head commit may be READ as data from the API (`gh api repos/.../pulls/N --jq .head.sha`) to tie the file
+    # list to one commit. It must never come from an event expression or reach a checkout or a command line
+    # as PR-controlled text: only a jq filter on a `gh api` call may name it.
+    code.lines.select { |l| l.include?("head.sha") }.each do |l|
+      assert_match(/gh api .*--jq\s+\S*head\.sha/, l, "head.sha may appear only as a jq filter on a gh api call: #{l.strip}")
+      refute_includes l, "${{", "head.sha must not come from an expression: #{l.strip}"
     end
     steps.each do |s|
       assert_no_match(/\$\{\{\s*github\.event\.(pull_request|issue)\.(title|body|head)/, s["run"].to_s)
@@ -91,6 +98,7 @@ class RiskTierWorkflowTest < ActiveSupport::TestCase
   #   :check   `jq -e`        the control-character check    -> exit 5, no output
   #   :extract `jq -r`        writing the names to paths.txt -> first line, then exit 5
   #   :existing `jq` with "removed" in its filter: listing the paths that still exist -> exit 5
+  #   :modes   `jq -rn` the mode check over the PR head's tree  -> exit 5, no output
   # Each is a jq that dies (out of memory, a bad build, a killed process): the step must not
   # read a dead jq as "nothing wrong".
   JQ_STUB = <<~'SH'
@@ -102,6 +110,7 @@ class RiskTierWorkflowTest < ActiveSupport::TestCase
       slurp:-s|check:-e) echo "jq: error: boom" >&2; exit 5 ;;
       count:length) echo "jq: error: boom" >&2; exit 5 ;;
       extract:-r) "$REAL_JQ" "$@" | head -n 1; echo "jq: error: boom" >&2; exit 5 ;;
+      modes:-rn) echo "jq: error: boom" >&2; exit 5 ;;
     esac
     exec "$REAL_JQ" "$@"
   SH
@@ -124,22 +133,31 @@ class RiskTierWorkflowTest < ActiveSupport::TestCase
   # Anything not named is a regular file (100644).
   MODE_TYPES = { "100644" => "blob", "100755" => "blob", "120000" => "blob", "160000" => "commit", "040000" => "tree" }.freeze
 
-  def tree_entries(files, modes)
+  # The commit the stub says the PR head is, until a test moves it.
+  HEAD_SHA = "a" * 40
+  OTHER_SHA = "b" * 40
+
+  # `types` overrides the type of a named entry; `extra` appends raw rows (a duplicate path, an entry the
+  # file list never named). A mode listed in `modes` as :absent has no entry at all.
+  def tree_entries(files, modes, types: {}, extra: [])
     files.reject { |f| f["status"] == "removed" }.filter_map do |f|
       name = f["filename"]
       mode = modes.fetch(name, "100644")
       next if mode == :absent
       next({ "path" => name }) if mode == :nomode
-      { "path" => name, "mode" => mode, "type" => MODE_TYPES.fetch(mode, "blob"), "sha" => "0" * 40 }
-    end + [ { "path" => "app", "mode" => "040000", "type" => "tree", "sha" => "1" * 40 } ]
+      { "path" => name, "mode" => mode, "type" => types.fetch(name) { MODE_TYPES.fetch(mode, "blob") }, "sha" => "0" * 40 }
+    end + extra + [ { "path" => "app", "mode" => "040000", "type" => "tree", "sha" => "1" * 40 } ]
   end
 
-  def tree_body(tree, entries)
+  # The trees API echoes the COMMIT sha it was asked for in `sha` (checked live 2026-10-24: asking for
+  # a PR's head commit returns that commit sha, not the tree sha).
+  def tree_body(tree, entries, sha: HEAD_SHA)
     case tree
     when :error then "ERROR"
     when :garbage then "not json{"
-    when :truncated then JSON.generate({ "sha" => "a" * 40, "tree" => entries, "truncated" => true })
-    else JSON.generate({ "sha" => "a" * 40, "tree" => entries, "truncated" => false })
+    when :truncated then JSON.generate({ "sha" => sha, "tree" => entries, "truncated" => true })
+    when :no_truncated_key then JSON.generate({ "sha" => sha, "tree" => entries })
+    else JSON.generate({ "sha" => sha, "tree" => entries, "truncated" => false })
     end
   end
 
@@ -157,7 +175,8 @@ class RiskTierWorkflowTest < ActiveSupport::TestCase
     path.split("/", -1).map { |seg| ERB::Util.url_encode(seg) }.join("/")
   end
 
-  def run_classify(files:, classifier: :real, gh_fails: false, changed: nil, jq_fail: nil, modes: {}, tree: :ok, calls: nil)
+  def run_classify(files:, classifier: :real, gh_fails: false, changed: nil, jq_fail: nil, modes: {}, tree: :ok, calls: nil,
+                   heads: [ HEAD_SHA ], tree_sha: nil, types: {}, extra: [])
     Dir.mktmpdir do |dir|
       FileUtils.mkdir_p(File.join(dir, "bin"))
       FileUtils.mkdir_p(File.join(dir, ".github"))
@@ -179,7 +198,13 @@ class RiskTierWorkflowTest < ActiveSupport::TestCase
       tsv = File.join(dir, "stubs", "contents.tsv")
       File.write(tsv, modes.reject { |_, m| m == :absent || m == :nomode }.map { |path, mode| "#{uri_path(path)}\t#{contents_body(mode)}\n" }.join)
       tree_out = File.join(dir, "stubs", "tree.out")
-      File.write(tree_out, tree_body(tree, tree_entries(files, modes)))
+      File.write(tree_out, tree_body(tree, tree_entries(files, modes, types: types, extra: extra), sha: tree_sha || heads.first.to_s))
+      # What `GET pulls/N` says the head commit is on the 1st, 2nd, ... read (the last value repeats).
+      # :error is a failed call, :garbage a reply that is not a commit sha.
+      heads_file = File.join(dir, "stubs", "heads.txt")
+      File.write(heads_file, heads.map { |h| h.to_s }.join("\n") + "\n")
+      head_count = File.join(dir, "stubs", "head_reads")
+      File.write(head_count, "0")
       call_log = File.join(dir, "gh_calls")
       FileUtils.touch(call_log)
       File.write(File.join(dir, "stubs", "gh"), <<~SH)
@@ -187,6 +212,16 @@ class RiskTierWorkflowTest < ActiveSupport::TestCase
         echo "$*" >> #{call_log}
         #{gh_fails ? 'echo "gh: boom" >&2; exit 1' : ''}
         case "$*" in
+          *"/pulls/1/files"*) cat #{pages}; exit 0 ;;
+          *"/pulls/1"*)
+            n=$(( $(cat #{head_count}) + 1 )); echo "$n" > #{head_count}
+            total=$(wc -l < #{heads_file}); [ "$n" -gt "$total" ] && n="$total"
+            v=$(sed -n "${n}p" #{heads_file})
+            if [ "$v" = error ]; then echo "gh: HTTP 500" >&2; exit 1; fi
+            if [ "$v" = garbage ]; then v="not-a-sha"; fi
+            printf '{"head":{"sha":"%s"}}\n' "$v" | "$REAL_JQ" -r '.head.sha'
+            exit $?
+            ;;
           *"/git/trees/"*)
             filter=""; prev=""
             for a in "$@"; do
@@ -352,10 +387,6 @@ class RiskTierWorkflowTest < ActiveSupport::TestCase
     assert_equal 0, contents_calls(calls), "the contents API calls a symlink-to-file a file; it must not be asked"
   end
 
-  test "the contents API would have called that symlink a regular file (why it cannot be the check)" do
-    assert_match(/"type":"file"/, contents_body("120000"))
-  end
-
   test "a safe-named doc that is a symlink makes the PR laptop-only" do
     tier, = run_classify(files: [ file("docs/notes.md") ], modes: { "docs/notes.md" => "120000" })
     assert_equal "laptop-only", tier
@@ -443,12 +474,98 @@ class RiskTierWorkflowTest < ActiveSupport::TestCase
     assert_equal "phone-safe", tier, summary
   end
 
-  test "the lookup reads the PR ref on the base repo and never a head SHA or a head repo" do
+  # ---- one head commit for the file list and the tree (panel round on #633) -----------------
+  #
+  # The file list comes from pulls/N/files and the tree from the git trees API, two calls. A push between
+  # them leaves a list for one commit and a tree for another: a symlink the list never named, or a file the
+  # list calls regular that the tree already shows as a link. So the workflow reads the PR's head commit
+  # (API data, never checked out or executed) BEFORE listing the files, asks for the tree BY THAT COMMIT,
+  # requires the tree reply to echo it, and reads the head again afterwards: anything other than the same
+  # 40-hex commit all the way through is laptop-only.
+  def head_reads(calls) = calls.count { |c| c =~ %r{repos/o/r/pulls/1(\s|$)} && c !~ /files/ }
+
+  test "the tree is asked for by the head commit read from the API, not by a moving ref" do
     calls = []
-    run_classify(files: [ file("README.md") ], calls: calls)
+    tier, summary = run_classify(files: [ file("README.md") ], calls: calls)
+    assert_equal "phone-safe", tier, summary
     lookup = calls.find { |c| c.include?("/git/trees/") }
     assert lookup, calls.inspect
-    assert_match(%r{repos/o/r/git/trees/refs/pull/1/head\?recursive=1}, lookup)
+    assert_match(%r{repos/o/r/git/trees/#{HEAD_SHA}\?recursive=1}, lookup)
+    refute_match(%r{refs/pull}, lookup)
+  end
+
+  test "the head commit is read before the files and again after the tree" do
+    calls = []
+    run_classify(files: [ file("README.md") ], calls: calls)
+    idx = ->(pat) { calls.index { |c| c =~ pat } }
+    first_head = calls.index { |c| c =~ %r{repos/o/r/pulls/1(\s|$)} && c !~ /files/ }
+    last_head = calls.rindex { |c| c =~ %r{repos/o/r/pulls/1(\s|$)} && c !~ /files/ }
+    assert_operator head_reads(calls), :>=, 2, calls.inspect
+    assert_operator first_head, :<, idx.(%r{pulls/1/files}), calls.inspect
+    assert_operator last_head, :>, idx.(%r{/git/trees/}), calls.inspect
+  end
+
+  test "a head that moves while the PR is judged makes it laptop-only, tree newer than the list" do
+    tier, summary = run_classify(files: [ file("README.md") ], heads: [ HEAD_SHA, OTHER_SHA ])
+    assert_equal "laptop-only", tier, summary
+    assert_match(/moved|changed/i, summary)
+  end
+
+  test "a tree for a different commit than the one asked for is laptop-only (tree older than the list)" do
+    tier, summary = run_classify(files: [ file("app/assets/images/logo.png") ], tree_sha: OTHER_SHA)
+    assert_equal "laptop-only", tier, summary
+    assert_match(/commit|head|tree/i, summary)
+  end
+
+  test "a head commit that cannot be read makes the PR laptop-only" do
+    tier, summary = run_classify(files: [ file("README.md") ], heads: [ :error ])
+    assert_equal "laptop-only", tier, summary
+    assert_match(/undetermined/i, summary)
+  end
+
+  test "a head commit that is not a 40-hex sha makes the PR laptop-only" do
+    tier, = run_classify(files: [ file("README.md") ], heads: [ :garbage ])
+    assert_equal "laptop-only", tier
+  end
+
+  test "a head commit that cannot be re-read after the tree makes the PR laptop-only" do
+    tier, = run_classify(files: [ file("README.md") ], heads: [ HEAD_SHA, :error ])
+    assert_equal "laptop-only", tier
+  end
+
+  test "a PR that only removes files still checks the head did not move while its list was read" do
+    tier, summary = run_classify(files: [ file("docs/gone.md", status: "removed") ], heads: [ HEAD_SHA, OTHER_SHA ])
+    assert_equal "laptop-only", tier, summary
+  end
+
+  # ---- guards that had no test (panel round on #633) --------------------------------------
+  test "a mode check whose jq dies makes the PR laptop-only, never 'nothing wrong'" do
+    tier, summary = run_classify(files: [ file("README.md") ], jq_fail: :modes)
+    assert_equal "laptop-only", tier, summary
+    assert_match(/undetermined/i, summary)
+  end
+
+  test "a tree reply with no truncated field is laptop-only" do
+    tier, = run_classify(files: [ file("README.md") ], tree: :no_truncated_key)
+    assert_equal "laptop-only", tier
+  end
+
+  test "a tree that lists one path twice is laptop-only, whichever entry comes last" do
+    dup = [ { "path" => "docs/dup.md", "mode" => "120000", "type" => "blob", "sha" => "2" * 40 } ]
+    tier, summary = run_classify(files: [ file("docs/dup.md") ], extra: dup)
+    assert_equal "laptop-only", tier, summary
+  end
+
+  test "a tree that lists a symlink first and a regular file second for one path is laptop-only" do
+    # from_entries would keep the LAST row; the symlink must not be able to hide behind it
+    dup = [ { "path" => "docs/dup.md", "mode" => "100644", "type" => "blob", "sha" => "2" * 40 } ]
+    tier, = run_classify(files: [ file("docs/dup.md") ], modes: { "docs/dup.md" => "120000" }, extra: dup)
+    assert_equal "laptop-only", tier
+  end
+
+  test "a regular mode on an entry that is not a blob is laptop-only" do
+    tier, = run_classify(files: [ file("docs/odd.md") ], types: { "docs/odd.md" => "commit" })
+    assert_equal "laptop-only", tier
   end
 
   test "a laptop-only classification makes no tree or contents calls" do
