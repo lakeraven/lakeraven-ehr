@@ -22,10 +22,10 @@ module Lakeraven
       test "seed! then all, count and find expose seeded medications" do
         med = build_medication(fhir_id: "rxnorm-1234")
         store = MedicationStore.instance
-        store.seed!([med])
+        store.seed!([ med ])
 
         assert_equal 1, store.count
-        assert_equal [med], store.all
+        assert_equal [ med ], store.all
         assert_equal med, store.find("rxnorm-1234")
         assert_equal med, store.find("rxnorm-1234".to_sym)
       end
@@ -43,13 +43,13 @@ module Lakeraven
       test "seed! replaces contents so seeding the same records twice leaves one copy" do
         med = build_medication(fhir_id: "med-1")
         store = MedicationStore.instance
-        records = [med]
+        records = [ med ]
 
         store.seed!(records)
         store.seed!(records)
 
         assert_equal 1, store.count
-        assert_equal [med], store.all
+        assert_equal [ med ], store.all
       end
 
       test "seed! replaces prior contents rather than appending" do
@@ -57,11 +57,11 @@ module Lakeraven
         second = build_medication(fhir_id: "b")
         store = MedicationStore.instance
 
-        store.seed!([first])
-        store.seed!([second])
+        store.seed!([ first ])
+        store.seed!([ second ])
 
         assert_equal 1, store.count
-        assert_equal [second], store.all
+        assert_equal [ second ], store.all
         refute_includes store.all, first
       end
 
@@ -71,7 +71,7 @@ module Lakeraven
 
       test "reset_instance! yields a fresh empty store" do
         store = MedicationStore.instance
-        store.seed!([build_medication(fhir_id: "9")])
+        store.seed!([ build_medication(fhir_id: "9") ])
 
         MedicationStore.reset_instance!
 
@@ -88,13 +88,13 @@ module Lakeraven
       test "all returns a copy so mutating it does not change the store" do
         med = build_medication(fhir_id: "7")
         store = MedicationStore.instance
-        store.seed!([med])
+        store.seed!([ med ])
 
         snapshot = store.all
         snapshot << build_medication(fhir_id: "99")
 
         assert_equal 1, store.count
-        assert_equal [med], store.all
+        assert_equal [ med ], store.all
       end
 
       # =============================================================================
@@ -103,7 +103,7 @@ module Lakeraven
 
       test "find returns nil when no medication matches id" do
         store = MedicationStore.instance
-        store.seed!([build_medication(fhir_id: "1")])
+        store.seed!([ build_medication(fhir_id: "1") ])
 
         assert_nil store.find("missing")
         assert_nil store.find(999)

@@ -25,11 +25,11 @@ module Lakeraven
       test "seed! then all, count, for_patient and find expose seeded encounters" do
         enc = build_encounter(ien: 42, patient_dfn: 100)
         store = EncounterStore.instance
-        store.seed!([enc])
+        store.seed!([ enc ])
 
         assert_equal 1, store.count
-        assert_equal [enc], store.all
-        assert_equal [enc], store.for_patient(100)
+        assert_equal [ enc ], store.all
+        assert_equal [ enc ], store.for_patient(100)
         assert_equal enc, store.find(42)
         assert_equal enc, store.find("42")
       end
@@ -41,13 +41,13 @@ module Lakeraven
       test "seed! replaces contents so seeding the same records twice leaves one copy" do
         enc = build_encounter(ien: 1, patient_dfn: 50)
         store = EncounterStore.instance
-        records = [enc]
+        records = [ enc ]
 
         store.seed!(records)
         store.seed!(records)
 
         assert_equal 1, store.count
-        assert_equal [enc], store.all
+        assert_equal [ enc ], store.all
       end
 
       test "seed! replaces prior contents rather than appending" do
@@ -55,11 +55,11 @@ module Lakeraven
         second = build_encounter(ien: 2, patient_dfn: 20)
         store = EncounterStore.instance
 
-        store.seed!([first])
-        store.seed!([second])
+        store.seed!([ first ])
+        store.seed!([ second ])
 
         assert_equal 1, store.count
-        assert_equal [second], store.all
+        assert_equal [ second ], store.all
         refute_includes store.all, first
       end
 
@@ -69,7 +69,7 @@ module Lakeraven
 
       test "reset_instance! yields a fresh empty store" do
         store = EncounterStore.instance
-        store.seed!([build_encounter(ien: 9, patient_dfn: 1)])
+        store.seed!([ build_encounter(ien: 9, patient_dfn: 1) ])
 
         EncounterStore.reset_instance!
 
@@ -87,13 +87,13 @@ module Lakeraven
       test "all returns a copy so mutating it does not change the store" do
         enc = build_encounter(ien: 7, patient_dfn: 88)
         store = EncounterStore.instance
-        store.seed!([enc])
+        store.seed!([ enc ])
 
         snapshot = store.all
         snapshot << build_encounter(ien: 99, patient_dfn: 88)
 
         assert_equal 1, store.count
-        assert_equal [enc], store.all
+        assert_equal [ enc ], store.all
       end
 
       # =============================================================================
@@ -102,7 +102,7 @@ module Lakeraven
 
       test "for_patient returns empty array when no encounters match" do
         store = EncounterStore.instance
-        store.seed!([build_encounter(ien: 1, patient_dfn: 100)])
+        store.seed!([ build_encounter(ien: 1, patient_dfn: 100) ])
 
         assert_empty store.for_patient(200)
         assert_empty store.for_patient("200")
@@ -110,7 +110,7 @@ module Lakeraven
 
       test "find returns nil when no encounter matches id" do
         store = EncounterStore.instance
-        store.seed!([build_encounter(ien: 1, patient_dfn: 100)])
+        store.seed!([ build_encounter(ien: 1, patient_dfn: 100) ])
 
         assert_nil store.find("missing")
         assert_nil store.find(999)
@@ -124,11 +124,11 @@ module Lakeraven
         for_100 = build_encounter(ien: 1, patient_dfn: 100)
         for_200 = build_encounter(ien: 2, patient_dfn: 200)
         store = EncounterStore.instance
-        store.seed!([for_100, for_200])
+        store.seed!([ for_100, for_200 ])
 
         results = store.for_patient(100)
 
-        assert_equal [for_100], results
+        assert_equal [ for_100 ], results
         refute_includes results, for_200
       end
     end

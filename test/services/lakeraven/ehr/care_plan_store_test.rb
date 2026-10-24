@@ -26,12 +26,12 @@ module Lakeraven
       test "seed! then all, count, for_patient and find expose seeded care plans" do
         plan = build_care_plan(ien: "cp-1", patient_dfn: "100")
         store = CarePlanStore.instance
-        store.seed!([plan])
+        store.seed!([ plan ])
 
         assert_equal 1, store.count
-        assert_equal [plan], store.all
-        assert_equal [plan], store.for_patient("100")
-        assert_equal [plan], store.for_patient(100)
+        assert_equal [ plan ], store.all
+        assert_equal [ plan ], store.for_patient("100")
+        assert_equal [ plan ], store.for_patient(100)
         assert_equal plan, store.find("cp-1")
       end
 
@@ -42,13 +42,13 @@ module Lakeraven
       test "seed! replaces contents so seeding the same records twice leaves one copy" do
         plan = build_care_plan(ien: "1", patient_dfn: "50")
         store = CarePlanStore.instance
-        records = [plan]
+        records = [ plan ]
 
         store.seed!(records)
         store.seed!(records)
 
         assert_equal 1, store.count
-        assert_equal [plan], store.all
+        assert_equal [ plan ], store.all
       end
 
       test "seed! replaces prior contents rather than appending" do
@@ -56,11 +56,11 @@ module Lakeraven
         second = build_care_plan(ien: "b", patient_dfn: "20")
         store = CarePlanStore.instance
 
-        store.seed!([first])
-        store.seed!([second])
+        store.seed!([ first ])
+        store.seed!([ second ])
 
         assert_equal 1, store.count
-        assert_equal [second], store.all
+        assert_equal [ second ], store.all
         refute_includes store.all, first
       end
 
@@ -70,7 +70,7 @@ module Lakeraven
 
       test "reset_instance! yields a fresh empty store" do
         store = CarePlanStore.instance
-        store.seed!([build_care_plan(ien: "9", patient_dfn: "1")])
+        store.seed!([ build_care_plan(ien: "9", patient_dfn: "1") ])
 
         CarePlanStore.reset_instance!
 
@@ -88,13 +88,13 @@ module Lakeraven
       test "all returns a copy so mutating it does not change the store" do
         plan = build_care_plan(ien: "7", patient_dfn: "88")
         store = CarePlanStore.instance
-        store.seed!([plan])
+        store.seed!([ plan ])
 
         snapshot = store.all
         snapshot << build_care_plan(ien: "99", patient_dfn: "88")
 
         assert_equal 1, store.count
-        assert_equal [plan], store.all
+        assert_equal [ plan ], store.all
       end
 
       # =============================================================================
@@ -103,7 +103,7 @@ module Lakeraven
 
       test "for_patient returns empty array when no care plans match" do
         store = CarePlanStore.instance
-        store.seed!([build_care_plan(ien: "1", patient_dfn: "100")])
+        store.seed!([ build_care_plan(ien: "1", patient_dfn: "100") ])
 
         assert_empty store.for_patient("200")
         assert_empty store.for_patient(200)
@@ -111,7 +111,7 @@ module Lakeraven
 
       test "find returns nil when no care plan matches id" do
         store = CarePlanStore.instance
-        store.seed!([build_care_plan(ien: "1", patient_dfn: "100")])
+        store.seed!([ build_care_plan(ien: "1", patient_dfn: "100") ])
 
         assert_nil store.find("missing")
       end
@@ -124,11 +124,11 @@ module Lakeraven
         for_100 = build_care_plan(ien: "1", patient_dfn: "100")
         for_200 = build_care_plan(ien: "2", patient_dfn: "200")
         store = CarePlanStore.instance
-        store.seed!([for_100, for_200])
+        store.seed!([ for_100, for_200 ])
 
         results = store.for_patient("100")
 
-        assert_equal [for_100], results
+        assert_equal [ for_100 ], results
         refute_includes results, for_200
       end
     end
