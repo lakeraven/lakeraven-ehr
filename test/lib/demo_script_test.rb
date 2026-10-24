@@ -25,6 +25,24 @@ class DemoScriptTest < ActiveSupport::TestCase
     FileUtils.remove_entry(@stub_bin) if @stub_bin && Dir.exist?(@stub_bin)
   end
 
+  # bin/demo is the demo launcher and macOS is the platform it exists for, where
+  # /bin/sh is bash 3.2. bash 3.2 mis-parses a `case` pattern list inside `$( )`,
+  # so the script has to parse under every sh the machine has, not only under the
+  # dash or bash 5 that Linux CI runs. `-n` reads the script and runs nothing.
+  [
+    ["/bin/sh"],
+    ["bash", "--posix"],
+    ["dash"]
+  ].each do |shell|
+    test "bin/demo parses under #{shell.join(' ')}" do
+      skip "#{shell.first} is not installed" unless shell.first.start_with?("/") ? File.executable?(shell.first) : system("command -v #{shell.first} >/dev/null 2>&1")
+
+      _out, err, status = Open3.capture3(*shell, "-n", DEMO_SCRIPT_SOURCE)
+
+      assert status.success?, "#{shell.join(' ')} -n bin/demo failed:\n#{err}"
+    end
+  end
+
   test "refuses busy port without killing holder or starting rails" do
     skip "lsof not on PATH; required for port-holder detection" unless lsof_available?
 
