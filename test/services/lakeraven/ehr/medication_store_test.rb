@@ -65,6 +65,19 @@ module Lakeraven
         refute_includes store.all, first
       end
 
+      test "mutating the seeded array after seed! does not change the store" do
+        med = build_medication(fhir_id: "7")
+        store = MedicationStore.instance
+        records = [ med ]
+
+        store.seed!(records)
+        records << build_medication(fhir_id: "99")
+        records.clear
+
+        assert_equal 1, store.count
+        assert_equal [ med ], store.all
+      end
+
       # =============================================================================
       # RESET
       # =============================================================================
@@ -107,6 +120,30 @@ module Lakeraven
 
         assert_nil store.find("missing")
         assert_nil store.find(999)
+      end
+
+      # =============================================================================
+      # SEED VALIDATION
+      # =============================================================================
+
+      test "seed! with nil argument raises and leaves prior contents intact" do
+        med = build_medication(fhir_id: "1")
+        store = MedicationStore.instance
+        store.seed!([ med ])
+
+        assert_raises(ArgumentError) { store.seed!(nil) }
+        assert_equal 1, store.count
+        assert_equal [ med ], store.all
+      end
+
+      test "seed! with non-array argument raises and leaves prior contents intact" do
+        med = build_medication(fhir_id: "1")
+        store = MedicationStore.instance
+        store.seed!([ med ])
+
+        assert_raises(ArgumentError) { store.seed!("not-an-array") }
+        assert_equal 1, store.count
+        assert_equal [ med ], store.all
       end
     end
   end

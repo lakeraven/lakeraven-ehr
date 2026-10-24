@@ -36,6 +36,38 @@ module Lakeraven
       end
 
       # =============================================================================
+      # OWNER (patient_dfn)
+      # =============================================================================
+
+      test "add raises and stores nothing when patient_dfn is blank" do
+        plan = CarePlan.new(
+          ien: "cp-blank",
+          patient_dfn: "",
+          title: "Blank owner",
+          status: "active",
+          intent: "plan"
+        )
+        store = CarePlanStore.instance
+
+        assert_raises(ArgumentError) { store.add(plan) }
+        assert_equal 0, store.count
+      end
+
+      test "seed! raises when any care plan has blank patient_dfn" do
+        bad = CarePlan.new(
+          ien: "cp-bad",
+          patient_dfn: nil,
+          title: "No owner",
+          status: "active",
+          intent: "plan"
+        )
+        store = CarePlanStore.instance
+
+        assert_raises(ArgumentError) { store.seed!([ bad ]) }
+        assert_equal 0, store.count
+      end
+
+      # =============================================================================
       # IDEMPOTENT RE-SEED
       # =============================================================================
 
@@ -62,6 +94,19 @@ module Lakeraven
         assert_equal 1, store.count
         assert_equal [ second ], store.all
         refute_includes store.all, first
+      end
+
+      test "mutating the seeded array after seed! does not change the store" do
+        plan = build_care_plan(ien: "7", patient_dfn: "88")
+        store = CarePlanStore.instance
+        records = [ plan ]
+
+        store.seed!(records)
+        records << build_care_plan(ien: "99", patient_dfn: "88")
+        records.clear
+
+        assert_equal 1, store.count
+        assert_equal [ plan ], store.all
       end
 
       # =============================================================================
@@ -109,6 +154,14 @@ module Lakeraven
         assert_empty store.for_patient(200)
       end
 
+      test "for_patient returns empty array for blank patient key" do
+        store = CarePlanStore.instance
+        store.seed!([ build_care_plan(ien: "1", patient_dfn: "100") ])
+
+        assert_empty store.for_patient(nil)
+        assert_empty store.for_patient("")
+      end
+
       test "find returns nil when no care plan matches id" do
         store = CarePlanStore.instance
         store.seed!([ build_care_plan(ien: "1", patient_dfn: "100") ])
@@ -130,6 +183,47 @@ module Lakeraven
 
         assert_equal [ for_100 ], results
         refute_includes results, for_200
+      end
+
+      # =============================================================================
+      # SEED VALIDATION
+      # =============================================================================
+
+      test "seed! with nil argument raises and leaves prior contents intact" do
+        plan = build_care_plan(ien: "1", patient_dfn: "10")
+        store = CarePlanStore.instance
+        store.seed!([ plan ])
+
+        assert_raises(ArgumentError) { store.seed!(nil) }
+        assert_equal 1, store.count
+        assert_equal [ plan ], store.all
+      end
+
+      test "seed! with non-array argument raises and leaves prior contents intact" do
+        plan = build_care_plan(ien: "1", patient_dfn: "10")
+        store = CarePlanStore.instance
+        store.seed!([ plan ])
+
+        assert_raises(ArgumentError) { store.seed!("not-an-array") }
+        assert_equal 1, store.count
+        assert_equal [ plan ], store.all
+      end
+
+      test "seed! rolls back when one record fails validation leaving prior contents intact" do
+        good = build_care_plan(ien: "1", patient_dfn: "10")
+        bad = CarePlan.new(
+          ien: "2",
+          patient_dfn: "",
+          title: "Bad owner",
+          status: "active",
+          intent: "plan"
+        )
+        store = CarePlanStore.instance
+        store.seed!([ good ])
+
+        assert_raises(ArgumentError) { store.seed!([ good, bad ]) }
+        assert_equal 1, store.count
+        assert_equal [ good ], store.all
       end
     end
   end

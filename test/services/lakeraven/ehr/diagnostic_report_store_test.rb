@@ -36,6 +36,38 @@ module Lakeraven
       end
 
       # =============================================================================
+      # OWNER (patient_dfn)
+      # =============================================================================
+
+      test "add raises and stores nothing when patient_dfn is blank" do
+        report = DiagnosticReport.new(
+          ien: "dr-blank",
+          patient_dfn: nil,
+          code_display: "Blank owner",
+          status: "final",
+          category: "LAB"
+        )
+        store = DiagnosticReportStore.instance
+
+        assert_raises(ArgumentError) { store.add(report) }
+        assert_equal 0, store.count
+      end
+
+      test "seed! raises when any report has blank patient_dfn" do
+        bad = DiagnosticReport.new(
+          ien: "dr-bad",
+          patient_dfn: "",
+          code_display: "No owner",
+          status: "final",
+          category: "LAB"
+        )
+        store = DiagnosticReportStore.instance
+
+        assert_raises(ArgumentError) { store.seed!([ bad ]) }
+        assert_equal 0, store.count
+      end
+
+      # =============================================================================
       # IDEMPOTENT RE-SEED
       # =============================================================================
 
@@ -62,6 +94,19 @@ module Lakeraven
         assert_equal 1, store.count
         assert_equal [ second ], store.all
         refute_includes store.all, first
+      end
+
+      test "mutating the seeded array after seed! does not change the store" do
+        report = build_report(ien: "7", patient_dfn: "88")
+        store = DiagnosticReportStore.instance
+        records = [ report ]
+
+        store.seed!(records)
+        records << build_report(ien: "99", patient_dfn: "88")
+        records.clear
+
+        assert_equal 1, store.count
+        assert_equal [ report ], store.all
       end
 
       # =============================================================================
@@ -109,6 +154,14 @@ module Lakeraven
         assert_empty store.for_patient(200)
       end
 
+      test "for_patient returns empty array for blank patient key" do
+        store = DiagnosticReportStore.instance
+        store.seed!([ build_report(ien: "1", patient_dfn: "100") ])
+
+        assert_empty store.for_patient(nil)
+        assert_empty store.for_patient("")
+      end
+
       test "find returns nil when no report matches id" do
         store = DiagnosticReportStore.instance
         store.seed!([ build_report(ien: "1", patient_dfn: "100") ])
@@ -130,6 +183,47 @@ module Lakeraven
 
         assert_equal [ for_100 ], results
         refute_includes results, for_200
+      end
+
+      # =============================================================================
+      # SEED VALIDATION
+      # =============================================================================
+
+      test "seed! with nil argument raises and leaves prior contents intact" do
+        report = build_report(ien: "1", patient_dfn: "10")
+        store = DiagnosticReportStore.instance
+        store.seed!([ report ])
+
+        assert_raises(ArgumentError) { store.seed!(nil) }
+        assert_equal 1, store.count
+        assert_equal [ report ], store.all
+      end
+
+      test "seed! with non-array argument raises and leaves prior contents intact" do
+        report = build_report(ien: "1", patient_dfn: "10")
+        store = DiagnosticReportStore.instance
+        store.seed!([ report ])
+
+        assert_raises(ArgumentError) { store.seed!("not-an-array") }
+        assert_equal 1, store.count
+        assert_equal [ report ], store.all
+      end
+
+      test "seed! rolls back when one record fails validation leaving prior contents intact" do
+        good = build_report(ien: "1", patient_dfn: "10")
+        bad = DiagnosticReport.new(
+          ien: "2",
+          patient_dfn: nil,
+          code_display: "Bad owner",
+          status: "final",
+          category: "LAB"
+        )
+        store = DiagnosticReportStore.instance
+        store.seed!([ good ])
+
+        assert_raises(ArgumentError) { store.seed!([ good, bad ]) }
+        assert_equal 1, store.count
+        assert_equal [ good ], store.all
       end
     end
   end
