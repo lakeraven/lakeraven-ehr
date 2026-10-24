@@ -1,0 +1,9 @@
+#!/bin/bash -e
+
+# Prepare the database (create, load the schema, or migrate) before the server starts.
+# Only for the server command: a one-off `docker run ... bin/rails runner` skips it.
+if [ "${@: -4:1}" == "server" ] || [ "$2" == "server" ]; then
+  ./bin/rails db:prepare
+fi
+
+exec "${@}"
