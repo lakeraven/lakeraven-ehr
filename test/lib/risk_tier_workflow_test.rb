@@ -395,6 +395,15 @@ class RiskTierWorkflowTest < ActiveSupport::TestCase
     end
   end
 
+  test "no label description claims locale files are phone-safe" do
+    body = step("Apply the label")["run"].gsub(/\\\n\s*/, " ")
+    creates = body.lines.select { |l| l =~ /\bgh label create\b/ }
+    assert_equal 2, creates.size
+    creates.each do |l|
+      refute_match(/locale/i, l, "locale YAML can run Ruby when I18n loads it, so it is not on the safe-list: #{l.strip}")
+    end
+  end
+
   test "Apply removes a stale opposite label that was set before this run" do
     statuses, labels, log = run_label_steps([ "Apply the label" ], tier: "laptop-only", labels: [ "risk:phone-safe", "risk:laptop-only" ])
     assert_equal [ 0 ], statuses, "Apply must succeed: #{log.inspect}"
