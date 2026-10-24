@@ -41,8 +41,8 @@ the stub is removed when the block ends and an inherited method stays where
 it was.
 
 ```ruby
-with_stub(PatientGateway, :brief_header, { name: "TEST" }) do
-  PatientGateway.brief_header(1, 2, extra: 3) # => { name: "TEST" }
+with_stub(Lakeraven::EHR::PatientGateway, :brief_header, { name: "TEST" }) do
+  Lakeraven::EHR::PatientGateway.brief_header(1) # => { name: "TEST" }
 end
 ```
 

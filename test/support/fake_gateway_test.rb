@@ -2,7 +2,7 @@
 
 require "test_helper"
 
-class FakeGatewayTest < ActiveSupport::TestCase
+class SharedFakeGatewayTest < ActiveSupport::TestCase
   # --- Encounter shape: FakeGateway.new(:method_name, return_value) ---
 
   test "encounter shape defines a singleton method that returns a fixed value" do
