@@ -3,10 +3,190 @@
 # runs the preflight checks that have bitten us before, then starts the dummy
 # app with the exact env the demo needs. Synthetic data only — no PHI.
 #
-#   test/dummy/bin/demo            # http://localhost:3000/patients/1
-#   test/dummy/bin/demo -b 0.0.0.0 # if showing from another device
+#   test/dummy/bin/demo              # http://localhost:3000/patients/1
+#   PORT=3001 test/dummy/bin/demo    # bind and print that port instead
+#   test/dummy/bin/demo -b 0.0.0.0   # if showing from another device
+#
+# PORT sets the listen port (default 3000). The only accepted arguments are
+# -b HOST, -b=HOST, --binding HOST, and --binding=HOST, at most once. HOST is
+# a non-empty plain host and must not start with "-": a URI, a socket
+# (leading "/", ".", or "@"), and host:port are refused. An IPv6 address
+# (::1, [::1]) is a plain host and is forwarded. Every other argument is
+# refused before the port is probed. Every other rails server switch changed
+# the port, the host, the environment, or the files this script checked.
+# BINDING, when set, is that same plain host (the port still comes from
+# PORT). RACKUP_HANDLER and RACK_HANDLER are unset so the server stays on
+# Puma and listens on PORT.
+#
+# Threat model. Whoever controls the environment is trusted. The guards
+# protect against mistakes and stray inherited state, not a hostile
+# environment: PORT validation, the argument allowlist, the BINDING check,
+# the PUMA_INHERIT scan, unsetting RACK_HANDLER and RACKUP_HANDLER, and
+# unset -f of shadowing functions. Under bash, an exported function
+# (BASH_FUNC_<name>%%) can override any command, including exit, unset, and
+# [, so these checks cannot defend against that party. The script never
+# kills or signals another process, and it never removes
+# tmp/pids/server.pid. Rackup check_pid! removes a stale pidfile and refuses
+# to start whenever the PID in tmp/pids/server.pid is a running process (a
+# reused PID included). If that PID is not your dev server, remove
+# test/dummy/tmp/pids/server.pid yourself.
 set -e
+# Bash imports BASH_FUNC_<name>%% as a shell function before this script runs.
+# A function named ruby, command, env, or lsof would replace the bind probe,
+# the PUMA_INHERIT scan, or the final Ruby check (a stub that returns 0 lets
+# a name such as A<newline>PUMA_INHERIT_0 through). Drop those shadows, and
+# the other commands used below, before any of them run. POSIX unset -f;
+# missing functions are not worth aborting for (harmless in dash).
+unset -f ruby command env lsof awk printf cd exec pg_isready 2>/dev/null || true
 cd "$(dirname "$0")/.."
+
+# PORT selects the listen port and the URL printed below. Default is 3000.
+# All digits, 1..65535. Leading zeros are accepted and normalized (08 is not octal).
+PORT="${PORT:-3000}"
+case "$PORT" in
+  *[!0-9]*)
+    printf 'PORT must be an integer from 1 to 65535 (got %s)\n' "$PORT" >&2
+    exit 1
+    ;;
+esac
+port_num=$PORT
+while [ "$port_num" != "${port_num#0}" ]; do
+  port_num=${port_num#0}
+done
+if [ -z "$port_num" ] || [ "${#port_num}" -gt 5 ] || [ "$port_num" -gt 65535 ]; then
+  printf 'PORT must be an integer from 1 to 65535 (got %s)\n' "$PORT" >&2
+  exit 1
+fi
+PORT=$port_num
+export PORT
+
+# Status 0 when this host would not listen on PORT: a URI ("://"), a
+# unix-socket host (starting with "/", ".", or "@"), or a host that contains
+# ":" and is not an IPv6 address. An IPv6 address has two or more ":" and may
+# be wrapped in [brackets] (::1, [::1]). A scheme-less host:port such as
+# 127.0.0.1:4000 or localhost:4000 is refused.
+# Status 0 when $1 is an IPv6 address under that rule.
+ipv6_host() {
+  _rh=$1
+  case "$_rh" in
+    \[*\])
+      _rh=${_rh#\[}
+      _rh=${_rh%\]}
+      case "$_rh" in
+        *\[*|*\]*)
+          return 1
+          ;;
+      esac
+      ;;
+    *\[*|*\]*)
+      return 1
+      ;;
+  esac
+  _rh_rest=$_rh
+  _rh_n=0
+  while [ "$_rh_rest" != "${_rh_rest#*:}" ]; do
+    _rh_rest=${_rh_rest#*:}
+    _rh_n=$((_rh_n + 1))
+  done
+  if [ "$_rh_n" -ge 2 ]; then
+    return 0
+  fi
+  return 1
+}
+
+refused_host() {
+  case "$1" in
+    *://*|/*|.*|@*)
+      return 0
+      ;;
+    *:*)
+      if ipv6_host "$1"; then
+        return 1
+      fi
+      return 0
+      ;;
+  esac
+  return 1
+}
+# Allowlist, before any probe. Accepted at most once: -b HOST, -b=HOST,
+# --binding HOST, --binding=HOST. HOST must be non-empty, must not start
+# with "-", and must pass refused_host. Every other rails server switch
+# changed the port, the host, the environment, or the files checked below.
+refuse_arguments() {
+  printf '%s\n' "Only -b HOST, -b=HOST, --binding HOST, and --binding=HOST are accepted, at most once (the next argument is the host). PORT sets the port. Refusing: $*" >&2
+  exit 1
+}
+
+_accepted_host=
+_expect_host=
+_bind_seen=0
+for _arg in "$@"; do
+  if [ -n "$_expect_host" ]; then
+    _expect_host=
+    if [ -z "$_arg" ] || [ "$_arg" != "${_arg#-}" ]; then
+      refuse_arguments "$@"
+    fi
+    if refused_host "$_arg"; then
+      printf 'Set the host with a plain -b HOST; the port comes from PORT (refusing %s).\n' "$_arg" >&2
+      exit 1
+    fi
+    _accepted_host=$_arg
+    _bind_seen=1
+    continue
+  fi
+  case "$_arg" in
+    -b|--binding)
+      if [ "$_bind_seen" -ne 0 ]; then
+        refuse_arguments "$@"
+      fi
+      _expect_host=1
+      ;;
+    -b=*|--binding=*)
+      if [ "$_bind_seen" -ne 0 ]; then
+        refuse_arguments "$@"
+      fi
+      case "$_arg" in
+        -b=*)
+          _host=${_arg#-b=}
+          ;;
+        *)
+          _host=${_arg#--binding=}
+          ;;
+      esac
+      if [ -z "$_host" ] || [ "$_host" != "${_host#-}" ]; then
+        refuse_arguments "$@"
+      fi
+      if refused_host "$_host"; then
+        printf 'Set the host with a plain -b HOST; the port comes from PORT (refusing %s).\n' "$_arg" >&2
+        exit 1
+      fi
+      _accepted_host=$_host
+      _bind_seen=1
+      ;;
+    *)
+      refuse_arguments "$@"
+      ;;
+  esac
+done
+if [ -n "$_expect_host" ]; then
+  refuse_arguments "$@"
+fi
+unset _expect_host _host _bind_seen _arg
+
+# Rails reads ENV.fetch("BINDING", "localhost"), so an exported empty
+# BINDING would override the localhost default and bind every interface.
+if [ -z "${BINDING-}" ]; then
+  unset BINDING
+fi
+
+# BINDING is the host Rails uses when -b is absent. A URI ("://"), a
+# unix-socket host (starting with "/", ".", or "@"), or a scheme-less
+# host:port would ignore PORT, so refuse it even if -b is also passed.
+# An IPv6 address (::1, [::1]) is a plain host and is left unchanged.
+if refused_host "$BINDING"; then
+  printf 'Set BINDING to a plain host; the port comes from PORT (refusing %s).\n' "$BINDING" >&2
+  exit 1
+fi
 
 # 1. Postgres must be up — dev-mode CheckPending middleware hits the DB on
 #    every request, so a down Postgres 500s the whole demo.
@@ -15,21 +195,300 @@ if ! pg_isready -q; then
   exit 1
 fi
 
-# 2. Clear port 3000 + any stale pidfile from a previous server.
-PIDS=$(lsof -ti:3000 || true)
-if [ -n "$PIDS" ]; then
-  echo "Killing process(es) on port 3000: $PIDS"
-  kill $PIDS
-  sleep 1
+# Positive evidence only: exit 0 when 0.0.0.0 and 127.0.0.1 bind, and ::1 binds
+# or is n/a (EADDRNOTAVAIL / EAFNOSUPPORT). Exit 10 when the port is busy.
+# Anything else is a probe failure and the shell fails closed. On macOS/BSD,
+# TCPServer sets SO_REUSEADDR, so 0.0.0.0 can bind while 127.0.0.1 is held.
+# probe_rc and probe_err are left set. This returns 0 either way so set -e
+# does not abort on a busy port (ruby exits 10) or a probe error.
+bind_probe() {
+  probe_rc=0
+  probe_err=$(ruby -rsocket -e '
+port = Integer(ARGV[0])
+
+def bind_result(host, port)
+  server = TCPServer.new(host, port)
+  server.close
+  "ok"
+rescue Errno::EADDRINUSE
+  "busy"
+rescue Errno::EADDRNOTAVAIL, Errno::EAFNOSUPPORT
+  if host == "::1"
+    "na"
+  else
+    warn format("bind probe failed on %s: %s: %s", host, $!.class, $!.message)
+    exit 1
+  end
+rescue StandardError
+  warn format("bind probe failed on %s: %s: %s", host, $!.class, $!.message)
+  exit 1
+end
+
+result = bind_result("0.0.0.0", port)
+exit 10 if result == "busy"
+unless result == "ok"
+  warn "bind probe failed on 0.0.0.0"
+  exit 1
+end
+
+result = bind_result("127.0.0.1", port)
+exit 10 if result == "busy"
+unless result == "ok"
+  warn "bind probe failed on 127.0.0.1"
+  exit 1
+end
+
+result = bind_result("::1", port)
+exit 10 if result == "busy"
+exit 0 if result == "ok" || result == "na"
+
+warn "bind probe failed on ::1"
+exit 1
+' "$1" 2>&1) || probe_rc=$?
+}
+
+# First free port among up to 20 candidates. Sets _alt to that port, or leaves
+# it empty when none is free. Candidates run upward from PORT+1. When PORT+k
+# would pass 65535, the rest run downward from PORT-1 and stop at 1. Free
+# means the same bind probe used for PORT exits 0. Exit 10 is busy. Any other
+# status is a probe error: _alt_probe_failed is set and _alt_probe_err is the
+# first such error, one line. A later free port still wins. Never signals a
+# process. Not called in a subshell, so those variables stay visible.
+free_alternate_port() {
+  _alt=
+  _alt_probe_err=
+  _alt_probe_failed=0
+  _alt_n=0
+  _alt_cand=$((PORT + 1))
+  _alt_down=0
+  while [ "$_alt_n" -lt 20 ]; do
+    if [ "$_alt_down" -eq 0 ] && [ "$_alt_cand" -gt 65535 ]; then
+      _alt_down=1
+      _alt_cand=$((PORT - 1))
+    fi
+    if [ "$_alt_cand" -lt 1 ] || [ "$_alt_cand" -gt 65535 ]; then
+      break
+    fi
+    bind_probe "$_alt_cand"
+    if [ "$probe_rc" -eq 0 ]; then
+      _alt=$_alt_cand
+      return 0
+    fi
+    if [ "$probe_rc" -ne 10 ] && [ "$_alt_probe_failed" -eq 0 ]; then
+      _alt_probe_failed=1
+      _alt_nl='
+'
+      _alt_probe_err=${probe_err%%"$_alt_nl"*}
+    fi
+    _alt_n=$((_alt_n + 1))
+    if [ "$_alt_down" -eq 0 ]; then
+      _alt_cand=$((_alt_cand + 1))
+    else
+      _alt_cand=$((_alt_cand - 1))
+    fi
+  done
+  return 0
+}
+
+# Suggest the first free candidate. When none is free, say so and do not
+# invent a PORT= value. When ruby is not on PATH, or no candidate was free
+# and any probe errored, the search cannot run; say that, rather than
+# claiming no free port was found:
+#   alternate port search could not run: <first probe error, one line>; choose another port
+print_alternate_port_hint() {
+  if ! command -v ruby >/dev/null 2>&1; then
+    printf 'alternate port search could not run: ruby was not found on PATH; choose another port\n' >&2
+    return 0
+  fi
+  free_alternate_port
+  if [ -n "$_alt" ]; then
+    printf 'choose another port, e.g. PORT=%s test/dummy/bin/demo\n' "$_alt" >&2
+  elif [ "$_alt_probe_failed" -ne 0 ]; then
+    printf 'alternate port search could not run: %s; choose another port\n' "$_alt_probe_err" >&2
+  else
+    printf 'no free port found near %s; choose another\n' "$PORT" >&2
+  fi
+  unset _alt _alt_probe_err _alt_probe_failed _alt_nl
+}
+
+# Host printed in the chart URL: the accepted -b/--binding host, otherwise
+# BINDING. Rails uses that same host (development default is localhost when
+# neither is set). A wildcard bind is not a URL host, so unset, 0.0.0.0, ::,
+# and [::] print as localhost. A bare IPv6 address is wrapped in brackets;
+# one already wrapped is left as-is.
+chart_url_host() {
+  _url_host=$1
+  if [ -z "$_url_host" ] && [ -n "$BINDING" ]; then
+    _url_host=$BINDING
+  fi
+  case "$_url_host" in
+    ""|0.0.0.0|::|"[::]")
+      printf '%s' "localhost"
+      ;;
+    \[*\])
+      printf '%s' "$_url_host"
+      ;;
+    *:*:*)
+      printf '[%s]' "$_url_host"
+      ;;
+    *)
+      printf '%s' "$_url_host"
+      ;;
+  esac
+}
+
+# 2. Name a holder with lsof when we can. Empty lsof output is not evidence
+#    the port is free: lsof may be missing, or the listener may be owned by
+#    another user (for example docker-proxy) and invisible to us. Never signal
+#    a holder. "Free" is decided only by a successful bind probe.
+if command -v lsof >/dev/null 2>&1; then
+  listeners=$(lsof +c 0 -nP -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null || true)
+  holders=$(printf '%s\n' "$listeners" | awk '
+    NR == 1 && $1 == "COMMAND" { next }
+    $2 ~ /^[0-9][0-9]*$/ && !seen[$2] { seen[$2] = 1; print $2, $1 }
+  ' || true)
+  if [ -n "$holders" ]; then
+    printf 'Port %s is already in use:\n' "$PORT" >&2
+    printf '%s\n' "$holders" | awk '{ printf "PID %s command %s\n", $1, $2 }' >&2
+    print_alternate_port_hint
+    exit 1
+  fi
 fi
-rm -f tmp/pids/server.pid
+
+if ! command -v ruby >/dev/null 2>&1; then
+  printf 'Could not check whether port %s is free; the bind probe could not run: ruby was not found on PATH.\n' "$PORT" >&2
+  exit 1
+fi
+bind_probe "$PORT"
+
+if [ "$probe_rc" -eq 10 ]; then
+  printf 'Port %s is already in use, but the holder could not be identified (lsof is missing or cannot see it, e.g. owned by another user such as docker-proxy).\n' "$PORT" >&2
+  printf 'Try: sudo lsof -nP -iTCP:%s -sTCP:LISTEN\n' "$PORT" >&2
+  print_alternate_port_hint
+  exit 1
+fi
+if [ "$probe_rc" -ne 0 ]; then
+  printf 'Could not check whether port %s is free; the bind probe failed' "$PORT" >&2
+  if [ -n "$probe_err" ]; then
+    printf ': %s\n' "$probe_err" >&2
+  else
+    printf ' (exit status %s).\n' "$probe_rc" >&2
+  fi
+  exit 1
+fi
 
 # 3. A stray RPMS_RPC_PATH flips the Gemfile to a path source and bundler
 #    rejects the lockfile at boot — make sure it is unset.
 unset RPMS_RPC_PATH
 
-# 4. Both flags are required, and both are honored ONLY in development:
+# Rackup::Handler.default prefers RACKUP_HANDLER, then RACK_HANDLER, when
+# -u/--using is absent. cgi (and any handler other than puma) never listens
+# on the port just probed. Drop both so the server stays on Puma and PORT.
+unset RACKUP_HANDLER RACK_HANDLER
+
+# 4. Puma's binder treats an env name as an already-open listener when it
+#    matches /PUMA_INHERIT_\d+/ anywhere (Puma 8.0.2 binder.rb), not only as a
+#    leading prefix. PUMA_INHERIT_0=9:tcp://localhost:$PORT — or the same value
+#    in X_PUMA_INHERIT_0 — would serve on whatever fd that value names instead
+#    of the port just probed. Unset every valid identifier containing
+#    PUMA_INHERIT_ followed by a digit (*PUMA_INHERIT_[0-9]*). A value may
+#    contain newlines, so a later physical line of env text can look like an
+#    assignment; only a [A-Za-z_][A-Za-z0-9_]* name the shell actually has set
+#    (${name+x}) is unset, and only such a name is interpolated into eval.
+#    Parse `command env`, not `env`. Bash functions named env and command
+#    (BASH_FUNC_env%%, BASH_FUNC_command%%) are dropped at the top of the
+#    script; `command` still forces the builtin. A name that is not a valid
+#    identifier cannot be unset; bash keeps it in the environment passed to
+#    exec, so Puma would inherit that fd. The unset runs in this shell — a
+#    pipeline would be a subshell and the variables would survive into exec.
+#    After the unset, refuse to exec when a valid identifier is still set
+#    (${name+x}), or when any `command env` line has a name (the text before
+#    the first "=") that contains PUMA_INHERIT_ followed by a digit and is not
+#    a valid identifier. Detect that name by text only; never eval it. A
+#    multi-line value that fakes such a line is refused too (fail closed).
+#    A name that itself contains a newline is split across those lines, so
+#    this scan cannot see it. Just before exec, after every unset, Ruby checks
+#    the real environment for /PUMA_INHERIT_\d+/ and refuses to start if any
+#    key matches. The check prints those names only, never their values. An
+#    exported function named ruby is dropped at the top, so this is the real
+#    interpreter (the same one the bind probe requires), not a stub that
+#    returns 0.
+# The scan is a function, not inline in $( ): bash 3.2 (macOS /bin/sh) mis-parses
+# a case pattern list inside a command substitution, and the launcher must parse
+# there. Keep any `case` out of $( ).
+_puma_inherit_scan() {
+  while IFS= read -r _puma_inherit_line || [ -n "$_puma_inherit_line" ]; do
+    case "$_puma_inherit_line" in
+      *PUMA_INHERIT_[0-9]*=*)
+        _puma_inherit_name=${_puma_inherit_line%%=*}
+        case "$_puma_inherit_name" in
+          *[!A-Za-z0-9_]*)
+            ;;
+          [!A-Za-z_]*)
+            ;;
+          *PUMA_INHERIT_[0-9]*)
+            printf '%s\n' "$_puma_inherit_name"
+            ;;
+        esac
+        ;;
+    esac
+  done
+}
+_puma_inherit_names=$(command env | _puma_inherit_scan)
+unset -f _puma_inherit_scan
+while IFS= read -r _puma_inherit_name || [ -n "$_puma_inherit_name" ]; do
+  case "$_puma_inherit_name" in
+    *[!A-Za-z0-9_]*|[!A-Za-z_]*)
+      ;;
+    *PUMA_INHERIT_[0-9]*)
+      # `command` keeps a failed unset (readonly name) from aborting the shell
+      # so the env check below can refuse to exec.
+      eval "case \${$_puma_inherit_name+x} in x) command unset $_puma_inherit_name ;; esac" || true
+      ;;
+  esac
+done <<END_PUMA_INHERIT
+$_puma_inherit_names
+END_PUMA_INHERIT
+_puma_inherit_find_left() {
+  while IFS= read -r _puma_inherit_line || [ -n "$_puma_inherit_line" ]; do
+    case "$_puma_inherit_line" in
+      *PUMA_INHERIT_[0-9]*=*)
+        _puma_inherit_name=${_puma_inherit_line%%=*}
+        case "$_puma_inherit_name" in
+          *PUMA_INHERIT_[0-9]*)
+            case "$_puma_inherit_name" in
+              *[!A-Za-z0-9_]*|[!A-Za-z_]*)
+                # Not a valid identifier, so the shell cannot unset it.
+                # Detect by text only; never interpolate into eval.
+                printf '%s\n' "$_puma_inherit_name"
+                ;;
+              *)
+                eval "case \${$_puma_inherit_name+x} in x) printf '%s\n' '$_puma_inherit_name' ;; esac"
+                ;;
+            esac
+            ;;
+        esac
+        ;;
+    esac
+  done
+}
+_puma_inherit_left=$(command env | _puma_inherit_find_left)
+unset -f _puma_inherit_find_left
+if [ -n "$_puma_inherit_left" ]; then
+  printf 'Refusing to start: env still contains a PUMA_INHERIT_<digit> name, which Puma would inherit as an open listener:\n%s\n' "$_puma_inherit_left" >&2
+  exit 1
+fi
+unset _puma_inherit_names _puma_inherit_name _puma_inherit_left
+
+# 5. Both flags are required, and both are honored ONLY in development:
 #    SPIKE_MOCK_RPC=1  seeds the in-memory RPMS mock (else 404/empty chart)
 #    CHART_DEMO_OPEN=1 dev-only auth bypass (else 401 without a token)
-echo "Starting demo server -> http://localhost:3000/patients/1"
-exec env RAILS_ENV=development CHART_DEMO_OPEN=1 SPIKE_MOCK_RPC=1 bin/rails server "$@"
+_chart_host=$(chart_url_host "$_accepted_host")
+printf 'Launching Rails on PORT %s; the chart will be at http://%s:%s/patients/1 once it is up\n' \
+  "$PORT" "$_chart_host" "$PORT"
+# Real keys, not a line split of env text. Fail closed: a non-zero ruby
+# status (including ruby missing) refuses to start. Names only, never values.
+# The ruby function, if a parent bash exported one, was already unset.
+ruby -e 'k = ENV.keys.grep(/PUMA_INHERIT_\d+/); exit 0 if k.empty?; warn "Refusing to start: env still contains a PUMA_INHERIT_<digit> name, which Puma would inherit as an open listener:"; k.each { |x| warn x.inspect }; exit 1' || exit 1
+# "$@" is the accepted binding, or nothing. PORT is the only listen port.
+exec env RAILS_ENV=development CHART_DEMO_OPEN=1 SPIKE_MOCK_RPC=1 bin/rails server -p "$PORT" "$@"
