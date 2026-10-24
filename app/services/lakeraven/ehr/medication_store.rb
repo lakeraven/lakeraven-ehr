@@ -47,10 +47,9 @@ module Lakeraven
 
       private
 
-      # Definitional resources have no patient owner. The hook keeps seed!
-      # all-or-nothing with the patient-scoped stores.
       def validate(medication)
-        medication
+        raise ArgumentError, "record is nil" if medication.nil?
+        raise ArgumentError, "fhir_id is blank" if medication.fhir_id.blank?
       end
     end
   end

@@ -54,6 +54,7 @@ module Lakeraven
       private
 
       def validate(care_plan)
+        raise ArgumentError, "record is nil" if care_plan.nil?
         raise ArgumentError, "patient_dfn is blank" if care_plan.patient_dfn.blank?
       end
     end

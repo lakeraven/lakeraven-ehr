@@ -55,6 +55,8 @@ module Lakeraven
       private
 
       def validate(encounter)
+        raise ArgumentError, "record is nil" if encounter.nil?
+
         identifier = encounter.patient_identifier
         raise ArgumentError, "patient_identifier is blank" if identifier.blank?
 
