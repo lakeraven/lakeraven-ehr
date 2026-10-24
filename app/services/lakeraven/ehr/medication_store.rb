@@ -18,6 +18,7 @@ module Lakeraven
       end
 
       def add(medication)
+        validate(medication)
         @records << medication
       end
 
@@ -26,6 +27,9 @@ module Lakeraven
       end
 
       def seed!(records)
+        raise ArgumentError, "records must be an Array" unless records.is_a?(Array)
+
+        records.each { |medication| validate(medication) }
         @records = records.dup
       end
 
@@ -39,6 +43,14 @@ module Lakeraven
 
       def count
         @records.count
+      end
+
+      private
+
+      # Definitional resources have no patient owner. The hook keeps seed!
+      # all-or-nothing with the patient-scoped stores.
+      def validate(medication)
+        medication
       end
     end
   end

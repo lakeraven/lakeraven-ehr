@@ -18,6 +18,7 @@ module Lakeraven
       end
 
       def add(report)
+        validate(report)
         @records << report
       end
 
@@ -26,6 +27,9 @@ module Lakeraven
       end
 
       def seed!(records)
+        raise ArgumentError, "records must be an Array" unless records.is_a?(Array)
+
+        records.each { |report| validate(report) }
         @records = records.dup
       end
 
@@ -34,6 +38,8 @@ module Lakeraven
       end
 
       def for_patient(dfn)
+        return [] if dfn.blank?
+
         @records.select { |report| report.patient_dfn.to_s == dfn.to_s }
       end
 
@@ -43,6 +49,12 @@ module Lakeraven
 
       def count
         @records.count
+      end
+
+      private
+
+      def validate(report)
+        raise ArgumentError, "patient_dfn is blank" if report.patient_dfn.blank?
       end
     end
   end
