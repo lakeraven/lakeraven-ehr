@@ -121,7 +121,7 @@ class RiskTierWorkflowTest < ActiveSupport::TestCase
 
   # The stub `gh` models the two GitHub APIs as they really answer (checked live, read-only, against
   # public repos on 2026-10-24):
-  #   * GET .../git/trees/refs/pull/1/head?recursive=1 returns every entry WITH its git mode: 100644 /
+  #   * GET .../git/trees/<head commit>?recursive=1 returns every entry WITH its git mode: 100644 /
   #     100755 regular files, 120000 a symlink, 160000 a gitlink (submodule), 040000 a directory.
   #     `truncated: true` means the list is incomplete.
   #   * GET .../contents/<path>?ref=... does NOT reveal a symlink to a tracked file. GitHub's docs: "If the
@@ -371,8 +371,8 @@ class RiskTierWorkflowTest < ActiveSupport::TestCase
   # The files API gives names and statuses, never file modes. A symlink named logo.png, or docs/x.md,
   # classifies phone-safe by name, and an asset pipeline follows the link when it precompiles. When
   # the classifier says phone-safe, every changed path that still exists must be a regular file
-  # (git mode 100644 or 100755) in the PR head's git tree. The tree is read from refs/pull/N/head on the
-  # base repo (no head SHA, no head repo), in ONE call. The contents API cannot be used: it reports
+  # (git mode 100644 or 100755) in the PR head's git tree. The tree is requested by the head commit read
+  # from the API (data only, nothing checked out), in ONE call. The contents API cannot be used: it reports
   # a symlink to a tracked file as {"type":"file"} (see the note above the stub). Anything other than a
   # regular file, a tree that is truncated or unreadable, or any failed call, is laptop-only.
   def tree_calls(calls) = calls.count { |c| c.include?("/git/trees/") }
