@@ -132,11 +132,26 @@ module Lakeraven
       # Runs from ApplicationController after the token checks and before the
       # search-parameter validators and any subclass patient-param callback,
       # so a withheld capability is not-supported rather than a 400.
+      #
+      # It is not a way around authorization. A caller this controller would
+      # refuse on an available backend (a patient-bound token naming another
+      # patient's compartment, a patient-level write scope on a create) is
+      # refused the same way here, so only a caller who would be let in learns
+      # that the capability is missing. Authorization is not repeated: the
+      # controller's own checks run through authorize_before_unavailable!.
       def ensure_backend_supports_interaction!
         interaction = FHIR_ACTION_INTERACTIONS[action_name]
         capability = BackendRegistry.capability_for_fhir_interaction(fhir_resource_type, interaction)
         CapabilityGuard.ensure!(capability) if capability
+      rescue FeatureUnavailable
+        authorize_before_unavailable!
+        raise unless performed?
       end
+
+      # The authorization a controller declares beyond the token and scope
+      # checks every controller shares. Renders 403 when it refuses. A
+      # controller that declares such checks overrides this and calls super.
+      def authorize_before_unavailable!; end
 
       def feature_unavailable_document(message)
         UNAVAILABLE_PAGE.sub("FEATURE_UNAVAILABLE_MESSAGE", ERB::Util.html_escape(message))
