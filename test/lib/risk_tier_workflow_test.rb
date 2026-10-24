@@ -110,24 +110,54 @@ class RiskTierWorkflowTest < ActiveSupport::TestCase
     ENV["PATH"].split(File::PATH_SEPARATOR).map { |d| File.join(d, "jq") }.find { |f| File.executable?(f) }
   end
 
-  # What the stub `gh` answers for GET /repos/o/r/contents/<path>?ref=refs/pull/1/head, keyed by file
-  # name. Anything not named is a regular file. The stub applies the caller's own --jq filter with the
-  # real jq, as gh does, so a body that is not an object or not JSON fails the way it would live.
-  CONTENT_BODIES = {
-    file: '{"type":"file","path":"x"}',
-    symlink: '{"type":"symlink","path":"x","target":"../../../config/master.key"}',
-    submodule: '{"type":"submodule","path":"x"}',
-    dir: '[{"type":"file","path":"x/a"}]',
-    garbage: "not json{",
-    typeless: "{}",
-    error: "ERROR"
-  }.freeze
+  # The stub `gh` models the two GitHub APIs as they really answer (checked live, read-only, against
+  # public repos on 2026-10-24):
+  #   * GET .../git/trees/refs/pull/1/head?recursive=1 returns every entry WITH its git mode: 100644 /
+  #     100755 regular files, 120000 a symlink, 160000 a gitlink (submodule), 040000 a directory.
+  #     `truncated: true` means the list is incomplete.
+  #   * GET .../contents/<path>?ref=... does NOT reveal a symlink to a tracked file. GitHub's docs: "If the
+  #     content is a symlink with a normal file target, the API responds with the content of the file", so
+  #     it says {"type":"file"} for a mode-120000 entry (django/django docs/_theme/djangodocs-epub/static/
+  #     docicons-note.png is 120000 and the contents API says `file`). Only a link to a directory reads as
+  #     "symlink". The check must therefore never rest on this endpoint.
+  # `modes` maps a path to a git mode string, :absent (no tree entry) or :nomode (an entry without a mode).
+  # Anything not named is a regular file (100644).
+  MODE_TYPES = { "100644" => "blob", "100755" => "blob", "120000" => "blob", "160000" => "commit", "040000" => "tree" }.freeze
+
+  def tree_entries(files, modes)
+    files.reject { |f| f["status"] == "removed" }.filter_map do |f|
+      name = f["filename"]
+      mode = modes.fetch(name, "100644")
+      next if mode == :absent
+      next({ "path" => name }) if mode == :nomode
+      { "path" => name, "mode" => mode, "type" => MODE_TYPES.fetch(mode, "blob"), "sha" => "0" * 40 }
+    end + [ { "path" => "app", "mode" => "040000", "type" => "tree", "sha" => "1" * 40 } ]
+  end
+
+  def tree_body(tree, entries)
+    case tree
+    when :error then "ERROR"
+    when :garbage then "not json{"
+    when :truncated then JSON.generate({ "sha" => "a" * 40, "tree" => entries, "truncated" => true })
+    else JSON.generate({ "sha" => "a" * 40, "tree" => entries, "truncated" => false })
+    end
+  end
+
+  # What the real contents API answers for a path with that mode (see the note above: a symlink to a
+  # file reads as a file).
+  def contents_body(mode)
+    case mode
+    when "160000" then '{"type":"submodule","path":"x"}'
+    when "040000" then '[{"type":"file","path":"x/a"}]'
+    else '{"type":"file","path":"x"}'
+    end
+  end
 
   def uri_path(path)
     path.split("/", -1).map { |seg| ERB::Util.url_encode(seg) }.join("/")
   end
 
-  def run_classify(files:, classifier: :real, gh_fails: false, changed: nil, jq_fail: nil, contents: {}, calls: nil)
+  def run_classify(files:, classifier: :real, gh_fails: false, changed: nil, jq_fail: nil, modes: {}, tree: :ok, calls: nil)
     Dir.mktmpdir do |dir|
       FileUtils.mkdir_p(File.join(dir, "bin"))
       FileUtils.mkdir_p(File.join(dir, ".github"))
@@ -147,7 +177,9 @@ class RiskTierWorkflowTest < ActiveSupport::TestCase
       pages = File.join(dir, "stubs", "pages.json")
       File.write(pages, JSON.generate(files))
       tsv = File.join(dir, "stubs", "contents.tsv")
-      File.write(tsv, contents.map { |path, kind| "#{uri_path(path)}\t#{kind.is_a?(Symbol) ? CONTENT_BODIES.fetch(kind) : JSON.generate(kind)}\n" }.join)
+      File.write(tsv, modes.reject { |_, m| m == :absent || m == :nomode }.map { |path, mode| "#{uri_path(path)}\t#{contents_body(mode)}\n" }.join)
+      tree_out = File.join(dir, "stubs", "tree.out")
+      File.write(tree_out, tree_body(tree, tree_entries(files, modes)))
       call_log = File.join(dir, "gh_calls")
       FileUtils.touch(call_log)
       File.write(File.join(dir, "stubs", "gh"), <<~SH)
@@ -155,6 +187,17 @@ class RiskTierWorkflowTest < ActiveSupport::TestCase
         echo "$*" >> #{call_log}
         #{gh_fails ? 'echo "gh: boom" >&2; exit 1' : ''}
         case "$*" in
+          *"/git/trees/"*)
+            filter=""; prev=""
+            for a in "$@"; do
+              case "$prev" in --jq) filter="$a" ;; esac
+              prev="$a"
+            done
+            if [ "$(cat #{tree_out})" = ERROR ]; then echo "gh: HTTP 404" >&2; exit 1; fi
+            if [ -n "$filter" ]; then "$REAL_JQ" -r "$filter" < #{tree_out}; exit $?; fi
+            cat #{tree_out}
+            exit 0
+            ;;
           *"/contents/"*)
             url=""; filter="."; prev=""
             for a in "$@"; do
@@ -164,8 +207,7 @@ class RiskTierWorkflowTest < ActiveSupport::TestCase
             done
             enc="${url#*/contents/}"; enc="${enc%%\\?*}"
             body=$(awk -F'\t' -v k="$enc" '$1==k {print $2; exit}' #{tsv})
-            [ -z "$body" ] && body='#{CONTENT_BODIES[:file]}'
-            if [ "$body" = ERROR ]; then echo "gh: HTTP 404" >&2; exit 1; fi
+            [ -z "$body" ] && body='{"type":"file","path":"x"}'
             printf '%s\n' "$body" | "$REAL_JQ" -r "$filter"
             exit $?
             ;;
@@ -293,107 +335,137 @@ class RiskTierWorkflowTest < ActiveSupport::TestCase
   #
   # The files API gives names and statuses, never file modes. A symlink named logo.png, or docs/x.md,
   # classifies phone-safe by name, and an asset pipeline follows the link when it precompiles. When
-  # the classifier says phone-safe, every changed path that still exists must read back as a
-  # regular file at the PR head (refs/pull/N/head on the base repo: no head SHA, no head repo).
-  # Anything else, or any call that fails, is laptop-only.
-  test "a safe-named path that is a symlink makes the PR laptop-only" do
+  # the classifier says phone-safe, every changed path that still exists must be a regular file
+  # (git mode 100644 or 100755) in the PR head's git tree. The tree is read from refs/pull/N/head on the
+  # base repo (no head SHA, no head repo), in ONE call. The contents API cannot be used: it reports
+  # a symlink to a tracked file as {"type":"file"} (see the note above the stub). Anything other than a
+  # regular file, a tree that is truncated or unreadable, or any failed call, is laptop-only.
+  def tree_calls(calls) = calls.count { |c| c.include?("/git/trees/") }
+  def contents_calls(calls) = calls.count { |c| c.include?("/contents/") }
+
+  test "a safe-named path that is a symlink to a tracked file makes the PR laptop-only" do
+    calls = []
     tier, summary = run_classify(files: [ file("README.md"), file("app/assets/images/logo.png") ],
-                                 contents: { "app/assets/images/logo.png" => :symlink })
+                                 modes: { "app/assets/images/logo.png" => "120000" }, calls: calls)
     assert_equal "laptop-only", tier, summary
     assert_match(/symlink/i, summary)
+    assert_equal 0, contents_calls(calls), "the contents API calls a symlink-to-file a file; it must not be asked"
+  end
+
+  test "the contents API would have called that symlink a regular file (why it cannot be the check)" do
+    assert_match(/"type":"file"/, contents_body("120000"))
   end
 
   test "a safe-named doc that is a symlink makes the PR laptop-only" do
-    tier, = run_classify(files: [ file("docs/notes.md") ], contents: { "docs/notes.md" => :symlink })
+    tier, = run_classify(files: [ file("docs/notes.md") ], modes: { "docs/notes.md" => "120000" })
     assert_equal "laptop-only", tier
   end
 
-  test "a safe-named path that is a submodule makes the PR laptop-only" do
-    tier, summary = run_classify(files: [ file("docs/vendor.md") ], contents: { "docs/vendor.md" => :submodule })
+  test "a safe-named path that is a submodule (gitlink) makes the PR laptop-only" do
+    tier, summary = run_classify(files: [ file("docs/vendor.md") ], modes: { "docs/vendor.md" => "160000" })
     assert_equal "laptop-only", tier, summary
     assert_match(/submodule/i, summary)
   end
 
   test "a safe-named path that is a directory makes the PR laptop-only" do
-    tier, = run_classify(files: [ file("docs/odd.md") ], contents: { "docs/odd.md" => :dir })
+    tier, = run_classify(files: [ file("docs/odd.md") ], modes: { "docs/odd.md" => "040000" })
     assert_equal "laptop-only", tier
   end
 
-  test "a contents call that fails makes the PR laptop-only, not 'nothing wrong'" do
-    tier, summary = run_classify(files: [ file("README.md") ], contents: { "README.md" => :error })
+  test "a path with an unknown mode makes the PR laptop-only" do
+    tier, = run_classify(files: [ file("docs/odd.md") ], modes: { "docs/odd.md" => "100664" })
+    assert_equal "laptop-only", tier
+  end
+
+  test "a path that is not in the PR head's tree makes the PR laptop-only" do
+    tier, summary = run_classify(files: [ file("README.md"), file("docs/ghost.md") ], modes: { "docs/ghost.md" => :absent })
+    assert_equal "laptop-only", tier, summary
+    assert_match(/not found|not in/i, summary)
+  end
+
+  test "a tree entry with no mode makes the PR laptop-only" do
+    tier, = run_classify(files: [ file("README.md") ], modes: { "README.md" => :nomode })
+    assert_equal "laptop-only", tier
+  end
+
+  test "a truncated tree makes the PR laptop-only, not 'nothing wrong'" do
+    tier, summary = run_classify(files: [ file("README.md") ], tree: :truncated)
+    assert_equal "laptop-only", tier, summary
+    assert_match(/truncated|incomplete/i, summary)
+  end
+
+  test "a tree call that fails makes the PR laptop-only, not 'nothing wrong'" do
+    tier, summary = run_classify(files: [ file("README.md") ], tree: :error)
     assert_equal "laptop-only", tier, summary
     assert_match(/undetermined/i, summary)
   end
 
-  test "a contents reply that is not JSON makes the PR laptop-only" do
-    tier, = run_classify(files: [ file("README.md") ], contents: { "README.md" => :garbage })
-    assert_equal "laptop-only", tier
-  end
-
-  test "a contents reply with no type makes the PR laptop-only" do
-    tier, = run_classify(files: [ file("README.md") ], contents: { "README.md" => :typeless })
+  test "a tree reply that is not JSON makes the PR laptop-only" do
+    tier, = run_classify(files: [ file("README.md") ], tree: :garbage)
     assert_equal "laptop-only", tier
   end
 
   test "one symlink among regular files makes the PR laptop-only" do
-    tier, = run_classify(files: [ file("README.md"), file("docs/a.md"), file("docs/b.md") ], contents: { "docs/b.md" => :symlink })
+    tier, = run_classify(files: [ file("README.md"), file("docs/a.md"), file("docs/b.md") ], modes: { "docs/b.md" => "120000" })
     assert_equal "laptop-only", tier
   end
 
-  test "a regular file at the PR head keeps a docs-only PR phone-safe" do
-    tier, summary = run_classify(files: [ file("README.md"), file("docs/a.md") ])
+  test "regular files (100644 and 100755) at the PR head keep a docs-only PR phone-safe" do
+    tier, summary = run_classify(files: [ file("README.md"), file("docs/a.md"), file("docs/run.md") ],
+                                 modes: { "docs/run.md" => "100755" })
     assert_equal "phone-safe", tier, summary
   end
 
   test "a renamed file is checked under its new name" do
-    tier, = run_classify(files: [ file("docs/new.md", previous: "docs/old.md", status: "renamed") ], contents: { "docs/new.md" => :symlink })
+    tier, = run_classify(files: [ file("docs/new.md", previous: "docs/old.md", status: "renamed") ], modes: { "docs/new.md" => "120000" })
     assert_equal "laptop-only", tier
   end
 
-  test "a removed file is not looked up, because it no longer exists at the head" do
-    calls = []
-    tier, summary = run_classify(files: [ file("README.md"), file("docs/gone.md", status: "removed") ],
-                                 contents: { "docs/gone.md" => :error }, calls: calls)
+  test "a removed file needs no entry in the tree, because it no longer exists at the head" do
+    tier, summary = run_classify(files: [ file("README.md"), file("docs/gone.md", status: "removed") ])
     assert_equal "phone-safe", tier, summary
-    refute(calls.any? { |c| c.include?("docs/gone.md") }, calls.inspect)
   end
 
-  test "a file name with a space is looked up URL-encoded" do
+  test "a PR that only removes files makes no tree call" do
     calls = []
-    tier, = run_classify(files: [ file("docs/my notes.md") ], calls: calls)
-    assert_equal "phone-safe", tier
-    assert(calls.any? { |c| c.include?("contents/docs/my%20notes.md") }, calls.inspect)
+    tier, summary = run_classify(files: [ file("docs/gone.md", status: "removed") ], calls: calls)
+    assert_equal "phone-safe", tier, summary
+    assert_equal 0, tree_calls(calls), calls.inspect
+  end
+
+  test "a file name with a space is matched by its exact tree path" do
+    tier, summary = run_classify(files: [ file("docs/my notes.md") ])
+    assert_equal "phone-safe", tier, summary
   end
 
   test "the lookup reads the PR ref on the base repo and never a head SHA or a head repo" do
     calls = []
     run_classify(files: [ file("README.md") ], calls: calls)
-    lookup = calls.find { |c| c.include?("/contents/") }
+    lookup = calls.find { |c| c.include?("/git/trees/") }
     assert lookup, calls.inspect
-    assert_match(%r{repos/o/r/contents/README\.md\?ref=refs/pull/1/head}, lookup)
+    assert_match(%r{repos/o/r/git/trees/refs/pull/1/head\?recursive=1}, lookup)
   end
 
-  test "a laptop-only classification makes no contents calls" do
+  test "a laptop-only classification makes no tree or contents calls" do
     calls = []
     run_classify(files: [ file("README.md"), file("app/models/lakeraven/ehr/disclosure.rb") ], calls: calls)
-    refute(calls.any? { |c| c.include?("/contents/") }, calls.inspect)
+    assert_equal 0, tree_calls(calls), calls.inspect
+    assert_equal 0, contents_calls(calls), calls.inspect
   end
 
-  test "up to 100 existing safe paths are verified one by one and stay phone-safe" do
-    files = (1..100).map { |i| file("docs/n#{i}.md") }
+  test "any number of existing safe paths is verified with ONE tree call and stays phone-safe" do
+    files = (1..150).map { |i| file("docs/n#{i}.md") }
     calls = []
     tier, summary = run_classify(files: files, calls: calls)
     assert_equal "phone-safe", tier, summary
-    assert_equal 100, calls.count { |c| c.include?("/contents/") }
+    assert_equal 1, tree_calls(calls), calls.inspect
+    assert_equal 0, contents_calls(calls), calls.inspect
   end
 
-  test "more than 100 existing safe paths are laptop-only: they cannot all be verified as regular files" do
-    files = (1..101).map { |i| file("docs/n#{i}.md") }
-    calls = []
-    tier, summary = run_classify(files: files, calls: calls)
-    assert_equal "laptop-only", tier, summary
-    assert_match(/101/, summary)
-    assert_equal 0, calls.count { |c| c.include?("/contents/") }, "no lookups once the bound is known to be exceeded"
+  test "one symlink among many safe paths is found" do
+    files = (1..150).map { |i| file("docs/n#{i}.md") }
+    tier, = run_classify(files: files, modes: { "docs/n77.md" => "120000" })
+    assert_equal "laptop-only", tier
   end
 
   test "a jq that dies while listing the existing paths is laptop-only" do
