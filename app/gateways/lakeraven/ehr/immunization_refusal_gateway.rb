@@ -11,6 +11,7 @@ module Lakeraven
       FAILURE = { success: false, ien: nil, raw: nil }.freeze
 
       def self.record(dfn, vaccine_code, reason_code:, narrative: nil, via: default_provider)
+        CapabilityGuard.ensure!(:ihs_immunization)
         return FAILURE if via.nil?
 
         via.record(dfn.to_s, vaccine_code,

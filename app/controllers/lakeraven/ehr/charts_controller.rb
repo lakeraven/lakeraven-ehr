@@ -35,6 +35,7 @@ module Lakeraven
     # serializers; only the RPMS data source is mocked (see
     # test/dummy/lib/lakeraven_demo_seeds.rb).
     class ChartsController < ActionController::Base
+      helper ApplicationHelper
       include SmartAuthentication
       # FAIL-CLOSED audit, the same terms the clinician screening surface is
       # held to. The chart now carries scored screenings (#474), so it serves
@@ -46,6 +47,10 @@ module Lakeraven
       include FHIRReadEgress
 
       FHIR_CONTENT_TYPE = "application/fhir+json"
+
+      # Chart sections an IHS capability owns. A backend that withholds one
+      # adds an outcome entry instead of those resources (#647).
+      CHART_CAPABILITY_RESOURCES = { ihs_immunization: "Immunization" }.freeze
 
       before_action :authenticate_chart_request!
       before_action :require_patient_scope!
@@ -163,11 +168,31 @@ module Lakeraven
         # omit a configured supplemental provider's rows from the chart while
         # showing them in the search.
         @observations  = readable?("Observation") ? safe { SupplementalClinicalResources.merged_observations_for_patient(dfn) } || [] : []
-        @immunizations = readable?("Immunization") ? safe { Immunization.for_patient(dfn) } : []
+        @immunizations = ihs_immunizations(dfn)
         @procedures    = readable?("Procedure") ? build_procedures(dfn) : []
         @encounters    = readable?("Encounter") ? safe { EncounterGateway.for_patient(dfn) } : []
         @encounter_resources = build_encounter_resources(dfn)
         load_screenings(dfn)
+      end
+
+      # Immunizations are an IHS-only chart section. A backend without the
+      # capability never sees the gateway call, and the card is omitted.
+      # A read that raises is a failed card, not an empty list.
+      def ihs_immunizations(dfn)
+        return [] unless readable?("Immunization") && BackendRegistry.current.provides?(:ihs_immunization)
+
+        Immunization.for_patient(dfn)
+      rescue StandardError => error
+        record_immunization_load_failure(error)
+        []
+      end
+
+      def record_immunization_load_failure(error)
+        @immunizations_load_failed = true
+        Rails.logger.warn(
+          "[chart] immunizations could not be loaded: #{error.class}: " \
+          "#{PhiSanitizer.sanitize_message(error.message)}"
+        )
       end
 
       # Scored screening instruments (#474). Engine-owned records rather than an
@@ -308,6 +333,10 @@ module Lakeraven
         resources.concat(@procedures.map(&:to_fhir))
         resources.concat(chart_encounter_entries)
 
+        entries = resources.map do |resource|
+          { fullUrl: entry_full_url(resource), resource: resource, search: { mode: "match" } }
+        end
+
         {
           resourceType: "Bundle",
           id: SecureRandom.uuid,
@@ -315,9 +344,40 @@ module Lakeraven
           type: "searchset",
           total: resources.length,
           link: [ { relation: "self", url: request.original_url } ],
-          entry: resources.map do |r|
-            { fullUrl: entry_full_url(r), resource: r, search: { mode: "match" } }
-          end
+          entry: entries + withheld_chart_outcomes + immunization_load_outcomes
+        }
+      end
+
+      def withheld_chart_outcomes
+        CHART_CAPABILITY_RESOURCES.filter_map do |capability, resource_type|
+          next if BackendRegistry.current.provides?(capability)
+
+          chart_feature_outcome(
+            code: "not-supported",
+            diagnostics: "#{resource_type} is not available on this system"
+          )
+        end
+      end
+
+      # The capability is present, but the read failed. The diagnostics stay
+      # fixed: the exception message can carry broker detail and stays in the log.
+      def immunization_load_outcomes
+        return [] unless @immunizations_load_failed
+
+        [ chart_feature_outcome(code: "exception", diagnostics: "Immunizations could not be loaded.") ]
+      end
+
+      def chart_feature_outcome(code:, diagnostics:)
+        {
+          resource: {
+            resourceType: "OperationOutcome",
+            issue: [ {
+              severity: "error",
+              code: code,
+              diagnostics: diagnostics
+            } ]
+          },
+          search: { mode: "outcome" }
         }
       end
 
