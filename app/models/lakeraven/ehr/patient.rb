@@ -231,6 +231,7 @@ module Lakeraven
       def tribal_enrollment_details
         return nil unless dfn
 
+        CapabilityGuard.ensure!(:tribal_enrollment)
         TribalEnrollmentGateway.enrollment_details(dfn)
       end
 
