@@ -1,0 +1,194 @@
+#!/usr/bin/env bash
+# risk-tier — classify a change as `laptop-only` or `phone-safe` from the paths it touches.
+#
+# It labels; it does not gate. A classified change exits 0 whichever tier it gets.
+#
+# This is a SAFE-LIST. .github/risk-tiers.txt has laptop-only rules, then a `[safe]` section.
+# A change is phone-safe only when EVERY path matches a `[safe]` glob and no laptop-only rule.
+# A path that matches a laptop-only rule is laptop-only; a path on neither list is laptop-only
+# ("not on the safe-list"); a path containing a control character is laptop-only. The rules
+# win over the safe-list. The default is the cautious tier because a blocklist cannot see a
+# privileged file with an unremarkable name (gate round 2 on #633).
+#
+# An empty list, a path that climbs out of the repo, an unreadable rules file, a rules file
+# with no laptop-only rules or no `[safe]` globs, or a base ref that does not resolve is
+# UNDETERMINED: the script prints `laptop-only` and exits 2. Absence of data is never verification.
+#
+# Glob semantics differ on purpose. A laptop-only glob is a bash pattern: `*` crosses `/`, so
+# `*consent*` catches a path anywhere in the tree (over-matching costs minutes). A `[safe]` glob
+# is matched per segment: `*` and `?` never match `/`, so `docs/*.md` is top-level docs only
+# and each directory level a safe path may sit at has to be spelled out (gate round 4 on #633:
+# a crossing `*` let docs/internal/master_key.md through).
+#
+# Known limit (bash 3.2, the macOS /bin/sh): a NUL byte ends the line, so
+# `printf 'docs/x.md\0app/x.rb\n' | bin/risk-tier` reads only `docs/x.md` and prints phone-safe
+# there; bash 4+ and 5 print laptop-only. The workflow is not exposed: its jq check rejects any
+# control character, NUL included, before the classifier runs, and its runner has bash 5. Do not
+# pipe untrusted names into this script by hand on a Mac.
+#
+# Usage:
+#   bin/risk-tier                      paths on stdin, one per line
+#   bin/risk-tier --base REF           paths from `git diff --no-renames --name-only REF...HEAD`
+#                                      (--no-renames so BOTH sides of a rename are judged)
+#   bin/risk-tier --rules FILE         use a different rules file
+#   bin/risk-tier --coverage           paths on stdin; print "<count>\t<glob>" for every rule,
+#                                      laptop-only and safe
+#
+# Output: first line is the tier. Each path that made it laptop-only follows as
+#         `  <path>  <- <glob> (<reason>)`, or `  <path>  <- not on the safe-list`.
+#         A phone-safe answer says how many paths it read.
+# Exit:   0 classified    2 usage error or undetermined (output is still `laptop-only`)
+set -uo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RULES="$HERE/../.github/risk-tiers.txt"
+BASE=""
+COVERAGE=0
+
+undetermined() {
+  echo "laptop-only"
+  echo "  (undetermined: $1)"
+  exit 2
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --base)     [ $# -ge 2 ] && [ -n "$2" ] || undetermined "--base needs a ref"; BASE="$2"; shift 2 ;;
+    --rules)    [ $# -ge 2 ] || undetermined "--rules needs a file"; RULES="$2"; shift 2 ;;
+    --coverage) COVERAGE=1; shift ;;
+    *)          undetermined "unknown argument '$1'" ;;
+  esac
+done
+
+[ -r "$RULES" ] || undetermined "rules file '$RULES' is not readable"
+
+# Parse rules: "<glob>   # <reason>". Blank lines and lines starting with # are skipped. A line
+# that is just `[safe]` starts the safe-list; everything before it is a laptop-only rule.
+globs=(); reasons=(); safe_globs=(); safe_reasons=()
+section=laptop
+while IFS= read -r line || [ -n "$line" ]; do
+  line="${line%$'\r'}"
+  trimmed="${line#"${line%%[![:space:]]*}"}"
+  [ -z "$trimmed" ] && continue
+  [ "${trimmed:0:1}" = "#" ] && continue
+  case "${trimmed%"${trimmed##*[![:space:]]}"}" in
+    "[safe]") section=safe; continue ;;
+    "["*"]")  undetermined "rules file '$RULES' has an unknown section '$trimmed'" ;;
+  esac
+  glob="${trimmed%%[[:space:]]#[[:space:]]*}"
+  glob="${glob%"${glob##*[![:space:]]}"}"
+  reason=""
+  case "$trimmed" in *[[:space:]]#[[:space:]]*) reason="${trimmed#*[[:space:]]#[[:space:]]}" ;; esac
+  [ -z "$glob" ] && continue
+  if [ "$section" = safe ]; then
+    safe_globs+=("$glob"); safe_reasons+=("$reason")
+  else
+    globs+=("$glob"); reasons+=("$reason")
+  fi
+done < "$RULES"
+[ ${#globs[@]} -gt 0 ] || undetermined "rules file '$RULES' contains no laptop-only rules"
+[ ${#safe_globs[@]} -gt 0 ] || undetermined "rules file '$RULES' has no [safe] globs, so nothing could be phone-safe"
+
+# A safe glob becomes an anchored regex in which `*` and `?` stop at `/`; every other character
+# is literal. Plain bash patterns would let `*` cross `/` (see the header).
+glob_to_regex() {
+  local g="$1" out="" c i
+  for ((i = 0; i < ${#g}; i++)); do
+    c="${g:i:1}"
+    case "$c" in
+      '*')              out+='[^/]*' ;;
+      '?')              out+='[^/]' ;;
+      [A-Za-z0-9_/])    out+="$c" ;;
+      '^'|']'|'['|\\)     out+="\\$c" ;;
+      *)                out+="[$c]" ;;
+    esac
+  done
+  printf '^%s$' "$out"
+}
+safe_res=()
+for g in "${safe_globs[@]}"; do safe_res+=("$(glob_to_regex "$g")"); done
+
+# Collect the paths.
+paths=()
+if [ -n "$BASE" ]; then
+  tmp="$(mktemp)" || undetermined "cannot create a temp file"
+  trap 'rm -f "$tmp"' EXIT
+  git diff --no-renames --name-only -z "$BASE...HEAD" > "$tmp" 2>/dev/null \
+    || undetermined "git could not diff '$BASE...HEAD'"
+  while IFS= read -r -d '' p; do paths+=("$p"); done < "$tmp"
+else
+  while IFS= read -r p || [ -n "$p" ]; do paths+=("${p%$'\r'}"); done
+fi
+
+# Normalise: drop empty lines, strip leading ./, squeeze //, refuse anything that leaves the repo.
+# Only a ZERO-length line is ignored (a trailing-newline artifact). A line with any character,
+# whitespace included, is a changed path and gets classified: a file named "   " is not on the
+# safe-list, so it must make the PR laptop-only rather than vanish from the list.
+clean=()
+for p in ${paths[@]+"${paths[@]}"}; do
+  [ -z "$p" ] && continue
+  while [ "${p:0:2}" = "./" ]; do p="${p:2}"; done
+  while [[ "$p" == *//* ]]; do p="${p//\/\//\/}"; done
+  case "/$p/" in
+    */../*) [ $COVERAGE -eq 1 ] && continue; undetermined "path '$p' climbs out of the repository" ;;
+  esac
+  [ "${p:0:1}" = "/" ] && { [ $COVERAGE -eq 1 ] && continue; undetermined "path '$p' is absolute"; }
+  clean+=("$p")
+done
+
+shopt -s nocasematch
+
+if [ $COVERAGE -eq 1 ]; then
+  for g in "${globs[@]}"; do
+    n=0
+    for p in ${clean[@]+"${clean[@]}"}; do
+      # shellcheck disable=SC2053
+      [[ "$p" == $g ]] && n=$((n + 1))
+    done
+    printf '%s\t%s\n' "$n" "$g"
+  done
+  for i in "${!safe_globs[@]}"; do
+    n=0
+    for p in ${clean[@]+"${clean[@]}"}; do
+      [[ "$p" =~ ${safe_res[$i]} ]] && n=$((n + 1))
+    done
+    printf '%s\t%s\n' "$n" "${safe_globs[$i]}"
+  done
+  exit 0
+fi
+
+[ ${#clean[@]} -gt 0 ] || undetermined "no changed paths"
+
+# A path is phone-safe only if no laptop-only rule matches it AND a safe glob does.
+matches=()
+for p in "${clean[@]}"; do
+  if [[ "$p" == *[[:cntrl:]]* ]]; then
+    matches+=("  $(printf '%q' "$p")  <- control character in path (a name that is not one plain line cannot be judged)")
+    continue
+  fi
+  hit=0
+  for i in "${!globs[@]}"; do
+    g="${globs[$i]}"
+    # shellcheck disable=SC2053
+    if [[ "$p" == $g ]]; then
+      matches+=("  $p  <- $g (${reasons[$i]})")
+      hit=1
+      break
+    fi
+  done
+  [ $hit -eq 1 ] && continue
+  safe=0
+  for re in "${safe_res[@]}"; do
+    if [[ "$p" =~ $re ]]; then safe=1; break; fi
+  done
+  [ $safe -eq 1 ] || matches+=("  $p  <- not on the safe-list")
+done
+
+if [ ${#matches[@]} -gt 0 ]; then
+  echo "laptop-only"
+  printf '%s\n' "${matches[@]}"
+else
+  echo "phone-safe"
+  echo "  ${#clean[@]} path(s) read, all on the safe-list and none matched a laptop-only rule"
+fi
+exit 0
