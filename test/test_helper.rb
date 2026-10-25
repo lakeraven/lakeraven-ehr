@@ -10,8 +10,9 @@ require "rails/test_help"
 require_relative "support/supplemental_provider_config_helper"
 require_relative "support/global_store_isolation"
 require_relative "support/host_role_expectations"
+require_relative "support/fake_gateway"
+require_relative "support/stub_helpers"
 require_relative "support/ihs_feature_availability_test_helper"
-require "rpms_rpc/version"
 require "rpms_rpc/mock_client"
 require_relative "support/mock_session_user"
 
@@ -301,3 +302,4 @@ if ActiveSupport::TestCase.respond_to?(:fixture_paths=)
 end
 
 ActiveSupport::TestCase.include GlobalStoreIsolation
+ActiveSupport::TestCase.include StubHelpers

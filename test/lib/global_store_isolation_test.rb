@@ -87,6 +87,36 @@ class GlobalStoreIsolationUnitTest < ActiveSupport::TestCase
   include GlobalStoreIsolationTestHelpers
   i_suck_and_my_tests_are_order_dependent!
 
+  MedicationSeedEntry = Struct.new(:fhir_id, keyword_init: true)
+
+  def test_reset_clears_resource_singleton_stores
+    Lakeraven::EHR::EncounterStore.instance.seed!([
+      Lakeraven::EHR::Encounter.new(
+        ien: 99, patient_identifier: "isolation-enc", status: "finished", class_code: "AMB"
+      )
+    ])
+    Lakeraven::EHR::MedicationStore.instance.seed!([
+      MedicationSeedEntry.new(fhir_id: "isolation-med")
+    ])
+    Lakeraven::EHR::CarePlanStore.instance.seed!([
+      Lakeraven::EHR::CarePlan.new(
+        ien: "isolation-cp", patient_dfn: "1", title: "Isolation", status: "active", intent: "plan"
+      )
+    ])
+    Lakeraven::EHR::DiagnosticReportStore.instance.seed!([
+      Lakeraven::EHR::DiagnosticReport.new(
+        ien: "isolation-dr", patient_dfn: "1", code_display: "Isolation", status: "final", category: "LAB"
+      )
+    ])
+
+    GlobalStoreIsolation.reset!
+
+    assert_equal 0, Lakeraven::EHR::EncounterStore.instance.count
+    assert_equal 0, Lakeraven::EHR::MedicationStore.instance.count
+    assert_equal 0, Lakeraven::EHR::CarePlanStore.instance.count
+    assert_equal 0, Lakeraven::EHR::DiagnosticReportStore.instance.count
+  end
+
   def test_1_a_test_leaves_records_in_process_global_stores
     seed_process_global_state!(provenance_target_id: "rpms-isolation-unit")
     assert_process_global_state_present!(provenance_target_id: "rpms-isolation-unit")
