@@ -65,19 +65,74 @@ module UrlPatientContextTestHelper
     assert_equal 200, current_response.status
   end
 
-  def assert_invalid_identifier_flash!(hint = nil)
-    message = flash_alert_message
-    assert message.present?, "expected flash alert explaining the identifier problem"
-    assert_match(/patient|identifier|record|invalid|not found/i, message)
-    assert_match(Regexp.new(Regexp.escape(hint), Regexp::IGNORECASE), message) if hint.present?
+  def assert_no_flash_scaffold_header!(response = current_response)
+    header = response.headers["X-Message-Flash-Alert"]
+    assert header.blank?,
+           "X-Message-Flash-Alert is test scaffolding and must not be set in production (#{header.inspect})"
   end
 
-  def flash_alert_message
-    if respond_to?(:flash)
-      flash[:alert].to_s
-    else
-      current_response.headers["X-Message-Flash-Alert"].to_s
+  def assert_invalid_identifier_flash!(hint = nil)
+    body = current_response.body
+    assert_match(/not a valid record id/i, body,
+                 "dashboard must render the explanatory flash in the page body")
+    assert_match(/patient|identifier|record|invalid/i, body)
+    assert_match(Regexp.new(Regexp.escape(hint), Regexp::IGNORECASE), body) if hint.present?
+  end
+
+  def assert_invalid_identifier_redirect_flash_and_no_scaffold!(hint = nil)
+    assert_redirected_to_chart_search!
+    redirect_response = current_response
+    follow_chart_search_redirect!
+    assert_invalid_identifier_flash!(hint)
+    assert_no_flash_scaffold_header!(redirect_response)
+  end
+
+  def user_chart_read_headers(extra = {})
+    token = clinician_token(scopes: BANNER_SCOPES, app_name: "url-patient-context-fhir")
+    bearer_headers(token).merge(extra)
+  end
+
+  def patient_bound_chart_headers(patient_dfn:, scopes: "patient/*.read")
+    token = clinician_token(scopes: scopes, app_name: "patient-bound-chart", duz: patient_dfn.to_s)
+    bearer_headers(token)
+  end
+
+  def revoke_session_chart_authentication!
+    raw = chart_test_session[:smart_token].presence
+    if raw.present?
+      token = Doorkeeper::AccessToken.by_token(raw)
+      token&.revoke
     end
+    chart_test_session.delete(:smart_token)
+    chart_test_session.delete(:last_seen_at)
+  end
+
+  MALFORMED_CHART_SEGMENT = "not-a-valid-dfn"
+
+  def assert_malformed_chart_fhir_refusal!(segment: MALFORMED_CHART_SEGMENT)
+    resp = current_response
+    refute resp.redirect?,
+           "FHIR chart caller must not redirect (got #{resp.status} Location=#{resp.headers['Location']})"
+    assert_equal 400, resp.status, resp.body[0, 500]
+    assert_equal "application/fhir+json", resp.media_type
+    body = JSON.parse(resp.body)
+    assert_equal "OperationOutcome", body["resourceType"]
+    issue_code = body.dig("issue", 0, "code")
+    assert_includes %w[invalid value], issue_code, "expected invalid/value issue code, got #{issue_code.inspect}"
+    refute_includes resp.body, segment, "raw malformed id must not appear in the OperationOutcome body"
+  end
+
+  def assert_malformed_chart_dfn_audit_refusal!(segment: MALFORMED_CHART_SEGMENT)
+    event = Lakeraven::EHR::AuditEvent.order(:id).last
+    refute_nil event, "malformed chart id request must leave an audit row"
+    refute_equal "0", event.outcome,
+                 "malformed identifier refusal must not be audited as success (outcome #{event.outcome})"
+    desc = event.outcome_desc.to_s
+    assert_match(/invalid|identifier|valid record/i, desc,
+                 "refusal outcome_desc must name the invalid identifier problem")
+    refute_includes desc, segment, "raw malformed id must not be stored in outcome_desc"
+    refute_equal segment, event.entity_identifier,
+                 "raw malformed id must not be stored as the audit entity"
   end
 
   # URL-derived context: the chart and banner reflect the route dfn, not session.

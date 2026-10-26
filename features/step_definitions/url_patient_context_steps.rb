@@ -86,9 +86,7 @@ end
 
 Then("the clinician is redirected to patient search with an explanatory message") do
   assert_not_format_error_response!
-  assert_redirected_to_chart_search!
-  assert_invalid_identifier_flash!
-  follow_chart_search_redirect!
+  assert_invalid_identifier_redirect_flash_and_no_scaffold!
 end
 
 Then("no partial patient data is rendered") do
