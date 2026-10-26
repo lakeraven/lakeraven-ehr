@@ -5,12 +5,16 @@ Lakeraven::EHR::Engine.routes.draw do
   # dev-only synthetic-demo bypass lives in ChartsController#demo_bypass?.
   # Content-negotiated: HTML for browsers, FHIR R4 Bundle for `.json`
   # (or Accept: application/fhir+json / ?_format=json). The `.:format`
-  # segment is optional so `patients/1` and `patients/1.json` both resolve;
-  # dfn is constrained to digits so the extension isn't swallowed.
+  # segment is optional so `patients/1` and `patients/1.json` both resolve.
+  # dfn is not limited to digits (#467): a malformed identifier has to reach
+  # ChartsController's format gate. The segment still excludes "." (and the
+  # other route separators) so the extension is not swallowed — `patients/1.json`
+  # is dfn "1" with format json. Sibling patient routes keep their digit
+  # constraints.
   # RESTful path: the chart is the human-facing representation of a patient,
   # so it lives at /patients/:dfn (the FHIR API keeps /Patient per convention;
   # that resource also owns the patient_path helper, hence :patient_chart).
-  get "patients/:dfn(.:format)", to: "charts#show", as: :patient_chart, constraints: { dfn: /\d+/ }
+  get "patients/:dfn(.:format)", to: "charts#show", as: :patient_chart, constraints: { dfn: %r{[^/.?]+} }
   # Demo-only clickable walk-in visit (the UI counterpart of
   # features/encounter/demo_visit.feature). Gated to dev + CHART_DEMO_OPEN +
   # SPIKE_MOCK_RPC in the controller; 404s everywhere else.

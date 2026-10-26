@@ -45,8 +45,22 @@ module Lakeraven
       # recorded, it is not completed.
       include AuditableClinicalAccess
       include FHIRReadEgress
+      # close_patient_context! only. This controller keeps its own
+      # enforce_patient_context! (token compartment, not the session gate);
+      # a GET still must not open a context.
+      include ClinicianPatientContext
 
       FHIR_CONTENT_TYPE = "application/fhir+json"
+
+      # VistA DFN width. Patient.canonical_dfn has no length cap; the chart
+      # route treats a longer digit string as a malformed identifier (#467).
+      MAX_CHART_DFN_DIGITS = 18
+
+      # Static on purpose: the flash names the problem, never the raw segment.
+      # A leaked error string or markup in the URL must not be echoed.
+      INVALID_CHART_IDENTIFIER_ALERT =
+        "Patient identifier is not a valid record id. " \
+        "A record id is a positive integer of at most 18 digits; 0 is not valid."
 
       # Chart sections an IHS capability owns. A backend that withholds one
       # adds an outcome entry instead of those resources (#647).
@@ -55,6 +69,9 @@ module Lakeraven
       before_action :authenticate_chart_request!
       before_action :require_patient_scope!
       before_action :enforce_patient_context!
+      # After the authorization chain, before show loads a patient or any
+      # clinical section. A malformed :dfn never becomes a repository read.
+      before_action :reject_invalid_chart_dfn!
 
       # ORWPT APPTLST status text -> FHIR Encounter.status
       APPOINTMENT_STATUS = {
@@ -77,7 +94,8 @@ module Lakeraven
       end
 
       def show
-        @patient = Patient.find_by_dfn(params[:dfn])
+        @patient = find_chart_patient
+        return if performed?
         return render_missing_patient unless @patient
 
         load_clinical_collections
@@ -85,6 +103,73 @@ module Lakeraven
       end
 
       private
+
+      # -- Identifier format (#467) ----------------------------------------------
+      #
+      # Canonical positive integer via Patient.canonical_dfn (leading zeros
+      # allowed, zero rejected). More than MAX_CHART_DFN_DIGITS digits is
+      # malformed even when canonical_dfn would accept it.
+
+      def reject_invalid_chart_dfn!
+        return if chart_dfn_well_formed?
+
+        close_patient_context!
+        redirect_to dashboard_path, alert: INVALID_CHART_IDENTIFIER_ALERT
+        # Rack-test callers have no integration `flash` helper. The alert
+        # text is the same static string, not the request segment.
+        response.set_header("X-Message-Flash-Alert", INVALID_CHART_IDENTIFIER_ALERT)
+      end
+
+      def chart_dfn_well_formed?
+        raw = chart_route_dfn.to_s.strip
+        raw.length <= MAX_CHART_DFN_DIGITS && Patient.canonical_dfn(raw).present?
+      end
+
+      # PatientRepository.find / PatientGateway.find do not raise a dedicated
+      # backend error. The URL-context specs stub `find` with StandardError
+      # ("rpms unavailable"), and a broker failure arrives as whatever the
+      # RPC client raises — also a StandardError. Rescue is limited to this
+      # lookup so a programming error while rendering the chart still
+      # propagates.
+      def find_chart_patient
+        Patient.find_by_dfn(params[:dfn])
+      rescue StandardError => error
+        log_chart_backend_failure(error)
+        render_chart_backend_failure
+        nil
+      end
+
+      def log_chart_backend_failure(error)
+        Rails.logger.warn(
+          "[chart] patient could not be loaded: #{error.class}: " \
+          "#{PhiSanitizer.sanitize_message(error.message)}"
+        )
+      end
+
+      def render_chart_backend_failure
+        close_patient_context!
+        if fhir_requested?
+          render_chart_backend_failure_fhir
+        else
+          render_chart_backend_failure_html
+        end
+      end
+
+      def render_chart_backend_failure_fhir
+        render json: {
+          resourceType: "OperationOutcome",
+          issue: [ {
+            severity: "error",
+            code: "exception",
+            diagnostics: "The chart could not be loaded"
+          } ]
+        }, status: :service_unavailable, content_type: FHIR_CONTENT_TYPE
+      end
+
+      def render_chart_backend_failure_html
+        @patient_banner = PatientBanner.empty
+        render :unavailable, layout: false, status: :service_unavailable
+      end
 
       # -- Authentication / authorization (fail closed) -------------------------
 
