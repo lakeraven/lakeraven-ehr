@@ -26,7 +26,7 @@ module Lakeraven
       # credentials, in the HOST app's config, since that is where request
       # logging reads them from.
       initializer "lakeraven-ehr.filter_credentials" do |app|
-        app.config.filter_parameters += %i[username access_code verify_code]
+        app.config.filter_parameters += %i[username access_code verify_code client_assertion]
       end
 
       initializer "lakeraven-ehr.inflections" do

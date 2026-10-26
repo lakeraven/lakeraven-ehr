@@ -17,6 +17,8 @@ module Lakeraven
       include BrowserSmartAuthentication
       include ClinicianPatientContext
 
+      rate_limit only: :create
+
       before_action :authenticate_smart_token!
       before_action :authorize_context_scope!
       before_action :enforce_token_patient_context!

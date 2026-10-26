@@ -45,6 +45,9 @@ module Lakeraven
       # recorded, it is not completed.
       include AuditableClinicalAccess
       include FHIRReadEgress
+      include RateLimitable
+
+      rate_limit only: :show
 
       FHIR_CONTENT_TYPE = "application/fhir+json"
 

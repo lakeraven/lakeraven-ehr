@@ -5,6 +5,8 @@ module Lakeraven
     class ObservationsController < ApplicationController
       include PatientCompartment
 
+      rate_limit only: %i[index show]
+
       compartment_bound :index, param: :patient, require_param: true
       before_action :refuse_system_qualified_tokens!, only: :index
 

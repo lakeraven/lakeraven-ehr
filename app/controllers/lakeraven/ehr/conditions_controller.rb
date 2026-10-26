@@ -5,6 +5,8 @@ module Lakeraven
     class ConditionsController < ApplicationController
       include PatientCompartment
 
+      rate_limit only: %i[index show]
+
       compartment_bound :index, param: :patient, require_param: true
 
       def index

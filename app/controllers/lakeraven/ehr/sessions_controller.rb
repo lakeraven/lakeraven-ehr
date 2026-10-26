@@ -20,6 +20,8 @@ module Lakeraven
       IDLE_TIMEOUT = SmartAuthentication::SESSION_IDLE_TIMEOUT
       TOKEN_LIFETIME = 12.hours
 
+      rate_limit only: :create, login_throttle: true
+
       def new
         # login form
       end
@@ -45,7 +47,7 @@ module Lakeraven
           # is correct: RPMS's own three-strike lock keys on the broker client
           # IP — the app server — so an unthrottled login route lets one
           # attacker lock out every clinician at once.
-          return render_throttled
+          return render_throttled(access_code)
         end
 
         result = authenticate(access_code: access_code, verify_code: params[:password].to_s)
@@ -105,8 +107,9 @@ module Lakeraven
         render :new, status: :unprocessable_entity
       end
 
-      def render_throttled
-        response.headers["Retry-After"] = LoginThrottle.retry_after.to_s
+      def render_throttled(access_code)
+        note_audit_denial("sign-in throttled")
+        response.headers["Retry-After"] = LoginThrottle.retry_after(access_code).to_s
         flash.now[:alert] = "Too many sign-in attempts. Try again later."
         render :new, status: :too_many_requests
       end

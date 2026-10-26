@@ -15,6 +15,10 @@ module Lakeraven
     # column, so a token for organization A can still read organization B's
     # patients. Closing that gap is lakeraven-ehr#553.
     class BackendServicesController < ActionController::API
+      include RateLimitable
+
+      rate_limit only: :token
+
       CLIENT_ASSERTION_TYPE = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
       # SMART Backend Services requires the authentication JWT to be signed
       # with RS384 and requires the authorization server to reject every

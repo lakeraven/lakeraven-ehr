@@ -11,6 +11,7 @@ module Lakeraven
       # need no row and are not refused one; see `audit_settled?`.
       include AuditableClinicalAccess
       include PatientBannerRendering
+      include RateLimitable
 
       helper ApplicationHelper
       layout "lakeraven/ehr/application"

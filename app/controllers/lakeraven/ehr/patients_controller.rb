@@ -5,6 +5,8 @@ module Lakeraven
     class PatientsController < ApplicationController
       include PatientCompartment
 
+      rate_limit only: %i[index show create]
+
       before_action :enforce_patient_context!, only: :show
       before_action :enforce_patient_search_context!, only: :index
       before_action :validate_patient_search_values!, only: :index
