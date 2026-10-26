@@ -12,7 +12,8 @@ Given("a provider exists with DUZ {string}") do |duz|
 end
 
 Given("the patient has an active medication {string}") do |drug_name|
-  @patient_medications = [ OpenStruct.new(medication_display: drug_name, medication_code: nil) ]
+  # One ACTIVE order as the ORWPS ACTIVE gateway returns it (#680).
+  @patient_medications = [ { order_id: "4401R;O", name: drug_name, status: "ACTIVE" } ]
   ensure_cpoe_medication_stubs!
 end
 
