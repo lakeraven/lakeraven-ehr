@@ -1,0 +1,31 @@
+# Reviewed allowlist for routes that are intentionally NOT rate-limited (#498).
+#
+# Every engine route must appear here OR in Lakeraven::EHR::RateLimit.throttled_route_keys.
+# Only routes that serve no patient or clinical data and accept no credentials belong here.
+
+routes:
+  # SMART / metadata discovery (no clinical payload)
+  - lakeraven/ehr/capability_statements#show
+  - lakeraven/ehr/smart_configuration#show
+  - lakeraven/ehr/smart_launch#show
+
+  # Login form (GET) and logout — POST login is throttled via LoginThrottle / RateLimit
+  - lakeraven/ehr/sessions#new
+  - lakeraven/ehr/sessions#destroy
+
+  # Session teardown only; does not open or read a patient record
+  - lakeraven/ehr/active_patient_contexts#destroy
+
+  # Demo visit UI — 404 outside development unless CHART_DEMO_OPEN=1 and SPIKE_MOCK_RPC=1
+  # (Lakeraven::EHR::DemoVisitsController#require_demo_mode!)
+  - lakeraven/ehr/demo_visits#show
+  - lakeraven/ehr/demo_visits#new
+  - lakeraven/ehr/demo_visits#summary
+  - lakeraven/ehr/demo_visits#vitals
+  - lakeraven/ehr/demo_visits#pov
+  - lakeraven/ehr/demo_visits#note
+  - lakeraven/ehr/demo_visits#close
+  - lakeraven/ehr/demo_visits#reset
+
+  # Test harness — mounted only when Rails.env.test? (config/routes.rb)
+  - lakeraven/ehr/test_sessions#create
