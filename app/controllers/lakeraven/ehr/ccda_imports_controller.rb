@@ -8,6 +8,8 @@ module Lakeraven
     class CcdaImportsController < ApplicationController
       include PatientCompartment
 
+      rate_limit only: :create
+
       # The one patient-naming write that had no compartment declaration. It
       # moves no data today only because ClinicalReconciliationService's
       # persistence is still a stub — but the 201 is already a false

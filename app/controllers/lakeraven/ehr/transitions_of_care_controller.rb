@@ -7,6 +7,8 @@ module Lakeraven
     class TransitionsOfCareController < ApplicationController
       include PatientCompartment
 
+      rate_limit only: :create
+
       # Types in the C-CDA body. A scope named after this controller is not
       # one of them.
       DISCLOSED_TYPES = %w[Patient AllergyIntolerance Condition MedicationRequest].freeze

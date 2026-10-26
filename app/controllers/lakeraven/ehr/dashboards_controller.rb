@@ -3,6 +3,8 @@
 module Lakeraven
   module EHR
     class DashboardsController < WebController
+      rate_limit only: :show
+
       before_action :require_authentication
 
       def show

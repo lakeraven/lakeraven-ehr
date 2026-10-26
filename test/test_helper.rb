@@ -15,6 +15,7 @@ require_relative "support/stub_helpers"
 require_relative "support/ihs_feature_availability_test_helper"
 require "rpms_rpc/mock_client"
 require_relative "support/mock_session_user"
+require_relative "support/rate_limit_test_helper"
 
 # Baseline RpmsRpc mock seeds. Installed at load and again before every
 # example (GlobalStoreIsolation) so a test that adds seeds cannot leak
