@@ -15,14 +15,11 @@ module Lakeraven
       # Search parameters come from SearchCapabilities, which is also what
       # FHIRSearchBundle enforces, so there is one list of them, not two.
       #
-      # Never advertise more than is granted. The security element names the
-      # SMART service and the token endpoint, never scopes: the SMART
-      # discovery document lists wildcard write scopes that the token
-      # endpoint does not grant to every client, and this document does not
-      # repeat them.
+      # The security element comes from SmartDiscovery, which also builds
+      # .well-known/smart-configuration, so the two name the same endpoints.
+      # It names no scopes: smart-configuration lists them.
       class CapabilityStatement
         FHIR_VERSION = "4.0.1"
-        OAUTH_URIS = "http://fhir-registry.smarthealthit.org/StructureDefinition/oauth-uris"
         SEARCH_ONLY_STUB = "No read by id: GET [type]/[id] is routed and always returns 404."
 
         # What each routed type supports, and where its data comes from:
@@ -118,19 +115,7 @@ module Lakeraven
         end
 
         def security
-          {
-            extension: [ {
-              url: OAUTH_URIS,
-              extension: [ { url: "token", valueUri: @token_endpoint } ]
-            } ],
-            service: [ {
-              coding: [ {
-                system: "http://terminology.hl7.org/CodeSystem/restful-security-service",
-                code: "SMART-on-FHIR"
-              } ]
-            } ],
-            description: "SMART on FHIR. .well-known/smart-configuration lists the endpoints and capabilities."
-          }
+          SmartDiscovery.new(token_endpoint: @token_endpoint).security
         end
 
         def resource(type, declaration)

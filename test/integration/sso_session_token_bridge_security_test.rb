@@ -134,7 +134,7 @@ class SsoSessionTokenBridgeSecurityTest < ActionDispatch::IntegrationTest
     keyed_scopes = session_token.scopes.to_a
 
     assert_empty clerk_scopes
-    assert_includes keyed_scopes, "user/Patient.read"
+    assert_includes keyed_scopes, "user/Patient.rs"
     assert (clerk_scopes - keyed_scopes).empty?
   end
 
@@ -653,8 +653,8 @@ class SsoSessionTokenBridgeSecurityTest < ActionDispatch::IntegrationTest
     chart = Lakeraven::EHR::SessionScopePolicy.scopes_for(security_keys: [ :cprs_gui_chart ])
     bh = Lakeraven::EHR::SessionScopePolicy.scopes_for(security_keys: [ :bh_provider, :bh_supervisor ])
 
-    assert_includes chart, "user/Observation.read", "PHQ-9 item 9 rides on Observation"
-    assert_includes chart, "user/Condition.read",   "substance-use diagnoses ride on Condition"
+    assert_includes chart, "user/Observation.rs", "PHQ-9 item 9 rides on Observation"
+    assert_includes chart, "user/Condition.rs",   "substance-use diagnoses ride on Condition"
     assert_empty bh, "the BH keys grant nothing today — see #494"
     assert_empty Lakeraven::EHR::SessionScopePolicy::BEHAVIORAL_HEALTH_TYPES
   end
@@ -664,8 +664,7 @@ class SsoSessionTokenBridgeSecurityTest < ActionDispatch::IntegrationTest
       security_keys: [ :dental_provider, :dental_supervisor ]
     )
 
-    refute_includes dental, "user/Condition.write"
-    refute_includes dental, "user/Condition.read"
+    refute dental.any? { |scope| scope.start_with?("user/Condition.") }, dental.join(" ")
   end
 
   private

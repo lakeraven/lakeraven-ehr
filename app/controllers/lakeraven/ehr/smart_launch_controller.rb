@@ -44,7 +44,7 @@ module Lakeraven
           response_type: "code",
           client_id: app.uid,
           redirect_uri: app.redirect_uri,
-          scope: "launch patient/*.read",
+          scope: "launch patient/*.rs",
           state: SecureRandom.hex(16),
           launch: params[:launch],
           aud: params[:iss]
