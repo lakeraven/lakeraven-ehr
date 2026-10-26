@@ -173,10 +173,14 @@ if [ -n "$_expect_host" ]; then
 fi
 unset _expect_host _host _bind_seen _arg
 
-# Rails reads ENV.fetch("BINDING", "localhost"), so an exported empty
-# BINDING would override the localhost default and bind every interface.
-if [ -z "${BINDING-}" ]; then
-  unset BINDING
+# Rails reads ENV.fetch("BINDING", "localhost"), so a set-but-empty
+# BINDING overrides the localhost default and Puma binds every interface.
+# Refuse it before any port probe or rails, the same way an empty -b host
+# is refused: set BINDING to a plain host, or unset it. An unset BINDING
+# is left unset so that localhost default still applies.
+if [ -n "${BINDING+x}" ] && [ -z "$BINDING" ]; then
+  printf 'BINDING is set but empty; set it to a plain host or unset it.\n' >&2
+  exit 1
 fi
 
 # BINDING is the host Rails uses when -b is absent. A URI ("://"), a
