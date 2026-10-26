@@ -68,10 +68,12 @@ module Lakeraven
 
       before_action :authenticate_chart_request!
       before_action :require_patient_scope!
-      before_action :enforce_patient_context!
-      # After the authorization chain, before show loads a patient or any
-      # clinical section. A malformed :dfn never becomes a repository read.
+      # After authentication and Patient scope, before the token compartment
+      # check. A malformed id never reaches enforce_patient_context! and
+      # never becomes a repository read. A well-formed id falls through and
+      # the authorization decision is unchanged.
       before_action :reject_invalid_chart_dfn!
+      before_action :enforce_patient_context!
 
       # ORWPT APPTLST status text -> FHIR Encounter.status
       APPOINTMENT_STATUS = {
@@ -106,23 +108,58 @@ module Lakeraven
 
       # -- Identifier format (#467) ----------------------------------------------
       #
-      # Canonical positive integer via Patient.canonical_dfn (leading zeros
-      # allowed, zero rejected). More than MAX_CHART_DFN_DIGITS digits is
-      # malformed even when canonical_dfn would accept it.
+      # The RAW route segment, never stripped. It must be 1..18 ASCII digits
+      # and Patient.canonical_dfn must resolve to a positive id. Leading zeros
+      # are valid ("007"). Whitespace and control characters are malformed
+      # even though canonical_dfn would strip them. The static alert names the
+      # problem and never echoes the segment.
 
       def reject_invalid_chart_dfn!
         return if chart_dfn_well_formed?
 
         close_patient_context!
-        redirect_to dashboard_path, alert: INVALID_CHART_IDENTIFIER_ALERT
-        # Rack-test callers have no integration `flash` helper. The alert
-        # text is the same static string, not the request segment.
-        response.set_header("X-Message-Flash-Alert", INVALID_CHART_IDENTIFIER_ALERT)
+        note_audit_denial(INVALID_CHART_IDENTIFIER_ALERT)
+        respond_to_invalid_chart_dfn
+      end
+
+      def respond_to_invalid_chart_dfn
+        if fhir_requested?
+          render_invalid_chart_dfn
+        else
+          redirect_to dashboard_path, alert: INVALID_CHART_IDENTIFIER_ALERT
+        end
+      end
+
+      def render_invalid_chart_dfn
+        render json: invalid_chart_dfn_outcome,
+               status: :bad_request,
+               content_type: FHIR_CONTENT_TYPE
+      end
+
+      def invalid_chart_dfn_outcome
+        {
+          resourceType: "OperationOutcome",
+          issue: [ {
+            severity: "error",
+            code: "invalid",
+            diagnostics: INVALID_CHART_IDENTIFIER_ALERT
+          } ]
+        }
       end
 
       def chart_dfn_well_formed?
-        raw = chart_route_dfn.to_s.strip
-        raw.length <= MAX_CHART_DFN_DIGITS && Patient.canonical_dfn(raw).present?
+        raw = raw_chart_dfn_segment
+        return false unless raw.match?(/\A\d{1,#{MAX_CHART_DFN_DIGITS}}\z/)
+
+        Patient.canonical_dfn(raw).present?
+      end
+
+      # Exactly the routed segment. No strip and no presence: a blank-looking
+      # value made of whitespace is still not a record id.
+      def raw_chart_dfn_segment
+        path = request.path_parameters
+        segment = path.key?(:dfn) ? path[:dfn] : path["dfn"]
+        segment.to_s
       end
 
       # PatientRepository.find / PatientGateway.find do not raise a dedicated
