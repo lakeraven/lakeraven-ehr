@@ -577,20 +577,40 @@ class DemoScriptTest < ActiveSupport::TestCase
 
   # Rails reads ENV.fetch("BINDING", "localhost"), so an exported empty
   # BINDING overrides the localhost default and Puma binds every interface
-  # with the demo's auth bypass on. The script must drop it, not forward it.
+  # with the demo's auth bypass on. The script must refuse it like -b '',
+  # not forward it or silently unset it.
   test "an empty BINDING never reaches rails" do
+    install_lsof_argv_recording_stub(@stub_bin)
+    install_ruby_argv_recording_stub(@stub_bin)
+
     port = find_free_port
     tree = build_demo_tree
-    env = demo_env(tree[:rails_log], "PORT" => port.to_s, "BINDING" => "")
+    pidfile = server_pidfile_path(tree)
+    pid_contents = "515151\n"
+    File.write(pidfile, pid_contents)
+    lsof_log = bind_probe_lsof_stub_log_path(tree)
+    ruby_log = bind_probe_ruby_stub_log_path(tree)
+    env = demo_env(
+      tree[:rails_log],
+      "PORT" => port.to_s,
+      "BINDING" => "",
+      "DEMO_TEST_LSOF_STUB_LOG" => lsof_log,
+      "DEMO_TEST_RUBY_STUB_LOG" => ruby_log
+    )
 
-    stdout, _stderr, status = run_demo(tree[:demo_path], env)
+    _stdout, stderr, status = run_demo(tree[:demo_path], env)
 
-    assert_predicate status, :success?, "expected success for BINDING=\"\""
-    read_rails_invocation(tree[:rails_log])
-    binding_log = File.join(File.dirname(tree[:rails_log]), "binding_env.log")
-    assert_equal "unset", File.read(binding_log).strip,
-                 "an empty BINDING must be unset before rails starts"
-    assert_includes stdout, "http://localhost:#{port}/"
+    refute_predicate status, :success?, "expected failure for BINDING=\"\""
+    assert_match(/BINDING/i, stderr, "stderr should name BINDING for BINDING=\"\"")
+    assert_match(/plain host/i, stderr,
+                 "stderr should say to set a plain host for BINDING=\"\"")
+    assert_match(/unset/i, stderr,
+                 "stderr should say to unset BINDING for BINDING=\"\"")
+    refute rails_invoked?(tree[:rails_log]),
+           "fake rails must not run for BINDING=\"\""
+    assert_equal pid_contents, File.read(pidfile),
+                 "server.pid must remain unchanged when BINDING=\"\" is refused"
+    assert_bind_probe_stubs_did_not_run!(lsof_log, ruby_log, 'BINDING=""')
   end
 
   test "forwards allowlisted plain host bindings without embedded port to rails" do
@@ -1038,6 +1058,9 @@ class DemoScriptTest < ActiveSupport::TestCase
   end
 
   test "rejects non-allowlisted CLI arguments without starting rails or running bind probe" do
+    install_lsof_argv_recording_stub(@stub_bin)
+    install_ruby_argv_recording_stub(@stub_bin)
+
     env_port = find_free_port
     pid_path = File.join(Dir.mktmpdir("demo_script_pid_refusal_"), "x.pid")
 
@@ -1059,7 +1082,14 @@ class DemoScriptTest < ActiveSupport::TestCase
 
     refused_forms.each do |form|
       tree = build_demo_tree
-      env = demo_env(tree[:rails_log], "PORT" => env_port.to_s)
+      lsof_log = bind_probe_lsof_stub_log_path(tree)
+      ruby_log = bind_probe_ruby_stub_log_path(tree)
+      env = demo_env(
+        tree[:rails_log],
+        "PORT" => env_port.to_s,
+        "DEMO_TEST_LSOF_STUB_LOG" => lsof_log,
+        "DEMO_TEST_RUBY_STUB_LOG" => ruby_log
+      )
 
       _stdout, stderr, status = run_demo(tree[:demo_path], env, *form)
       form_desc = form.inspect
@@ -1069,6 +1099,7 @@ class DemoScriptTest < ActiveSupport::TestCase
       assert_stderr_lists_accepted_binding_forms(stderr, form_desc)
       refute rails_invoked?(tree[:rails_log]),
              "fake rails must not run for non-allowlisted argv #{form_desc}"
+      assert_bind_probe_stubs_did_not_run!(lsof_log, ruby_log, form_desc)
     end
   ensure
     FileUtils.remove_entry(File.dirname(pid_path)) if pid_path && Dir.exist?(File.dirname(pid_path))
@@ -1169,6 +1200,68 @@ class DemoScriptTest < ActiveSupport::TestCase
     path = File.join(stub_bin, "ruby")
     File.write(path, "#!/bin/sh\necho 'rbenv: version not installed' >&2\nexit 1\n")
     File.chmod(0o755, path)
+  end
+
+  def install_lsof_argv_recording_stub(stub_bin)
+    real_lsof = `command -v lsof 2>/dev/null`.strip
+    path = File.join(stub_bin, "lsof")
+    File.write(
+      path,
+      <<~STUB
+        #!/bin/sh
+        if [ -n "${DEMO_TEST_LSOF_STUB_LOG:-}" ]; then
+          {
+            printf 'lsof'
+            for _a in "$@"; do printf ' %s' "$_a"; done
+            printf '\\n'
+          } >> "${DEMO_TEST_LSOF_STUB_LOG}"
+        fi
+        if [ -n "#{real_lsof}" ] && [ -x "#{real_lsof}" ]; then
+          exec "#{real_lsof}" "$@"
+        fi
+        exit 0
+      STUB
+    )
+    File.chmod(0o755, path)
+  end
+
+  def install_ruby_argv_recording_stub(stub_bin)
+    real_ruby = `command -v ruby 2>/dev/null`.strip
+    path = File.join(stub_bin, "ruby")
+    File.write(
+      path,
+      <<~STUB
+        #!/bin/sh
+        if [ -n "${DEMO_TEST_RUBY_STUB_LOG:-}" ]; then
+          {
+            printf 'ruby'
+            for _a in "$@"; do printf ' %s' "$_a"; done
+            printf '\\n'
+          } >> "${DEMO_TEST_RUBY_STUB_LOG}"
+        fi
+        if [ -n "#{real_ruby}" ] && [ -x "#{real_ruby}" ]; then
+          exec "#{real_ruby}" "$@"
+        fi
+        exit 0
+      STUB
+    )
+    File.chmod(0o755, path)
+  end
+
+  def bind_probe_lsof_stub_log_path(tree)
+    File.join(File.dirname(tree[:rails_log]), "lsof_stub_argv.log")
+  end
+
+  def bind_probe_ruby_stub_log_path(tree)
+    File.join(File.dirname(tree[:rails_log]), "ruby_stub_argv.log")
+  end
+
+  def assert_bind_probe_stubs_did_not_run!(lsof_log, ruby_log, context = nil)
+    suffix = context ? " for #{context}" : ""
+    refute File.exist?(lsof_log) && !File.empty?(lsof_log),
+           "lsof bind probe must not run#{suffix}"
+    refute File.exist?(ruby_log) && !File.empty?(ruby_log),
+           "ruby bind probe must not run#{suffix}"
   end
 
   def build_demo_tree
