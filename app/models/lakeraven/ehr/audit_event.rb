@@ -39,6 +39,12 @@ module Lakeraven
       validates :entity_type, presence: true
       validate :entity_identifier_shape
 
+      # Throttle rows file a SHA-256 of the caller on agent_who_identifier.
+      # Correlation checks also read that digest under this name.
+      def agent_who_id
+        agent_who_identifier
+      end
+
       # A Patient is identified by a DFN — digits, nothing else. Anything
       # else filed under Patient is a reference that points nowhere or, worse,
       # at a different patient.

@@ -6,6 +6,10 @@ module Lakeraven
     # ONC 170.315(g)(10)(iii) - Application registration and EHR launch
     class SmartLaunchController < ActionController::API
       include SmartEndpoints
+      include RateLimitable
+
+      # client_id on this route is an oracle for registered apps (#498).
+      rate_limit only: :show
 
       def show
         unless params[:launch].present? && params[:iss].present?
