@@ -72,6 +72,56 @@ class RateLimitSignInTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "repeated lockouts within a day reach the documented 24h backoff cap and stay there" do
+    attempts = Lakeraven::EHR::LoginThrottle::MAX_ATTEMPTS
+    username = "lindarodriguez"
+    wrong_password = "wrongwrong"
+    cap = Lakeraven::EHR::LoginThrottle::BACKOFF_CAP.to_i
+
+    travel_to Time.zone.parse("2026-10-26 08:00:00") do
+      retry_afters = []
+      6.times do |cycle|
+        attempts.times { post LOGIN, params: { username: username, password: wrong_password } }
+        post LOGIN, params: { username: username, password: wrong_password }
+        assert_response :too_many_requests, "lockout cycle #{cycle + 1} (#498)"
+        retry_afters << response.headers["Retry-After"].to_i
+        travel retry_afters.last.seconds + 1
+      end
+
+      assert_equal cap, retry_afters.last,
+                   "backoff must reach the 24h cap (#498); got #{retry_afters.last}"
+      assert_equal cap, retry_afters[-2],
+                   "backoff must not collapse below the cap once reached (#498)"
+
+      travel 32.hours
+      attempts.times { post LOGIN, params: { username: username, password: wrong_password } }
+      post LOGIN, params: { username: username, password: wrong_password }
+      assert_response :too_many_requests
+      assert_equal cap, response.headers["Retry-After"].to_i,
+                   "after 32h repeated lockouts must stay at the 24h cap, not reset to 30 minutes (#498)"
+    end
+  end
+
+  test "an access code that looks like an IP address still receives progressive backoff" do
+    attempts = Lakeraven::EHR::LoginThrottle::MAX_ATTEMPTS
+    username = "203.0.113.44"
+    wrong_password = "wrongwrong"
+    retry_afters = []
+
+    travel_to Time.zone.parse("2026-10-26 09:00:00") do
+      2.times do
+        attempts.times { post LOGIN, params: { username: username, password: wrong_password } }
+        post LOGIN, params: { username: username, password: wrong_password }
+        assert_response :too_many_requests
+        retry_afters << response.headers["Retry-After"].to_i
+        travel retry_afters.last.seconds + 1
+      end
+
+      assert_operator retry_afters.last, :>, retry_afters.first,
+                      "IP-shaped access codes must still lengthen backoff on repeat lockout (#498)"
+    end
+  end
+
   test "repeated sign-in lockouts leave multiple visible throttle audit rows" do
     attempts = Lakeraven::EHR::LoginThrottle::MAX_ATTEMPTS
 

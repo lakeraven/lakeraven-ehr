@@ -59,3 +59,44 @@ class RateLimitRouteConventionTest < ActiveSupport::TestCase
       "controller rate_limit declarations must register throttled_route_keys (#498):\n#{ghost.join("\n")}"
   end
 end
+
+# lakeraven-ehr#498: throttled routes must actually refuse traffic, not merely register.
+class RateLimitRouteEnforcementTest < ActionDispatch::IntegrationTest
+  include RateLimitTestHelper
+
+  teardown do
+    Lakeraven::EHR::LoginThrottle.reset!
+    Lakeraven::EHR::RateLimit.reset! if Lakeraven::EHR.const_defined?(:RateLimit, false) &&
+      Lakeraven::EHR::RateLimit.respond_to?(:reset!)
+  end
+
+  test "every throttled route returns 429 before authentication at max_requests zero" do
+    Lakeraven::EHR::LoginThrottle.reset!
+
+    with_test_rate_limit(max_requests: 0, window: 5.minutes) do
+      throttled_route_keys.each do |key|
+        spec = sample_request_for_route_key(key)
+        issue_integration_request!(
+          verb: spec[:verb],
+          path: spec[:path],
+          params: spec[:params],
+          headers: spec[:headers],
+          env: integration_request_env(remote_addr: "198.51.100.200")
+        )
+
+        assert_response :too_many_requests,
+                         "#{key} must return 429 before authentication when over limit (#498)"
+        refute_equal 401, response.status,
+                     "#{key} must not reach authentication before rate limiting (#498)"
+      end
+    end
+  end
+
+  test "only sessions may declare login_throttle" do
+    offenders = controllers_declaring_login_throttle - [ "lakeraven/ehr/sessions" ]
+    assert_empty offenders,
+                 "login_throttle: true is only valid on sessions#create (#498); found on: #{offenders.join(", ")}"
+    assert_includes controllers_declaring_login_throttle, "lakeraven/ehr/sessions",
+                    "sessions#create must declare rate_limit (#498)"
+  end
+end

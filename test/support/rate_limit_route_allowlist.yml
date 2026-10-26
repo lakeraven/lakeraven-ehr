@@ -7,7 +7,6 @@ routes:
   # SMART / metadata discovery (no clinical payload)
   - lakeraven/ehr/capability_statements#show
   - lakeraven/ehr/smart_configuration#show
-  - lakeraven/ehr/smart_launch#show
 
   # Login form (GET) and logout — POST login is throttled via LoginThrottle / RateLimit
   - lakeraven/ehr/sessions#new

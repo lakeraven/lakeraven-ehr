@@ -20,7 +20,7 @@ class RateLimitIdentityTest < ActionDispatch::IntegrationTest
   test "one bearer token from several addresses is throttled by identity" do
     setup_smart_auth(scopes: "system/Patient.read system/*.read")
     limit = 2
-    ips = %w[10.0.0.1 10.0.0.2 10.0.0.3]
+    ips = %w[10.0.0.1 10.0.0.2]
 
     with_test_rate_limit(max_requests: limit) do
       ips.each do |ip|
@@ -28,7 +28,7 @@ class RateLimitIdentityTest < ActionDispatch::IntegrationTest
         assert_response :success, "request from #{ip} should succeed under the limit"
       end
 
-      get "/lakeraven-ehr/Patient/1", headers: @headers, env: { "REMOTE_ADDR" => "10.0.0.99" }
+      get "/lakeraven-ehr/Patient/1", headers: @headers, env: { "REMOTE_ADDR" => "10.0.0.3" }
 
       assert_response :too_many_requests,
                        "the same token must be throttled across addresses (#498)"
@@ -39,7 +39,7 @@ class RateLimitIdentityTest < ActionDispatch::IntegrationTest
   test "many bearer tokens from one address are throttled by IP" do
     limit = 2
     ip = "192.0.2.50"
-    tokens = 3.times.map { mint_token }
+    tokens = limit.times.map { mint_token }
 
     with_test_rate_limit(max_requests: limit) do
       tokens.each do |headers|
@@ -50,7 +50,7 @@ class RateLimitIdentityTest < ActionDispatch::IntegrationTest
       get "/lakeraven-ehr/Patient/1", headers: mint_token, env: { "REMOTE_ADDR" => ip }
 
       assert_response :too_many_requests,
-                       "one address must be throttled across tokens (#498)"
+                       "one address must be throttled across tokens after exactly max successes (#498)"
       assert_positive_retry_after!(response)
     end
   end

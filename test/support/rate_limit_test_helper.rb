@@ -136,4 +136,143 @@ module RateLimitTestHelper
     assert_match pattern, event.outcome_desc.to_s,
                  "expected the audit row to describe rate limiting (#498)"
   end
+
+  def rate_limit_key_count!
+    mod = rate_limit_module!
+    unless mod.respond_to?(:key_count)
+      rate_limit_failure! "#{RATE_LIMIT_CONSTANT} must expose .key_count so memory bounds are testable (#498)"
+    end
+    mod.key_count
+  end
+
+  def integration_request_env(remote_addr:, x_forwarded_for: nil)
+    env = { "REMOTE_ADDR" => remote_addr.to_s }
+    env["HTTP_X_FORWARDED_FOR"] = x_forwarded_for if x_forwarded_for
+    env
+  end
+
+  def reset_rate_limit_declarations!
+    return unless Lakeraven::EHR.const_defined?(:RateLimit, false)
+
+    mod = Lakeraven::EHR::RateLimit
+    mod.remove_instance_variable(:@declared_keys) if mod.instance_variable_defined?(:@declared_keys)
+    mod.throttled_route_keys if mod.respond_to?(:throttled_route_keys)
+  end
+
+  # Maps controller#action to a minimal integration request (path, verb, params, headers).
+  def sample_request_for_route_key(route_key)
+    controller, action = route_key.split("#", 2)
+    route = Lakeraven::EHR::Engine.routes.routes.find do |r|
+      r.defaults[:controller] == controller && r.defaults[:action] == action.to_s
+    end
+    rate_limit_failure! "no engine route for #{route_key} (#498)" unless route
+
+    verb = route.verb.to_s.delete_prefix("^").delete_suffix("$").downcase
+    verb = "get" if verb.blank?
+    path = route.path.spec.to_s
+    path = path.gsub("(.:format)", "").gsub("(.format)", "")
+    path = path.gsub(/:\w+/, "1")
+    path = path.gsub(/\(\?:\/([^)]+)\)\?/, "")
+    path = "/lakeraven-ehr#{path}"
+    path = path.gsub("//", "/")
+
+    params = sample_params_for(controller, action)
+    headers = sample_headers_for(controller, action)
+    { verb: verb, path: path, params: params, headers: headers }
+  end
+
+  def sample_params_for(controller, action)
+    case controller
+    when "lakeraven/ehr/sessions"
+      { username: "probe-user", password: "wrong" }
+    when "lakeraven/ehr/backend_services"
+      {
+        grant_type: "client_credentials",
+        client_id: "rate-limit-probe",
+        client_assertion_type: "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+        client_assertion: "probe.jwt",
+        scope: "system/*.read"
+      }
+    when "lakeraven/ehr/patients"
+      action == "create" ? { resourceType: "Patient", name: [ { family: "Probe" } ] } : { name: "Probe" }
+    when "lakeraven/ehr/patient_contexts"
+      {}
+    when "lakeraven/ehr/ccda_imports", "lakeraven/ehr/transitions_of_care"
+      { resourceType: "Bundle", type: "document" }
+    when "lakeraven/ehr/coverage_eligibility_requests"
+      { resourceType: "CoverageEligibilityRequest", status: "active" }
+    when "lakeraven/ehr/exports"
+      { patient_dfn: "1" }
+    when "lakeraven/ehr/measures"
+      { file: "probe.ndjson" }
+    when "lakeraven/ehr/screenings"
+      { instrument: "phq-9" }
+    else
+      {}
+    end
+  end
+
+  def sample_headers_for(controller, _action)
+    return {} if %w[lakeraven/ehr/sessions lakeraven/ehr/backend_services].include?(controller)
+
+    { "Authorization" => "Bearer rate-limit-probe-token" }
+  end
+
+  def issue_integration_request!(verb:, path:, params: {}, headers: {}, env: {})
+    case verb
+    when "get", "head"
+      public_send(verb, path, params: params, headers: headers, env: env)
+    when "post", "put", "patch", "delete"
+      public_send(verb, path, params: params, headers: headers, env: env)
+    else
+      get path, params: params, headers: headers, env: env
+    end
+  end
+
+  def rate_limit_macro_counts_by_controller
+    root = Lakeraven::EHR::Engine.root.join("app/controllers/lakeraven/ehr")
+    counts = Hash.new(0)
+    Dir.children(root).each do |entry|
+      next unless entry.end_with?("_controller.rb")
+
+      path = root.join(entry)
+      source = File.read(path)
+      controller_path = "lakeraven/ehr/#{entry.delete_suffix("_controller.rb")}"
+      counts[controller_path] = source.scan(/rate_limit\s+only:/).length
+    end
+    counts
+  end
+
+  def controllers_declaring_login_throttle
+    root = Lakeraven::EHR::Engine.root.join("app/controllers/lakeraven/ehr")
+    found = []
+    Dir.children(root).each do |entry|
+      next unless entry.end_with?("_controller.rb")
+
+      path = root.join(entry)
+      source = File.read(path)
+      next unless source.match?(/rate_limit\s+only:.*login_throttle:\s*true/)
+
+      found << "lakeraven/ehr/#{entry.delete_suffix("_controller.rb")}"
+    end
+    found.sort
+  end
+
+  def rate_limit_declarations_for(controller_path)
+    path = Lakeraven::EHR::Engine.root.join(
+      "app/controllers/lakeraven/ehr/#{controller_path.delete_prefix("lakeraven/ehr/")}_controller.rb"
+    )
+    return [] unless File.exist?(path)
+
+    File.read(path).scan(/rate_limit\s+only:\s*([^,\n]+)/).flat_map do |capture|
+      actions = capture.first
+      if actions.include?("%i[")
+        actions[/\%i\[(.*?)\]/, 1].split(/\s+/).map(&:to_sym)
+      elsif actions.include?("%w[")
+        actions[/\%w\[(.*?)\]/, 1].split(/\s+/).map(&:to_sym)
+      else
+        [ actions.strip.delete_prefix(":").to_sym ]
+      end
+    end
+  end
 end
