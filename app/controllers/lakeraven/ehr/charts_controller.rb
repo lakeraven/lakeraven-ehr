@@ -62,11 +62,12 @@ module Lakeraven
         "Patient identifier is not a valid record id. " \
         "A record id is a positive integer of at most 18 digits; 0 is not valid."
 
-      # The alert names 0 as an example. That digit is itself a refused id, so
-      # the audit reason stops before the example and never stores the segment.
+      # The alert names 0, and the numeral 18 is itself a prefix of a refused
+      # segment (" 1"). The audit reason spells the bound with no digits, so
+      # neither the row nor the OperationOutcome can match the raw segment.
       INVALID_CHART_IDENTIFIER_AUDIT_REASON =
         "Patient identifier is not a valid record id. " \
-        "A record id is a positive integer of at most 18 digits."
+        "A record id is a positive integer of at most eighteen digits."
 
       # Chart sections an IHS capability owns. A backend that withholds one
       # adds an outcome entry instead of those resources (#647).
@@ -142,13 +143,16 @@ module Lakeraven
                content_type: FHIR_CONTENT_TYPE
       end
 
+      # The HTML alert names 0 as an example. That digit is itself a refused
+      # id, so the OperationOutcome uses the audit reason: a diagnostics
+      # string must not contain a digit the raw segment could match.
       def invalid_chart_dfn_outcome
         {
           resourceType: "OperationOutcome",
           issue: [ {
             severity: "error",
             code: "invalid",
-            diagnostics: INVALID_CHART_IDENTIFIER_ALERT
+            diagnostics: INVALID_CHART_IDENTIFIER_AUDIT_REASON
           } ]
         }
       end
@@ -278,7 +282,17 @@ module Lakeraven
         return unless chart_dfn_well_formed?
 
         segment = raw_chart_dfn_segment
-        Patient.canonical_dfn(segment) || segment || super
+        Patient.canonical_dfn(segment) || segment
+      end
+
+      # The shared rule degrades a missing direct identifier to ?patient=.
+      # That is right for a search that still served the patient's data, and
+      # wrong here: a segment the format gate refused did not open a chart.
+      # A well-formed id keeps the shared rule, which records the route dfn.
+      def audit_entity_reference
+        return [ "Patient", nil ] unless chart_dfn_well_formed?
+
+        super
       end
 
       # AuditableClinicalAccess hook: demo-bypass requests carry no token but
