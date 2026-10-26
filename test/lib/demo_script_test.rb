@@ -613,6 +613,21 @@ class DemoScriptTest < ActiveSupport::TestCase
     assert_bind_probe_stubs_did_not_run!(lsof_log, ruby_log, 'BINDING=""')
   end
 
+  test "an unset BINDING reaches rails unset" do
+    port = find_free_port
+    tree = build_demo_tree
+    env = demo_env(tree[:rails_log], "PORT" => port.to_s)
+
+    stdout, _stderr, status = run_demo(tree[:demo_path], env)
+
+    assert_predicate status, :success?
+    binding_log = File.join(File.dirname(tree[:rails_log]), "binding_env.log")
+    assert_equal "unset\n", File.read(binding_log),
+                 "BINDING must not be exported when absent from the demo environment"
+    assert_includes stdout, "http://localhost:#{port}/",
+                    "stdout URL should use localhost when BINDING is unset"
+  end
+
   test "forwards allowlisted plain host bindings without embedded port to rails" do
     port = find_free_port
 
