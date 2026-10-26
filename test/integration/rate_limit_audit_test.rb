@@ -80,10 +80,38 @@ class RateLimitAuditTest < ActionDispatch::IntegrationTest
       refute_nil event
       refute_includes event.to_json, access_code,
                       "throttle audit must not store the raw access code (#498)"
-      digest = Digest::SHA256.hexdigest(access_code)
-      assert event.outcome_desc.to_s.include?(digest) || event.agent_who_id.to_s.include?(digest),
-             "throttle audit must carry a non-reversible identity digest for correlation (#498)"
+      identifier = event.agent_who_identifier
+      refute_nil identifier, "throttle audit must carry an identity digest (#498 F4)"
+      assert_not_sha256_or_prefix!(identifier, access_code)
     end
+  ensure
+    Lakeraven::EHR::LoginThrottle.reset!
+  end
+
+  test "F4 throttle audit identity digest is HMAC keyed on secret_key_base" do
+    access_code = "clinic-access-hmac-probe"
+    Lakeraven::EHR::LoginThrottle.reset!
+    Lakeraven::EHR::AuditEvent.delete_all
+
+    identifiers = []
+    %w[deployment-alpha-secret deployment-beta-secret].each do |secret|
+      with_secret_key_base(secret) do
+        with_test_rate_limit(max_requests: 0, window: 5.minutes) do
+          post "/lakeraven-ehr/login",
+               params: { username: access_code, password: "wrong" },
+               env: integration_request_env(remote_addr: "198.51.100.63")
+          assert_response :too_many_requests
+          event = Lakeraven::EHR::AuditEvent.order(:id).last
+          refute_nil event
+          identifiers << event.agent_who_identifier
+        end
+      end
+      Lakeraven::EHR::RateLimit.reset! if Lakeraven::EHR::RateLimit.respond_to?(:reset!)
+    end
+
+    assert_equal 2, identifiers.compact.size
+    refute_equal identifiers[0], identifiers[1],
+                 "the same access code must digest differently per deployment secret (#498 F4)"
   ensure
     Lakeraven::EHR::LoginThrottle.reset!
   end

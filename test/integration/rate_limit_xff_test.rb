@@ -139,6 +139,115 @@ class RateLimitXffTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "F5 with no explicit trusted-proxy config RateLimit keys on X-Forwarded-For client behind private REMOTE_ADDR" do
+    limit = 1
+    trusted_proxy = "10.0.0.5"
+    client = "203.0.113.7"
+    assert_empty Lakeraven::EHR::ClientIp.configured_proxies,
+                 "dummy test config must not pin trusted_proxies (#498 F5)"
+
+    with_test_rate_limit(max_requests: limit) do
+      get FHIR_READ,
+          headers: @headers,
+          env: integration_request_env(
+            remote_addr: trusted_proxy,
+            x_forwarded_for: client
+          )
+      refute_equal 429, response.status,
+                    "first request for #{client} behind #{trusted_proxy} should succeed (#498 F5)"
+
+      get FHIR_READ,
+          headers: @headers,
+          env: integration_request_env(
+            remote_addr: trusted_proxy,
+            x_forwarded_for: client
+          )
+      assert_response :too_many_requests,
+                       "must key on #{client}, not #{trusted_proxy}, matching Rails private trust (#498 F5)"
+
+      get FHIR_READ,
+          headers: @headers,
+          env: integration_request_env(
+            remote_addr: trusted_proxy,
+            x_forwarded_for: "198.51.100.200"
+          )
+      refute_equal 429, response.status,
+                    "a different XFF client must not inherit #{client}'s bucket (#498 F5)"
+    end
+  end
+
+  test "F5 LoginThrottle lockout for one XFF client does not lock out another behind the same proxy" do
+    trusted_proxy = "10.0.0.5"
+    first_client = "203.0.113.7"
+    second_client = "198.51.100.200"
+    attempts = Lakeraven::EHR::LoginThrottle::MAX_ATTEMPTS
+    assert_empty Lakeraven::EHR::ClientIp.configured_proxies,
+                 "dummy test config must not pin trusted_proxies (#498 F5)"
+
+    attempts.times do |i|
+      post LOGIN,
+           params: { username: "acct-#{i}", password: "wrong" },
+           env: integration_request_env(
+             remote_addr: trusted_proxy,
+             x_forwarded_for: first_client
+           )
+    end
+    post LOGIN,
+         params: { username: "acct-over", password: "wrong" },
+         env: integration_request_env(
+           remote_addr: trusted_proxy,
+           x_forwarded_for: first_client
+         )
+    assert_response :too_many_requests,
+                     "#{first_client} must throttle behind #{trusted_proxy} (#498 F5)"
+
+    post LOGIN,
+         params: { username: "other-client", password: "wrong" },
+         env: integration_request_env(
+           remote_addr: trusted_proxy,
+           x_forwarded_for: second_client
+         )
+    refute_equal 429, response.status,
+                  "#{second_client} must not share #{first_client}'s IP bucket (#498 F5)"
+  end
+
+  test "F5 trusted proxy right-to-left walk keys on the client not the leftmost spoof entry" do
+    limit = 1
+    trusted_proxy = "10.0.0.5"
+    client = "203.0.113.7"
+    spoof = "198.51.100.250"
+    assert_empty Lakeraven::EHR::ClientIp.configured_proxies,
+                 "dummy test config must not pin trusted_proxies (#498 F5)"
+
+    with_test_rate_limit(max_requests: limit) do
+      get FHIR_READ,
+          headers: @headers,
+          env: integration_request_env(
+            remote_addr: trusted_proxy,
+            x_forwarded_for: "#{spoof}, #{client}"
+          )
+      refute_equal 429, response.status
+
+      get FHIR_READ,
+          headers: @headers,
+          env: integration_request_env(
+            remote_addr: trusted_proxy,
+            x_forwarded_for: "#{spoof}, #{client}"
+          )
+      assert_response :too_many_requests,
+                       "must key on #{client} from XFF spoof,client (#498 F5)"
+
+      get FHIR_READ,
+          headers: @headers,
+          env: integration_request_env(
+            remote_addr: trusted_proxy,
+            x_forwarded_for: spoof
+          )
+      refute_equal 429, response.status,
+                    "leftmost-only XFF parsing would have throttled #{spoof} here (#498 F5)"
+    end
+  end
+
   test "LoginThrottle keys the IP limb on the client behind a trusted proxy" do
     trusted_proxy = "10.0.0.5"
     first_client = "203.0.113.7"

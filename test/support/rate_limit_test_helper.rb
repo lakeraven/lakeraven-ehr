@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+require "base64"
+require "digest"
+
 # Shared helpers for lakeraven-ehr#498 rate-limit defect tests.
 module RateLimitTestHelper
   ALLOWLIST_PATH = File.expand_path("rate_limit_route_allowlist.yml", __dir__).freeze
@@ -256,6 +259,44 @@ module RateLimitTestHelper
       found << "lakeraven/ehr/#{entry.delete_suffix("_controller.rb")}"
     end
     found.sort
+  end
+
+  def unsigned_jwt(payload)
+    header = Base64.urlsafe_encode64('{"alg":"none"}', padding: false)
+    body = Base64.urlsafe_encode64(payload.to_json, padding: false)
+    "#{header}.#{body}.sig"
+  end
+
+  def with_secret_key_base(value)
+    original = Rails.application.secret_key_base
+    Rails.application.config.secret_key_base = value
+    yield
+  ensure
+    Rails.application.config.secret_key_base = original
+  end
+
+  def assert_not_sha256_or_prefix!(identifier, secret)
+    digest = Digest::SHA256.hexdigest(secret.to_s)
+    refute_equal digest, identifier.to_s,
+                 "throttle audit must not store unsalted SHA-256 of the identity (#498 F4)"
+    (1..digest.length).each do |len|
+      next unless identifier.to_s.length == len
+
+      refute_equal digest[0, len], identifier.to_s,
+                   "throttle audit must not store a prefix of unsalted SHA-256 (#498 F4)"
+    end
+  end
+
+  def without_login_throttle_enforcement
+    throttle = Lakeraven::EHR::LoginThrottle
+    original_throttled = throttle.method(:throttled?)
+    original_record = throttle.method(:record_failure)
+    throttle.define_singleton_method(:throttled?) { |*_args| false }
+    throttle.define_singleton_method(:record_failure) { |*_args| nil }
+    yield
+  ensure
+    throttle.define_singleton_method(:throttled?, original_throttled)
+    throttle.define_singleton_method(:record_failure, original_record)
   end
 
   def rate_limit_declarations_for(controller_path)

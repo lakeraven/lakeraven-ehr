@@ -45,16 +45,4 @@ class RateLimitSignInVolumeTest < ActionDispatch::IntegrationTest
       end
     end
   end
-
-  def without_login_throttle_enforcement
-    throttle = Lakeraven::EHR::LoginThrottle
-    original_throttled = throttle.method(:throttled?)
-    original_record = throttle.method(:record_failure)
-    throttle.define_singleton_method(:throttled?) { |*_args| false }
-    throttle.define_singleton_method(:record_failure) { |*_args| nil }
-    yield
-  ensure
-    throttle.define_singleton_method(:throttled?, original_throttled)
-    throttle.define_singleton_method(:record_failure, original_record)
-  end
 end
