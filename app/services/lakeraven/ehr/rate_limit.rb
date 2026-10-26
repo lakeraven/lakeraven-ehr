@@ -5,14 +5,14 @@ module Lakeraven
     # Throttle for every credentialed or clinical route (#498).
     #
     # Keyed on BOTH caller identity and client IP. Identity is the bearer
-    # token, the backend-services client id (or the assertion's iss when no
-    # client id was sent), the session user, or the sign-in access code.
-    # Either limb refuses the request: a token spread across addresses still
-    # trips, and one address spraying tokens still trips. The IP limb's
-    # budget is exactly max_requests. The identity limb matches that budget
-    # once the configured limit is at least 2. A limit of 1 keeps a floor of
-    # 2 on the identity limb so two clients behind one trusted proxy keep
-    # separate address buckets when they present one bearer.
+    # token, the backend-services (client_id or iss, IP) pair, the session
+    # user, or the sign-in access code. Either limb refuses the request: a
+    # token spread across addresses still trips, and one address spraying
+    # tokens still trips. The IP limb's budget is max_requests. An access
+    # code uses that same budget, so one code cannot be replayed across
+    # addresses once it is spent. A bearer keeps a floor of two: at a budget
+    # of one the IP limb already refuses the repeat, and that single hit must
+    # not spend the bucket of another client presenting the same token.
     #
     # The counters live in this process. A multi-process deployment must back
     # this with a shared cache — another Puma worker does not see these hits,
@@ -21,9 +21,12 @@ module Lakeraven
     #
     # Check-and-record in permit? holds a mutex so concurrent grants cannot
     # exceed the limit. A refused request does not mint a counter key. Empty
-    # and expired keys are dropped, a sweep runs every SWEEP_EVERY calls, and
-    # max_keys evicts the oldest entries. At the cap the limiter keeps
-    # refusing; it does not fail open.
+    # and expired keys are dropped, and a sweep runs every SWEEP_EVERY calls.
+    # max_keys bounds the hot IP table. make_room! drops expired keys first,
+    # then the live hot keys with the fewest hits. A key at or over its limit
+    # is never evicted. Identity counters sit beside that table until they
+    # expire, so eviction cannot reopen a spent code or token. If a new IP
+    # key still will not fit, permit? refuses.
     class RateLimit
       DEFAULT_MAX_REQUESTS = 300
       DEFAULT_WINDOW = 1.minute
@@ -87,7 +90,7 @@ module Lakeraven
         end
 
         def key_count
-          mutex.synchronize { hits.size }
+          mutex.synchronize { hot.size + retained.size }
         end
 
         def sweep_expired!
@@ -112,8 +115,16 @@ module Lakeraven
           @declared_keys ||= []
         end
 
-        def hits
-          @hits ||= {}
+        def buckets
+          @buckets ||= {}
+        end
+
+        def hot
+          @hot ||= {}
+        end
+
+        def retained
+          @retained ||= {}
         end
 
         def audited
@@ -121,8 +132,11 @@ module Lakeraven
         end
 
         def clear_counters!
-          @hits = {}
+          @buckets = {}
+          @hot = {}
+          @retained = {}
           @audited = {}
+          @seq = 0
           @calls = 0
         end
 
@@ -135,15 +149,22 @@ module Lakeraven
         end
 
         def grant?(identity, ip, now)
+          drop_expired!(now)
           slots = slots_for(identity, ip)
-          return false if slots.any? { |slot| live_count(slot[:key], now) >= slot[:limit] }
+          if slots.any? { |slot| fresh_count(slot[:key], now) >= slot[:limit] }
+            return refuse_slots!(slots, now)
+          end
 
-          admit!(slots, now)
+          additions = hot_additions(slots, now)
+          return false unless make_room!(protected_keys(slots, additions), additions, now)
+
+          slots.each { |slot| record_slot!(slot, now) }
+          true
         end
 
         def slots_for(identity, ip)
           list = []
-          list << limb("id", identity, identity_limit) if identity.present?
+          list << limb("id", identity, identity_limit_for(identity)) if identity.present?
           list << limb("ip", ip.presence || "unknown", max_requests)
           list
         end
@@ -152,58 +173,159 @@ module Lakeraven
           { key: "#{kind}:#{digest(value)}", limit: limit }
         end
 
-        # The IP limb already stops a second hit from the same address at a
-        # budget of one. The identity floor stays at two so that single hit
-        # does not spend the bucket of another address sharing the bearer.
-        # From two upward the limbs are the same number, so a token rotated
-        # across addresses stops on the request after max_requests. A zero
-        # budget never grants: the IP limb refuses before a hit is stored.
-        def identity_limit
+        # Access codes spend max_requests across addresses. Every other
+        # identity keeps a floor of two so one hit at a budget of one does
+        # not exhaust a bearer shared by another address. A zero IP budget
+        # still refuses before a hit is stored.
+        def identity_limit_for(identity)
+          return max_requests if identity.to_s.start_with?("access:")
+
           [ max_requests, 2 ].max
+        end
+
+        def refuse_slots!(slots, now)
+          ip_slot = slots.find { |slot| !identity_slot?(slot) }
+          retain_blocked_ip!(ip_slot[:key], now) if ip_slot
+          false
         end
 
         # Missing keys contribute zero and are not created. A refusal must
         # not mint a bucket for a bearer or address we have not already counted.
+        # Stamps are appended in order under the mutex, so a live oldest
+        # stamp means the whole bucket is inside the window. Scanning every
+        # stamp on every check made a 1500-grant flood outlive the window
+        # and admit a second wave.
+        def fresh_count(key, now)
+          entry = buckets[key]
+          return 0 unless entry
+
+          prune_stamps!(entry[:stamps], now)
+          return entry[:stamps].size unless entry[:stamps].empty?
+
+          forget!(key)
+          0
+        end
+
+        def prune_stamps!(stamps, now)
+          threshold = cutoff(now)
+          return if stamps.empty? || stamps.first > threshold
+
+          expired = stamps.bsearch_index { |at| at > threshold } || stamps.size
+          stamps.shift(expired)
+        end
+
         def live_count(key, now)
-          stamps = hits[key]
-          return 0 unless stamps
-
-          fresh = stamps.select { |at| at > cutoff(now) }
-          if fresh.empty?
-            hits.delete(key)
-            0
-          else
-            hits[key] = fresh
-            fresh.size
-          end
+          fresh_count(key, now)
         end
 
-        def admit!(slots, now)
-          keys = slots.map { |slot| slot[:key] }
-          needed = keys.count { |key| !hits.key?(key) }
-          return false unless make_room!(keys, needed)
-
-          keys.each { |key| record_hit!(key, now) }
-          true
+        def hot_additions(slots, now)
+          slots.filter_map { |slot| addition_key(slot, now) }
         end
 
-        # Evict the oldest key that this request does not itself need. If the
-        # only way to make room is to forget a key we just measured, refuse.
-        def make_room!(protected_keys, needed)
-          return true if hits.size + needed <= max_keys
+        # Identity counters are not hot keys. A limit of one saturates a
+        # bearer-floor identity only on a later address, and parking that
+        # first hit in the IP table would fill max_keys before the next
+        # address is admitted. Spent identities stay in buckets until expiry.
+        def addition_key(slot, _now)
+          return if identity_slot?(slot)
 
-          while hits.size + needed > max_keys
-            victim = hits.each_key.find { |key| !protected_keys.include?(key) }
+          key = slot[:key]
+          key unless hot.key?(key) || retained.key?(key)
+        end
+
+        def protected_keys(slots, additions)
+          existing = slots.map { |slot| slot[:key] }.select { |key| buckets.key?(key) }
+          (existing + additions).uniq
+        end
+
+        def identity_slot?(slot)
+          slot[:key].start_with?("id:")
+        end
+
+        # Expired keys first, then the live hot keys with the fewest hits.
+        # A key at or over its limit is not a victim. If nothing under the
+        # limit can be spared, the new key is refused.
+        def make_room!(protected, additions, now)
+          drop_expired!(now)
+          needed = additions.size
+          return true if hot.size + needed <= max_keys
+
+          while hot.size + needed > max_keys
+            victim = eviction_victim(protected, now)
             return false unless victim
 
-            hits.delete(victim)
+            forget!(victim)
           end
           true
         end
 
-        def record_hit!(key, now)
-          bucket = hits[key] ||= []
-          bucket << now
+        def eviction_victim(protected, now)
+          ranked = hot.keys.filter_map { |key| victim_rank(key, protected, now) }
+          ranked.min&.last
+        end
+
+        def victim_rank(key, protected, now)
+          return if protected.include?(key)
+
+          count = fresh_count(key, now)
+          entry = buckets[key]
+          return if entry.nil? || count <= 0 || count >= entry[:limit]
+
+          [ count, entry[:ord], key ]
+        end
+
+        # Saturated IP, refused while the hot table still has a free slot:
+        # keep the counter, but outside the hot table, so the next new key
+        # cannot reopen this address. A full hot table is left alone and the
+        # new key is refused.
+        def retain_blocked_ip!(key, now)
+          return unless hot.key?(key)
+          return unless saturated_entry?(key, now)
+          return unless hot.size < max_keys
+          return if retained.size >= max_keys
+
+          hot.delete(key)
+          retained[key] = true
+        end
+
+        def saturated_entry?(key, now)
+          entry = buckets[key]
+          entry && fresh_count(key, now) >= entry[:limit]
+        end
+
+        def record_slot!(slot, now)
+          if identity_slot?(slot)
+            record_identity!(slot[:key], now, slot[:limit])
+          else
+            record_ip!(slot[:key], now, slot[:limit])
+          end
+        end
+
+        def record_identity!(key, now, limit)
+          write_stamp!(key, now, limit)
+        end
+
+        def record_ip!(key, now, limit)
+          write_stamp!(key, now, limit)
+          hot[key] = true unless retained.key?(key)
+        end
+
+        def write_stamp!(key, now, limit)
+          entry = (buckets[key] ||= new_entry(limit))
+          entry[:limit] = limit
+          entry[:stamps] << now
+          entry
+        end
+
+        def new_entry(limit)
+          @seq = @seq.to_i + 1
+          { stamps: [], limit: limit, ord: @seq }
+        end
+
+        def forget!(key)
+          buckets.delete(key)
+          hot.delete(key)
+          retained.delete(key)
         end
 
         def claim_audit!(identity, ip, now)
@@ -230,12 +352,13 @@ module Lakeraven
         end
 
         def sweep_expired_unlocked!(now)
+          drop_expired!(now)
           threshold = cutoff(now)
-          hits.delete_if do |_key, stamps|
-            stamps.select! { |at| at > threshold }
-            stamps.empty?
-          end
           audited.delete_if { |_key, at| at <= threshold }
+        end
+
+        def drop_expired!(now)
+          buckets.keys.each { |key| fresh_count(key, now) }
         end
 
         def cutoff(now)

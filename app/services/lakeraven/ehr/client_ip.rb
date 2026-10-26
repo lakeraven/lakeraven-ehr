@@ -9,27 +9,34 @@ module Lakeraven
     #
     # Walks REMOTE_ADDR and X-Forwarded-For from the right — the hop closest
     # to this process first — and returns the first address that is not a
-    # configured trusted proxy. With no trusted proxies configured, the
-    # client is REMOTE_ADDR and X-Forwarded-For is ignored. A caller who
-    # can set that header must not be able to choose a fresh throttle bucket.
+    # trusted proxy. A public REMOTE_ADDR is that address, so a caller who
+    # can set X-Forwarded-For must not be able to choose a fresh bucket.
     #
-    # Deployment requirement: configure trusted proxies
-    # (Rails config.action_dispatch.trusted_proxies) when this process sits
-    # behind a load balancer. Until that list is set, every user shares the
-    # balancer's address and a forged X-Forwarded-For is not believed.
+    # With no explicit list, the default is Rails'
+    # ActionDispatch::RemoteIp::TRUSTED_PROXIES (loopback and private ranges).
+    # A process behind a proxy in those ranges therefore keys on the client
+    # in X-Forwarded-For. config.action_dispatch.trusted_proxies replaces
+    # that default when an operator needs a narrower or wider set.
+    # LoginThrottle sees the same address: SessionsController passes it in.
     module ClientIp
       module_function
 
       def resolve(request)
         remote = header(request, "REMOTE_ADDR")
-        proxies = configured_proxies
-        return present(remote) if proxies.empty?
-
-        present(untrusted_hop(remote, forwarded_for(request), proxies) || remote)
+        present(untrusted_hop(remote, forwarded_for(request), effective_proxies) || remote)
       end
 
+      # The raw operator list. Empty means "no explicit config", not "trust
+      # nobody": resolve falls back to Rails' private-range defaults.
       def configured_proxies
         Array(Rails.application.config.action_dispatch.trusted_proxies).compact
+      end
+
+      def effective_proxies
+        configured = configured_proxies
+        return configured if configured.any?
+
+        ActionDispatch::RemoteIp::TRUSTED_PROXIES
       end
 
       def forwarded_for(request)

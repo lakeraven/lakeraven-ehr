@@ -2,6 +2,7 @@
 
 require "base64"
 require "json"
+require "openssl"
 
 module Lakeraven
   module EHR
@@ -20,6 +21,9 @@ module Lakeraven
       extend ActiveSupport::Concern
 
       FHIR_THROTTLE_TYPE = "application/fhir+json"
+      # Prefix of the HMAC-SHA256 hex digest. Fixed length so a row never
+      # stores the raw code and never stores a plain SHA256 of it.
+      AUDIT_DIGEST_PREFIX = 32
 
       class_methods do
         def rate_limit(only:, login_throttle: false)
@@ -61,8 +65,23 @@ module Lakeraven
         ip = ClientIp.resolve(request)
         return if RateLimit.permit?(identity: principal&.dig(:key), ip: ip)
 
+        # LoginThrottle refuses inside create, after terminate_session!.
+        # This callback runs first, so a RateLimit 429 has to end the previous
+        # session itself or the workstation stays signed in.
+        terminate_sign_in_session!
         rate_limit_audit!(principal, ip)
         rate_limit_render!
+      end
+
+      def terminate_sign_in_session!
+        return unless sign_in_request?
+        return unless respond_to?(:terminate_session!, true)
+
+        terminate_session!
+      end
+
+      def sign_in_request?
+        controller_path == "lakeraven/ehr/sessions" && action_name == "create"
       end
 
       def rate_limit_audit!(principal, ip)
@@ -95,14 +114,18 @@ module Lakeraven
         }
       end
 
-      # SHA-256 of the raw identity (token, access code, or client id). The
-      # hex is a non-reversible prefix for correlation; the secret itself
-      # never lands on the row.
+      # HMAC-SHA256 of the raw identity, keyed on the app secret and truncated
+      # to a fixed prefix. A plain SHA-256 of the code or token is the same on
+      # every deployment, so it is not a credential digest we can store.
       def rate_limit_identity_digest(principal)
         secret = principal&.dig(:secret)
         return if secret.blank?
 
-        Digest::SHA256.hexdigest(secret)
+        OpenSSL::HMAC.hexdigest("SHA256", rate_limit_hmac_key, secret)[0, AUDIT_DIGEST_PREFIX]
+      end
+
+      def rate_limit_hmac_key
+        Rails.application.secret_key_base.to_s
       end
 
       def rate_limit_audit_action
@@ -145,8 +168,12 @@ module Lakeraven
       def rate_limit_principal
         if backend_services_token?
           token_principal
+        elsif sign_in_request?
+          # The submitted access code, never a Bearer header. A junk
+          # Authorization on POST /login must not mint a fresh bucket.
+          access_code_principal
         else
-          bearer_principal || access_code_principal || session_principal
+          bearer_principal || session_principal
         end
       end
 
@@ -154,14 +181,16 @@ module Lakeraven
         controller_path == "lakeraven/ehr/backend_services" && action_name == "token"
       end
 
-      # client_id, or the assertion's iss when client_id was not sent.
+      # (client_id or iss, IP). Since #496 an unverified assertion cannot
+      # mint tokens, a global client limb only offers a lockout DoS: any
+      # address that can name the victim's client_id would spend that budget.
       # The payload is decoded only to read iss — the signature is not
       # checked, and the assertion string is never the throttle identity.
       def token_principal
-        client_id = rate_limit_string(:client_id)
-        return rate_limit_named("client", client_id) if client_id
+        client = rate_limit_string(:client_id) || jwt_issuer(rate_limit_string(:client_assertion))
+        return if client.blank?
 
-        rate_limit_named("client", jwt_issuer(rate_limit_string(:client_assertion)))
+        rate_limit_named("client", "#{client}@#{ClientIp.resolve(request)}")
       end
 
       def bearer_principal
