@@ -135,8 +135,21 @@ module Lakeraven
 
       # AuditableClinicalAccess records entity_type from this; the chart is a
       # Patient-centric aggregate, so audit it against Patient + the dfn.
+      # The dfn is the route segment. `params` also carries the query string,
+      # so `?id=` or `?dfn=` must not name a record this chart did not open.
       def fhir_resource_type
         "Patient"
+      end
+
+      # The route may say "01". The chart shows the patient the repository
+      # resolves, and the audit row names that same canonical dfn.
+      def direct_audit_identifier
+        Patient.canonical_dfn(chart_route_dfn) || chart_route_dfn || super
+      end
+
+      def chart_route_dfn
+        path = request.path_parameters
+        path[:dfn].presence || path["dfn"].presence
       end
 
       # AuditableClinicalAccess hook: demo-bypass requests carry no token but
@@ -162,7 +175,7 @@ module Lakeraven
         dfn = @patient.dfn.to_s
         @conditions    = readable?("Condition") ? build_conditions(dfn) : []
         @medications   = readable?("MedicationRequest") ? build_medications(dfn) : []
-        @allergies     = readable?("AllergyIntolerance") ? build_allergies(dfn) : []
+        @allergies     = build_allergies(dfn)
         # Through the seam, like the FHIR search: converting the raw vitals here
         # would stamp this patient's DFN over whatever a row stated, and would
         # omit a configured supplemental provider's rows from the chart while
@@ -264,8 +277,21 @@ module Lakeraven
       # disagree about the same wire row -- they previously read different keys
       # for the reaction -- and so a configured supplemental provider's rows are
       # in the chart rather than only in the search.
+      #
+      # Not `safe`. That helper turns a raise and a real [] into the same [],
+      # and the banner then cannot tell "not loaded" from "none recorded".
+      # Other sections still use `safe`.
       def build_allergies(dfn)
-        safe { SupplementalClinicalResources.merged_allergy_intolerances_for_patient(dfn) } || []
+        @allergy_source = chart_allergy_source(dfn)
+        @allergy_source.records
+      end
+
+      def chart_allergy_source(dfn)
+        return AllergySource.unauthorized unless readable?("AllergyIntolerance")
+
+        AllergySource.fetch(log_label: "[chart]") do
+          SupplementalClinicalResources.merged_allergy_intolerances_for_patient(dfn)
+        end
       end
 
       # ORQQAL LIST (the allergy RPC) returns ALLERGEN^REACTION^SEVERITY with no
@@ -482,7 +508,19 @@ module Lakeraven
         return refuse_unfiltered_fhir_egress unless bundle
 
         assign_chart_from_bundle(bundle)
+        assign_patient_banner
         render :show, layout: false
+      end
+
+      # The banner and the allergy sections both read the filtered bundle.
+      # Source status is what tells a withheld list from a genuinely empty one.
+      def assign_patient_banner
+        @allergy_list_status = chart_allergy_status
+        @patient_banner = PatientBanner.for_chart(@patient, @allergy_list_status)
+      end
+
+      def chart_allergy_status
+        @allergy_source.to_list_status(@allergies.map(&:display_allergen))
       end
 
       def assign_chart_from_bundle(bundle)
@@ -557,10 +595,12 @@ module Lakeraven
       end
 
       def allergy_from_fhir(resource)
+        code = fhir_field(resource, "code")
         reaction = fhir_first(fhir_field(resource, "reaction"))
         manifestation = fhir_first(fhir_field(reaction, "manifestation"))
         AllergyIntolerance.new(
-          allergen: codeable_text(fhir_field(resource, "code")),
+          allergen: codeable_text(code),
+          allergen_code: fhir_coding_code(code),
           reaction: fhir_field(manifestation, "text"),
           severity: fhir_field(reaction, "severity")
         )
