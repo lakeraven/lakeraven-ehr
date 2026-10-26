@@ -153,6 +153,25 @@ module UrlPatientContextTestHelper
     refute_includes desc, segment, "raw malformed id must not be stored in outcome_desc"
   end
 
+  # ChartsController#direct_audit_identifier is nil when the format gate refuses
+  # the route segment; AuditableClinicalAccess must not then treat `?patient=`
+  # as the chart that was opened (unlike a patient-scoped FHIR search where
+  # a garbage ?id= degrades to the patient scope).
+  def get_chart_with_patient_query!(path, patient:)
+    get path, params: { patient: patient }
+  end
+
+  def assert_malformed_chart_dfn_audit_refusal_ignores_patient_query!(patient_scope:, segment: MALFORMED_CHART_SEGMENT)
+    assert_malformed_chart_dfn_audit_refusal!(segment: segment)
+    event = Lakeraven::EHR::AuditEvent.order(:id).last
+    scoped_dfn = patient_scope.to_s.delete_prefix("Patient/")
+    refute_equal scoped_dfn, event.entity_identifier,
+                 "refused malformed chart id must not be audited against ?patient=#{patient_scope} " \
+                 "(entity_type=#{event.entity_type.inspect} entity_identifier=#{event.entity_identifier.inspect})"
+    refute_equal [ "Patient", scoped_dfn ], [ event.entity_type, event.entity_identifier ],
+                 "?patient= must not name a record this chart did not open"
+  end
+
   # URL-derived context: the chart and banner reflect the route dfn, not session.
   def assert_chart_derives_patient_from_url!(dfn)
     resp = current_response

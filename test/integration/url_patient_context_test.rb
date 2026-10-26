@@ -208,6 +208,76 @@ class UrlPatientContextTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "well-formed chart with ?patient= audits the route dfn, not the query patient" do
+    with_demo_clinical_seeds do
+      travel_to Time.zone.local(2026, 10, 17, 12, 0, 0) do
+        sign_in_clinician!
+        open_patient_context!(1)
+        assert_equal "1", session_open_patient_dfn
+        Lakeraven::EHR::AuditEvent.delete_all
+
+        get_chart_with_patient_query!(chart_path_for(1), patient: "2")
+
+        assert_response :success
+        assert_chart_derives_patient_from_url!(1)
+        event = Lakeraven::EHR::AuditEvent.order(:id).last
+        refute_nil event, "well-formed chart read must leave an audit row"
+        assert_equal [ "Patient", "1" ], [ event.entity_type, event.entity_identifier ],
+                     "?patient= must not name a record this chart did not open"
+        refute_equal "2", event.entity_identifier
+      end
+    end
+  end
+
+  # When direct_audit_identifier is nil, audit_entity_reference must not fall back
+  # to ?patient= — the query string did not open a chart for that patient.
+  MALFORMED_CHART_REFUSAL_WITH_PATIENT_QUERY = [
+    { label: "zero", path: -> { chart_path_for("0") }, patient: "2", segment: "0" },
+    { label: "letters", path: -> { chart_path_for("abc") }, patient: "2", segment: "abc" },
+    {
+      label: "19-digit id",
+      path: -> { chart_path_for("9" * 19) },
+      patient: "Patient/2",
+      segment: "9" * 19
+    },
+    {
+      label: "percent-encoded leading space",
+      path: -> { chart_path_for_decoded_segment(" 1") },
+      patient: "2",
+      segment: " 1"
+    }
+  ].freeze
+
+  MALFORMED_CHART_REFUSAL_WITH_PATIENT_QUERY.each do |example|
+    test "malformed chart id with ?patient= does not audit that patient for #{example[:label]}" do
+      with_demo_clinical_seeds do
+        sign_in_clinician!
+        open_patient_context!(1)
+        Lakeraven::EHR::AuditEvent.delete_all
+
+        get_chart_with_patient_query!(instance_exec(&example[:path]), patient: example[:patient])
+
+        assert_redirected_to_chart_search!
+        assert_malformed_chart_dfn_audit_refusal_ignores_patient_query!(
+          patient_scope: example[:patient],
+          segment: example[:segment]
+        )
+      end
+    end
+  end
+
+  test "malformed chart id .json with ?patient= does not audit that patient" do
+    with_demo_clinical_seeds do
+      headers = user_chart_read_headers
+      Lakeraven::EHR::AuditEvent.delete_all
+
+      get "#{MOUNT}/patients/0.json", params: { patient: "2" }, headers: headers
+
+      assert_malformed_chart_fhir_refusal!(segment: "0")
+      assert_malformed_chart_dfn_audit_refusal_ignores_patient_query!(patient_scope: "2", segment: "0")
+    end
+  end
+
   test "leading zeros on chart id are valid format and do not clear context via redirect" do
     with_demo_clinical_seeds do
       sign_in_clinician!
