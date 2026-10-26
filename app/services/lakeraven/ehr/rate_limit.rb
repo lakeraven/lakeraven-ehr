@@ -20,18 +20,25 @@ module Lakeraven
     # store, and a host that never configured one does not have one either).
     #
     # Check-and-record in permit? holds a mutex so concurrent grants cannot
-    # exceed the limit. A refused request does not mint a counter key. Empty
-    # and expired keys are dropped, and a sweep runs every SWEEP_EVERY calls.
-    # max_keys bounds the hot IP table. make_room! drops expired keys first,
-    # then the live hot keys with the fewest hits. A key at or over its limit
-    # is never evicted. Identity counters sit beside that table until they
-    # expire, so eviction cannot reopen a spent code or token. If a new IP
-    # key still will not fit, permit? refuses.
+    # exceed the limit. A refused request does not mint a counter key.
+    # permit? prunes only that request's keys. Expired keys are swept every
+    # SWEEP_EVERY calls, a bounded batch at a time; sweep_expired! walks
+    # the rest. max_keys counts every stored bucket: IP, identity, and the
+    # backend-services (client, IP) pair, which is stored as an identity.
+    # On a full table the victim is the lightest under-limit key in a
+    # bounded random sample. Expired keys in that sample are dropped. A
+    # key at or over its limit is never evicted, so a spent code or token
+    # is not reopened. If the sample has no IP victim, the new IP is
+    # refused. A saturated IP can be parked outside the hot table while
+    # that table still has room, so the address stays spent.
     class RateLimit
       DEFAULT_MAX_REQUESTS = 300
       DEFAULT_WINDOW = 1.minute
       DEFAULT_MAX_KEYS = 10_000
       SWEEP_EVERY = 64
+      SWEEP_BATCH = 64
+      EVICT_SAMPLE = 32
+      EVICT_TRIES = 4
       AUDIT_DESCRIPTION = "request throttled"
 
       @mutex = Mutex.new
@@ -78,7 +85,7 @@ module Lakeraven
         def permit?(identity:, ip:)
           mutex.synchronize do
             now = Time.current
-            sweep_if_due!(now)
+            note_call!(now)
             grant?(identity, ip.to_s, now)
           end
         end
@@ -91,6 +98,11 @@ module Lakeraven
 
         def key_count
           mutex.synchronize { hot.size + retained.size }
+        end
+
+        # Every stored bucket: IP, identity, and parked saturated keys.
+        def bucket_count
+          mutex.synchronize { buckets.size }
         end
 
         def sweep_expired!
@@ -136,8 +148,11 @@ module Lakeraven
           @hot = {}
           @retained = {}
           @audited = {}
+          @order = []
+          @key_index = {}
           @seq = 0
           @calls = 0
+          @cursor = 0
         end
 
         def current_window
@@ -149,17 +164,33 @@ module Lakeraven
         end
 
         def grant?(identity, ip, now)
-          drop_expired!(now)
           slots = slots_for(identity, ip)
-          if slots.any? { |slot| fresh_count(slot[:key], now) >= slot[:limit] }
-            return refuse_slots!(slots, now)
-          end
+          return refuse_slots!(slots, now) if over_limit?(slots, now)
 
-          additions = hot_additions(slots, now)
-          return false unless make_room!(protected_keys(slots, additions), additions, now)
+          ip_add = additions_for(slots, :ip)
+          id_add = additions_for(slots, :id)
+          protected = slot_keys(slots)
+          return false unless hot_room!(ip_add, protected, now)
 
-          slots.each { |slot| record_slot!(slot, now) }
+          kept = keep_identities!(id_add, ip_add, protected, now)
+          record_kept!(slots, kept, now)
           true
+        end
+
+        def over_limit?(slots, now)
+          slots.any? { |slot| fresh_count(slot[:key], now) >= slot[:limit] }
+        end
+
+        def additions_for(slots, kind)
+          slots.filter_map { |slot| slot[:key] if slot_kind(slot) == kind && !buckets.key?(slot[:key]) }
+        end
+
+        def slot_kind(slot)
+          identity_slot?(slot) ? :id : :ip
+        end
+
+        def slot_keys(slots)
+          slots.map { |slot| slot[:key] }
         end
 
         def slots_for(identity, ip)
@@ -218,60 +249,107 @@ module Lakeraven
           fresh_count(key, now)
         end
 
-        def hot_additions(slots, now)
-          slots.filter_map { |slot| addition_key(slot, now) }
-        end
-
-        # Identity counters are not hot keys. A limit of one saturates a
-        # bearer-floor identity only on a later address, and parking that
-        # first hit in the IP table would fill max_keys before the next
-        # address is admitted. Spent identities stay in buckets until expiry.
-        def addition_key(slot, _now)
-          return if identity_slot?(slot)
-
-          key = slot[:key]
-          key unless hot.key?(key) || retained.key?(key)
-        end
-
-        def protected_keys(slots, additions)
-          existing = slots.map { |slot| slot[:key] }.select { |key| buckets.key?(key) }
-          (existing + additions).uniq
-        end
-
         def identity_slot?(slot)
           slot[:key].start_with?("id:")
         end
 
-        # Expired keys first, then the live hot keys with the fewest hits.
-        # A key at or over its limit is not a victim. If nothing under the
-        # limit can be spared, the new key is refused.
-        def make_room!(protected, additions, now)
-          drop_expired!(now)
-          needed = additions.size
-          return true if hot.size + needed <= max_keys
+        def identity_key?(key)
+          key.start_with?("id:")
+        end
 
-          while hot.size + needed > max_keys
-            victim = eviction_victim(protected, now)
+        # Hot IP slots only. One bounded sample per try: drop expired keys in
+        # that sample, otherwise the lightest live hot key under its limit.
+        # No qualifying victim refuses the new IP.
+        def hot_room!(ip_add, protected, now)
+          needed = ip_add.size
+          EVICT_TRIES.times do
+            return true if hot_fits?(needed)
+
+            keys = sample_keys
+            release_expired!(keys, protected, now)
+            return true if hot_fits?(needed)
+
+            victim = lightest_key(keys, protected, now, :hot)
             return false unless victim
 
             forget!(victim)
           end
-          true
+          hot_fits?(needed)
         end
 
-        def eviction_victim(protected, now)
-          ranked = hot.keys.filter_map { |key| victim_rank(key, protected, now) }
-          ranked.min&.last
+        def hot_fits?(needed)
+          hot.size + needed <= max_keys
         end
 
-        def victim_rank(key, protected, now)
-          return if protected.include?(key)
+        # Identity buckets share max_keys with IP buckets. Evict an under-limit
+        # identity from the sample. If the sample has none, the new identity
+        # is not stored; a new IP that already fit in the hot table is still
+        # recorded so a parked saturated address does not reopen.
+        def keep_identities!(id_add, ip_add, protected, now)
+          pending = id_add.dup
+          EVICT_TRIES.times do
+            return pending if total_fits?(ip_add, pending)
+
+            keys = sample_keys
+            release_expired!(keys, protected, now)
+            return pending if total_fits?(ip_add, pending)
+
+            victim = lightest_key(keys, protected, now, :id)
+            if victim
+              forget!(victim)
+            else
+              pending.pop
+              return pending
+            end
+          end
+          trim_identities!(pending, ip_add)
+        end
+
+        def trim_identities!(pending, ip_add)
+          pending.pop while pending.any? && !total_fits?(ip_add, pending)
+          pending
+        end
+
+        def total_fits?(ip_add, id_add)
+          buckets.size + ip_add.size + id_add.size <= max_keys
+        end
+
+        def release_expired!(keys, protected, now)
+          keys.each { |key| fresh_count(key, now) unless protected.include?(key) }
+        end
+
+        def lightest_key(keys, protected, now, kind)
+          best = nil
+          keys.each do |key|
+            rank = victim_rank(key, protected, now, kind)
+            best = rank if rank && (best.nil? || (rank <=> best).negative?)
+          end
+          best&.last
+        end
+
+        def victim_rank(key, protected, now, kind)
+          return if skip_victim?(key, protected, kind)
 
           count = fresh_count(key, now)
           entry = buckets[key]
           return if entry.nil? || count <= 0 || count >= entry[:limit]
 
           [ count, entry[:ord], key ]
+        end
+
+        def skip_victim?(key, protected, kind)
+          return true if protected.include?(key)
+          return !hot.key?(key) if kind == :hot
+
+          !identity_key?(key)
+        end
+
+        def sample_keys
+          n = order.size
+          return [] if n.zero?
+          return order.dup if n <= EVICT_SAMPLE
+
+          order.sample(EVICT_SAMPLE)
         end
 
         # Saturated IP, refused while the hot table still has a free slot:
@@ -293,6 +371,18 @@ module Lakeraven
           entry && fresh_count(key, now) >= entry[:limit]
         end
 
+        def record_kept!(slots, kept_ids, now)
+          allowed = kept_ids.each_with_object({}) { |key, map| map[key] = true }
+          slots.each { |slot| record_slot!(slot, now) if keep_slot?(slot, allowed) }
+        end
+
+        def keep_slot?(slot, allowed)
+          return true unless identity_slot?(slot)
+          return true if buckets.key?(slot[:key])
+
+          allowed[slot[:key]]
+        end
+
         def record_slot!(slot, now)
           if identity_slot?(slot)
             record_identity!(slot[:key], now, slot[:limit])
@@ -312,9 +402,17 @@ module Lakeraven
 
         def write_stamp!(key, now, limit)
           entry = (buckets[key] ||= new_entry(limit))
+          remember_key!(key)
           entry[:limit] = limit
           entry[:stamps] << now
           entry
+        end
+
+        def remember_key!(key)
+          return if key_index.key?(key)
+
+          key_index[key] = order.size
+          order << key
         end
 
         def new_entry(limit)
@@ -326,6 +424,18 @@ module Lakeraven
           buckets.delete(key)
           hot.delete(key)
           retained.delete(key)
+          drop_key!(key)
+        end
+
+        def drop_key!(key)
+          index = key_index.delete(key)
+          return if index.nil?
+
+          last = order.pop
+          return if index == order.size
+
+          order[index] = last
+          key_index[last] = index
         end
 
         def claim_audit!(identity, ip, now)
@@ -346,19 +456,35 @@ module Lakeraven
           at.present? && at > cutoff(now)
         end
 
-        def sweep_if_due!(now)
+        def note_call!(now)
           @calls = @calls.to_i + 1
-          sweep_expired_unlocked!(now) if (@calls % SWEEP_EVERY).zero?
+          sweep_batch!(now) if (@calls % SWEEP_EVERY).zero?
+        end
+
+        def sweep_batch!(now)
+          sweep_some!(now, SWEEP_BATCH)
+          sweep_audited!(now)
         end
 
         def sweep_expired_unlocked!(now)
-          drop_expired!(now)
-          threshold = cutoff(now)
-          audited.delete_if { |_key, at| at <= threshold }
+          sweep_some!(now, order.size)
+          sweep_audited!(now)
         end
 
-        def drop_expired!(now)
-          buckets.keys.each { |key| fresh_count(key, now) }
+        def sweep_some!(now, limit)
+          scanned = 0
+          while scanned < limit && order.any?
+            @cursor = 0 if @cursor.to_i >= order.size
+            size_before = order.size
+            fresh_count(order[@cursor], now)
+            scanned += 1
+            @cursor = @cursor.to_i + 1 if order.size == size_before
+          end
+        end
+
+        def sweep_audited!(now)
+          threshold = cutoff(now)
+          audited.delete_if { |_key, at| at <= threshold }
         end
 
         def cutoff(now)
@@ -367,6 +493,14 @@ module Lakeraven
 
         def digest(value)
           Digest::SHA256.hexdigest(value.to_s)
+        end
+
+        def order
+          @order ||= []
+        end
+
+        def key_index
+          @key_index ||= {}
         end
 
         def observed_controllers
