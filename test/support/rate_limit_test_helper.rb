@@ -148,6 +148,37 @@ module RateLimitTestHelper
     mod.key_count
   end
 
+  # Call before configuring limits when .bucket_count is not implemented.
+  def assert_rate_limit_storage_countable!(mod)
+    return if mod.respond_to?(:bucket_count)
+
+    unless mod.respond_to?(:key_count)
+      rate_limit_failure! "#{RATE_LIMIT_CONSTANT} must expose .bucket_count or .key_count (#498)"
+    end
+    mod.configure_for_test!(max_requests: 100, window: 1.minute, max_keys: 10_000)
+    mod.permit?(identity: "bearer:storage-probe-a", ip: "127.0.0.1")
+    baseline = mod.key_count
+    mod.permit?(identity: "bearer:storage-probe-b", ip: "127.0.0.1")
+    unless mod.key_count > baseline
+      rate_limit_failure! "#{RATE_LIMIT_CONSTANT} must expose .bucket_count or make .key_count " \
+                           "count every stored bucket (#498)"
+    end
+    mod.reset! if mod.respond_to?(:reset!)
+  end
+
+  def rate_limit_stored_bucket_count(mod)
+    return mod.bucket_count if mod.respond_to?(:bucket_count)
+
+    unless mod.respond_to?(:key_count)
+      rate_limit_failure! "#{RATE_LIMIT_CONSTANT} must expose .bucket_count or .key_count (#498)"
+    end
+    mod.key_count
+  end
+
+  def monotonic_seconds
+    Process.clock_gettime(Process::CLOCK_MONOTONIC)
+  end
+
   def integration_request_env(remote_addr:, x_forwarded_for: nil)
     env = { "REMOTE_ADDR" => remote_addr.to_s }
     env["HTTP_X_FORWARDED_FOR"] = x_forwarded_for if x_forwarded_for

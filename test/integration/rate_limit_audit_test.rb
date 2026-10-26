@@ -88,6 +88,29 @@ class RateLimitAuditTest < ActionDispatch::IntegrationTest
     Lakeraven::EHR::LoginThrottle.reset!
   end
 
+  test "F4 throttle audit identity digest is exactly 32 hex characters" do
+    access_code = "clinic-access-length-probe"
+    Lakeraven::EHR::LoginThrottle.reset!
+    Lakeraven::EHR::AuditEvent.delete_all
+
+    with_test_rate_limit(max_requests: 0, window: 5.minutes) do
+      post "/lakeraven-ehr/login",
+           params: { username: access_code, password: "wrong" },
+           env: integration_request_env(remote_addr: "198.51.100.64")
+
+      assert_response :too_many_requests
+      event = Lakeraven::EHR::AuditEvent.order(:id).last
+      refute_nil event
+      identifier = event.agent_who_identifier
+      refute_nil identifier, "throttle audit must carry an identity digest (#498 F4)"
+      assert_match(/\A[0-9a-f]{32}\z/, identifier.to_s,
+                   "throttle audit identity digest must be exactly 32 lowercase hex chars (#498 F4); " \
+                   "got length #{identifier.to_s.length}")
+    end
+  ensure
+    Lakeraven::EHR::LoginThrottle.reset!
+  end
+
   test "F4 throttle audit identity digest is HMAC keyed on secret_key_base" do
     access_code = "clinic-access-hmac-probe"
     Lakeraven::EHR::LoginThrottle.reset!
