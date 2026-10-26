@@ -111,6 +111,7 @@ When("the clinician opens the HTML chart for patient {int}") do |dfn|
   without_show_exceptions do
     get_chart_for_dfn!(@dfn)
   end
+  @chart_response = last_response
   @last_response = last_response
 end
 

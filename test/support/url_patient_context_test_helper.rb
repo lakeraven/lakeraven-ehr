@@ -131,8 +131,16 @@ module UrlPatientContextTestHelper
   # ChartsController#render_unrecorded_access_denial).
   CHART_BACKEND_FAILURE_STATUS = 503
 
+  def chart_response_for_load_error_assertions
+    if instance_variable_defined?(:@chart_response) && @chart_response
+      @chart_response
+    else
+      current_response
+    end
+  end
+
   def assert_chart_load_error_state!
-    resp = current_response
+    resp = chart_response_for_load_error_assertions
     assert_equal CHART_BACKEND_FAILURE_STATUS, resp.status,
                  "backend failure must not return 200 with an empty chart (got #{resp.status})"
     body = resp.body
@@ -140,7 +148,16 @@ module UrlPatientContextTestHelper
                  "expected an explicit chart error state")
     refute_includes body, "Type 2 diabetes mellitus", "clinical sections must not render on load failure"
     refute_includes body, "Lisinopril 10mg"
-    assert_empty_banner!
+    assert_empty_banner_in_html!(body)
+  end
+
+  def assert_empty_banner_in_html!(html)
+    banner = Nokogiri::HTML(html).at_css("#patient-banner")
+    assert banner, "Expected #patient-banner on the page"
+    assert_includes banner.text, "No patient selected"
+    link = banner.css("a").find { |a| a.text.match?(/chart search/i) }
+    assert link, "Expected a chart search link in the empty banner"
+    assert link["href"].present?, "Chart search link must have an href"
   end
 
   def without_show_exceptions
