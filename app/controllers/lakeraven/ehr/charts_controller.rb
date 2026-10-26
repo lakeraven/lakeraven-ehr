@@ -62,6 +62,12 @@ module Lakeraven
         "Patient identifier is not a valid record id. " \
         "A record id is a positive integer of at most 18 digits; 0 is not valid."
 
+      # The alert names 0 as an example. That digit is itself a refused id, so
+      # the audit reason stops before the example and never stores the segment.
+      INVALID_CHART_IDENTIFIER_AUDIT_REASON =
+        "Patient identifier is not a valid record id. " \
+        "A record id is a positive integer of at most 18 digits."
+
       # Chart sections an IHS capability owns. A backend that withholds one
       # adds an outcome entry instead of those resources (#647).
       CHART_CAPABILITY_RESOURCES = { ihs_immunization: "Immunization" }.freeze
@@ -118,7 +124,7 @@ module Lakeraven
         return if chart_dfn_well_formed?
 
         close_patient_context!
-        note_audit_denial(INVALID_CHART_IDENTIFIER_ALERT)
+        note_audit_denial(INVALID_CHART_IDENTIFIER_AUDIT_REASON)
         respond_to_invalid_chart_dfn
       end
 
@@ -264,14 +270,15 @@ module Lakeraven
       end
 
       # The route may say "01". The chart shows the patient the repository
-      # resolves, and the audit row names that same canonical dfn.
+      # resolves, and the audit row names that same canonical dfn. A segment
+      # the format gate refused is not that patient: canonical_dfn still
+      # accepts a whitespace-padded "1", and a non-canonical fallback would
+      # record "0" or a 19-digit id. Those refusals name no entity.
       def direct_audit_identifier
-        Patient.canonical_dfn(chart_route_dfn) || chart_route_dfn || super
-      end
+        return unless chart_dfn_well_formed?
 
-      def chart_route_dfn
-        path = request.path_parameters
-        path[:dfn].presence || path["dfn"].presence
+        segment = raw_chart_dfn_segment
+        Patient.canonical_dfn(segment) || segment || super
       end
 
       # AuditableClinicalAccess hook: demo-bypass requests carry no token but
