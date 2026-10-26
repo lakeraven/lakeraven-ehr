@@ -114,10 +114,23 @@ class UrlPatientContextTest < ActionDispatch::IntegrationTest
     { label: "html injection", segment: "<script>" },
     { label: "encoded quote", segment: "1%27" },
     { label: "leaked backend error string", segment: "-1^Patient not found" },
-    { label: "newline suffix", segment: "1%0A" },
-    { label: "leading spaces", segment: "%20%201" },
-    { label: "trailing space", segment: "1%20" },
-    { label: "tab suffix", segment: "1%09" }
+    { label: "newline suffix", decoded_segment: "1\n" },
+    { label: "leading spaces", decoded_segment: "  1" },
+    { label: "trailing space", decoded_segment: "1 " },
+    { label: "tab suffix", decoded_segment: "1\t" }
+  ].freeze
+
+  MALFORMED_CHART_AUDIT_REFUSAL_IDENTIFIERS = [
+    { label: "zero", path: -> { chart_path_for("0") }, segment: "0" },
+    { label: "19-digit id", path: -> { chart_path_for("9" * 19) }, segment: "9" * 19 },
+    {
+      label: "22-digit id with leading zeros",
+      path: -> { chart_path_for("0000000000000000000001") },
+      segment: "0000000000000000000001"
+    },
+    { label: "leading spaces", path: -> { chart_path_for_decoded_segment("  1") }, segment: "  1" },
+    { label: "trailing space", path: -> { chart_path_for_decoded_segment("1 ") }, segment: "1 " },
+    { label: "newline suffix", path: -> { chart_path_for_decoded_segment("1\n") }, segment: "1\n" }
   ].freeze
 
   MALFORMED_FHIR_CHART_REQUESTS = [
@@ -139,7 +152,12 @@ class UrlPatientContextTest < ActionDispatch::IntegrationTest
         open_patient_context!(1)
         assert_equal "1", session_open_patient_dfn
 
-        get chart_path_for(example[:segment])
+        path = if example[:decoded_segment]
+                 chart_path_for_decoded_segment(example[:decoded_segment])
+        else
+                 chart_path_for(example[:segment])
+        end
+        get path
         assert_not_format_error_response!
         assert_invalid_identifier_redirect_flash_and_no_scaffold!(example[:flash_hint])
         assert_session_patient_context_cleared!
@@ -172,6 +190,21 @@ class UrlPatientContextTest < ActionDispatch::IntegrationTest
 
       assert_redirected_to_chart_search!
       assert_malformed_chart_dfn_audit_refusal!(segment: MALFORMED_CHART_SEGMENT)
+    end
+  end
+
+  MALFORMED_CHART_AUDIT_REFUSAL_IDENTIFIERS.each do |example|
+    test "malformed chart id audit refusal omits entity for #{example[:label]}" do
+      with_demo_clinical_seeds do
+        sign_in_clinician!
+        open_patient_context!(1)
+        Lakeraven::EHR::AuditEvent.delete_all
+
+        get instance_exec(&example[:path])
+
+        assert_redirected_to_chart_search!
+        assert_malformed_chart_dfn_audit_refusal!(segment: example[:segment])
+      end
     end
   end
 

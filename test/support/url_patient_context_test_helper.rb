@@ -53,6 +53,23 @@ module UrlPatientContextTestHelper
     end
   end
 
+  # Percent-encode each byte of the routed segment once (e.g. "1\n" -> "1%0A").
+  # Integration `get` must not pass a literal "1%0A" string through chart_path_for,
+  # which treats percent sequences as opaque path text.
+  def chart_path_for_decoded_segment(segment)
+    "#{MOUNT}/patients/#{encode_chart_path_segment_once(segment)}"
+  end
+
+  def encode_chart_path_segment_once(segment)
+    segment.to_s.bytes.map do |byte|
+      if byte.chr.match?(/[A-Za-z0-9\-._~]/)
+        byte.chr
+      else
+        format("%%%02X", byte)
+      end
+    end.join
+  end
+
   def assert_redirected_to_chart_search!
     resp = current_response
     assert resp.redirect?, "expected redirect to patient search (dashboard), got #{resp.status}"
@@ -127,12 +144,13 @@ module UrlPatientContextTestHelper
     refute_nil event, "malformed chart id request must leave an audit row"
     refute_equal "0", event.outcome,
                  "malformed identifier refusal must not be audited as success (outcome #{event.outcome})"
+    assert event.entity_identifier.blank?,
+           "malformed identifier refusal must not attribute a patient " \
+           "(entity_identifier #{event.entity_identifier.inspect})"
     desc = event.outcome_desc.to_s
     assert_match(/invalid|identifier|valid record/i, desc,
                  "refusal outcome_desc must name the invalid identifier problem")
     refute_includes desc, segment, "raw malformed id must not be stored in outcome_desc"
-    refute_equal segment, event.entity_identifier,
-                 "raw malformed id must not be stored as the audit entity"
   end
 
   # URL-derived context: the chart and banner reflect the route dfn, not session.
