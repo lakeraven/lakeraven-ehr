@@ -64,6 +64,9 @@ module Lakeraven
         "lakeraven/ehr/dashboards#show",      # Web UI dashboard; banner patient/allergy via filter_fhir_for_egress
         "lakeraven/ehr/registration/patients#index", # Front-desk lookup: registration demographics (name, HRN, DOB, status), no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/registration/patients#show",  # Registration demographics (name, HRN, DOB, sex), no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/registration/patients#new",     # Registration entry form (S-REG-02), not disclosure
+        "lakeraven/ehr/registration/patients#create",  # Registration entry; possible matches show registration demographics only; revisit with Part 2 (#494)
+        "lakeraven/ehr/registration/patients#confirm", # Registration entry after review; as #create
         "lakeraven/ehr/test_sessions#create", # Test only
         "lakeraven/ehr/smart_configuration#show", # Discovery
         "lakeraven/ehr/smart_launch#show",    # Discovery
