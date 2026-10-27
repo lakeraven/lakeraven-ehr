@@ -33,6 +33,7 @@ module Lakeraven
       attribute :appointment_on, :date
       attribute :completed_on, :date
       attribute :notes, :string
+      attribute :authored_on, :date
 
       class RecordNotFound < StandardError; end
 
@@ -84,6 +85,30 @@ module Lakeraven
 
       def self.for_patient(dfn)
         gateway.for_patient(dfn)
+      end
+
+      # STATUS OF REFERRAL (#90001 .15): A ACTIVE, A1 APPROVED, C1
+      # CLOSED-COMPLETED, X CLOSED-NOT COMPLETED. The search reply may carry
+      # the code or its name, so both are read.
+      RCIS_STATUS = {
+        "A" => "active", "ACTIVE" => "active", "A1" => "active", "APPROVED" => "active",
+        "C1" => "completed", "CLOSED-COMPLETED" => "completed",
+        "X" => "cancelled", "CLOSED-NOT COMPLETED" => "cancelled"
+      }.freeze
+
+      # A row of RpmsRpc::Referral.for_patient (BMC SEARCH REFERRAL). Only
+      # what has a FHIR element is kept: the row's HRN, patient name and
+      # eligibility fields are not part of a ServiceRequest.
+      def self.from_rpms_row(row, patient_dfn:)
+        new(
+          ien: row[:ien].to_s.presence,
+          patient_dfn: patient_dfn.to_s,
+          identifier: row[:referral_number].presence,
+          status: RCIS_STATUS.fetch(row[:status].to_s.strip.upcase, "draft"),
+          service_requested: row[:purpose].presence,
+          performer_name: row[:facility].presence,
+          authored_on: row[:date]
+        )
       end
 
       def self.create(attributes = {})
@@ -175,6 +200,7 @@ module Lakeraven
           priority: map_urgency_to_fhir_priority,
           code: service_requested.present? ? { text: service_requested } : nil,
           subject: patient_dfn ? { reference: "Patient/#{patient_dfn}" } : nil,
+          authoredOn: authored_on&.iso8601,
           reasonCode: reason_for_referral.present? ? [ { text: reason_for_referral } ] : nil
         }.compact
       end
