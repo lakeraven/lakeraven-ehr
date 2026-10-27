@@ -72,6 +72,17 @@ module Lakeraven
         PatientRepository.find(dfn)
       end
 
+      # "01", "1", and " 1 " are one patient. PatientRepository#find resolves
+      # with to_i, and SupplementalClinicalResources compares owners the same
+      # way. A non-digit or non-positive value is not a dfn.
+      def self.canonical_dfn(value)
+        numeric = value.to_s.strip
+        return nil unless numeric.match?(/\A\d+\z/)
+
+        number = numeric.to_i
+        number.positive? ? number.to_s : nil
+      end
+
       def self.search(name_pattern)
         PatientRepository.search(name_pattern.to_s)
       end
@@ -231,6 +242,7 @@ module Lakeraven
       def tribal_enrollment_details
         return nil unless dfn
 
+        CapabilityGuard.ensure!(:tribal_enrollment)
         TribalEnrollmentGateway.enrollment_details(dfn)
       end
 

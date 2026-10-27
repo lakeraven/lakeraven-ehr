@@ -8,12 +8,12 @@ module Lakeraven
     class ClinicalDecisionSupportServiceTest < ActiveSupport::TestCase
       setup do
         @_orig_patient_find = Patient.method(:find_by_dfn)
-        @_orig_med_for_patient = MedicationRequest.method(:for_patient)
+        @_orig_rpms_client = RpmsRpc.configuration.client
+        RpmsRpc.mock!(&BASELINE_MOCK_SEEDS)
         @_orig_allergy_for_patient = AllergyIntolerance.method(:for_patient)
         @_orig_device_for_patient = Device.method(:for_patient)
 
         # Default mocks: empty data
-        mock_no_medications("12345")
         mock_no_allergies("12345")
         mock_no_devices("12345")
         mock_no_conditions("12345")
@@ -24,7 +24,7 @@ module Lakeraven
 
       teardown do
         Patient.define_singleton_method(:find_by_dfn, @_orig_patient_find)
-        MedicationRequest.define_singleton_method(:for_patient, @_orig_med_for_patient)
+        RpmsRpc.configure { |c| c.client = @_orig_rpms_client }
         AllergyIntolerance.define_singleton_method(:for_patient, @_orig_allergy_for_patient)
         Device.define_singleton_method(:for_patient, @_orig_device_for_patient)
 
@@ -37,8 +37,8 @@ module Lakeraven
       # =============================================================================
 
       test "returns drug interaction alert for proposed medication" do
-        mock_active_medications("12345", [
-          { drug_name: "Warfarin 5mg", rxnorm_code: "11289", status: "active" }
+        seed_active_medications("12345", [
+          { drug_name: "WARFARIN 5MG TAB", status: "ACTIVE" }
         ])
 
         result = ClinicalDecisionSupportService.evaluate_medication("12345", "Ibuprofen 400mg")
@@ -46,6 +46,21 @@ module Lakeraven
         assert result.has_alerts?
         drug_alerts = result.alerts_by_category("drug-interaction")
         assert_not_empty drug_alerts
+      end
+
+      test "drug interaction alerts weigh active and held orders, not discontinued ones (#680)" do
+        seed_active_medications("12345", [
+          { drug_name: "WARFARIN 5MG TAB", status: "ACTIVE" },
+          { drug_name: "METHOTREXATE 2.5MG TAB", status: "DISCONTINUED" },
+          { drug_name: "LITHIUM CARBONATE 300MG CAP", status: "HOLD" }
+        ])
+
+        result = ClinicalDecisionSupportService.evaluate_medication("12345", "Ibuprofen 400mg")
+
+        messages = result.alerts_by_category("drug-interaction").map { |a| a[:message] }.join("\n")
+        assert_includes messages, "WARFARIN 5MG TAB"
+        assert_includes messages, "LITHIUM CARBONATE 300MG CAP"
+        refute_includes messages, "METHOTREXATE"
       end
 
       test "no drug alerts for safe medication" do
@@ -149,8 +164,8 @@ module Lakeraven
       # =============================================================================
 
       test "alerts include source attribution" do
-        mock_active_medications("12345", [
-          { drug_name: "Warfarin 5mg", rxnorm_code: "11289", status: "active" }
+        seed_active_medications("12345", [
+          { drug_name: "WARFARIN 5MG TAB", status: "ACTIVE" }
         ])
 
         result = ClinicalDecisionSupportService.evaluate_medication("12345", "Ibuprofen 400mg")
@@ -382,21 +397,14 @@ module Lakeraven
         mock_devices(dfn, [])
       end
 
-      def mock_active_medications(dfn, meds)
-        med_objects = meds.map do |m|
-          OpenStruct.new(
-            medication_display: m[:drug_name],
-            medication_code: m[:rxnorm_code],
-            status: m[:status]
-          )
+      # The patient's orders as ORWPS ACTIVE wire, read back through the
+      # gateway and the rpms-rpc parser: order id, drug, expiration, refills,
+      # CPRS order number, the RPMS status (piece 9), then the sig line.
+      def seed_active_medications(dfn, orders)
+        wire = orders.each_with_index.map do |order, i|
+          "~OP^#{4401 + i}R;O^#{order[:drug_name]}^^3271231^3^^^#{120345 + i}^#{order[:status]}\n\\ Sig: TAKE AS DIRECTED"
         end
-        MedicationRequest.define_singleton_method(:for_patient) do |patient_dfn, **_opts|
-          patient_dfn.to_s == dfn.to_s ? med_objects : []
-        end
-      end
-
-      def mock_no_medications(dfn)
-        mock_active_medications(dfn, [])
+        RpmsRpc.client.seed_text(:medication_active, dfn.to_s, wire.join("\n"))
       end
 
       def mock_no_allergies(dfn)

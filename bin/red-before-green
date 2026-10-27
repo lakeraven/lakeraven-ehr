@@ -1,0 +1,239 @@
+#!/usr/bin/env bash
+# red-before-green — do a PR's new tests fail without the PR's fix?
+#
+# For a PR that changes app code AND adds or changes minitest files, run those
+# test files against the BASE branch's app code and require at least one to
+# fail. A test that passes either way does not test the change. This automates
+# the manual mutation check (on lakeraven-ehr#631, 2 of 3 new tests failed
+# without the fix).
+#
+# How: find the merge-base, put every app path the PR touched (app/ lib/
+# config/ db/) back to its merge-base content in a scratch worktree at HEAD
+# (delete files the PR added, restore files it deleted), and run only the
+# changed *_test.rb files there. The PR's own checkout is never touched.
+#
+# Verdicts                exit  meaning
+#   EXEMPT                 0    nothing to check; the reason is printed
+#   RED                    0    >=1 test failed (or errored for a real reason) without the fix
+#   RED-FOR-WRONG-REASON   0    only missing-code errors (NameError / LoadError / NoMethodError);
+#                               the tests may fail merely because the new code is absent.
+#                               Printed as a WARNING: read them.
+#   GREEN-WITHOUT-FIX      1    every test passed without the fix
+#   UNDETERMINED           2    could not tell. Never a pass: no merge-base, no parseable
+#                               summary, zero tests run, every test skipped, unreadable errors,
+#                               or a Gemfile/lockfile/gemspec/Rakefile or bin/ change alongside
+#                               tests (not revertible by restoring app paths).
+#
+# The summary is read only from the single "Finished in" block minitest prints; a run
+# with no such block, or more than one, is UNDETERMINED (test output can imitate a summary).
+# Known floor: a single forged "Finished in" block, printed by any process in the run (a test,
+# a subprocess, an at_exit hook) while the real summary never appears, is indistinguishable
+# from minitest's own and can give a false RED or a false GREEN-WITHOUT-FIX. This script
+# cannot close that; it is a known floor of an advisory check, which is why a RED is a
+# prompt to read the tests and not a proof that they test the change.
+# HARNESS-CHANGED is printed when the PR also changes test/test_helper.rb, test/support or
+# test/dummy: the base run used the PR's version of those, so read the verdict with care.
+# DB-CHANGED is printed when the PR also changes db/schema.rb, db/structure.sql or a
+# migration: the test database is loaded from the PR's schema before this script runs and is
+# not reverted, so the base app code ran against a schema it may not have had.
+#
+# This runs the PR's own copy of this script. It therefore cannot police a PR that edits
+# the script (or its workflow) to say what it likes. That is why it is advisory, and why the
+# workflow must stay on `pull_request`: it executes the PR's tests, so it must never gain
+# the secrets or write token that `pull_request_target` would give it.
+#
+# Not checked: a modified existing test file can be RED because of one new test
+# while other tests in it are vacuous; a test file that fails for an unrelated
+# reason can look RED. This is a floor, not a proof (SOFTWARE-FACTORY.md: green
+# CI is not evidence of correctness; neither is a red one).
+#
+# Usage: bin/red-before-green [--base REF] [--dry-classify]
+#   --base REF       where the PR branches from (default $RBG_BASE or origin/main)
+#   --dry-classify   print the classification only; run nothing
+# Env:
+#   RBG_EXEMPT=1     skip the check (CI sets it from the `red-green-exempt` label)
+#   RBG_TEST_CMD     the test command (default "bundle exec rails test"); changed test
+#                    files are appended as arguments
+#   RBG_REPORT=FILE  also append the verdict block to FILE (CI: $GITHUB_STEP_SUMMARY)
+#   RBG_ANNOTATE=1   also print ::warning:: workflow commands for warnings (CI sets it)
+set -uo pipefail
+
+BASE="${RBG_BASE:-origin/main}"
+DRY=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --base) BASE="${2:?--base needs a ref}"; shift 2 ;;
+    --dry-classify) DRY=1; shift ;;
+    -h|--help) sed -n '2,/^set -u/p' "$0" | sed '$d'; exit 0 ;;
+    *) echo "red-before-green: unknown argument '$1'" >&2; exit 2 ;;
+  esac
+done
+
+TEST_CMD="${RBG_TEST_CMD:-bundle exec rails test}"
+APP_PATHS="app lib config db"
+
+# verdict NAME EXIT_CODE [detail lines...] — print the verdict block and leave.
+HARNESS_FILES=""; DB_FILES=""
+verdict() {
+  local name="$1" code="$2"; shift 2
+  local block="VERDICT: $name"
+  local line harness_msg="" db_msg=""
+  for line in "$@"; do block="$block"$'\n'"  $line"; done
+  if [ -n "$HARNESS_FILES" ]; then
+    harness_msg="HARNESS-CHANGED: the PR also changes $(printf '%s\n' "$HARNESS_FILES" | sed '/^$/d' | paste -sd' ' -); the base run used the PR's version of these, so this verdict may not reflect the app code alone."
+    block="$block"$'\n'"  WARNING $harness_msg"
+  fi
+  if [ -n "$DB_FILES" ]; then
+    db_msg="DB-CHANGED: the PR also changes $(printf '%s\n' "$DB_FILES" | sed '/^$/d' | paste -sd' ' -); the test database was loaded from the PR's schema before the base run and is not reverted, so the base app code may have run against a schema it never had."
+    block="$block"$'\n'"  WARNING $db_msg"
+  fi
+  echo "$block"
+  if [ "${RBG_ANNOTATE:-0}" = "1" ]; then
+    case "$name" in
+      RED-FOR-WRONG-REASON|GREEN-WITHOUT-FIX|UNDETERMINED) echo "::warning title=red-before-green::$name: ${1:-}" ;;
+    esac
+    [ -n "$harness_msg" ] && echo "::warning title=red-before-green::$harness_msg"
+    [ -n "$db_msg" ] && echo "::warning title=red-before-green::$db_msg"
+  fi
+  [ -n "${RBG_REPORT:-}" ] && printf '### Red before green\n\n```\n%s\n```\n' "$block" >> "$RBG_REPORT"
+  exit "$code"
+}
+
+ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || verdict UNDETERMINED 2 "not inside a git checkout"
+cd "$ROOT" || verdict UNDETERMINED 2 "cannot enter $ROOT"
+
+MB=$(git merge-base "$BASE" HEAD 2>/dev/null) \
+  || verdict UNDETERMINED 2 "no merge-base between '$BASE' and HEAD (unknown ref or shallow clone: fetch full history)"
+
+# Status + path of every app file the PR touched. No rename detection: a rename
+# is a delete (restore) plus an add (remove).
+APP_CHANGES=$(git diff --name-status --no-renames "$MB" HEAD -- $APP_PATHS) \
+  || verdict UNDETERMINED 2 "git diff failed against merge-base ${MB:0:7}"
+APP_FILES=$(printf '%s\n' "$APP_CHANGES" | awk -F'\t' 'NF>=2 {print $2}')
+
+# Added/copied/modified/renamed-to test files; deleted ones cannot run.
+CHANGED_TESTS=$(git diff --name-only --no-renames --diff-filter=ACMRT "$MB" HEAD -- test features) \
+  || verdict UNDETERMINED 2 "git diff failed against merge-base ${MB:0:7}"
+MINITEST_FILES=$(printf '%s\n' "$CHANGED_TESTS" | grep -E '^test/.*_test\.rb$' | grep -v '^test/dummy/' || true)
+FEATURE_FILES=$(printf '%s\n' "$CHANGED_TESTS" | grep -E '^features/' || true)
+
+# Build and dependency files: putting app paths back cannot revert these.
+DEP_FILES=$(git diff --name-only --no-renames "$MB" HEAD -- Gemfile Gemfile.lock '*.gemspec' Rakefile) \
+  || verdict UNDETERMINED 2 "git diff failed against merge-base ${MB:0:7}"
+# bin/ scripts are not app paths either: they can change behavior and are not put back.
+BIN_FILES=$(git diff --name-only --no-renames "$MB" HEAD -- bin) \
+  || verdict UNDETERMINED 2 "git diff failed against merge-base ${MB:0:7}"
+# The PR's schema and migrations: the test database is built from the PR's, not the base's.
+DB_FILES=$(git diff --name-only --no-renames "$MB" HEAD -- db/schema.rb db/structure.sql db/migrate) \
+  || verdict UNDETERMINED 2 "git diff failed against merge-base ${MB:0:7}"
+# The PR's test harness: what runs the base app code in the scratch worktree.
+HARNESS_FILES=$(git diff --name-only --no-renames "$MB" HEAD -- test/test_helper.rb test/support test/dummy) \
+  || verdict UNDETERMINED 2 "git diff failed against merge-base ${MB:0:7}"
+
+oneline() { printf '%s\n' "$1" | sed '/^$/d' | paste -sd' ' -; }
+
+EXEMPT_REASON=""; UNDET_REASON=""
+if [ "${RBG_EXEMPT:-0}" = "1" ]; then
+  EXEMPT_REASON="RBG_EXEMPT=1 (the red-green-exempt label is set); a person chose to skip this check"
+elif [ -n "$DEP_FILES$BIN_FILES" ] && [ -n "$MINITEST_FILES" ]; then
+  UNDET_REASON="$(oneline "$DEP_FILES
+$BIN_FILES") changed alongside tests; reverting app paths cannot revert dependencies or bin/ scripts, so this check cannot tell whether the tests need the change"
+elif [ -z "$APP_FILES" ]; then
+  EXEMPT_REASON="no app-code change (nothing under $APP_PATHS differs from the base)"
+elif [ -z "$MINITEST_FILES" ]; then
+  EXEMPT_REASON="no changed minitest files to run"
+  [ -n "$FEATURE_FILES" ] && EXEMPT_REASON="$EXEMPT_REASON; features changed but cucumber features are not run by this check"
+fi
+
+echo "base: ${MB:0:7} ($BASE)"
+echo "app: $(oneline "$APP_FILES")"
+echo "tests: $(oneline "$MINITEST_FILES")"
+[ -n "$DEP_FILES" ] && echo "deps: $(oneline "$DEP_FILES")"
+[ -n "$BIN_FILES" ] && echo "bin: $(oneline "$BIN_FILES")"
+[ -n "$DB_FILES" ] && echo "db: $(oneline "$DB_FILES")"
+[ -n "$HARNESS_FILES" ] && echo "harness: $(oneline "$HARNESS_FILES")"
+[ -n "$FEATURE_FILES" ] && echo "features: $(oneline "$FEATURE_FILES")"
+if [ -n "$EXEMPT_REASON" ]; then echo "exempt: yes ($EXEMPT_REASON)"; else echo "exempt: no"; fi
+[ -n "$UNDET_REASON" ] && echo "undetermined: $UNDET_REASON"
+
+[ $DRY -eq 1 ] && exit 0
+[ -n "$UNDET_REASON" ] && verdict UNDETERMINED 2 "$UNDET_REASON"
+[ -n "$EXEMPT_REASON" ] && verdict EXEMPT 0 "$EXEMPT_REASON"
+
+# --- scratch worktree at HEAD with the app code put back to the base ---------
+SCRATCH=$(mktemp -d "${TMPDIR:-/tmp}/rbg.XXXXXX") || verdict UNDETERMINED 2 "cannot create a scratch directory"
+WT="$SCRATCH/wt"
+cleanup() { git worktree remove --force "$WT" >/dev/null 2>&1; git worktree prune >/dev/null 2>&1; rm -rf "$SCRATCH"; }
+trap cleanup EXIT
+
+git worktree add -q --detach "$WT" HEAD >/dev/null 2>&1 \
+  || verdict UNDETERMINED 2 "cannot create a scratch worktree at HEAD"
+
+while IFS=$'\t' read -r status path; do
+  [ -z "$path" ] && continue
+  case "$status" in
+    A) rm -f "$WT/$path" ;;
+    *) git -C "$WT" checkout -q "$MB" -- "$path" 2>/dev/null \
+         || verdict UNDETERMINED 2 "cannot restore $path from ${MB:0:7}" ;;
+  esac
+done <<EOF
+$APP_CHANGES
+EOF
+
+echo "running against the base app code: $(oneline "$MINITEST_FILES")"
+LOG="$SCRATCH/run.log"
+TESTS=()
+while IFS= read -r f; do [ -n "$f" ] && TESTS+=("$f"); done <<EOF
+$MINITEST_FILES
+EOF
+# TEST_CMD is intentionally word-split: it is a command line, not one word.
+# shellcheck disable=SC2086
+( cd "$WT" && $TEST_CMD "${TESTS[@]}" ) >"$LOG" 2>&1
+RC=$?
+cat "$LOG"
+echo
+# A runner on Windows-style line endings must not hide a complete run: parse a copy without CRs.
+CLEAN="$SCRATCH/run.clean.log"
+tr -d '\r' < "$LOG" > "$CLEAN"
+
+# Read the summary only from the one "Finished in" block minitest prints: its first non-blank
+# line, anchored at the start of the line. Any process in the run can print a line shaped like
+# a summary, so a run with more than one such block is not trusted either.
+FINISHED=$(grep -c '^Finished in ' "$CLEAN" || true)
+[ "$FINISHED" = "1" ] \
+  || verdict UNDETERMINED 2 "the test run (exit $RC) printed ${FINISHED} 'Finished in' blocks, not exactly 1; it did not run to completion or its output cannot be trusted"
+SUMMARY=$(awk '/^Finished in / {f=1; next} f && NF == 0 {next} f {print; exit}' "$CLEAN" \
+  | grep -E '^[0-9]+ runs, [0-9]+ assertions, [0-9]+ failures, [0-9]+ errors(, [0-9]+ skips)?' || true)
+[ -n "$SUMMARY" ] || verdict UNDETERMINED 2 "no 'N runs, ... failures, ... errors' summary directly after the 'Finished in' line (exit $RC)"
+
+num() { printf '%s\n' "$SUMMARY" | sed -nE "s/.*[^0-9]([0-9]+) $1.*/\1/p;s/^([0-9]+) $1.*/\1/p" | head -1; }
+RUNS=$(num runs); FAILURES=$(num failures); ERRORS=$(num errors); SKIPS=$(num skips)
+RUNS=${RUNS:-0}; FAILURES=${FAILURES:-0}; ERRORS=${ERRORS:-0}; SKIPS=${SKIPS:-0}
+
+[ "$RUNS" -gt 0 ] || verdict UNDETERMINED 2 "0 tests ran: $SUMMARY"
+[ $((RUNS - SKIPS)) -gt 0 ] || verdict UNDETERMINED 2 "every test was skipped, which proves nothing: $SUMMARY"
+
+if [ "$FAILURES" -gt 0 ]; then
+  verdict RED 0 "$SUMMARY" "the new tests fail without the fix, as they should"
+fi
+
+if [ "$ERRORS" -gt 0 ]; then
+  # The exception line follows "Error:" and the test name.
+  EXC=$(awk '/^Error:$/ {getline; getline; print}' "$CLEAN" | sed '/^$/d')
+  READABLE=$(printf '%s\n' "$EXC" | sed '/^$/d' | wc -l | tr -d ' ')
+  OTHER=$(printf '%s\n' "$EXC" | sed '/^$/d' | grep -Evc '^(NameError|LoadError|NoMethodError)' || true)
+  if [ "${OTHER:-0}" -gt 0 ]; then
+    verdict RED 0 "$SUMMARY" "$OTHER error(s) are not missing-code errors, so the tests are red for a real reason"
+  fi
+  # "Every error is missing code" is only a claim when every error was read.
+  [ "$READABLE" -eq "$ERRORS" ] \
+    || verdict UNDETERMINED 2 "$SUMMARY" "$ERRORS error(s) reported but only $READABLE exception line(s) could be read, so they cannot be classed as missing code"
+  verdict RED-FOR-WRONG-REASON 0 "$SUMMARY" \
+    "WARNING: every error is a NameError / LoadError / NoMethodError. The tests may fail only because the" \
+    "new code is absent, not because they check its behavior. Read them before trusting this."
+fi
+
+[ "$RC" -eq 0 ] || verdict UNDETERMINED 2 "$SUMMARY" "no failures reported, but the runner exited $RC"
+verdict GREEN-WITHOUT-FIX 1 "$SUMMARY" \
+  "these tests pass with the app code reverted to the base, so they do not test this change" \
+  "(add the label red-green-exempt only if the change is not testable this way, e.g. a refactor)"

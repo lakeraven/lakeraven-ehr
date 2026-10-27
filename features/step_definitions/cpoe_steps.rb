@@ -12,7 +12,8 @@ Given("a provider exists with DUZ {string}") do |duz|
 end
 
 Given("the patient has an active medication {string}") do |drug_name|
-  @patient_medications = [ OpenStruct.new(medication_display: drug_name, medication_code: nil) ]
+  # One ACTIVE order as the ORWPS ACTIVE gateway returns it (#680).
+  @patient_medications = [ { order_id: "4401R;O", name: drug_name, status: "ACTIVE" } ]
   ensure_cpoe_medication_stubs!
 end
 
@@ -176,6 +177,8 @@ end
 def ensure_cpoe_medication_stubs!
   meds = @patient_medications || []
   allergies = @patient_allergies || []
-  Lakeraven::EHR::MedicationRequest.define_singleton_method(:for_patient) { |_dfn, **_opts| meds }
-  Lakeraven::EHR::AllergyIntolerance.define_singleton_method(:for_patient) { |_dfn| allergies }
+  # stub_gateway restores after the scenario. A bare singleton replacement
+  # survives into later features and makes an empty chart look unassessed.
+  stub_gateway(Lakeraven::EHR::MedicationRequest, :for_patient, meds)
+  stub_gateway(Lakeraven::EHR::AllergyIntolerance, :for_patient, allergies)
 end

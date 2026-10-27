@@ -29,8 +29,8 @@ module Lakeraven
     #
     # State the shipped position plainly, because it is not neutral:
     # `cprs_gui_chart` — the most widely held key in an RPMS site, the one that
-    # means "may open a chart" — grants `user/Observation.read` and
-    # `user/Condition.read`, which is to say the PHQ-9 item-9 answer and the
+    # means "may open a chart" — grants `user/Observation.rs` and
+    # `user/Condition.rs`, which is to say the PHQ-9 item-9 answer and the
     # substance-use diagnosis. `bh_provider` and `bh_supervisor` grant NOTHING.
     # So the effect today is not "no Part 2 control": it is that Part 2 content
     # travels with ordinary chart access while the keys named for it are inert.
@@ -106,13 +106,16 @@ module Lakeraven
           scopes_for(security_keys: security_keys).join(" ")
         end
 
+        # One SMART v2 scope per resource type: `rs` for a type the keys let
+        # the user read, `cud` for one they let the user change, `cruds` for
+        # both (SmartScope).
         def scopes_for(security_keys:)
           granted = Array(security_keys).filter_map { |k| KEY_SCOPES[k.to_sym] }
 
-          reads = granted.flat_map { |g| g[:read] }.uniq.map { |t| "user/#{t}.read" }
-          writes = granted.flat_map { |g| g[:write] }.uniq.map { |t| "user/#{t}.write" }
+          reads = granted.flat_map { |g| g[:read] }.to_set
+          writes = granted.flat_map { |g| g[:write] }.to_set
 
-          (reads + writes).sort
+          (reads | writes).map { |type| user_scope(type, reads.include?(type), writes.include?(type)) }.sort
         end
 
         # Every scope this policy can ever mint. Used to declare the browser
@@ -120,6 +123,12 @@ module Lakeraven
         # scope outside the table.
         def all_scopes
           KEY_SCOPES.keys.then { |keys| scopes_for(security_keys: keys) }
+        end
+
+        private
+
+        def user_scope(type, read, write)
+          SmartScope.build("user", type, "#{'rs' if read}#{'cud' if write}").to_s
         end
       end
     end

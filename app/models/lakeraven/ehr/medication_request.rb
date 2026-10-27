@@ -48,6 +48,18 @@ module Lakeraven
         gateway.for_patient(dfn)
       end
 
+      # The orders an interaction check or decision support weighs (#680).
+      # ORWPS ACTIVE also returns orders that expired or were discontinued
+      # inside the site's date window; the chart, FHIR search and export keep
+      # those. A held order can be resumed, so it is still checked.
+      CHECKED_STATUSES = %w[active on-hold].freeze
+
+      def self.checked_for_patient(dfn)
+        for_patient(dfn)
+          .map { |row| from_rpms_row(row, patient_dfn: dfn.to_s) }
+          .select { |order| CHECKED_STATUSES.include?(order.status) }
+      end
+
       # The order status RPMS sends with each active-list row (#628). The
       # status is read as sent, never worked out from the stop date: a
       # prescription discontinued early keeps its future stop date.

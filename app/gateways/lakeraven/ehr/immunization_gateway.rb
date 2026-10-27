@@ -16,12 +16,14 @@ module Lakeraven
       ADMINISTERED = { status: "completed" }.freeze
 
       def self.for_patient(dfn, via: default_provider)
+        CapabilityGuard.ensure!(:ihs_immunization)
         return [] if via.nil?
 
         Array(via.for_patient(dfn.to_s)).map { |row| ADMINISTERED.merge(row) }
       end
 
       def self.find(ien, via: default_provider)
+        CapabilityGuard.ensure!(:ihs_immunization)
         return nil if via.nil?
 
         row = via.find(ien.to_s)
