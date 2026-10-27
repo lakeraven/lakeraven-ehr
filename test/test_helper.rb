@@ -8,8 +8,8 @@ ActiveRecord::Migrator.migrations_paths = [ File.expand_path("../test/dummy/db/m
 ActiveRecord::Migrator.migrations_paths << File.expand_path("../db/migrate", __dir__)
 require "rails/test_help"
 
-# Every engine page links the Tailwind build (tailwind.css), and a missing
-# build is a template error on every page render. `rails test:prepare` builds
+# Engine pages link the Tailwind build (tailwind.css), and a missing build is
+# a template error on any page that links it. `rails test:prepare` builds
 # it in an app, but an engine's test runner never calls test:prepare, so build
 # it here: once per run, from the current views, and loudly when it fails.
 # Cucumber loads this file too.
@@ -17,20 +17,26 @@ Tailwindcss::Engines.bundle
 system(*Tailwindcss::Commands.compile_command(silent: false), exception: true)
 
 require_relative "support/supplemental_provider_config_helper"
-require "rpms_rpc/version"
+require_relative "support/global_store_isolation"
+require_relative "support/host_role_expectations"
+require_relative "support/fake_gateway"
+require_relative "support/stub_helpers"
+require_relative "support/ihs_feature_availability_test_helper"
 require "rpms_rpc/mock_client"
-# Needed to build the DDR GETS ENTRY DATA seed key below.
-require "rpms_rpc/api/ddr_fileman"
+require_relative "support/mock_session_user"
 
-# Configure RpmsRpc with mock client and seed data for all tests.
-RpmsRpc.mock! do |m|
+# Baseline RpmsRpc mock seeds. Installed at load and again before every
+# example (GlobalStoreIsolation) so a test that adds seeds cannot leak
+# them into the next example.
+BASELINE_MOCK_SEEDS = lambda do |m|
   # Patients (DFN 1-3)
   m.seed(:patient_select, "1", { name: "Anderson,Alice", sex: "F", dob: Date.parse("1980-05-15"), ssn: "111-11-1111", age: 45 })
   m.seed(:patient_select, "2", { name: "MOUSE,MICKEY M", sex: "M", dob: Date.parse("2010-02-14"), ssn: "000009999", age: 16 })
   m.seed(:patient_select, "3", { name: "DOE,JANE", sex: "F", dob: Date.parse("1990-12-25"), ssn: "555667777", age: 35 })
 
-  # patient_id_info now returns the identifier projection from ORWPT ID INFO
-  # (SSN/DOB/sex/race_code/site_ien/name) — not the extended demographics
+  # patient_id_info returns ORWPT ID INFO as IDINFO^ORWPT writes it
+  # (SSN/DOB/sex/veteran/SC%/ward/room-bed/name, rpms-rpc #309) — not the
+  # race code and site the earlier mapping read there, and not the extended demographics
   # that the prior mapping hallucinated. Address, phone, service_area and
   # coverage_type still have NO known RPC source — the old "BHDPTRPC, not
   # installed on staging" attribution was itself unverified (see rpms-rpc
@@ -42,15 +48,15 @@ RpmsRpc.mock! do |m|
   # (^AUPNPAT) and it is read via DDR GETS ENTRY DATA, seeded below.
   m.seed(:patient_id_info, "1", {
     ssn: "111-11-1111", dob: Date.parse("1980-05-15"), sex: "F",
-    race_code: "I", site_ien: 7819, name: "Anderson,Alice"
+    veteran: "", ward_location: "", name: "Anderson,Alice"
   })
   m.seed(:patient_id_info, "2", {
     ssn: "000009999", dob: Date.parse("2010-02-14"), sex: "M",
-    race_code: "I", site_ien: 7819, name: "MOUSE,MICKEY M"
+    veteran: "", ward_location: "", name: "MOUSE,MICKEY M"
   })
   m.seed(:patient_id_info, "3", {
     ssn: "555667777", dob: Date.parse("1990-12-25"), sex: "F",
-    race_code: "I", site_ien: 7819, name: "DOE,JANE"
+    veteran: "", ward_location: "", name: "DOE,JANE"
   })
 
   # Tribal detail for DFN 1 — #9000001 (^AUPNPAT) via DDR GETS ENTRY DATA,
@@ -76,50 +82,69 @@ RpmsRpc.mock! do |m|
       9000001^1^1118^Example Community^Example Community
     TRIBAL
 
-  m.seed(:patient_ssn, "111-11-1111", { dfn: 1, name: "Anderson,Alice", ssn: "111-11-1111" })
+  # The SSN index holds the SSN without punctuation; Patient.find_by_ssn
+  # strips it before the call (rpms-rpc #352).
+  m.seed(:patient_ssn, "111111111", { dfn: 1, name: "Anderson,Alice", ssn: "111111111" })
 
+  # ORWPT LIST ALL answers a page of the name index, { dfn:, name: } rows,
+  # whatever the start text (rpms-rpc #352): seeded unfiltered, so the
+  # gateway's own filtering is what a search test exercises.
   m.seed_collection(:patient_list,
     [
-      { dfn: 1, name: "Anderson,Alice", sex: "F", dob: Date.parse("1980-05-15") },
-      { dfn: 2, name: "MOUSE,MICKEY M", sex: "M", dob: Date.parse("2010-02-14") },
-      { dfn: 3, name: "DOE,JANE", sex: "F", dob: Date.parse("1990-12-25") }
-    ],
-    filter_field: :name)
-
-  # Practitioner — ORWU USERINFO is single-session-user (per rr-fyf); the
-  # mock dispatches on "" since the wrapper passes no params. Test code
-  # that "looks up" IEN 101 works iff the seeded duz matches; IEN 102 or
-  # any other returns nil. The practitioner_list (ORWU NEWPERS) is a
-  # genuine multi-record search and continues to surface both.
-  m.seed(:practitioner_info, "", {
-    duz: 101, name: "MARTINEZ,SARAH", user_class: 3,
-    kernel_domain: "DEMO.IHS.GOV", site_ien: 8904
-  })
+      { dfn: 1, name: "Anderson,Alice" },
+      { dfn: 2, name: "MOUSE,MICKEY M" },
+      { dfn: 3, name: "DOE,JANE" }
+    ])
 
   m.seed_collection(:practitioner_list,
     [ { ien: 101, name: "MARTINEZ,SARAH", title: "MD" }, { ien: 102, name: "CHEN,JAMES", title: "DO" } ],
     filter_field: :name)
 
-  # Institutions (IEN 1)
-  m.seed(:institution, "1", { ien: 1, name: "Example Health Center", station_number: "463",
-                               address: "500 Example Way", city: "Anchorage", state: "AK",
-                               zip_code: "99508", phone: "555-0100" })
+  # Institution IEN 1 (#4) and hospital location IEN 1 (#44): DDR GETS ENTRY
+  # DATA, which Organization.find and Location.find read since rpms-rpc
+  # #379/#377 (the BHDO INST DATA / HOSP LOC DATA names were registered
+  # nowhere). Wire form per field is FILE^IEN^FIELD^INTERNAL^EXTERNAL; #4
+  # has no phone field. Synthetic values throughout.
+  m.seed(:ddr_gets_entry_data,
+    RpmsRpc::DdrFileman.gets_entry_param(
+      file: RpmsRpc::Organization::FILE, iens: "1,",
+      fields: RpmsRpc::Organization::FIELDS.join(";"), flags: "IE"
+    ).to_s,
+    <<~INSTITUTION.chomp)
+      [Data]
+      4^1^.01^Example Health Center^Example Health Center
+      4^1^99^463^463
+      4^1^1.01^500 Example Way^500 Example Way
+      4^1^1.03^Anchorage^Anchorage
+      4^1^.02^2^ALASKA
+      4^1^1.04^99508^99508
+    INSTITUTION
+  m.seed(:ddr_gets_entry_data,
+    RpmsRpc::DdrFileman.gets_entry_param(
+      file: RpmsRpc::Location::FILE, iens: "1,",
+      fields: RpmsRpc::Location::FIELDS.values.join(";"), flags: "IE"
+    ).to_s,
+    <<~LOCATION.chomp)
+      [Data]
+      44^1^.01^Primary Care Clinic^Primary Care Clinic
+      44^1^1^PCC^PCC
+      44^1^2^C^CLINIC
+      44^1^3.5^1^Example Health Center
+    LOCATION
 
-  # Locations (IEN 1)
-  m.seed(:hospital_location, "1", { ien: 1, name: "Primary Care Clinic", abbreviation: "PCC",
-                                     type: "C", division: "463" })
-
-  # VFC Eligibility
-  m.seed(:vfc_eligibility, "1", { code: "V04", label: "American Indian/Alaska Native" })
-  m.seed_collection(:vfc_eligibility_list, [
-    { code: "V01", label: "Not VFC eligible" },
-    { code: "V02", label: "VFC eligible - Medicaid" },
-    { code: "V03", label: "VFC eligible - Uninsured" },
-    { code: "V04", label: "VFC eligible - AI/AN" },
-    { code: "V05", label: "VFC eligible - FQHC" },
-    { code: "V06", label: "VFC eligible - State specific" },
-    { code: "V07", label: "VFC eligible - Local specific" }
+  # VFC eligibility: BGOVIMM2 GETELIG (the code table) and BGOVIMM GETVFC
+  # (DFN 1's default, which answers a label, not a code), read by
+  # Eligibility.codes and .for_patient since rpms-rpc #376.
+  m.seed_collection(:vfc_eligibility_codes, [
+    { ien: 1, code: "V01", label: "Not VFC eligible" },
+    { ien: 2, code: "V02", label: "VFC eligible - Medicaid" },
+    { ien: 3, code: "V03", label: "VFC eligible - Uninsured" },
+    { ien: 4, code: "V04", label: "Am Indian/AK Native" },
+    { ien: 5, code: "V05", label: "VFC eligible - FQHC" },
+    { ien: 6, code: "V06", label: "VFC eligible - State specific" },
+    { ien: 7, code: "V07", label: "VFC eligible - Local specific" }
   ])
+  m.seed(:vfc_default, "1", { ihs_site: 1, age: 45, default_label: "Am Indian/AK Native" })
 
   # Tribal enrollment / eligibility seeds REMOVED with the rpms-rpc 0.3.0 bump.
   # #235 deleted the invented placeholder mappings these seeded against
@@ -133,33 +158,46 @@ RpmsRpc.mock! do |m|
 
   # Vitals (ORQQVI VITALS) for patient DFN 1
   m.seed_keyed_collection(:vitals, "1", [
-    { type: "BP",  value: "120/80", units: "mm[Hg]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
-    { type: "P",   value: "72",     units: "/min",   recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
-    { type: "T",   value: "98.6",   units: "[degF]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
-    { type: "R",   value: "16",     units: "/min",   recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
-    { type: "POX", value: "98",     units: "%",      recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
-    { type: "WT",  value: "150",    units: "[lb_av]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
-    { type: "HT",  value: "65",     units: "[in_i]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) }
+    { measurement_ien: 1001, type: "BP",  value: "120/80", units: "mm[Hg]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
+    { measurement_ien: 1002, type: "P",   value: "72",     units: "/min",   recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
+    { measurement_ien: 1003, type: "T",   value: "98.6",   units: "[degF]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
+    { measurement_ien: 1004, type: "R",   value: "16",     units: "/min",   recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
+    { measurement_ien: 1005, type: "POX", value: "98",     units: "%",      recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
+    { measurement_ien: 1006, type: "WT",  value: "150",    units: "[lb_av]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
+    { measurement_ien: 1007, type: "HT",  value: "65",     units: "[in_i]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) }
   ])
 
   # Test users
   m.seed_user("301", credentials: "testprovider;test123", name: "PROVIDER,TEST", role: :provider)
   m.seed_user("302", credentials: "testnurse;test123", name: "NURSE,TEST", role: :nurse)
   m.seed_user("303", credentials: "testclerk;test123", name: "CLERK,TEST", role: :clerk)
-  m.seed_user("304", credentials: "lindarodriguez;test123", name: "RODRIGUEZ,LINDA", role: :case_manager,
-                     security_keys: [ :prc_supervisor, :cprs_gui_chart ])
+  m.seed_user("304", credentials: "lindarodriguez;test123", name: "RODRIGUEZ,LINDA", role: :case_manager)
+  # DUZ 304's KEYS multiple (#200.051), which Authentication.user_security_keys
+  # reads with DDR LISTER since rpms-rpc #374: IEN^KEY-name rows.
+  m.seed_text(:ddr_lister,
+    RpmsRpc::DdrFileman.lister_param(file: "200.051", iens: ",304,", fields: "@;.01").to_s,
+    <<~KEYS.chomp)
+      [Data]
+      1^PRCFA SUPERVISOR
+      2^OR CPRS GUI CHART
+    KEYS
 
-  # Referral details (for ServiceRequestGateway delete/cancel tests)
-  m.seed(:referral_detail, "SR-DRAFT-001", { ien: "SR-DRAFT-001", status: "draft", patient_dfn: "1",
-                                              service: "Cardiology", to_service: "Cardiology Clinic" })
-  m.seed(:referral_detail, "SR-PENDING-001", { ien: "SR-PENDING-001", status: "pending", patient_dfn: "1",
-                                                service: "Orthopedics", to_service: "Ortho Clinic" })
-  m.seed(:referral_detail, "SR-AUTHORIZED-001", { ien: "SR-AUTHORIZED-001", status: "authorized", patient_dfn: "1",
-                                                    service: "Neurology", to_service: "Neuro Clinic" })
-  m.seed(:referral_delete, "SR-DRAFT-001", { success: true, message: "Referral deleted" })
-  m.seed(:referral_delete, "SR-PENDING-001", { success: true, message: "Referral deleted" })
-  m.seed(:referral_delete, "SR-AUTHORIZED-001", { success: true, message: "Referral cancelled" })
+  # Practitioner — ORWU USERINFO is single-session-user (per rr-fyf); the
+  # mock dispatches on "" since the wrapper passes no params. Test code
+  # that "looks up" IEN 101 works iff the seeded duz matches; IEN 102 or
+  # any other returns nil. The practitioner_list (ORWU NEWPERS) is a
+  # genuine multi-record search and continues to surface both.
+  #
+  # Seeded after the test users: MockClient#seed_user writes the same
+  # session-user reply for each user it seeds (rpms-rpc 0.4), so seeding
+  # it first would leave the last test user as the session user.
+  m.seed(:practitioner_info, "", {
+    duz: 101, name: "MARTINEZ,SARAH", user_class: 3,
+    kernel_domain: "DEMO.IHS.GOV", site_ien: 8904
+  })
 end
+
+RpmsRpc.mock!(&BASELINE_MOCK_SEEDS)
 
 # Scripted RPC broker for the BPRM reg/sched/ADT twin gateway tests.
 #
@@ -226,7 +264,6 @@ class FakeBroker
     end
   end
 
-  def supports?(_feature) = true
   def connected? = true
   def hostname = "fake-broker.test"
   def received_calls = @calls
@@ -272,3 +309,6 @@ if ActiveSupport::TestCase.respond_to?(:fixture_paths=)
   ActiveSupport::TestCase.file_fixture_path = "#{File.expand_path('fixtures', __dir__)}/files"
   ActiveSupport::TestCase.fixtures :all
 end
+
+ActiveSupport::TestCase.include GlobalStoreIsolation
+ActiveSupport::TestCase.include StubHelpers

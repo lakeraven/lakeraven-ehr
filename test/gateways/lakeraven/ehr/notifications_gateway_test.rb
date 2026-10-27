@@ -19,22 +19,12 @@ module Lakeraven
           @calls << { method: :inbox, args: [ user_duz ], unread: unread }
           @returns[:inbox] || []
         end
-
-        def mark_read(notification_ien, user_duz)
-          @calls << { method: :mark_read, args: [ notification_ien, user_duz ] }
-          @returns[:mark_read] || { success: true, raw: "0" }
-        end
       end
 
       # --- via: nil ---
 
       test "inbox returns empty when no provider is available" do
         assert_equal [], NotificationsGateway.inbox("301", via: nil)
-      end
-
-      test "mark_read returns failure shape when no provider is available" do
-        assert_equal({ success: false, raw: nil },
-          NotificationsGateway.mark_read(1001, "301", via: nil))
       end
 
       # --- delegation ---
@@ -56,15 +46,6 @@ module Lakeraven
         NotificationsGateway.inbox("301", via: fake)
 
         assert_nil fake.calls.first[:unread]
-      end
-
-      test "mark_read delegates with identifiers coerced to strings" do
-        fake = FakeNotificationsAPI.new(returns: { mark_read: { success: true, raw: "0" } })
-
-        result = NotificationsGateway.mark_read(1001, 301, via: fake)
-
-        assert_equal({ success: true, raw: "0" }, result)
-        assert_equal [ "1001", "301" ], fake.calls.first[:args]
       end
 
       # --- default_provider ---

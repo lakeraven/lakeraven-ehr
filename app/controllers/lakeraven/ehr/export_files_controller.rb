@@ -24,7 +24,7 @@ module Lakeraven
           return render_not_found("File", params[:file_name])
         end
 
-        render plain: file["content"], content_type: "application/fhir+ndjson"
+        render_export_file_egress(file)
       end
     end
   end

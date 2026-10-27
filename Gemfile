@@ -7,15 +7,14 @@ gemspec
 if ENV["RPMS_RPC_PATH"]
   gem "rpms-rpc", path: ENV["RPMS_RPC_PATH"]
 else
-  # Pinned to rpms-rpc main 98276f0, past #251: CIA sign-on reads the DUZ with
-  # XUS GET USER INFO (every CIA sign-on failed closed before it; #540). Not
-  # yet 19fffc3 (#188): it retires Problem.filter and reshapes the medication
-  # and vitals rows, a migration of its own. Earlier
-  # pins brought RpmsRpc::SessionPool (ADR 0005 / #234), the #249 nil-DUZ
-  # fail-closed sign-on and the 0.3.0 sign-on path (encrypted AV pair, CIA
-  # reply grammar, RpmsRpc.synchronize_wire). A fixed ref rather than
-  # branch:main so the pin does not drift mid-merge.
-  gem "rpms-rpc", github: "lakeraven/rpms-rpc", ref: "98276f0"
+  # Pinned to rpms-rpc main 45125a7 (0.4.0 and the unreleased changes after
+  # it): past #251, so CIA sign-on reads the DUZ with CIAVCXUS VIMINFO and
+  # resolves one (lakeraven-ehr#540); the invented RPC names and their API
+  # removed (#310/#311) or rebuilt on registered RPCs (#374-#380); typed
+  # errors for a missing RPC (#370); the sign-on user class read from ORWU
+  # USERINFO (#236). A fixed ref rather than branch:main so the pin does
+  # not drift mid-merge.
+  gem "rpms-rpc", github: "lakeraven/rpms-rpc", ref: "45125a7"
 end
 
 gem "puma"

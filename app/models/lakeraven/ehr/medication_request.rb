@@ -6,8 +6,9 @@ module Lakeraven
       include ActiveModel::Model
       include ActiveModel::Attributes
 
-      VALID_STATUSES = %w[active on-hold cancelled completed stopped draft entered-in-error].freeze
+      VALID_STATUSES = %w[active on-hold cancelled completed stopped draft entered-in-error unknown].freeze
       VALID_INTENTS = %w[proposal plan order original-order reflex-order filler-order instance-order option].freeze
+      DATA_ABSENT_REASON = "http://hl7.org/fhir/StructureDefinition/data-absent-reason"
 
       attribute :ien, :string
       attribute :patient_dfn, :string
@@ -46,6 +47,66 @@ module Lakeraven
       def self.for_patient(dfn)
         gateway.for_patient(dfn)
       end
+
+      # The orders an interaction check or decision support weighs (#680).
+      # ORWPS ACTIVE also returns orders that expired or were discontinued
+      # inside the site's date window; the chart, FHIR search and export keep
+      # those. A held order can be resumed, so it is still checked.
+      CHECKED_STATUSES = %w[active on-hold].freeze
+
+      def self.checked_for_patient(dfn)
+        for_patient(dfn)
+          .map { |row| from_rpms_row(row, patient_dfn: dfn.to_s) }
+          .select { |order| CHECKED_STATUSES.include?(order.status) }
+      end
+
+      # The order status RPMS sends with each active-list row (#628). The
+      # status is read as sent, never worked out from the stop date: a
+      # prescription discontinued early keeps its future stop date.
+      RPMS_STATUS = {
+        "active" => "active",
+        "refill fill" => "active",
+        "hold" => "on-hold",
+        "suspended" => "on-hold",
+        "pending" => "draft",
+        "non-verified" => "draft",
+        "expired" => "completed",
+        "done" => "completed",
+        "discontinued" => "stopped",
+        "discontinued (edit)" => "stopped"
+      }.freeze
+
+      def self.from_rpms_row(row, patient_dfn:)
+        new(
+          ien: fhir_id(row[:order_id]),
+          patient_dfn: patient_dfn,
+          medication_display: row[:name],
+          dosage_instruction: dosage_text(row),
+          status: rpms_status(row[:status]),
+          intent: "order"
+        )
+      end
+
+      # An RPMS order id is IEN, a type letter, ";", and I or O ("4401R;O").
+      # ";" is not legal in a FHIR id and "-" never occurs in an order id, so
+      # the id swaps one for the other and the swap reverses.
+      def self.fhir_id(order_id)
+        order_id.to_s.tr(";", "-").presence
+      end
+
+      # Case-insensitive. Blank and unrecognised RPMS text are unknown,
+      # which is a legal MedicationRequest status. Do not pass a raw
+      # FHIR code through, and do not read stop_date.
+      def self.rpms_status(raw)
+        RPMS_STATUS[raw.to_s.strip.downcase] || "unknown"
+      end
+
+      # dosageInstruction.text is the order's instruction lines as RPMS
+      # sends them (the drug and quantity line, then the sig).
+      def self.dosage_text(row)
+        Array(row[:instructions]).filter_map { |line| line.to_s.strip.presence }.join(" ").presence
+      end
+      private_class_method :rpms_status, :dosage_text
 
       def self.resource_class
         "MedicationRequest"
@@ -94,6 +155,8 @@ module Lakeraven
           intent: intent,
           subject: patient_dfn ? { reference: "Patient/#{patient_dfn}" } : nil,
           medicationCodeableConcept: build_medication_code,
+          authoredOn: authored_on&.iso8601,
+          _authoredOn: build_authored_on_absent,
           dosageInstruction: build_dosage_instructions,
           dispenseRequest: build_dispense_request,
           requester: build_requester
@@ -144,13 +207,21 @@ module Lakeraven
         dr
       end
 
-      def build_requester
-        return nil if requester_duz.blank?
+      def build_authored_on_absent
+        return nil if authored_on.present?
 
-        {
-          reference: "Practitioner/#{requester_duz}",
-          display: requester_name
-        }.compact
+        { extension: [ { url: DATA_ABSENT_REASON, valueCode: "unknown" } ] }
+      end
+
+      def build_requester
+        if requester_duz.present?
+          {
+            reference: "Practitioner/#{requester_duz}",
+            display: requester_name
+          }.compact
+        else
+          { extension: [ { url: DATA_ABSENT_REASON, valueCode: "unknown" } ] }
+        end
       end
     end
   end

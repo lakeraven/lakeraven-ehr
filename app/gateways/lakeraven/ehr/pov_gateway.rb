@@ -10,6 +10,7 @@ module Lakeraven
       FAILURE = { success: false, ien: nil, raw: nil }.freeze
 
       def self.add(dfn, visit_ien, diagnosis_code, narrative:, modifiers: {}, via: default_provider)
+        CapabilityGuard.ensure!(:pcc_screens)
         return FAILURE if via.nil?
 
         via.add(dfn.to_s, visit_ien.to_s, diagnosis_code,

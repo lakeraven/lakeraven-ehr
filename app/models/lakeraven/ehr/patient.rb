@@ -38,10 +38,11 @@ module Lakeraven
       attribute :service_area, :string
       attribute :coverage_type, :string
 
-      # From ORWPT ID INFO — IHS single-letter race code (e.g. "I" =
-      # American Indian/Alaska Native) and the current site IEN. Distinct
-      # from `:race` which holds the long-form string and currently isn't
-      # populated by any RPC mapped to this codebase.
+      # IHS single-letter race code (e.g. "I" = American Indian/Alaska
+      # Native) and the patient's site IEN. No RPC fills them: ORWPT ID INFO
+      # was read as carrying them, but its pieces 4 and 6 are the VETERAN
+      # flag and the ward (rpms-rpc #309). A real source is #564; until then
+      # only a caller that knows them (a partner fixture) sets them.
       attribute :race_code, :string
       attribute :site_ien, :integer
 
@@ -69,6 +70,17 @@ module Lakeraven
 
       def self.find_by_dfn(dfn)
         PatientRepository.find(dfn)
+      end
+
+      # "01", "1", and " 1 " are one patient. PatientRepository#find resolves
+      # with to_i, and SupplementalClinicalResources compares owners the same
+      # way. A non-digit or non-positive value is not a dfn.
+      def self.canonical_dfn(value)
+        numeric = value.to_s.strip
+        return nil unless numeric.match?(/\A\d+\z/)
+
+        number = numeric.to_i
+        number.positive? ? number.to_s : nil
       end
 
       def self.search(name_pattern)
@@ -162,6 +174,20 @@ module Lakeraven
         dfn.present? && dfn.to_i.positive?
       end
 
+      # Completed years from dob to date. A Feb 29 birth's anniversary is March 1
+      # in a non-leap year. Nil when dob is blank or after the date.
+      def age_on(date)
+        born = dob&.to_date
+        return nil unless born
+
+        on = date.to_date
+        return nil if born > on
+
+        years = on.year - born.year
+        years -= 1 if on < anniversary_in(born, on.year)
+        years
+      end
+
       # -- Clinical data accessors (ported from the predecessor app) ------------------
 
       def service_requests
@@ -216,6 +242,7 @@ module Lakeraven
       def tribal_enrollment_details
         return nil unless dfn
 
+        CapabilityGuard.ensure!(:tribal_enrollment)
         TribalEnrollmentGateway.enrollment_details(dfn)
       end
 
@@ -369,6 +396,12 @@ module Lakeraven
       end
 
       private
+
+      def anniversary_in(born, year)
+        return Date.new(year, 3, 1) if born.month == 2 && born.day == 29 && !Date.leap?(year)
+
+        Date.new(year, born.month, born.day)
+      end
 
       def persistable_attributes
         {

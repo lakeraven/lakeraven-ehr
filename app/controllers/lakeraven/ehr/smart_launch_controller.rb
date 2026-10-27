@@ -5,6 +5,8 @@ module Lakeraven
     # SMART EHR Launch controller
     # ONC 170.315(g)(10)(iii) - Application registration and EHR launch
     class SmartLaunchController < ActionController::API
+      include SmartEndpoints
+
       def show
         unless params[:launch].present? && params[:iss].present?
           render json: { error: "invalid_request", error_description: "launch and iss parameters are required" },
@@ -30,15 +32,11 @@ module Lakeraven
       private
 
       def authorization_endpoint
-        "#{root_url}oauth/authorize"
+        "#{smart_base_url}oauth/authorize"
       end
 
       def token_endpoint
-        "#{root_url}oauth/token"
-      end
-
-      def root_url
-        request.base_url + "/"
+        smart_token_endpoint
       end
 
       def build_authorize_url(app)
@@ -46,7 +44,7 @@ module Lakeraven
           response_type: "code",
           client_id: app.uid,
           redirect_uri: app.redirect_uri,
-          scope: "launch patient/*.read",
+          scope: "launch patient/*.rs",
           state: SecureRandom.hex(16),
           launch: params[:launch],
           aud: params[:iss]

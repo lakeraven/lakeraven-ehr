@@ -37,6 +37,7 @@ module Lakeraven
       }.freeze
 
       CATEGORY_SYSTEM = "http://terminology.hl7.org/CodeSystem/observation-category"
+      UCUM_SYSTEM = "http://unitsofmeasure.org"
 
       # US Core vital sign profile URLs
       US_CORE_PROFILES = {
@@ -95,24 +96,48 @@ module Lakeraven
       # DETERMINISTIC id from dfn + vital type (+ timestamp when present) —
       # never a random uuid — so ids/fullUrls are stable across requests.
       def self.from_vital_hashes(hashes, patient_dfn:)
-        hashes.filter_map do |h|
-          mapping = VITAL_TYPE_MAP[h[:type]]
-          next unless mapping
+        hashes.filter_map { |hash| vital_from_hash(hash, patient_dfn) }
+      end
 
-          new(
-            ien: h[:ien]&.to_s || vital_id(patient_dfn, h),
-            patient_dfn: patient_dfn,
-            code: mapping[:code],
-            code_system: "loinc",
-            display: mapping[:display],
-            value: h[:value],
-            value_quantity: h[:type] == "BP" ? nil : h[:value],
-            unit: mapping[:unit],
-            category: "vital-signs",
-            status: "final",
-            effective_datetime: h[:recorded_date]
-          )
+      # Unmapped RPMS types (PAIN) stay on the resource as code.text. A row
+      # that states units keeps those units; the map's UCUM unit is only the
+      # fallback when the row says nothing.
+      def self.vital_from_hash(hash, patient_dfn)
+        type = hash[:type]
+        return if type.blank?
+
+        mapping = VITAL_TYPE_MAP[type]
+        new(vital_attributes(hash, patient_dfn, type, mapping))
+      end
+
+      def self.vital_attributes(hash, patient_dfn, type, mapping)
+        {
+          # ORQQVI VITALS names the V MEASUREMENT IEN :measurement_ien since
+          # rpms-rpc #188; :ien is what the earlier mapping called it.
+          ien: (hash[:measurement_ien] || hash[:ien])&.to_s.presence || vital_id(patient_dfn, hash),
+          patient_dfn: patient_dfn,
+          code: mapping&.dig(:code),
+          code_system: ("loinc" if mapping),
+          display: mapping&.dig(:display) || type.to_s,
+          value: hash[:value],
+          value_quantity: (type == "BP" ? nil : hash[:value]),
+          unit: stated_vital_unit(hash, mapping),
+          category: "vital-signs",
+          status: "final",
+          effective_datetime: hash[:recorded_date]
+        }
+      end
+
+      # Recorded text when the row states it. A blank (or absent) units
+      # field is not a unit; the map's UCUM unit is the fallback. The
+      # recorded text is display-only — it never becomes valueQuantity.code.
+      def self.stated_vital_unit(hash, mapping)
+        recorded = if hash.key?(:units)
+          hash[:units]
+        elsif hash.key?("units")
+          hash["units"]
         end
+        recorded.presence || mapping&.dig(:unit)
       end
 
       def self.vital_id(patient_dfn, hash)
@@ -121,14 +146,14 @@ module Lakeraven
         id += "-#{recorded.strftime('%Y%m%d%H%M')}" if recorded.respond_to?(:strftime)
         id
       end
-      private_class_method :vital_id
+      private_class_method :vital_from_hash, :vital_attributes, :stated_vital_unit, :vital_id
 
       def vital_sign? = category == "vital-signs"
       def laboratory? = category == "laboratory"
       def sdoh? = category == "social-history" || category == "survey"
 
       def to_fhir
-        if blood_pressure?
+        if blood_pressure? && numeric_blood_pressure?
           build_blood_pressure_fhir
         else
           build_standard_fhir
@@ -151,13 +176,13 @@ module Lakeraven
           code: build_code,
           effectiveDateTime: effective_datetime&.iso8601,
           valueQuantity: build_value_quantity,
-          valueString: sdoh? && value_quantity.blank? ? value : nil,
+          valueString: fhir_value_string,
           category: category ? [ { coding: [ { code: category, system: CATEGORY_SYSTEM } ] } ] : nil
         }.compact
       end
 
       def build_blood_pressure_fhir
-        systolic_val, diastolic_val = (value || "").split("/").map(&:strip)
+        systolic_text, diastolic_text = blood_pressure_parts
         {
           resourceType: "Observation",
           id: ien&.to_s,
@@ -168,16 +193,17 @@ module Lakeraven
           effectiveDateTime: effective_datetime&.iso8601,
           category: category ? [ { coding: [ { code: category, system: CATEGORY_SYSTEM } ] } ] : nil,
           component: [
-            {
-              code: { coding: [ { code: VITAL_SIGNS_CODES[:systolic], system: "http://loinc.org" } ] },
-              valueQuantity: { value: systolic_val.to_f, unit: "mm[Hg]", code: "mm[Hg]", system: "http://unitsofmeasure.org" }
-            },
-            {
-              code: { coding: [ { code: VITAL_SIGNS_CODES[:diastolic], system: "http://loinc.org" } ] },
-              valueQuantity: { value: diastolic_val.to_f, unit: "mm[Hg]", code: "mm[Hg]", system: "http://unitsofmeasure.org" }
-            }
+            blood_pressure_component(VITAL_SIGNS_CODES[:systolic], systolic_text),
+            blood_pressure_component(VITAL_SIGNS_CODES[:diastolic], diastolic_text)
           ]
         }.compact
+      end
+
+      def blood_pressure_component(component_code, text)
+        {
+          code: { coding: [ { code: component_code, system: "http://loinc.org" } ] },
+          valueQuantity: quantity_hash(quantity_number(text))
+        }
       end
 
       def build_code
@@ -209,23 +235,70 @@ module Lakeraven
         profile_url ? { profile: [ profile_url ] } : nil
       end
 
-      # Quantity.value is a FHIR decimal — it must serialize as a JSON
-      # number, never a string. Non-numeric values fall back to nil (the
-      # caller compacts the element away) rather than emitting invalid JSON.
+      # Quantity.value is a FHIR decimal — a JSON number, never a string.
+      # A non-numeric vital is not a quantity; fhir_value_string carries
+      # the recorded text instead.
       def build_value_quantity
-        return nil unless value_quantity
+        number = quantity_number(value_quantity)
+        return if number.nil?
 
-        numeric = begin
-          Float(value_quantity)
-        rescue ArgumentError, TypeError
-          return nil
+        quantity_hash(number)
+      end
+
+      # code and system come from the UCUM map only when the recorded unit
+      # is blank or equals that map unit. Other recorded text is the unit
+      # alone — never a code that disagrees with it ("Celsius" must not
+      # carry [degF]). A blank recorded unit with a map unit takes unit,
+      # code, and system from the map. A survey score has no vital mapping;
+      # its unit attribute is already the UCUM code ("{score}"), so unit,
+      # code, and system are that same text. Omit all three when both the
+      # recorded text and the map are blank.
+      def quantity_hash(number)
+        recorded = unit.presence
+        mapped = mapped_ucum_unit
+        fields = { value: number }
+
+        if mapped && (recorded.nil? || recorded == mapped)
+          fields[:unit] = mapped
+          fields[:code] = mapped
+          fields[:system] = UCUM_SYSTEM
+        elsif recorded
+          fields[:unit] = recorded
+          if mapped.nil? && !vital_sign?
+            fields[:code] = recorded
+            fields[:system] = UCUM_SYSTEM
+          end
         end
 
-        qty = { value: numeric }
-        qty[:unit] = unit if unit
-        qty[:code] = unit if unit
-        qty[:system] = "http://unitsofmeasure.org" if unit
-        qty
+        fields
+      end
+
+      def mapped_ucum_unit
+        VITAL_TYPE_MAP.each_value.find { |mapping| mapping[:code] == code }&.dig(:unit).presence
+      end
+
+      def fhir_value_string
+        return value if sdoh? && value_quantity.blank?
+        return value if vital_sign? && value.present? && quantity_number(value_quantity).nil?
+
+        nil
+      end
+
+      def numeric_blood_pressure?
+        parts = blood_pressure_parts
+        parts.length == 2 && parts.all? { |part| !quantity_number(part).nil? }
+      end
+
+      def blood_pressure_parts
+        value.to_s.split("/", 2).map(&:strip)
+      end
+
+      def quantity_number(text)
+        return if text.blank?
+
+        Float(text)
+      rescue ArgumentError, TypeError
+        nil
       end
     end
   end

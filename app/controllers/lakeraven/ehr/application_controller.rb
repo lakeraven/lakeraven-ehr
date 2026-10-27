@@ -5,11 +5,24 @@ module Lakeraven
     class ApplicationController < ActionController::API
       include SmartAuthentication
       include AuditableClinicalAccess
+      include FHIRReadEgress
+      include FHIRSearchBundle
+      include FeatureUnavailableRendering
 
       FHIR_CONTENT_TYPE = "application/fhir+json"
 
       before_action :authenticate_smart_token!
       before_action :authorize_fhir_scope!
+      # A withheld endpoint reports itself unavailable (#647) before any
+      # request parameter is judged, so a malformed one cannot turn
+      # not-supported into a 400. After the token checks, so an
+      # unauthenticated or out-of-scope caller learns nothing from it.
+      before_action :ensure_backend_supports_interaction!
+      # Every index here is a FHIR search. Its result parameters are checked
+      # after the token, so an unauthenticated or out-of-scope caller learns
+      # nothing from a 400.
+      before_action :validate_fhir_paging!, if: :fhir_search?
+      before_action :validate_fhir_sort_and_include!, if: :fhir_search?
 
       # Actions that DISCLOSE clinical data even though they are shaped as
       # writes — generating a C-CDA, running a bulk export, requesting an
@@ -122,13 +135,7 @@ module Lakeraven
       end
 
       def render_bundle(entries, type: "searchset")
-        bundle = {
-          resourceType: "Bundle",
-          type: type,
-          total: entries.length,
-          entry: entries.map { |e| { resource: e } }
-        }
-        render json: bundle, status: :ok, content_type: FHIR_CONTENT_TYPE
+        render json: fhir_search_bundle(entries, type: type), status: :ok, content_type: FHIR_CONTENT_TYPE
       end
     end
   end

@@ -73,8 +73,9 @@ module Lakeraven
       # methods that cannot touch the backend or its credentials; everything
       # else — `call_rpc_raw`, `read_response`, `authenticate`, `connect` —
       # is refused, so a caller that needs it must come through `call_rpc`
-      # and be recorded.
-      PASSTHROUGH = %i[supports? connected? hostname].freeze
+      # and be recorded. `supports?` is gone from every client (rpms-rpc
+      # #370): a missing RPC raises a typed error instead.
+      PASSTHROUGH = %i[connected? hostname].freeze
 
       def respond_to_missing?(name, include_private = false)
         (PASSTHROUGH.include?(name) && @client.respond_to?(name, include_private)) || super

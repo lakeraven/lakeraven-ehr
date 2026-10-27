@@ -72,10 +72,6 @@ module Lakeraven
         RpmsRpc::Problem.delete(dfn.to_s, ien.to_s, reason: reason)
       end
 
-      def self.filter(dfn, scope:)
-        RpmsRpc::Problem.filter(dfn.to_s, scope: scope)
-      end
-
       def self.diagnosis_coded?(problem)
         return false unless problem.is_a?(Hash)
 
