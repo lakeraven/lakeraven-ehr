@@ -7,7 +7,9 @@ gemspec
 if ENV["RPMS_RPC_PATH"]
   gem "rpms-rpc", path: ENV["RPMS_RPC_PATH"]
 else
-  # Pinned to rpms-rpc main b9ae9f8: Tribal.communities lists COMMUNITY entries
+  # Pinned to rpms-rpc main 672eb36: Scheduling.resources and slot_schedule (the
+  # user's resources and rights, each block's slots; rpms-rpc#495). Earlier:
+  # Tribal.communities lists COMMUNITY entries
   # with county and state (rpms-rpc#493), for the registration form. Earlier:
   # Patient.lookup binds AGGRPC (AGG LOOKUP
   # PATIENTS is refused under the CIA sign-on context) and a refused global-array
@@ -16,7 +18,7 @@ else
   # (lakeraven-ehr#540), invented RPC names removed (#310/#311), typed errors for
   # a missing RPC (#370), the user class from ORWU USERINFO (#236). A fixed ref
   # rather than branch:main so the pin does not drift mid-merge.
-  gem "rpms-rpc", github: "lakeraven/rpms-rpc", ref: "b9ae9f8"
+  gem "rpms-rpc", github: "lakeraven/rpms-rpc", ref: "672eb36"
 end
 
 gem "puma"
