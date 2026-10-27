@@ -1,0 +1,16 @@
+<%#
+  Chart backend failure (#467). No clinical sections: the lookup raised, so
+  there is nothing safe to show. The banner is the empty state.
+%>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lakeraven EHR</title>
+</head>
+<body>
+  <%= render "lakeraven/ehr/shared/patient_banner", banner: @patient_banner %>
+  <p role="alert">This chart could not be loaded. The record service is unavailable.</p>
+</body>
+</html>
