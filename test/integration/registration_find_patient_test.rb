@@ -4,7 +4,8 @@ require "test_helper"
 
 # rpms-ux S-REG-01: the front desk finds the patient before registering.
 class RegistrationFindPatientTest < ActionDispatch::IntegrationTest
-  Match = Lakeraven::EHR::PatientLookupGateway::Match
+  # Looked up when a test runs, not when the file loads.
+  def match(**attrs) = Lakeraven::EHR::PatientLookupGateway::Match.new(**attrs)
 
   def sign_in(keys)
     post "/lakeraven-ehr/test_session", params: { duz: "207", user_type: "user", user_name: "PROFILE,REG", security_keys: keys }
@@ -35,7 +36,7 @@ class RegistrationFindPatientTest < ActionDispatch::IntegrationTest
   end
 
   test "S-REG-01.1 a registered patient is listed with their health record number, and opens" do
-    mouse = Match.new(dfn: 3, name: "MOUSE,MICKEY M", hrn: "1001", dob: Date.new(1910, 2, 14), dod: nil, inactive: false)
+    mouse = match(dfn: 3, name: "MOUSE,MICKEY M", hrn: "1001", dob: Date.new(1910, 2, 14), dod: nil, inactive: false)
     sign_in("registration_menu")
 
     with_lookup([ mouse ]) do |asked|
@@ -50,8 +51,8 @@ class RegistrationFindPatientTest < ActionDispatch::IntegrationTest
   end
 
   test "S-REG-01.3 and 01.4 an inactive chart and a deceased patient are marked" do
-    inactive = Match.new(dfn: 5, name: "DUCK,DONALD", hrn: "1002", dob: Date.new(1934, 6, 9), dod: nil, inactive: true)
-    deceased = Match.new(dfn: 6, name: "DUCK,DAISY", hrn: "1003", dob: Date.new(1940, 1, 1), dod: Date.new(2020, 3, 1), inactive: false)
+    inactive = match(dfn: 5, name: "DUCK,DONALD", hrn: "1002", dob: Date.new(1934, 6, 9), dod: nil, inactive: true)
+    deceased = match(dfn: 6, name: "DUCK,DAISY", hrn: "1003", dob: Date.new(1940, 1, 1), dod: Date.new(2020, 3, 1), inactive: false)
     sign_in("scheduling_user")
 
     with_lookup([ inactive, deceased ]) { get "/lakeraven-ehr/registration/patients", params: { q: "DUCK" } }
