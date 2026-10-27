@@ -20,7 +20,7 @@ name: lakeraven-ehr
 
 services:
   rpms:
-    image: ghcr.io/lakeraven/rpms-ydb:${RPMS_TAG:-bcer-9.0-20261005-17411fa-ydb}
+    image: ghcr.io/lakeraven/rpms-ydb:${RPMS_TAG:-bcer-9.0-20261023-e9b78c8-ydb}
     ports:
       - "127.0.0.1:9100:9100"
     volumes:
