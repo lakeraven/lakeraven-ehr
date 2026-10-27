@@ -4,55 +4,15 @@ module Lakeraven
   module EHR
     # SMART App Launch Framework - Well-Known Configuration
     # ONC 170.315(g)(10) — SMART on FHIR discovery endpoint
+    #
+    # The document is SmartDiscovery's, which also builds the
+    # CapabilityStatement's security element: only served endpoints, and only
+    # scopes the token endpoint grants (#657, #658).
     class SmartConfigurationController < ActionController::API
+      include SmartEndpoints
+
       def show
-        render json: smart_configuration, status: :ok
-      end
-
-      private
-
-      def smart_configuration
-        {
-          authorization_endpoint: "#{base_url}oauth/authorize",
-          token_endpoint: "#{base_url}oauth/token",
-          userinfo_endpoint: "#{base_url}oauth/userinfo",
-          jwks_uri: "#{base_url}.well-known/jwks.json",
-          scopes_supported: supported_scopes,
-          response_types_supported: [ "code" ],
-          grant_types_supported: %w[authorization_code client_credentials refresh_token],
-          code_challenge_methods_supported: [ "S256" ],
-          capabilities: capabilities
-        }
-      end
-
-      def base_url
-        request.base_url + "/"
-      end
-
-      def supported_scopes
-        %w[
-          openid fhirUser
-          launch launch/patient
-          patient/Patient.read patient/AllergyIntolerance.read
-          patient/Condition.read patient/MedicationRequest.read
-          patient/Observation.read patient/Immunization.read
-          patient/Procedure.read patient/Encounter.read
-          user/Patient.read user/AllergyIntolerance.read
-          user/Condition.read user/MedicationRequest.read
-          user/Observation.read
-          system/*.read system/*.write system/*.*
-        ]
-      end
-
-      def capabilities
-        %w[
-          launch-ehr launch-standalone
-          client-public client-confidential-symmetric client-confidential-asymmetric
-          sso-openid-connect
-          context-ehr-patient context-ehr-encounter
-          context-standalone-patient
-          permission-offline permission-patient permission-user
-        ]
+        render json: SmartDiscovery.new(token_endpoint: smart_token_endpoint).configuration, status: :ok
       end
     end
   end

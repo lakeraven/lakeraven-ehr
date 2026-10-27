@@ -1,6 +1,6 @@
 # BPRM twin — scenario #1: Register a new patient
 # HTTP:  POST /patients
-# RPC:   VAFC VOA ADD PATIENT (#2 half) + LR completion shim (IHS half: #9000001/HRN, AGADDREG-faithful; HRN clerk-supplied per AG1)  ->  ^DPT / ^AUPNPAT
+# RPC:   RpmsRpc::Registration.register -> AGG ADD NEW PATIENT under AGGRPC (AG files #2 + #9000001/HRN together)  ->  ^DPT / ^AUPNPAT
 # BPRM:  AgPatientRegisterEvent
 # Disposition: sql-mutate -> reimpl  (BPRM raw-writes ^DPT/^AUPN*; reimplement via ^DIE/AG API so xrefs+audit fire)
 @bprm_twin @registration

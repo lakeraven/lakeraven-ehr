@@ -152,7 +152,8 @@ module Lakeraven
         post_token(assertion(claims))
 
         assert_response :success
-        assert_equal "system/*.read", JSON.parse(response.body)["scope"]
+        assert_equal "system/*.rs", JSON.parse(response.body)["scope"],
+          "a v1 registration is granted in SMART v2 form"
       end
 
       test "an RS256 assertion is rejected" do
@@ -278,7 +279,20 @@ module Lakeraven
         post_token(assertion(claims), scope: "system/*.read system/*.write")
 
         assert_response :success
-        assert_equal "system/*.read", JSON.parse(response.body)["scope"]
+        assert_equal "system/*.rs", JSON.parse(response.body)["scope"]
+      end
+
+      # #536. scope_permits? in SmartAuthentication is the authority for what a
+      # wildcard covers: system/*.rs permits system/Patient.rs. The token
+      # endpoint must agree, and a client asking for less than its entitlement
+      # must be issued that narrower scope. An exact-string intersection
+      # refused it with a 400, pushing clients to omit scope and take the
+      # whole grant.
+      test "requesting system/Patient.read against a registered system/*.read wildcard is issued system/Patient.rs" do
+        post_token(assertion(claims), scope: "system/Patient.read")
+
+        assert_response :success
+        assert_equal "system/Patient.rs", JSON.parse(response.body)["scope"]
       end
 
       test "refusals do not reveal whether a client exists or has a key" do

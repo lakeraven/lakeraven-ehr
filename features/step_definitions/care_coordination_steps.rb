@@ -1,14 +1,21 @@
 # frozen_string_literal: true
 
+# The patient RPMS holds under this exact name (a demo site patient).
+def patient_named(name)
+  found = Lakeraven::EHR::Patient.search(name).find { |p| p.name == name }
+  assert found, "No patient named #{name}"
+  found
+end
+
 # -- Data sharing consent ----------------------------------------------------
 
-Given("patient {string} has consented to data sharing") do |_name|
-  @patient = Lakeraven::EHR::Patient.find_by_dfn(1)
+Given("patient {string} has consented to data sharing") do |name|
+  @patient = patient_named(name)
   @consent_granted = true
 end
 
-Given("patient {string} needs specialty care") do |_name|
-  @patient = Lakeraven::EHR::Patient.find_by_dfn(1)
+Given("patient {string} needs specialty care") do |name|
+  @patient = patient_named(name)
 end
 
 Given("a service request has been created for cardiology") do
@@ -20,18 +27,18 @@ Given("a service request has been created for cardiology") do
   }
 end
 
-Given("patient {string} has an active service request") do |_name|
-  @patient = Lakeraven::EHR::Patient.find_by_dfn(1)
+Given("patient {string} has an active service request") do |name|
+  @patient = patient_named(name)
   @service_request = { specialty: "Cardiology", status: "active", patient_dfn: @patient.dfn }
 end
 
 Given("a service request was sent to the care navigation platform") do
-  @patient = Lakeraven::EHR::Patient.find_by_dfn(1)
+  @patient = patient_named("DEMO,PATIENT ONE")
   @service_request = { specialty: "Cardiology", status: "submitted", patient_dfn: @patient.dfn }
 end
 
-Given("patient {string} has sensitive tribal enrollment data") do |_name|
-  @patient = Lakeraven::EHR::Patient.find_by_dfn(1)
+Given("patient {string} has sensitive tribal enrollment data") do |name|
+  @patient = patient_named(name)
   assert @patient.tribal_enrollment_number.present?
 end
 
