@@ -31,24 +31,9 @@ module Lakeraven
           @returns[:fetch_text]
         end
 
-        def authorize(note_ien, user_duz)
-          @calls << { method: :authorize, args: [ note_ien, user_duz ] }
-          @returns.fetch(:authorize, true)
-        end
-
-        def lock(note_ien, user_duz)
-          @calls << { method: :lock, args: [ note_ien, user_duz ] }
-          @returns.fetch(:lock, true)
-        end
-
         def update_text(note_ien, text)
           @calls << { method: :update_text, args: [ note_ien, text ] }
           @returns[:update_text] || { success: true, raw: "0" }
-        end
-
-        def unlock(note_ien, user_duz)
-          @calls << { method: :unlock, args: [ note_ien, user_duz ] }
-          @returns.fetch(:unlock, true)
         end
       end
 
@@ -68,11 +53,11 @@ module Lakeraven
       end
 
       test "authorize returns false when no provider is available" do
-        refute ProgressNoteGateway.authorize(1001, "301", via: nil)
+        refute ProgressNoteGateway.authorize(1001, via: nil)
       end
 
       test "lock returns false when no provider is available" do
-        refute ProgressNoteGateway.lock(1001, "301", via: nil)
+        refute ProgressNoteGateway.lock(1001, via: nil)
       end
 
       test "update_text returns failure shape when no provider is available" do
@@ -81,7 +66,7 @@ module Lakeraven
       end
 
       test "unlock returns false when no provider is available" do
-        refute ProgressNoteGateway.unlock(1001, "301", via: nil)
+        refute ProgressNoteGateway.unlock(1001, via: nil)
       end
 
       # --- delegation + coercion ---
@@ -119,18 +104,25 @@ module Lakeraven
         assert_equal [ "1001" ], fake.calls.first[:args]
       end
 
-      test "authorize delegates and returns boolean" do
-        fake = FakeProgressNoteAPI.new(returns: { authorize: true })
-        assert ProgressNoteGateway.authorize(1001, "301", via: fake)
+      # Replies as a fresh rpms-ydb e9b78c8 sent them for note 5 (a completed
+      # TELEPHONE NOTE on DFN 4), replayed through the real RpmsRpc::ProgressNote,
+      # so a change to the gem's signature fails here. The note is completed, so
+      # CANDO refuses EDIT RECORD with its own reason (TIUSRVA.m:23-29).
+      test "authorize asks for EDIT RECORD as the signed-on user and reads the refusal" do
+        RpmsRpc.client.seed_raw_lines(:tiu_authorization, "5", [ "0^ You may not edit uncosigned or completed documents" ])
 
-        denied = FakeProgressNoteAPI.new(returns: { authorize: false })
-        refute ProgressNoteGateway.authorize(1001, "301", via: denied)
+        refute ProgressNoteGateway.authorize(5)
+        assert_equal [ "5", "EDIT RECORD" ], RpmsRpc.client.received_calls.last[:params]
       end
 
-      test "lock delegates with identifiers coerced to strings" do
-        fake = FakeProgressNoteAPI.new(returns: { lock: true })
-        assert ProgressNoteGateway.lock(1001, 301, via: fake)
-        assert_equal [ "1001", "301" ], fake.calls.first[:args]
+      test "lock and unlock send the note alone and read RPMS's 0 as done" do
+        RpmsRpc.client.seed_raw_lines(:tiu_lock_record, "5", [ "0" ])
+        RpmsRpc.client.seed_raw_lines(:tiu_unlock_record, "5", [ "0" ])
+
+        assert ProgressNoteGateway.lock(5)
+        assert_equal [ "5" ], RpmsRpc.client.received_calls.last[:params]
+        assert ProgressNoteGateway.unlock(5)
+        assert_equal [ "5" ], RpmsRpc.client.received_calls.last[:params]
       end
 
       test "update_text delegates and preserves the 2-key success shape" do
@@ -140,11 +132,6 @@ module Lakeraven
 
         assert_equal({ success: true, raw: "0" }, result)
         assert_equal [ "1001", "S: revised note text" ], fake.calls.first[:args]
-      end
-
-      test "unlock delegates" do
-        fake = FakeProgressNoteAPI.new(returns: { unlock: true })
-        assert ProgressNoteGateway.unlock(1001, "301", via: fake)
       end
 
       # --- default_provider ---

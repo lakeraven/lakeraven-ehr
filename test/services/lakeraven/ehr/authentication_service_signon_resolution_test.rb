@@ -12,28 +12,27 @@ module Lakeraven
         AUTH_USER_TYPES_FOR_MATRIX + [ "synthetic_unknown_auth_role" ]
       ).freeze
 
-      SECURITY_KEYS_FETCH_FAILURES = [
-        [ "RpcError", -> { raise RpmsRpc::Client::RpcError.new("ORWU USERKEYS timeout") } ],
-        [ "StandardError", -> { raise StandardError, "broker unavailable" } ]
-      ].freeze
-
       AUTH_USER_TYPES_WHEN_KEYS_FETCH_FAILS = %w[provider nurse clerk user].freeze
 
-      test "resolve_signon succeeds with base role and empty security_keys when user_security_keys raises" do
-        AUTH_USER_TYPES_WHEN_KEYS_FETCH_FAILS.product(SECURITY_KEYS_FETCH_FAILURES).each do |auth_user_type, (label, raise_proc)|
-          with_auth_stubs(auth_user_type: auth_user_type, user_security_keys_raise: raise_proc) do
-            result = AuthenticationService.new.authenticate(
-              access_code: "synthetic.access",
-              verify_code: "synthetic.verify"
-            )
-
-            assert result.success?,
-              "expected success when user_security_keys raises #{label} for auth_user_type=#{auth_user_type}"
-            assert_equal expected_resolved_user_type(auth_user_type, []), result.value[:user_type],
-              "user_type must not elevate when keys fetch fails (#{label}, auth_user_type=#{auth_user_type})"
-            assert_equal [], result.value[:security_keys],
-              "security_keys must be empty when fetch fails (#{label}, auth_user_type=#{auth_user_type})"
+      # held_keys answers nil when it could not ask (a refusal, no reply, a
+      # reply that does not answer every name). A session must not be built on
+      # keys nobody read (#578): the sign-on is refused as unavailable.
+      test "a key read that could not be made refuses the sign-on, at every user class" do
+        AUTH_USER_TYPES_WHEN_KEYS_FETCH_FAILS.each do |auth_user_type|
+          with_auth_stubs(auth_user_type: auth_user_type, keys_unreadable: true) do
+            error = assert_raises(SecurityKeyGateway::Unreadable, "auth_user_type=#{auth_user_type}") do
+              AuthenticationService.new.authenticate(access_code: "synthetic.access", verify_code: "synthetic.verify")
+            end
+            assert_kind_of RpmsRpc::Client::RpcError, error, "the sessions controller answers RpcError as unavailable"
           end
+        end
+      end
+
+      test "sign-on asks RPMS for exactly the keys the policy table names" do
+        with_auth_stubs(auth_user_type: "provider") do |asked|
+          AuthenticationService.new.authenticate(access_code: "synthetic.access", verify_code: "synthetic.verify")
+
+          assert_equal [ Roles::KEY_NAMES.values ], asked
         end
       end
 
@@ -53,14 +52,15 @@ module Lakeraven
             expected = expected_resolved_user_type(auth_user_type, expected_keys)
             assert_equal expected, result.value[:user_type],
               "resolved user_type for auth_user_type=#{auth_user_type} keys=#{key_set.inspect}"
-            assert_equal expected_keys, result.value[:security_keys]
+            assert_equal expected_keys.sort, result.value[:security_keys].sort
           end
         end
       end
 
       private
 
-      def with_auth_stubs(auth_user_type:, raw_keys: [], user_security_keys_raise: nil)
+      def with_auth_stubs(auth_user_type:, raw_keys: [], keys_unreadable: false)
+        asked = []
         RpmsRpc::Authentication.define_singleton_method(:authenticate) do |**_kwargs|
           {
             success: true,
@@ -80,18 +80,19 @@ module Lakeraven
           { name: "SYNTH,USER" }
         end
 
-        RpmsRpc::Authentication.define_singleton_method(:user_security_keys) do |_duz|
-          raise user_security_keys_raise.call if user_security_keys_raise
-
-          raw_keys
+        # CIAVCXUS HASKEYS: the names asked that the user holds, in the order
+        # asked, or nil when it could not ask.
+        RpmsRpc::Authentication.define_singleton_method(:held_keys) do |names|
+          asked << names
+          keys_unreadable ? nil : names.select { |name| raw_keys.include?(name) }
         end
 
-        yield
+        yield asked
       ensure
         RpmsRpc::Authentication.singleton_class.send(:remove_method, :authenticate)
         RpmsRpc::Authentication.singleton_class.send(:remove_method, :user_info)
         RpmsRpc::Authentication.singleton_class.send(:remove_method, :user_type)
-        RpmsRpc::Authentication.singleton_class.send(:remove_method, :user_security_keys)
+        RpmsRpc::Authentication.singleton_class.send(:remove_method, :held_keys)
       end
     end
   end

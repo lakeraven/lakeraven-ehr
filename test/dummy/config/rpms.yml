@@ -1,0 +1,28 @@
+# The RPMS broker this app signs on to and reads through; the engine reads it
+# with config_for(:rpms). lakeraven-ehr is a front end for RPMS: without a
+# host here, the app boots, logs "No RPMS backend configured", and sign-in fails.
+#
+#   broker  cia (an RPMS CIA broker: a YottaDB stack's 9100, an IRIS stack's 9200)
+#           or xwb (a stock VistA XWB broker)
+#   host    the broker's host
+#   port    the broker's port
+#
+# Each value can come from the environment, as database.yml takes DATABASE_URL.
+# broker and host are quoted: a bare `on` or `null` would otherwise load as a boolean or nil.
+default: &default
+  broker: "<%= ENV.fetch("VISTA_BROKER", "cia") %>"
+  host: "<%= ENV["VISTA_RPC_HOST"] %>"
+  port: <%= ENV.fetch("VISTA_RPC_PORT", 9100) %>
+
+# A local rpms-ops image: docker run -p 127.0.0.1:9100:9100 ghcr.io/lakeraven/rpms-ydb:$TAG
+development:
+  <<: *default
+  host: "<%= ENV.fetch("VISTA_RPC_HOST", "127.0.0.1") %>"
+
+# The suite runs on rpms-rpc's MockClient (test_helper.rb), which replaces any
+# client built here. Only test/system/live names a broker, through VISTA_*.
+test:
+  <<: *default
+
+production:
+  <<: *default

@@ -156,15 +156,18 @@ BASELINE_MOCK_SEEDS = lambda do |m|
   # (undetermined ⇒ not eligible); the eligibility_status (I/D/C/P) product
   # mapping is tracked in #520 and is out of Sprint 1 (BH-only) scope.
 
-  # Vitals (ORQQVI VITALS) for patient DFN 1
+  # Vitals (ORQQVI VITALS) for patient DFN 1: the rows a fresh rpms-ydb
+  # e9b78c8 sent for DFN 4 (DEMO,PATIENT ONE), so their shape is the wire's.
+  # On RPMS VITAL^ORQQVI answers from MSR^ORQQVI with IHS MEASUREMENT TYPE
+  # codes (TMP, PU, RS, BP, PA, O2), and the reply has no units piece: the
+  # recorded text is display ("98 F") and metric_display ("(36.7 C)").
   m.seed_keyed_collection(:vitals, "1", [
-    { measurement_ien: 1001, type: "BP",  value: "120/80", units: "mm[Hg]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
-    { measurement_ien: 1002, type: "P",   value: "72",     units: "/min",   recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
-    { measurement_ien: 1003, type: "T",   value: "98.6",   units: "[degF]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
-    { measurement_ien: 1004, type: "R",   value: "16",     units: "/min",   recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
-    { measurement_ien: 1005, type: "POX", value: "98",     units: "%",      recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
-    { measurement_ien: 1006, type: "WT",  value: "150",    units: "[lb_av]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
-    { measurement_ien: 1007, type: "HT",  value: "65",     units: "[in_i]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) }
+    { measurement_ien: 5,  type: "TMP", value: "98",     recorded_date: Time.new(2026, 9, 11, 21, 34), display: "98 F", metric_display: "(36.7 C)" },
+    { measurement_ien: 6,  type: "PU",  value: "50",     recorded_date: Time.new(2026, 9, 11, 21, 34), display: "50" },
+    { measurement_ien: 7,  type: "RS",  value: "20",     recorded_date: Time.new(2026, 9, 11, 21, 34), display: "20" },
+    { measurement_ien: 8,  type: "BP",  value: "117/81", recorded_date: Time.new(2026, 9, 11, 21, 34), display: "117/81" },
+    { measurement_ien: 10, type: "PA",  value: "0",      recorded_date: Time.new(2026, 9, 11, 21, 34), display: "0" },
+    { measurement_ien: 9,  type: "O2",  value: "98",     recorded_date: Time.new(2026, 9, 11, 21, 34), display: "98" }
   ])
 
   # Test users
@@ -172,15 +175,8 @@ BASELINE_MOCK_SEEDS = lambda do |m|
   m.seed_user("302", credentials: "testnurse;test123", name: "NURSE,TEST", role: :nurse)
   m.seed_user("303", credentials: "testclerk;test123", name: "CLERK,TEST", role: :clerk)
   m.seed_user("304", credentials: "lindarodriguez;test123", name: "RODRIGUEZ,LINDA", role: :case_manager)
-  # DUZ 304's KEYS multiple (#200.051), which Authentication.user_security_keys
-  # reads with DDR LISTER since rpms-rpc #374: IEN^KEY-name rows.
-  m.seed_text(:ddr_lister,
-    RpmsRpc::DdrFileman.lister_param(file: "200.051", iens: ",304,", fields: "@;.01").to_s,
-    <<~KEYS.chomp)
-      [Data]
-      1^PRCFA SUPERVISOR
-      2^OR CPRS GUI CHART
-    KEYS
+  # The SECURITY KEYs DUZ 304 holds, answered to CIAVCXUS HASKEYS once 304 signs on.
+  m.seed_held_keys("304", [ "PRCFA SUPERVISOR", "OR CPRS GUI CHART" ])
 
   # Practitioner — ORWU USERINFO is single-session-user (per rr-fyf); the
   # mock dispatches on "" since the wrapper passes no params. Test code
@@ -197,7 +193,37 @@ BASELINE_MOCK_SEEDS = lambda do |m|
   })
 end
 
-RpmsRpc.mock!(&BASELINE_MOCK_SEEDS)
+# LIVE_RPMS=1 runs the suite against a real broker instead of the mock
+# (cucumber --profile live). The broker is the one the engine built at boot
+# from config/rpms.yml (VISTA_BROKER, VISTA_RPC_HOST, VISTA_RPC_PORT), the
+# path a deployed app takes, and the run signs on through the engine's own
+# AuthenticationService as LIVE_RPMS_ACCESS / LIVE_RPMS_VERIFY. It never falls
+# back to the mock: a missing broker or a refused sign-on aborts the run.
+LIVE_RPMS = ENV["LIVE_RPMS"] == "1"
+if LIVE_RPMS
+  abort "LIVE_RPMS=1: no broker configured (set VISTA_RPC_HOST)" unless RpmsRpc.configuration.client
+
+  module LiveRpmsSession
+    module_function
+
+    # Sign the shared broker session on as the run's persona. Scenarios that
+    # sign on as someone else call this afterwards, since one process holds
+    # one broker identity (rpms-rpc#234).
+    def sign_on!
+      result = Lakeraven::EHR::AuthenticationService.new.authenticate(
+        access_code: ENV.fetch("LIVE_RPMS_ACCESS"), verify_code: ENV.fetch("LIVE_RPMS_VERIFY")
+      )
+      abort "LIVE_RPMS=1: sign-on refused: #{result.error}" unless result.success?
+      result
+    end
+  end
+
+  live_user = LiveRpmsSession.sign_on!.value
+  settings = Lakeraven::EHR::Engine.rpms_settings
+  warn "[live] RPMS #{settings[:broker]} #{settings[:host]}:#{settings[:port]} signed on as #{live_user.inspect[0, 120]}"
+else
+  RpmsRpc.mock!(&BASELINE_MOCK_SEEDS)
+end
 
 # Scripted RPC broker for the BPRM reg/sched/ADT twin gateway tests.
 #
