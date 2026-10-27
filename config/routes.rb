@@ -106,9 +106,12 @@ Lakeraven::EHR::Engine.routes.draw do
   delete "logout" => "sessions#destroy", as: :logout
   get "dashboard" => "dashboards#show", as: :dashboard
 
-  # The front desk finds a patient before registering one (rpms-ux S-REG-01).
+  # The front desk finds a patient (rpms-ux S-REG-01) and registers a new one (S-REG-02).
   namespace :registration do
     get "patients", to: "patients#index", as: :patients
+    get "patients/new", to: "patients#new", as: :new_patient
+    post "patients", to: "patients#create"
+    post "patients/confirm", to: "patients#confirm", as: :confirm_patient
     get "patients/:dfn", to: "patients#show", as: :patient, constraints: { dfn: /\d+/ }
   end
 
