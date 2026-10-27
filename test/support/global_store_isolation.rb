@@ -7,6 +7,7 @@ module GlobalStoreIsolation
   # BASELINE_MOCK_SEEDS is defined in test/test_helper.rb; the proc looks it
   # up when reset! runs, after that constant exists.
   STORE_RESETS = [
+    -> { Lakeraven::EHR::AssertionReplayGuard.reset! },
     -> { Lakeraven::EHR::ProvenanceStore.reset_instance! },
     -> { Lakeraven::EHR::ExportsController.reset_store! },
     -> { Lakeraven::EHR::LoginThrottle.reset! },
