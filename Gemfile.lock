@@ -144,6 +144,9 @@ GEM
       cucumber (>= 7, < 11)
       railties (>= 6.1, < 9)
     cucumber-tag-expressions (8.1.0)
+    cuprite (0.19)
+      capybara (~> 3.0)
+      ferrum (~> 0.19.1)
     date (3.5.1)
     diff-lcs (1.6.2)
     doorkeeper (5.9.0)
@@ -151,6 +154,11 @@ GEM
     drb (2.2.3)
     erb (6.0.4)
     erubi (1.13.1)
+    ferrum (0.19.2)
+      addressable (~> 2.5)
+      base64 (~> 0.2)
+      concurrent-ruby (~> 1.1)
+      websocket-driver (~> 0.7)
     ffi (1.17.4-aarch64-linux-gnu)
     ffi (1.17.4-aarch64-linux-musl)
     ffi (1.17.4-arm-linux-gnu)
@@ -371,6 +379,7 @@ PLATFORMS
 
 DEPENDENCIES
   cucumber-rails
+  cuprite
   lakeraven-ehr!
   minitest
   pg
