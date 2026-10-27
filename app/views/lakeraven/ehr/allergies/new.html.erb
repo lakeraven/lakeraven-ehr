@@ -1,0 +1,88 @@
+<% content_for :title, "Record an allergy | Lakeraven EHR" %>
+
+<div class="page-header">
+  <h1>Record an allergy</h1>
+  <p>Patient #<%= @dfn %></p>
+</div>
+
+<% if @allergy_not_saved %>
+  <div class="screening-errors" role="alert">
+    <h2>This allergy was not saved</h2>
+    <p>The allergy was not saved.</p>
+  </div>
+<% end %>
+
+<%= form_with url: patient_allergies_path(@dfn), method: :post, class: "allergy-form" do %>
+  <div class="screening-visit">
+    <label for="allergy_agent">Allergen</label>
+    <%= text_field_tag "allergy[agent]", allergy_value("agent"), id: "allergy_agent", autocomplete: "off" %>
+  </div>
+
+  <div class="screening-visit">
+    <label for="allergy_agent_pointer">Allergen pointer</label>
+    <%= text_field_tag "allergy[agent_pointer]", allergy_value("agent_pointer"),
+          id: "allergy_agent_pointer", autocomplete: "off" %>
+  </div>
+
+  <div class="screening-visit">
+    <label for="allergy_type">Type</label>
+    <%= text_field_tag "allergy[type]", allergy_value("type"), id: "allergy_type", autocomplete: "off" %>
+  </div>
+
+  <div class="screening-visit">
+    <label for="allergy_nature">Nature</label>
+    <%= text_field_tag "allergy[nature]", allergy_value("nature"), id: "allergy_nature", autocomplete: "off" %>
+  </div>
+
+  <div class="screening-visit">
+    <label for="allergy_originated_at">Originated at</label>
+    <%= text_field_tag "allergy[originated_at]", allergy_value("originated_at"),
+          id: "allergy_originated_at", autocomplete: "off" %>
+  </div>
+
+  <div class="screening-visit">
+    <label for="allergy_observed_or_historical">Observed or historical</label>
+    <%= text_field_tag "allergy[observed_or_historical]", allergy_value("observed_or_historical"),
+          id: "allergy_observed_or_historical", autocomplete: "off" %>
+  </div>
+
+  <div class="screening-visit">
+    <label for="allergy_reaction_date">Reaction date</label>
+    <%= text_field_tag "allergy[reaction_date]", allergy_value("reaction_date"),
+          id: "allergy_reaction_date", autocomplete: "off" %>
+  </div>
+
+  <div class="screening-visit">
+    <label for="allergy_severity">Severity</label>
+    <%= text_field_tag "allergy[severity]", allergy_value("severity"), id: "allergy_severity", autocomplete: "off" %>
+  </div>
+
+  <fieldset>
+    <legend>Symptom</legend>
+    <div class="screening-visit">
+      <label for="allergy_symptom_ien">Symptom IEN</label>
+      <%= text_field_tag "allergy[symptoms][][ien]", symptom_value("ien"),
+            id: "allergy_symptom_ien", autocomplete: "off" %>
+    </div>
+    <div class="screening-visit">
+      <label for="allergy_symptom_text">Symptom</label>
+      <%= text_field_tag "allergy[symptoms][][text]", symptom_value("text"),
+            id: "allergy_symptom_text", autocomplete: "off" %>
+    </div>
+    <div class="screening-visit">
+      <label for="allergy_symptom_date">Symptom date</label>
+      <%= text_field_tag "allergy[symptoms][][date]", symptom_value("date"),
+            id: "allergy_symptom_date", autocomplete: "off" %>
+    </div>
+  </fieldset>
+
+  <div class="screening-visit">
+    <label for="allergy_comment">Comment</label>
+    <%= text_field_tag "allergy[comments][]", comment_value, id: "allergy_comment", autocomplete: "off" %>
+  </div>
+
+  <div class="screening-actions">
+    <button type="submit">Record allergy</button>
+    <%= link_to "Back to chart", patient_chart_path(@dfn) %>
+  </div>
+<% end %>
