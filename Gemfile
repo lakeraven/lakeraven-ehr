@@ -29,5 +29,9 @@ gem "tailwindcss-rails", "~> 4.4"
 gem "cucumber-rails", require: false
 gem "minitest"
 
+# Headless Chrome for the live system tests (test/system/live), which sign in
+# against a real RPMS broker and save screenshots as evidence.
+gem "cuprite", require: false
+
 # Omakase Ruby styling [https://github.com/rails/rubocop-rails-omakase/]
 gem "rubocop-rails-omakase", require: false
