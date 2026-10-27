@@ -42,7 +42,23 @@ class GlobalStoreIsolationConventionTest < ActiveSupport::TestCase
   end
 
   def constants_with_class_level_reset
-    walk_constants(Lakeraven::EHR).sort_by(&:first)
+    deduplicate_resetters(walk_constants(Lakeraven::EHR)).sort_by(&:first)
+  end
+
+  def deduplicate_resetters(resetters)
+    by_object_id = {}
+    resetters.each do |constant_name, klass, method_name|
+      id = klass.object_id
+      canonical = klass.name || constant_name
+      if by_object_id.key?(id)
+        existing_canonical, = by_object_id[id]
+        canonical = klass.name || existing_canonical
+        by_object_id[id] = [ canonical, klass, method_name ]
+      else
+        by_object_id[id] = [ canonical, klass, method_name ]
+      end
+    end
+    by_object_id.values
   end
 
   def walk_constants(mod, prefix = "Lakeraven::EHR", visited = nil)
