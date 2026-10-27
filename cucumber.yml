@@ -19,4 +19,6 @@ default: --publish-quiet --tags "not @unsourced"
 unsourced: --publish-quiet --tags @unsourced
 all: --publish-quiet
 # Against a real broker (LIVE_RPMS_HOST/PORT/ACCESS/VERIFY); see test/test_helper.rb.
-live: LIVE_RPMS=1 --publish-quiet --tags "not @unsourced"
+# @mock_only scenarios check the test mock itself, so a live run has nothing
+# for them to check.
+live: LIVE_RPMS=1 --publish-quiet --tags "not @unsourced and not @mock_only"
