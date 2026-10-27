@@ -67,7 +67,6 @@ Lakeraven::EHR::Engine.routes.draw do
   resources :coverage_eligibility_requests, path: "CoverageEligibilityRequest", only: %i[create]
   resources :measures, path: "Measure", only: %i[index]
   resources :measure_reports, path: "MeasureReport", only: %i[index]
-  resources :consents, path: "Consent", only: %i[index show]
   resources :audit_events, path: "AuditEvent", only: %i[index show]
   resources :value_sets, path: "ValueSet", only: %i[index show] do
     member do
