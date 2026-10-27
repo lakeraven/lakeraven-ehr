@@ -1,4 +1,9 @@
-<div id="patient-banner">
+<%# Stays on screen while a long chart scrolls, so the clinician can still
+    see which patient they are documenting on. %>
+<div
+  id="patient-banner"
+  class="sticky top-0 z-20 bg-slate-50"
+>
   <% if banner.empty? %>
     <p>No patient selected</p>
     <%# No chart-search page exists yet; the dashboard is the nearest

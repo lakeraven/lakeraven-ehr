@@ -5,6 +5,8 @@ Feature: Authentication
   I want to authenticate with my RPMS credentials
   So that I can access the system securely
 
+  # Sign-ons use the demo site personas (features/support/rpms_demo_site.rb),
+  # whose access/verify pairs are published with the rpms-ops seed.
   Background:
     Given the authentication service is available
 
@@ -13,22 +15,29 @@ Feature: Authentication
   # =============================================================================
 
   Scenario: Provider logs in with valid access and verify codes
-    When I login as "testprovider" with password "test123"
+    When I login as "PMD123" with password "PMD123!!"
     Then I should be logged in successfully
     And my user type should be "provider"
 
   Scenario: Nurse logs in with valid credentials
-    When I login as "testnurse" with password "test123"
+    When I login as "PRN123" with password "PRN123!!"
     Then I should be logged in successfully
     And my user type should be "nurse"
 
-  Scenario: Case manager logs in with valid credentials
-    When I login as "lindarodriguez" with password "test123"
+  # The registration clerk and the scheduler hold only their package menus
+  # (AGZMENU, SDZMENU) and USRCLS 0, so the engine resolves them as "user".
+  Scenario: Registration clerk logs in with valid credentials
+    When I login as "PREG123" with password "PREG123!!"
     Then I should be logged in successfully
-    And my user type should be "case_manager"
+    And my user type should be "user"
+
+  Scenario: Scheduler logs in with valid credentials
+    When I login as "PSCH123" with password "PSCH123!!"
+    Then I should be logged in successfully
+    And my user type should be "user"
 
   Scenario: Clerk logs in with valid credentials
-    When I login as "testclerk" with password "test123"
+    When I login as "PMA123" with password "PMA123!!"
     Then I should be logged in successfully
     And my user type should be "clerk"
 
@@ -41,8 +50,13 @@ Feature: Authentication
     Then I should see an authentication error "Invalid"
     And I should not be logged in
 
+  Scenario: Login fails with a wrong verify code
+    When I login as "PMD123" with password "NOT-THE-CODE"
+    Then I should see an authentication error "Invalid"
+    And I should not be logged in
+
   Scenario: Login fails with invalid verify code
-    When I login as "testprovider" with password ""
+    When I login as "PMD123" with password ""
     Then I should see an authentication error "Password required"
     And I should not be logged in
 
@@ -93,21 +107,23 @@ Feature: Authentication
   # SECURITY KEY CHECKS
   # =============================================================================
 
-  Scenario: User with PRCFA SUPERVISOR key can approve CHS
-    Given I am logged in as a case_manager with security key "PRCFA SUPERVISOR"
+  Scenario: User with BMCZSUPERVISOR key can approve CHS
+    Given I am logged in as a case_manager with security key "BMCZSUPERVISOR"
     Then I should be able to approve CHS referrals
 
-  Scenario: User without PRCFA SUPERVISOR key cannot approve CHS
+  Scenario: User without BMCZSUPERVISOR key cannot approve CHS
     Given I am logged in as a clerk without security keys
     Then I should not be able to approve CHS referrals
 
-  Scenario: User with PRCFA TECH key can process CHS claims
-    Given I am logged in as a clerk with security key "PRCFA TECH"
+  Scenario: User with BMCZMENU key can process CHS claims
+    Given I am logged in as a clerk with security key "BMCZMENU"
     Then I should be able to process CHS claims
 
-  Scenario: User with GMRC MGR key can manage consults
+  # GMRC MGR is a menu option, not a SECURITY KEY, and no key for consults is
+  # decided yet (#578): it grants nothing.
+  Scenario: No key grants consult management until one is decided
     Given I am logged in as a nurse with security key "GMRC MGR"
-    Then I should be able to manage consults
+    Then I should not be able to manage consults
 
   # =============================================================================
   # UNAUTHENTICATED ACCESS

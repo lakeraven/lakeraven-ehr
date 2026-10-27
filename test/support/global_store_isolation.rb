@@ -16,7 +16,7 @@ module GlobalStoreIsolation
     -> { Lakeraven::EHR::MedicationStore.reset_instance! },
     -> { Lakeraven::EHR::CarePlanStore.reset_instance! },
     -> { Lakeraven::EHR::DiagnosticReportStore.reset_instance! },
-    -> { RpmsRpc.mock!(&BASELINE_MOCK_SEEDS) }
+    -> { RpmsRpc.mock!(&BASELINE_MOCK_SEEDS) unless LIVE_RPMS }
   ].freeze
 
   def self.reset!
