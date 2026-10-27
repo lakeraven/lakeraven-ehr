@@ -14,6 +14,8 @@ module Lakeraven
     # and rolls that proof back before calling the gateway. The row that
     # remains is the one AuditableClinicalAccess writes after the response
     # status is known. If the proof insert fails, the gateway is not called.
+    # If the RPC succeeded and that later row fails, the response says the
+    # write is already in RPMS and must not be entered again.
     class AllergiesController < WebController
       include BrowserSmartAuthentication
       include ClinicianPatientContext
@@ -24,6 +26,10 @@ module Lakeraven
         agent agent_pointer type nature originated_at
         observed_or_historical reaction_date severity
       ].freeze
+      SYMPTOM_FIELDS = %w[ien text date].freeze
+      # A backend error symbol is safe to keep. Free text is not.
+      SAFE_GATEWAY_ERROR = /\A[a-z][a-z0-9_]*\z/
+      INDEX_KEY = /\A-?\d+\z/
 
       before_action :authenticate_smart_token!
       before_action :authorize_allergy_scope!
@@ -42,13 +48,13 @@ module Lakeraven
 
       def create
         return if audit_unwritable?
+        return render_allergy_not_saved unless allergy_lists_well_formed?
 
         @allergy = permitted_allergy
         if allergy_recorded?
           redirect_to patient_chart_path(@dfn), notice: "Allergy recorded."
         else
-          @allergy_not_saved = true
-          render :new, status: :unprocessable_entity
+          render_allergy_not_saved
         end
       end
 
@@ -65,6 +71,8 @@ module Lakeraven
       private
 
       helper_method :allergy_value, :symptom_value, :comment_value
+      helper_method :allergy_failure_heading, :allergy_failure_detail
+      helper_method :nka_failure_heading, :nka_failure_detail
 
       def authorize_allergy_scope!
         return true if allergy_scope_permitted?
@@ -118,6 +126,37 @@ module Lakeraven
         true
       end
 
+      # Remember the class, then let the concern refuse the access. The
+      # message is not logged: it can carry the broker's own text.
+      def record_audit_event!(detached: false)
+        super(detached: detached)
+      rescue StandardError => error
+        @rpms_audit_error = error
+        raise
+      end
+
+      # The concern says the access was not completed. That is true only
+      # when the RPC did not run. A committed write must not be entered again.
+      def render_unrecorded_access_denial
+        return super unless @rpms_write
+
+        log_unaudited_rpms_write
+        render plain: unaudited_rpms_message, status: :service_unavailable
+      end
+
+      def log_unaudited_rpms_write
+        Rails.logger.error(
+          "ERROR [allergy] #{action_name} recorded in RPMS but this access could not be audited: " \
+          "#{@rpms_audit_error&.class}"
+        )
+      end
+
+      def unaudited_rpms_message
+        subject = @rpms_write == :nka ? "No known allergies were" : "This allergy was"
+        "Service Unavailable: #{subject} recorded in RPMS, but this access could not be audited. " \
+          "It must not be entered again."
+      end
+
       def audit_log_writable?
         AuditEvent.transaction(requires_new: true) do
           AuditEvent.create!(probe_audit_attributes)
@@ -140,25 +179,55 @@ module Lakeraven
       end
 
       def allergy_recorded?
-        gateway_succeeded?(
-          AllergyIntoleranceGateway.add(@dfn, allergy_for_gateway, clinician_duz: current_duz)
-        )
+        result = AllergyIntoleranceGateway.add(@dfn, allergy_for_gateway, clinician_duz: current_duz)
+        note_gateway_result(:allergy, result)
       end
 
       def nka_recorded?
-        gateway_succeeded?(AllergyIntoleranceGateway.record_no_known_allergies(@dfn))
+        result = AllergyIntoleranceGateway.record_no_known_allergies(@dfn)
+        note_gateway_result(:nka, result)
+      end
+
+      def note_gateway_result(kind, result)
+        if gateway_succeeded?(result)
+          @rpms_write = kind
+          true
+        else
+          @allergy_error = safe_gateway_error(result)
+          false
+        end
       end
 
       def gateway_succeeded?(result)
         result.is_a?(Hash) && result[:success] == true
       end
 
+      # Only the symbol. The backend's message text is never kept.
+      def safe_gateway_error(result)
+        error = result[:error] if result.is_a?(Hash)
+        error if error.is_a?(Symbol) && error.name.match?(SAFE_GATEWAY_ERROR)
+      end
+
+      def render_allergy_not_saved
+        @allergy ||= permitted_allergy
+        @allergy_not_saved = true
+        render :new, status: :unprocessable_entity
+      end
+
       # originator is intentionally absent. The gateway files the DUZ.
+      # Symptoms and comments arrive as arrays or as Rails' indexed hashes.
       def permitted_allergy
+        permitted_scalars.merge(
+          "symptoms" => symptom_rows.map { |row| symptom_fields(row) },
+          "comments" => comment_lines
+        )
+      end
+
+      def permitted_scalars
         raw = params[:allergy]
         return {} unless raw.respond_to?(:permit)
 
-        raw.permit(SCALAR_FIELDS, comments: [], symptoms: %i[ien text date]).to_h
+        raw.permit(SCALAR_FIELDS).to_h
       end
 
       def allergy_for_gateway
@@ -167,6 +236,81 @@ module Lakeraven
           "symptoms" => present_symptoms(attrs["symptoms"]),
           "comments" => present_comments(attrs["comments"])
         )
+      end
+
+      # A string, or any hash that is not index => row, is refused before
+      # the gateway so a bad encoding cannot be written.
+      def allergy_lists_well_formed?
+        list_well_formed?(:symptoms, :hash) && list_well_formed?(:comments, :scalar)
+      end
+
+      def list_well_formed?(key, entry_kind)
+        value = allergy_param(key)
+        return true if value.nil? || value.is_a?(Array)
+        return false unless hash_param?(value)
+
+        hash_entries(value).all? { |index, entry| entry_well_formed?(index, entry, entry_kind) }
+      end
+
+      def entry_well_formed?(index, entry, entry_kind)
+        return false unless index_key?(index)
+
+        entry_kind == :hash ? hash_param?(entry) : entry.is_a?(String)
+      end
+
+      def allergy_param(key)
+        raw = params[:allergy]
+        raw[key] if raw.respond_to?(:key?)
+      end
+
+      def symptom_rows
+        collection_rows(allergy_param(:symptoms))
+      end
+
+      def comment_lines
+        collection_rows(allergy_param(:comments)).select { |line| comment_scalar?(line) }
+      end
+
+      def collection_rows(value)
+        return [] if value.nil?
+        return value if value.is_a?(Array)
+        return indexed_rows(value) if hash_param?(value)
+
+        []
+      end
+
+      def indexed_rows(value)
+        hash_entries(value)
+          .select { |key, _| index_key?(key) }
+          .sort_by { |key, _| Integer(key.to_s) }
+          .map(&:last)
+      end
+
+      def hash_entries(value)
+        value.is_a?(ActionController::Parameters) ? value.to_unsafe_h : value.to_h
+      end
+
+      def symptom_fields(row)
+        symptom_parameters(row).permit(*SYMPTOM_FIELDS).to_h
+      end
+
+      def symptom_parameters(row)
+        return row if row.is_a?(ActionController::Parameters)
+        return ActionController::Parameters.new(row) if row.is_a?(Hash)
+
+        ActionController::Parameters.new
+      end
+
+      def hash_param?(value)
+        value.is_a?(Hash) || value.is_a?(ActionController::Parameters)
+      end
+
+      def index_key?(key)
+        key.to_s.match?(INDEX_KEY)
+      end
+
+      def comment_scalar?(value)
+        value.is_a?(String) || value.is_a?(Numeric) || value.nil? || value == true || value == false
       end
 
       def present_symptoms(rows)
@@ -191,6 +335,41 @@ module Lakeraven
 
       def comment_value
         Array(allergy_value("comments")).first
+      end
+
+      def allergy_failure_heading
+        case @allergy_error
+        when :duplicate then "Already on file"
+        when :unavailable then "Outcome unknown"
+        when :active_allergies then "Active allergies on file"
+        else "This allergy was not saved"
+        end
+      end
+
+      def allergy_failure_detail
+        case @allergy_error
+        when :duplicate then "This allergy is already on file."
+        when :unavailable then "The outcome is unknown. Check the chart before trying again."
+        when :active_allergies then "The patient has active allergies on file."
+        else "The allergy was not saved."
+        end
+      end
+
+      def nka_failure_heading
+        case @allergy_error
+        when :active_allergies then "Active allergies on file"
+        when :unavailable then "Outcome unknown"
+        else "Not saved"
+        end
+      end
+
+      def nka_failure_detail
+        case @allergy_error
+        when :active_allergies then "The patient has active allergies on file."
+        when :duplicate then "This is already on file."
+        when :unavailable then "The outcome is unknown. Check the chart before trying again."
+        else "This was not saved."
+        end
       end
     end
   end
