@@ -23,9 +23,10 @@ module LakeravenDemoSeeds
   # Clustered chronic comorbidity (diabetes / hypertension / CKD), one
   # behavioral-health patient, one prenatal, one pediatric asthma.
   #
-  # Vital `type` codes use RPMS-native abbreviations (BP/P/T/WT/HT) so the
-  # engine's Observation.from_vital_hashes VITAL_TYPE_MAP maps every reading
-  # into valid FHIR. BP carries both components in one reading ("systolic/
+  # Vitals are shaped as ORQQVI VITALS answers on RPMS: IHS MEASUREMENT TYPE
+  # codes (BP, PU, WT; TMP, RS, O2 for the others), the recorded text in
+  # display, and no units piece (the reply has none). The engine's
+  # Observation.from_vital_hashes VITAL_TYPE_MAP maps each into valid FHIR. BP carries both components in one reading ("systolic/
   # diastolic"), the shape the serializer expects.
   PANEL = [
     { dfn: 2, name: "DEMOPATIENT,HENRY", sex: "M", dob: Date.new(1954, 11, 22),
@@ -42,9 +43,9 @@ module LakeravenDemoSeeds
         { ien: 21, allergen: "Sulfa Drugs", reaction: "Rash", severity: "moderate" }
       ],
       vitals: [
-        { measurement_ien: 2001, type: "BP", value: "150/92", units: "mm[Hg]",  recorded_date: VITALS_TAKEN },
-        { measurement_ien: 2002, type: "P",  value: "68",     units: "/min",    recorded_date: VITALS_TAKEN },
-        { measurement_ien: 2003, type: "WT", value: "201",    units: "[lb_av]", recorded_date: VITALS_TAKEN }
+        { measurement_ien: 2001, type: "BP", value: "150/92", recorded_date: VITALS_TAKEN, display: "150/92" },
+        { measurement_ien: 2002, type: "PU", value: "68", recorded_date: VITALS_TAKEN, display: "68" },
+        { measurement_ien: 2003, type: "WT", value: "201", recorded_date: VITALS_TAKEN, display: "201" }
       ] },
     { dfn: 3, name: "DEMOPATIENT,MARA", sex: "F", dob: Date.new(1997, 6, 30),
       ssn: "900-00-0103",
@@ -58,9 +59,9 @@ module LakeravenDemoSeeds
       ],
       allergies: [],
       vitals: [
-        { measurement_ien: 2004, type: "BP", value: "112/70", units: "mm[Hg]",  recorded_date: VITALS_TAKEN },
-        { measurement_ien: 2005, type: "P",  value: "82",     units: "/min",    recorded_date: VITALS_TAKEN },
-        { measurement_ien: 2006, type: "WT", value: "158",    units: "[lb_av]", recorded_date: VITALS_TAKEN }
+        { measurement_ien: 2004, type: "BP", value: "112/70", recorded_date: VITALS_TAKEN, display: "112/70" },
+        { measurement_ien: 2005, type: "PU", value: "82", recorded_date: VITALS_TAKEN, display: "82" },
+        { measurement_ien: 2006, type: "WT", value: "158", recorded_date: VITALS_TAKEN, display: "158" }
       ] },
     { dfn: 4, name: "DEMOPATIENT,JOE", sex: "M", dob: Date.new(1972, 1, 15),
       ssn: "900-00-0104",
@@ -74,9 +75,9 @@ module LakeravenDemoSeeds
       ],
       allergies: [],
       vitals: [
-        { measurement_ien: 2007, type: "BP", value: "136/84", units: "mm[Hg]",  recorded_date: VITALS_TAKEN },
-        { measurement_ien: 2008, type: "P",  value: "78",     units: "/min",    recorded_date: VITALS_TAKEN },
-        { measurement_ien: 2009, type: "WT", value: "224",    units: "[lb_av]", recorded_date: VITALS_TAKEN }
+        { measurement_ien: 2007, type: "BP", value: "136/84", recorded_date: VITALS_TAKEN, display: "136/84" },
+        { measurement_ien: 2008, type: "PU", value: "78", recorded_date: VITALS_TAKEN, display: "78" },
+        { measurement_ien: 2009, type: "WT", value: "224", recorded_date: VITALS_TAKEN, display: "224" }
       ] },
     { dfn: 5, name: "DEMOPATIENT,TESSA", sex: "F", dob: Date.new(1990, 9, 8),
       ssn: "900-00-0105",
@@ -89,9 +90,9 @@ module LakeravenDemoSeeds
       ],
       allergies: [],
       vitals: [
-        { measurement_ien: 2010, type: "BP", value: "118/76", units: "mm[Hg]",  recorded_date: VITALS_TAKEN },
-        { measurement_ien: 2011, type: "P",  value: "72",     units: "/min",    recorded_date: VITALS_TAKEN },
-        { measurement_ien: 2012, type: "WT", value: "146",    units: "[lb_av]", recorded_date: VITALS_TAKEN }
+        { measurement_ien: 2010, type: "BP", value: "118/76", recorded_date: VITALS_TAKEN, display: "118/76" },
+        { measurement_ien: 2011, type: "PU", value: "72", recorded_date: VITALS_TAKEN, display: "72" },
+        { measurement_ien: 2012, type: "WT", value: "146", recorded_date: VITALS_TAKEN, display: "146" }
       ] },
     { dfn: 6, name: "DEMOPATIENT,RAY", sex: "M", dob: Date.new(2016, 4, 12),
       ssn: "900-00-0106",
@@ -106,9 +107,9 @@ module LakeravenDemoSeeds
         { ien: 61, allergen: "Peanuts", reaction: "Hives", severity: "moderate" }
       ],
       vitals: [
-        { measurement_ien: 2013, type: "P",  value: "96",   units: "/min",    recorded_date: VITALS_TAKEN },
-        { measurement_ien: 2014, type: "T",  value: "98.6", units: "[degF]",  recorded_date: VITALS_TAKEN },
-        { measurement_ien: 2015, type: "WT", value: "62",   units: "[lb_av]", recorded_date: VITALS_TAKEN }
+        { measurement_ien: 2013, type: "PU", value: "96", recorded_date: VITALS_TAKEN, display: "96" },
+        { measurement_ien: 2014, type: "TMP", value: "98.6", recorded_date: VITALS_TAKEN, display: "98.6 F", metric_display: "(37.0 C)" },
+        { measurement_ien: 2015, type: "WT", value: "62", recorded_date: VITALS_TAKEN, display: "62" }
       ] },
     { dfn: 7, name: "DEMOPATIENT,IRENE", sex: "F", dob: Date.new(1948, 2, 27),
       ssn: "900-00-0107",
@@ -126,9 +127,9 @@ module LakeravenDemoSeeds
         { ien: 71, allergen: "Codeine", reaction: "Nausea", severity: "mild" }
       ],
       vitals: [
-        { measurement_ien: 2016, type: "BP", value: "148/86", units: "mm[Hg]",  recorded_date: VITALS_TAKEN },
-        { measurement_ien: 2017, type: "P",  value: "70",     units: "/min",    recorded_date: VITALS_TAKEN },
-        { measurement_ien: 2018, type: "WT", value: "168",    units: "[lb_av]", recorded_date: VITALS_TAKEN }
+        { measurement_ien: 2016, type: "BP", value: "148/86", recorded_date: VITALS_TAKEN, display: "148/86" },
+        { measurement_ien: 2017, type: "PU", value: "70", recorded_date: VITALS_TAKEN, display: "70" },
+        { measurement_ien: 2018, type: "WT", value: "168", recorded_date: VITALS_TAKEN, display: "168" }
       ] }
   ].freeze
 
@@ -195,10 +196,10 @@ module LakeravenDemoSeeds
     # profile) and the deterministic per-vital FHIR id.
     vitals_taken = DateTime.new(2026, 2, 1, 9, 30, 0)
     m.seed_keyed_collection(:vitals, "1",
-      [ { measurement_ien: 2019, type: "BP", value: "128/82", units: "mm[Hg]",   recorded_date: vitals_taken },
-        { measurement_ien: 2020, type: "P",  value: "74",     units: "/min",     recorded_date: vitals_taken },
-        { measurement_ien: 2021, type: "WT", value: "180",    units: "[lb_av]",  recorded_date: vitals_taken },
-        { measurement_ien: 2022, type: "T",  value: "98.6",   units: "[degF]",   recorded_date: vitals_taken } ])
+      [ { measurement_ien: 2019, type: "BP", value: "128/82", recorded_date: vitals_taken, display: "128/82" },
+        { measurement_ien: 2020, type: "PU", value: "74", recorded_date: vitals_taken, display: "74" },
+        { measurement_ien: 2021, type: "WT", value: "180", recorded_date: vitals_taken, display: "180" },
+        { measurement_ien: 2022, type: "TMP", value: "98.6", recorded_date: vitals_taken, display: "98.6 F", metric_display: "(37.0 C)" } ])
 
     # Medications (ORWPS ACTIVE) — MedicationRequest
     m.seed_text(:medication_active, "1", active_medication_wire(

@@ -324,7 +324,7 @@ module Lakeraven
           get "/lakeraven-ehr/patients/1", headers: @headers
         end
         assert_response :service_unavailable
-        refute_includes response.body, "120/80"
+        refute_includes response.body, "117/81"
       end
 
       test "HTML chart fails closed if filter returns hash without resourceType" do
@@ -332,7 +332,7 @@ module Lakeraven
           get "/lakeraven-ehr/patients/1", headers: @headers
         end
         assert_response :service_unavailable
-        refute_includes response.body, "120/80"
+        refute_includes response.body, "117/81"
       end
 
             test "HTML chart retains RPMS text for appointments, missing vitals, and units" do
@@ -573,7 +573,7 @@ module Lakeraven
         # 1. Verify it appears with the real filter
         get "/lakeraven-ehr/patients/1", headers: @headers
         assert_response :success
-        assert_includes response.body, "120/80"
+        assert_includes response.body, "117/81"
 
         # 2. Mock filter to return an empty bundle and verify it's gone
         calls = 0
@@ -586,7 +586,7 @@ module Lakeraven
 
         assert_response :success
         assert_operator calls, :>=, 1, "HTML chart must invoke Part2EgressFilter"
-        refute_includes response.body, "120/80", "Expected clinical content to be removed when filter returns empty bundle"
+        refute_includes response.body, "117/81", "Expected clinical content to be removed when filter returns empty bundle"
       end
 
       test "HTML chart fails closed if seam returns nil" do
@@ -595,7 +595,7 @@ module Lakeraven
         end
 
         assert_response :service_unavailable
-        refute_includes response.body, "120/80"
+        refute_includes response.body, "117/81"
       end
 
       test "screenings never invent a score when filter removes the score Observation" do
