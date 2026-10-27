@@ -156,15 +156,18 @@ BASELINE_MOCK_SEEDS = lambda do |m|
   # (undetermined ⇒ not eligible); the eligibility_status (I/D/C/P) product
   # mapping is tracked in #520 and is out of Sprint 1 (BH-only) scope.
 
-  # Vitals (ORQQVI VITALS) for patient DFN 1
+  # Vitals (ORQQVI VITALS) for patient DFN 1: the rows a fresh rpms-ydb
+  # e9b78c8 sent for DFN 4 (DEMO,PATIENT ONE), so their shape is the wire's.
+  # On RPMS VITAL^ORQQVI answers from MSR^ORQQVI with IHS MEASUREMENT TYPE
+  # codes (TMP, PU, RS, BP, PA, O2), and the reply has no units piece: the
+  # recorded text is display ("98 F") and metric_display ("(36.7 C)").
   m.seed_keyed_collection(:vitals, "1", [
-    { measurement_ien: 1001, type: "BP",  value: "120/80", units: "mm[Hg]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
-    { measurement_ien: 1002, type: "P",   value: "72",     units: "/min",   recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
-    { measurement_ien: 1003, type: "T",   value: "98.6",   units: "[degF]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
-    { measurement_ien: 1004, type: "R",   value: "16",     units: "/min",   recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
-    { measurement_ien: 1005, type: "POX", value: "98",     units: "%",      recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
-    { measurement_ien: 1006, type: "WT",  value: "150",    units: "[lb_av]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
-    { measurement_ien: 1007, type: "HT",  value: "65",     units: "[in_i]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) }
+    { measurement_ien: 5,  type: "TMP", value: "98",     recorded_date: Time.new(2026, 9, 11, 21, 34), display: "98 F", metric_display: "(36.7 C)" },
+    { measurement_ien: 6,  type: "PU",  value: "50",     recorded_date: Time.new(2026, 9, 11, 21, 34), display: "50" },
+    { measurement_ien: 7,  type: "RS",  value: "20",     recorded_date: Time.new(2026, 9, 11, 21, 34), display: "20" },
+    { measurement_ien: 8,  type: "BP",  value: "117/81", recorded_date: Time.new(2026, 9, 11, 21, 34), display: "117/81" },
+    { measurement_ien: 10, type: "PA",  value: "0",      recorded_date: Time.new(2026, 9, 11, 21, 34), display: "0" },
+    { measurement_ien: 9,  type: "O2",  value: "98",     recorded_date: Time.new(2026, 9, 11, 21, 34), display: "98" }
   ])
 
   # Test users
