@@ -28,10 +28,10 @@ module Lakeraven
     # DEPLOYING ANYWHERE THAT HOLDS PART 2 CONTENT.
     #
     # State the shipped position plainly, because it is not neutral:
-    # `cprs_gui_chart` — the most widely held key in an RPMS site, the one that
-    # means "may open a chart" — grants `user/Observation.rs` and
+    # the order-entry keys (`ORES`, `ORELSE`, `OREMAS`) — held by every clinician
+    # who works in the chart, so they mean "may open a chart" — grant `user/Observation.rs` and
     # `user/Condition.rs`, which is to say the PHQ-9 item-9 answer and the
-    # substance-use diagnosis. `bh_provider` and `bh_supervisor` grant NOTHING.
+    # substance-use diagnosis. The behavioral health keys (`AMHZMENU`, `AMHZMGR`) grant NOTHING.
     # So the effect today is not "no Part 2 control": it is that Part 2 content
     # travels with ordinary chart access while the keys named for it are inert.
     #
@@ -67,35 +67,26 @@ module Lakeraven
 
       # key symbol => { read: [types], write: [types] }
       KEY_SCOPES = {
-        # Clinical
-        cprs_gui_chart: { read: CHART_READ_TYPES, write: [] },
+        # Clinical: the order-entry keys, one per clinician who works in the chart.
+        orders_sign: { read: CHART_READ_TYPES, write: [] },
+        orders_release: { read: CHART_READ_TYPES, write: [] },
+        orders_enter: { read: CHART_READ_TYPES, write: [] },
 
-        # PRC / CHS — purchased & referred care
-        prc_supervisor: { read: REFERRAL_TYPES + COVERAGE_TYPES, write: REFERRAL_TYPES },
-        prc_manager: { read: REFERRAL_TYPES + COVERAGE_TYPES, write: REFERRAL_TYPES },
-        prc_tech: { read: REFERRAL_TYPES, write: [] },
-        chs_approve: { read: REFERRAL_TYPES, write: REFERRAL_TYPES },
-        chs_clerk: { read: REFERRAL_TYPES, write: [] },
-
-        # Consults
-        consult_manager: { read: REFERRAL_TYPES, write: REFERRAL_TYPES },
-
-        # Eligibility
-        eligibility_verify: { read: COVERAGE_TYPES, write: COVERAGE_TYPES },
+        # Referred care (RCIS)
+        referrals_supervisor: { read: REFERRAL_TYPES + COVERAGE_TYPES, write: REFERRAL_TYPES },
+        referrals_manager: { read: REFERRAL_TYPES + COVERAGE_TYPES, write: REFERRAL_TYPES },
+        referrals_user: { read: REFERRAL_TYPES, write: [] },
 
         # Scheduling
         scheduling_admin: { read: %w[Encounter Location], write: %w[Encounter] },
+        scheduling_user: { read: %w[Encounter Location], write: %w[Encounter] },
 
-        # Behavioural health (42 CFR Part 2) — see the note above.
-        bh_provider: { read: BEHAVIORAL_HEALTH_TYPES, write: BEHAVIORAL_HEALTH_TYPES },
-        bh_supervisor: { read: BEHAVIORAL_HEALTH_TYPES, write: BEHAVIORAL_HEALTH_TYPES },
+        # Behavioural health (42 CFR Part 2): see the note above.
+        behavioral_health_user: { read: BEHAVIORAL_HEALTH_TYPES, write: BEHAVIORAL_HEALTH_TYPES },
+        behavioral_health_manager: { read: BEHAVIORAL_HEALTH_TYPES, write: BEHAVIORAL_HEALTH_TYPES }
 
-        # Dental. NOT Condition: this engine cannot distinguish a dental
-        # diagnosis from any other, so granting Condition here would hand a
-        # dental provider the whole problem list — read AND write — on a key
-        # that names one clinic. Procedures are dental-coded and safe to grant.
-        dental_provider: { read: %w[Procedure Encounter], write: %w[Procedure] },
-        dental_supervisor: { read: %w[Procedure Encounter], write: %w[Procedure] }
+        # Consults, eligibility and dental have no key decided yet (#578), so
+        # they grant nothing; see Roles::KEY_NAMES.
       }.freeze
 
       class << self

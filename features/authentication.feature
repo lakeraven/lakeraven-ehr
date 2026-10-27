@@ -107,21 +107,23 @@ Feature: Authentication
   # SECURITY KEY CHECKS
   # =============================================================================
 
-  Scenario: User with PRCFA SUPERVISOR key can approve CHS
-    Given I am logged in as a case_manager with security key "PRCFA SUPERVISOR"
+  Scenario: User with BMCZSUPERVISOR key can approve CHS
+    Given I am logged in as a case_manager with security key "BMCZSUPERVISOR"
     Then I should be able to approve CHS referrals
 
-  Scenario: User without PRCFA SUPERVISOR key cannot approve CHS
+  Scenario: User without BMCZSUPERVISOR key cannot approve CHS
     Given I am logged in as a clerk without security keys
     Then I should not be able to approve CHS referrals
 
-  Scenario: User with PRCFA TECH key can process CHS claims
-    Given I am logged in as a clerk with security key "PRCFA TECH"
+  Scenario: User with BMCZMENU key can process CHS claims
+    Given I am logged in as a clerk with security key "BMCZMENU"
     Then I should be able to process CHS claims
 
-  Scenario: User with GMRC MGR key can manage consults
+  # GMRC MGR is a menu option, not a SECURITY KEY, and no key for consults is
+  # decided yet (#578): it grants nothing.
+  Scenario: No key grants consult management until one is decided
     Given I am logged in as a nurse with security key "GMRC MGR"
-    Then I should be able to manage consults
+    Then I should not be able to manage consults
 
   # =============================================================================
   # UNAUTHENTICATED ACCESS
