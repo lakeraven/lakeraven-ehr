@@ -24,13 +24,17 @@ Feature: Authentication
     Then I should be logged in successfully
     And my user type should be "nurse"
 
-  # A case manager is a user holding PRCFA SUPERVISOR (Roles.resolve_signon).
-  # No demo site persona holds that key yet, so this waits on the seed.
-  Scenario: Case manager logs in with valid credentials
-    Given a demo site persona holds security key "PRCFA SUPERVISOR"
-    When I login as "lindarodriguez" with password "test123"
+  # The registration clerk and the scheduler hold only their package menus
+  # (AGZMENU, SDZMENU) and USRCLS 0, so the engine resolves them as "user".
+  Scenario: Registration clerk logs in with valid credentials
+    When I login as "PREG123" with password "PREG123!!"
     Then I should be logged in successfully
-    And my user type should be "case_manager"
+    And my user type should be "user"
+
+  Scenario: Scheduler logs in with valid credentials
+    When I login as "PSCH123" with password "PSCH123!!"
+    Then I should be logged in successfully
+    And my user type should be "user"
 
   Scenario: Clerk logs in with valid credentials
     When I login as "PMA123" with password "PMA123!!"

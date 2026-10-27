@@ -38,10 +38,6 @@ end
 # on as its own user, the live run's persona signs back on.
 After { LiveRpmsSession.sign_on! if LIVE_RPMS && @signed_on_as_scenario_user }
 
-Given("a demo site persona holds security key {string}") do |key|
-  pending "no demo site persona holds #{key}; the rpms-ops demo seed (SEEDPERS) needs one"
-end
-
 # Role login shortcuts
 Given("I am logged in as a provider") do
   setup_user_with_role("provider")
