@@ -71,12 +71,12 @@ Building to (g)(10) is therefore the durable bet; building to criteria that may 
 - Validate FHIR output against US Core in CI with the HL7 validator, and run Inferno's (g)(10) suite against a deployed stack (#254). Hand-written serializers are fine; unvalidated ones are not.
 - Advertise only what is served, in discovery and in the CapabilityStatement (#657, #658, #656).
 
-**Today.** Scopes are SMART v1, there is no implementation-guide declaration, and FHIR output is validated by unit tests only.
+**Today.** Scopes are SMART v2 (#665): v1 scopes are translated at the edge, and discovery and the CapabilityStatement list only what is routed (#657, #658).
+There is no implementation-guide declaration yet, and FHIR output is validated by unit tests only.
 
 **Next.**
-1. Move to v2 scopes along with #578.
-2. Add the validator to CI.
-3. Fix #657 and #658.
+1. Add the validator to CI and declare US Core 6.1.0 for the types that pass (#666).
+2. Run Inferno's (g)(10) suite against a deployed stack (#254).
 
 ## 5. Browsers hold a session cookie; API clients hold short-lived, sender-constrained tokens
 
@@ -92,9 +92,9 @@ Building to (g)(10) is therefore the durable bet; building to criteria that may 
   - DPoP (RFC 9449) for public clients when SMART launch is served.
 - Tokens carry capabilities and scopes, never raw RPMS key names (ADR 0010).
 
-**Today.** The browser session and the backend-services path follow this. SMART launch is advertised but not served (#657).
+**Today.** The browser session and the backend-services path follow this. SMART launch is not served, and since #665 it is no longer advertised.
 
-**Next.** Serve SMART launch, or stop advertising it.
+**Next.** Serve SMART authorization-code launch with PKCE, short-lived sender-constrained tokens, and refresh tokens bound to the client.
 
 ## 6. Staff sign in with the organization's identity provider and phishing-resistant MFA
 
@@ -196,7 +196,7 @@ Building to (g)(10) is therefore the durable bet; building to criteria that may 
 
 1. Adopt this page as the yardstick for reviews, and link it from the README.
 2. Amend ADR 0001: Pundit stays, but mappings move from rpms-rpc to this engine (principle 3).
-3. Move scopes to SMART v2 as part of #578 (principle 4).
+3. Mint scopes from RPMS capabilities as part of #578 (principle 4); the v2 grammar is in place since #665.
 4. Name the PostgreSQL columns that hold PHI, and encrypt them (principle 9).
 5. Choose the #531 sign-on design: how the server acts in RPMS as an IdP-authenticated user (principle 6).
 
