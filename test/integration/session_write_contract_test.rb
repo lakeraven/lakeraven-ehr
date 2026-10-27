@@ -23,7 +23,7 @@ class SessionWriteContractTest < ActionDispatch::IntegrationTest
   setup { Lakeraven::EHR::LoginThrottle.reset! }
   teardown { Lakeraven::EHR::LoginThrottle.reset! }
 
-  # 304 RODRIGUEZ,LINDA holds prc_supervisor, which grants ServiceRequest
+  # 304 RODRIGUEZ,LINDA holds referrals_supervisor, which grants ServiceRequest
   # write — the scope the probe routes check.
   KEYED = { username: "lindarodriguez", password: "test123" }.freeze
 

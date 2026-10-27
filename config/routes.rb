@@ -71,7 +71,6 @@ Lakeraven::EHR::Engine.routes.draw do
   resources :coverage_eligibility_requests, path: "CoverageEligibilityRequest", only: %i[create]
   resources :measures, path: "Measure", only: %i[index]
   resources :measure_reports, path: "MeasureReport", only: %i[index]
-  resources :consents, path: "Consent", only: %i[index show]
   resources :audit_events, path: "AuditEvent", only: %i[index show]
   resources :value_sets, path: "ValueSet", only: %i[index show] do
     member do
@@ -110,6 +109,12 @@ Lakeraven::EHR::Engine.routes.draw do
   post "login" => "sessions#create"
   delete "logout" => "sessions#destroy", as: :logout
   get "dashboard" => "dashboards#show", as: :dashboard
+
+  # The front desk finds a patient before registering one (rpms-ux S-REG-01).
+  namespace :registration do
+    get "patients", to: "patients#index", as: :patients
+    get "patients/:dfn", to: "patients#show", as: :patient, constraints: { dfn: /\d+/ }
+  end
 
   # Test-only: seed the browser session (DUZ, user type, security keys, and
   # the session-bound SMART token) without the RPMS sign-on flow. The

@@ -8,7 +8,7 @@ require "rpms_rpc/api/authentication"
 # fix; each names the finding it reproduces.
 #
 # Seeded users (test_helper): 301 PROVIDER,TEST (no keys) / 303 CLERK,TEST
-# (no keys) / 304 RODRIGUEZ,LINDA (prc_supervisor + cprs_gui_chart).
+# (no keys) / 304 RODRIGUEZ,LINDA (referrals_supervisor + orders_sign).
 class SsoSessionTokenBridgeSecurityTest < ActionDispatch::IntegrationTest
   LOGIN = "/lakeraven-ehr/login"
 
@@ -650,8 +650,8 @@ class SsoSessionTokenBridgeSecurityTest < ActionDispatch::IntegrationTest
   # -- M: the C-CDA author must not be caller-supplied --------------------
 
   test "the chart key grants Part 2-bearing resource types and the BH keys grant nothing" do
-    chart = Lakeraven::EHR::SessionScopePolicy.scopes_for(security_keys: [ :cprs_gui_chart ])
-    bh = Lakeraven::EHR::SessionScopePolicy.scopes_for(security_keys: [ :bh_provider, :bh_supervisor ])
+    chart = Lakeraven::EHR::SessionScopePolicy.scopes_for(security_keys: [ :orders_sign ])
+    bh = Lakeraven::EHR::SessionScopePolicy.scopes_for(security_keys: [ :behavioral_health_user, :behavioral_health_manager ])
 
     assert_includes chart, "user/Observation.rs", "PHQ-9 item 9 rides on Observation"
     assert_includes chart, "user/Condition.rs",   "substance-use diagnoses ride on Condition"
@@ -659,14 +659,11 @@ class SsoSessionTokenBridgeSecurityTest < ActionDispatch::IntegrationTest
     assert_empty Lakeraven::EHR::SessionScopePolicy::BEHAVIORAL_HEALTH_TYPES
   end
 
-  test "the dental keys do not grant global Condition write" do
-    dental = Lakeraven::EHR::SessionScopePolicy.scopes_for(
-      security_keys: [ :dental_provider, :dental_supervisor ]
-    )
+  test "no key in the table grants Condition write" do
+    every = Lakeraven::EHR::SessionScopePolicy.scopes_for(security_keys: Lakeraven::EHR::SessionScopePolicy::KEY_SCOPES.keys)
 
-    refute dental.any? { |scope| scope.start_with?("user/Condition.") }, dental.join(" ")
+    assert_equal [ "user/Condition.rs" ], every.select { |scope| scope.start_with?("user/Condition.") }
   end
-
   private
 
   # Minitest 6 dropped Object#stub; swap a singleton method and put it back.

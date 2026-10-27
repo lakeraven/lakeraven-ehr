@@ -1,4 +1,9 @@
-#!/usr/bin/env ruby
-# frozen_string_literal: true
+#!/usr/bin/env sh
+# The Rails server and the Tailwind watcher together (Procfile.dev), as a new Rails 8 app runs them.
+if ! gem list foreman -i --silent; then
+  echo "Installing foreman..."
+  gem install foreman
+fi
 
-exec "./bin/rails", "server", *ARGV
+export PORT="${PORT:-3000}"
+exec foreman start -f Procfile.dev "$@"
