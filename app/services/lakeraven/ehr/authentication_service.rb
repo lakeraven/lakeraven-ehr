@@ -63,8 +63,10 @@ module Lakeraven
         # when the class cannot be read, so the sign-on fails closed as
         # unavailable rather than defaulting a role.
         server_user_type = RpmsRpc::Authentication.user_type(duz_s)
-        raw_keys = fetch_raw_security_keys(duz_s)
-        symbolic_keys = Roles.symbolize_keys(raw_keys)
+        # The keys the policy table names, asked of RPMS for the signed-on
+        # user. A key read that could not be made raises, and the sign-on is
+        # refused as unavailable: never a session on keys nobody read (#578).
+        symbolic_keys = Roles.symbolize_keys(SecurityKeyGateway.held(Roles::KEY_NAMES.values))
 
         # Round-trip the server's user type through the short code so
         # :prc_supervisor or :prc_manager still elevates to "case_manager".
@@ -131,13 +133,6 @@ module Lakeraven
       rescue RpmsRpc::Client::RpcError => e
         Rails.logger.warn("[auth] user info unavailable for DUZ #{duz}: #{e.message}")
         nil
-      end
-
-      def fetch_raw_security_keys(duz)
-        RpmsRpc::Authentication.user_security_keys(duz)
-      rescue => e
-        Rails.logger.error("Failed to load security keys for DUZ #{duz}: #{e.message}") if defined?(Rails)
-        []
       end
     end
   end

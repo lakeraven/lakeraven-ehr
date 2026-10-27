@@ -13,17 +13,30 @@ require "rpms_rpc/mock_client"
 # A successful XUS AV CODE reply re-seeds both replies for the DUZ it names,
 # from that user's own seed_user arguments. Users seeded another way are
 # left alone. Belongs in rpms-rpc's MockClient; kept here until it is.
+#
+# CIAVCXUS HASKEYS is answered the same way: for the user the sign-on bound,
+# one 0/1 per name asked, from the keys seed_held_keys gave that DUZ (HASKEY,
+# CIAVCXUS.m:8-12, reads ^XUSEC(KEY,DUZ)). With nobody signed on it answers
+# nothing, which held_keys reads as "could not ask".
 module MockSessionUser
   AV_CODE_RPC = "XUS AV CODE"
+  HELD_KEYS_RPC = "CIAVCXUS HASKEYS"
 
   def seed_user(duz, credentials:, name:, role:)
     super
     (@session_users ||= {})[duz.to_i] = { credentials: credentials, name: name, role: role }
   end
 
+  # The SECURITY KEYs DUZ holds: what ^XUSEC(KEY,DUZ) would say.
+  def seed_held_keys(duz, names)
+    (@held_keys ||= {})[duz.to_i] = Array(names)
+  end
+
   def seeded_reply(rpc_name, *params)
     reply = super
     bind_session_user(reply) if rpc_name == AV_CODE_RPC
+    return held_keys_reply(params.first) if rpc_name == HELD_KEYS_RPC && reply == "" && @session_duz
+
     reply
   end
 
@@ -34,8 +47,14 @@ module MockSessionUser
     duz = lines[0].to_i
     return unless duz.positive? && lines[1].to_s.strip == "0"
 
+    @session_duz = duz
     user = @session_users&.dig(duz)
     seed_user(duz.to_s, **user) if user
+  end
+
+  def held_keys_reply(asked)
+    held = @held_keys&.dig(@session_duz) || []
+    [ asked.to_s.split("^", -1).map { |name| held.include?(name) ? "1" : "0" }.join("^") ]
   end
 end
 

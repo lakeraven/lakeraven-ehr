@@ -175,15 +175,8 @@ BASELINE_MOCK_SEEDS = lambda do |m|
   m.seed_user("302", credentials: "testnurse;test123", name: "NURSE,TEST", role: :nurse)
   m.seed_user("303", credentials: "testclerk;test123", name: "CLERK,TEST", role: :clerk)
   m.seed_user("304", credentials: "lindarodriguez;test123", name: "RODRIGUEZ,LINDA", role: :case_manager)
-  # DUZ 304's KEYS multiple (#200.051), which Authentication.user_security_keys
-  # reads with DDR LISTER since rpms-rpc #374: IEN^KEY-name rows.
-  m.seed_text(:ddr_lister,
-    RpmsRpc::DdrFileman.lister_param(file: "200.051", iens: ",304,", fields: "@;.01").to_s,
-    <<~KEYS.chomp)
-      [Data]
-      1^PRCFA SUPERVISOR
-      2^OR CPRS GUI CHART
-    KEYS
+  # The SECURITY KEYs DUZ 304 holds, answered to CIAVCXUS HASKEYS once 304 signs on.
+  m.seed_held_keys("304", [ "PRCFA SUPERVISOR", "OR CPRS GUI CHART" ])
 
   # Practitioner — ORWU USERINFO is single-session-user (per rr-fyf); the
   # mock dispatches on "" since the wrapper passes no params. Test code
