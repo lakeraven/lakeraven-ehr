@@ -20,8 +20,18 @@ end
 gem "puma"
 gem "pg"
 
+# The asset pipeline and Tailwind CSS v4 for the dummy app, the same pair the
+# SaaS host runs. Engine pages link the host's Tailwind build (tailwind.css);
+# without an asset pipeline that link has no route and every page load 404s it.
+gem "propshaft"
+gem "tailwindcss-rails", "~> 4.4"
+
 gem "cucumber-rails", require: false
 gem "minitest"
+
+# Headless Chrome for the live system tests (test/system/live), which sign in
+# against a real RPMS broker and save screenshots as evidence.
+gem "cuprite", require: false
 
 # Omakase Ruby styling [https://github.com/rails/rubocop-rails-omakase/]
 gem "rubocop-rails-omakase", require: false
