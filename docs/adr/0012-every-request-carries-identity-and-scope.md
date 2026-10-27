@@ -1,8 +1,8 @@
-# ADR 0009: Every request carries an identity and a scope, respected on the way in, through, and out
+# ADR 0012: Every request carries an identity and a scope, respected on the way in, through, and out
 
 **Status:** Proposed
 **Date:** 2026-10-06
-**Implemented at the RPMS hop by:** ADR 0008 (a broker session is the only way to RPMS)
+**Implemented at the RPMS hop by:** ADR 0011 (a broker session is the only way to RPMS)
 **Background:** `docs/rpms-client-state-model.md` (what RPMS assumes about its clients)
 
 ## Principle
@@ -33,7 +33,7 @@ So the web tier has to establish identity and scope itself, carry them explicitl
 | `organization` | the tenancy boundary (ADR 0007) | the client registration or session; never a parameter |
 | `division` | RPMS `DUZ(2)` | the user's RPMS sign-on and `DIVSET`; never a header |
 | `request_id` | correlates this request across logs, audit and RPMS | W3C Trace Context `traceparent`, or generated at the edge |
-| `broker_session` | this principal's RPMS connection (ADR 0008), or none | built from the context, never the reverse |
+| `broker_session` | this principal's RPMS connection (ADR 0011), or none | built from the context, never the reverse |
 
 A context is either complete or doesn't exist.
 No layer fills in a missing field with a default.
@@ -62,7 +62,7 @@ No layer fills in a missing field with a default.
 5. **The context is an argument, not ambient state.** Controllers pass it to policies, services and gateways.
    A gateway called without a context raises.
    No thread-local, fiber-local or global holds it (rpms-rpc ADR 0006 rejected the same idea for the client).
-6. **The RPMS connection is derived from the context** (ADR 0008).
+6. **The RPMS connection is derived from the context** (ADR 0011).
    A person's request runs on that person's own signed-on connection.
    A non-human principal runs on its named service account's connection, or gets none.
 7. **Two independent authorities must both allow.** Our scopes say what this request may do.
@@ -106,10 +106,10 @@ No layer fills in a missing field with a default.
 | 2 deny by default | `ApplicationController` requires a SMART token and a FHIR scope. **`WebController` doesn't:** each subclass opts in with `before_action :require_authentication`. `ChartsController` and `DemoVisitsController` sit outside both bases, with their own checks | Make `WebController` fail closed; give public endpoints a declaration; add a route-inventory test that every route is authenticated or declared public |
 | 3 actions declare needs | resource scope derived per controller (`authorize_fhir_scope!`); some per-action skips (`measures#import`) | Make the declaration explicit per action, and refuse an action that declares nothing |
 | 4 nothing from input | compartment checks exist (`enforce_declared_compartment!`, `enforce_patient_context!`) | Division and organization still need the same rule; ADR 0007 and #553 |
-| 5 explicit context | identity sits in `session[:duz]` and the token; gateways see neither | ADR 0008's `BrokerSession` is the first explicit carrier; extend it to a full request context |
-| 6 connection from context | one global `RpmsRpc.client` | ADR 0008 |
-| 7 RPMS checks again | not real while the connection is shared | ADR 0008 |
-| 8 deferred work | no rule | define with ADR 0008's service identity |
+| 5 explicit context | identity sits in `session[:duz]` and the token; gateways see neither | ADR 0011's `BrokerSession` is the first explicit carrier; extend it to a full request context |
+| 6 connection from context | one global `RpmsRpc.client` | ADR 0011 |
+| 7 RPMS checks again | not real while the connection is shared | ADR 0011 |
+| 8 deferred work | no rule | define with ADR 0011's service identity |
 | 9 egress check | only C-CDA egress (`Part2EgressFilter`); `render_bundle` sends what the gateway returned | add the check to `render_bundle` and the chart's bundle |
 | 10 no-store | Rails default `private, max-age=0, must-revalidate`; no `no-store` | set it on every authenticated response |
 | 11 uniform not-found | not yet checked across controllers | add to the route-inventory test |
@@ -120,8 +120,8 @@ No layer fills in a missing field with a default.
 - **Route inventory:** every route is either behind a base controller that requires a context or declared public, and the list of public routes is pinned in the test.
 - **Every action declares its scope:** a test fails on an action with no declaration.
 - **Egress:** a gateway double returns one resource from another patient, or a type outside the scope, and the response is refused and audited.
-- **No ambient identity:** a gateway called without a context raises. A web process holds no global broker client (ADR 0008).
-- **Two identities:** concurrent users each read under their own DUZ, checked on the RPMS connection (ADR 0008).
+- **No ambient identity:** a gateway called without a context raises. A web process holds no global broker client (ADR 0011).
+- **Two identities:** concurrent users each read under their own DUZ, checked on the RPMS connection (ADR 0011).
 - **Cache headers:** every authenticated response carries `no-store`.
 
 ## Standards this rests on
@@ -136,6 +136,6 @@ No layer fills in a missing field with a default.
 ## Consequences
 
 - Authorization stops being a gate at the door and becomes a value carried end to end, checked at every hop and once more on the way out.
-- Most gaps close by changing the base controllers, `render_bundle`, and ADR 0008's broker seam, not every controller.
+- Most gaps close by changing the base controllers, `render_bundle`, and ADR 0011's broker seam, not every controller.
 - The route-inventory and egress tests make the principle part of the build, so new code that skips it fails CI.
 - Some current behavior becomes a refusal (a web screen that forgot to opt in, a response carrying an extra resource), which is the point.

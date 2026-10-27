@@ -1,7 +1,7 @@
 # What RPMS assumes about its clients: state, identity, and the web
 
 **Status:** reference, 2026-10-06.
-**Read with:** ADR 0008 (a broker session is the only way to RPMS), rpms-rpc ADR 0005, 0006 and 0010.
+**Read with:** ADR 0011 (a broker session is the only way to RPMS), rpms-rpc ADR 0005, 0006 and 0010.
 **Evidence:** FOIA RPMS source (`~/workspace/FOIA-RPMS/Packages`) and the BPRM 4.0 p6 source (`GUI Source/bprm0400.06src.zip`), cited by file and line.
 Claims marked *unverified* come from reading code, not from a run.
 
@@ -22,7 +22,7 @@ Developers can't be expected to remember it.
 The short version of the recommendation:
 
 - **Browser ↔ web tier:** a standard web session (HttpOnly cookie, the OAuth "backend for frontend" pattern). JWT access tokens are reserved for third-party API clients, where the party that issues a token is not the party that verifies it.
-- **Web tier ↔ RPMS:** one signed-on broker connection per user session, bound at sign-on and never re-bound (ADR 0008). It's stateful because RPMS is.
+- **Web tier ↔ RPMS:** one signed-on broker connection per user session, bound at sign-on and never re-bound (ADR 0011). It's stateful because RPMS is.
 - **Later, if wanted:** a stateless identity path into RPMS (a signed assertion that M itself verifies on each call). That is build work in rpms-ops, not something the web tier can invent.
 
 ## 1. The assumptions RPMS makes about a client
@@ -92,7 +92,7 @@ Each row is a place where the thick-client assumption fails, and what the web ti
 
 | RPMS assumes | A web app has | So the web tier must |
 |---|---|---|
-| one user per process | many users per server process | never share a signed-on connection; bind one per user session (ADR 0008 §2) |
+| one user per process | many users per server process | never share a signed-on connection; bind one per user session (ADR 0011 §2) |
 | identity set once, at the door | each request stands alone | bind identity when the connection is created; never stamp a user onto a shared connection later (§3 shows why) |
 | the session is a long-lived socket | requests may land on any process; processes restart | send each session's requests to the process holding its connection (sticky sessions), or sign the user in again when it's gone; never rebuild a connection from stored credentials |
 | one request at a time | tabs, parallel fetches, background refresh | serialize per connection (the client's wire lock); open a second connection only with the 20-second handoff token, never with stored codes |
@@ -172,7 +172,7 @@ This is the hop where a JWT would matter most, and today it can't help.
 The brokers can't verify a JWT: identity comes from the connection (1.2).
 Three honest options:
 
-1. **A stateful connection per user** (ADR 0008). It works with RPMS as built, and it's what VueCentric does.
+1. **A stateful connection per user** (ADR 0011). It works with RPMS as built, and it's what VueCentric does.
 2. **A shared connection the app stamps** (BPRM's pattern). This is the source of every gap in §3. Rejected.
 3. **A stateless identity path in RPMS.** One broker entry point accepts a signed assertion per call (a JWT from our server, or an OAuth token-exchange result, RFC 8693, with an "acting on behalf of" claim). M verifies the signature, audience and expiry, sets `DUZ` for that call only, and clears it after. The connection authenticates the *web tier* (a proxy account limited to that entry point, ideally over mutual TLS); the assertion names the *user*. This is the standard trusted-subsystem-with-delegation pattern. It would let RPMS identify the user on each call, and it removes sticky sessions and the one-job-per-user cost. It is a change to RPMS's security model and needs:
    - JWT verification in M on both engines (IRIS has OAuth and JWT classes; YottaDB has none);
@@ -183,7 +183,7 @@ Three honest options:
 
 ### Recommendation
 
-- **Now:** BFF sessions for browsers, JWT-profile OAuth for API clients, and ADR 0008's per-user connection to RPMS. Each uses the mechanism the standards intend for that hop.
+- **Now:** BFF sessions for browsers, JWT-profile OAuth for API clients, and ADR 0011's per-user connection to RPMS. Each uses the mechanism the standards intend for that hop.
 - **Next:** open the design question for option 3 in rpms-ops, starting with whether IHS has, or would accept, a delegated-identity entry point.
 - **Always:**
   - identity is bound at the hop where it's verified;

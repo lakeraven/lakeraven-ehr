@@ -1,4 +1,4 @@
-# ADR 0008: A broker session is the only way to reach RPMS, and a web process holds no shared identity
+# ADR 0011: A broker session is the only way to reach RPMS, and a web process holds no shared identity
 
 **Status:** Proposed
 **Date:** 2026-10-06
