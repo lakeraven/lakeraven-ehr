@@ -128,17 +128,12 @@ module PatientBannerTestHelper
   end
 
   def assert_banner_sticky_stylesheet!
-    css_path = Lakeraven::EHR::Engine.root.join(
-      "app/assets/stylesheets/lakeraven/ehr/application.css"
-    )
-    css = File.read(css_path)
     banner = patient_banner_node
     inline_sticky = banner["style"].to_s.match?(/position:\s*sticky/i)
-    class_sticky = banner["class"].to_s.match?(/sticky/i)
-    sheet_sticky = css.match?(/#patient-banner[^{]*\{[^}]*position:\s*sticky/i)
+    class_sticky = banner["class"].to_s.split.include?("sticky")
 
-    assert inline_sticky || class_sticky || sheet_sticky,
-           "Expected #patient-banner to be sticky via class, inline style, or application.css"
+    assert inline_sticky || class_sticky,
+           "Expected #patient-banner to be sticky via the Tailwind class or an inline style"
   end
 
   def assert_banner_demographics!(name:, mrn:, dob:, age:, sex:)
