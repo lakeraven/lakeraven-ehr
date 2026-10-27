@@ -52,9 +52,16 @@ module Lakeraven
         referrals_supervisor: "BMCZSUPERVISOR",
         referrals_manager: "BMCZ MGR",
 
+        # Registration (AG): the keys BPRM gates its registration screens on.
+        registration_menu: "AGZMENU",
+        registration_manager: "AGZMGR",
+        registration_view_only: "AGZVIEWONLY",
+        registration_view_ssn: "AGZVIEWSSN",
+
         # Scheduling (SD)
         scheduling_admin: "SD SUPERVISOR",
         scheduling_user: "SDZMENU",
+        scheduling_supervisor: "SDZSUP",
 
         # Behavioral health (AMH)
         behavioral_health_user: "AMHZMENU",

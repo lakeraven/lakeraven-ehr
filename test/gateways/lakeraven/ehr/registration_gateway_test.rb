@@ -187,30 +187,7 @@ module Lakeraven
         end
       end
 
-      # --- #4 Search + face sheet -----------------------------------------
-
-      test "search parses broker rows into patient hashes" do
-        broker = FakeBroker.new.on("BHDPTRPC LOOKUP",
-                                   [ "42^RAVEN,NORA^2920311^F", "43^RAVEN,NOAH^2880104^M" ])
-        use_broker(broker) do
-          result = RegistrationGateway.search("RAVEN")
-
-          assert result[:success]
-          assert_equal 2, result[:patients].length
-          assert_equal [ "RAVEN,NORA", "RAVEN,NOAH" ], result[:patients].map { |p| p[:name] }
-        end
-      end
-
-      test "search narrows the match by date of birth" do
-        broker = FakeBroker.new.on("BHDPTRPC LOOKUP",
-                                   [ "42^RAVEN,NORA^2920311^F", "43^RAVEN,NOAH^2880104^M" ])
-        use_broker(broker) do
-          result = RegistrationGateway.search("RAVEN", dob: "1992-03-11")
-
-          assert_equal 1, result[:patients].length
-          assert_equal "RAVEN,NORA", result[:patients].first[:name]
-        end
-      end
+      # --- #4 Face sheet (search is PatientLookupGateway) ----------------
 
       test "face sheet returns name, community and tribe" do
         broker = FakeBroker.new.on("BHDPTRPC FACESHEET", "RAVEN,NORA^Broken Rock City^Broken Rock^")
