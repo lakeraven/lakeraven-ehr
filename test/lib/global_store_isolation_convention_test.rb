@@ -45,8 +45,20 @@ class GlobalStoreIsolationConventionTest < ActiveSupport::TestCase
     walk_constants(Lakeraven::EHR).sort_by(&:first)
   end
 
-  def walk_constants(mod, prefix = "Lakeraven::EHR")
-    mod.constants(false).flat_map do |name|
+  def walk_constants(mod, prefix = "Lakeraven::EHR", visited = nil)
+    visited ||= {}
+    return [] if visited[mod.object_id]
+
+    visited[mod.object_id] = true
+
+    found_self =
+      if EXEMPTED.key?(prefix)
+        nil
+      else
+        class_level_reset_method(mod)&.then { |method_name| [ prefix, mod, method_name ] }
+      end
+
+    nested = mod.constants(false).flat_map do |name|
       const = mod.const_get(name)
       next [] unless const.is_a?(Module)
 
@@ -58,9 +70,11 @@ class GlobalStoreIsolationConventionTest < ActiveSupport::TestCase
           class_level_reset_method(const)&.then { |method_name| [ full_name, const, method_name ] }
         end
 
-      nested = walk_constants(const, full_name)
-      found ? [ found ] + nested : nested
+      child_nested = walk_constants(const, full_name, visited)
+      found ? [ found ] + child_nested : child_nested
     end
+
+    found_self ? [ found_self ] + nested : nested
   end
 
   def class_level_reset_method(klass)
