@@ -29,6 +29,11 @@ end
 PATIENT_CONTEXT_DFN = 1
 
 Given("I have a valid SMART token with scope {string}") do |scopes|
+  step %(I have a valid SMART token with scope "#{scopes}" for patient "#{PATIENT_CONTEXT_DFN}")
+end
+
+# A patient/ scope binds the token to the named patient; other scopes bind none.
+Given("I have a valid SMART token with scope {string} for patient {string}") do |scopes, dfn|
   @oauth_app ||= Doorkeeper::Application.create!(
     name: "cqm-test", redirect_uri: "https://example.test/callback",
     scopes: scopes, confidential: true
@@ -42,7 +47,7 @@ Given("I have a valid SMART token with scope {string}") do |scopes|
   # fixture patient every scenario actually requests (DFN 1, Alice Anderson).
   token = Doorkeeper::AccessToken.create!(
     application: @oauth_app, scopes: scopes, expires_in: 3600,
-    resource_owner_id: (scopes.include?("patient/") ? PATIENT_CONTEXT_DFN : nil)
+    resource_owner_id: (scopes.include?("patient/") ? dfn.to_i : nil)
   )
   @fhir_headers = { "Authorization" => "Bearer #{token.plaintext_token || token.token}" }
 end
