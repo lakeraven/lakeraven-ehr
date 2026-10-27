@@ -27,6 +27,32 @@ module Lakeraven
         pcc_screens
       ].freeze
 
+      # FHIR interactions each IHS capability owns (#574, #647). Patient
+      # read and search stay available with no capability; registration
+      # only adds Patient create. The supported set is this map filtered
+      # by BackendRegistry.current.provides?. ServiceRequest and Immunization
+      # are routed index-only, so only search-type is listed; add read with
+      # its show route.
+      CAPABILITY_FHIR_INTERACTIONS = {
+        prc_referrals: [
+          %w[ServiceRequest search-type]
+        ].freeze,
+        tribal_enrollment: [].freeze,
+        bprm_registration: [
+          %w[Patient create]
+        ].freeze,
+        bprm_scheduling: [].freeze,
+        ihs_immunization: [
+          %w[Immunization search-type]
+        ].freeze,
+        pcc_screens: [].freeze
+      }.freeze
+
+      # Stock interactions that do not belong to an IHS capability.
+      BASE_FHIR_INTERACTIONS = {
+        "Patient" => %w[read search-type].freeze
+      }.freeze
+
       # A registered backend: a client source (called on every request, so a
       # client swapped in configuration is picked up) and its capabilities.
       # It carries no name, so nothing can branch on one.
@@ -72,6 +98,36 @@ module Lakeraven
 
         def current
           fetch(Lakeraven::EHR.configuration.backend)
+        end
+
+        def capability_fhir_interactions
+          CAPABILITY_FHIR_INTERACTIONS
+        end
+
+        def supported_fhir_resource_types
+          (BASE_FHIR_INTERACTIONS.keys + provided_fhir_pairs.map(&:first)).uniq
+        end
+
+        def supported_fhir_interactions(resource_type)
+          owned = provided_fhir_pairs.filter_map { |type, name| name if type == resource_type }
+          (Array(BASE_FHIR_INTERACTIONS[resource_type]) + owned).uniq
+        end
+
+        # The capability that owns this FHIR interaction, or nil when the
+        # interaction is stock (or not one this server gates).
+        def capability_for_fhir_interaction(resource_type, interaction)
+          return if interaction.nil?
+
+          CAPABILITY_FHIR_INTERACTIONS.each do |capability, pairs|
+            return capability if pairs.any? { |type, name| type == resource_type && name == interaction }
+          end
+          nil
+        end
+
+        def provided_fhir_pairs
+          CAPABILITY_FHIR_INTERACTIONS.flat_map do |capability, pairs|
+            current.provides?(capability) ? pairs : []
+          end
         end
 
         private

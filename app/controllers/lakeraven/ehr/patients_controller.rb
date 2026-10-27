@@ -98,6 +98,14 @@ module Lakeraven
         authorize_patient_search!(params[:_id])
       end
 
+      # Registration is the one Patient interaction an IHS capability owns, so
+      # a withheld bprm_registration still refuses a caller without the write
+      # scope before it says the capability is missing.
+      def authorize_before_unavailable!
+        super
+        require_registration_scope! if !performed? && action_name == "create"
+      end
+
       def require_registration_scope!
         return if system_scope? || user_context_scope?
         render_forbidden("Patient registration requires a user- or system-level write scope")

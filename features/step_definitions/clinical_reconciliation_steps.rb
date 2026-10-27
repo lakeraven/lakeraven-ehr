@@ -326,6 +326,16 @@ end
 # =============================================================================
 
 Given("the patient has existing allergies in the system") do
+  # Register the restore before replacing the method. Otherwise this stub
+  # stays in place and a later chart reads these rows instead of RPMS.
+  sc = Lakeraven::EHR::AllergyIntolerance.singleton_class
+  if sc.method_defined?(:for_patient) && sc.instance_method(:for_patient).owner == sc
+    original = sc.instance_method(:for_patient)
+    @gateway_stubs << -> { sc.send(:define_method, :for_patient, original) }
+  else
+    @gateway_stubs << -> { sc.send(:remove_method, :for_patient) if sc.method_defined?(:for_patient) }
+  end
+
   Lakeraven::EHR::AllergyIntolerance.define_singleton_method(:for_patient) do |_dfn|
     [
       Lakeraven::EHR::AllergyIntolerance.new(

@@ -35,6 +35,7 @@ module Lakeraven
     # serializers; only the RPMS data source is mocked (see
     # test/dummy/lib/lakeraven_demo_seeds.rb).
     class ChartsController < ActionController::Base
+      helper ApplicationHelper
       include SmartAuthentication
       # FAIL-CLOSED audit, the same terms the clinician screening surface is
       # held to. The chart now carries scored screenings (#474), so it serves
@@ -46,6 +47,10 @@ module Lakeraven
       include FHIRReadEgress
 
       FHIR_CONTENT_TYPE = "application/fhir+json"
+
+      # Chart sections an IHS capability owns. A backend that withholds one
+      # adds an outcome entry instead of those resources (#647).
+      CHART_CAPABILITY_RESOURCES = { ihs_immunization: "Immunization" }.freeze
 
       before_action :authenticate_chart_request!
       before_action :require_patient_scope!
@@ -130,8 +135,21 @@ module Lakeraven
 
       # AuditableClinicalAccess records entity_type from this; the chart is a
       # Patient-centric aggregate, so audit it against Patient + the dfn.
+      # The dfn is the route segment. `params` also carries the query string,
+      # so `?id=` or `?dfn=` must not name a record this chart did not open.
       def fhir_resource_type
         "Patient"
+      end
+
+      # The route may say "01". The chart shows the patient the repository
+      # resolves, and the audit row names that same canonical dfn.
+      def direct_audit_identifier
+        Patient.canonical_dfn(chart_route_dfn) || chart_route_dfn || super
+      end
+
+      def chart_route_dfn
+        path = request.path_parameters
+        path[:dfn].presence || path["dfn"].presence
       end
 
       # AuditableClinicalAccess hook: demo-bypass requests carry no token but
@@ -157,17 +175,37 @@ module Lakeraven
         dfn = @patient.dfn.to_s
         @conditions    = readable?("Condition") ? build_conditions(dfn) : []
         @medications   = readable?("MedicationRequest") ? build_medications(dfn) : []
-        @allergies     = readable?("AllergyIntolerance") ? build_allergies(dfn) : []
+        @allergies     = build_allergies(dfn)
         # Through the seam, like the FHIR search: converting the raw vitals here
         # would stamp this patient's DFN over whatever a row stated, and would
         # omit a configured supplemental provider's rows from the chart while
         # showing them in the search.
         @observations  = readable?("Observation") ? safe { SupplementalClinicalResources.merged_observations_for_patient(dfn) } || [] : []
-        @immunizations = readable?("Immunization") ? safe { Immunization.for_patient(dfn) } : []
+        @immunizations = ihs_immunizations(dfn)
         @procedures    = readable?("Procedure") ? build_procedures(dfn) : []
         @encounters    = readable?("Encounter") ? safe { EncounterGateway.for_patient(dfn) } : []
         @encounter_resources = build_encounter_resources(dfn)
         load_screenings(dfn)
+      end
+
+      # Immunizations are an IHS-only chart section. A backend without the
+      # capability never sees the gateway call, and the card is omitted.
+      # A read that raises is a failed card, not an empty list.
+      def ihs_immunizations(dfn)
+        return [] unless readable?("Immunization") && BackendRegistry.current.provides?(:ihs_immunization)
+
+        Immunization.for_patient(dfn)
+      rescue StandardError => error
+        record_immunization_load_failure(error)
+        []
+      end
+
+      def record_immunization_load_failure(error)
+        @immunizations_load_failed = true
+        Rails.logger.warn(
+          "[chart] immunizations could not be loaded: #{error.class}: " \
+          "#{PhiSanitizer.sanitize_message(error.message)}"
+        )
       end
 
       # Scored screening instruments (#474). Engine-owned records rather than an
@@ -239,8 +277,21 @@ module Lakeraven
       # disagree about the same wire row -- they previously read different keys
       # for the reaction -- and so a configured supplemental provider's rows are
       # in the chart rather than only in the search.
+      #
+      # Not `safe`. That helper turns a raise and a real [] into the same [],
+      # and the banner then cannot tell "not loaded" from "none recorded".
+      # Other sections still use `safe`.
       def build_allergies(dfn)
-        safe { SupplementalClinicalResources.merged_allergy_intolerances_for_patient(dfn) } || []
+        @allergy_source = chart_allergy_source(dfn)
+        @allergy_source.records
+      end
+
+      def chart_allergy_source(dfn)
+        return AllergySource.unauthorized unless readable?("AllergyIntolerance")
+
+        AllergySource.fetch(log_label: "[chart]") do
+          SupplementalClinicalResources.merged_allergy_intolerances_for_patient(dfn)
+        end
       end
 
       # ORQQAL LIST (the allergy RPC) returns ALLERGEN^REACTION^SEVERITY with no
@@ -308,6 +359,10 @@ module Lakeraven
         resources.concat(@procedures.map(&:to_fhir))
         resources.concat(chart_encounter_entries)
 
+        entries = resources.map do |resource|
+          { fullUrl: entry_full_url(resource), resource: resource, search: { mode: "match" } }
+        end
+
         {
           resourceType: "Bundle",
           id: SecureRandom.uuid,
@@ -315,9 +370,40 @@ module Lakeraven
           type: "searchset",
           total: resources.length,
           link: [ { relation: "self", url: request.original_url } ],
-          entry: resources.map do |r|
-            { fullUrl: entry_full_url(r), resource: r, search: { mode: "match" } }
-          end
+          entry: entries + withheld_chart_outcomes + immunization_load_outcomes
+        }
+      end
+
+      def withheld_chart_outcomes
+        CHART_CAPABILITY_RESOURCES.filter_map do |capability, resource_type|
+          next if BackendRegistry.current.provides?(capability)
+
+          chart_feature_outcome(
+            code: "not-supported",
+            diagnostics: "#{resource_type} is not available on this system"
+          )
+        end
+      end
+
+      # The capability is present, but the read failed. The diagnostics stay
+      # fixed: the exception message can carry broker detail and stays in the log.
+      def immunization_load_outcomes
+        return [] unless @immunizations_load_failed
+
+        [ chart_feature_outcome(code: "exception", diagnostics: "Immunizations could not be loaded.") ]
+      end
+
+      def chart_feature_outcome(code:, diagnostics:)
+        {
+          resource: {
+            resourceType: "OperationOutcome",
+            issue: [ {
+              severity: "error",
+              code: code,
+              diagnostics: diagnostics
+            } ]
+          },
+          search: { mode: "outcome" }
         }
       end
 
@@ -422,7 +508,19 @@ module Lakeraven
         return refuse_unfiltered_fhir_egress unless bundle
 
         assign_chart_from_bundle(bundle)
+        assign_patient_banner
         render :show, layout: false
+      end
+
+      # The banner and the allergy sections both read the filtered bundle.
+      # Source status is what tells a withheld list from a genuinely empty one.
+      def assign_patient_banner
+        @allergy_list_status = chart_allergy_status
+        @patient_banner = PatientBanner.for_chart(@patient, @allergy_list_status)
+      end
+
+      def chart_allergy_status
+        @allergy_source.to_list_status(@allergies.map(&:display_allergen))
       end
 
       def assign_chart_from_bundle(bundle)
@@ -497,10 +595,12 @@ module Lakeraven
       end
 
       def allergy_from_fhir(resource)
+        code = fhir_field(resource, "code")
         reaction = fhir_first(fhir_field(resource, "reaction"))
         manifestation = fhir_first(fhir_field(reaction, "manifestation"))
         AllergyIntolerance.new(
-          allergen: codeable_text(fhir_field(resource, "code")),
+          allergen: codeable_text(code),
+          allergen_code: fhir_coding_code(code),
           reaction: fhir_field(manifestation, "text"),
           severity: fhir_field(reaction, "severity")
         )
