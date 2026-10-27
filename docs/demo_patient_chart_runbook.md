@@ -25,6 +25,8 @@ Equivalent manual start:
 
 **URL:** http://localhost:3000/patients/1
 
+To run against a real RPMS instead of the mock, see the README, "RPMS backend".
+
 ## Threat model
 
 Whoever controls the environment that runs `test/dummy/bin/demo` is trusted.
