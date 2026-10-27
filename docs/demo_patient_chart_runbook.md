@@ -4,9 +4,16 @@ Read-only demo patient chart (issue #452, PR #453). Synthetic data only — no P
 
 ## Start (local, synthetic data only)
 
-Preferred — runs the preflight checks automatically:
+Preferred — runs the preflight checks automatically (`PORT` selects the listen port; default 3000):
 
-    /Users/kimball/code/lakeraven/rpms/lakeraven-ehr/test/dummy/bin/demo
+    test/dummy/bin/demo
+    PORT=3001 test/dummy/bin/demo
+
+The smoke-test and walkthrough URLs below use port 3000 by default; substitute your PORT if you set one.
+
+The only arguments accepted are `-b HOST`, `-b=HOST`, `--binding HOST`, and `--binding=HOST` (at most once). PORT sets the port. Every other rails server switch is refused, because those switches changed the port, the host, the environment, or the files the script checked.
+
+On a busy port, `test/dummy/bin/demo` exits 1. It names the holder (PID and command), or says the holder could not be identified and suggests `sudo lsof`. It suggests a PORT it has probed free, or says none was found. If the search cannot run (ruby missing or erroring) it says so.
 
 Equivalent manual start:
 
@@ -18,20 +25,48 @@ Equivalent manual start:
 
 **URL:** http://localhost:3000/patients/1
 
+## Threat model
+
+Whoever controls the environment that runs `test/dummy/bin/demo` is trusted.
+The script accepts only `-b HOST`, `-b=HOST`, `--binding HOST`, and
+`--binding=HOST` (at most once). PORT sets the port. Every other rails
+server switch is refused, because those switches changed the port, the host,
+the environment, or the files the script checked. The other guards (PORT
+validation, the BINDING check, the `PUMA_INHERIT` scan, unsetting
+`RACK_HANDLER` and `RACKUP_HANDLER`, and `unset -f` of shadowing functions)
+protect against mistakes and stray inherited state, not against a hostile
+environment. Under bash, an exported function (`BASH_FUNC_<name>%%`) can
+override any command, including `exit`, `unset`, and `[`, so these checks
+cannot defend against that party. The script never kills or signals another
+process, and it never removes `tmp/pids/server.pid`. Rackup `check_pid!`
+removes a stale pidfile and refuses to start whenever the PID in
+`tmp/pids/server.pid` is a running process (a reused PID included). If that
+PID is not your dev server, remove `test/dummy/tmp/pids/server.pid` yourself.
+
 ## Preflight (5 minutes before)
 
-`bin/demo` does all of this for you; if starting manually:
+`test/dummy/bin/demo` does all of this for you; if starting manually:
 
-1. **Port 3000 free?** A previous dummy server (or its stale pidfile) is the most
-   likely failure. `lsof -ti:3000 | xargs kill; rm -f test/dummy/tmp/pids/server.pid`
-   — or just reuse the already-running server if it is serving `/patients/1` correctly.
+1. **Port 3000 free?** A previous dummy server is the most likely failure.
+   Find the holder (`lsof -nP -iTCP:3000 -sTCP:LISTEN`) and either
+   stop it yourself if it is yours or pick another port with
+   `PORT=3001 test/dummy/bin/demo`; never kill a process you did not start.
+   The script never removes `tmp/pids/server.pid`. It accepts only a binding
+   host (`-b` / `--binding`); every other rails server switch is refused
+   because those switches changed the port, the host, the environment, or
+   the files the script checked. Rackup `check_pid!`
+   removes a stale pidfile and refuses to start whenever the PID in
+   `tmp/pids/server.pid` is a running process (a reused PID included).
+   If that PID is not your dev server, remove
+   `test/dummy/tmp/pids/server.pid` yourself.
+   Or just reuse the already-running server if it is serving `/patients/1` correctly.
 2. **Postgres up?** `pg_isready || brew services start postgresql`. Dev-mode
    migration checking queries the DB on every request; a down Postgres 500s everything.
 3. **Clean env.** `unset RPMS_RPC_PATH` (flips the Gemfile to a path source →
    bundler rejects the lockfile) and make sure no stray `RAILS_ENV` is exported —
    both demo flags are honored **only in development**.
 4. **Remote screen?** Puma binds localhost. Showing from another device on the
-   network needs `bin/demo -b 0.0.0.0`. A local browser needs nothing.
+   network needs `test/dummy/bin/demo -b 0.0.0.0`. A local browser needs nothing.
 5. **Smoke test:** open http://localhost:3000/patients/1 (expect Alice Anderson) and
    http://localhost:3000/patients/1.json (expect a FHIR Bundle).
 

@@ -22,6 +22,29 @@ module Lakeraven
         assert_equal "user", user.user_type
       end
 
+      test "string-keyed attrs behave like symbol-keyed attrs" do
+        symbol_attrs = {
+          user_type: "provider",
+          security_keys: [ :prc_supervisor ],
+          duz: "501",
+          name: "TEST,USER"
+        }
+        string_attrs = {
+          "user_type" => "provider",
+          "security_keys" => [ :prc_supervisor ],
+          "duz" => "501",
+          "name" => "TEST,USER"
+        }
+
+        from_symbols = CurrentUser.new(symbol_attrs)
+        from_strings = CurrentUser.new(string_attrs)
+
+        assert_equal from_symbols.user_type, from_strings.user_type
+        assert_equal from_symbols.can?(:create_referrals), from_strings.can?(:create_referrals)
+        assert_equal from_symbols.can_approve_chs?, from_strings.can_approve_chs?
+        assert_equal from_symbols.capabilities, from_strings.capabilities
+      end
+
       # =============================================================================
       # ROLE CHECKS
       # =============================================================================

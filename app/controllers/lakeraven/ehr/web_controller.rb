@@ -10,7 +10,9 @@ module Lakeraven
       # Pages that touch no patient data and name no user (the sign-in form)
       # need no row and are not refused one; see `audit_settled?`.
       include AuditableClinicalAccess
+      include PatientBannerRendering
 
+      helper ApplicationHelper
       layout "lakeraven/ehr/application"
 
       private

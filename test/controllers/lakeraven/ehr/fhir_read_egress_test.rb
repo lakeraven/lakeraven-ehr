@@ -37,26 +37,13 @@ module Lakeraven
         teardown_smart_auth
       end
 
-      # Routed but NO controller exists on origin/main.
-      # When implemented, they must be wired to Part2EgressFilter.
-      UNIMPLEMENTED_ACTIONS = [
-        "lakeraven/ehr/medications#index",
-        "lakeraven/ehr/medications#show",
-        "lakeraven/ehr/diagnostic_reports#index",
-        "lakeraven/ehr/diagnostic_reports#show",
-        "lakeraven/ehr/care_plans#index",
-        "lakeraven/ehr/care_plans#show"
-      ].freeze
-
       # STUBBED_ACTIONS: actions that exist but render 404 or empty content.
       # When implemented with data, they must be wired to Part2EgressFilter and moved to WIRED_ACTIONS.
       STUBBED_ACTIONS = [
         "lakeraven/ehr/allergy_intolerances#show",
         "lakeraven/ehr/conditions#show",
         "lakeraven/ehr/medication_requests#show",
-        "lakeraven/ehr/observations#show",
-        "lakeraven/ehr/consents#show",
-        "lakeraven/ehr/encounters#show"
+        "lakeraven/ehr/observations#show"
       ].freeze
 
       # Non-disclosing or out-of-scope controller actions that are explicitly allowed to bypass the seam.
@@ -74,10 +61,11 @@ module Lakeraven
         "lakeraven/ehr/sessions#new",         # Web UI login
         "lakeraven/ehr/sessions#create",      # Web UI login
         "lakeraven/ehr/sessions#destroy",     # Web UI logout
-        "lakeraven/ehr/dashboards#show",      # Web UI dashboard
+        "lakeraven/ehr/dashboards#show",      # Web UI dashboard; banner patient/allergy via filter_fhir_for_egress
         "lakeraven/ehr/test_sessions#create", # Test only
         "lakeraven/ehr/smart_configuration#show", # Discovery
         "lakeraven/ehr/smart_launch#show",    # Discovery
+        "lakeraven/ehr/capability_statements#show", # Discovery
         "lakeraven/ehr/backend_services#token", # Auth
         "lakeraven/ehr/transitions_of_care#create", # Wired separately in #568
         "lakeraven/ehr/ccda_imports#create",  # Ingress
@@ -85,6 +73,7 @@ module Lakeraven
         "lakeraven/ehr/exports#show",         # Status/kickoff
         "lakeraven/ehr/exports#destroy",      # Status/kickoff
         "lakeraven/ehr/patient_contexts#create", # Session context
+        "lakeraven/ehr/active_patient_contexts#destroy", # Closes session context, no clinical data
         "lakeraven/ehr/practitioners#index",  # Directory data
         "lakeraven/ehr/practitioners#show",   # Directory data
         "lakeraven/ehr/organizations#show",   # Directory data
@@ -113,7 +102,6 @@ module Lakeraven
         "lakeraven/ehr/procedures#index",
         "lakeraven/ehr/coverage_eligibility_requests#create",
         "lakeraven/ehr/measure_reports#index",
-        "lakeraven/ehr/consents#index",
         "lakeraven/ehr/audit_events#index",
         "lakeraven/ehr/audit_events#show",
         "lakeraven/ehr/export_files#show"
@@ -127,7 +115,7 @@ module Lakeraven
           "#{controller}##{action}" if controller && action
         end.compact.uniq
 
-        untested = controller_actions - ALLOWED_WITHOUT_SEAM - WIRED_ACTIONS - UNIMPLEMENTED_ACTIONS - STUBBED_ACTIONS
+        untested = controller_actions - ALLOWED_WITHOUT_SEAM - WIRED_ACTIONS - STUBBED_ACTIONS
 
         assert_empty untested, "Found routes that might disclose clinical data but are not explicitly tested for seam wiring or allowlisted."
       end
@@ -353,9 +341,9 @@ module Lakeraven
             { datetime: Date.new(2026, 2, 1), location_ien: 1, location: "Clinic", status: "no show" }
           ])
           RpmsRpc.client.seed_keyed_collection(:vitals, "1", [
-            { type: "PAIN", value: "4", units: "", recorded_date: DateTime.now },
-            { type: "T", value: "98.6", units: "Celsius", recorded_date: DateTime.now },
-            { type: "BP", value: "Refused", units: "", recorded_date: DateTime.now }
+            { measurement_ien: 4001, type: "PAIN", value: "4", units: "", recorded_date: DateTime.now },
+            { measurement_ien: 4002, type: "T", value: "98.6", units: "Celsius", recorded_date: DateTime.now },
+            { measurement_ien: 4003, type: "BP", value: "Refused", units: "", recorded_date: DateTime.now }
           ])
 
           get "/lakeraven-ehr/patients/1", headers: @headers
@@ -392,13 +380,13 @@ module Lakeraven
         ensure
           RpmsRpc.client.seed_keyed_collection(:patient_appointments, "1", [])
           RpmsRpc.client.seed_keyed_collection(:vitals, "1", [
-            { type: "BP",  value: "120/80", units: "mm[Hg]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
-            { type: "P",   value: "72",     units: "/min",   recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
-            { type: "T",   value: "98.6",   units: "[degF]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
-            { type: "R",   value: "16",     units: "/min",   recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
-            { type: "POX", value: "98",     units: "%",      recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
-            { type: "WT",  value: "150",    units: "[lb_av]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
-            { type: "HT",  value: "65",     units: "[in_i]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) }
+            { measurement_ien: 4004, type: "BP",  value: "120/80", units: "mm[Hg]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
+            { measurement_ien: 4005, type: "P",   value: "72",     units: "/min",   recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
+            { measurement_ien: 4006, type: "T",   value: "98.6",   units: "[degF]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
+            { measurement_ien: 4007, type: "R",   value: "16",     units: "/min",   recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
+            { measurement_ien: 4008, type: "POX", value: "98",     units: "%",      recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
+            { measurement_ien: 4009, type: "WT",  value: "150",    units: "[lb_av]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
+            { measurement_ien: 4010, type: "HT",  value: "65",     units: "[in_i]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) }
           ])
         end
       end
@@ -426,7 +414,7 @@ module Lakeraven
       end
 
       # Table-driven tests for each wired endpoint that can be successfully invoked with seeded data.
-      # Note: Many /:id show routes (like Consent/:id, AllergyIntolerance/:id) are omitted here because
+      # Note: Many /:id show routes (like AllergyIntolerance/:id) are omitted here because
       # we do not have seeded data for those specific resource IDs. We use the nearest real path
       # (the index search route) to verify the seam is wired for that controller, rather than inventing IDs that return 404.
       WIRED_ENDPOINTS = [
@@ -444,7 +432,6 @@ module Lakeraven
         { path: "/lakeraven-ehr/Procedure", method: :get, params: { patient: "1" } },
         { path: "/lakeraven-ehr/CoverageEligibilityRequest", method: :post, params: { patient_dfn: "1", coverage_type: "medicaid" } },
         { path: "/lakeraven-ehr/MeasureReport", method: :get, params: { patient: "1" } },
-        { path: "/lakeraven-ehr/Consent", method: :get, params: { patient: "1" } },
         { path: "/lakeraven-ehr/AuditEvent", method: :get },
         { name: "AuditEvent show", dynamic_path: -> { "/lakeraven-ehr/AuditEvent/#{@audit_event.id}" }, method: :get },
         { name: "exports file show", dynamic_path: -> { @export_file_path }, method: :get },
@@ -545,46 +532,22 @@ module Lakeraven
         }
       ].freeze
 
-      [
-        [ "/lakeraven-ehr/Medication", { patient: "1" } ],
-        [ "/lakeraven-ehr/DiagnosticReport", { patient: "1" } ],
-        [ "/lakeraven-ehr/CarePlan", { patient: "1" } ]
-      ].each do |path, params|
-        test "missing controller for #{path} does not serve data and fails if later added without wiring" do
-          begin
-            get path, params: params, headers: @headers
-          rescue ActionController::RoutingError, ActionDispatch::MissingController, NameError, AbstractController::ActionNotFound
-            # Pass: The controller doesn't exist, which is expected for now.
-            assert true
-          else
-            refute_response :success, "The controller for #{path} was added. You must wire it to Part2EgressFilter and move it to WIRED_ACTIONS in the test."
-            refute_includes response.body, "Anderson", "Expected not to serve patient data"
-          end
-        end
-      end
+      # Medication, DiagnosticReport and CarePlan were routed with no
+      # controller, and Encounter's show with no action, so each raised (#574).
+      # They are not routed now. Adding one back puts its action in front of
+      # the completeness test above, which then requires it to be wired or
+      # allowlisted.
+      %w[
+        /lakeraven-ehr/Medication /lakeraven-ehr/Medication/1
+        /lakeraven-ehr/DiagnosticReport /lakeraven-ehr/DiagnosticReport/1
+        /lakeraven-ehr/CarePlan /lakeraven-ehr/CarePlan/1
+        /lakeraven-ehr/Encounter/1
+      ].each do |path|
+        test "#{path} is not routed and serves nothing" do
+          get path, params: { patient: "1" }, headers: @headers
 
-      [
-        [ "/lakeraven-ehr/Medication/1", "Lakeraven::EHR::MedicationsController" ],
-        [ "/lakeraven-ehr/DiagnosticReport/1", "Lakeraven::EHR::DiagnosticReportsController" ],
-        [ "/lakeraven-ehr/CarePlan/1", "Lakeraven::EHR::CarePlansController" ]
-      ].each do |path, controller_constant|
-        test "missing member action for #{path} does not serve data and fails if later added without wiring" do
-          assert_nil controller_constant.safe_constantize,
-                     "#{controller_constant} must not be defined until wired to Part2EgressFilter and moved to WIRED_ACTIONS"
-
-          routing_error = nil
-          begin
-            get path, headers: @headers
-          rescue ActionController::RoutingError, ActionDispatch::MissingController => e
-            routing_error = e
-          rescue NameError => e
-            assert_equal controller_constant.demodulize, e.name.to_s.demodulize,
-                         "Expected NameError for missing #{controller_constant}, got #{e.name}: #{e.message}"
-            routing_error = e
-          end
-
-          assert routing_error,
-                 "Expected GET #{path} to raise routing/missing-controller error, got HTTP #{response.status}"
+          assert_response :not_found
+          refute_includes response.body, "Anderson", "Expected not to serve patient data"
         end
       end
 
@@ -592,9 +555,7 @@ module Lakeraven
         [ "/lakeraven-ehr/AllergyIntolerance/1", { patient: "1" } ],
         [ "/lakeraven-ehr/Condition/1", { patient: "1" } ],
         [ "/lakeraven-ehr/MedicationRequest/1", { patient: "1" } ],
-        [ "/lakeraven-ehr/Observation/1", { patient: "1" } ],
-        [ "/lakeraven-ehr/Consent/1", { patient: "1" } ],
-        [ "/lakeraven-ehr/Encounter/1", { patient: "1" } ]
+        [ "/lakeraven-ehr/Observation/1", { patient: "1" } ]
       ].each do |path, params|
         test "stubbed action for #{path} does not serve data and fails if implemented without wiring" do
           begin

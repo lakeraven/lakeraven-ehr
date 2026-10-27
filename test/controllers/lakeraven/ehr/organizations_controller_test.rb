@@ -36,7 +36,7 @@ module Lakeraven
         body = JSON.parse(response.body)
         addr = body["address"]&.first
         assert_equal "Anchorage", addr["city"]
-        assert_equal "AK", addr["state"]
+        assert_equal "ALASKA", addr["state"]
       end
 
       test "returns FHIR JSON content type" do

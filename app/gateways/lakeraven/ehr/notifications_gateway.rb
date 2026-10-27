@@ -5,20 +5,14 @@ require "rpms_rpc/api/notifications"
 module Lakeraven
   module EHR
     # Clinician alert inbox — fires at login and on patient open.
-    # Wraps RpmsRpc::Notifications
+    # Wraps RpmsRpc::Notifications. There is no mark-read: rpms-rpc #311
+    # removed it with BQI MARK ALERT READ, and these alerts carry no per-user
+    # read state to set.
     class NotificationsGateway
-      MARK_READ_FAILURE = { success: false, raw: nil }.freeze
-
       def self.inbox(user_duz, unread: nil, via: default_provider)
         return [] if via.nil?
 
         via.inbox(user_duz.to_s, unread: unread)
-      end
-
-      def self.mark_read(notification_ien, user_duz, via: default_provider)
-        return MARK_READ_FAILURE if via.nil?
-
-        via.mark_read(notification_ien.to_s, user_duz.to_s)
       end
 
       def self.default_provider

@@ -19,7 +19,7 @@ Feature: VFC compliance
 
   Scenario: VFC eligibility codes are enumerable
     When I list all VFC eligibility codes
-    Then the list should include code "V04" with label containing "AI/AN"
+    Then the list should include code "V04" with label containing "AK Native"
     And the list should include code "V01" with label containing "Not"
 
   Scenario: VFC eligible codes are V02 through V07

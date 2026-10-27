@@ -19,7 +19,7 @@ class EngineAssetsTest < ActionDispatch::IntegrationTest
     assert_response :success
     # A utility used only by the engine layout: Tailwind found the engine's views.
     assert_includes response.body, ".max-w-5xl"
-    # Engine components: the scoped element defaults and the screening styles.
+    # Engine classes: the scoped element defaults and the screening styles.
     assert_includes response.body, ".lr-ehr"
     assert_includes response.body, ".screening-item"
   end

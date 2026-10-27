@@ -145,11 +145,13 @@ module Lakeraven
         false
       end
 
-      # Check if token can read the given FHIR resource type.
-      def can_read?(resource_type)
+      # Check if token can read the given FHIR resource type. SMART v2 splits
+      # reading in two: `r` reads by id, `s` searches. A v1 `.read` carries
+      # both (SmartScope).
+      def can_read?(resource_type, permission = "r")
         return false unless current_token
 
-        scope_permits?(resource_type, %w[read *])
+        scope_permits?(resource_type, permission)
       end
 
       # Authorization for the CURRENT request's HTTP verb. A read scope must
@@ -168,7 +170,21 @@ module Lakeraven
       end
 
       def can_perform?(resource_type)
-        read_request? ? can_read?(resource_type) : can_write?(resource_type)
+        read_request? ? can_read?(resource_type, read_permission) : can_write?(resource_type)
+      end
+
+      # An index action is a FHIR search (`s`); every other read, a show or
+      # an operation such as $expand, reads by id (`r`).
+      def read_permission
+        action_name == "index" ? "s" : "r"
+      end
+
+      # The SMART v2 permission a state-changing verb needs. An unrecognised
+      # verb needs update, never nothing.
+      WRITE_PERMISSIONS = { "POST" => "c", "PUT" => "u", "PATCH" => "u", "DELETE" => "d" }.freeze
+
+      def write_permission
+        WRITE_PERMISSIONS.fetch(request.request_method, "u")
       end
 
       # Resource types pulled into a bundle by _include / _revinclude are
@@ -178,11 +194,13 @@ module Lakeraven
         Array(types).select { |t| can_read?(t) }
       end
 
-      # Check if token can write the given FHIR resource type (SMART v2).
-      def can_write?(resource_type)
+      # Check if token can change the given FHIR resource type: create for a
+      # POST, update for PUT/PATCH, delete for DELETE. A v1 `.write` carries
+      # all three (SmartScope).
+      def can_write?(resource_type, permission = write_permission)
         return false unless current_token
 
-        scope_permits?(resource_type, %w[write c *])
+        scope_permits?(resource_type, permission)
       end
 
       # Enforce patient compartment for patient-context tokens.
@@ -227,12 +245,8 @@ module Lakeraven
 
       private
 
-      def scope_permits?(resource_type, actions)
-        token_scopes = current_token.scopes.to_s.split
-        allowed = %w[patient user system].flat_map do |context|
-          actions.flat_map { |a| [ "#{context}/#{resource_type}.#{a}", "#{context}/*.#{a}" ] }
-        end
-        (token_scopes & allowed).any?
+      def scope_permits?(resource_type, permission, contexts: SmartScope::CONTEXTS)
+        SmartScope.permits?(current_token.scopes.to_s, resource_type, permission, contexts: contexts)
       end
 
       def extract_bearer_token

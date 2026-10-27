@@ -31,13 +31,14 @@ module Lakeraven
       end
 
       test "entries have correct resourceType" do
-        RpmsRpc.client.seed_keyed_collection(:immunization_list, "1", [
-          { ien: 7001, vaccine_code: "207", vaccine_display: "COVID-19 Pfizer-BioNTech, mRNA",
-            status: "completed", lot_number: "EX1234",
-            occurrence_datetime: Time.utc(2026, 1, 15, 10, 0, 0),
-            site: "Left deltoid", route: "IM", performer_duz: "301",
-            dose_quantity: 0.3, dose_unit: "mL", manufacturer: "Pfizer-BioNTech",
-            vfc_eligibility_code: "V04", funding_source: "VFC" }
+        # BGOVIMM GET rows ("DFN^I", the immunization records only): the
+        # pieces GET^BGOVIMM5 returns, with "IEN~NAME" pairs for the
+        # performer and the site (rpms-rpc #378).
+        RpmsRpc.client.seed_keyed_collection(:immunization_list, "1^I", [
+          { record_type: "I", ien: 7001, vaccine_display: "COVID-19 Pfizer-BioNTech, mRNA",
+            lot_number: "EX1234", occurrence_datetime: Time.utc(2026, 1, 15, 10, 0, 0),
+            site: "3~Left deltoid", performer: "301~PROVIDER,TEST",
+            dose_quantity: 0.3, manufacturer: "Pfizer-BioNTech" }
         ])
 
         get "/lakeraven-ehr/Immunization", params: { patient: "1" }, headers: @headers
@@ -68,13 +69,14 @@ module Lakeraven
       # Entries should be proper FHIR resources from Immunization#to_fhir,
       # not raw gateway hashes merged into a thin envelope.
       test "entries render as FHIR-conformant Immunization resources" do
-        RpmsRpc.client.seed_keyed_collection(:immunization_list, "1", [
-          { ien: 7001, vaccine_code: "207", vaccine_display: "COVID-19 Pfizer-BioNTech, mRNA",
-            status: "completed", lot_number: "EX1234",
-            occurrence_datetime: Time.utc(2026, 1, 15, 10, 0, 0),
-            site: "Left deltoid", route: "IM", performer_duz: "301",
-            dose_quantity: 0.3, dose_unit: "mL", manufacturer: "Pfizer-BioNTech",
-            vfc_eligibility_code: "V04", funding_source: "VFC" }
+        # BGOVIMM GET rows ("DFN^I", the immunization records only): the
+        # pieces GET^BGOVIMM5 returns, with "IEN~NAME" pairs for the
+        # performer and the site (rpms-rpc #378).
+        RpmsRpc.client.seed_keyed_collection(:immunization_list, "1^I", [
+          { record_type: "I", ien: 7001, vaccine_display: "COVID-19 Pfizer-BioNTech, mRNA",
+            lot_number: "EX1234", occurrence_datetime: Time.utc(2026, 1, 15, 10, 0, 0),
+            site: "3~Left deltoid", performer: "301~PROVIDER,TEST",
+            dose_quantity: 0.3, manufacturer: "Pfizer-BioNTech" }
         ])
 
         get "/lakeraven-ehr/Immunization", params: { patient: "1" }, headers: @headers
@@ -90,7 +92,8 @@ module Lakeraven
         assert_equal "Immunization", resource["resourceType"]
         assert_equal "completed", resource["status"]
         assert_equal "Patient/1", resource.dig("patient", "reference")
-        assert_equal "207", resource.dig("vaccineCode", "coding", 0, "code")
+        # BGOVIMM GET names the vaccine but sends no CVX code.
+        assert_equal "COVID-19 Pfizer-BioNTech, mRNA", resource.dig("vaccineCode", "text")
         assert_equal "EX1234", resource["lotNumber"]
         assert_includes resource["occurrenceDateTime"].to_s, "2026-01-15"
 

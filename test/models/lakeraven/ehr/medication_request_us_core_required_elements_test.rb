@@ -7,15 +7,12 @@ module Lakeraven
     class MedicationRequestUsCoreRequiredElementsTest < ActiveSupport::TestCase
       DATA_ABSENT_REASON_URL = "http://hl7.org/fhir/StructureDefinition/data-absent-reason"
 
-      def wire_medication_row(overrides = {})
-        {
-          ien: "42",
-          drug_name: "Metformin 500mg",
-          stop_date: nil,
-          route: "PO",
-          schedule: "BID",
-          refills: 2
-        }.merge(overrides)
+      # One ORWPS ACTIVE outpatient order, parsed by rpms-rpc: the row the
+      # gateway hands from_rpms_row.
+      def wire_medication_row(stop: "", status: "ACTIVE")
+        RpmsRpc.client.seed_text(:medication_active, "1",
+          "~OP^42R;O^METFORMIN 500MG TAB^^#{stop}^2^^^120042^#{status}\n\\ Sig: TAKE 1 TABLET BY MOUTH TWICE A DAY")
+        MedicationRequest.for_patient("1").first
       end
 
       def assert_authored_on_data_absent_unknown(fhir)
@@ -141,16 +138,15 @@ module Lakeraven
       end
 
       test "from_rpms_row does not map stop_date to authoredOn, status, or dispense validityPeriod" do
-        [ Date.new(2025, 1, 1), "3250101" ].each do |stop_date|
-          fhir = MedicationRequest.from_rpms_row(
-            wire_medication_row(stop_date: stop_date),
-            patient_dfn: "1"
-          ).to_fhir
+        row = wire_medication_row(stop: "3250101", status: "")
+        assert_equal Date.new(2025, 1, 1), row[:stop_date]
 
-          assert_equal "unknown", fhir[:status]
-          assert_authored_on_data_absent_unknown(fhir)
-          assert_stop_date_absent_from_fhir(fhir, stop_date)
-        end
+        fhir = MedicationRequest.from_rpms_row(row, patient_dfn: "1").to_fhir
+
+        assert_equal "unknown", fhir[:status]
+        assert_authored_on_data_absent_unknown(fhir)
+        assert_stop_date_absent_from_fhir(fhir, row[:stop_date])
+        assert_stop_date_absent_from_fhir(fhir, "3250101")
       end
     end
   end
