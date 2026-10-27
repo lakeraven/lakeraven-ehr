@@ -55,6 +55,21 @@ class SsoSessionTokenBridgeTest < ActionDispatch::IntegrationTest
     assert_response :unauthorized
   end
 
+  # held_keys answers nil when RPMS could not be asked (#578). The sign-on is
+  # refused as unavailable, with no session, rather than going ahead as a user
+  # who holds no keys.
+  test "a key read RPMS cannot answer refuses the sign-on and establishes no session" do
+    RpmsRpc::Authentication.define_singleton_method(:held_keys) { |_names| nil }
+
+    post "/lakeraven-ehr/login", params: KEYED_USER
+
+    assert_response :service_unavailable
+    assert_nil session[:duz]
+    assert_nil session[:smart_token]
+  ensure
+    RpmsRpc::Authentication.singleton_class.send(:remove_method, :held_keys)
+  end
+
   test "the rejection reaches RPMS rather than short-circuiting" do
     before = RpmsRpc.client.received_calls.length
 

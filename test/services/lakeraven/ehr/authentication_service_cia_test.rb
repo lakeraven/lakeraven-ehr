@@ -39,11 +39,15 @@ class AuthenticationServiceCiaTest < ActiveSupport::TestCase
     # user class from it and fails closed without one (rpms-rpc #236).
     USERINFO_REPLY = "\x01\x00".b + "77^PROVIDER,TEST^3^1^1^3^0^99999^20^1^1^5^DEMO.IHS.GOV^1^180".b
 
-    def call_rpc_raw(name, *)
+    def call_rpc_raw(name, *params)
       @rpcs << name
       raise RpmsRpc::Client::RpcError, "4 Access denied for remote procedure: #{name}" if @denied.include?(name)
 
-      name == "ORWU USERINFO" ? USERINFO_REPLY : ""
+      return USERINFO_REPLY if name == "ORWU USERINFO"
+      # CIAVCXUS HASKEYS: this user holds none of the names asked.
+      return "\x01\x00".b + params.first.to_s.split("^", -1).map { "0" }.join("^").b if name == "CIAVCXUS HASKEYS"
+
+      ""
     end
   end
 
