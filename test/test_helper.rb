@@ -197,7 +197,26 @@ BASELINE_MOCK_SEEDS = lambda do |m|
   })
 end
 
-RpmsRpc.mock!(&BASELINE_MOCK_SEEDS)
+# LIVE_RPMS=1 runs the suite against a real broker instead of the mock, to
+# measure where the mock disagrees with RPMS (cucumber --profile live). It
+# never falls back to the mock: missing settings or a refused sign-on abort.
+LIVE_RPMS = ENV["LIVE_RPMS"] == "1"
+if LIVE_RPMS
+  require "rpms_rpc/broker_factory"
+  RpmsRpc.configure do |c|
+    c.client = RpmsRpc.client_for(
+      ENV.fetch("LIVE_RPMS_BROKER", "cia").to_sym,
+      host: ENV.fetch("LIVE_RPMS_HOST"), port: Integer(ENV.fetch("LIVE_RPMS_PORT"))
+    )
+  end
+  live_client = RpmsRpc.client
+  live_client.connect unless live_client.connected?
+  live_auth = live_client.authenticate(ENV.fetch("LIVE_RPMS_ACCESS"), ENV.fetch("LIVE_RPMS_VERIFY"))
+  abort "LIVE_RPMS=1: sign-on returned no DUZ: #{live_auth.inspect}" if live_auth[:duz].to_s.empty?
+  warn "[live] RPMS #{ENV["LIVE_RPMS_HOST"]}:#{ENV["LIVE_RPMS_PORT"]} signed on as DUZ #{live_auth[:duz]}"
+else
+  RpmsRpc.mock!(&BASELINE_MOCK_SEEDS)
+end
 
 # Scripted RPC broker for the BPRM reg/sched/ADT twin gateway tests.
 #
