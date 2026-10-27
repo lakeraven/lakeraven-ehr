@@ -204,6 +204,14 @@ module Lakeraven
         assert_empty Array(fhir[:telecom])
       end
 
+      # FHIR ele-1: an element with no values is left out, never an empty array.
+      test "to_fhir leaves out every element that has no values" do
+        fhir = Organization.find_by_ien(1).to_fhir
+
+        empty = fhir.select { |_key, value| value == [] }.keys
+        assert_empty empty, "empty arrays: #{empty.join(', ')}"
+      end
+
       test "to_fhir includes station number as identifier" do
         org = Organization.find_by_ien(1)
         fhir = org.to_fhir
