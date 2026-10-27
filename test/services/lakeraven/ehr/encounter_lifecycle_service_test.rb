@@ -5,27 +5,6 @@ require "test_helper"
 module Lakeraven
   module EHR
     class EncounterLifecycleServiceTest < ActiveSupport::TestCase
-      # FakeGateway — a clean test double accepting a fixed return value (or
-      # a Proc for argument capture). Used via constructor injection on
-      # EncounterLifecycleService so we never mutate the production gateway
-      # classes.
-      class FakeGateway
-        attr_reader :calls
-
-        def initialize(method_name, return_value)
-          @method_name = method_name
-          @return_value = return_value
-          @calls = []
-          fake = self
-          define_singleton_method(method_name) do |*args, **kwargs|
-            fake.calls << { args: args, kwargs: kwargs }
-            fake.instance_variable_get(:@return_value).respond_to?(:call) ?
-              fake.instance_variable_get(:@return_value).call(*args, **kwargs) :
-              fake.instance_variable_get(:@return_value)
-          end
-        end
-      end
-
       setup do
         @dfn = 26664
         @visit_ien = 2090061

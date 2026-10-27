@@ -29,6 +29,10 @@ Lakeraven::EHR::Engine.routes.draw do
   # audited POST — everything session-authenticated that reads a patient's
   # clinical data requires it.
   post "patients/:dfn/context", to: "patient_contexts#create", as: :patient_context, constraints: { dfn: /\d+/ }
+  # Closing the session's open record. Fixed destination, so this cannot be
+  # turned into an open redirect. Its own controller: PatientContextsController's
+  # before_actions authorize *opening* a record and must not run on a clear.
+  delete "patient_context", to: "active_patient_contexts#destroy", as: :active_patient_context
 
   # Scored behavioural-health instruments (PHQ-9 / GAD-7, issue #474).
   # Server-rendered, no JavaScript. `new` carries the instrument key as a

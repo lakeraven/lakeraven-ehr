@@ -11,6 +11,10 @@ module GlobalStoreIsolation
     -> { Lakeraven::EHR::ExportsController.reset_store! },
     -> { Lakeraven::EHR::LoginThrottle.reset! },
     -> { Lakeraven::EHR::ClinicalDecisionSupportService.rule_overrides.clear },
+    -> { Lakeraven::EHR::EncounterStore.reset_instance! },
+    -> { Lakeraven::EHR::MedicationStore.reset_instance! },
+    -> { Lakeraven::EHR::CarePlanStore.reset_instance! },
+    -> { Lakeraven::EHR::DiagnosticReportStore.reset_instance! },
     -> { RpmsRpc.mock!(&BASELINE_MOCK_SEEDS) }
   ].freeze
 
