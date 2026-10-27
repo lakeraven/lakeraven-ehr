@@ -10,7 +10,7 @@ module Lakeraven
       def index
         dfn = patient_compartment_dfn
         results = EncounterGateway.for_patient(dfn)
-        render_bundle_egress(results.map { |r| { resourceType: "Encounter" }.merge(r) })
+        render_bundle_egress(results.map { |r| Encounter.from_rpms_row(r, patient_dfn: dfn).to_fhir })
       end
     end
   end

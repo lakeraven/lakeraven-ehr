@@ -37,7 +37,9 @@ module Lakeraven
           "Condition" => %w[us-core-condition-problems-health-concerns],
           "MedicationRequest" => %w[us-core-medicationrequest],
           "Observation" => %w[us-core-vital-signs],
-          "Immunization" => %w[us-core-immunization]
+          "Immunization" => %w[us-core-immunization],
+          "Procedure" => %w[us-core-procedure],
+          "ServiceRequest" => %w[us-core-servicerequest]
         }.transform_values { |names| names.map { |name| "#{US_CORE}/#{name}" }.freeze }.freeze
         SEARCH_ONLY_STUB = "No read by id: GET [type]/[id] is routed and always returns 404."
 
