@@ -279,10 +279,11 @@ module Lakeraven
         reset!
         sign_in_clinician!(scopes: WRITE_SCOPES)
         AuditEvent.delete_all
+        authenticity_token = csrf_token
 
         assert_difference -> { AuditEvent.count }, 1 do
           with_tracking_allergy_gateway(@tracker) do
-            post BASE, params: allergy_form_params.merge(authenticity_token: csrf_token)
+            post BASE, params: allergy_form_params.merge(authenticity_token: authenticity_token)
           end
         end
 
