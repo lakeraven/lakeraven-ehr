@@ -210,8 +210,9 @@ module Lakeraven
       end
 
       # Builder: MedicationRequest.from_rpms_row(row, patient_dfn:) — read path maps gateway Hashes to models;
-      # for_patient must keep returning those Hashes for charts, CDS, CPOE, and export callers.
-      test "from_rpms_row maps gateway medication-list row to US Core MedicationRequest serialization" do
+      # for_patient must keep returning those Hashes for the chart, FHIR search and export; CPOE
+      # and decision support read checked_for_patient, which maps them (#680).
+      test "from_rpms_row maps gateway active-medication row to US Core MedicationRequest serialization" do
         original_client = RpmsRpc.configuration.client
         RpmsRpc.mock! do |m|
           require_relative "../../../dummy/lib/lakeraven_demo_seeds"
@@ -220,23 +221,22 @@ module Lakeraven
 
         row = MedicationRequest.for_patient("1").first
         assert_kind_of Hash, row
-        assert_equal "Lisinopril 10mg", row[:drug_name]
-        refute row.key?(:status), "ORQQPS LIST row must not include RPMS order status"
-        refute row.key?(:sig), "ORQQPS LIST row must not include sig text"
+        assert_equal "Lisinopril 10mg", row[:name]
+        assert_equal "1R;O", row[:order_id]
+        assert_equal "ACTIVE", row[:status]
 
         mr = MedicationRequest.from_rpms_row(row, patient_dfn: "1")
         assert_kind_of MedicationRequest, mr
-        assert_equal "1", mr.ien
+        assert_equal "1R-O", mr.ien
         assert_equal "1", mr.patient_dfn
         assert_equal "Lisinopril 10mg", mr.medication_display
-        assert_equal "unknown", mr.status
-        refute_equal "active", mr.status
+        assert_equal "active", mr.status
         assert_equal "order", mr.intent
 
         fhir = mr.to_fhir
         assert_equal "MedicationRequest", fhir[:resourceType]
-        assert_equal "1", fhir[:id]
-        assert_equal "unknown", fhir[:status]
+        assert_equal "1R-O", fhir[:id]
+        assert_equal "active", fhir[:status]
         assert_equal "order", fhir[:intent]
         assert_equal "Patient/1", fhir.dig(:subject, :reference)
         assert_equal "Lisinopril 10mg", fhir.dig(:medicationCodeableConcept, :text)
@@ -259,57 +259,83 @@ module Lakeraven
         RpmsRpc.configure { |c| c.client = original_client }
       end
 
-      def wire_medication_row(overrides = {})
-        {
-          ien: "42",
-          drug_name: "Metformin 500mg",
-          stop_date: nil,
-          route: "PO",
-          schedule: "BID",
-          refills: 2
-        }.merge(overrides)
+      # One outpatient order on the ORWPS ACTIVE wire, read through the gateway
+      # and the rpms-rpc parser: order id, drug, expiration, refills, CPRS order
+      # number, status (piece 9 of the OCL node), then its instruction lines.
+      def active_medication(status:, stop: "3271231", order_id: "4401R;O", lines: [ "\\ Sig: TAKE 1 TABLET BY MOUTH" ])
+        RpmsRpc.client.seed_text(:medication_active, "1",
+          [ "~OP^#{order_id}^METFORMIN 500MG TAB^^#{stop}^3^^^120345^#{status}", *lines ].join("\n"))
+        row = MedicationRequest.for_patient("1").first
+        MedicationRequest.from_rpms_row(row, patient_dfn: "1")
       end
 
-      test "from_rpms_row maps wire-shaped medication list row without status to unknown" do
-        row = wire_medication_row(sig: "1 tab PO BID — must not appear in dosage text")
-
-        mr = MedicationRequest.from_rpms_row(row, patient_dfn: "1")
-
-        assert_equal "unknown", mr.status
-        refute_equal "active", mr.status
-        assert_equal "PO BID", mr.dosage_instruction
-        refute_includes mr.dosage_instruction.to_s, "tab"
-
-        dosage = mr.to_fhir[:dosageInstruction]&.first
-        assert_equal "PO BID", dosage&.dig(:text)
-        refute_includes dosage&.dig(:text).to_s, "tab"
+      # The RPMS order statuses and the FHIR status each maps to (#628).
+      {
+        "ACTIVE" => "active",
+        "REFILL FILL" => "active",
+        "HOLD" => "on-hold",
+        "SUSPENDED" => "on-hold",
+        "NON-VERIFIED" => "draft",
+        "PENDING" => "draft",
+        "EXPIRED" => "completed",
+        "DONE" => "completed",
+        "DISCONTINUED" => "stopped",
+        "DISCONTINUED (EDIT)" => "stopped"
+      }.each do |rpms, fhir_status|
+        test "from_rpms_row maps RPMS order status #{rpms} to #{fhir_status}" do
+          mr = active_medication(status: rpms)
+          assert_equal fhir_status, mr.status
+          assert_equal fhir_status, mr.to_fhir[:status]
+          assert mr.valid?, mr.errors.full_messages.to_sentence
+        end
       end
 
-      test "from_rpms_row maps RPMS medication status DISCONTINUED to stopped" do
-        mr = MedicationRequest.from_rpms_row(wire_medication_row(status: "DISCONTINUED"), patient_dfn: "1")
+      test "from_rpms_row keeps a discontinued order stopped when its stop date is still in the future" do
+        future = RpmsRpc::FilemanDateParser.format_date(Date.current + 365)
+        mr = active_medication(status: "DISCONTINUED", stop: future)
+
         assert_equal "stopped", mr.status
-        assert_equal "stopped", mr.to_fhir[:status]
+        refute_includes mr.to_fhir.to_json, future
       end
 
-      test "from_rpms_row maps RPMS medication status EXPIRED to completed" do
-        mr = MedicationRequest.from_rpms_row(wire_medication_row(status: "EXPIRED"), patient_dfn: "1")
-        assert_equal "completed", mr.status
-      end
-
-      test "from_rpms_row maps RPMS medication status HOLD to on-hold" do
-        mr = MedicationRequest.from_rpms_row(wire_medication_row(status: "HOLD"), patient_dfn: "1")
-        assert_equal "on-hold", mr.status
-      end
-
-      test "from_rpms_row maps RPMS medication status ACTIVE to active" do
-        mr = MedicationRequest.from_rpms_row(wire_medication_row(status: "ACTIVE"), patient_dfn: "1")
+      test "from_rpms_row keeps an ACTIVE order active when its stop date has passed" do
+        mr = active_medication(status: "ACTIVE", stop: "3200101")
         assert_equal "active", mr.status
       end
 
-      test "from_rpms_row maps unrecognised RPMS medication status to unknown" do
-        mr = MedicationRequest.from_rpms_row(wire_medication_row(status: "SUSPENDED"), patient_dfn: "1")
+      test "from_rpms_row maps an unrecognised RPMS order status to unknown" do
+        assert_equal "unknown", active_medication(status: "SOMETHING NEW").status
+      end
+
+      test "from_rpms_row maps an order with no status piece to unknown" do
+        mr = active_medication(status: "")
         assert_equal "unknown", mr.status
         refute_equal "active", mr.status
+      end
+
+      test "from_rpms_row encodes the RPMS order id as a legal FHIR id that reverses" do
+        mr = active_medication(status: "ACTIVE", order_id: "403R;O")
+
+        assert_equal "403R-O", mr.ien
+        assert_match(/\A[A-Za-z0-9\-.]{1,64}\z/, mr.to_fhir[:id])
+        assert_equal "403R;O", mr.ien.tr("-", ";")
+      end
+
+      test "from_rpms_row takes dosageInstruction text from the order's instruction lines" do
+        mr = active_medication(status: "ACTIVE", lines: [
+          " METFORMIN 500MG TAB  Qty: 30 for 30 days",
+          "\\ Sig: TAKE 1 TABLET BY MOUTH",
+          " DAILY WITH BREAKFAST"
+        ])
+
+        expected = "METFORMIN 500MG TAB  Qty: 30 for 30 days Sig: TAKE 1 TABLET BY MOUTH DAILY WITH BREAKFAST"
+        assert_equal expected, mr.dosage_instruction
+        assert_equal expected, mr.to_fhir.dig(:dosageInstruction, 0, :text)
+      end
+
+      test "from_rpms_row leaves dosageInstruction absent when the order has no instruction lines" do
+        mr = active_medication(status: "ACTIVE", lines: [])
+        assert_nil mr.to_fhir[:dosageInstruction]
       end
 
       test "to_fhir omits RxNorm coding when RPMS does not supply a medication code" do

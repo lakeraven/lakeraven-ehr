@@ -64,6 +64,29 @@ class DemoPatientChartTest < ActionDispatch::IntegrationTest
     assert_includes body, "View as FHIR"
   end
 
+  # The Medications card shows each order's status as RPMS reports it, not
+  # "Unknown" on every row (#628). The discontinued order's stop date is
+  # still in the future.
+  test "HTML chart shows each medication's RPMS order status" do
+    future = RpmsRpc::FilemanDateParser.format_date(Date.current + 365)
+    RpmsRpc.client.seed_text(:medication_active, "1", <<~WIRE)
+      ~OP^1R;O^Lisinopril 10mg^^3271231^3^^^120001^ACTIVE
+      \\ Sig: TAKE 1 TABLET BY MOUTH DAILY
+      ~OP^2R;O^Metformin 500mg^^#{future}^2^^^120002^DISCONTINUED
+      \\ Sig: TAKE 1 TABLET BY MOUTH TWICE A DAY
+    WIRE
+
+    get "/patients/1", headers: @headers
+
+    assert_response :ok
+    rows = css_select("tr").to_h do |tr|
+      cells = tr.css("td")
+      [ cells.first&.text&.strip, cells.last&.css("span.badge")&.text&.strip ]
+    end
+    assert_equal "active", rows["Lisinopril 10mg"]
+    assert_equal "stopped", rows["Metformin 500mg"]
+  end
+
   test "HTML chart badges each screening with a class built from the WHOLE band" do
     seed_screening(band: "moderately severe", total: 18)
     get "/patients/1", headers: @headers

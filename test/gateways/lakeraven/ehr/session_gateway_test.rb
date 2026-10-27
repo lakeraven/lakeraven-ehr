@@ -28,7 +28,7 @@ module Lakeraven
       end
 
       test "bootstrap delegates and coerces duz to a string" do
-        payload = { config_root: 'c:\\CEHRTT15\\lib\\', default_site_ien: 539, vim_info: {}, registry: {} }
+        payload = { vim_info: {}, registry: {} }
         fake = FakeSessionAPI.new(payload)
 
         result = SessionGateway.bootstrap(301, via: fake)
@@ -49,16 +49,15 @@ module Lakeraven
         skip "Requires RpmsRpc::Session.bootstrap (lakeraven/rpms-rpc#99)" unless
           SessionGateway.default_provider
 
-        RpmsRpc.client.seed_scalar(:session_default_source, "CIAVM DEFAULT SOURCE", 'c:\\CEHRTT15\\lib\\')
         RpmsRpc.client.seed(:session_registry, "", { root: 'HKLM\\Software\\IHS\\CIAVM' })
         RpmsRpc.client.seed(:session_vim_info, "301", {
-          site_ien: 539, site_name: "TEST SERVICE UNIT", user_name: "PROVIDER,TEST"
+          duz: 301, user_name: "PROVIDER,TEST", timeouts: "300"
         })
 
         result = SessionGateway.bootstrap("301")
 
-        assert_equal 'c:\\CEHRTT15\\lib\\', result[:config_root]
-        assert_equal 539, result[:default_site_ien]
+        assert_equal [ :registry, :vim_info ], result.keys
+        assert_equal "PROVIDER,TEST", result[:vim_info][:user_name]
       end
     end
   end

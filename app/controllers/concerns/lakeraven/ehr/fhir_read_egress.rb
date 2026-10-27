@@ -36,7 +36,8 @@ module Lakeraven
         render json: filtered, status: status, content_type: fhir_egress_content_type
       end
 
-      # Same Bundle shape as ApplicationController#render_bundle.
+      # Same Bundle shape as ApplicationController#render_bundle: one page of
+      # the matches, built by FHIRSearchBundle.
       def render_bundle_egress(entries, type: "searchset")
         render_fhir_egress(fhir_search_bundle(entries, type: type))
       end
@@ -54,15 +55,6 @@ module Lakeraven
       def filter_fhir_for_egress(payload)
         filtered = egress_filter(payload)
         filtered if usable_fhir_payload?(filtered)
-      end
-
-      def fhir_search_bundle(entries, type: "searchset")
-        {
-          resourceType: "Bundle",
-          type: type,
-          total: entries.length,
-          entry: entries.map { |entry| { resource: entry } }
-        }
       end
 
       def egress_filter(payload)

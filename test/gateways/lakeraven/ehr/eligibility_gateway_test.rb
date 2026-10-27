@@ -20,8 +20,10 @@ module Lakeraven
       test "patient_eligibility returns seeded VFC code for patient 1" do
         result = EligibilityGateway.patient_eligibility("1")
 
+        # BGOVIMM GETVFC answers a label; it resolves to the GETELIG row that
+        # carries it (rpms-rpc #376).
         assert_equal "V04", result[:code]
-        assert_equal "American Indian/Alaska Native", result[:label]
+        assert_equal "Am Indian/AK Native", result[:label]
       end
 
       test "patient_eligibility returns nil code for unknown patient" do
@@ -76,7 +78,7 @@ module Lakeraven
         ai_an = codes.find { |c| c[:code] == "V04" }
 
         assert_not_nil ai_an
-        assert_equal "VFC eligible - AI/AN", ai_an[:label]
+        assert_equal "Am Indian/AK Native", ai_an[:label]
       end
     end
   end

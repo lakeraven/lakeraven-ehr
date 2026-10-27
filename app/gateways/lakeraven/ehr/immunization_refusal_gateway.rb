@@ -13,6 +13,7 @@ module Lakeraven
       # reason_ien is the REFUSAL REASON (#9999999.102) IEN the gem files;
       # RpmsRpc::ImmunizationRefusal.reasons lists the valid ones.
       def self.record(dfn, vaccine_ien, reason_ien:, narrative: nil, via: default_provider)
+        CapabilityGuard.ensure!(:ihs_immunization)
         return FAILURE if via.nil?
 
         via.record(dfn.to_s, vaccine_ien,

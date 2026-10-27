@@ -38,21 +38,11 @@ module Lakeraven
 
       private
 
+      # $import creates Measures, and only a system client may do it.
       def authorize_write_scope!
-        return if can_write?(fhir_resource_type)
+        return if current_token && scope_permits?(fhir_resource_type, "c", contexts: %w[system])
 
         render_forbidden("Insufficient scope for writing #{fhir_resource_type}")
-      end
-
-      def can_write?(resource_type)
-        return false unless current_token
-
-        token_scopes = current_token.scopes.to_s.split
-        allowed = [
-          "system/#{resource_type}.write", "system/#{resource_type}.*",
-          "system/*.write", "system/*.*"
-        ]
-        (token_scopes & allowed).any?
       end
     end
   end

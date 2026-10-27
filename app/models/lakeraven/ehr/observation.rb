@@ -112,7 +112,9 @@ module Lakeraven
 
       def self.vital_attributes(hash, patient_dfn, type, mapping)
         {
-          ien: hash[:ien]&.to_s.presence || vital_id(patient_dfn, hash),
+          # ORQQVI VITALS names the V MEASUREMENT IEN :measurement_ien since
+          # rpms-rpc #188; :ien is what the earlier mapping called it.
+          ien: (hash[:measurement_ien] || hash[:ien])&.to_s.presence || vital_id(patient_dfn, hash),
           patient_dfn: patient_dfn,
           code: mapping&.dig(:code),
           code_system: ("loinc" if mapping),

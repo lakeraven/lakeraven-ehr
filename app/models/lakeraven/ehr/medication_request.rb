@@ -48,27 +48,50 @@ module Lakeraven
         gateway.for_patient(dfn)
       end
 
-      # ORQQPS LIST is ID^NAME+FORM^STOP_DATE^ROUTE^SCHEDULE^REFILLS.
-      # Status is mapped only when a row actually carries one. stop_date
-      # is never a status. No code, authoredOn, or requester on this wire.
+      # The orders an interaction check or decision support weighs (#680).
+      # ORWPS ACTIVE also returns orders that expired or were discontinued
+      # inside the site's date window; the chart, FHIR search and export keep
+      # those. A held order can be resumed, so it is still checked.
+      CHECKED_STATUSES = %w[active on-hold].freeze
+
+      def self.checked_for_patient(dfn)
+        for_patient(dfn)
+          .map { |row| from_rpms_row(row, patient_dfn: dfn.to_s) }
+          .select { |order| CHECKED_STATUSES.include?(order.status) }
+      end
+
+      # The order status RPMS sends with each active-list row (#628). The
+      # status is read as sent, never worked out from the stop date: a
+      # prescription discontinued early keeps its future stop date.
       RPMS_STATUS = {
-        "discontinued" => "stopped",
-        "dc" => "stopped",
-        "expired" => "completed",
+        "active" => "active",
+        "refill fill" => "active",
         "hold" => "on-hold",
+        "suspended" => "on-hold",
         "pending" => "draft",
-        "active" => "active"
+        "non-verified" => "draft",
+        "expired" => "completed",
+        "done" => "completed",
+        "discontinued" => "stopped",
+        "discontinued (edit)" => "stopped"
       }.freeze
 
       def self.from_rpms_row(row, patient_dfn:)
         new(
-          ien: row[:ien]&.to_s,
+          ien: fhir_id(row[:order_id]),
           patient_dfn: patient_dfn,
-          medication_display: row[:drug_name],
+          medication_display: row[:name],
           dosage_instruction: dosage_text(row),
           status: rpms_status(row[:status]),
           intent: "order"
         )
+      end
+
+      # An RPMS order id is IEN, a type letter, ";", and I or O ("4401R;O").
+      # ";" is not legal in a FHIR id and "-" never occurs in an order id, so
+      # the id swaps one for the other and the swap reverses.
+      def self.fhir_id(order_id)
+        order_id.to_s.tr(";", "-").presence
       end
 
       # Case-insensitive. Blank and unrecognised RPMS text are unknown,
@@ -78,14 +101,10 @@ module Lakeraven
         RPMS_STATUS[raw.to_s.strip.downcase] || "unknown"
       end
 
-      # dosageInstruction.text is route + schedule when either is present.
-      # A sig is not on the ORQQPS LIST wire; keep one only when this row
-      # carries it and the wire fields are blank.
+      # dosageInstruction.text is the order's instruction lines as RPMS
+      # sends them (the drug and quantity line, then the sig).
       def self.dosage_text(row)
-        parts = [ row[:route], row[:schedule] ].filter_map { |part| part.to_s.strip.presence }
-        return parts.join(" ") if parts.any?
-
-        row[:sig].to_s.strip.presence
+        Array(row[:instructions]).filter_map { |line| line.to_s.strip.presence }.join(" ").presence
       end
       private_class_method :rpms_status, :dosage_text
 
