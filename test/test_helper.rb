@@ -197,23 +197,34 @@ BASELINE_MOCK_SEEDS = lambda do |m|
   })
 end
 
-# LIVE_RPMS=1 runs the suite against a real broker instead of the mock, to
-# measure where the mock disagrees with RPMS (cucumber --profile live). It
-# never falls back to the mock: missing settings or a refused sign-on abort.
+# LIVE_RPMS=1 runs the suite against a real broker instead of the mock
+# (cucumber --profile live). The broker is the one the engine built at boot
+# from config/rpms.yml (VISTA_BROKER, VISTA_RPC_HOST, VISTA_RPC_PORT), the
+# path a deployed app takes, and the run signs on through the engine's own
+# AuthenticationService as LIVE_RPMS_ACCESS / LIVE_RPMS_VERIFY. It never falls
+# back to the mock: a missing broker or a refused sign-on aborts the run.
 LIVE_RPMS = ENV["LIVE_RPMS"] == "1"
 if LIVE_RPMS
-  require "rpms_rpc/broker_factory"
-  RpmsRpc.configure do |c|
-    c.client = RpmsRpc.client_for(
-      ENV.fetch("LIVE_RPMS_BROKER", "cia").to_sym,
-      host: ENV.fetch("LIVE_RPMS_HOST"), port: Integer(ENV.fetch("LIVE_RPMS_PORT"))
-    )
+  abort "LIVE_RPMS=1: no broker configured (set VISTA_RPC_HOST)" unless RpmsRpc.configuration.client
+
+  module LiveRpmsSession
+    module_function
+
+    # Sign the shared broker session on as the run's persona. Scenarios that
+    # sign on as someone else call this afterwards, since one process holds
+    # one broker identity (rpms-rpc#234).
+    def sign_on!
+      result = Lakeraven::EHR::AuthenticationService.new.authenticate(
+        access_code: ENV.fetch("LIVE_RPMS_ACCESS"), verify_code: ENV.fetch("LIVE_RPMS_VERIFY")
+      )
+      abort "LIVE_RPMS=1: sign-on refused: #{result.error}" unless result.success?
+      result
+    end
   end
-  live_client = RpmsRpc.client
-  live_client.connect unless live_client.connected?
-  live_auth = live_client.authenticate(ENV.fetch("LIVE_RPMS_ACCESS"), ENV.fetch("LIVE_RPMS_VERIFY"))
-  abort "LIVE_RPMS=1: sign-on returned no DUZ: #{live_auth.inspect}" if live_auth[:duz].to_s.empty?
-  warn "[live] RPMS #{ENV["LIVE_RPMS_HOST"]}:#{ENV["LIVE_RPMS_PORT"]} signed on as DUZ #{live_auth[:duz]}"
+
+  live_user = LiveRpmsSession.sign_on!.value
+  settings = Lakeraven::EHR::Engine.rpms_settings
+  warn "[live] RPMS #{settings[:broker]} #{settings[:host]}:#{settings[:port]} signed on as #{live_user.inspect[0, 120]}"
 else
   RpmsRpc.mock!(&BASELINE_MOCK_SEEDS)
 end

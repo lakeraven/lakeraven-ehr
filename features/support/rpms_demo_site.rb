@@ -79,6 +79,17 @@ module RpmsDemoSite
     4 => { ihs_site: "Y", age: "25", default_label: "Am Indian/AK Native" }
   }.freeze
 
+  # The demo site's sign-on personas (rpms-ops SEEDPERS; the pairs are
+  # published with the seed). user_type is what the engine resolves from
+  # ORWU USERINFO's USRCLS: provider 3, nurse 2, clerk 1, else user.
+  PERSONAS = {
+    "PMD123" => { verify: "PMD123!!", duz: "206", name: "PROFILE,MD", user_type: "provider" },
+    "PRN123" => { verify: "PRN123!!", duz: "205", name: "PROFILE,RN", user_type: "nurse" },
+    "PMA123" => { verify: "PMA123!!", duz: "204", name: "PROFILE,MA", user_type: "clerk" },
+    "PREG123" => { verify: "PREG123!!", duz: "207", name: "PROFILE,REG", user_type: "user" },
+    "PSCH123" => { verify: "PSCH123!!", duz: "208", name: "PROFILE,SCHED", user_type: "user" }
+  }.freeze
+
   module_function
 
   def seed!(mock)
@@ -97,6 +108,9 @@ module RpmsDemoSite
     mock.seed_collection(:practitioner_list, PROVIDERS)
     mock.seed_collection(:vfc_eligibility_codes, VFC_CODES)
     VFC_DEFAULTS.each { |dfn, row| mock.seed(:vfc_default, dfn.to_s, row) }
+    PERSONAS.each do |access, p|
+      mock.seed_user(p[:duz], credentials: "#{access};#{p[:verify]}", name: p[:name], role: p[:user_type].to_sym)
+    end
   end
 
   # Every difference between this file and what the backend answers, as
@@ -125,6 +139,10 @@ module RpmsDemoSite
       expected = VFC_CODES.find { |c| c[:label] == row[:default_label] }&.slice(:code, :label)
       check.call("VFC eligibility #{dfn}", expected, RpmsRpc::Eligibility.for_patient(dfn))
     end
+    PERSONAS.each do |access, p|
+      result = Lakeraven::EHR::AuthenticationService.new.authenticate(access_code: access, verify_code: p[:verify])
+      check.call("sign-on #{access}", p.except(:verify), result.success? ? result.value.slice(:duz, :name, :user_type) : result.error)
+    end
     diffs
   end
 
@@ -142,5 +160,6 @@ if LIVE_RPMS
     Fix the file from the pinned build, or pin the build the file was read from:
       #{diffs.join("\n  ")}
   MSG
+  LiveRpmsSession.sign_on!
   warn "[live] RPMS agrees with the demo site fixture (#{RpmsDemoSite::BUILD})"
 end
