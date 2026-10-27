@@ -10,7 +10,7 @@ module Lakeraven
       def index
         dfn = patient_compartment_dfn
         results = Condition.for_patient(dfn)
-        render_bundle(results.map { |r| { resourceType: "Condition" }.merge(r) })
+        render_bundle_egress(results.map { |r| Condition.from_rpms_row(r, patient_dfn: dfn).to_fhir })
       end
 
       def show

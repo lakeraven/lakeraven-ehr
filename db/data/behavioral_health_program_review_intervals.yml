@@ -1,0 +1,18 @@
+# Site default review intervals for behavioral-health programs.
+#
+# Stand-in for L2/L3 delivery. BehavioralHealthProgramConfiguration.seed_defaults!
+# loads this file; TreatmentPlan and TreatmentPlanService only read the
+# duration stored for a program. Changing a cadence is a data change.
+#
+# Values are calendar parts (days, months, ...), not a second count, so a
+# month interval lands on the calendar month.
+#
+# The outpatient progress-review cadence below is the seeded default the
+# compliance query is specified against. It is not a re-verification of RPMS
+# file 9002011.56.
+
+bh_outpatient:
+  progress_review_interval:
+    days: 60
+  end_of_treatment_review_interval:
+    months: 6

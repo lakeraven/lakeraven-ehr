@@ -13,9 +13,19 @@ module Lakeraven
           build_patient(attrs)
         end
 
+        # ORWPT LIST ALL answers one page of the name index starting at the
+        # text, not a filter, and RPMS stores names upper-case (rpms-rpc
+        # #352). Ask in upper case and keep the rows whose name begins with
+        # the text. A page holds at most 44 rows, so a very common prefix
+        # can stop short of every match. A row carries the DFN and name and
+        # nothing else, so each match is read with #find for the sex and
+        # date of birth a Patient resource must carry; a row #find cannot
+        # read keeps what the row gave.
         def search(name_pattern)
-          results = RpmsRpc::Patient.search(name_pattern)
-          results.map { |attrs| build_patient(attrs) }
+          text = name_pattern.to_s.upcase
+          RpmsRpc::Patient.search(text)
+            .select { |row| row[:name].to_s.upcase.start_with?(text) }
+            .map { |row| find(row[:dfn]) || build_patient(row) }
         end
 
         def find_by_ssn(ssn)
@@ -34,7 +44,7 @@ module Lakeraven
         private
 
         # rpms-rpc returns fields beyond the Patient model's declared
-        # attributes (race_code, site_ien, etc.); slice to model.attribute_names
+        # attributes (veteran, ward_location, etc.); slice to model.attribute_names
         # so ActiveModel doesn't raise UnknownAttributeError on the extras.
         def build_patient(attrs)
           known = Patient.attribute_names.map(&:to_sym)

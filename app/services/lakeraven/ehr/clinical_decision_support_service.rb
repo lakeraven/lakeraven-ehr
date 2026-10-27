@@ -132,7 +132,7 @@ module Lakeraven
         private
 
         def fetch_active_medications(patient_dfn)
-          MedicationRequest.for_patient(patient_dfn)
+          MedicationRequest.checked_for_patient(patient_dfn)
         rescue
           []
         end

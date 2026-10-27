@@ -4,12 +4,12 @@ Feature: Care Coordination with External Systems
   So that patients receive coordinated care across different providers
 
   Background:
-    Given the following patients exist:
-      | dfn | first_name | last_name | dob        | sex | ssn         | tribal_enrollment | tribal_affiliation                    | service_area |
-      | 1   | Alice      | Anderson  | 1980-05-15 | F   | 111-11-1111 | EXNH-12345       | Example Native Health (EXNH)      | Anchorage    |
+    Given these RPMS demo patients:
+      | dfn | name             | ssn       | dob        | sex |
+      | 4   | DEMO,PATIENT ONE | 666010101 | 2001-01-01 | F   |
 
   Scenario: External system requests patient information
-    Given patient "Anderson, Alice" has consented to data sharing
+    Given patient "DEMO,PATIENT ONE" has consented to data sharing
     When an authorized external system requests patient data
     Then patient demographics are provided in a standard format
     And the data format is compatible with national health networks
@@ -20,13 +20,13 @@ Feature: Care Coordination with External Systems
     # the field again.
   @unsourced
   Scenario: External system receives tribal affiliation and enrollment
-    Given patient "Anderson, Alice" has consented to data sharing
+    Given patient "DEMO,PATIENT ONE" has consented to data sharing
     When an authorized external system requests patient data
     Then tribal affiliation is included
     And enrollment information is available for eligibility checks
 
   Scenario: Sending service request to care navigation platform
-    Given patient "Anderson, Alice" needs specialty care
+    Given patient "DEMO,PATIENT ONE" needs specialty care
     And a service request has been created for cardiology
     When the service request is submitted to the care navigation platform
     Then the platform receives all required patient information
@@ -35,7 +35,7 @@ Feature: Care Coordination with External Systems
     And the platform can process the service request automatically
 
   Scenario: Receiving care recommendations from external platform
-    Given patient "Anderson, Alice" has an active service request
+    Given patient "DEMO,PATIENT ONE" has an active service request
     When the care navigation platform provides specialist recommendations
     Then I can see recommended providers
     And I can see estimated costs
@@ -50,7 +50,7 @@ Feature: Care Coordination with External Systems
     And the patient can be informed of next steps
 
   Scenario: Ensuring data privacy during external sharing
-    Given patient "Anderson, Alice" has consented to data sharing
+    Given patient "DEMO,PATIENT ONE" has consented to data sharing
     When patient information is shared with external systems
     Then only authorized systems can access the data
     And audit logs record all data access
@@ -62,7 +62,7 @@ Feature: Care Coordination with External Systems
     # the field again.
   @unsourced
   Scenario: Tribal-specific information is protected during external sharing
-    Given patient "Anderson, Alice" has sensitive tribal enrollment data
+    Given patient "DEMO,PATIENT ONE" has sensitive tribal enrollment data
     When patient information is shared with external systems
     Then tribal-specific information is properly protected
 

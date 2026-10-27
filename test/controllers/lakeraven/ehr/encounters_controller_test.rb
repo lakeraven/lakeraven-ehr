@@ -9,6 +9,7 @@ module Lakeraven
 
       setup do
         setup_smart_auth
+        seed_encounters
       end
 
       teardown do
@@ -31,7 +32,9 @@ module Lakeraven
         get "/lakeraven-ehr/Encounter", params: { patient: "1" }, headers: @headers
         assert_response :ok
         body = JSON.parse(response.body)
-        body["entry"]&.each do |entry|
+        entries = body["entry"]
+        assert entries.is_a?(Array) && entries.any?, "Encounter bundle should include entries"
+        entries.each do |entry|
           assert_equal "Encounter", entry.dig("resource", "resourceType")
         end
       end
@@ -128,7 +131,9 @@ module Lakeraven
       test "all bundle entries have Encounter resourceType" do
         get "/lakeraven-ehr/Encounter", params: { patient: "1" }, headers: @headers
         body = JSON.parse(response.body)
-        body["entry"]&.each do |entry|
+        entries = body["entry"]
+        assert entries.is_a?(Array) && entries.any?, "Encounter bundle should include entries"
+        entries.each do |entry|
           assert_equal "Encounter", entry.dig("resource", "resourceType"),
             "Expected all entries to be Encounter resources"
         end
@@ -154,6 +159,15 @@ module Lakeraven
       test "FHIR content type on 401 responses" do
         get "/lakeraven-ehr/Encounter", params: { patient: "1" }
         assert_equal "application/fhir+json", response.media_type
+      end
+
+      private
+
+      def seed_encounters
+        RpmsRpc.client.seed_keyed_collection(:patient_appointments, "1", [
+          { datetime: Date.new(2026, 3, 10), location_ien: 1, location: "Primary Care Clinic", status: "KEPT" },
+          { datetime: Date.new(2026, 4, 15), location_ien: 1, location: "Primary Care Clinic", status: "SCHEDULED" }
+        ])
       end
     end
   end

@@ -192,14 +192,24 @@ module Lakeraven
         fhir = org.to_fhir
 
         addr = fhir[:address]&.first
-        assert_equal "AK", addr[:state]
+        # INSTITUTION .02 STATE points at STATE #5; DDR answers its name.
+        assert_equal "ALASKA", addr[:state]
       end
 
-      test "to_fhir includes telecom" do
+      test "to_fhir carries no telecom: INSTITUTION #4 has no phone field" do
         org = Organization.find_by_ien(1)
         fhir = org.to_fhir
 
-        assert fhir[:telecom]&.any?
+        assert_nil org.phone
+        assert_empty Array(fhir[:telecom])
+      end
+
+      # FHIR ele-1: an element with no values is left out, never an empty array.
+      test "to_fhir leaves out every element that has no values" do
+        fhir = Organization.find_by_ien(1).to_fhir
+
+        empty = fhir.select { |_key, value| value == [] }.keys
+        assert_empty empty, "empty arrays: #{empty.join(', ')}"
       end
 
       test "to_fhir includes station number as identifier" do

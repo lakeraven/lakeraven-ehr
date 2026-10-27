@@ -4,8 +4,8 @@ Feature: VFC compliance
   So that I comply with federal VFC program requirements
 
   Scenario: VFC-eligible patient receives VFC vaccine successfully
-    Given patient "1" has VFC eligibility code "V04"
-    When I check VFC eligibility for patient "1"
+    Given patient "4" has VFC eligibility code "V04"
+    When I check VFC eligibility for patient "4"
     Then the patient should be VFC eligible
 
   Scenario: Non-eligible patient blocked from VFC vaccine
@@ -19,7 +19,7 @@ Feature: VFC compliance
 
   Scenario: VFC eligibility codes are enumerable
     When I list all VFC eligibility codes
-    Then the list should include code "V04" with label containing "AI/AN"
+    Then the list should include code "V04" with label containing "AK Native"
     And the list should include code "V01" with label containing "Not"
 
   Scenario: VFC eligible codes are V02 through V07

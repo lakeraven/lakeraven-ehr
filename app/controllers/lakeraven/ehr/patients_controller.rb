@@ -7,29 +7,38 @@ module Lakeraven
 
       before_action :enforce_patient_context!, only: :show
       before_action :enforce_patient_search_context!, only: :index
+      before_action :validate_patient_search_values!, only: :index
       before_action :require_registration_scope!, only: :create
 
       def index
-        patients = resolve_patient_search
+        matches = resolve_patient_search
+        # Same as render_bundle / fhir_search_bundle: total is the length of
+        # the whole match set, not of this page. _revinclude rows are appended
+        # after the page and are not counted.
+        total = matches.length
+        # A sort reads FHIR elements, so a sorted search builds every match
+        # before paging; an unsorted one builds only the page.
+        page = if fhir_sort_keys.any?
+          fhir_page(fhir_sort(matches.map(&:to_fhir)))
+        else
+          fhir_page(matches).map(&:to_fhir)
+        end
 
-        entries = patients.map { |p| build_patient_entry(p) }
+        entries = page.map { |resource| { resource: resource, search: { mode: "match" } } }
 
         # _revinclude hands the caller resources of ANOTHER type, so it needs
         # that type's read scope like any other read. A `user/Patient.read`
         # token used to receive Provenance entries — including their agent
         # references — because the inclusion was never authorized.
         if params[:_revinclude] == "Provenance:target" && readable_included_types(%w[Provenance]).any?
-          patients.each do |p|
-            ProvenanceStore.instance.for_target("Patient", "rpms-#{p.dfn}").each do |prov|
+          page.each do |resource|
+            ProvenanceStore.instance.for_target("Patient", "rpms-#{resource[:id]}").each do |prov|
               entries << { resource: prov.to_fhir, search: { mode: "include" } }
             end
           end
         end
 
-        render json: {
-          resourceType: "Bundle", type: "searchset",
-          total: entries.length, entry: entries
-        }, status: :ok, content_type: FHIR_CONTENT_TYPE
+        render_fhir_egress(paged_search_bundle(entries, total: total))
       end
 
       def show
@@ -45,7 +54,7 @@ module Lakeraven
           return
         end
 
-        render_fhir(patient.to_fhir)
+        render_fhir_egress(patient.to_fhir)
       end
 
       def create
@@ -65,8 +74,7 @@ module Lakeraven
         result = RegistrationGateway.register(reg)
 
         if result[:success] && result[:dfn].to_i.positive?
-          response.headers["Location"] = "#{request.base_url}#{request.path}/#{result[:dfn]}"
-          render_fhir(created_patient_fhir(result[:dfn], reg), status: :created)
+          publish_created_patient(result[:dfn], reg)
         elsif result[:success]
           render_operation_outcome(status: :bad_gateway, severity: "error", code: "exception",
             diagnostics: "Registration reported success but returned no patient identifier")
@@ -90,26 +98,45 @@ module Lakeraven
         authorize_patient_search!(params[:_id])
       end
 
+      # Registration is the one Patient interaction an IHS capability owns, so
+      # a withheld bprm_registration still refuses a caller without the write
+      # scope before it says the capability is missing.
+      def authorize_before_unavailable!
+        super
+        require_registration_scope! if !performed? && action_name == "create"
+      end
+
       def require_registration_scope!
         return if system_scope? || user_context_scope?
         render_forbidden("Patient registration requires a user- or system-level write scope")
       end
 
+      # Every parameter given narrows the match set: FHIR search parameters
+      # combine with AND. birthdate and gender used to apply only alongside
+      # name, and _id discarded every other parameter, so `?birthdate=` alone
+      # or `?_id=1&gender=male` returned patients the search had excluded.
+      # Each parameter here is declared in FHIR::SearchCapabilities; identifier
+      # is not (see there).
       def resolve_patient_search
-        if params[:_id].present?
+        results = if params[:_id].present?
           patient = Patient.find_by_dfn(params[:_id])
           patient ? [ patient ] : []
         elsif params[:identifier].present?
           ssn = extract_ssn_from_identifier(params[:identifier])
           ssn ? Patient.search_by_ssn(ssn) : []
-        elsif params[:name].present?
-          results = Patient.search(params[:name])
-          results = filter_by_birthdate(results) if params[:birthdate].present?
-          results = filter_by_gender(results) if params[:gender].present?
-          results
         else
-          Patient.search("")
+          Patient.search(params[:name].to_s)
         end
+        results = filter_by_name(results) if params[:name].present? && (params[:_id].present? || params[:identifier].present?)
+        results = filter_by_birthdate(results) if params.key?(:birthdate)
+        results = filter_by_gender(results) if params.key?(:gender)
+        results
+      end
+
+      # The patients the name lookup itself would return, among these.
+      def filter_by_name(patients)
+        named = Patient.search(params[:name]).map { |p| p.dfn.to_s }
+        patients.select { |p| named.include?(p.dfn.to_s) }
       end
 
       def extract_ssn_from_identifier(identifier)
@@ -119,25 +146,35 @@ module Lakeraven
       end
 
       def filter_by_birthdate(patients)
-        target = Date.parse(params[:birthdate]) rescue nil
-        return patients unless target
-
+        target = Date.iso8601(params[:birthdate])
         patients.select { |p| p.dob == target }
       end
 
+      # Compared as served: PatientSerializer is what turns RPMS sex into a
+      # FHIR gender, so a patient matches the gender its own resource shows.
       def filter_by_gender(patients)
-        sex_code = case params[:gender]
-        when "male" then "M"
-        when "female" then "F"
-        else nil
-        end
-        return patients unless sex_code
-
-        patients.select { |p| p.sex == sex_code }
+        patients.select { |p| p.to_fhir[:gender] == params[:gender] }
       end
 
-      def build_patient_entry(patient)
-        { resource: patient.to_fhir, search: { mode: "match" } }
+      BIRTHDATE = /\A\d{4}-\d{2}-\d{2}\z/
+      GENDERS = %w[male female other unknown].freeze
+
+      # A value these filters cannot apply is refused, not skipped: skipping
+      # it answers a search the client did not send. birthdate takes one day;
+      # the date prefixes (ge, lt, ...) and partial dates are not implemented.
+      def validate_patient_search_values!
+        if params.key?(:birthdate) && !valid_birthdate?(params[:birthdate])
+          return refuse_search_parameter("birthdate", "one day, YYYY-MM-DD")
+        end
+        return unless params.key?(:gender) && GENDERS.exclude?(params[:gender])
+
+        refuse_search_parameter("gender", "one of #{GENDERS.join(', ')}")
+      end
+
+      def valid_birthdate?(value)
+        value.is_a?(String) && value.match?(BIRTHDATE) && Date.iso8601(value)
+      rescue Date::Error
+        false
       end
 
       SSN_SYSTEMS = [
@@ -161,6 +198,26 @@ module Lakeraven
       def ssn_from_identifiers(identifiers)
         Array(identifiers).each { |i| return i["value"] if i.is_a?(Hash) && SSN_SYSTEMS.include?(i["system"]) }
         nil
+      end
+
+      # Registration has already succeeded by the time the filter refuses.
+      # 503 would invite a retry that registers a second patient. Location
+      # carries the new DFN; the body does not, and neither does any
+      # demographic from the request. The DFN is logged server-side.
+      def publish_created_patient(dfn, reg)
+        filtered = filter_fhir_for_egress(created_patient_fhir(dfn, reg))
+        response.headers["Location"] = "#{request.base_url}#{request.path}/#{dfn}"
+        if filtered
+          render json: filtered, status: :created, content_type: FHIR_CONTENT_TYPE
+        else
+          Rails.logger.warn("[patient] registered DFN #{dfn}; FHIR representation withheld")
+          render_operation_outcome(
+            status: :created,
+            severity: "information",
+            code: "suppressed",
+            diagnostics: "The representation is withheld"
+          )
+        end
       end
 
       def created_patient_fhir(dfn, reg)

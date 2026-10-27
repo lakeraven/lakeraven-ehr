@@ -3,16 +3,23 @@ Feature: Provider Search and Management
   I need to search for healthcare providers
   So that I can create appropriate referrals and track provider activity
 
+  # The NEW PERSON entries of the pinned RPMS build (rpms-ops demo site seed),
+  # as ORWU NEWPERS names them. Checked against features/support/rpms_demo_site.rb.
   Background:
-    Given the following practitioners are seeded:
-      | ien | name            | specialty          | npi        | dea_number |
-      | 101 | MARTINEZ,SARAH  | Cardiology         | 1234567890 | AM1234563  |
-      | 102 | CHEN,JAMES      | Orthopedic Surgery | 2345678901 |            |
+    Given these RPMS demo providers:
+      | ien | name           |
+      | 4   | Manager,System |
+      | 204 | Profile,Ma     |
+      | 206 | Profile,Md     |
+      | 207 | Profile,Reg    |
+      | 205 | Profile,Rn     |
+      | 208 | Profile,Sched  |
+      | 200 | Provider,Test  |
 
   Scenario: Search for provider by name
-    When I search for providers with name "MARTINEZ"
+    When I search for providers with name "PROVIDER"
     Then I should find 1 provider in the results
-    And the provider results should include "MARTINEZ,SARAH"
+    And the provider results should include "Provider,Test"
 
   # DEFERRED (@unsourced): the read this needs lives in rpms-rpc, not the
     # engine, and the field numbers were only verified against the live DD on
@@ -31,7 +38,7 @@ Feature: Provider Search and Management
 
   Scenario: List all providers
     When I search for all providers
-    Then I should find 2 providers in the results
+    Then I should find 7 providers in the results
 
   # DEFERRED (@unsourced): the read this needs lives in rpms-rpc, not the
     # engine, and the field numbers were only verified against the live DD on

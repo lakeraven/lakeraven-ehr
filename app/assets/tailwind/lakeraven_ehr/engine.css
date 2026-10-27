@@ -92,150 +92,153 @@
   }
 }
 
-@layer components {
-  /* Page chrome shared by engine views. */
-  .page-header {
-    @apply mb-6;
-  }
+/* ---------------------------------------------------------------------------
+ * Engine classes, as @utility so the build carries only the ones the markup uses
+ * (an unused @utility is dropped; a class in @layer components always ships).
+ * ------------------------------------------------------------------------ */
 
-  .page-header p {
+/* Page chrome shared by engine views. */
+@utility page-header {
+  @apply mb-6;
+
+  & p {
     @apply mt-1 text-slate-600;
   }
+}
 
-  .card {
-    @apply rounded-lg border border-slate-200 bg-white p-6 shadow-sm;
-  }
+@utility card {
+  @apply rounded-lg border border-slate-200 bg-white p-6 shadow-sm;
+}
 
-  .alert {
-    @apply my-4 rounded-md border px-4 py-3;
-  }
+@utility alert {
+  @apply my-4 rounded-md border px-4 py-3;
+}
 
-  .alert--error {
-    @apply border-red-300 bg-red-50 text-red-900;
-  }
+@utility alert--error {
+  @apply border-red-300 bg-red-50 text-red-900;
+}
 
-  .alert--notice {
-    @apply border-emerald-300 bg-emerald-50 text-emerald-900;
-  }
+@utility alert--notice {
+  @apply border-emerald-300 bg-emerald-50 text-emerald-900;
+}
 
-  .summary-counts {
-    @apply grid gap-4 sm:grid-cols-3;
-  }
+@utility summary-counts {
+  @apply grid gap-4 sm:grid-cols-3;
+}
 
-  .summary-count {
-    @apply flex flex-col rounded-lg border border-slate-200 bg-white p-5 shadow-sm;
-  }
+@utility summary-count {
+  @apply flex flex-col rounded-lg border border-slate-200 bg-white p-5 shadow-sm;
+}
 
-  .summary-count__number {
-    @apply text-3xl font-semibold text-slate-900 tabular-nums;
-  }
+@utility summary-count__number {
+  @apply text-3xl font-semibold text-slate-900 tabular-nums;
+}
 
-  .summary-count__label {
-    @apply mt-1 text-sm font-medium text-slate-600;
-  }
+@utility summary-count__label {
+  @apply mt-1 text-sm font-medium text-slate-600;
+}
 
-  .hint {
-    @apply mt-1 text-sm text-slate-600;
-  }
+@utility hint {
+  @apply mt-1 text-sm text-slate-600;
+}
 
-  /* -------------------------------------------------------------------------
-   * Scored screening instruments (PHQ-9 / GAD-7).
-   *
-   * Tuned for a shared clinic tablet: touch targets are at least 44px tall,
-   * the whole choice row is clickable via the <label>, and focus is always
-   * visible because the form is fully keyboard operable.
-   * ---------------------------------------------------------------------- */
-  .screening-preamble {
-    @apply mt-6 mb-2 font-semibold;
-  }
+/* ---------------------------------------------------------------------------
+ * Scored screening instruments (PHQ-9 / GAD-7).
+ *
+ * Tuned for a shared clinic tablet: touch targets are at least 44px tall,
+ * the whole choice row is clickable via the <label>, and focus is always
+ * visible because the form is fully keyboard operable.
+ * ------------------------------------------------------------------------ */
+@utility screening-preamble {
+  @apply mt-6 mb-2 font-semibold;
+}
 
-  .screening-visit label {
+@utility screening-visit {
+  & label {
     @apply block font-semibold;
   }
 
-  .screening-visit input {
+  & input {
     @apply min-h-11 p-2.5 text-lg;
   }
+}
 
-  .screening-items {
-    @apply m-0 list-none p-0;
-  }
+@utility screening-items {
+  @apply m-0 list-none p-0;
+}
 
-  .screening-item {
-    @apply mb-4 rounded-lg border border-slate-300 bg-white p-4;
-  }
+@utility screening-item {
+  @apply mb-4 rounded-lg border border-slate-300 bg-white p-4;
 
-  .screening-item legend {
+  & legend {
     @apply px-1 font-semibold;
   }
+}
 
-  .screening-item__n {
-    @apply tabular-nums;
-  }
+@utility screening-item__n {
+  @apply tabular-nums;
+}
 
-  .screening-item--missing {
-    @apply border-2 border-red-700;
-  }
+@utility screening-item--missing {
+  @apply border-2 border-red-700;
+}
 
-  .screening-item__error {
-    @apply my-1 font-semibold text-red-700;
-  }
+@utility screening-item__error {
+  @apply my-1 font-semibold text-red-700;
+}
 
-  .screening-choice {
-    @apply flex min-h-11 items-center gap-2.5;
-  }
+@utility screening-choice {
+  @apply flex min-h-11 items-center gap-2.5;
 
-  .screening-choice label {
+  & label {
     @apply flex-1 py-2 font-normal;
   }
 
-  .screening-choice input[type="radio"] {
+  & input[type="radio"] {
     @apply size-5.5;
   }
+}
 
-  .screening-choice__score {
-    @apply text-slate-600 tabular-nums;
-  }
+@utility screening-choice__score {
+  @apply text-slate-600 tabular-nums;
+}
 
-  .screening-safety,
-  .screening-errors {
-    @apply my-4 rounded-lg border-2 border-red-700 p-4;
-  }
+@utility screening-safety {
+  @apply my-4 rounded-lg border-2 border-red-700 bg-amber-50 p-4;
 
-  .screening-safety {
-    @apply bg-amber-50;
-  }
-
-  .screening-errors {
-    @apply bg-red-50;
-  }
-
-  .screening-safety h2,
-  .screening-errors h2 {
+  & h2 {
     @apply mt-0 text-lg;
   }
+}
 
-  .screening-safety__ack {
-    @apply flex min-h-11 items-start gap-2.5;
+@utility screening-errors {
+  @apply my-4 rounded-lg border-2 border-red-700 bg-red-50 p-4;
+
+  & h2 {
+    @apply mt-0 text-lg;
   }
+}
 
-  .screening-safety__ack input[type="checkbox"] {
+@utility screening-safety__ack {
+  @apply flex min-h-11 items-start gap-2.5;
+
+  & input[type="checkbox"] {
     @apply mt-1 size-5.5;
   }
+}
 
-  .screening-actions {
-    @apply my-6 flex flex-wrap items-center gap-4;
-  }
+@utility screening-actions {
+  @apply my-6 flex flex-wrap items-center gap-4;
 
-  .screening-actions button {
+  & button {
     @apply min-h-12 px-6 py-3 text-lg;
   }
+}
 
-  .screening-score__number {
-    @apply text-4xl font-bold tabular-nums;
-  }
+@utility screening-score__number {
+  @apply text-4xl font-bold tabular-nums;
+}
 
-  .screening-score__band {
-    @apply mt-0 text-xl font-semibold;
-  }
+@utility screening-score__band {
+  @apply mt-0 text-xl font-semibold;
 }

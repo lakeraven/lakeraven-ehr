@@ -1,11 +1,12 @@
 # frozen_string_literal: true
 
 # Provider Search Steps — lakeraven-ehr
-# Data comes from RpmsRpc.mock! seeds in test_helper.rb
 
-Given("the following practitioners are seeded:") do |_table|
-  # Data is pre-seeded via RpmsRpc.mock! in test_helper.rb.
-  # The table documents what's available; no runtime action needed.
+# Names demo providers in the feature's own words; the rows must match
+# features/support/rpms_demo_site.rb (checked against RPMS on a live run).
+Given("these RPMS demo providers:") do |table|
+  rows = table.hashes.map { |r| { ien: r["ien"], name: r["name"] } }
+  assert_equal RpmsDemoSite::PROVIDERS, rows, "The table differs from the demo site"
 end
 
 When("I search for providers with name {string}") do |name|

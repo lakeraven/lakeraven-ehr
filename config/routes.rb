@@ -29,6 +29,10 @@ Lakeraven::EHR::Engine.routes.draw do
   # audited POST — everything session-authenticated that reads a patient's
   # clinical data requires it.
   post "patients/:dfn/context", to: "patient_contexts#create", as: :patient_context, constraints: { dfn: /\d+/ }
+  # Closing the session's open record. Fixed destination, so this cannot be
+  # turned into an open redirect. Its own controller: PatientContextsController's
+  # before_actions authorize *opening* a record and must not run on a clear.
+  delete "patient_context", to: "active_patient_contexts#destroy", as: :active_patient_context
 
   # Scored behavioural-health instruments (PHQ-9 / GAD-7, issue #474).
   # Server-rendered, no JavaScript. `new` carries the instrument key as a
@@ -39,6 +43,12 @@ Lakeraven::EHR::Engine.routes.draw do
   get  "patients/:dfn/screenings/new", to: "screenings#new",    as: :new_patient_screening, constraints: { dfn: /\d+/ }
   get  "patients/:dfn/screenings/:id", to: "screenings#show",   as: :patient_screening, constraints: { dfn: /\d+/, id: /\d+/ }
 
+  # FHIR CapabilityStatement (#574). Every FHIR type routed below is declared
+  # in FHIR::CapabilityStatement, and a route with no controller action
+  # behind it is not routed: Medication, DiagnosticReport and CarePlan were,
+  # and Encounter's show, and each raised instead of answering.
+  get "metadata", to: "capability_statements#show"
+
   # Doorkeeper models (Application, AccessToken) are used directly;
   # routes are NOT mounted here because the engine provides its own
   # BackendServicesController for OAuth token issuance.
@@ -47,11 +57,8 @@ Lakeraven::EHR::Engine.routes.draw do
   resources :allergy_intolerances, path: "AllergyIntolerance", only: %i[index show]
   resources :conditions, path: "Condition", only: %i[index show]
   resources :medication_requests, path: "MedicationRequest", only: %i[index show]
-  resources :medications, path: "Medication", only: %i[index show]
   resources :observations, path: "Observation", only: %i[index show]
-  resources :diagnostic_reports, path: "DiagnosticReport", only: %i[index show]
-  resources :care_plans, path: "CarePlan", only: %i[index show]
-  resources :encounters, path: "Encounter", only: %i[index show]
+  resources :encounters, path: "Encounter", only: %i[index]
   resources :organizations, path: "Organization", only: %i[show], param: :ien
   resources :locations, path: "Location", only: %i[show], param: :ien
   resources :service_requests, path: "ServiceRequest", only: %i[index]
@@ -60,7 +67,6 @@ Lakeraven::EHR::Engine.routes.draw do
   resources :coverage_eligibility_requests, path: "CoverageEligibilityRequest", only: %i[create]
   resources :measures, path: "Measure", only: %i[index]
   resources :measure_reports, path: "MeasureReport", only: %i[index]
-  resources :consents, path: "Consent", only: %i[index show]
   resources :audit_events, path: "AuditEvent", only: %i[index show]
   resources :value_sets, path: "ValueSet", only: %i[index show] do
     member do
@@ -74,7 +80,11 @@ Lakeraven::EHR::Engine.routes.draw do
 
   # Exports — ONC §170.315(b)(10) + (g)(10)
   resources :exports, only: [ :create, :show, :destroy ] do
-    resources :files, only: [ :show ], controller: "export_files", param: :file_name
+    # The documented file URL ends in "patient.ndjson". `format: false`
+    # drops the format suffix; the file_name constraint is what lets the
+    # dot through, because "." is still a segment separator without it.
+    resources :files, only: [ :show ], controller: "export_files", param: :file_name,
+      format: false, file_name: %r{[^/]+}
   end
 
   # SMART discovery + EHR Launch

@@ -5,13 +5,19 @@ module Lakeraven
     # BPRM twin — registration group (scenarios #1, #2, #3, #4).
     #
     # Re-grounds BPRM's IRIS/BMW-SQL registration tier on the VistA RPC broker.
-    # Target grounding: VAFC VOA ADD PATIENT (PATIENT #2 half) + the Lakeraven
-    # LR* completion shim (IHS half — #9000001/HRN/tribe/community, AGADDREG as
-    # reference; HRN clerk-supplied with AG1-faithful uniqueness) plus BMX
-    # reads. The BHDPTRPC wire names below are UNVERIFIED PLACEHOLDERS with no
-    # known server implementation anywhere (see rpms-rpc
-    # docs/RPC_COVERAGE.md, "BHDPTRPC provenance"); they stay until the LR
-    # shim lands so callers and tests don't churn. BPRM's original
+    # Target grounding: RpmsRpc::Registration.register / .update (rpms-rpc
+    # 0.4.0, #409/#410), which register and edit only through the IHS AG
+    # package's own RPCs, AGG ADD NEW PATIENT / AGG UPDATE PATIENT under the
+    # stock AGGRPC option. That is BPRM's own registration surface: AG files
+    # PATIENT (#2) and IHS PATIENT (#9000001) together, with the HRN,
+    # tribe/community/classification/eligibility, and its edit checks. The
+    # earlier target, VAFC VOA ADD PATIENT plus a Lakeraven completion shim,
+    # is dropped: no RPMS context serves that RPC to a client, and rpms-ops
+    # removes the option that once did (rpms-rpc#409). The BHDPTRPC wire names
+    # below are UNVERIFIED PLACEHOLDERS with no known server implementation
+    # anywhere (see rpms-rpc docs/rpcs.md, "BHDPTRPC provenance"); they stay
+    # until the gateway calls RpmsRpc::Registration, so callers and tests
+    # don't churn. BPRM's original
     # SQL-MUTATE procs (AgPatientRegisterEvent, AgPatientUpdateEvent,
     # AgSetPatientInsuranceDelete) raw-write ^DPT/^AUPN*/insurance globals and
     # bypass FileMan cross-references + audit; here every write goes through a
@@ -24,10 +30,11 @@ module Lakeraven
       # dump" claim here was wrong — see the header note). The first four
       # payload fields match the gem's RpmsRpc::Patient.registration_param
       # (NAME^SEX^DOB^SSN); the trailing IHS items are OUR contract extension.
-      # Slated replacement: VAFC VOA ADD PATIENT + LR completion shim.
+      # Slated replacement: RpmsRpc::Registration.register (AGG ADD NEW PATIENT).
       REGISTER_RPC = "BHDPTRPC REGISTER"
 
-      # PLACEHOLDER wire name — see header note. Slated: VAFCPTED + LR/AG path.
+      # PLACEHOLDER wire name — see header note. Slated:
+      # RpmsRpc::Registration.update (AGG UPDATE PATIENT).
       UPDATE_RPC = "BHDPTRPC UPDATE"
       # PLACEHOLDER wire name — see header note.
       SEARCH_RPC = "BHDPTRPC LOOKUP"
@@ -48,12 +55,14 @@ module Lakeraven
 
       class << self
         # --- #1 Register a new patient (POST /patients) ---------------------
-        # Target: VAFC VOA ADD PATIENT + LR completion shim → ^DPT/^AUPNPAT
-        # (dispatches the placeholder REGISTER_RPC wire name until then).
+        # Target: RpmsRpc::Registration.register → AGG ADD NEW PATIENT under
+        # AGGRPC → ^DPT/^AUPNPAT (dispatches the placeholder REGISTER_RPC wire
+        # name until then).
         # TODO(sql-mutate→reimpl): BPRM's AgPatientRegisterEvent raw-inserts
-        # ^DPT/^AUPN*; the AG REGISTER path must file via ^DIE/DBS so the .01
+        # ^DPT/^AUPN*; AG's own add path files through FileMan so the .01
         # name xref, SSN xref, and registration audit fire.
         def register(params)
+          CapabilityGuard.ensure!(:bprm_registration)
           params = params.to_h.transform_keys(&:to_sym)
           return validation_error("name is required") if blank?(params[:name])
 
@@ -67,12 +76,14 @@ module Lakeraven
         end
 
         # --- #2 Edit demographics (PATCH /patients/:dfn) -------------------
-        # Target: VAFCPTED + LR/AG-faithful path → ^DIE on ^DPT (PATIENT #2)
-        # (dispatches the placeholder UPDATE_RPC wire name until then).
+        # Target: RpmsRpc::Registration.update → AGG UPDATE PATIENT, one call
+        # per AG window, under AG's edit lock → ^DPT/^AUPNPAT (dispatches the
+        # placeholder UPDATE_RPC wire name until then).
         # TODO(sql-mutate→reimpl): BPRM patches individual ^DPT fields raw
         # (AgSetCorrectPatientName/CellNumber/DateOfDeath/Mbi). File each
         # through ^DIE so the FileMan audit (DD "AUDIT") records the change.
         def update(dfn, changes)
+          CapabilityGuard.ensure!(:bprm_registration)
           changes = changes.to_h.transform_keys(&:to_sym)
           return validation_error("dfn is required") unless valid_id?(dfn)
           return validation_error("no changes given") if changes.empty?
@@ -91,6 +102,7 @@ module Lakeraven
         # in-gateway. RPC name/encoding unconfirmed against #8994 — the
         # confirmed stock search is ORWPT LIST ALL (RpmsRpc::Patient.search).
         def search(query, dob: nil)
+          CapabilityGuard.ensure!(:bprm_registration)
           RpcSupport.with_broker("Patient lookup service unavailable") do
             raw = RpcSupport.broker.call_rpc(SEARCH_RPC, query.to_s)
             patients = RpcSupport.lines(raw).filter_map { |line| parse_search_row(line) }
@@ -102,6 +114,7 @@ module Lakeraven
         # --- #4 Face sheet (GET /patients/:dfn/face_sheet) -----------------
         # AgGetPatientFaceSheet + AgGetPatientErrorsAndWarnings (read).
         def face_sheet(dfn)
+          CapabilityGuard.ensure!(:bprm_registration)
           return validation_error("dfn is required") unless valid_id?(dfn)
 
           RpcSupport.with_broker("Patient lookup service unavailable") do
@@ -114,6 +127,7 @@ module Lakeraven
 
         # --- #3 List insurances (GET /patients/:dfn/insurances) ------------
         def insurances(dfn)
+          CapabilityGuard.ensure!(:bprm_registration)
           return validation_error("dfn is required") unless valid_id?(dfn)
 
           RpcSupport.with_broker("Insurance service unavailable") do
@@ -126,6 +140,7 @@ module Lakeraven
         # TODO(sql-mutate→reimpl): file the policy-number change through ^DIE
         # on the patient-insurance multiple rather than a raw UPDATE.
         def update_insurance(dfn, insurance_id, policy_number:)
+          CapabilityGuard.ensure!(:bprm_registration)
           return validation_error("dfn is required") unless valid_id?(dfn)
           return validation_error("insurance id is required") unless valid_id?(insurance_id)
           if RpcSupport.unsafe_field?(policy_number)
@@ -150,6 +165,7 @@ module Lakeraven
         # in-use policy must be refused (409) before any dependent row is
         # touched.
         def delete_insurance(dfn, insurance_id)
+          CapabilityGuard.ensure!(:bprm_registration)
           return validation_error("dfn is required") unless valid_id?(dfn)
           return validation_error("insurance id is required") unless valid_id?(insurance_id)
 
@@ -291,6 +307,9 @@ module Lakeraven
           { success: false, status: 422, error: message }
         end
       end
+
+      # BPRM registration writes are IHS-only (#647). Stock patient reads
+      # stay on PatientGateway (ORWPT SELECT) and are not checked here.
     end
   end
 end

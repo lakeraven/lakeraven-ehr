@@ -29,15 +29,16 @@ module Lakeraven
         assert_nil Patient.find_by_dfn(nil)
       end
 
-      test "find_by_dfn merges identifier fields from patient_id_info" do
+      test "find_by_dfn does not read a race code or site from ORWPT ID INFO" do
         # ORWPT ID INFO contributes the IHS race code and current site IEN
         # to the merged patient hash; extended demographics (full race
         # string, address, phone, tribal_enrollment_number) have NO known
         # RPC source — the old BHDPTRPC attribution was unverified (see
         # rpms-rpc docs/RPC_COVERAGE.md, "BHDPTRPC provenance").
         patient = Patient.find_by_dfn(1)
-        assert_equal "I", patient.race_code
-        assert_equal 7819, patient.site_ien
+        # ORWPT ID INFO pieces 4 and 6 are the VETERAN flag and the ward (rpms-rpc #309), not a race code and a site.
+        assert_nil patient.race_code
+        assert_nil patient.site_ien
       end
 
       # -- find (raises) --------------------------------------------------------
