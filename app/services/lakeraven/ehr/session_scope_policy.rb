@@ -51,7 +51,7 @@ module Lakeraven
       CHART_READ_TYPES = %w[
         Patient Practitioner Organization Location Encounter
         Observation Condition AllergyIntolerance MedicationRequest Medication
-        Procedure Immunization DiagnosticReport CarePlan Consent Provenance
+        Procedure Immunization DiagnosticReport CarePlan Provenance
       ].freeze
 
       # Resource types this engine serves that are behavioural-health specific.
