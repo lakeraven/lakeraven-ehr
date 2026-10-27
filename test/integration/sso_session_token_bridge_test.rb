@@ -13,7 +13,7 @@ require "test_helper"
 # Binding, scope derivation, revocation, throttling and audit identity are
 # exercised in sso_session_token_bridge_security_test.rb.
 class SsoSessionTokenBridgeTest < ActionDispatch::IntegrationTest
-  # 304 RODRIGUEZ,LINDA holds OR CPRS GUI CHART, so she can open a chart.
+  # 304 RODRIGUEZ,LINDA holds ORELSE, an order-entry key, so she can open a chart.
   # 303 CLERK,TEST holds no security keys, so she cannot.
   KEYED_USER = { username: "lindarodriguez", password: "test123" }.freeze
   KEYLESS_USER = { username: "testclerk", password: "test123" }.freeze
