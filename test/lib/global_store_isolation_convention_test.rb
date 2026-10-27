@@ -5,125 +5,109 @@ require "test_helper"
 # Every process-global in-memory store with a class-level reset hook must be
 # cleared via GlobalStoreIsolation::STORE_RESETS (see test/support/global_store_isolation.rb).
 class GlobalStoreIsolationConventionTest < ActiveSupport::TestCase
+  RESET_METHOD_NAMES = %i[reset! reset_instance! reset_store!].freeze
+
   # Classes that define reset! / reset_instance! / reset_store! but are not
   # suite-wide process globals — each entry must stay commented with a reason.
-  EXEMPTED_RESETTERS = {
+  EXEMPTED = {
     "Lakeraven::EHR::BehavioralHealthProgramConfiguration" =>
-      "Database-backed ActiveRecord rows; reset! clears the test table, not in-process memory"
+      "ActiveRecord-backed, delete_all, rolled back by the per-test transaction"
   }.freeze
 
-  CLASS_LEVEL_SELF_RESET = /def\s+self\.reset(?:!|_instance!|_store!)(?:\s|$|=)/
-  EIGENCLASS_RESET = /class\s+<<\s+self[\s\S]*?^\s*def\s+reset(?:!|_instance!|_store!)(?:\s|$|=)/m
+  GENERIC_RESET_METHOD_OWNERS = [
+    Object,
+    Kernel,
+    BasicObject
+  ].freeze
 
-  def test_every_class_level_store_reset_is_registered_in_global_store_isolation
-    store_resets_source = File.read(engine_root.join("test/support/global_store_isolation.rb"))
-    missing = []
+  test "every class-level store reset is invoked by GlobalStoreIsolation.reset!" do
+    eager_load_engine!
 
-    resetter_constants.each do |constant_name|
-      next if EXEMPTED_RESETTERS.key?(constant_name)
-      next if store_resets_source.include?(constant_name)
+    resetters = constants_with_class_level_reset
+    called = resetters.to_h { |constant_name, _klass, _method| [ constant_name, false ] }
 
-      next if reset_cleared_by_global_store_isolation?(constant_name)
+    invoke_with_reset_stubs(resetters, called) { GlobalStoreIsolation.reset! }
 
-      missing << constant_name
-    end
-
-    assert_empty missing,
-                 "Add each class to GlobalStoreIsolation::STORE_RESETS or EXEMPTED_RESETTERS " \
-                 "(with a reason): #{missing.join(', ')}"
+    not_called = called.reject { |_name, was_called| was_called }.keys.sort
+    assert_empty not_called,
+                 "GlobalStoreIsolation.reset! must call each store resetter (register missing " \
+                 "classes in GlobalStoreIsolation::STORE_RESETS or EXEMPTED with a reason): " \
+                 "#{not_called.join(', ')}"
   end
 
   private
 
-  def resetter_constants
-    app_lib_rb_files.flat_map { |path| constants_with_class_level_reset_in(path) }.uniq.sort
+  def eager_load_engine!
+    Lakeraven::EHR::Engine.eager_load!
   end
 
-  def app_lib_rb_files
-    %w[app lib].flat_map { |root| Dir[engine_root.join(root, "**", "*.rb")] }
+  def constants_with_class_level_reset
+    walk_constants(Lakeraven::EHR).sort_by(&:first)
   end
 
-  def engine_root
-    Lakeraven::EHR::Engine.root
+  def walk_constants(mod, prefix = "Lakeraven::EHR")
+    mod.constants(false).flat_map do |name|
+      const = mod.const_get(name)
+      next [] unless const.is_a?(Module)
+
+      full_name = "#{prefix}::#{name}"
+      found =
+        if EXEMPTED.key?(full_name)
+          nil
+        else
+          class_level_reset_method(const)&.then { |method_name| [ full_name, const, method_name ] }
+        end
+
+      nested = walk_constants(const, full_name)
+      found ? [ found ] + nested : nested
+    end
   end
 
-  def constants_with_class_level_reset_in(path)
-    source = File.read(path)
-    return [] unless source.match?(CLASS_LEVEL_SELF_RESET) || source.match?(EIGENCLASS_RESET)
+  def class_level_reset_method(klass)
+    RESET_METHOD_NAMES.each do |method_name|
+      next unless klass.respond_to?(method_name, true)
 
-    [ constant_name_for_path(path) ]
+      method = klass.method(method_name)
+      next unless reset_method_owned_by_constant?(klass, method)
+
+      return method_name
+    end
+    nil
   end
 
-  def constant_name_for_path(absolute_path)
-    rel = Pathname.new(absolute_path).relative_path_from(engine_root).to_s
-    rel = rel.delete_prefix("app/").delete_prefix("lib/")
-    rel = rel.sub(%r{\A(?:controllers|models|services|mailers|jobs|helpers|channels|lib)/}, "")
-    rel.sub(/\.rb\z/, "").camelize
+  def reset_method_owned_by_constant?(klass, method)
+    owner = method.owner
+    return false if generic_reset_method_owner?(owner)
+
+    owner == klass.singleton_class || klass.singleton_class.ancestors.include?(owner)
   end
 
-  def reset_cleared_by_global_store_isolation?(constant_name)
-    case constant_name
-    when "Lakeraven::EHR::AssertionReplayGuard"
-      assert_replay_guard_cleared_by_global_reset!
-    when "Lakeraven::EHR::LoginThrottle"
-      assert_login_throttle_cleared_by_global_reset!
-    when "Lakeraven::EHR::ProvenanceStore"
-      assert_provenance_store_cleared_by_global_reset!
-    when "Lakeraven::EHR::ExportsController"
-      assert_exports_store_cleared_by_global_reset!
+  def generic_reset_method_owner?(owner)
+    return true unless owner.is_a?(Module)
+    return true if GENERIC_RESET_METHOD_OWNERS.include?(owner)
+
+    name = owner.name
+    return true if name&.start_with?("ActiveRecord::", "ActionView::", "ActionController::", "ActiveSupport::")
+
+    false
+  end
+
+  def invoke_with_reset_stubs(resetters, called)
+    if resetters.empty?
+      yield
     else
-      false
+      constant_name, klass, method_name = resetters.first
+      with_recording_singleton_stub(klass, method_name, -> { called[constant_name] = true }) do
+        invoke_with_reset_stubs(resetters.drop(1), called) { yield }
+      end
     end
   end
 
-  def assert_replay_guard_cleared_by_global_reset!
-    guard = Lakeraven::EHR::AssertionReplayGuard
-    guard.reset!
-    client_id = "convention-synthetic-client"
-    jti = "convention-synthetic-jti-#{SecureRandom.hex(4)}"
-    exp = 5.minutes.from_now.to_i
-
-    refute guard.replayed?(client_id, jti, exp),
-           "first use of jti should be accepted"
-    assert guard.replayed?(client_id, jti, exp),
-           "second use of the same jti should be refused"
-    GlobalStoreIsolation.reset!
-    !guard.replayed?(client_id, jti, exp)
+  def with_recording_singleton_stub(klass, method_name, on_call)
+    restore = StubHelpers.send(:singleton_method_restore, klass, method_name)
+    klass.define_singleton_method(method_name) { on_call.call }
+    yield
   ensure
-    guard.reset!
-  end
-
-  def assert_login_throttle_cleared_by_global_reset!
-    key = "convention-throttle-#{SecureRandom.hex(4)}"
-    Lakeraven::EHR::LoginThrottle::MAX_ATTEMPTS.times do
-      Lakeraven::EHR::LoginThrottle.record_failure(key)
-    end
-    assert Lakeraven::EHR::LoginThrottle.throttled?(key)
-    GlobalStoreIsolation.reset!
-    !Lakeraven::EHR::LoginThrottle.throttled?(key)
-  end
-
-  def assert_provenance_store_cleared_by_global_reset!
-    Lakeraven::EHR::ProvenanceStore.instance.add(
-      Lakeraven::EHR::Provenance.new(
-        target_type: "Patient", target_id: "convention-synthetic", activity: "CREATE",
-        agent_who_id: "synthetic-agent", agent_who_type: "Practitioner", recorded: Time.current
-      )
-    )
-    assert_operator Lakeraven::EHR::ProvenanceStore.instance.count, :>, 0
-    GlobalStoreIsolation.reset!
-    Lakeraven::EHR::ProvenanceStore.instance.count.zero?
-  end
-
-  def assert_exports_store_cleared_by_global_reset!
-    export_id = "convention-export-#{SecureRandom.hex(4)}"
-    Lakeraven::EHR::ExportsController.store[export_id] = Lakeraven::EHR::BulkExport.new(
-      id: export_id, export_type: "patient", status: "pending",
-      request_url: "https://example.test/exports",
-      output_format: "application/fhir+ndjson", client_id: "synthetic-client"
-    )
-    assert Lakeraven::EHR::ExportsController.store.key?(export_id)
-    GlobalStoreIsolation.reset!
-    Lakeraven::EHR::ExportsController.store.empty?
+    restore&.call
   end
 end
