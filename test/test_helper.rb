@@ -8,8 +8,8 @@ ActiveRecord::Migrator.migrations_paths = [ File.expand_path("../test/dummy/db/m
 ActiveRecord::Migrator.migrations_paths << File.expand_path("../db/migrate", __dir__)
 require "rails/test_help"
 
-# Every engine page links the Tailwind build (tailwind.css), and a missing
-# build is a template error on every page render. `rails test:prepare` builds
+# Engine pages link the Tailwind build (tailwind.css), and a missing build is
+# a template error on any page that links it. `rails test:prepare` builds
 # it in an app, but an engine's test runner never calls test:prepare, so build
 # it here: once per run, from the current views, and loudly when it fails.
 # Cucumber loads this file too.
