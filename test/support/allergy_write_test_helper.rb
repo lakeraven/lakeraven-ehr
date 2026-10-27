@@ -89,6 +89,71 @@ module AllergyWriteTestHelper
     refute_includes body, message
   end
 
+  # Scalar allergy fields for raw form posts (no symptoms, comments, or originator).
+  def base_allergy_scalar_attrs
+    valid_synthetic_allergy_attrs.except(:symptoms, :comments, :originator)
+  end
+
+  def allergy_scalar_query_string(except: [], merge: {})
+    attrs = base_allergy_scalar_attrs.except(*except).merge(merge)
+    attrs.map { |k, v| "allergy[#{k}]=#{CGI.escape(v.to_s)}" }.join("&")
+  end
+
+  def post_raw_allergy_form(url, body_query_string, tracker: @tracker)
+    with_tracking_allergy_gateway(tracker) do
+      post url,
+           params: "#{body_query_string}&authenticity_token=#{CGI.escape(csrf_token)}",
+           headers: { "CONTENT_TYPE" => "application/x-www-form-urlencoded" }
+    end
+  end
+
+  def post_allergy_json(url, allergy_hash, tracker: @tracker)
+    with_tracking_allergy_gateway(tracker) do
+      post url,
+           params: { allergy: allergy_hash }.to_json,
+           headers: { "CONTENT_TYPE" => "application/json", "X-CSRF-Token" => csrf_token }
+    end
+  end
+
+  def assert_strict_allergy_form_refused!
+    assert_response :unprocessable_entity
+    assert_match(/not saved/i, response.body)
+    assert_empty @tracker.add_calls
+  end
+
+  def assert_unknown_gateway_outcome!(body = response.body)
+    assert_match(/unknown|could not confirm|check the chart/i, body)
+    refute_match(/was not saved|left unchanged/i, body)
+  end
+
+  def assert_named_allergy_not_saved_refusal!(pattern)
+    assert_response :unprocessable_entity
+    assert_match(pattern, response.body)
+    assert_match(/not saved/i, response.body)
+  end
+
+  # Query string matching new.html.erb when optional scalars and comment are blank.
+  def shipped_allergy_form_empty_optionals_query_string
+    required = {
+      agent: SYNTHETIC_AGENT,
+      agent_pointer: "125;PSNDF(50.6,",
+      type: "D",
+      nature: "A",
+      originated_at: "3261015.1045",
+      observed_or_historical: "o",
+      reaction_date: "",
+      severity: ""
+    }
+    parts = required.map { |k, v| "allergy[#{k}]=#{CGI.escape(v.to_s)}" }
+    parts += [
+      "allergy[symptoms][][ien]=#{CGI.escape('10')}",
+      "allergy[symptoms][][text]=#{CGI.escape(SYNTHETIC_SYMPTOM)}",
+      "allergy[symptoms][][date]=",
+      "allergy[comments][]="
+    ]
+    parts.join("&")
+  end
+
   class FakeAllergyRpc
     attr_reader :save_calls, :nka_calls
 

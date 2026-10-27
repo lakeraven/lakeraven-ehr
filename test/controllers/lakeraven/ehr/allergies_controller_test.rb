@@ -160,7 +160,7 @@ module Lakeraven
       # -- Gateway failure ------------------------------------------------------
 
       test "POST allergy re-renders form with error when gateway fails" do
-        @tracker = TrackingAllergyGateway.new(add_returns: { success: false, error: :backend, message: "failed" })
+        @tracker = TrackingAllergyGateway.new(add_returns: { success: false, error: :invalid_value, message: "failed" })
 
         post_allergy
 
@@ -171,7 +171,7 @@ module Lakeraven
       end
 
       test "POST NKA shows error when gateway fails" do
-        @tracker = TrackingAllergyGateway.new(nka_returns: { success: false, error: :backend, message: "failed" })
+        @tracker = TrackingAllergyGateway.new(nka_returns: { success: false, error: :invalid_value, message: "failed" })
 
         post_nka
 
@@ -479,6 +479,227 @@ module Lakeraven
         assert_response :unprocessable_entity
         assert_match(/not saved/i, response.body)
         assert_empty @tracker.add_calls
+      end
+
+      # -- Spec amendment: strict form parsing (#644 round-2) ------------------
+
+      test "POST allergy with symptoms as array of strings returns 422 and does not call gateway" do
+        post_raw_allergy_form(BASE, allergy_scalar_query_string + "&allergy[symptoms][]=#{CGI.escape(SYNTHETIC_SYMPTOM)}")
+
+        assert_strict_allergy_form_refused!
+      end
+
+      test "POST allergy with symptom rows containing only unknown keys in array form returns 422 and does not call gateway" do
+        post_raw_allergy_form(BASE, allergy_scalar_query_string + "&allergy[symptoms][][name]=x")
+
+        assert_strict_allergy_form_refused!
+      end
+
+      test "POST allergy with indexed symptom row containing only unknown keys returns 422 and does not call gateway" do
+        post_raw_allergy_form(BASE, allergy_scalar_query_string + "&allergy[symptoms][0][name]=x")
+
+        assert_strict_allergy_form_refused!
+      end
+
+      test "POST allergy with symptom row mixing known and unknown keys returns 422 and does not call gateway" do
+        qs = allergy_scalar_query_string +
+             "&allergy[symptoms][][ien]=10" \
+             "&allergy[symptoms][][text]=t" \
+             "&allergy[symptoms][][extra]=x"
+        post_raw_allergy_form(BASE, qs)
+
+        assert_strict_allergy_form_refused!
+      end
+
+      test "POST allergy with non-scalar symptom date field returns 422 and does not call gateway" do
+        qs = allergy_scalar_query_string +
+             "&allergy[symptoms][][ien]=10" \
+             "&allergy[symptoms][][text]=t" \
+             "&allergy[symptoms][][date][x]=3261015"
+        post_raw_allergy_form(BASE, qs)
+
+        assert_strict_allergy_form_refused!
+      end
+
+      test "POST allergy with comment entries that are not strings returns 422 and does not call gateway" do
+        post_raw_allergy_form(
+          BASE,
+          allergy_scalar_query_string + "&allergy[comments][][line]=#{CGI.escape(SYNTHETIC_COMMENT)}"
+        )
+
+        assert_strict_allergy_form_refused!
+      end
+
+      test "POST allergy with severity submitted as array returns 422 and does not call gateway" do
+        post_raw_allergy_form(BASE, allergy_scalar_query_string(except: :severity) + "&allergy[severity][]=3")
+
+        assert_strict_allergy_form_refused!
+      end
+
+      test "POST allergy with reaction_date submitted as array returns 422 and does not call gateway" do
+        post_raw_allergy_form(BASE, allergy_scalar_query_string(except: :reaction_date) + "&allergy[reaction_date][]=3261015")
+
+        assert_strict_allergy_form_refused!
+      end
+
+      test "POST allergy with unknown allergy field key returns 422 and does not call gateway" do
+        post_raw_allergy_form(BASE, allergy_scalar_query_string + "&allergy[unknown_field]=x")
+
+        assert_strict_allergy_form_refused!
+      end
+
+      test "POST allergy JSON with non-string comment entry returns 422 and does not call gateway" do
+        post_allergy_json(
+          BASE,
+          base_allergy_scalar_attrs.merge(
+            symptoms: [ { ien: "10", text: SYNTHETIC_SYMPTOM, date: "3261015" } ],
+            comments: [ nil, "x" ]
+          )
+        )
+
+        assert_strict_allergy_form_refused!
+      end
+
+      test "POST allergy with blank symptom date and valid comments reaches gateway intact" do
+        base = valid_synthetic_allergy_attrs.except(:originator)
+        params = {
+          allergy: base.merge(
+            symptoms: [ { ien: "10", text: SYNTHETIC_SYMPTOM, date: "" } ],
+            comments: [ SYNTHETIC_COMMENT ]
+          ),
+          authenticity_token: csrf_token
+        }
+
+        with_tracking_allergy_gateway(@tracker) do
+          post BASE, params: params
+        end
+
+        assert_equal 1, @tracker.add_calls.length
+        attrs = @tracker.add_calls.first[:attrs]
+        symptoms = attrs[:symptoms] || attrs["symptoms"]
+        comments = attrs[:comments] || attrs["comments"]
+        date = symptoms.dig(0, :date) || symptoms.dig(0, "date")
+        assert_equal "", date.to_s
+        assert_equal SYNTHETIC_COMMENT, comments.first
+      end
+
+      test "POST allergy with shipped form empty optional fields is accepted" do
+        post_raw_allergy_form(BASE, shipped_allergy_form_empty_optionals_query_string)
+
+        assert_equal 1, @tracker.add_calls.length
+        assert_redirected_to CHART
+      end
+
+      # -- Spec amendment: unknown gateway outcome (#644 round-2) --------------
+
+      test "POST allergy with malformed_reply outcome says to check chart and does not claim not saved" do
+        @tracker = TrackingAllergyGateway.new(
+          add_returns: { success: false, error: :malformed_reply, message: BACKEND_PROBE_MESSAGE }
+        )
+
+        post_allergy
+
+        assert_response :unprocessable_entity
+        assert_unknown_gateway_outcome!
+        refute_backend_message_in_body!
+      end
+
+      test "POST NKA with malformed_reply outcome says to check chart and does not claim not saved" do
+        @tracker = TrackingAllergyGateway.new(
+          nka_returns: { success: false, error: :malformed_reply, message: BACKEND_PROBE_MESSAGE }
+        )
+
+        post_nka
+
+        assert_response :unprocessable_entity
+        assert_unknown_gateway_outcome!
+        refute_backend_message_in_body!
+      end
+
+      test "POST allergy with empty_reply outcome says to check chart and does not claim not saved" do
+        @tracker = TrackingAllergyGateway.new(
+          add_returns: { success: false, error: :empty_reply, message: BACKEND_PROBE_MESSAGE }
+        )
+
+        post_allergy
+
+        assert_response :unprocessable_entity
+        assert_unknown_gateway_outcome!
+        refute_backend_message_in_body!
+      end
+
+      test "POST NKA with empty_reply outcome says to check chart and does not claim not saved" do
+        @tracker = TrackingAllergyGateway.new(
+          nka_returns: { success: false, error: :empty_reply, message: BACKEND_PROBE_MESSAGE }
+        )
+
+        post_nka
+
+        assert_response :unprocessable_entity
+        assert_unknown_gateway_outcome!
+        refute_backend_message_in_body!
+      end
+
+      test "POST allergy with unrecognized gateway error says to check chart and does not claim not saved" do
+        @tracker = TrackingAllergyGateway.new(
+          add_returns: { success: false, error: :something_new, message: BACKEND_PROBE_MESSAGE }
+        )
+
+        post_allergy
+
+        assert_response :unprocessable_entity
+        assert_unknown_gateway_outcome!
+        refute_backend_message_in_body!
+      end
+
+      test "POST NKA with unrecognized gateway error says to check chart and does not claim not saved" do
+        @tracker = TrackingAllergyGateway.new(
+          nka_returns: { success: false, error: :something_new, message: BACKEND_PROBE_MESSAGE }
+        )
+
+        post_nka
+
+        assert_response :unprocessable_entity
+        assert_unknown_gateway_outcome!
+        refute_backend_message_in_body!
+      end
+
+      # -- Spec amendment: pre-write refusal messaging (#644 round-2) --------
+
+      test "POST allergy with locked refusal explains another user is editing allergies" do
+        @tracker = TrackingAllergyGateway.new(
+          add_returns: { success: false, error: :locked, message: BACKEND_PROBE_MESSAGE }
+        )
+
+        post_allergy
+
+        assert_equal 1, @tracker.add_calls.length
+        assert_named_allergy_not_saved_refusal!(/lock|another user|editing/i)
+        refute_backend_message_in_body!
+      end
+
+      test "POST allergy with invalid_value refusal explains value was invalid or missing" do
+        @tracker = TrackingAllergyGateway.new(
+          add_returns: { success: false, error: :invalid_value, message: BACKEND_PROBE_MESSAGE }
+        )
+
+        post_allergy
+
+        assert_equal 1, @tracker.add_calls.length
+        assert_named_allergy_not_saved_refusal!(/invalid|missing|required/i)
+        refute_backend_message_in_body!
+      end
+
+      test "POST allergy with missing_fields refusal explains value was invalid or missing" do
+        @tracker = TrackingAllergyGateway.new(
+          add_returns: { success: false, error: :missing_fields, message: BACKEND_PROBE_MESSAGE }
+        )
+
+        post_allergy
+
+        assert_equal 1, @tracker.add_calls.length
+        assert_named_allergy_not_saved_refusal!(/invalid|missing|required/i)
+        refute_backend_message_in_body!
       end
     end
   end
