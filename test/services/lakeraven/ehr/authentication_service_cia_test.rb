@@ -34,11 +34,16 @@ class AuthenticationServiceCiaTest < ActiveSupport::TestCase
       { success: true, user: "PROVIDER,TEST", duz: 77, greeting: @greeting }
     end
 
+    # ORWU USERINFO for the signed-on DUZ, as a CIA broker frames it (sequence
+    # byte, 0x00, body): piece 3 is USRCLS, 3 = provider. Sign-on reads the
+    # user class from it and fails closed without one (rpms-rpc #236).
+    USERINFO_REPLY = "\x01\x00".b + "77^PROVIDER,TEST^3^1^1^3^0^99999^20^1^1^5^DEMO.IHS.GOV^1^180".b
+
     def call_rpc_raw(name, *)
       @rpcs << name
       raise RpmsRpc::Client::RpcError, "4 Access denied for remote procedure: #{name}" if @denied.include?(name)
 
-      ""
+      name == "ORWU USERINFO" ? USERINFO_REPLY : ""
     end
   end
 
@@ -58,6 +63,7 @@ class AuthenticationServiceCiaTest < ActiveSupport::TestCase
     assert result.success?
     assert_equal "77", result.value[:duz]
     assert_equal "PROVIDER,TEST", result.value[:name]
+    assert_equal "provider", result.value[:user_type], "the class is ORWU USERINFO USRCLS 3"
     assert_equal [ [ "PROV123", "VERIFY" ] ], client.signons
     refute_includes client.rpcs, "XUS AV CODE"
     refute_includes client.rpcs, "XUS SIGNON SETUP"
