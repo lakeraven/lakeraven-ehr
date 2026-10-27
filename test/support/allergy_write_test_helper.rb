@@ -48,6 +48,47 @@ module AllergyWriteTestHelper
     { allergy: valid_synthetic_allergy_attrs.merge(extra) }
   end
 
+  # Rails indexed form encoding (allergy[symptoms][0][text]=...) arrives as
+  # a Hash keyed by index strings, not as an Array.
+  def indexed_allergy_form_params(symptom_text: SYNTHETIC_SYMPTOM, comment: SYNTHETIC_COMMENT, extra: {})
+    base = valid_synthetic_allergy_attrs.except(:symptoms, :comments, :originator)
+    {
+      allergy: base.merge(
+        symptoms: { "0" => { ien: "10", text: symptom_text, date: "3261015" } },
+        comments: { "0" => comment }
+      ).merge(extra)
+    }
+  end
+
+  BACKEND_PROBE_MESSAGE = "BACKEND-PROBE-SECRET-644"
+
+  # Probe audit insert succeeds; the post-action audit row fails (#644).
+  def with_audit_create_failing_after_probe
+    calls = 0
+    audit_model = Lakeraven::EHR::AuditEvent
+    original = audit_model.method(:create!)
+    audit_model.define_singleton_method(:create!) do |*args, **kwargs|
+      calls += 1
+      raise ActiveRecord::StatementInvalid, "audit down" if calls > 1
+
+      original.call(*args, **kwargs)
+    end
+    yield
+  ensure
+    audit_model.singleton_class.send(:remove_method, :create!)
+  end
+
+  def assert_error_log_without_clinical_text!(logs)
+    assert_match(/\bERROR\b/i, logs, "expected an error-level log line")
+    refute_includes logs, SYNTHETIC_AGENT
+    refute_includes logs, SYNTHETIC_COMMENT
+    refute_includes logs, SYNTHETIC_SYMPTOM
+  end
+
+  def refute_backend_message_in_body!(body, message = BACKEND_PROBE_MESSAGE)
+    refute_includes body, message
+  end
+
   class FakeAllergyRpc
     attr_reader :save_calls, :nka_calls
 

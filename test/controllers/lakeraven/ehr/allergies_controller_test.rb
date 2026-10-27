@@ -325,6 +325,161 @@ module Lakeraven
         assert_response :ok
         assert_allergies_state!("none-recorded", text_fragment: "None recorded")
       end
+
+      # -- Spec amendment: audit after committed RPC (#644 review) ---------------
+
+      test "POST allergy returns 503 explaining RPMS write succeeded when post-write audit fails" do
+        AuditEvent.delete_all
+        logs = capture_rails_logs do
+          with_audit_create_failing_after_probe do
+            with_tracking_allergy_gateway(@tracker) do
+              post BASE, params: allergy_form_params.merge(authenticity_token: csrf_token)
+            end
+          end
+        end
+
+        assert_equal 1, @tracker.add_calls.length
+        assert_response :service_unavailable
+        assert_match(/recorded/i, response.body)
+        assert_match(/audit/i, response.body)
+        refute_match(/not (completed|saved|recorded)/i, response.body)
+        refute_match(/Allergy recorded\./, response.body)
+        assert_error_log_without_clinical_text!(logs)
+      end
+
+      test "POST NKA returns 503 explaining RPMS write succeeded when post-write audit fails" do
+        AuditEvent.delete_all
+        logs = capture_rails_logs do
+          with_audit_create_failing_after_probe do
+            with_tracking_allergy_gateway(@tracker) do
+              post NKA_PATH, params: { authenticity_token: csrf_token }
+            end
+          end
+        end
+
+        assert_equal 1, @tracker.nka_calls.length
+        assert_response :service_unavailable
+        assert_match(/recorded/i, response.body)
+        assert_match(/audit/i, response.body)
+        refute_match(/not (completed|saved|recorded)/i, response.body)
+        refute_match(/No known allergies recorded\./, response.body)
+        assert_error_log_without_clinical_text!(logs)
+      end
+
+      # -- Spec amendment: gateway refusal messaging (#644 review) -------------
+
+      test "POST NKA with active allergies refusal explains patient has active allergies on file" do
+        @tracker = TrackingAllergyGateway.new(
+          nka_returns: {
+            success: false,
+            error: :active_allergies,
+            message: BACKEND_PROBE_MESSAGE
+          }
+        )
+
+        post_nka
+
+        assert_response :unprocessable_entity
+        assert_match(/active allerg/i, response.body)
+        refute_backend_message_in_body!(response.body)
+      end
+
+      test "POST allergy with duplicate refusal explains allergy is already on file" do
+        @tracker = TrackingAllergyGateway.new(
+          add_returns: { success: false, error: :duplicate, message: BACKEND_PROBE_MESSAGE }
+        )
+
+        post_allergy
+
+        assert_response :unprocessable_entity
+        assert_match(/already|duplicate/i, response.body)
+        refute_backend_message_in_body!(response.body)
+      end
+
+      test "POST allergy with unavailable outcome says to check chart and does not claim nothing changed" do
+        @tracker = TrackingAllergyGateway.new(
+          add_returns: { success: false, error: :unavailable, message: BACKEND_PROBE_MESSAGE }
+        )
+
+        post_allergy
+
+        assert_response :unprocessable_entity
+        assert_match(/unknown|could not confirm|check the chart/i, response.body)
+        refute_match(/left unchanged/i, response.body)
+        refute_match(/was not saved/i, response.body)
+        refute_backend_message_in_body!(response.body)
+      end
+
+      test "POST NKA with unavailable outcome says to check chart and does not claim nothing changed" do
+        @tracker = TrackingAllergyGateway.new(
+          nka_returns: { success: false, error: :unavailable, message: BACKEND_PROBE_MESSAGE }
+        )
+
+        post_nka
+
+        assert_response :unprocessable_entity
+        assert_match(/unknown|could not confirm|check the chart/i, response.body)
+        refute_match(/left unchanged/i, response.body)
+        refute_match(/was not saved/i, response.body)
+        refute_backend_message_in_body!(response.body)
+      end
+
+      test "POST allergy with generic gateway refusal reports not saved" do
+        @tracker = TrackingAllergyGateway.new(
+          add_returns: { success: false, error: :invalid_value, message: BACKEND_PROBE_MESSAGE }
+        )
+
+        post_allergy
+
+        assert_response :unprocessable_entity
+        assert_match(/not saved/i, response.body)
+        refute_backend_message_in_body!(response.body)
+      end
+
+      test "POST NKA failure heading does not use double negative wording" do
+        @tracker = TrackingAllergyGateway.new(
+          nka_returns: { success: false, error: :invalid_value, message: BACKEND_PROBE_MESSAGE }
+        )
+
+        post_nka
+
+        assert_response :unprocessable_entity
+        refute_match(/No known allergies were not recorded/i, response.body)
+      end
+
+      # -- Spec amendment: indexed allergy params (#644 review) ------------------
+
+      test "POST allergy with Rails indexed symptoms and comments passes them to gateway" do
+        with_tracking_allergy_gateway(@tracker) do
+          post BASE, params: indexed_allergy_form_params.merge(authenticity_token: csrf_token)
+        end
+
+        assert_equal 1, @tracker.add_calls.length
+        attrs = @tracker.add_calls.first[:attrs]
+        symptoms = attrs[:symptoms] || attrs["symptoms"]
+        comments = attrs[:comments] || attrs["comments"]
+
+        assert symptoms.is_a?(Array), "expected symptoms as an Array, got #{symptoms.class}"
+        assert_equal SYNTHETIC_SYMPTOM, symptoms.dig(0, :text) || symptoms.dig(0, "text")
+        assert comments.is_a?(Array), "expected comments as an Array, got #{comments.class}"
+        assert_equal SYNTHETIC_COMMENT, comments.first
+      end
+
+      test "POST allergy with malformed symptoms shape returns 422 and does not call gateway" do
+        base = valid_synthetic_allergy_attrs.except(:symptoms, :comments, :originator)
+        params = {
+          allergy: base.merge(symptoms: "SYNTHETIC-GARBAGE-SHAPE"),
+          authenticity_token: csrf_token
+        }
+
+        with_tracking_allergy_gateway(@tracker) do
+          post BASE, params: params
+        end
+
+        assert_response :unprocessable_entity
+        assert_match(/not saved/i, response.body)
+        assert_empty @tracker.add_calls
+      end
     end
   end
 end
