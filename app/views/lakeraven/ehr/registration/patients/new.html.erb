@@ -1,0 +1,144 @@
+<% content_for :title, "Register a new patient | Lakeraven EHR" %>
+
+<div class="page-header">
+  <h1>Register a new patient</h1>
+  <p>
+    RPMS checks for a patient already on file before anything is saved.
+  </p>
+</div>
+
+<% if flash[:alert].present? %>
+  <div
+    class="alert alert--error"
+    role="alert"
+  >
+    <p><%= flash[:alert] %></p>
+  </div>
+<% end %>
+
+<% if @registration.errors.any? %>
+  <div
+    id="registration-errors"
+    class="alert alert--error"
+    role="alert"
+  >
+    <p>
+      The registration was not saved.
+    </p>
+    <ul>
+      <% @registration.errors.full_messages.each do |message| %>
+        <li><%= message %></li>
+      <% end %>
+    </ul>
+  </div>
+<% end %>
+
+<%= form_with scope: :registration,
+      url: registration_patients_path,
+      method: :post,
+      local: true,
+      id: "registration-form",
+      class: "card flex flex-col gap-4" do |f| %>
+  <div class="flex flex-col gap-1">
+    <%= f.label :name, "Name (LAST,FIRST MIDDLE)" %>
+    <%= f.text_field :name,
+          value: @registration.name,
+          required: true,
+          autocomplete: "off",
+          class: "rounded border border-slate-300 px-3 py-2" %>
+  </div>
+
+  <fieldset class="flex gap-4">
+    <legend>Sex</legend>
+    <label>
+      <%= f.radio_button :sex,
+            "F",
+            checked: @registration.sex == "F" %>
+      Female
+    </label>
+    <label>
+      <%= f.radio_button :sex,
+            "M",
+            checked: @registration.sex == "M" %>
+      Male
+    </label>
+  </fieldset>
+
+  <div class="flex flex-col gap-1">
+    <%= f.label :dob, "Date of birth" %>
+    <%= f.date_field :dob,
+          value: @registration.dob,
+          required: true,
+          class: "rounded border border-slate-300 px-3 py-2" %>
+  </div>
+
+  <div class="flex flex-col gap-1">
+    <%= f.label :ssn, "Social security number (optional)" %>
+    <%= f.text_field :ssn,
+          value: @registration.ssn,
+          inputmode: "numeric",
+          autocomplete: "off",
+          class: "rounded border border-slate-300 px-3 py-2" %>
+  </div>
+
+  <fieldset class="flex flex-col gap-2">
+    <legend>Tribe of membership</legend>
+    <div class="flex items-end gap-2">
+      <%= label_tag :tribe_search, "Tribe name starts with", class: "sr-only" %>
+      <%= text_field_tag :tribe_search,
+            params[:tribe_search],
+            placeholder: "Tribe name starts with",
+            class: "rounded border border-slate-300 px-3 py-2" %>
+      <%= submit_tag "Find tribe",
+            name: nil,
+            formaction: registration_new_patient_path,
+            formmethod: :get,
+            formnovalidate: true,
+            class: "min-h-9 bg-white px-3 py-2 ring-1 ring-slate-300 ring-inset" %>
+    </div>
+    <% @tribes.each do |tribe| %>
+      <label data-tribe="<%= tribe[:ien] %>">
+        <%= f.radio_button :tribe_ien,
+              tribe[:ien],
+              checked: @registration.tribe_ien == tribe[:ien] %>
+        <%= tribe[:name] %>
+      </label>
+    <% end %>
+    <% if @tribes.empty? && @registration.tribe_ien %>
+      <%= f.hidden_field :tribe_ien, value: @registration.tribe_ien %>
+      <p class="hint">Tribe chosen.</p>
+    <% end %>
+  </fieldset>
+
+  <fieldset class="flex flex-col gap-2">
+    <legend>Community of residence</legend>
+    <div class="flex items-end gap-2">
+      <%= label_tag :community_search, "Community name starts with", class: "sr-only" %>
+      <%= text_field_tag :community_search,
+            params[:community_search],
+            placeholder: "Community name starts with",
+            class: "rounded border border-slate-300 px-3 py-2" %>
+      <%= submit_tag "Find community",
+            name: nil,
+            formaction: registration_new_patient_path,
+            formmethod: :get,
+            formnovalidate: true,
+            class: "min-h-9 bg-white px-3 py-2 ring-1 ring-slate-300 ring-inset" %>
+    </div>
+    <% @communities.each do |community| %>
+      <label data-community="<%= community[:ien] %>">
+        <%= f.radio_button :community_ien,
+              community[:ien],
+              checked: @registration.community_ien == community[:ien] %>
+        <%= community[:name] %>, <%= community[:county] %>, <%= community[:state] %>
+      </label>
+    <% end %>
+    <% if @communities.empty? && @registration.community_ien %>
+      <%= f.hidden_field :community_ien, value: @registration.community_ien %>
+      <p class="hint">Community chosen.</p>
+    <% end %>
+  </fieldset>
+
+  <%= f.submit "Register",
+        class: "min-h-9 self-start bg-slate-900 px-4 py-2 text-white hover:bg-slate-700" %>
+<% end %>

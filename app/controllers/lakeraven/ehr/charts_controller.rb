@@ -45,8 +45,29 @@ module Lakeraven
       # recorded, it is not completed.
       include AuditableClinicalAccess
       include FHIRReadEgress
+      # close_patient_context! only. This controller keeps its own
+      # enforce_patient_context! (token compartment, not the session gate);
+      # a GET still must not open a context.
+      include ClinicianPatientContext
 
       FHIR_CONTENT_TYPE = "application/fhir+json"
+
+      # VistA DFN width. Patient.canonical_dfn has no length cap; the chart
+      # route treats a longer digit string as a malformed identifier (#467).
+      MAX_CHART_DFN_DIGITS = 18
+
+      # Static on purpose: the flash names the problem, never the raw segment.
+      # A leaked error string or markup in the URL must not be echoed.
+      INVALID_CHART_IDENTIFIER_ALERT =
+        "Patient identifier is not a valid record id. " \
+        "A record id is a positive integer of at most 18 digits; 0 is not valid."
+
+      # The alert names 0, and the numeral 18 is itself a prefix of a refused
+      # segment (" 1"). The audit reason spells the bound with no digits, so
+      # neither the row nor the OperationOutcome can match the raw segment.
+      INVALID_CHART_IDENTIFIER_AUDIT_REASON =
+        "Patient identifier is not a valid record id. " \
+        "A record id is a positive integer of at most eighteen digits."
 
       # Chart sections an IHS capability owns. A backend that withholds one
       # adds an outcome entry instead of those resources (#647).
@@ -54,6 +75,11 @@ module Lakeraven
 
       before_action :authenticate_chart_request!
       before_action :require_patient_scope!
+      # After authentication and Patient scope, before the token compartment
+      # check. A malformed id never reaches enforce_patient_context! and
+      # never becomes a repository read. A well-formed id falls through and
+      # the authorization decision is unchanged.
+      before_action :reject_invalid_chart_dfn!
       before_action :enforce_patient_context!
 
       # ORWPT APPTLST status text -> FHIR Encounter.status
@@ -77,7 +103,8 @@ module Lakeraven
       end
 
       def show
-        @patient = Patient.find_by_dfn(params[:dfn])
+        @patient = find_chart_patient
+        return if performed?
         return render_missing_patient unless @patient
 
         load_clinical_collections
@@ -85,6 +112,111 @@ module Lakeraven
       end
 
       private
+
+      # -- Identifier format (#467) ----------------------------------------------
+      #
+      # The RAW route segment, never stripped. It must be 1..18 ASCII digits
+      # and Patient.canonical_dfn must resolve to a positive id. Leading zeros
+      # are valid ("007"). Whitespace and control characters are malformed
+      # even though canonical_dfn would strip them. The static alert names the
+      # problem and never echoes the segment.
+
+      def reject_invalid_chart_dfn!
+        return if chart_dfn_well_formed?
+
+        close_patient_context!
+        note_audit_denial(INVALID_CHART_IDENTIFIER_AUDIT_REASON)
+        respond_to_invalid_chart_dfn
+      end
+
+      def respond_to_invalid_chart_dfn
+        if fhir_requested?
+          render_invalid_chart_dfn
+        else
+          redirect_to dashboard_path, alert: INVALID_CHART_IDENTIFIER_ALERT
+        end
+      end
+
+      def render_invalid_chart_dfn
+        render json: invalid_chart_dfn_outcome,
+               status: :bad_request,
+               content_type: FHIR_CONTENT_TYPE
+      end
+
+      # The HTML alert names 0 as an example. That digit is itself a refused
+      # id, so the OperationOutcome uses the audit reason: a diagnostics
+      # string must not contain a digit the raw segment could match.
+      def invalid_chart_dfn_outcome
+        {
+          resourceType: "OperationOutcome",
+          issue: [ {
+            severity: "error",
+            code: "invalid",
+            diagnostics: INVALID_CHART_IDENTIFIER_AUDIT_REASON
+          } ]
+        }
+      end
+
+      def chart_dfn_well_formed?
+        raw = raw_chart_dfn_segment
+        return false unless raw.match?(/\A\d{1,#{MAX_CHART_DFN_DIGITS}}\z/)
+
+        Patient.canonical_dfn(raw).present?
+      end
+
+      # Exactly the routed segment. No strip and no presence: a blank-looking
+      # value made of whitespace is still not a record id.
+      def raw_chart_dfn_segment
+        path = request.path_parameters
+        segment = path.key?(:dfn) ? path[:dfn] : path["dfn"]
+        segment.to_s
+      end
+
+      # PatientRepository.find / PatientGateway.find do not raise a dedicated
+      # backend error. The URL-context specs stub `find` with StandardError
+      # ("rpms unavailable"), and a broker failure arrives as whatever the
+      # RPC client raises — also a StandardError. Rescue is limited to this
+      # lookup so a programming error while rendering the chart still
+      # propagates.
+      def find_chart_patient
+        Patient.find_by_dfn(params[:dfn])
+      rescue StandardError => error
+        log_chart_backend_failure(error)
+        render_chart_backend_failure
+        nil
+      end
+
+      def log_chart_backend_failure(error)
+        Rails.logger.warn(
+          "[chart] patient could not be loaded: #{error.class}: " \
+          "#{PhiSanitizer.sanitize_message(error.message)}"
+        )
+      end
+
+      def render_chart_backend_failure
+        close_patient_context!
+        if fhir_requested?
+          render_chart_backend_failure_fhir
+        else
+          render_chart_backend_failure_html
+        end
+      end
+
+      def render_chart_backend_failure_fhir
+        render json: {
+          resourceType: "OperationOutcome",
+          issue: [ {
+            severity: "error",
+            code: "exception",
+            diagnostics: "The chart could not be loaded"
+          } ]
+        }, status: :service_unavailable, content_type: FHIR_CONTENT_TYPE
+      end
+
+      def render_chart_backend_failure_html
+        @patient_banner = PatientBanner.empty
+        render :unavailable, layout: false, status: :service_unavailable
+      end
 
       # -- Authentication / authorization (fail closed) -------------------------
 
@@ -142,14 +274,25 @@ module Lakeraven
       end
 
       # The route may say "01". The chart shows the patient the repository
-      # resolves, and the audit row names that same canonical dfn.
+      # resolves, and the audit row names that same canonical dfn. A segment
+      # the format gate refused is not that patient: canonical_dfn still
+      # accepts a whitespace-padded "1", and a non-canonical fallback would
+      # record "0" or a 19-digit id. Those refusals name no entity.
       def direct_audit_identifier
-        Patient.canonical_dfn(chart_route_dfn) || chart_route_dfn || super
+        return unless chart_dfn_well_formed?
+
+        segment = raw_chart_dfn_segment
+        Patient.canonical_dfn(segment) || segment
       end
 
-      def chart_route_dfn
-        path = request.path_parameters
-        path[:dfn].presence || path["dfn"].presence
+      # The shared rule degrades a missing direct identifier to ?patient=.
+      # That is right for a search that still served the patient's data, and
+      # wrong here: a segment the format gate refused did not open a chart.
+      # A well-formed id keeps the shared rule, which records the route dfn.
+      def audit_entity_reference
+        return [ "Patient", nil ] unless chart_dfn_well_formed?
+
+        super
       end
 
       # AuditableClinicalAccess hook: demo-bypass requests carry no token but

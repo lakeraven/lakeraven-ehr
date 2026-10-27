@@ -1,0 +1,74 @@
+<% content_for :title, "Possible matches | Lakeraven EHR" %>
+
+<div class="page-header">
+  <h1>This patient may already have a chart</h1>
+  <p>
+    Nothing has been saved.
+  </p>
+  <p>
+    RPMS found patients on file with the same name or the same date of birth as <%= @registration.name %>.
+  </p>
+</div>
+
+<table
+  id="possible-matches"
+  class="w-full text-left"
+>
+  <caption class="sr-only">Patients on file who may be <%= @registration.name %></caption>
+  <thead>
+    <tr>
+      <th scope="col">Name</th>
+      <th scope="col">Health record number</th>
+      <th scope="col">Date of birth</th>
+      <th scope="col">Sex</th>
+    </tr>
+  </thead>
+  <tbody>
+    <% @candidates.each do |candidate| %>
+      <tr data-dfn="<%= candidate[:dfn] %>">
+        <td>
+          <%= link_to candidate[:name], registration_patient_path(candidate[:dfn]) %>
+        </td>
+        <td><%= candidate[:mrn].presence || "None at this facility" %></td>
+        <td><%= candidate[:dob]&.strftime("%b %-d, %Y") %></td>
+        <td><%= candidate[:sex] %></td>
+      </tr>
+    <% end %>
+  </tbody>
+</table>
+
+<p class="mt-6">
+  If one of them is this patient, open their registration instead of registering again.
+</p>
+
+<% if @unshowable %>
+  <div
+    id="unshowable-match"
+    class="alert alert--error"
+    role="alert"
+  >
+    <p>
+      RPMS found a possible match it could not describe, so it cannot be ruled out here.
+    </p>
+    <p>
+      Search for the patient by name and date of birth before registering.
+    </p>
+  </div>
+<% else %>
+<%= form_with scope: :registration,
+      url: registration_confirm_patient_path,
+      method: :post,
+      local: true,
+      id: "confirm-different-person",
+      class: "mt-4" do |f| %>
+  <%= hidden_field_tag :review_token, @review_token %>
+  <%= f.hidden_field :name, value: @registration.name %>
+  <%= f.hidden_field :sex, value: @registration.sex %>
+  <%= f.hidden_field :dob, value: @registration.dob&.iso8601 %>
+  <%= f.hidden_field :ssn, value: @registration.ssn %>
+  <%= f.hidden_field :tribe_ien, value: @registration.tribe_ien %>
+  <%= f.hidden_field :community_ien, value: @registration.community_ien %>
+  <%= f.submit "None of these is the patient: register them",
+        class: "min-h-9 bg-white px-4 py-2 ring-1 ring-slate-300 ring-inset hover:bg-slate-50" %>
+<% end %>
+<% end %>

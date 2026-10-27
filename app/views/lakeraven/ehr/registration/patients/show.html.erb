@@ -7,6 +7,31 @@
   </p>
 </div>
 
+<% if flash[:alert].present? %>
+  <div
+    id="registration-alert"
+    class="alert alert--error"
+    role="alert"
+  >
+    <p><%= flash[:alert] %></p>
+  </div>
+<% end %>
+
+<% if @registered_hrn.present? %>
+  <div
+    id="registered"
+    class="alert alert--notice"
+    role="status"
+  >
+    <p>
+      Registered.
+    </p>
+    <p>
+      Health record number <%= @patient[:mrn].presence || @registered_hrn %>.
+    </p>
+  </div>
+<% end %>
+
 <dl
   id="registration"
   class="card grid grid-cols-[max-content_1fr] gap-x-6 gap-y-2"
