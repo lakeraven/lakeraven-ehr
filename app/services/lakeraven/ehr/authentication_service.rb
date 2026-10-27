@@ -69,7 +69,7 @@ module Lakeraven
         symbolic_keys = Roles.symbolize_keys(SecurityKeyGateway.held(Roles::KEY_NAMES.values))
 
         # Round-trip the server's user type through the short code so
-        # :prc_supervisor or :prc_manager still elevates to "case_manager".
+        # :referrals_supervisor or :referrals_manager still elevates to "case_manager".
         # A class the map does not know stays "user".
         Result.new(
           success?: true,

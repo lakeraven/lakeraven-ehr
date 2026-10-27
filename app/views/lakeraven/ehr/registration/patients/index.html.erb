@@ -1,0 +1,83 @@
+<% content_for :title, "Find a patient | Lakeraven EHR" %>
+
+<div class="page-header">
+  <h1>Find a patient</h1>
+  <p>
+    Search before registering, so nobody gets a second chart.
+  </p>
+</div>
+
+<%= form_with url: registration_patients_path,
+      method: :get,
+      local: true,
+      class: "card flex flex-wrap items-end gap-4" do %>
+  <div class="flex flex-col gap-1">
+    <%= label_tag :q, "Name, health record number or SSN" %>
+    <%= text_field_tag :q,
+          @query,
+          id: "q",
+          required: true,
+          autocomplete: "off",
+          class: "rounded border border-slate-300 px-3 py-2" %>
+  </div>
+  <div class="flex flex-col gap-1">
+    <%= label_tag :dob, "Date of birth (optional)" %>
+    <%= date_field_tag :dob,
+          @dob,
+          id: "dob",
+          class: "rounded border border-slate-300 px-3 py-2" %>
+  </div>
+  <%= submit_tag "Search",
+        name: nil,
+        class: "min-h-9 bg-slate-900 px-4 py-2 text-white hover:bg-slate-700" %>
+<% end %>
+
+<% if @lookup_failed %>
+  <div
+    class="alert alert--error"
+    role="alert"
+  >
+    <p>
+      The patient lookup did not answer, so these results are not complete.
+    </p>
+    <p>
+      Do not register a new patient until a search succeeds.
+    </p>
+  </div>
+<% elsif @searched && @matches.empty? %>
+  <p
+    id="no-match"
+    class="hint"
+  >
+    No patient matches “<%= @query %>”<%= " born #{@dob.strftime('%b %-d, %Y')}" if @dob %>.
+  </p>
+<% elsif @matches.any? %>
+  <table
+    id="matches"
+    class="mt-6 w-full text-left"
+  >
+    <caption class="sr-only">Patients matching “<%= @query %>”</caption>
+    <thead>
+      <tr>
+        <th scope="col">Name</th>
+        <th scope="col">Health record number</th>
+        <th scope="col">Date of birth</th>
+        <th scope="col">Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% @matches.each do |match| %>
+        <tr data-dfn="<%= match.dfn %>">
+          <td>
+            <%= link_to match.name, registration_patient_path(match.dfn) %>
+          </td>
+          <td><%= match.hrn || "None at this facility" %></td>
+          <td><%= match.dob&.strftime("%b %-d, %Y") %></td>
+          <td data-status="<%= match.status.downcase %>">
+            <%= match.status %><%= " #{match.dod.strftime('%b %-d, %Y')}" if match.deceased? %>
+          </td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+<% end %>

@@ -106,6 +106,12 @@ Lakeraven::EHR::Engine.routes.draw do
   delete "logout" => "sessions#destroy", as: :logout
   get "dashboard" => "dashboards#show", as: :dashboard
 
+  # The front desk finds a patient before registering one (rpms-ux S-REG-01).
+  namespace :registration do
+    get "patients", to: "patients#index", as: :patients
+    get "patients/:dfn", to: "patients#show", as: :patient, constraints: { dfn: /\d+/ }
+  end
+
   # Test-only: seed the browser session (DUZ, user type, security keys, and
   # the session-bound SMART token) without the RPMS sign-on flow. The
   # controller refuses to exist outside the test environment; the route guard

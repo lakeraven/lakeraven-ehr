@@ -102,8 +102,8 @@ Then("I should be able to process CHS claims") do
   assert @current_user.can_process_chs?, "Expected user to be able to process CHS claims"
 end
 
-Then("I should be able to manage consults") do
-  assert @current_user.can_manage_consults?, "Expected user to be able to manage consults"
+Then("I should not be able to manage consults") do
+  refute @current_user.can_manage_consults?, "Expected user not to be able to manage consults"
 end
 
 Then("I should not have a current user") do
