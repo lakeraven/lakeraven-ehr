@@ -41,6 +41,20 @@
   If one of them is this patient, open their registration instead of registering again.
 </p>
 
+<% if @unshowable %>
+  <div
+    id="unshowable-match"
+    class="alert alert--error"
+    role="alert"
+  >
+    <p>
+      RPMS found a possible match it could not describe, so it cannot be ruled out here.
+    </p>
+    <p>
+      Search for the patient by name and date of birth before registering.
+    </p>
+  </div>
+<% else %>
 <%= form_with scope: :registration,
       url: registration_confirm_patient_path,
       method: :post,
@@ -56,4 +70,5 @@
   <%= f.hidden_field :community_ien, value: @registration.community_ien %>
   <%= f.submit "None of these is the patient: register them",
         class: "min-h-9 bg-white px-4 py-2 ring-1 ring-slate-300 ring-inset hover:bg-slate-50" %>
+<% end %>
 <% end %>

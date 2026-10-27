@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "rpms_rpc/api/patient"
+require "securerandom"
 
 module Lakeraven
   module EHR
@@ -64,11 +65,18 @@ module Lakeraven
         # did not review does the registration file with the override.
         def confirm
           @registration = PatientRegistration.new(registration_params)
-          reviewed = reviewed_candidates(@registration)
-          unless @registration.valid? && reviewed
+          review = verified_review(@registration)
+          unless @registration.valid? && review
             flash.now[:alert] = "The review has expired or does not match these details. Check the possible matches again."
             return render_form(:unprocessable_content)
           end
+          # A review files at most once: a second confirm of it (a double click,
+          # a retried request) stops here, before RPMS is asked.
+          unless RegistrationReview.use!(review["id"], duz: session[:duz])
+            flash.now[:alert] = "This review was already used. Search for the patient before registering again."
+            return render_form(:conflict)
+          end
+          reviewed = Array(review["candidates"]).map(&:to_i)
 
           result = PatientRegistrationGateway.register(@registration)
           if result.possible_matches? && (result.candidate_dfns - reviewed).empty?
@@ -83,6 +91,11 @@ module Lakeraven
           if result.registered?
             flash[:registered_hrn] = result.dfn.to_s
             redirect_to registration_patient_path(result.dfn)
+          elsif result.hrn_not_filed?
+            flash[:alert] = "The patient was registered, but RPMS did not file a health record number. Ask a registration manager to assign one before the patient is seen."
+            redirect_to registration_patient_path(result.dfn)
+          elsif result.outcome_unknown?
+            render :outcome_unknown, status: :service_unavailable
           elsif result.possible_matches?
             render_possible_matches(result.candidate_dfns)
           else
@@ -92,21 +105,38 @@ module Lakeraven
         end
 
         def render_possible_matches(dfns)
-          @candidates = dfns.filter_map { |dfn| (header = RpmsRpc::Patient.brief_header(dfn)) && header.merge(dfn: dfn) }
-          @review_token = review_verifier.generate(
-            { "digest" => @registration.digest, "candidates" => dfns.map(&:to_i).sort, "duz" => session[:duz].to_s },
-            purpose: REVIEW_PURPOSE, expires_in: REVIEW_TTL
-          )
+          @candidates = dfns.map { |dfn| shown_candidate(dfn) }
+          # Only what the clerk can see may be reviewed. A candidate RPMS will not
+          # describe (no name or date of birth) cannot be told apart from this
+          # patient, so there is no override: the clerk searches instead.
+          @unshowable = @candidates.any?(&:nil?)
+          @candidates = @candidates.compact
+          unless @unshowable
+            @review_token = review_verifier.generate(
+              { "id" => SecureRandom.uuid, "digest" => @registration.digest,
+                "candidates" => @candidates.map { |c| c[:dfn] }.sort, "duz" => session[:duz].to_s },
+              purpose: REVIEW_PURPOSE, expires_in: REVIEW_TTL
+            )
+          end
           render :possible_matches, status: :conflict
         end
 
-        # The DFNs the clerk reviewed for exactly these details, or nil.
-        def reviewed_candidates(registration)
+        def shown_candidate(dfn)
+          header = RpmsRpc::Patient.brief_header(dfn)
+          return nil unless header && header[:name].present? && header[:dob].present?
+
+          header.merge(dfn: dfn.to_i)
+        rescue RpmsRpc::Client::RpcError
+          nil
+        end
+
+        # The review the clerk gave for exactly these details, as this user, or nil.
+        def verified_review(registration)
           review = review_verifier.verified(params[:review_token].to_s, purpose: REVIEW_PURPOSE)
-          return nil unless review.is_a?(Hash)
+          return nil unless review.is_a?(Hash) && review["id"].present?
           return nil unless review["digest"] == registration.digest && review["duz"] == session[:duz].to_s
 
-          Array(review["candidates"]).map(&:to_i)
+          review
         end
 
         def review_verifier

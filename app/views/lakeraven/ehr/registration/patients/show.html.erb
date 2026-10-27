@@ -7,6 +7,16 @@
   </p>
 </div>
 
+<% if flash[:alert].present? %>
+  <div
+    id="registration-alert"
+    class="alert alert--error"
+    role="alert"
+  >
+    <p><%= flash[:alert] %></p>
+  </div>
+<% end %>
+
 <% if @registered_hrn.present? %>
   <div
     id="registered"

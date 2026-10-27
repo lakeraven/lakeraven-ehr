@@ -11,7 +11,8 @@ class RegistrationRegisterPatientTest < ActionDispatch::IntegrationTest
   HEADERS = {
     3 => { name: "MOUSE,MICKEY M", dob: Date.new(1910, 2, 14), sex: "M", mrn: "1001" },
     990_057 => { name: "PROBE,ALPHA", dob: Date.new(1990, 5, 1), sex: "F", mrn: "990057" },
-    77 => { name: "PROBE,OTHER", dob: Date.new(1990, 5, 1), sex: "M", mrn: "77" }
+    77 => { name: "PROBE,OTHER", dob: Date.new(1990, 5, 1), sex: "M", mrn: "77" },
+    88 => { name: nil, dob: nil, sex: nil, mrn: nil }
   }.freeze
 
   def sign_in(keys, duz: "207")
@@ -143,6 +144,74 @@ class RegistrationRegisterPatientTest < ActionDispatch::IntegrationTest
       end
 
       assert_equal 1, calls.size, "no confirmation reached RPMS"
+    end
+  end
+
+  # Review finding: a candidate RPMS will not describe could be signed as
+  # "reviewed" without being shown. It is not shown, and there is no override.
+  test "a possible match RPMS cannot describe leaves no override, only a search" do
+    sign_in("registration_menu")
+    with_register(possible(3, 88)) do |calls|
+      post "/lakeraven-ehr/registration/patients", params: { registration: ENTRY }
+
+      assert_response :conflict
+      assert_select "#possible-matches tr[data-dfn='3']"
+      assert_select "#unshowable-match", text: /could not describe/
+      assert_select "#confirm-different-person", count: 0
+      assert_equal 1, calls.size
+    end
+  end
+
+  # Review finding: two confirms of one review (a double click) must not file twice.
+  test "a review files at most once: a second confirm of it is refused before RPMS is asked" do
+    sign_in("registration_menu")
+    with_register(possible(3), possible(3), registered(990_057)) do |calls|
+      post "/lakeraven-ehr/registration/patients", params: { registration: ENTRY }
+      token = review_token
+      post "/lakeraven-ehr/registration/patients/confirm", params: { review_token: token, registration: ENTRY }
+      assert_redirected_to "/lakeraven-ehr/registration/patients/990057"
+
+      post "/lakeraven-ehr/registration/patients/confirm", params: { review_token: token, registration: ENTRY }
+
+      assert_response :conflict
+      assert_select "[role='alert']", text: /already used/
+      assert_equal 3, calls.size, "the second confirm reached RPMS"
+    end
+  end
+
+  # Review finding: a chart that was filed must not read as "not registered".
+  test "a chart filed without its health record number opens, and says the number is missing" do
+    sign_in("registration_menu")
+    with_register({ success: false, error: :hrn_file_failed, dfn: 990_057, message: "" }) do
+      post "/lakeraven-ehr/registration/patients", params: { registration: ENTRY }
+
+      assert_redirected_to "/lakeraven-ehr/registration/patients/990057"
+      follow_redirect!
+      assert_select "#registration-alert", text: /did not file a health record number/
+    end
+  end
+
+  test "no answer from RPMS, or an error mid-save, is an unknown outcome with a search, not a retry" do
+    sign_in("registration_menu")
+    with_register(nil) do
+      post "/lakeraven-ehr/registration/patients", params: { registration: ENTRY }
+
+      assert_response :service_unavailable
+      assert_select "#outcome-unknown", text: /do not register them again yet/
+      assert_select "#search-after-unknown[href*='q=PROBE%2CALPHA']"
+      assert_select "#registration-form", count: 0
+    end
+
+    patient = RpmsRpc::Patient.singleton_class
+    patient.alias_method(:__register, :register)
+    RpmsRpc::Patient.define_singleton_method(:register) { |_attrs| raise RpmsRpc::Client::ConnectionError, "socket closed" }
+    post "/lakeraven-ehr/registration/patients", params: { registration: ENTRY }
+    assert_response :service_unavailable
+    assert_select "#outcome-unknown"
+  ensure
+    if patient&.method_defined?(:__register)
+      patient.alias_method(:register, :__register)
+      patient.remove_method(:__register)
     end
   end
 

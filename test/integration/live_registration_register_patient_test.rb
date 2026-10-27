@@ -69,5 +69,11 @@ class LiveRegistrationRegisterPatientTest < ActionDispatch::IntegrationTest
     assert_response :redirect
     follow_redirect!
     assert_select "h1", text: second[:name]
+
+    # A second confirm of the same review files nothing more.
+    post "/lakeraven-ehr/registration/patients/confirm", params: { review_token: token, registration: second }
+    assert_response :conflict
+    get "/lakeraven-ehr/registration/patients", params: { q: second[:name], dob: second[:dob] }
+    assert_select "#matches tbody tr", count: 1
   end
 end
