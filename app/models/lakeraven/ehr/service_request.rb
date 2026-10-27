@@ -90,6 +90,13 @@ module Lakeraven
       # STATUS OF REFERRAL (#90001 .15): A ACTIVE, A1 APPROVED, C1
       # CLOSED-COMPLETED, X CLOSED-NOT COMPLETED. The search reply may carry
       # the code or its name, so both are read.
+      # An RCIS REFERRAL (#90001) row, whatever its purpose.
+      RCIS_REFERRAL = "rcis"
+      # SNOMED CT 3457005 "Patient referral (procedure)": what every RCIS
+      # referral is. US Core requires a code (1..1); the referral's purpose,
+      # when RPMS has one, is its text.
+      PATIENT_REFERRAL = { system: "http://snomed.info/sct", code: "3457005", display: "Patient referral" }.freeze
+
       RCIS_STATUS = {
         "A" => "active", "ACTIVE" => "active", "A1" => "active", "APPROVED" => "active",
         "C1" => "completed", "CLOSED-COMPLETED" => "completed",
@@ -106,6 +113,7 @@ module Lakeraven
           identifier: row[:referral_number].presence,
           status: RCIS_STATUS.fetch(row[:status].to_s.strip.upcase, "draft"),
           service_requested: row[:purpose].presence,
+          referral_type: RCIS_REFERRAL,
           performer_name: row[:facility].presence,
           authored_on: row[:date]
         )
@@ -198,7 +206,7 @@ module Lakeraven
           status: map_status_to_fhir,
           intent: "order",
           priority: map_urgency_to_fhir_priority,
-          code: service_requested.present? ? { text: service_requested } : nil,
+          code: build_code,
           subject: patient_dfn ? { reference: "Patient/#{patient_dfn}" } : nil,
           authoredOn: authored_on&.iso8601,
           reasonCode: reason_for_referral.present? ? [ { text: reason_for_referral } ] : nil
@@ -217,6 +225,14 @@ module Lakeraven
           procedure_codes: procedure_codes, medical_priority_level: medical_priority_level,
           appointment_on: appointment_on, completed_on: completed_on, notes: notes
         }.compact
+      end
+
+      def build_code
+        if referral_type == RCIS_REFERRAL
+          { coding: [ PATIENT_REFERRAL ], text: service_requested.presence }.compact
+        elsif service_requested.present?
+          { text: service_requested }
+        end
       end
 
       def map_status_to_fhir

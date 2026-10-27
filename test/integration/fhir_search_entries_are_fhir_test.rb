@@ -70,6 +70,15 @@ class FhirSearchEntriesAreFhirTest < ActionDispatch::IntegrationTest
     end
   end
 
+  # US Core requires ServiceRequest.code (1..1). An RCIS referral is coded as
+  # what it is, a patient referral, with RPMS's purpose as its text.
+  test "an RCIS referral is coded as a patient referral, with its purpose as text" do
+    referral = entries("ServiceRequest").first
+
+    assert_equal "3457005", referral.dig("code", "coding", 0, "code")
+    assert_equal "Cardiology consult", referral.dig("code", "text")
+  end
+
   private
 
   def searched_types
