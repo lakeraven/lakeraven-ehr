@@ -142,7 +142,8 @@ module Lakeraven
       def parsed_accept_entries(header)
         header.split(",").filter_map do |part|
           type, *params = part.split(";").map(&:strip)
-          next if type.empty?
+          # An empty list element splits to no type (RFC 9110 §5.6.1).
+          next if type.nil? || type.empty?
 
           return nil if params.any? { |param| q_parameter_with_space_before_equals?(param) }
 
