@@ -141,6 +141,61 @@ class FeatureUnavailableAcceptNegotiationTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "feature unavailable ignores leading empty Accept list element for HTML negotiation" do
+    with_restricted_backend do
+      get IMMUNIZATION_PATH, params: { patient: PATIENT_DFN },
+        headers: @headers.merge("Accept" => ",text/html")
+
+      assert_response :not_found
+      assert_equal "text/html", response.media_type
+      assert_match(/not available on this system/i, response.body)
+
+      assert_equal 1, Lakeraven::EHR::AuditEvent.count,
+        "HTML not-supported response must record exactly one audit row"
+      event = Lakeraven::EHR::AuditEvent.order(:id).first
+      assert_equal "4", event.outcome
+      assert_match(/fhir operation refused: not-supported \(HTTP 404\)/i, event.outcome_desc)
+    end
+  end
+
+  test "feature unavailable ignores empty Accept list elements during negotiation" do
+    with_restricted_backend do
+      baseline_accept = "text/html,application/fhir+json"
+      get IMMUNIZATION_PATH, params: { patient: PATIENT_DFN },
+        headers: @headers.merge("Accept" => baseline_accept)
+      assert_response :not_found
+      baseline_media_type = response.media_type
+      baseline_body = response.body
+
+      Lakeraven::EHR::AuditEvent.delete_all
+
+      get IMMUNIZATION_PATH, params: { patient: PATIENT_DFN },
+        headers: @headers.merge("Accept" => "text/html,,application/fhir+json")
+
+      assert_response :not_found
+      assert_equal baseline_media_type, response.media_type
+      assert_equal baseline_body, response.body
+    end
+  end
+
+  test "feature unavailable Accept list with only empty elements renders FHIR JSON" do
+    with_restricted_backend do
+      get IMMUNIZATION_PATH, params: { patient: PATIENT_DFN },
+        headers: @headers.merge("Accept" => ",")
+
+      assert_fhir_feature_unavailable(response, capability: :ihs_immunization)
+    end
+  end
+
+  test "feature unavailable blank Accept header renders FHIR JSON" do
+    with_restricted_backend do
+      get IMMUNIZATION_PATH, params: { patient: PATIENT_DFN },
+        headers: @headers.merge("Accept" => " ")
+
+      assert_fhir_feature_unavailable(response, capability: :ihs_immunization)
+    end
+  end
+
   private
 
   def audit_denial_for_fhir_refusal
