@@ -42,6 +42,20 @@ class PerCheckoutTestDatabaseReadmeTest < ActiveSupport::TestCase
            "a stale lakeraven_ehr_rbg_* database"
   end
 
+  test "README documents cleaning up scratch worktrees left by a hard-killed red-before-green run" do
+    body = File.read(README)
+
+    assert body.match?(/SIGKILL|kill -9|killed hard|hard.?kill/i),
+           "test/README.md should say a hard-killed (e.g. SIGKILL) red-before-green run can leave " \
+           "a scratch worktree behind"
+    assert body.match?(/git worktree prune/i),
+           "test/README.md should document git worktree prune for stale scratch worktrees"
+    assert body.match?(/git worktree remove.*--force|worktree remove --force/i),
+           "test/README.md should document git worktree remove --force for stale scratch worktrees"
+    assert body.match?(/lakeraven_ehr_rbg_|red-before-green/i),
+           "worktree cleanup docs should sit alongside red-before-green / scratch database guidance"
+  end
+
   test "README explains that moving a worktree changes its database name" do
     body = File.read(README)
 
