@@ -15,7 +15,9 @@ module Lakeraven
     # remains is the one AuditableClinicalAccess writes after the response
     # status is known. If the proof insert fails, the gateway is not called.
     # If the RPC succeeded and that later row fails, the response says the
-    # write is already in RPMS and must not be entered again.
+    # write is already in RPMS and must not be entered again. An unknown
+    # RPC outcome says the chart must be checked; a nothing-written refusal
+    # keeps the shared not-completed response.
     class AllergiesController < WebController
       include BrowserSmartAuthentication
       include ClinicianPatientContext
@@ -141,13 +143,21 @@ module Lakeraven
         raise
       end
 
-      # The concern says the access was not completed. That is true only
-      # when the RPC did not run. A committed write must not be entered again.
+      # The shared refusal is right when the chart was not changed: the RPC
+      # never ran, or it refused with a NOTHING_WRITTEN symbol. A committed
+      # write must not be entered again. An unknown outcome may already be
+      # on the chart.
       def render_unrecorded_access_denial
-        return super unless @rpms_write
-
-        log_unaudited_rpms_write
-        render plain: unaudited_rpms_message, status: :service_unavailable
+        case write_outcome
+        when :written
+          log_unaudited_rpms_write
+          render plain: unaudited_rpms_message, status: :service_unavailable
+        when :unknown
+          log_unaudited_unknown_outcome
+          render plain: unaudited_unknown_message, status: :service_unavailable
+        else
+          super
+        end
       end
 
       def log_unaudited_rpms_write
@@ -161,6 +171,51 @@ module Lakeraven
         subject = @rpms_write == :nka ? "No known allergies were" : "This allergy was"
         "Service Unavailable: #{subject} recorded in RPMS, but this access could not be audited. " \
           "It must not be entered again."
+      end
+
+      # Class only. The insert error's message can carry broker text.
+      def log_unaudited_unknown_outcome
+        Rails.logger.error(
+          "ERROR [allergy] #{action_name} outcome unknown; this access could not be audited: " \
+          "#{@rpms_audit_error&.class}"
+        )
+      end
+
+      def unaudited_unknown_message
+        subject = action_name == "no_known_allergies" ? "No known allergies" : "This allergy"
+        "Service Unavailable: #{subject} may have been recorded in RPMS. " \
+          "The outcome is unknown, and this access could not be audited. " \
+          "Check the chart before entering it again."
+      end
+
+      # An unknown write is a serious failure even though the page is a 422:
+      # the chart may have changed. A nothing-written refusal stays a "4"
+      # and names its symbol. Success is left to the concern.
+      def audit_outcome
+        return "8" if write_outcome == :unknown
+
+        super
+      end
+
+      def audit_outcome_desc
+        [ super, write_outcome_note ].compact.join("; ").presence
+      end
+
+      # written, nothing written (a NOTHING_WRITTEN symbol), or unknown.
+      def write_outcome
+        return :written if @rpms_write
+        return unless @gateway_failure
+
+        outcome_unknown? ? :unknown : :nothing_written
+      end
+
+      def write_outcome_note
+        case write_outcome
+        when :unknown
+          [ "write outcome unknown", @allergy_error ].compact.join(": ")
+        when :nothing_written
+          "refused: #{@allergy_error}"
+        end
       end
 
       def audit_log_writable?
@@ -317,7 +372,8 @@ module Lakeraven
         pairs = value.to_a
         return unless pairs.all? { |key, _entry| index_key?(key) }
 
-        pairs.sort_by { |key, _entry| Integer(key.to_s) }.map(&:last)
+        # Decimal, not octal: "08" is 8 and "010" sorts after "9".
+        pairs.sort_by { |key, _entry| Integer(key.to_s, 10) }.map(&:last)
       end
 
       def symptom_fields(row)
