@@ -85,8 +85,10 @@ module Lakeraven
       # a range it cannot serve (application/xml) never decides, and each
       # type takes the quality of its most specific matching range, so an
       # explicit application/fhir+json;q=0.1 is not overridden by */*;q=1.
-      # application/json and application/json+fhir name that same JSON
-      # representation, as `_format=application/json` already does.
+      # An explicit application/fhir+json entry sets that JSON quality.
+      # application/json and application/json+fhir stand in for it only when
+      # the header has no explicit application/fhir+json entry; the highest
+      # alias quality then applies. Order in the header does not matter.
       HTML_TYPE = "text/html"
       FHIR_JSON_TYPE = "application/fhir+json"
       FHIR_JSON_ALIASES = %w[application/json application/json+fhir].freeze
@@ -124,7 +126,17 @@ module Lakeraven
 
       # { "type/subtype" => q }, or nil when any q is malformed.
       def accept_qualities(header)
-        header.split(",").each_with_object({}) do |part, qualities|
+        entries = parsed_accept_entries(header)
+        return nil unless entries
+
+        explicit_fhir_json = entries.any? { |type, _quality| type.casecmp?(FHIR_JSON_TYPE) }
+        entries.each_with_object({}) do |(type, quality), qualities|
+          record_accept_quality(qualities, type, quality, explicit_fhir_json: explicit_fhir_json)
+        end
+      end
+
+      def parsed_accept_entries(header)
+        header.split(",").filter_map do |part|
           type, *params = part.split(";").map(&:strip)
           next if type.empty?
 
@@ -134,7 +146,7 @@ module Lakeraven
           q = q_param ? q_param.split("=", 2).last.to_s.strip : "1"
           return nil unless q.match?(QUALITY)
 
-          record_accept_quality(qualities, type, q.to_f)
+          [ type, q.to_f ]
         end
       end
 
@@ -144,11 +156,14 @@ module Lakeraven
         !value.nil? && name.strip.casecmp?("q") && name != name.strip
       end
 
-      def record_accept_quality(qualities, type, quality)
+      # Explicit application/fhir+json wins on its own, including when an
+      # alias appears earlier or later in the header. Aliases contribute
+      # only in its absence, and then the highest of them is kept.
+      def record_accept_quality(qualities, type, quality, explicit_fhir_json:)
         type = type.downcase
-        if type == FHIR_JSON_TYPE || FHIR_JSON_ALIASES.include?(type)
+        if type == FHIR_JSON_TYPE || (!explicit_fhir_json && FHIR_JSON_ALIASES.include?(type))
           qualities[FHIR_JSON_TYPE] = [ qualities[FHIR_JSON_TYPE], quality ].compact.max
-        else
+        elsif !FHIR_JSON_ALIASES.include?(type)
           qualities[type] = quality
         end
       end
