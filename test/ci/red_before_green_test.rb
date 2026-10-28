@@ -1077,8 +1077,11 @@ class RedBeforeGreenTest < Minitest::Test
   end
 
   def fake_runner(body = FAKE_RUNNER)
-    # Outside the temp repo so it never shows up as a change.
-    path = File.join(Dir.mktmpdir("rbg-runner"), "runner.rb")
+    # Under .git so it never shows up as a change; removed with @dir in teardown.
+    @runner_seq = (@runner_seq || 0) + 1
+    dir = File.join(@dir, ".git", "rbg-runner-#{@runner_seq}")
+    FileUtils.mkdir_p(dir)
+    path = File.join(dir, "runner.rb")
     File.write(path, body)
     { "RBG_TEST_CMD" => "ruby #{path}" }
   end
