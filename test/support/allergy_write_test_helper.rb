@@ -85,7 +85,7 @@ module AllergyWriteTestHelper
     refute_includes logs, SYNTHETIC_SYMPTOM
   end
 
-  def refute_backend_message_in_body!(body, message = BACKEND_PROBE_MESSAGE)
+  def refute_backend_message_in_body!(body = response.body, message = BACKEND_PROBE_MESSAGE)
     refute_includes body, message
   end
 
