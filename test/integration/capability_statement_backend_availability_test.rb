@@ -93,6 +93,12 @@ module Lakeraven
             absent_pairs.map(&:first).uniq.each do |type|
               next if pairs.any? { |pair_type, _| pair_type == type }
 
+              if type == "Patient"
+                assert_equal %w[read search-type].sort, @metadata_interactions.fetch("Patient").sort
+                refute_includes @metadata_interactions.fetch("Patient"), "create"
+                next
+              end
+
               refute_includes @metadata_interactions.keys, type,
                               "did not expect a #{type} resource entry with only #{capability}"
             end
