@@ -87,8 +87,10 @@ module Lakeraven
       # explicit application/fhir+json;q=0.1 is not overridden by */*;q=1.
       # An explicit application/fhir+json entry sets that JSON quality.
       # application/json and application/json+fhir stand in for it only when
-      # the header has no explicit application/fhir+json entry; the highest
-      # alias quality then applies. Order in the header does not matter.
+      # the header has no explicit application/fhir+json entry; FHIR JSON's
+      # quality is then the max of the highest alias quality and the quality
+      # its most specific wildcard gives it (application/*, else */*).
+      # Order in the header does not matter.
       HTML_TYPE = "text/html"
       FHIR_JSON_TYPE = "application/fhir+json"
       FHIR_JSON_ALIASES = %w[application/json application/json+fhir].freeze
@@ -130,9 +132,11 @@ module Lakeraven
         return nil unless entries
 
         explicit_fhir_json = entries.any? { |type, _quality| type.casecmp?(FHIR_JSON_TYPE) }
-        entries.each_with_object({}) do |(type, quality), qualities|
-          record_accept_quality(qualities, type, quality, explicit_fhir_json: explicit_fhir_json)
+        qualities = entries.each_with_object({}) do |(type, quality), ranges|
+          record_accept_quality(ranges, type, quality, explicit_fhir_json: explicit_fhir_json)
         end
+        record_fhir_json_alias(qualities) unless explicit_fhir_json
+        qualities
       end
 
       def parsed_accept_entries(header)
@@ -157,15 +161,32 @@ module Lakeraven
       end
 
       # Explicit application/fhir+json wins on its own, including when an
-      # alias appears earlier or later in the header. Aliases contribute
-      # only in its absence, and then the highest of them is kept.
+      # alias appears earlier or later in the header. Aliases are recorded
+      # only in its absence, and the highest of each alias is kept.
       def record_accept_quality(qualities, type, quality, explicit_fhir_json:)
         type = type.downcase
-        if type == FHIR_JSON_TYPE || (!explicit_fhir_json && FHIR_JSON_ALIASES.include?(type))
-          qualities[FHIR_JSON_TYPE] = [ qualities[FHIR_JSON_TYPE], quality ].compact.max
-        elsif !FHIR_JSON_ALIASES.include?(type)
+        if type == FHIR_JSON_TYPE
+          qualities[type] = [ qualities[type], quality ].compact.max
+        elsif FHIR_JSON_ALIASES.include?(type)
+          return if explicit_fhir_json
+
+          qualities[type] = [ qualities[type], quality ].compact.max
+        else
           qualities[type] = quality
         end
+      end
+
+      # The alias becomes the application/fhir+json quality only when it is
+      # at least what the most specific wildcard gives that type. A higher
+      # wildcard is left in place, so effective_quality still reads it.
+      def record_fhir_json_alias(qualities)
+        alias_q = FHIR_JSON_ALIASES.filter_map { |name| qualities[name] }.max
+        return if alias_q.nil?
+
+        wild_q = qualities["application/*"] || qualities["*/*"]
+        return if wild_q && alias_q < wild_q
+
+        qualities[FHIR_JSON_TYPE] = alias_q
       end
 
       # Runs from ApplicationController after the token checks and before the
