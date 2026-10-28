@@ -41,21 +41,31 @@
 # When DATABASE_URL is unset, the scratch worktree has no database of its own: the
 # name would be derived from a path that was just created. The script exports
 # TEST_DATABASE=lakeraven_ehr_rbg_<unique suffix> (a PostgreSQL identifier, at most
-# 63 bytes, different every run) for the setup command, the test command, and the
-# teardown command, all run inside that worktree. Setup is $RBG_DB_SETUP_CMD,
-# defaulting to "RAILS_ENV=test bin/rails db:create db:schema:load"; if it fails the
-# verdict is UNDETERMINED. Teardown is $RBG_DB_TEARDOWN_CMD, or by default
-# `dropdb --if-exists --force` on that database (PostgreSQL 13+), falling back to
-# "RAILS_ENV=test bin/rails db:drop". It runs from the cleanup trap before the
-# worktree is removed, on every exit path including RED and after a caught signal
-# once no test process is still alive. A teardown failure does not change the
-# verdict; it prints a warning naming the database. When DATABASE_URL is set there
-# is no TEST_DATABASE, no setup, and no teardown (CI loads the database itself).
+# 63 bytes, different every run) and unsets TEST_ENV_NUMBER for setup, the tests,
+# and teardown inside that worktree, so the name Rails resolves is exactly the
+# printed one. Setup is $RBG_DB_SETUP_CMD, defaulting to
+# "RAILS_ENV=test bin/rails db:create db:schema:load"; if it fails the verdict is
+# UNDETERMINED. Teardown is $RBG_DB_TEARDOWN_CMD, or by default
+# "RAILS_ENV=test bin/rails db:drop" (Rails' config, as setup uses, so a PGHOST
+# cannot aim the drop at another server). It runs from the cleanup trap only after
+# the test process group is gone, before the worktree is removed, on every exit
+# path including RED and a caught signal. A failure prints a warning naming the
+# database and does not change the verdict. With DATABASE_URL set, CI's database
+# is used and this script does not create or drop one.
 #
 # This runs the PR's own copy of this script. It therefore cannot police a PR that edits
 # the script (or its workflow) to say what it likes. That is why it is advisory, and why the
 # workflow must stay on `pull_request`: it executes the PR's tests, so it must never gain
 # the secrets or write token that `pull_request_target` would give it.
+#
+# On the first INT, TERM, or HUP, those three stay trapped to a handler that only
+# records later signals — they are not reset to the default — while the child is
+# stopped. Stopping sends TERM, escalates to KILL after a short grace period, and
+# waits until the whole process group is gone before teardown. During cleanup the
+# script ignores further INT/TERM/HUP so teardown, worktree removal, and scratch
+# removal always finish. An ignored signal is inherited, so the teardown command
+# survives a Ctrl-C delivered to the process group. The exit status is the verdict's
+# code when a verdict was reached, otherwise 128 plus the first signal.
 #
 # Not checked: a modified existing test file can be RED because of one new test
 # while other tests in it are vacuous; a test file that fails for an unrelated
@@ -73,13 +83,12 @@
 #                    (default "RAILS_ENV=test bin/rails db:create db:schema:load").
 #                    A failure is UNDETERMINED, naming the database setup.
 #   RBG_DB_TEARDOWN_CMD
-#                    drop that database. Default: dropdb --if-exists --force
-#                    "$TEST_DATABASE" (PostgreSQL 13+), else
-#                    "RAILS_ENV=test bin/rails db:drop". Runs from the cleanup trap
-#                    before the worktree is removed, including after INT, TERM, or
-#                    HUP once the test process has exited. A failure prints a
-#                    warning naming the database and does not change the verdict.
-#                    Unused when DATABASE_URL is set.
+#                    drop that database. Default: "RAILS_ENV=test bin/rails db:drop"
+#                    (Rails' config, same as setup, so PGHOST cannot redirect it).
+#                    Runs from the cleanup trap after the test process group is
+#                    gone and before the worktree is removed, including after INT,
+#                    TERM, or HUP. A failure prints a warning naming the database
+#                    and does not change the verdict. Unused when DATABASE_URL is set.
 #   RBG_REPORT=FILE  also append the verdict block to FILE (CI: $GITHUB_STEP_SUMMARY)
 #   RBG_ANNOTATE=1   also print ::warning:: workflow commands for warnings (CI sets it)
 set -uo pipefail
@@ -122,6 +131,8 @@ verdict() {
     [ -n "$db_msg" ] && echo "::warning title=red-before-green::$db_msg"
   fi
   [ -n "${RBG_REPORT:-}" ] && printf '### Red before green\n\n```\n%s\n```\n' "$block" >> "$RBG_REPORT"
+  # A signal during cleanup must exit with this code, not 128+signal.
+  VERDICT_CODE=$code
   exit "$code"
 }
 
@@ -191,20 +202,24 @@ SCRATCH=$(mktemp -d "${TMPDIR:-/tmp}/rbg.XXXXXX") || verdict UNDETERMINED 2 "can
 WT="$SCRATCH/wt"
 # 0 until a throwaway TEST_DATABASE is chosen. The trap drops it, then the worktree.
 RBG_OWN_DB=0
-# eval, not a bare expansion: the default starts with RAILS_ENV=test, which an
-# unquoted expansion would try to execute as the command name. A command line,
-# same as TEST_CMD below.
 # eval, not a bare expansion: these are command lines (the setup default starts
-# with RAILS_ENV=test), same as TEST_CMD below. The teardown default severs
-# leftover sessions from a killed test process. dropdb --force is PostgreSQL
-# 13+; if it is missing or rejects --force, Rails drops the database instead.
+# with RAILS_ENV=test), same as TEST_CMD below. Teardown uses Rails' config, as
+# setup does, and runs only after the test process group is gone.
 DB_SETUP_CMD="${RBG_DB_SETUP_CMD:-RAILS_ENV=test bin/rails db:create db:schema:load}"
-DB_TEARDOWN_CMD="${RBG_DB_TEARDOWN_CMD:-dropdb --if-exists --force \"\$TEST_DATABASE\" || RAILS_ENV=test bin/rails db:drop}"
+DB_TEARDOWN_CMD="${RBG_DB_TEARDOWN_CMD:-RAILS_ENV=test bin/rails db:drop}"
 
 # PID of the setup or test command while it runs; empty otherwise. That command
 # is a process-group leader so a signal can kill it and its children
 # (bin/rails test) without killing this script.
 CHILD_PID=""
+# Process-group leader of the last setup or test command, until that group is gone.
+GROUP_PID=""
+# First caught HUP/INT/TERM (1/2/15). Empty until one arrives. Later signals do not replace it.
+FIRST_SIGNAL=""
+# Verdict exit code, once verdict() is reached. A later signal must not replace it.
+VERDICT_CODE=""
+# 1 while the first signal is stopping the child, or while cleanup is running.
+STOPPING=0
 
 # True while pid or its process group still has a live or zombie member.
 # kill -0 succeeds on a zombie, which teardown would still see as alive.
@@ -212,61 +227,120 @@ group_alive() {
   kill -0 -"$1" 2>/dev/null || kill -0 "$1" 2>/dev/null
 }
 
-# Kill the running setup or test command and wait until it is gone. Teardown
-# runs only after this returns.
+# Reap pid when it is a zombie. A live process is left alone (wait would block).
+reap_leader() {
+  local pid="$1" stat
+  stat=$(ps -o stat= -p "$pid" 2>/dev/null | tr -d '[:space:]' || true)
+  case "$stat" in
+    Z*) wait "$pid" 2>/dev/null || true ;;
+  esac
+}
+
+# TERM the group, escalate to KILL after the grace period, then wait until every
+# member is gone (zombies reaped). Teardown runs only after this returns, so no
+# leftover connection blocks db:drop. 30 tenths is 3s: long enough for a rails
+# process to exit, short enough that a TERM-ignoring process is still killed
+# promptly.
 terminate_child() {
-  local pid="${CHILD_PID:-}"
+  local pid="${CHILD_PID:-}" i=0
+  [ -n "$pid" ] || pid="${GROUP_PID:-}"
   [ -n "$pid" ] || return 0
   CHILD_PID=""
-  kill -TERM -"$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
-  local i=0 stat
-  while [ "$i" -lt 30 ]; do
-    stat=$(ps -o stat= -p "$pid" 2>/dev/null | tr -d '[:space:]' || true)
-    if [ -z "$stat" ]; then
-      break
-    fi
-    # A zombie still answers kill -0. Reap it before teardown checks.
-    case "$stat" in
-      Z*) wait "$pid" 2>/dev/null || true ;;
-    esac
-    group_alive "$pid" || break
-    i=$((i + 1))
-    sleep 0.1
-  done
+  reap_leader "$pid"
   if group_alive "$pid"; then
-    kill -KILL -"$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+    kill -TERM -"$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
     i=0
-    while group_alive "$pid" && [ "$i" -lt 20 ]; do
+    while [ "$i" -lt 30 ]; do
+      reap_leader "$pid"
+      group_alive "$pid" || break
       i=$((i + 1))
       sleep 0.1
     done
   fi
-  wait "$pid" 2>/dev/null || true
+  if group_alive "$pid"; then
+    kill -KILL -"$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+    i=0
+    while [ "$i" -lt 50 ]; do
+      reap_leader "$pid"
+      group_alive "$pid" || break
+      i=$((i + 1))
+      sleep 0.1
+    done
+  fi
+  reap_leader "$pid"
+  if ! group_alive "$pid"; then
+    wait "$pid" 2>/dev/null || true
+  fi
 }
 
-# Bash delivers traps during wait, not while a foreground command runs. Exit
-# 128+signal so the EXIT trap can drop the database and remove the worktree.
+# Before teardown, and before a later command replaces GROUP_PID.
+ensure_group_gone() {
+  local pid="${CHILD_PID:-}"
+  [ -n "$pid" ] || pid="${GROUP_PID:-}"
+  [ -n "$pid" ] || return 0
+  if group_alive "$pid"; then
+    CHILD_PID=$pid
+    terminate_child
+  else
+    reap_leader "$pid"
+    wait "$pid" 2>/dev/null || true
+  fi
+  if [ "${GROUP_PID:-}" = "$pid" ]; then
+    GROUP_PID=""
+  fi
+}
+
+# Remember the first signal only. Must not `return`: in a trap, return leaves
+# the function that was interrupted (the stop wait), which would start teardown
+# while the test process is still alive.
+record_signal() {
+  [ -n "$FIRST_SIGNAL" ] || FIRST_SIGNAL=$1
+}
+
+# Bash delivers traps during wait, not while a foreground command runs.
+# Further INT/TERM/HUP only record until cleanup ignores them. Do not restore
+# the default disposition: the next signal would kill this script and skip the
+# rest of the stop.
 on_signal() {
-  trap - HUP INT TERM
-  set +m
-  terminate_child
-  exit $((128 + $1))
+  record_signal "$1"
+  trap 'record_signal 1' HUP
+  trap 'record_signal 2' INT
+  trap 'record_signal 15' TERM
+  if [ "$STOPPING" -eq 0 ]; then
+    STOPPING=1
+    set +m
+    terminate_child
+    if [ -n "${VERDICT_CODE:-}" ]; then
+      exit "$VERDICT_CODE"
+    fi
+    exit $((128 + FIRST_SIGNAL))
+  fi
 }
 
 cleanup() {
   local status=$?
-  trap - HUP INT TERM
+  STOPPING=1
+  # Ignore, not catch: the child inherits it, so a Ctrl-C to the process group
+  # does not kill teardown, worktree removal, or scratch removal either.
+  trap '' HUP INT TERM
   set +m
+  ensure_group_gone
   if [ "$RBG_OWN_DB" -eq 1 ]; then
-    # Drop before the worktree is removed, on every exit path. The verdict's
-    # status (or 128+signal) is what this trap exits with.
+    # Drop before the worktree is removed, on every exit path, and only once
+    # the test process group is gone. The verdict's code, when one was reached,
+    # is what this trap exits with; otherwise 128 plus the first signal.
     if ! ( cd "$WT" && eval "$DB_TEARDOWN_CMD" ); then
-      echo "red-before-green: WARNING: failed to drop test database ${TEST_DATABASE}. Drop it yourself with: dropdb --if-exists --force ${TEST_DATABASE}" >&2
+      echo "red-before-green: WARNING: failed to drop test database ${TEST_DATABASE}." >&2
     fi
   fi
   git worktree remove --force "$WT" >/dev/null 2>&1 || true
   git worktree prune >/dev/null 2>&1 || true
   rm -rf "$SCRATCH" || true
+  if [ -n "${VERDICT_CODE:-}" ]; then
+    status=$VERDICT_CODE
+  elif [ -n "${FIRST_SIGNAL:-}" ]; then
+    status=$((128 + FIRST_SIGNAL))
+  fi
   exit "$status"
 }
 trap cleanup EXIT
@@ -287,6 +361,7 @@ run_group() {
     "$@" >"$log" 2>&1 &
   fi
   CHILD_PID=$!
+  GROUP_PID=$CHILD_PID
   set +m
   local rc=0
   wait "$CHILD_PID" || rc=$?
@@ -313,6 +388,9 @@ EOF
 # and create it here. CI sets DATABASE_URL and has already loaded that database.
 if [ -z "${DATABASE_URL:-}" ]; then
   unset DATABASE_URL
+  # Rails appends _<n> when TEST_ENV_NUMBER is set, so setup, the tests, and
+  # teardown would not use the printed name. Unset for all three.
+  unset TEST_ENV_NUMBER
   raw=$(basename "$SCRATCH" | tr -cd 'A-Za-z0-9' | tr '[:upper:]' '[:lower:]')
   [ -n "$raw" ] || raw="run"
   rand=$(printf '%04x' "$RANDOM")
@@ -324,6 +402,7 @@ if [ -z "${DATABASE_URL:-}" ]; then
   if ! run_group - bash -c 'cd "$1" && eval "$2"' rbg "$WT" "$DB_SETUP_CMD"; then
     verdict UNDETERMINED 2 "database setup failed (TEST_DATABASE=$TEST_DATABASE)"
   fi
+  ensure_group_gone
 else
   unset TEST_DATABASE
 fi

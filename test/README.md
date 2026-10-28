@@ -91,5 +91,9 @@ $ RAILS_ENV=test bin/rails db:drop
 Locally, `bin/red-before-green` makes and drops its own scratch database
 (named `lakeraven_ehr_rbg_<suffix>`) when `DATABASE_URL` is unset. A cancelled
 or killed red-before-green run can leave a stale `lakeraven_ehr_rbg_*` database
-behind; the listing above finds it. CI sets `DATABASE_URL`, so the script does
-not create or drop a database there.
+behind; the listing above finds it. A hard-killed run (SIGKILL, or power loss)
+never reaches that cleanup, so it can leave the scratch worktree and that
+database. The `psql -l | grep lakeraven_ehr_` listing above finds the database.
+Remove the worktree with `git worktree remove --force <path>`. If the directory
+is already gone and git still has it registered, run `git worktree prune`.
+CI sets `DATABASE_URL`, so the script does not create or drop a database there.
