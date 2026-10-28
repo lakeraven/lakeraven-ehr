@@ -22,7 +22,7 @@ module Lakeraven
 
       ALLERGY_RESOURCE = "AllergyIntolerance"
       USER_CONTEXTS = %w[user].freeze
-      SCALAR_FIELDS = %i[
+      SCALAR_FIELDS = %w[
         agent agent_pointer type nature originated_at
         observed_or_historical reaction_date severity
       ].freeze
@@ -30,6 +30,13 @@ module Lakeraven
       # A backend error symbol is safe to keep. Free text is not.
       SAFE_GATEWAY_ERROR = /\A[a-z][a-z0-9_]*\z/
       INDEX_KEY = /\A-?\d+\z/
+      # Proof the chart was not changed. Any other failure, including
+      # :unavailable, :malformed_reply, :empty_reply, nil, or a symbol
+      # this list does not name, is an unknown outcome.
+      NOTHING_WRITTEN = %i[
+        duplicate active_allergies locked invalid_value missing_fields
+        clinician_required invalid_dfn frame_too_long
+      ].freeze
 
       before_action :authenticate_smart_token!
       before_action :authorize_allergy_scope!
@@ -48,10 +55,9 @@ module Lakeraven
 
       def create
         return if audit_unwritable?
-        return render_allergy_not_saved unless allergy_lists_well_formed?
 
-        @allergy = permitted_allergy
-        if allergy_recorded?
+        @allergy = parse_allergy
+        if @allergy && allergy_recorded?
           redirect_to patient_chart_path(@dfn), notice: "Allergy recorded."
         else
           render_allergy_not_saved
@@ -179,7 +185,7 @@ module Lakeraven
       end
 
       def allergy_recorded?
-        result = AllergyIntoleranceGateway.add(@dfn, allergy_for_gateway, clinician_duz: current_duz)
+        result = AllergyIntoleranceGateway.add(@dfn, @allergy, clinician_duz: current_duz)
         note_gateway_result(:allergy, result)
       end
 
@@ -193,6 +199,7 @@ module Lakeraven
           @rpms_write = kind
           true
         else
+          @gateway_failure = true
           @allergy_error = safe_gateway_error(result)
           false
         end
@@ -209,116 +216,134 @@ module Lakeraven
       end
 
       def render_allergy_not_saved
-        @allergy ||= permitted_allergy
+        @allergy ||= {}
         @allergy_not_saved = true
         render :new, status: :unprocessable_entity
       end
 
-      # originator is intentionally absent. The gateway files the DUZ.
-      # Symptoms and comments arrive as arrays or as Rails' indexed hashes.
-      def permitted_allergy
-        permitted_scalars.merge(
-          "symptoms" => symptom_rows.map { |row| symptom_fields(row) },
-          "comments" => comment_lines
-        )
+      # The only read of the submitted allergy. Scalars, symptom rows, and
+      # comments are strings in the shapes the form posts; anything else is
+      # refused before the gateway runs. An empty scalar is absence. A fully
+      # blank symptom row and a blank comment are the empty controls on the
+      # shipped form, and are left out. originator is not a field: the
+      # gateway files the clinician DUZ, so a posted one is discarded.
+      def parse_allergy
+        raw = allergy_input
+        return unless raw
+
+        parsed = {}
+        raw.each do |key, value|
+          piece = strict_field(key.to_s, value)
+          return unless piece
+
+          parsed.merge!(piece)
+        end
+        with_lists(parsed)
       end
 
-      def permitted_scalars
-        raw = params[:allergy]
-        return {} unless raw.respond_to?(:permit)
+      # Rails removes nils from parameter arrays before the action, so a nil
+      # comment would vanish and the rest would be filed. The raw JSON body
+      # still has it.
+      def allergy_input
+        raw = json_request? ? json_allergy : params[:allergy]
+        return raw if raw.is_a?(Hash)
+        return raw.to_unsafe_h if raw.respond_to?(:to_unsafe_h)
 
-        raw.permit(SCALAR_FIELDS).to_h
+        nil
       end
 
-      def allergy_for_gateway
-        attrs = permitted_allergy
-        attrs.merge(
-          "symptoms" => present_symptoms(attrs["symptoms"]),
-          "comments" => present_comments(attrs["comments"])
-        )
+      def json_request?
+        request.media_type == "application/json"
       end
 
-      # A string, or any hash that is not index => row, is refused before
-      # the gateway so a bad encoding cannot be written.
-      def allergy_lists_well_formed?
-        list_well_formed?(:symptoms, :hash) && list_well_formed?(:comments, :scalar)
+      def json_allergy
+        body = request.raw_post
+        return if body.blank?
+
+        data = JSON.parse(body)
+        data["allergy"] if data.is_a?(Hash)
+      rescue JSON::ParserError
+        nil
       end
 
-      def list_well_formed?(key, entry_kind)
-        value = allergy_param(key)
-        return true if value.nil? || value.is_a?(Array)
-        return false unless hash_param?(value)
-
-        hash_entries(value).all? { |index, entry| entry_well_formed?(index, entry, entry_kind) }
+      def strict_field(key, value)
+        case key
+        when "originator" then {}
+        when "symptoms" then list_field("symptoms", parsed_symptoms(value))
+        when "comments" then list_field("comments", parsed_comments(value))
+        else scalar_field(key, value)
+        end
       end
 
-      def entry_well_formed?(index, entry, entry_kind)
-        return false unless index_key?(index)
+      # An empty string is a blank control: allowed, and not filed.
+      def scalar_field(key, value)
+        return unless SCALAR_FIELDS.include?(key)
+        return unless value.is_a?(String)
 
-        entry_kind == :hash ? hash_param?(entry) : entry.is_a?(String)
+        value.empty? ? {} : { key => value }
       end
 
-      def allergy_param(key)
-        raw = params[:allergy]
-        raw[key] if raw.respond_to?(:key?)
+      def list_field(key, entries)
+        { key => entries } unless entries.nil?
       end
 
-      def symptom_rows
-        collection_rows(allergy_param(:symptoms))
+      def parsed_symptoms(value)
+        rows = list_entries(value)
+        return unless rows
+
+        built = rows.map { |row| symptom_fields(row) }
+        return if built.any?(&:nil?)
+
+        built.reject { |row| blank_symptom?(row) }
       end
 
-      def comment_lines
-        collection_rows(allergy_param(:comments)).select { |line| comment_scalar?(line) }
+      def parsed_comments(value)
+        lines = list_entries(value)
+        return unless lines
+        return unless lines.all? { |line| line.is_a?(String) }
+
+        lines.reject(&:blank?)
       end
 
-      def collection_rows(value)
-        return [] if value.nil?
-        return value if value.is_a?(Array)
-        return indexed_rows(value) if hash_param?(value)
-
-        []
+      def list_entries(value)
+        value = value.to_unsafe_h if value.respond_to?(:to_unsafe_h)
+        case value
+        when Array then value
+        when Hash then indexed_entries(value)
+        end
       end
 
-      def indexed_rows(value)
-        hash_entries(value)
-          .select { |key, _| index_key?(key) }
-          .sort_by { |key, _| Integer(key.to_s) }
-          .map(&:last)
-      end
+      def indexed_entries(value)
+        pairs = value.to_a
+        return unless pairs.all? { |key, _entry| index_key?(key) }
 
-      def hash_entries(value)
-        value.is_a?(ActionController::Parameters) ? value.to_unsafe_h : value.to_h
+        pairs.sort_by { |key, _entry| Integer(key.to_s) }.map(&:last)
       end
 
       def symptom_fields(row)
-        symptom_parameters(row).permit(*SYMPTOM_FIELDS).to_h
+        row = row.to_unsafe_h if row.respond_to?(:to_unsafe_h)
+        return unless row.is_a?(Hash)
+        return unless row.all? { |key, field| symptom_field?(key, field) }
+
+        row.each_with_object({}) { |(key, field), fields| fields[key.to_s] = field }
       end
 
-      def symptom_parameters(row)
-        return row if row.is_a?(ActionController::Parameters)
-        return ActionController::Parameters.new(row) if row.is_a?(Hash)
-
-        ActionController::Parameters.new
+      def symptom_field?(key, field)
+        SYMPTOM_FIELDS.include?(key.to_s) && field.is_a?(String)
       end
 
-      def hash_param?(value)
-        value.is_a?(Hash) || value.is_a?(ActionController::Parameters)
+      def blank_symptom?(row)
+        row.values.none? { |field| field.to_s.strip.present? }
+      end
+
+      def with_lists(parsed)
+        parsed["symptoms"] ||= []
+        parsed["comments"] ||= []
+        parsed
       end
 
       def index_key?(key)
         key.to_s.match?(INDEX_KEY)
-      end
-
-      def comment_scalar?(value)
-        value.is_a?(String) || value.is_a?(Numeric) || value.nil? || value == true || value == false
-      end
-
-      def present_symptoms(rows)
-        Array(rows).select { |row| row.is_a?(Hash) && row.values.any? { |value| value.to_s.strip.present? } }
-      end
-
-      def present_comments(lines)
-        Array(lines).map(&:to_s).reject(&:blank?)
       end
 
       def allergy_value(key)
@@ -337,39 +362,63 @@ module Lakeraven
         Array(allergy_value("comments")).first
       end
 
+      def outcome_unknown?
+        @gateway_failure && !NOTHING_WRITTEN.include?(@allergy_error)
+      end
+
       def allergy_failure_heading
+        return "Outcome unknown" if outcome_unknown?
+
         case @allergy_error
         when :duplicate then "Already on file"
-        when :unavailable then "Outcome unknown"
         when :active_allergies then "Active allergies on file"
         else "This allergy was not saved"
         end
       end
 
       def allergy_failure_detail
+        return outcome_unknown_detail if outcome_unknown?
+
         case @allergy_error
         when :duplicate then "This allergy is already on file."
-        when :unavailable then "The outcome is unknown. Check the chart before trying again."
         when :active_allergies then "The patient has active allergies on file."
+        when :locked then locked_detail
+        when :invalid_value, :missing_fields then invalid_or_missing_detail
         else "The allergy was not saved."
         end
       end
 
       def nka_failure_heading
+        return "Outcome unknown" if outcome_unknown?
+
         case @allergy_error
         when :active_allergies then "Active allergies on file"
-        when :unavailable then "Outcome unknown"
         else "Not saved"
         end
       end
 
       def nka_failure_detail
+        return outcome_unknown_detail if outcome_unknown?
+
         case @allergy_error
         when :active_allergies then "The patient has active allergies on file."
         when :duplicate then "This is already on file."
-        when :unavailable then "The outcome is unknown. Check the chart before trying again."
+        when :locked then locked_detail
+        when :invalid_value, :missing_fields then invalid_or_missing_detail
         else "This was not saved."
         end
+      end
+
+      def outcome_unknown_detail
+        "Outcome unknown — check the chart before trying again."
+      end
+
+      def locked_detail
+        "Another user is editing this patient's allergies, try again shortly."
+      end
+
+      def invalid_or_missing_detail
+        "A value was invalid or a required value was missing."
       end
     end
   end
