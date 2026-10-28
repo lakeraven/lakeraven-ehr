@@ -30,7 +30,9 @@ module Dummy
     # Please, add to the `ignore` list any other `lib` subdirectories that do
     # not contain `.rb` files, or that should not be reloaded or eager loaded.
     # Common ones are `templates`, `generators`, or `middleware`, for example.
-    config.autoload_lib(ignore: %w[assets tasks])
+    # test_database_name.rb is required from database.yml and defines
+    # Lakeraven::EHR::TestDatabaseName, not the constant its path implies.
+    config.autoload_lib(ignore: %w[assets tasks test_database_name.rb])
 
     # Configuration for the application, engines, and railties goes here.
     #
