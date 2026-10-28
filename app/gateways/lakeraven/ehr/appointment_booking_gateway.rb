@@ -28,12 +28,17 @@ module Lakeraven
         resources(via: via).find { |r| r[:id] == id.to_i }
       end
 
-      # The resource's day: its blocks and the appointments already on it.
+      # The resource's day: its blocks, and its appointments with their ids and
+      # state (BSDX CREATE APPT SCHEDULE). A cancelled appointment frees its
+      # place, so only the others count against the slots.
       def self.day(resource, date, via: ::RpmsRpc::Scheduling)
         blocks = Array(via.slot_schedule(resource: resource[:name], start_date: date, end_date: date))
-        booked = Array(via.all_appointments(start_date: date, end_date: date))
-                   .select { |a| a[:resource_name] == resource[:name] }
-        [ ClinicDay.new(blocks: blocks, appointments: booked, time_scale: resource[:time_scale]), booked ]
+        listed = Array(via.appointments(resource: resource[:name], start_date: date, end_date: date))
+        [ ClinicDay.new(blocks: blocks, appointments: listed.reject { |a| a[:cancelled] }, time_scale: resource[:time_scale]), listed ]
+      end
+
+      def self.appointment(resource, id, date, via: ::RpmsRpc::Scheduling)
+        Array(via.appointments(resource: resource[:name], start_date: date, end_date: date)).find { |a| a[:id] == id.to_i }
       end
 
       # Patients whose names start with the text, each with HRN and date of birth.
