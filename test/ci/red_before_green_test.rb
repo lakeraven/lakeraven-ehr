@@ -750,6 +750,85 @@ class RedBeforeGreenTest < Minitest::Test
     refute_includes out[/^PWD=.*$/].to_s, @dir, "the tests must run in the scratch worktree, not the PR checkout"
   end
 
+  # --- lakeraven-ehr#663 panel round 1 ----------------------------------------
+  # Spec amendment: scratch worktree runs need a throwaway test DB when DATABASE_URL
+  # is unset (the default per-worktree name does not exist there).
+
+  def test_without_database_url_setup_teardown_and_test_share_test_database_in_scratch_worktree
+    fixed_pr
+    env = fake_runner(<<~RUBY).merge(fake_db_commands)
+      puts "RUNNER TEST_DATABASE=\#{ENV['TEST_DATABASE']}"
+      puts "Failure:\\nGreeterTest#test_it [test/greeter_test.rb:3]:\\nExpected: 1"
+      puts "#{FIN}1 runs, 1 assertions, 1 failures, 0 errors, 0 skips"
+      exit 1
+    RUBY
+
+    out, status = run_script(env: env.merge("DATABASE_URL" => ""))
+
+    assert_equal 0, status.exitstatus, out
+    assert_match(/^VERDICT: RED$/, out)
+    setup = out[/^DB_SETUP .*$/m]
+    runner = out[/^RUNNER TEST_DATABASE=.*$/m]
+    teardown = out[/^DB_TEARDOWN .*$/m]
+    refute_nil setup
+    refute_nil runner
+    refute_nil teardown, "teardown must run even after a RED verdict"
+    db = setup[/TEST_DATABASE=(\S+)/, 1]
+    assert_match(/\Alakeraven_ehr_rbg_[a-z0-9_]+\z/, db)
+    assert_equal db, runner[/TEST_DATABASE=(\S+)/, 1]
+    assert_equal db, teardown[/TEST_DATABASE=(\S+)/, 1]
+    assert_match(/DB_SETUP pwd=wt /, setup)
+    assert_match(/DB_TEARDOWN pwd=wt /, teardown)
+  end
+
+  def test_without_database_url_two_invocations_get_different_test_database_names
+    fixed_pr
+    env = fake_runner(<<~RUBY).merge(fake_db_commands).merge("DATABASE_URL" => "")
+      puts "RUNNER TEST_DATABASE=\#{ENV['TEST_DATABASE']}"
+      puts "#{FIN}1 runs, 1 assertions, 1 failures, 0 errors, 0 skips"
+      exit 1
+    RUBY
+
+    out1, = run_script(env: env)
+    out2, = run_script(env: env)
+    name1 = out1[/^RUNNER TEST_DATABASE=(\S+)/m, 1]
+    name2 = out2[/^RUNNER TEST_DATABASE=(\S+)/m, 1]
+
+    refute_equal name1, name2
+  end
+
+  def test_with_database_url_set_no_test_database_setup_or_teardown
+    fixed_pr
+    env = fake_runner(<<~RUBY).merge(fake_db_commands).merge("DATABASE_URL" => "postgres://ci.example/test")
+      puts "RUNNER TEST_DATABASE=\#{ENV['TEST_DATABASE'].inspect}"
+      puts "#{FIN}1 runs, 1 assertions, 1 failures, 0 errors, 0 skips"
+      exit 1
+    RUBY
+
+    out, status = run_script(env: env)
+
+    assert_equal 0, status.exitstatus, out
+    assert_match(/^VERDICT: RED$/, out)
+    assert_match(/^RUNNER TEST_DATABASE=nil$/, out[/^RUNNER TEST_DATABASE=nil$/m])
+    refute_match(/^DB_SETUP /m, out)
+    refute_match(/^DB_TEARDOWN /m, out)
+  end
+
+  def test_database_setup_failure_is_undetermined_not_red_or_green
+    fixed_pr
+    env = fake_runner(<<~RUBY).merge(fake_db_commands(setup_exit: 1)).merge("DATABASE_URL" => "")
+      puts "#{FIN}1 runs, 1 assertions, 0 failures, 0 errors, 0 skips"
+    RUBY
+
+    out, status = run_script(env: env)
+
+    assert_equal 2, status.exitstatus, out
+    assert_match(/^VERDICT: UNDETERMINED/, out)
+    assert_match(/database setup/i, out)
+    refute_match(/^VERDICT: RED$/, out)
+    refute_match(/^VERDICT: GREEN-WITHOUT-FIX/, out)
+  end
+
   private
 
   def fixed_pr
@@ -765,9 +844,32 @@ class RedBeforeGreenTest < Minitest::Test
     { "RBG_TEST_CMD" => "ruby #{path}" }
   end
 
+  def fake_db_commands(setup_exit: 0)
+    dir = Dir.mktmpdir("rbg-db-cmd")
+    setup = File.join(dir, "setup.sh")
+    teardown = File.join(dir, "teardown.sh")
+    File.write(setup, <<~SH)
+      #!/usr/bin/env bash
+      echo "DB_SETUP pwd=$(basename "$PWD") TEST_DATABASE=${TEST_DATABASE:-}"
+      exit #{setup_exit}
+    SH
+    File.write(teardown, <<~SH)
+      #!/usr/bin/env bash
+      echo "DB_TEARDOWN pwd=$(basename "$PWD") TEST_DATABASE=${TEST_DATABASE:-}"
+    SH
+    FileUtils.chmod(0o755, setup)
+    FileUtils.chmod(0o755, teardown)
+    {
+      "RBG_DB_SETUP_CMD" => setup,
+      "RBG_DB_TEARDOWN_CMD" => teardown
+    }
+  end
+
   def run_script(*args, env: {})
     args = [ "--base", @base ] + args unless args.include?("--base")
-    out, status = Open3.capture2e({ "RBG_EXEMPT" => "0" }.merge(env), SCRIPT, *args, chdir: @dir)
+    child = ENV.to_h.merge("RBG_EXEMPT" => "0")
+    child.delete("DATABASE_URL") unless env.key?("DATABASE_URL")
+    out, status = Open3.capture2e(child.merge(fake_db_commands).merge(env), SCRIPT, *args, chdir: @dir)
     [ out, status ]
   end
 

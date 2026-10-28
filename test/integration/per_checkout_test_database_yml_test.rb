@@ -13,6 +13,24 @@ class PerCheckoutTestDatabaseYmlTest < ActiveSupport::TestCase
   DATABASE_YML = File.join(REPO_ROOT, "test/dummy/config/database.yml")
   CHECKOUT_ROOT = REPO_ROOT
 
+  setup do
+    @saved_env = {}
+    %w[TEST_DATABASE TEST_ENV_NUMBER].each do |key|
+      @saved_env[key] = ENV.key?(key) ? ENV[key] : :missing
+      ENV.delete(key)
+    end
+  end
+
+  teardown do
+    @saved_env.each do |key, value|
+      if value == :missing
+        ENV.delete(key)
+      else
+        ENV[key] = value
+      end
+    end
+  end
+
   test "database.yml wires test.database through TestDatabaseName" do
     source = File.read(DATABASE_YML)
 

@@ -15,6 +15,21 @@ class LakeravenEhrTestDatabaseNameTest < ActiveSupport::TestCase
   setup do
     flunk("expected resolver at #{RESOLVER_RB}") unless File.exist?(RESOLVER_RB)
     require RESOLVER_RB unless defined?(Lakeraven::EHR::TestDatabaseName)
+    @saved_env = {}
+    %w[TEST_DATABASE TEST_ENV_NUMBER].each do |key|
+      @saved_env[key] = ENV.key?(key) ? ENV[key] : :missing
+      ENV.delete(key)
+    end
+  end
+
+  teardown do
+    @saved_env&.each do |key, value|
+      if value == :missing
+        ENV.delete(key)
+      else
+        ENV[key] = value
+      end
+    end
   end
 
   test "resolve is defined on Lakeraven::EHR::TestDatabaseName" do
