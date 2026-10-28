@@ -12,6 +12,10 @@ module Lakeraven
 
       ENGINE = "/lakeraven-ehr"
       METADATA = "#{ENGINE}/metadata".freeze
+      SMART_CONFIGURATION = "#{ENGINE}/.well-known/smart-configuration".freeze
+      READ_SCOPE_WILDCARD = "system/*.rs".freeze
+      INTERACTION_TO_SCOPE_PERMISSION = { "create" => "c", "read" => "r", "search-type" => "s" }.freeze
+      INTERACTIONS_FOR_SCOPE_ORDER = %w[create read search-type].freeze
 
       CAPABILITY_SUBSETS = (
         [ [] ] +
@@ -163,6 +167,42 @@ module Lakeraven
         end
       end
 
+      test "restricted backend scopes_supported omits gated types and matches Patient interactions from metadata" do
+        with_restricted_backend(capabilities: []) do
+          load_metadata_interactions!
+          load_scopes_supported!
+
+          assert_equal expected_scopes_supported_from_metadata(@metadata_interactions), @scopes_supported.sort
+          assert_includes @scopes_supported, "system/Patient.rs"
+          refute_includes @scopes_supported, "system/Patient.crs"
+          refute @scopes_supported.any? { |scope| scope.start_with?("system/ServiceRequest.") }
+          refute @scopes_supported.any? { |scope| scope.start_with?("system/Immunization.") }
+        end
+      end
+
+      CAPABILITY_SUBSETS.each do |capabilities|
+        label = capabilities.empty? ? "none" : (capabilities == BackendRegistry::CAPABILITIES ? "all" : capabilities.first.to_s)
+
+        test "scopes_supported per-type system scopes match live metadata for capability subset #{label}" do
+          exercise_backend(capabilities) do
+            load_metadata_interactions!
+            load_scopes_supported!
+
+            assert_equal expected_scopes_supported_from_metadata(@metadata_interactions), @scopes_supported.sort,
+                         "smart-configuration must list the same system/<Type>.<perms> as /metadata (#{label})"
+          end
+        end
+      end
+
+      test "default backend scopes_supported still advertises IHS-gated types present on metadata" do
+        load_metadata_interactions!
+        load_scopes_supported!
+
+        assert_includes @scopes_supported, "system/ServiceRequest.s"
+        assert_includes @scopes_supported, "system/Immunization.s"
+        assert_includes @scopes_supported, "system/Patient.crs"
+      end
+
       private
 
       def exercise_backend(capabilities, &block)
@@ -179,6 +219,24 @@ module Lakeraven
         @metadata_interactions = metadata_resources_by_type.transform_values do |resource|
           Array(resource["interaction"]).map { |entry| entry["code"] }
         end
+      end
+
+      def load_scopes_supported!
+        get SMART_CONFIGURATION
+        assert_response :ok
+        @scopes_supported = JSON.parse(response.body).fetch("scopes_supported")
+      end
+
+      def expected_scopes_supported_from_metadata(metadata_interactions)
+        per_type = metadata_interactions.sort.map do |type, interactions|
+          permissions = INTERACTIONS_FOR_SCOPE_ORDER.filter_map do |code|
+            INTERACTION_TO_SCOPE_PERMISSION[code] if interactions.include?(code)
+          end.join
+          next if permissions.empty?
+
+          "system/#{type}.#{permissions}"
+        end
+        [ READ_SCOPE_WILDCARD, *per_type ].sort
       end
 
       def metadata_statement

@@ -9,6 +9,7 @@ class FeatureUnavailableAcceptNegotiationTest < ActionDispatch::IntegrationTest
 
   PATIENT_DFN = "1"
   IMMUNIZATION_PATH = "/lakeraven-ehr/Immunization"
+  SERVICE_REQUEST_PATH = "/lakeraven-ehr/ServiceRequest"
 
   setup do
     Lakeraven::EHR::AuditEvent.delete_all
@@ -76,11 +77,42 @@ class FeatureUnavailableAcceptNegotiationTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "feature unavailable with explicit application/fhir+json;q=0 prefers HTML over JSON aliases" do
+    with_restricted_backend do
+      get SERVICE_REQUEST_PATH, params: { patient: PATIENT_DFN },
+        headers: @headers.merge(
+          "Accept" => "application/fhir+json;q=0, application/json, text/html;q=0.5"
+        )
+
+      assert_html_feature_unavailable(response, capability: :prc_referrals)
+    end
+  end
+
+  test "feature unavailable uses explicit application/fhir+json quality over JSON alias quality" do
+    with_restricted_backend do
+      get SERVICE_REQUEST_PATH, params: { patient: PATIENT_DFN },
+        headers: @headers.merge(
+          "Accept" => "application/fhir+json;q=0.2, application/json;q=0.9, text/html;q=0.5"
+        )
+
+      assert_html_feature_unavailable(response, capability: :prc_referrals)
+    end
+  end
+
   private
 
   def audit_denial_for_fhir_refusal
     Lakeraven::EHR::AuditEvent.order(:id).find do |event|
       event.outcome_desc.to_s.match?(/fhir operation refused: not-supported \(HTTP 404\)/i)
     end&.outcome_desc
+  end
+
+  def assert_html_feature_unavailable(response, capability:)
+    assert_response :not_found
+    assert_equal "text/html", response.media_type
+    assert_match(/not available on this system/i, response.body)
+    refute_equal "OperationOutcome", JSON.parse(response.body).fetch("resourceType", nil)
+  rescue JSON::ParserError
+    # HTML body is expected
   end
 end
