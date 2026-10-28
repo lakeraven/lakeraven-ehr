@@ -81,7 +81,7 @@ Moving a worktree changes its database name, because the hash is of the real
 path. Run `db:create` and `db:schema:load` again for the new path, and drop
 the old database.
 
-List stale per-worktree databases with `psql -l | grep lakeraven_ehr_test_`.
+List stale per-worktree databases — checkout `lakeraven_ehr_test_*` and red-before-green `lakeraven_ehr_rbg_*` — with `psql -l | grep lakeraven_ehr_`.
 Drop one with `dropdb <name>`, or from that worktree:
 
 ```bash
@@ -89,5 +89,7 @@ $ RAILS_ENV=test bin/rails db:drop
 ```
 
 Locally, `bin/red-before-green` makes and drops its own scratch database
-(named `lakeraven_ehr_rbg_<suffix>`) when `DATABASE_URL` is unset. CI sets
-`DATABASE_URL`, so the script does not create or drop a database there.
+(named `lakeraven_ehr_rbg_<suffix>`) when `DATABASE_URL` is unset. A cancelled
+or killed red-before-green run can leave a stale `lakeraven_ehr_rbg_*` database
+behind; the listing above finds it. CI sets `DATABASE_URL`, so the script does
+not create or drop a database there.

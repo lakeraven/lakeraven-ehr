@@ -44,11 +44,13 @@
 # 63 bytes, different every run) for the setup command, the test command, and the
 # teardown command, all run inside that worktree. Setup is $RBG_DB_SETUP_CMD,
 # defaulting to "RAILS_ENV=test bin/rails db:create db:schema:load"; if it fails the
-# verdict is UNDETERMINED. Teardown is $RBG_DB_TEARDOWN_CMD, defaulting to
-# "RAILS_ENV=test bin/rails db:drop", from the cleanup trap before the worktree is
-# removed, on every exit path including RED. A teardown failure does not change the
-# verdict. When DATABASE_URL is set there is no TEST_DATABASE, no setup, and no
-# teardown (CI loads the database itself).
+# verdict is UNDETERMINED. Teardown is $RBG_DB_TEARDOWN_CMD, or by default
+# `dropdb --if-exists --force` on that database (PostgreSQL 13+), falling back to
+# "RAILS_ENV=test bin/rails db:drop". It runs from the cleanup trap before the
+# worktree is removed, on every exit path including RED and after a caught signal
+# once no test process is still alive. A teardown failure does not change the
+# verdict; it prints a warning naming the database. When DATABASE_URL is set there
+# is no TEST_DATABASE, no setup, and no teardown (CI loads the database itself).
 #
 # This runs the PR's own copy of this script. It therefore cannot police a PR that edits
 # the script (or its workflow) to say what it likes. That is why it is advisory, and why the
@@ -71,9 +73,13 @@
 #                    (default "RAILS_ENV=test bin/rails db:create db:schema:load").
 #                    A failure is UNDETERMINED, naming the database setup.
 #   RBG_DB_TEARDOWN_CMD
-#                    drop that database (default "RAILS_ENV=test bin/rails db:drop").
-#                    Runs from the cleanup trap before the worktree is removed; a
-#                    failure does not change the verdict. Unused when DATABASE_URL is set.
+#                    drop that database. Default: dropdb --if-exists --force
+#                    "$TEST_DATABASE" (PostgreSQL 13+), else
+#                    "RAILS_ENV=test bin/rails db:drop". Runs from the cleanup trap
+#                    before the worktree is removed, including after INT, TERM, or
+#                    HUP once the test process has exited. A failure prints a
+#                    warning naming the database and does not change the verdict.
+#                    Unused when DATABASE_URL is set.
 #   RBG_REPORT=FILE  also append the verdict block to FILE (CI: $GITHUB_STEP_SUMMARY)
 #   RBG_ANNOTATE=1   also print ::warning:: workflow commands for warnings (CI sets it)
 set -uo pipefail
@@ -188,14 +194,75 @@ RBG_OWN_DB=0
 # eval, not a bare expansion: the default starts with RAILS_ENV=test, which an
 # unquoted expansion would try to execute as the command name. A command line,
 # same as TEST_CMD below.
+# eval, not a bare expansion: these are command lines (the setup default starts
+# with RAILS_ENV=test), same as TEST_CMD below. The teardown default severs
+# leftover sessions from a killed test process. dropdb --force is PostgreSQL
+# 13+; if it is missing or rejects --force, Rails drops the database instead.
 DB_SETUP_CMD="${RBG_DB_SETUP_CMD:-RAILS_ENV=test bin/rails db:create db:schema:load}"
-DB_TEARDOWN_CMD="${RBG_DB_TEARDOWN_CMD:-RAILS_ENV=test bin/rails db:drop}"
+DB_TEARDOWN_CMD="${RBG_DB_TEARDOWN_CMD:-dropdb --if-exists --force \"\$TEST_DATABASE\" || RAILS_ENV=test bin/rails db:drop}"
+
+# PID of the setup or test command while it runs; empty otherwise. That command
+# is a process-group leader so a signal can kill it and its children
+# (bin/rails test) without killing this script.
+CHILD_PID=""
+
+# True while pid or its process group still has a live or zombie member.
+# kill -0 succeeds on a zombie, which teardown would still see as alive.
+group_alive() {
+  kill -0 -"$1" 2>/dev/null || kill -0 "$1" 2>/dev/null
+}
+
+# Kill the running setup or test command and wait until it is gone. Teardown
+# runs only after this returns.
+terminate_child() {
+  local pid="${CHILD_PID:-}"
+  [ -n "$pid" ] || return 0
+  CHILD_PID=""
+  kill -TERM -"$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+  local i=0 stat
+  while [ "$i" -lt 30 ]; do
+    stat=$(ps -o stat= -p "$pid" 2>/dev/null | tr -d '[:space:]' || true)
+    if [ -z "$stat" ]; then
+      break
+    fi
+    # A zombie still answers kill -0. Reap it before teardown checks.
+    case "$stat" in
+      Z*) wait "$pid" 2>/dev/null || true ;;
+    esac
+    group_alive "$pid" || break
+    i=$((i + 1))
+    sleep 0.1
+  done
+  if group_alive "$pid"; then
+    kill -KILL -"$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+    i=0
+    while group_alive "$pid" && [ "$i" -lt 20 ]; do
+      i=$((i + 1))
+      sleep 0.1
+    done
+  fi
+  wait "$pid" 2>/dev/null || true
+}
+
+# Bash delivers traps during wait, not while a foreground command runs. Exit
+# 128+signal so the EXIT trap can drop the database and remove the worktree.
+on_signal() {
+  trap - HUP INT TERM
+  set +m
+  terminate_child
+  exit $((128 + $1))
+}
+
 cleanup() {
   local status=$?
+  trap - HUP INT TERM
+  set +m
   if [ "$RBG_OWN_DB" -eq 1 ]; then
-    # Drop before the worktree is removed, on every exit path. Failure stays local:
-    # the verdict's status is what this trap exits with.
-    ( cd "$WT" && eval "$DB_TEARDOWN_CMD" ) || true
+    # Drop before the worktree is removed, on every exit path. The verdict's
+    # status (or 128+signal) is what this trap exits with.
+    if ! ( cd "$WT" && eval "$DB_TEARDOWN_CMD" ); then
+      echo "red-before-green: WARNING: failed to drop test database ${TEST_DATABASE}. Drop it yourself with: dropdb --if-exists --force ${TEST_DATABASE}" >&2
+    fi
   fi
   git worktree remove --force "$WT" >/dev/null 2>&1 || true
   git worktree prune >/dev/null 2>&1 || true
@@ -203,6 +270,29 @@ cleanup() {
   exit "$status"
 }
 trap cleanup EXIT
+trap 'on_signal 1' HUP
+trap 'on_signal 2' INT
+trap 'on_signal 15' TERM
+
+# Run argv in its own process group and wait for it. "-" inherits stdout and
+# stderr (the setup command); any other argument is the test log path.
+run_group() {
+  local log="$1"
+  shift
+  # Monitor mode gives the background command its own process group.
+  set -m
+  if [ "$log" = "-" ]; then
+    "$@" &
+  else
+    "$@" >"$log" 2>&1 &
+  fi
+  CHILD_PID=$!
+  set +m
+  local rc=0
+  wait "$CHILD_PID" || rc=$?
+  CHILD_PID=""
+  return "$rc"
+}
 
 git worktree add -q --detach "$WT" HEAD >/dev/null 2>&1 \
   || verdict UNDETERMINED 2 "cannot create a scratch worktree at HEAD"
@@ -231,7 +321,7 @@ if [ -z "${DATABASE_URL:-}" ]; then
   export TEST_DATABASE
   RBG_OWN_DB=1
   echo "test database: $TEST_DATABASE"
-  if ! ( cd "$WT" && eval "$DB_SETUP_CMD" ); then
+  if ! run_group - bash -c 'cd "$1" && eval "$2"' rbg "$WT" "$DB_SETUP_CMD"; then
     verdict UNDETERMINED 2 "database setup failed (TEST_DATABASE=$TEST_DATABASE)"
   fi
 else
@@ -245,8 +335,10 @@ while IFS= read -r f; do [ -n "$f" ] && TESTS+=("$f"); done <<EOF
 $MINITEST_FILES
 EOF
 # TEST_CMD is intentionally word-split: it is a command line, not one word.
+# exec makes that command the process-group leader so a signal kills it and
+# its children (bin/rails test), not only the shell that launched it.
 # shellcheck disable=SC2086
-( cd "$WT" && $TEST_CMD "${TESTS[@]}" ) >"$LOG" 2>&1
+run_group "$LOG" bash -c 'cd "$1" && shift && exec "$@"' rbg "$WT" $TEST_CMD "${TESTS[@]}"
 RC=$?
 cat "$LOG"
 echo
