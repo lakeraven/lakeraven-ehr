@@ -35,6 +35,14 @@ class RegistrationFindPatientTest < ActionDispatch::IntegrationTest
     assert_response :forbidden
   end
 
+  # AG's lookup is refused to a scheduler by RPMS, so the search is not offered.
+  test "a scheduler cannot search here, and can open a registration" do
+    sign_in("scheduling_user")
+    get "/lakeraven-ehr/registration/patients", params: { q: "MOUSE" }
+
+    assert_response :forbidden
+  end
+
   test "S-REG-01.1 a registered patient is listed with their health record number, and opens" do
     mouse = match(dfn: 3, name: "MOUSE,MICKEY M", hrn: "1001", dob: Date.new(1910, 2, 14), dod: nil, inactive: false)
     sign_in("registration_menu")
@@ -53,7 +61,7 @@ class RegistrationFindPatientTest < ActionDispatch::IntegrationTest
   test "S-REG-01.3 and 01.4 an inactive chart and a deceased patient are marked" do
     inactive = match(dfn: 5, name: "DUCK,DONALD", hrn: "1002", dob: Date.new(1934, 6, 9), dod: nil, inactive: true)
     deceased = match(dfn: 6, name: "DUCK,DAISY", hrn: "1003", dob: Date.new(1940, 1, 1), dod: Date.new(2020, 3, 1), inactive: false)
-    sign_in("scheduling_user")
+    sign_in("registration_view_only")
 
     with_lookup([ inactive, deceased ]) { get "/lakeraven-ehr/registration/patients", params: { q: "DUCK" } }
 

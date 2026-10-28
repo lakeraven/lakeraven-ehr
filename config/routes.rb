@@ -128,6 +128,19 @@ Lakeraven::EHR::Engine.routes.draw do
     get "patients/:dfn", to: "patients#show", as: :patient, constraints: { dfn: /\d+/ }
   end
 
+  # Scheduling (rpms-ux W02): a clinic resource's day, booking into it (S-SCH-01)
+  # cancelling (S-SCH-02) and checking in (S-SCH-03).
+  namespace :scheduling do
+    get "/", to: "clinics#index", as: :home
+    get "clinics/:id", to: "clinics#show", as: :clinic, constraints: { id: /\d+/ }
+    get "clinics/:resource_id/appointments/new", to: "appointments#new", as: :new_clinic_appointment, constraints: { resource_id: /\d+/ }
+    post "clinics/:resource_id/appointments", to: "appointments#create", as: :clinic_appointments, constraints: { resource_id: /\d+/ }
+    get "clinics/:resource_id/appointments/:appointment_id/cancel", to: "cancellations#new", as: :cancel_clinic_appointment, constraints: { resource_id: /\d+/, appointment_id: /\d+/ }
+    post "clinics/:resource_id/appointments/:appointment_id/cancel", to: "cancellations#create", constraints: { resource_id: /\d+/, appointment_id: /\d+/ }
+    get "clinics/:resource_id/appointments/:appointment_id/checkin", to: "checkins#new", as: :checkin_clinic_appointment, constraints: { resource_id: /\d+/, appointment_id: /\d+/ }
+    post "clinics/:resource_id/appointments/:appointment_id/checkin", to: "checkins#create", constraints: { resource_id: /\d+/, appointment_id: /\d+/ }
+  end
+
   # Test-only: seed the browser session (DUZ, user type, security keys, and
   # the session-bound SMART token) without the RPMS sign-on flow. The
   # controller refuses to exist outside the test environment; the route guard

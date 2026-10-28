@@ -70,6 +70,14 @@ module Lakeraven
         "lakeraven/ehr/registration/patients#new",     # Registration entry form (S-REG-02), not disclosure
         "lakeraven/ehr/registration/patients#create",  # Registration entry; possible matches show registration demographics only; revisit with Part 2 (#494)
         "lakeraven/ehr/registration/patients#confirm", # Registration entry after review; as #create
+        "lakeraven/ehr/scheduling/clinics#index",     # Scheduling: clinic resources, no patient data
+        "lakeraven/ehr/scheduling/clinics#show",      # A clinic day: appointment times and patient names, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/scheduling/appointments#new",   # Booking form: patient name, HRN, date of birth, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/scheduling/appointments#create", # Booking entry, not disclosure
+        "lakeraven/ehr/scheduling/cancellations#new",    # Cancel form: patient name and time, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/scheduling/cancellations#create", # Cancellation entry, not disclosure
+        "lakeraven/ehr/scheduling/checkins#new",         # Check-in form: patient name and time, provider names, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/scheduling/checkins#create",      # Check-in entry, not disclosure
         "lakeraven/ehr/test_sessions#create", # Test only
         "lakeraven/ehr/smart_configuration#show", # Discovery
         "lakeraven/ehr/smart_launch#show",    # Discovery
