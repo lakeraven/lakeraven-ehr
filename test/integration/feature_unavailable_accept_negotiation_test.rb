@@ -99,6 +99,48 @@ class FeatureUnavailableAcceptNegotiationTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "feature unavailable FHIR JSON quality includes */* when alias quality is lower" do
+    with_restricted_backend do
+      get IMMUNIZATION_PATH, params: { patient: PATIENT_DFN },
+        headers: @headers.merge(
+          "Accept" => "text/html;q=0.5, */*;q=0.9, application/json;q=0.1"
+        )
+
+      assert_fhir_feature_unavailable(response, capability: :ihs_immunization)
+    end
+  end
+
+  test "feature unavailable FHIR JSON quality includes application/* when alias quality is lower" do
+    with_restricted_backend do
+      get IMMUNIZATION_PATH, params: { patient: PATIENT_DFN },
+        headers: @headers.merge(
+          "Accept" => "text/html;q=0.5, application/json;q=0.3, application/*;q=0.9"
+        )
+
+      assert_fhir_feature_unavailable(response, capability: :ihs_immunization)
+    end
+  end
+
+  test "feature unavailable FHIR JSON quality includes */* when alias qualities are zero" do
+    with_restricted_backend do
+      get IMMUNIZATION_PATH, params: { patient: PATIENT_DFN },
+        headers: @headers.merge(
+          "Accept" => "application/json;q=0, application/json+fhir;q=0, text/html;q=0.1, */*;q=0.5"
+        )
+
+      assert_fhir_feature_unavailable(response, capability: :ihs_immunization)
+    end
+  end
+
+  test "feature unavailable without wildcard alias quality alone decides HTML over JSON" do
+    with_restricted_backend do
+      get IMMUNIZATION_PATH, params: { patient: PATIENT_DFN },
+        headers: @headers.merge("Accept" => "text/html;q=0.5, application/json;q=0.3")
+
+      assert_html_feature_unavailable(response, capability: :ihs_immunization)
+    end
+  end
+
   private
 
   def audit_denial_for_fhir_refusal
