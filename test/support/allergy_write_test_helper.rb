@@ -25,6 +25,10 @@ module AllergyWriteTestHelper
   SYNTHETIC_AGENT = "SYNTHETIC-AGENT-A"
   SYNTHETIC_COMMENT = "SYNTHETIC-COMMENT-LINE"
   SYNTHETIC_SYMPTOM = "SYNTHETIC-SYMPTOM-RASH"
+  SYNTHETIC_NINTH_COMMENT = "SYNTHETIC-NINTH"
+  SYNTHETIC_TENTH_COMMENT = "SYNTHETIC-TENTH"
+  SYNTHETIC_EIGHTH_COMMENT = "SYNTHETIC-EIGHTH"
+  SYNTHETIC_EIGHTH_SYMPTOM = "SYNTHETIC-SYMPTOM-EIGHTH"
 
   # Valid wire-shaped attrs for RpmsRpc::Allergy.save (originator is set by the
   # server from the clinician DUZ, not trusted from the form).
@@ -83,6 +87,54 @@ module AllergyWriteTestHelper
     refute_includes logs, SYNTHETIC_AGENT
     refute_includes logs, SYNTHETIC_COMMENT
     refute_includes logs, SYNTHETIC_SYMPTOM
+    refute_includes logs, SYNTHETIC_NINTH_COMMENT
+    refute_includes logs, SYNTHETIC_TENTH_COMMENT
+    refute_includes logs, SYNTHETIC_EIGHTH_COMMENT
+    refute_includes logs, SYNTHETIC_EIGHTH_SYMPTOM
+  end
+
+  # Round-3: RPC may have run but outcome is unknown and the post-action audit failed.
+  def assert_unknown_outcome_audit_failure_503!(body = response.body)
+    assert_response :service_unavailable
+    assert_match(/may have been recorded|outcome is unknown/i, body)
+    assert_match(/audit/i, body)
+    assert_match(/check the chart/i, body)
+    refute_match(/not completed|not saved|left unchanged/i, body)
+  end
+
+  def assert_nothing_written_outcome_audit_failure_503!(body = response.body)
+    assert_response :service_unavailable
+    assert_match(/not completed/i, body)
+  end
+
+  def refute_clinical_text_in_audit_outcome_desc!(desc)
+    text = desc.to_s
+    [
+      SYNTHETIC_AGENT, SYNTHETIC_COMMENT, SYNTHETIC_SYMPTOM,
+      SYNTHETIC_NINTH_COMMENT, SYNTHETIC_TENTH_COMMENT,
+      SYNTHETIC_EIGHTH_COMMENT, SYNTHETIC_EIGHTH_SYMPTOM
+    ].each do |fragment|
+      refute_includes text, fragment
+    end
+  end
+
+  def assert_audit_unknown_write_outcome!(event, error_symbol)
+    assert_equal "8", event.outcome
+    desc = event.outcome_desc.to_s
+    assert_match(/outcome unknown/i, desc)
+    assert_includes desc, error_symbol.to_s
+    refute_clinical_text_in_audit_outcome_desc!(desc)
+  end
+
+  def assert_audit_named_refusal_outcome!(event, error_symbol)
+    assert_equal "4", event.outcome
+    assert_includes event.outcome_desc.to_s, error_symbol.to_s
+    refute_clinical_text_in_audit_outcome_desc!(event.outcome_desc)
+  end
+
+  def gateway_attrs_list(attrs, key)
+    list = attrs[key] || attrs[key.to_s]
+    list
   end
 
   def refute_backend_message_in_body!(body = response.body, message = BACKEND_PROBE_MESSAGE)

@@ -701,6 +701,159 @@ module Lakeraven
         assert_named_allergy_not_saved_refusal!(/invalid|missing|required/i)
         refute_backend_message_in_body!
       end
+
+      # -- Spec amendment: unknown outcome + audit failure (#644 round-3) ----
+
+      test "POST allergy with unavailable outcome and post-write audit failure returns unknown-outcome 503" do
+        @tracker = TrackingAllergyGateway.new(
+          add_returns: { success: false, error: :unavailable, message: BACKEND_PROBE_MESSAGE }
+        )
+        logs = capture_rails_logs do
+          with_audit_create_failing_after_probe do
+            with_tracking_allergy_gateway(@tracker) do
+              post BASE, params: allergy_form_params.merge(authenticity_token: csrf_token)
+            end
+          end
+        end
+
+        assert_equal 1, @tracker.add_calls.length
+        assert_unknown_outcome_audit_failure_503!
+        assert_error_log_without_clinical_text!(logs)
+      end
+
+      test "POST NKA with unavailable outcome and post-write audit failure returns unknown-outcome 503" do
+        @tracker = TrackingAllergyGateway.new(
+          nka_returns: { success: false, error: :unavailable, message: BACKEND_PROBE_MESSAGE }
+        )
+        logs = capture_rails_logs do
+          with_audit_create_failing_after_probe do
+            with_tracking_allergy_gateway(@tracker) do
+              post NKA_PATH, params: { authenticity_token: csrf_token }
+            end
+          end
+        end
+
+        assert_equal 1, @tracker.nka_calls.length
+        assert_unknown_outcome_audit_failure_503!
+        assert_error_log_without_clinical_text!(logs)
+      end
+
+      test "POST allergy with malformed_reply outcome and post-write audit failure returns unknown-outcome 503" do
+        @tracker = TrackingAllergyGateway.new(
+          add_returns: { success: false, error: :malformed_reply, message: BACKEND_PROBE_MESSAGE }
+        )
+        logs = capture_rails_logs do
+          with_audit_create_failing_after_probe do
+            with_tracking_allergy_gateway(@tracker) do
+              post BASE, params: allergy_form_params.merge(authenticity_token: csrf_token)
+            end
+          end
+        end
+
+        assert_equal 1, @tracker.add_calls.length
+        assert_unknown_outcome_audit_failure_503!
+        assert_error_log_without_clinical_text!(logs)
+      end
+
+      test "POST NKA with assessment_update_failed outcome and post-write audit failure returns unknown-outcome 503" do
+        @tracker = TrackingAllergyGateway.new(
+          nka_returns: { success: false, error: :assessment_update_failed, message: BACKEND_PROBE_MESSAGE }
+        )
+        logs = capture_rails_logs do
+          with_audit_create_failing_after_probe do
+            with_tracking_allergy_gateway(@tracker) do
+              post NKA_PATH, params: { authenticity_token: csrf_token }
+            end
+          end
+        end
+
+        assert_equal 1, @tracker.nka_calls.length
+        assert_unknown_outcome_audit_failure_503!
+        assert_error_log_without_clinical_text!(logs)
+      end
+
+      test "POST allergy with duplicate refusal and post-write audit failure still returns not completed 503" do
+        @tracker = TrackingAllergyGateway.new(
+          add_returns: { success: false, error: :duplicate, message: BACKEND_PROBE_MESSAGE }
+        )
+
+        with_audit_create_failing_after_probe do
+          with_tracking_allergy_gateway(@tracker) do
+            post BASE, params: allergy_form_params.merge(authenticity_token: csrf_token)
+          end
+        end
+
+        assert_equal 1, @tracker.add_calls.length
+        assert_nothing_written_outcome_audit_failure_503!
+      end
+
+      # -- Spec amendment: audit row fidelity for write outcomes (#644 round-3)
+
+      test "POST allergy with unavailable outcome audits as serious failure naming unknown write and symbol" do
+        AuditEvent.delete_all
+        @tracker = TrackingAllergyGateway.new(
+          add_returns: { success: false, error: :unavailable, message: BACKEND_PROBE_MESSAGE }
+        )
+
+        assert_difference -> { AuditEvent.count }, 1 do
+          post_allergy
+        end
+
+        assert_audit_unknown_write_outcome!(AuditEvent.recent.first, :unavailable)
+      end
+
+      test "POST allergy with duplicate refusal audits as minor failure naming symbol" do
+        AuditEvent.delete_all
+        @tracker = TrackingAllergyGateway.new(
+          add_returns: { success: false, error: :duplicate, message: BACKEND_PROBE_MESSAGE }
+        )
+
+        assert_difference -> { AuditEvent.count }, 1 do
+          post_allergy
+        end
+
+        assert_audit_named_refusal_outcome!(AuditEvent.recent.first, :duplicate)
+      end
+
+      # -- Spec amendment: decimal Rails index keys (#644 round-3) ------------
+
+      test "POST allergy with comment index keys 9 and 010 passes ordered comments to gateway" do
+        q = allergy_scalar_query_string +
+            "&allergy[comments][9]=#{CGI.escape(SYNTHETIC_NINTH_COMMENT)}" \
+            "&allergy[comments][010]=#{CGI.escape(SYNTHETIC_TENTH_COMMENT)}"
+        post_raw_allergy_form(BASE, q)
+
+        assert_equal 1, @tracker.add_calls.length
+        comments = gateway_attrs_list(@tracker.add_calls.first[:attrs], :comments)
+        assert_equal [ SYNTHETIC_NINTH_COMMENT, SYNTHETIC_TENTH_COMMENT ], comments
+      end
+
+      test "POST allergy with comment index key 08 is accepted as decimal index 8" do
+        q = allergy_scalar_query_string +
+            "&allergy[comments][7]=#{CGI.escape('SYNTHETIC-SEVENTH')}" \
+            "&allergy[comments][08]=#{CGI.escape(SYNTHETIC_EIGHTH_COMMENT)}" \
+            "&allergy[comments][9]=#{CGI.escape(SYNTHETIC_NINTH_COMMENT)}"
+        post_raw_allergy_form(BASE, q)
+
+        refute_equal 500, response.status
+        assert_equal 1, @tracker.add_calls.length
+        comments = gateway_attrs_list(@tracker.add_calls.first[:attrs], :comments)
+        assert_equal [ "SYNTHETIC-SEVENTH", SYNTHETIC_EIGHTH_COMMENT, SYNTHETIC_NINTH_COMMENT ], comments
+      end
+
+      test "POST allergy with symptom index key 08 is accepted as decimal index 8" do
+        q = allergy_scalar_query_string +
+            "&allergy[symptoms][7][ien]=10&allergy[symptoms][7][text]=SYNTH-SEVEN&allergy[symptoms][7][date]=" \
+            "&allergy[symptoms][08][ien]=10&allergy[symptoms][08][text]=#{CGI.escape(SYNTHETIC_EIGHTH_SYMPTOM)}&allergy[symptoms][08][date]=" \
+            "&allergy[symptoms][9][ien]=10&allergy[symptoms][9][text]=SYNTH-NINE&allergy[symptoms][9][date]="
+        post_raw_allergy_form(BASE, q)
+
+        refute_equal 500, response.status
+        assert_equal 1, @tracker.add_calls.length
+        symptoms = gateway_attrs_list(@tracker.add_calls.first[:attrs], :symptoms)
+        texts = symptoms.map { |row| row[:text] || row["text"] }
+        assert_equal [ "SYNTH-SEVEN", SYNTHETIC_EIGHTH_SYMPTOM, "SYNTH-NINE" ], texts
+      end
     end
   end
 end
