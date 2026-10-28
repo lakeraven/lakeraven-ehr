@@ -76,6 +76,34 @@ class LiveSchedulingBookAppointmentTest < ActionDispatch::IntegrationTest
     assert_response :conflict
   end
 
+  test "S-SCH-03.1, 03.7 and 02.5 the scheduler checks a patient in today, once, and it can no longer be cancelled" do
+    get "/lakeraven-ehr/scheduling"
+    clinic = css_select("#resources a").find { |a| a.text == "DEMO IHS CLINIC" }["href"]
+    today = Date.current
+    get clinic, params: { date: today.iso8601 }
+    open = css_select("#open-times tr[data-time]").select { |tr| tr.at_css("td[data-open]")["data-open"].to_i.positive? }
+    skip "no open time left today on the throwaway container" if open.empty?
+    time = open.sample["data-time"]
+    post "#{clinic}/appointments", params: { booking: { patient_dfn: "3", start: "#{today.iso8601}T#{time}", length: "15", note: "" } }
+    skip "MOUSE already has an appointment at #{time} today" if response.status == 422
+    follow_redirect!
+    row = css_select("#appointments tr[data-patient='3']").find { |tr| tr.at_css("td").text.start_with?(time) && tr.at_css("td[data-status='booked']") }
+    checkin = row.css("a").find { |a| a.text == "Check in" }["href"].split("?").first
+
+    get checkin, params: { date: today.iso8601, provider_search: "PROFILE" }
+    provider = css_select("#checkin-form label[data-provider]").find { |l| l.text.upcase.include?("PROFILE,MD") }["data-provider"]
+    now = Time.now.utc.strftime("%Y-%m-%dT%H:%M")
+    post checkin, params: { date: today.iso8601, checkin: { at: now, provider_ien: provider } }
+    assert_response :redirect
+    follow_redirect!
+    assert_select "#appointments tr[data-appointment='#{row['data-appointment']}'] td[data-status='checked']"
+
+    post checkin, params: { date: today.iso8601, checkin: { at: now, provider_ien: provider } }
+    assert_response :conflict
+    post checkin.sub("/checkin", "/cancel"), params: { date: today.iso8601, cancellation: { whom: "C", reason_ien: "7", remarks: "" } }
+    assert_response :conflict
+  end
+
   test "S-SCH-01.12 the front desk, who holds no scheduling key, cannot open scheduling" do
     Lakeraven::EHR::LoginThrottle.reset!
     post "/lakeraven-ehr/login", params: { username: "PREG123", password: "PREG123!!" }
