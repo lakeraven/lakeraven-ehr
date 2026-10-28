@@ -59,9 +59,9 @@ at the same time. `test/dummy/config/database.yml` asks
 `Lakeraven::EHR::TestDatabaseName` for the name.
 
 A primary checkout (`.git` is a directory) and a tree with no `.git` use
-`lakeraven_ehr_test`. A linked worktree (`.git` is a file) uses
-`lakeraven_ehr_test_` plus the first 8 hex digits of the SHA-256 of the
-checkout's real path.
+`lakeraven_ehr_test`. Any checkout whose `.git` is a file (a linked worktree
+or a git submodule) gets a hashed name: `lakeraven_ehr_test_` plus the first
+8 hex digits of the SHA-256 of the checkout's real path.
 
 Set `TEST_DATABASE` to choose the name yourself. A blank value is ignored.
 The name has to match `[a-z][a-z0-9_]*` and be at most 63 bytes;
@@ -77,9 +77,17 @@ Create the database and load `schema.rb` for this checkout:
 $ RAILS_ENV=test bin/rails db:create db:schema:load
 ```
 
-Drop a stale per-worktree database with `dropdb <name>`, or from that
-worktree:
+Moving a worktree changes its database name, because the hash is of the real
+path. Run `db:create` and `db:schema:load` again for the new path, and drop
+the old database.
+
+List stale per-worktree databases with `psql -l | grep lakeraven_ehr_test_`.
+Drop one with `dropdb <name>`, or from that worktree:
 
 ```bash
 $ RAILS_ENV=test bin/rails db:drop
 ```
+
+Locally, `bin/red-before-green` makes and drops its own scratch database
+(named `lakeraven_ehr_rbg_<suffix>`) when `DATABASE_URL` is unset. CI sets
+`DATABASE_URL`, so the script does not create or drop a database there.

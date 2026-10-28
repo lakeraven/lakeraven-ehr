@@ -21,8 +21,9 @@
 #   GREEN-WITHOUT-FIX      1    every test passed without the fix
 #   UNDETERMINED           2    could not tell. Never a pass: no merge-base, no parseable
 #                               summary, zero tests run, every test skipped, unreadable errors,
-#                               or a Gemfile/lockfile/gemspec/Rakefile or bin/ change alongside
-#                               tests (not revertible by restoring app paths).
+#                               a Gemfile/lockfile/gemspec/Rakefile or bin/ change alongside
+#                               tests (not revertible by restoring app paths), or the throwaway
+#                               database setup failed.
 #
 # The summary is read only from the single "Finished in" block minitest prints; a run
 # with no such block, or more than one, is UNDETERMINED (test output can imitate a summary).
@@ -36,6 +37,18 @@
 # DB-CHANGED is printed when the PR also changes db/schema.rb, db/structure.sql or a
 # migration: the test database is loaded from the PR's schema before this script runs and is
 # not reverted, so the base app code ran against a schema it may not have had.
+#
+# When DATABASE_URL is unset, the scratch worktree has no database of its own: the
+# name would be derived from a path that was just created. The script exports
+# TEST_DATABASE=lakeraven_ehr_rbg_<unique suffix> (a PostgreSQL identifier, at most
+# 63 bytes, different every run) for the setup command, the test command, and the
+# teardown command, all run inside that worktree. Setup is $RBG_DB_SETUP_CMD,
+# defaulting to "RAILS_ENV=test bin/rails db:create db:schema:load"; if it fails the
+# verdict is UNDETERMINED. Teardown is $RBG_DB_TEARDOWN_CMD, defaulting to
+# "RAILS_ENV=test bin/rails db:drop", from the cleanup trap before the worktree is
+# removed, on every exit path including RED. A teardown failure does not change the
+# verdict. When DATABASE_URL is set there is no TEST_DATABASE, no setup, and no
+# teardown (CI loads the database itself).
 #
 # This runs the PR's own copy of this script. It therefore cannot police a PR that edits
 # the script (or its workflow) to say what it likes. That is why it is advisory, and why the
@@ -54,6 +67,13 @@
 #   RBG_EXEMPT=1     skip the check (CI sets it from the `red-green-exempt` label)
 #   RBG_TEST_CMD     the test command (default "bundle exec rails test"); changed test
 #                    files are appended as arguments
+#   RBG_DB_SETUP_CMD when DATABASE_URL is unset, create the throwaway test database
+#                    (default "RAILS_ENV=test bin/rails db:create db:schema:load").
+#                    A failure is UNDETERMINED, naming the database setup.
+#   RBG_DB_TEARDOWN_CMD
+#                    drop that database (default "RAILS_ENV=test bin/rails db:drop").
+#                    Runs from the cleanup trap before the worktree is removed; a
+#                    failure does not change the verdict. Unused when DATABASE_URL is set.
 #   RBG_REPORT=FILE  also append the verdict block to FILE (CI: $GITHUB_STEP_SUMMARY)
 #   RBG_ANNOTATE=1   also print ::warning:: workflow commands for warnings (CI sets it)
 set -uo pipefail
@@ -163,7 +183,25 @@ if [ -n "$EXEMPT_REASON" ]; then echo "exempt: yes ($EXEMPT_REASON)"; else echo 
 # --- scratch worktree at HEAD with the app code put back to the base ---------
 SCRATCH=$(mktemp -d "${TMPDIR:-/tmp}/rbg.XXXXXX") || verdict UNDETERMINED 2 "cannot create a scratch directory"
 WT="$SCRATCH/wt"
-cleanup() { git worktree remove --force "$WT" >/dev/null 2>&1; git worktree prune >/dev/null 2>&1; rm -rf "$SCRATCH"; }
+# 0 until a throwaway TEST_DATABASE is chosen. The trap drops it, then the worktree.
+RBG_OWN_DB=0
+# eval, not a bare expansion: the default starts with RAILS_ENV=test, which an
+# unquoted expansion would try to execute as the command name. A command line,
+# same as TEST_CMD below.
+DB_SETUP_CMD="${RBG_DB_SETUP_CMD:-RAILS_ENV=test bin/rails db:create db:schema:load}"
+DB_TEARDOWN_CMD="${RBG_DB_TEARDOWN_CMD:-RAILS_ENV=test bin/rails db:drop}"
+cleanup() {
+  local status=$?
+  if [ "$RBG_OWN_DB" -eq 1 ]; then
+    # Drop before the worktree is removed, on every exit path. Failure stays local:
+    # the verdict's status is what this trap exits with.
+    ( cd "$WT" && eval "$DB_TEARDOWN_CMD" ) || true
+  fi
+  git worktree remove --force "$WT" >/dev/null 2>&1 || true
+  git worktree prune >/dev/null 2>&1 || true
+  rm -rf "$SCRATCH" || true
+  exit "$status"
+}
 trap cleanup EXIT
 
 git worktree add -q --detach "$WT" HEAD >/dev/null 2>&1 \
@@ -179,6 +217,26 @@ while IFS=$'\t' read -r status path; do
 done <<EOF
 $APP_CHANGES
 EOF
+
+# A scratch worktree's path-derived database does not exist. Without DATABASE_URL,
+# name one for this run (valid identifier, <=63 bytes, different every invocation)
+# and create it here. CI sets DATABASE_URL and has already loaded that database.
+if [ -z "${DATABASE_URL:-}" ]; then
+  unset DATABASE_URL
+  raw=$(basename "$SCRATCH" | tr -cd 'A-Za-z0-9' | tr '[:upper:]' '[:lower:]')
+  [ -n "$raw" ] || raw="run"
+  rand=$(printf '%04x' "$RANDOM")
+  TEST_DATABASE="lakeraven_ehr_rbg_${raw}_$$_${rand}"
+  [ "${#TEST_DATABASE}" -le 63 ] || TEST_DATABASE="${TEST_DATABASE:0:63}"
+  export TEST_DATABASE
+  RBG_OWN_DB=1
+  echo "test database: $TEST_DATABASE"
+  if ! ( cd "$WT" && eval "$DB_SETUP_CMD" ); then
+    verdict UNDETERMINED 2 "database setup failed (TEST_DATABASE=$TEST_DATABASE)"
+  fi
+else
+  unset TEST_DATABASE
+fi
 
 echo "running against the base app code: $(oneline "$MINITEST_FILES")"
 LOG="$SCRATCH/run.log"
