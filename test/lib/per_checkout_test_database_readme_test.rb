@@ -28,6 +28,20 @@ class PerCheckoutTestDatabaseReadmeTest < ActiveSupport::TestCase
            "(e.g. psql -l or names matching lakeraven_ehr_test_)"
   end
 
+  test "README stale database listing also finds red-before-green scratch databases" do
+    body = File.read(README)
+    listing = body[/List stale per-worktree databases[^\n]*/i].to_s
+
+    assert listing.match?(/grep lakeraven_ehr_(?!test)/i) || listing.match?(/lakeraven_ehr_rbg_/i),
+           "test/README.md should list stale databases with a pattern that also matches " \
+           "lakeraven_ehr_rbg_* (e.g. grep lakeraven_ehr_), not only lakeraven_ehr_test_"
+    assert body.match?(/lakeraven_ehr_rbg_/i),
+           "test/README.md should name red-before-green scratch databases (lakeraven_ehr_rbg_*)"
+    assert body.match?(/cancel|kill|interrupt|signaled|SIGTERM|SIGINT|stopped/i),
+           "test/README.md should say a cancelled or killed red-before-green run can leave " \
+           "a stale lakeraven_ehr_rbg_* database"
+  end
+
   test "README explains that moving a worktree changes its database name" do
     body = File.read(README)
 
