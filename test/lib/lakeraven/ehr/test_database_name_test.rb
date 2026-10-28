@@ -98,7 +98,10 @@ class LakeravenEhrTestDatabaseNameTest < ActiveSupport::TestCase
       assert_raises(ArgumentError) { resolve(checkout_root: root, env: { "TEST_DATABASE" => "bad-name" }) }
       assert_raises(ArgumentError) { resolve(checkout_root: root, env: { "TEST_DATABASE" => "9starts_with_digit" }) }
 
-      too_long = "#{'a' * 63}"
+      valid_max = "a" * 63
+      assert_equal valid_max, resolve(checkout_root: root, env: { "TEST_DATABASE" => valid_max })
+
+      too_long = "a" * 64
       error = assert_raises(ArgumentError) { resolve(checkout_root: root, env: { "TEST_DATABASE" => too_long }) }
       assert_includes error.message, "TEST_DATABASE"
     end
@@ -123,6 +126,25 @@ class LakeravenEhrTestDatabaseNameTest < ActiveSupport::TestCase
   test "invalid TEST_ENV_NUMBER raises ArgumentError naming TEST_ENV_NUMBER" do
     Dir.mktmpdir("lr-bad-num-") do |root|
       error = assert_raises(ArgumentError) { resolve(checkout_root: root, env: { "TEST_ENV_NUMBER" => "2a" }) }
+      assert_includes error.message, "TEST_ENV_NUMBER"
+    end
+  end
+
+  test "combined resolved name is at most 63 bytes including TEST_ENV_NUMBER suffix" do
+    Dir.mktmpdir("lr-len-bound-") do |root|
+      base = "a" * 61
+      assert_equal "#{base}_1", resolve(
+        checkout_root: root,
+        env: { "TEST_DATABASE" => base, "TEST_ENV_NUMBER" => "1" }
+      )
+
+      base_too_long = "a" * 62
+      error = assert_raises(ArgumentError) do
+        resolve(
+          checkout_root: root,
+          env: { "TEST_DATABASE" => base_too_long, "TEST_ENV_NUMBER" => "1" }
+        )
+      end
       assert_includes error.message, "TEST_ENV_NUMBER"
     end
   end
