@@ -71,6 +71,8 @@ module Lakeraven
         "lakeraven/ehr/scheduling/clinics#show",      # A clinic day: appointment times and patient names, no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/scheduling/appointments#new",   # Booking form: patient name, HRN, date of birth, no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/scheduling/appointments#create", # Booking entry, not disclosure
+        "lakeraven/ehr/scheduling/cancellations#new",    # Cancel form: patient name and time, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/scheduling/cancellations#create", # Cancellation entry, not disclosure
         "lakeraven/ehr/test_sessions#create", # Test only
         "lakeraven/ehr/smart_configuration#show", # Discovery
         "lakeraven/ehr/smart_launch#show",    # Discovery

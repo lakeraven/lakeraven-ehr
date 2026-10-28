@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require "rpms_rpc/api/patient"
-
 module Lakeraven
   module EHR
     module Scheduling
@@ -19,7 +17,7 @@ module Lakeraven
           @date = parse_date(params[:date])
           @day, @appointments = AppointmentBookingGateway.day(@resource, @date)
           @booked_id = flash[:booked_id]
-          @patient_names = @appointments.map { |a| a[:patient_dfn] }.uniq.to_h { |dfn| [ dfn, RpmsRpc::Patient.brief_header(dfn)&.dig(:name) ] }
+          @notice = flash[:notice]
         end
       end
     end

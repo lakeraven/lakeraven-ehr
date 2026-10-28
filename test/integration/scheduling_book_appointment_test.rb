@@ -31,7 +31,7 @@ class SchedulingBookAppointmentTest < ActionDispatch::IntegrationTest
       sched => {
         resources: ->(*) { RESOURCES },
         slot_schedule: ->(**) { blocks },
-        all_appointments: ->(**) { appointments },
+        appointments: ->(**) { appointments },
         add_appointment: ->(**args) { log << args; book.call(args) }
       },
       patient => {
@@ -61,7 +61,7 @@ class SchedulingBookAppointmentTest < ActionDispatch::IntegrationTest
 
   test "the clinic's day shows its open times on the slot grid, with places left" do
     sign_in("scheduling_user")
-    with_rpms(appointments: [ { start_time: at(9), end_time: at(9, 20), patient_dfn: 3, resource_name: "DEMO IHS CLINIC" } ]) do
+    with_rpms(appointments: [ { id: 1, start_time: at(9), end_time: at(9, 20), patient_dfn: 3, patient_name: "MOUSE,MICKEY M", cancelled: false, no_show: false, checkin_time: nil } ]) do
       get "/lakeraven-ehr/scheduling/clinics/2", params: { date: "2026-10-28" }
     end
 
@@ -83,7 +83,7 @@ class SchedulingBookAppointmentTest < ActionDispatch::IntegrationTest
 
   test "S-SCH-01.2 a full time is refused here, and nothing is filed" do
     sign_in("scheduling_user")
-    four = Array.new(4) { |i| { start_time: at(10), end_time: at(10, 20), patient_dfn: 10 + i, resource_name: "DEMO IHS CLINIC" } }
+    four = Array.new(4) { |i| { id: 20 + i, start_time: at(10), end_time: at(10, 20), patient_dfn: 10 + i, patient_name: "P", cancelled: false, no_show: false, checkin_time: nil } }
     with_rpms(appointments: four) do
       post "/lakeraven-ehr/scheduling/clinics/2/appointments", params: book_params(start: "2026-10-28T10:00")
 

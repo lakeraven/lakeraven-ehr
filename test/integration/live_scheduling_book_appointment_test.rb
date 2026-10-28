@@ -52,6 +52,30 @@ class LiveSchedulingBookAppointmentTest < ActionDispatch::IntegrationTest
     assert_select "[role='alert']", text: /already has appt/
   end
 
+  test "S-SCH-02.1 and 02.6 the scheduler cancels an appointment for the clinic, which frees its place, once" do
+    get "/lakeraven-ehr/scheduling"
+    clinic = css_select("#resources a").find { |a| a.text == "DEMO IHS CLINIC" }["href"]
+    day = weekday_ahead
+    get clinic, params: { date: day.iso8601 }
+    time = css_select("#open-times tr").select { |tr| tr["data-time"].to_s >= "11:00" && tr.at_css("td[data-open]")["data-open"].to_i.positive? }.sample["data-time"]
+    open_before = css_select("#open-times tr[data-time='#{time}'] td[data-open]").first["data-open"].to_i
+    post "#{clinic}/appointments", params: { booking: { patient_dfn: "3", start: "#{day.iso8601}T#{time}", length: "15", note: "" } }
+    follow_redirect!
+    row = css_select("#appointments tr[data-patient='3']").find { |tr| tr.at_css("td").text.start_with?(time) }
+    cancel = row.at_css("a")["href"]
+
+    get cancel.split("?").first, params: { date: day.iso8601, whom: "C" }
+    reason = css_select("#cancellation-form select option").find { |o| o.text == "CLINIC STAFFING" }["value"]
+    post cancel.split("?").first, params: { date: day.iso8601, cancellation: { whom: "C", reason_ien: reason, remarks: "live cancel" } }
+    assert_response :redirect
+    follow_redirect!
+    assert_select "#appointments tr[data-appointment='#{row['data-appointment']}'] td[data-status='cancelled']"
+    assert_select "#open-times tr[data-time='#{time}'] td[data-open='#{open_before}']"
+
+    post cancel.split("?").first, params: { date: day.iso8601, cancellation: { whom: "C", reason_ien: reason, remarks: "again" } }
+    assert_response :conflict
+  end
+
   test "S-SCH-01.12 the front desk, who holds no scheduling key, cannot open scheduling" do
     Lakeraven::EHR::LoginThrottle.reset!
     post "/lakeraven-ehr/login", params: { username: "PREG123", password: "PREG123!!" }

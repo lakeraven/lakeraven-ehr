@@ -119,12 +119,15 @@ Lakeraven::EHR::Engine.routes.draw do
     get "patients/:dfn", to: "patients#show", as: :patient, constraints: { dfn: /\d+/ }
   end
 
-  # Scheduling (rpms-ux W02): a clinic resource's day, and booking into it (S-SCH-01).
+  # Scheduling (rpms-ux W02): a clinic resource's day, booking into it (S-SCH-01)
+  # and cancelling (S-SCH-02).
   namespace :scheduling do
     get "/", to: "clinics#index", as: :home
     get "clinics/:id", to: "clinics#show", as: :clinic, constraints: { id: /\d+/ }
     get "clinics/:resource_id/appointments/new", to: "appointments#new", as: :new_clinic_appointment, constraints: { resource_id: /\d+/ }
     post "clinics/:resource_id/appointments", to: "appointments#create", as: :clinic_appointments, constraints: { resource_id: /\d+/ }
+    get "clinics/:resource_id/appointments/:appointment_id/cancel", to: "cancellations#new", as: :cancel_clinic_appointment, constraints: { resource_id: /\d+/, appointment_id: /\d+/ }
+    post "clinics/:resource_id/appointments/:appointment_id/cancel", to: "cancellations#create", constraints: { resource_id: /\d+/, appointment_id: /\d+/ }
   end
 
   # Test-only: seed the browser session (DUZ, user type, security keys, and
