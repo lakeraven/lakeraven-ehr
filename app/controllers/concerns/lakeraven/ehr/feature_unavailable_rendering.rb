@@ -44,6 +44,9 @@ module Lakeraven
       def render_feature_unavailable(error)
         if feature_unavailable_html?
           render html: feature_unavailable_document(error.message).html_safe, status: :not_found
+          # The JSON branch records this from render_operation_outcome. The
+          # HTML branch has to write the same denial or the audit row is missing.
+          note_audit_denial("fhir operation refused: not-supported (HTTP #{response.status})")
         else
           render_operation_outcome(status: :not_found, severity: "error", code: "not-supported",
             diagnostics: error.message)
@@ -82,8 +85,11 @@ module Lakeraven
       # a range it cannot serve (application/xml) never decides, and each
       # type takes the quality of its most specific matching range, so an
       # explicit application/fhir+json;q=0.1 is not overridden by */*;q=1.
+      # application/json and application/json+fhir name that same JSON
+      # representation, as `_format=application/json` already does.
       HTML_TYPE = "text/html"
       FHIR_JSON_TYPE = "application/fhir+json"
+      FHIR_JSON_ALIASES = %w[application/json application/json+fhir].freeze
 
       # A quality value per RFC 9110: 0 to 1 with at most three decimals.
       QUALITY = /\A(?:0(?:\.\d{0,3})?|1(?:\.0{0,3})?)\z/
@@ -91,7 +97,8 @@ module Lakeraven
       # HTML wins only when it outranks FHIR JSON, or ties with it and is the
       # more specific match (so `text/html, */*` is HTML, a lone `*/*` and two
       # equally named types stay FHIR JSON). A header with any malformed q value
-      # is unusable and falls to the FHIR JSON default.
+      # is unusable and falls to the FHIR JSON default, including a q parameter
+      # with whitespace before `=` (`text/html;q =0`).
       def text_html_preferred?(header)
         ranges = accept_qualities(header)
         return false unless ranges
@@ -121,11 +128,28 @@ module Lakeraven
           type, *params = part.split(";").map(&:strip)
           next if type.empty?
 
+          return nil if params.any? { |param| q_parameter_with_space_before_equals?(param) }
+
           q_param = params.find { |param| param.downcase.start_with?("q=") }
           q = q_param ? q_param.split("=", 2).last.to_s.strip : "1"
           return nil unless q.match?(QUALITY)
 
-          qualities[type.downcase] = q.to_f
+          record_accept_quality(qualities, type, q.to_f)
+        end
+      end
+
+      # `q =0` is not a quality value: the name and `=` have to be adjacent.
+      def q_parameter_with_space_before_equals?(param)
+        name, value = param.split("=", 2)
+        !value.nil? && name.strip.casecmp?("q") && name != name.strip
+      end
+
+      def record_accept_quality(qualities, type, quality)
+        type = type.downcase
+        if type == FHIR_JSON_TYPE || FHIR_JSON_ALIASES.include?(type)
+          qualities[FHIR_JSON_TYPE] = [ qualities[FHIR_JSON_TYPE], quality ].compact.max
+        else
+          qualities[type] = quality
         end
       end
 
@@ -139,13 +163,18 @@ module Lakeraven
       # refused the same way here, so only a caller who would be let in learns
       # that the capability is missing. Authorization is not repeated: the
       # controller's own checks run through authorize_before_unavailable!.
+      # Render here, inside the action, rather than re-raising for rescue_from.
+      # The audit wrapper records the row before rescue_from runs, so a denial
+      # note written only in the renderer would miss the row. Rendering in this
+      # callback leaves the note on the response the audit then records, and a
+      # rendered before_action halts the chain the same way the raise did.
       def ensure_backend_supports_interaction!
         interaction = FHIR_ACTION_INTERACTIONS[action_name]
         capability = BackendRegistry.capability_for_fhir_interaction(fhir_resource_type, interaction)
         CapabilityGuard.ensure!(capability) if capability
-      rescue FeatureUnavailable
+      rescue FeatureUnavailable => error
         authorize_before_unavailable!
-        raise unless performed?
+        render_feature_unavailable(error) unless performed?
       end
 
       # The authorization a controller declares beyond the token and scope

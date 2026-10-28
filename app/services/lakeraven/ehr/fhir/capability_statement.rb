@@ -109,7 +109,7 @@ module Lakeraven
             rest: [ {
               mode: "server",
               security: security,
-              resource: RESOURCES.map { |type, declaration| resource(type, declaration) },
+              resource: served_resources,
               searchParam: SearchCapabilities.rest_search_params
             } ]
           }
@@ -134,6 +134,29 @@ module Lakeraven
 
         def security
           SmartDiscovery.new(token_endpoint: @token_endpoint).security
+        end
+
+        # RESOURCES stays the list of what the engine can serve. The registry
+        # only decides what is gated: an interaction is kept unless
+        # capability_for_fhir_interaction names a capability the current
+        # backend does not provide. A type left with no interactions is
+        # dropped. Resolved on each request, because the backend can change.
+        def served_resources
+          RESOURCES.filter_map do |type, declaration|
+            interactions = served_interactions(type, declaration[:interactions])
+            next if interactions.empty?
+
+            resource(type, declaration.merge(interactions: interactions))
+          end
+        end
+
+        def served_interactions(type, interactions)
+          interactions.reject { |interaction| interaction_withheld?(type, interaction) }
+        end
+
+        def interaction_withheld?(type, interaction)
+          capability = BackendRegistry.capability_for_fhir_interaction(type, interaction)
+          capability && !BackendRegistry.current.provides?(capability)
         end
 
         def resource(type, declaration)
