@@ -73,7 +73,15 @@ Lakeraven::EHR::Engine.routes.draw do
   resources :observations, path: "Observation", only: %i[index show]
   resources :encounters, path: "Encounter", only: %i[index]
   resources :organizations, path: "Organization", only: %i[show], param: :ien
-  resources :groups, path: "Group", only: %i[show]
+  # A Group id is a FHIR id (1-64 of [A-Za-z0-9.-]). `format: false`
+  # drops the format suffix; the id constraint is what lets the dot
+  # through, because "." is still a segment separator without it.
+  # ".json" and ".xml" stay part of the literal id.
+  resources :groups, path: "Group", only: %i[show],
+    format: false, id: %r{[A-Za-z0-9\-.]{1,64}}
+  # An id outside that grammar still reaches #show, which answers
+  # not-found without reading the cohort.
+  get "Group/:id", to: "groups#show", as: nil, format: false, id: %r{[^/]+}
   resources :locations, path: "Location", only: %i[show], param: :ien
   resources :service_requests, path: "ServiceRequest", only: %i[index]
   resources :immunizations, path: "Immunization", only: %i[index]

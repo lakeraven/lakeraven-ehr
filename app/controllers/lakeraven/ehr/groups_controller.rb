@@ -4,23 +4,24 @@ module Lakeraven
   module EHR
     # FHIR Group read for a bulk-export cohort (#216).
     #
-    # An unknown id, an id that cannot name a record, and a cohort with no
-    # members are the same not-found. The diagnostics are fixed: the caller's
-    # id is never copied into them. Member references are Patient resources,
-    # so the token needs Patient read, and a patient-bound token may not read
-    # a cohort that names anyone else. The body is whatever
-    # Part2EgressFilter returns.
+    # Authorization is decided before the cohort is read. A token without
+    # Patient read is the same 403 for every id, and so is a patient-bound
+    # token: this read lists patients, and a bound token has no cohort it
+    # may read. An unknown id, an id that cannot name a record, and a
+    # cohort with no members are the same not-found. The diagnostics are
+    # fixed: the caller's id is never copied into them. Quantity is the
+    # length of the member list Part2EgressFilter returns.
     class GroupsController < ApplicationController
       NOT_FOUND_DIAGNOSTICS = "Group not found"
 
       def show
+        return unless group_read_authorized?
+
         group_id = params[:id].to_s
         return render_group_not_found unless fhir_group_id?(group_id)
 
         members = FhirGroupMember.members_of(group_id)
         return render_group_not_found if members.empty?
-        return unless disclosed_patient_read_authorized?
-        return unless group_within_patient_compartment?(members)
 
         render_fhir_egress(group_resource(group_id, members))
       end
@@ -42,6 +43,12 @@ module Lakeraven
         )
       end
 
+      # Patient read, then the compartment. A bound token names no patient
+      # on this read, so it is refused whole. Neither check reads the cohort.
+      def group_read_authorized?
+        disclosed_patient_read_authorized? && authorize_patient_search!(nil)
+      end
+
       def disclosed_patient_read_authorized?
         return true if can_read?("Patient")
 
@@ -49,34 +56,27 @@ module Lakeraven
         false
       end
 
-      # A patient-bound token may read a cohort made up only of itself.
-      # Any other member is a cross-patient read and is refused whole.
-      def group_within_patient_compartment?(members)
-        return true unless patient_context_scope?
-
-        other = members.map { |member| member.patient_dfn.to_s }.find { |dfn| dfn != bound_patient_dfn }
-        return true if other.nil?
-
-        authorize_patient_context!(other)
-      end
-
-      def bound_patient_dfn
-        current_token.resource_owner_id.to_s
-      end
-
       # String keys, because the egress seam matches resourceType on the
-      # hash it is given and renders that hash unchanged — quantity stays
-      # whatever the filter returned.
+      # hash it is given. Quantity is counted afterwards, from whatever
+      # member list the filter returns.
       def group_resource(group_id, members)
-        member = members.map { |row| member_reference(row) }
         {
           "resourceType" => "Group",
           "id" => group_id,
           "type" => "person",
           "actual" => true,
-          "quantity" => member.length,
-          "member" => member
+          "member" => members.map { |row| member_reference(row) }
         }
+      end
+
+      # Part2EgressFilter may drop member references. Count the list it
+      # returned. A payload with no member list is rendered unchanged.
+      def egress_filter(payload)
+        filtered = super
+        members = filtered["member"] if filtered.is_a?(Hash)
+        return filtered unless members.is_a?(Array)
+
+        filtered.merge("quantity" => members.length)
       end
 
       def member_reference(row)
