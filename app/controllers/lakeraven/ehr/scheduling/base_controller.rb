@@ -8,6 +8,8 @@ module Lakeraven
       # user's modify-appointments right on it (BSDX RESOURCE USER), unless they
       # hold SDZSUP (S-SCH-01.13).
       class BaseController < WebController
+        include RpmsUnavailableRendering
+
         VIEW_KEYS = %w[scheduling_user scheduling_supervisor].freeze
         SUPERVISOR_KEY = "scheduling_supervisor"
 
