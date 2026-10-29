@@ -17,8 +17,26 @@ module Lakeraven
       test "requires group_id and patient_dfn" do
         member = ::Lakeraven::EHR::FhirGroupMember.new(group_id: "", patient_dfn: "")
         refute member.valid?
-        assert_includes member.errors[:group_id], "can't be blank"
-        assert_includes member.errors[:patient_dfn], "can't be blank"
+        assert member.errors[:group_id].present?
+        assert member.errors[:patient_dfn].present?
+      end
+
+      test "group_id must match FHIR id grammar used by Group read" do
+        invalid_ids = [ ("a" * 65), "x/y", "a b", "" ]
+        invalid_ids.each do |group_id|
+          member = ::Lakeraven::EHR::FhirGroupMember.new(group_id: group_id, patient_dfn: DFN_A)
+          refute member.valid?, "expected group_id #{group_id.inspect} to be invalid"
+          assert member.errors[:group_id].present?, member.errors.full_messages.inspect
+        end
+      end
+
+      test "patient_dfn must be a positive integer string without leading zeros" do
+        invalid_dfns = [ "abc", "01", "0", "-1", "" ]
+        invalid_dfns.each do |patient_dfn|
+          member = ::Lakeraven::EHR::FhirGroupMember.new(group_id: GROUP_ID, patient_dfn: patient_dfn)
+          refute member.valid?, "expected patient_dfn #{patient_dfn.inspect} to be invalid"
+          assert member.errors[:patient_dfn].present?, member.errors.full_messages.inspect
+        end
       end
 
       test "enforces uniqueness of patient_dfn within a group" do

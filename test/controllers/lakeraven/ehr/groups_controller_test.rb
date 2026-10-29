@@ -12,15 +12,23 @@ module Lakeraven
       EMPTY_GROUP_ID = "cohort-synthetic-empty"
       UNKNOWN_GROUP_ID = "cohort-synthetic-unknown"
       MIXED_GROUP_ID = "cohort-synthetic-mixed"
+      SOLO_PATIENT_GROUP_ID = "cohort-synthetic-solo-patient"
       DFN_A = "900001"
       DFN_B = "900002"
       DFN_C = "900003"
+      DOTTED_COHORT_A = "a"
+      DOTTED_COHORT_AB = "a.b"
+      DOTTED_DFN_A = "900005"
+      DOTTED_DFN_AB = "900009"
       NOT_FOUND_DIAGNOSTICS = "Group not found"
+      INSUFFICIENT_PATIENT_SCOPE = "Insufficient scope for reading Patient"
+      FHIR_GROUP_MEMBERS_TABLE = "lakeraven_ehr_fhir_group_members"
 
       setup do
         ::Lakeraven::EHR::FhirGroupMember.delete_all
         seed_group!(GROUP_ID, [ DFN_C, DFN_A, DFN_B ])
         seed_group!(MIXED_GROUP_ID, [ DFN_A, DFN_B ])
+        seed_group!(SOLO_PATIENT_GROUP_ID, [ DFN_A ])
 
         AuditEvent.delete_all
         setup_smart_auth(scopes: "system/Group.read system/Patient.read")
@@ -118,28 +126,87 @@ module Lakeraven
         assert_response :forbidden
         body = JSON.parse(response.body)
         assert_equal "forbidden", body["issue"].first["code"]
+        assert_equal INSUFFICIENT_PATIENT_SCOPE, body["issue"].first["diagnostics"]
         refute_includes response.body, "Patient/#{DFN_A}"
       end
 
-      test "patient-bound token cannot read a group that lists other patients" do
-        app = Doorkeeper::Application.create!(
-          name: "patient-group-test", redirect_uri: "https://example.test/callback",
-          scopes: "patient/Group.read patient/Patient.read", confidential: true
-        )
-        token = Doorkeeper::AccessToken.create!(
-          application: app,
-          scopes: "patient/Group.read patient/Patient.read",
-          resource_owner_id: DFN_A,
-          expires_in: 3600
-        )
-        headers = { "Authorization" => "Bearer #{token.plaintext_token || token.token}" }
+      test "Group.read without Patient.read answers the same 403 for existing, unknown, and empty cohorts without querying membership" do
+        setup_smart_auth(scopes: "system/Group.read")
 
-        get group_path(MIXED_GROUP_ID), headers: headers
+        responses = []
+        membership_sql = capture_fhir_group_member_sql do
+          [ GROUP_ID, UNKNOWN_GROUP_ID, EMPTY_GROUP_ID ].each do |group_id|
+            get group_path(group_id), headers: @headers
+            responses << [ response.status, response.body ]
+          end
+        end
 
-        assert_response :forbidden
-        body = JSON.parse(response.body)
+        assert_empty membership_sql,
+                     "authorization must run before any #{FHIR_GROUP_MEMBERS_TABLE} query"
+        assert responses.all? { |status, _| status == 403 }, responses.inspect
+        assert_equal 1, responses.map(&:last).uniq.length, "expected identical response bodies"
+        body = JSON.parse(responses.first.last)
         assert_equal "forbidden", body["issue"].first["code"]
-        refute_includes response.body, "Patient/#{DFN_B}"
+        assert_equal INSUFFICIENT_PATIENT_SCOPE, body["issue"].first["diagnostics"]
+        responses.each do |_, raw_body|
+          refute_includes raw_body, "Patient/#{DFN_A}"
+          refute_includes raw_body, NOT_FOUND_DIAGNOSTICS
+        end
+      end
+
+      test "patient-bound token is refused for every Group read with identical 403 and no cohort query" do
+        headers = patient_bound_group_headers(DFN_A)
+        targets = [ UNKNOWN_GROUP_ID, SOLO_PATIENT_GROUP_ID, MIXED_GROUP_ID ]
+
+        responses = []
+        membership_sql = capture_fhir_group_member_sql do
+          targets.each do |group_id|
+            get group_path(group_id), headers: headers
+            responses << [ response.status, response.body ]
+          end
+        end
+
+        assert_empty membership_sql,
+                     "patient-bound Group read must be refused before #{FHIR_GROUP_MEMBERS_TABLE} is queried"
+        assert responses.all? { |status, _| status == 403 }, responses.inspect
+        assert_equal 1, responses.map(&:last).uniq.length, "expected identical response bodies"
+        body = JSON.parse(responses.first.last)
+        assert_equal "forbidden", body["issue"].first["code"]
+        responses.each do |_, raw_body|
+          refute_includes raw_body, "Patient/#{DFN_B}"
+          refute_includes raw_body, "Patient/#{DFN_A}"
+        end
+      end
+
+      test "GET /Group/a.b returns the dotted cohort, not the prefix cohort" do
+        seed_group!(DOTTED_COHORT_A, [ DOTTED_DFN_A ])
+        seed_group!(DOTTED_COHORT_AB, [ DOTTED_DFN_AB ])
+
+        get group_path(DOTTED_COHORT_AB), headers: @headers
+
+        assert_response :ok
+        body = JSON.parse(response.body)
+        assert_equal DOTTED_COHORT_AB, body["id"]
+        assert_equal(
+          [ { "entity" => { "reference" => "Patient/#{DOTTED_DFN_AB}" } } ],
+          body["member"]
+        )
+        refute_includes body["member"].to_s, DOTTED_DFN_A
+      end
+
+      test "Group ids ending in .xml or .json are literal cohort ids, not content formats" do
+        %w[cohort-a.xml cohort-a.json].each do |requested_id|
+          AuditEvent.delete_all
+
+          get group_path(requested_id), headers: @headers
+
+          assert_response :not_found, requested_id
+          body = JSON.parse(response.body)
+          assert_equal NOT_FOUND_DIAGNOSTICS, body["issue"].first["diagnostics"]
+
+          event = AuditEvent.recent.first
+          assert_equal requested_id, event.entity_identifier, requested_id
+        end
       end
 
       test "successful GET produces an AuditEvent for the Group" do
@@ -225,6 +292,36 @@ module Lakeraven
         calls
       ensure
         ::Lakeraven::EHR::FhirGroupMember.singleton_class.define_method(:members_of, original)
+      end
+
+      def capture_fhir_group_member_sql
+        statements = []
+        callback = lambda do |*_, payload|
+          sql = payload[:sql].to_s
+          statements << sql if sql.include?(FHIR_GROUP_MEMBERS_TABLE)
+        end
+
+        ActiveSupport::Notifications.subscribed(callback, "sql.active_record") do
+          yield
+        end
+
+        statements
+      end
+
+      def patient_bound_group_headers(patient_dfn)
+        app = Doorkeeper::Application.create!(
+          name: "patient-group-test-#{SecureRandom.hex(4)}",
+          redirect_uri: "https://example.test/callback",
+          scopes: "patient/Group.read patient/Patient.read",
+          confidential: true
+        )
+        token = Doorkeeper::AccessToken.create!(
+          application: app,
+          scopes: "patient/Group.read patient/Patient.read",
+          resource_owner_id: patient_dfn,
+          expires_in: 3600
+        )
+        { "Authorization" => "Bearer #{token.plaintext_token || token.token}" }
       end
     end
   end

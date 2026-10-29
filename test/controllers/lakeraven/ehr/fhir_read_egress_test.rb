@@ -727,7 +727,6 @@ module Lakeraven
 
           filtered = payload.deep_dup.deep_stringify_keys
           filtered["member"].reject! { |member| member.dig("entity", "reference") == "Patient/1" }
-          filtered["quantity"] = filtered["member"].length
           filtered
         }) do
           get path, headers: @headers
