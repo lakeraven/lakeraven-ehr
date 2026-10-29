@@ -7,37 +7,24 @@
 #   "a patient exists with DFN {string}" — cpoe_steps.rb
 #   "the generation should complete in under {int} seconds" — electronic_prescribing_steps.rb
 
+require_relative "../../test/support/ccda_model_fixtures"
+
+World(Lakeraven::EHR::CcdaModelFixtures)
+
 # -----------------------------------------------------------------------------
 # Given: patient with clinical data for C-CDA generation
 # -----------------------------------------------------------------------------
 
 Given("the patient has clinical data for a care summary") do
+  dfn = (@patient_dfn || Lakeraven::EHR::CcdaModelFixtures::SYNTHETIC_DFN).to_s
   @care_summary_data = {
-    patient: {
-      dfn: @patient_dfn || "12345",
-      name: { given: "Alice", family: "Anderson" },
-      dob: "1975-06-15", sex: "F",
-      address: { street: "123 Main St", city: "Anchorage", state: "AK", zip: "99501" }
-    },
-    allergies: [
-      { code: "7980", code_system: "2.16.840.1.113883.6.88", display: "Penicillin", status: "active" },
-      { code: "36567", code_system: "2.16.840.1.113883.6.88", display: "Simvastatin", status: "active" }
-    ],
-    conditions: [
-      { code: "E11.9", code_system: "2.16.840.1.113883.6.90", display: "Type 2 diabetes mellitus", status: "active" },
-      { code: "I10", code_system: "2.16.840.1.113883.6.90", display: "Essential hypertension", status: "active" }
-    ],
-    medications: [
-      { code: "311364", code_system: "2.16.840.1.113883.6.88", display: "Lisinopril 10 MG Oral Tablet" },
-      { code: "860975", code_system: "2.16.840.1.113883.6.88", display: "Metformin 500 MG Oral Tablet" }
-    ],
-    vitals: [
-      { code: "8480-6", display: "Systolic BP", value: "120", units: "mm[Hg]", date: "2026-03-01" }
-    ],
-    encounters: [
-      { date: "2026-03-01", type_code: "99213", type_display: "Office visit", performer: "Dr. Smith" }
-    ],
-    author: { name: "Dr. Smith", institution: "Example Health Center" }
+    patient: synthetic_patient(dfn: dfn.to_i, name: "TEST,PATIENT ONE"),
+    allergies: synthetic_allergies.map { |a| a.tap { |row| row.patient_dfn = dfn } },
+    conditions: synthetic_conditions.map { |c| c.tap { |row| row.patient_dfn = dfn } },
+    medications: synthetic_medications.map { |m| m.tap { |row| row.patient_dfn = dfn } },
+    vitals: synthetic_vitals.map { |v| v.tap { |row| row.patient_dfn = dfn } },
+    encounters: synthetic_encounters.map { |e| e.tap { |row| row.patient_dfn = dfn.to_i } },
+    author: synthetic_author.merge(institution: "Example Health Center")
   }
 end
 

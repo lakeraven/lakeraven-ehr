@@ -56,6 +56,45 @@ module Lakeraven
         assert_response :unauthorized
       end
 
+      test "C-CDA serializes filtered patient demographics not raw chart demographics" do
+        stub_egress_filter(->(sections) {
+          sections.merge(
+            patient: sections[:patient].merge(
+              name: { family: "FILTERED", given: "DEMOGRAPHIC" }
+            )
+          )
+        }) do
+          post "/lakeraven-ehr/transitions_of_care",
+            params: { patient_dfn: "1" }, headers: @headers
+        end
+
+        assert_response :created
+        assert_includes response.body, "FILTERED"
+        assert_includes response.body, "DEMOGRAPHIC"
+        refute_includes response.body, "Anderson"
+        refute_includes response.body, "Alice"
+      end
+
+      test "C-CDA omits allergy rows withheld by Part 2 egress filter" do
+        stub_egress_filter(->(sections) {
+          visible = { code: "VISIBLE-ALLERGY", display: "Visible synthetic allergen", code_system: nil }
+          with_hidden = sections.merge(
+            allergies: sections[:allergies] + [
+              { code: "WITHHELD-ALLERGY", display: "Must not appear in C-CDA", code_system: nil }
+            ]
+          )
+          with_hidden.merge(allergies: [ visible ])
+        }) do
+          post "/lakeraven-ehr/transitions_of_care",
+            params: { patient_dfn: "1" }, headers: @headers
+        end
+
+        assert_response :created
+        assert_includes response.body, "VISIBLE-ALLERGY"
+        refute_includes response.body, "WITHHELD-ALLERGY"
+        refute_includes response.body, "Must not appear in C-CDA"
+      end
+
       test "C-CDA serializes the Part 2 filter return value" do
         marker = { code: "ZZZ-FILTER-MARKER", display: "Filter marker", code_system: nil }
         stub_egress_filter(->(sections) { sections.merge(conditions: [ marker ]) }) do

@@ -1,36 +1,102 @@
 # frozen_string_literal: true
 
 require "test_helper"
+require_relative "../../../support/ccda_model_fixtures"
 
 module Lakeraven
   module EHR
     class CcdaGeneratorTest < ActiveSupport::TestCase
+      include CcdaModelFixtures
+
       setup do
-        @patient_data = {
-          dfn: "12345",
-          name: { given: "John", family: "Doe" },
-          dob: "1975-06-15",
-          sex: "M",
-          address: { street: "123 Main St", city: "Anchorage", state: "AK", zip: "99501" }
-        }
-        @allergies = [
-          { code: "7980", code_system: "2.16.840.1.113883.6.88", display: "Penicillin", status: "active" },
-          { code: "36567", code_system: "2.16.840.1.113883.6.88", display: "Simvastatin", status: "active" }
-        ]
-        @conditions = [
-          { code: "E11.9", code_system: "2.16.840.1.113883.6.90", display: "Type 2 diabetes mellitus", status: "active" },
-          { code: "I10", code_system: "2.16.840.1.113883.6.90", display: "Essential hypertension", status: "active" }
-        ]
-        @medications = [
-          { code: "311364", code_system: "2.16.840.1.113883.6.88", display: "Lisinopril 10 MG Oral Tablet" },
-          { code: "860975", code_system: "2.16.840.1.113883.6.88", display: "Metformin 500 MG Oral Tablet" }
-        ]
-        @vitals = [
-          { code: "8480-6", display: "Systolic BP", value: "120", units: "mm[Hg]", date: "2026-03-01" }
-        ]
-        @encounters = [
-          { date: "2026-03-01", type_code: "99213", type_display: "Office visit", performer: "Dr. Smith" }
-        ]
+        @patient = synthetic_patient
+        @allergies = synthetic_allergies
+        @conditions = synthetic_conditions
+        @medications = synthetic_medications
+        @vitals = synthetic_vitals
+        @encounters = synthetic_encounters
+        @author = synthetic_author
+      end
+
+      # =============================================================================
+      # MODEL INPUT CONTRACT (#233) — hash fallback removed
+      # =============================================================================
+
+      test "rejects hash patient with ArgumentError" do
+        assert_raises(ArgumentError) do
+          CcdaGenerator.generate(
+            patient: { dfn: "900001", name: { given: "ONE", family: "TEST" } },
+            allergies: [],
+            conditions: [],
+            medications: []
+          )
+        end
+      end
+
+      test "rejects hash allergy row with ArgumentError" do
+        assert_raises(ArgumentError) do
+          CcdaGenerator.generate(
+            patient: @patient,
+            allergies: [ { code: "7980", display: "Penicillin" } ],
+            conditions: @conditions,
+            medications: @medications
+          )
+        end
+      end
+
+      test "rejects hash condition row with ArgumentError" do
+        assert_raises(ArgumentError) do
+          CcdaGenerator.generate(
+            patient: @patient,
+            allergies: @allergies,
+            conditions: [ { code: "E11.9", display: "Type 2 diabetes mellitus" } ],
+            medications: @medications
+          )
+        end
+      end
+
+      test "rejects hash medication row with ArgumentError" do
+        assert_raises(ArgumentError) do
+          CcdaGenerator.generate(
+            patient: @patient,
+            allergies: @allergies,
+            conditions: @conditions,
+            medications: [ { code: "311364", display: "Lisinopril 10 MG Oral Tablet" } ]
+          )
+        end
+      end
+
+      test "rejects hash vital row with ArgumentError" do
+        assert_raises(ArgumentError) do
+          CcdaGenerator.generate(
+            patient: @patient,
+            vitals: [ { code: "8480-6", display: "Systolic BP", value: "120", units: "mm[Hg]", date: "2026-03-01" } ]
+          )
+        end
+      end
+
+      test "rejects hash encounter row with ArgumentError" do
+        assert_raises(ArgumentError) do
+          CcdaGenerator.generate(
+            patient: @patient,
+            encounters: [ { date: "2026-03-01", type_code: "99213", type_display: "Office visit", performer: "Dr. Smith" } ]
+          )
+        end
+      end
+
+      test "nil clinical lists are treated as empty" do
+        xml = CcdaGenerator.generate(
+          patient: @patient,
+          allergies: nil,
+          conditions: nil,
+          medications: nil,
+          vitals: nil,
+          encounters: nil,
+          author: @author
+        )
+        doc = Nokogiri::XML(xml)
+
+        assert doc.errors.empty?, "Expected valid XML with nil lists coerced to empty"
       end
 
       # =============================================================================
@@ -66,23 +132,23 @@ module Lakeraven
       end
 
       # =============================================================================
-      # PATIENT DEMOGRAPHICS
+      # PATIENT DEMOGRAPHICS (Patient model attributes)
       # =============================================================================
 
-      test "includes patient name" do
+      test "includes patient name from Patient name FAMILY,GIVEN" do
         doc = parse_ccda
 
         given = doc.at_xpath("//xmlns:patient/xmlns:name/xmlns:given", "xmlns" => "urn:hl7-org:v3")
         family = doc.at_xpath("//xmlns:patient/xmlns:name/xmlns:family", "xmlns" => "urn:hl7-org:v3")
-        assert_equal "John", given&.text
-        assert_equal "Doe", family&.text
+        assert_equal "PATIENT ONE", given&.text
+        assert_equal "TEST", family&.text
       end
 
       test "includes patient DFN as ID" do
         doc = parse_ccda
 
         id = doc.at_xpath("//xmlns:patientRole/xmlns:id/@extension", "xmlns" => "urn:hl7-org:v3")
-        assert_equal "12345", id&.value
+        assert_equal "900001", id&.value
       end
 
       test "includes patient birth time" do
@@ -97,6 +163,21 @@ module Lakeraven
 
         gender = doc.at_xpath("//xmlns:patient/xmlns:administrativeGenderCode/@code", "xmlns" => "urn:hl7-org:v3")
         assert_equal "M", gender&.value
+      end
+
+      test "includes patient address from flat address attributes" do
+        doc = parse_ccda
+        ns = { "xmlns" => "urn:hl7-org:v3" }
+
+        street = doc.at_xpath("//xmlns:patientRole/xmlns:addr/xmlns:streetAddressLine", ns)
+        city = doc.at_xpath("//xmlns:patientRole/xmlns:addr/xmlns:city", ns)
+        state = doc.at_xpath("//xmlns:patientRole/xmlns:addr/xmlns:state", ns)
+        zip = doc.at_xpath("//xmlns:patientRole/xmlns:addr/xmlns:postalCode", ns)
+
+        assert_equal "123 Main St", street&.text
+        assert_equal "Anchorage", city&.text
+        assert_equal "AK", state&.text
+        assert_equal "99501", zip&.text
       end
 
       # =============================================================================
@@ -173,6 +254,28 @@ module Lakeraven
         assert vitals_template.present?, "Expected vital signs section"
       end
 
+      test "vital observation uses Observation effective_datetime and unit" do
+        doc = parse_ccda
+        ns = { "xmlns" => "urn:hl7-org:v3" }
+
+        effective = doc.at_xpath(
+          "//xmlns:section[xmlns:templateId[@root='2.16.840.1.113883.10.20.22.2.4.1']]//xmlns:effectiveTime/@value",
+          ns
+        )
+        value = doc.at_xpath(
+          "//xmlns:section[xmlns:templateId[@root='2.16.840.1.113883.10.20.22.2.4.1']]//xmlns:value/@value",
+          ns
+        )
+        unit = doc.at_xpath(
+          "//xmlns:section[xmlns:templateId[@root='2.16.840.1.113883.10.20.22.2.4.1']]//xmlns:value/@unit",
+          ns
+        )
+
+        assert_equal "20260301120000", effective&.value
+        assert_equal "120", value&.value
+        assert_equal "mm[Hg]", unit&.value
+      end
+
       test "includes encounters section" do
         doc = parse_ccda
 
@@ -183,8 +286,30 @@ module Lakeraven
         assert encounters_template.present?, "Expected encounters section"
       end
 
+      test "encounter entry uses Encounter type and period_start" do
+        doc = parse_ccda
+        ns = { "xmlns" => "urn:hl7-org:v3" }
+
+        type_code = doc.at_xpath(
+          "//xmlns:section[xmlns:templateId[@root='2.16.840.1.113883.10.20.22.2.22.1']]//xmlns:code/@code",
+          ns
+        )
+        effective = doc.at_xpath(
+          "//xmlns:section[xmlns:templateId[@root='2.16.840.1.113883.10.20.22.2.22.1']]//xmlns:effectiveTime/@value",
+          ns
+        )
+        performer = doc.at_xpath(
+          "//xmlns:section[xmlns:templateId[@root='2.16.840.1.113883.10.20.22.2.22.1']]//xmlns:performer//xmlns:text",
+          ns
+        )
+
+        assert_equal "99213", type_code&.value
+        assert_equal "20260301090000", effective&.value
+        assert_equal "Dr. Smith", performer&.text
+      end
+
       # =============================================================================
-      # AUTHOR AND CUSTODIAN
+      # AUTHOR AND CUSTODIAN (author remains a hash)
       # =============================================================================
 
       test "includes author section" do
@@ -214,7 +339,7 @@ module Lakeraven
         assert_equal 2, parsed[:medications].length
       end
 
-      test "parsed allergy codes match input" do
+      test "parsed allergy codes match input allergen_code" do
         xml = generate_ccda
         parsed = CcdaParser.parse(xml)
 
@@ -228,14 +353,26 @@ module Lakeraven
       # =============================================================================
 
       test "generates document with no allergies" do
-        xml = CcdaGenerator.generate(patient: @patient_data, allergies: [], conditions: @conditions, medications: @medications)
+        xml = CcdaGenerator.generate(
+          patient: @patient,
+          allergies: [],
+          conditions: @conditions,
+          medications: @medications,
+          author: @author
+        )
         doc = Nokogiri::XML(xml)
 
         assert doc.errors.empty?, "Expected valid XML with empty allergies"
       end
 
       test "generates document with empty clinical data" do
-        xml = CcdaGenerator.generate(patient: @patient_data, allergies: [], conditions: [], medications: [])
+        xml = CcdaGenerator.generate(
+          patient: @patient,
+          allergies: [],
+          conditions: [],
+          medications: [],
+          author: @author
+        )
         doc = Nokogiri::XML(xml)
 
         assert doc.errors.empty?, "Expected valid XML with no clinical data"
@@ -257,13 +394,13 @@ module Lakeraven
 
       def generate_ccda
         CcdaGenerator.generate(
-          patient: @patient_data,
+          patient: @patient,
           allergies: @allergies,
           conditions: @conditions,
           medications: @medications,
           vitals: @vitals,
           encounters: @encounters,
-          author: { name: "Dr. Smith", institution: "IHS Facility" }
+          author: @author
         )
       end
 
