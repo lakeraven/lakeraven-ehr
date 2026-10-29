@@ -7,7 +7,10 @@ gemspec
 if ENV["RPMS_RPC_PATH"]
   gem "rpms-rpc", path: ENV["RPMS_RPC_PATH"]
 else
-  # Pinned to rpms-rpc main 49ec8b5: Scheduling.appointments (ids and state, for
+  # Pinned to rpms-rpc main 3e0c31d: Authentication.option_access, which options the
+  # signed-on user may run (ORWU HAS OPTION ACCESS; rpms-rpc#490), and a failed BSDX
+  # list read raises instead of reading as empty (rpms-rpc#500). Earlier, 49ec8b5:
+  # Scheduling.appointments (ids and state, for
   # cancel and check-in; rpms-rpc#496). Earlier: Scheduling.resources and slot_schedule (the
   # user's resources and rights, each block's slots; rpms-rpc#495). Earlier:
   # Tribal.communities lists COMMUNITY entries
@@ -19,7 +22,7 @@ else
   # (lakeraven-ehr#540), invented RPC names removed (#310/#311), typed errors for
   # a missing RPC (#370), the user class from ORWU USERINFO (#236). A fixed ref
   # rather than branch:main so the pin does not drift mid-merge.
-  gem "rpms-rpc", github: "lakeraven/rpms-rpc", ref: "49ec8b5"
+  gem "rpms-rpc", github: "lakeraven/rpms-rpc", ref: "3e0c31d"
 end
 
 gem "puma"
