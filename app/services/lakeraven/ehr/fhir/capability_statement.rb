@@ -17,7 +17,9 @@ module Lakeraven
       #
       # The security element comes from SmartDiscovery, which also builds
       # .well-known/smart-configuration, so the two name the same endpoints.
-      # It names no scopes: smart-configuration lists them.
+      # It names no scopes: smart-configuration lists them, and its per-type
+      # scopes are the interactions served_interactions_by_type returns, so
+      # the two documents cannot disagree.
       class CapabilityStatement
         FHIR_VERSION = "4.0.1"
         US_CORE_IG = "http://hl7.org/fhir/us/core/ImplementationGuide/hl7.fhir.us.core|6.1.0"
@@ -88,6 +90,26 @@ module Lakeraven
 
         def self.call(...) = new(...).to_fhir
 
+        # What /metadata serves right now: each type mapped to the interactions
+        # the current backend provides. RESOURCES stays the list of what the
+        # engine can serve. An interaction is kept unless
+        # capability_for_fhir_interaction names a capability the current
+        # backend does not provide. A type left with no interactions is
+        # dropped. Resolved on each call, because the backend can change.
+        # SmartDiscovery#scopes_supported reads this same map.
+        def self.served_interactions_by_type
+          RESOURCES.each_with_object({}) do |(type, declaration), served|
+            interactions = declaration[:interactions].reject { |interaction| interaction_withheld?(type, interaction) }
+            served[type] = interactions unless interactions.empty?
+          end
+        end
+
+        def self.interaction_withheld?(type, interaction)
+          capability = BackendRegistry.capability_for_fhir_interaction(type, interaction)
+          capability && !BackendRegistry.current.provides?(capability)
+        end
+        private_class_method :interaction_withheld?
+
         def initialize(base_url:, token_endpoint:)
           @base_url = base_url
           @token_endpoint = token_endpoint
@@ -109,7 +131,7 @@ module Lakeraven
             rest: [ {
               mode: "server",
               security: security,
-              resource: RESOURCES.map { |type, declaration| resource(type, declaration) },
+              resource: served_resources,
               searchParam: SearchCapabilities.rest_search_params
             } ]
           }
@@ -134,6 +156,12 @@ module Lakeraven
 
         def security
           SmartDiscovery.new(token_endpoint: @token_endpoint).security
+        end
+
+        def served_resources
+          self.class.served_interactions_by_type.map do |type, interactions|
+            resource(type, RESOURCES.fetch(type).merge(interactions: interactions))
+          end
         end
 
         def resource(type, declaration)
