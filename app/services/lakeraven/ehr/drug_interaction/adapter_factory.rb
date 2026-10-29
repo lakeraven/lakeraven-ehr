@@ -57,6 +57,19 @@ module Lakeraven
             @registrations = {}
           end
 
+          # True when an explicit build argument raises ArgumentError before
+          # any builder runs: not a name, an unknown name, or :mock in
+          # production. A builder that raises is a different failure.
+          def explicit_backend_rejected?(backend)
+            return false if backend.nil?
+            return true unless backend.is_a?(String) || backend.is_a?(Symbol)
+
+            name = normalize_backend(backend)
+            return true if name == :mock && Rails.env.production?
+
+            !(DOCUMENTED_BACKENDS.include?(name) || registrations.key?(name))
+          end
+
           private
 
           def configured_backend
