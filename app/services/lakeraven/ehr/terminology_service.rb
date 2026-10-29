@@ -10,9 +10,12 @@ module Lakeraven
     # expansion lives on Terminology::LocalAdapter.
     #
     # Pass adapter: to inject one. Otherwise AdapterFactory.build(backend)
-    # selects it: an explicit backend, else TERMINOLOGY_BACKEND (stripped
-    # and downcased), IRIS, VSAC, or local. An unknown TERMINOLOGY_BACKEND
-    # still returns an adapter; calling it raises AdapterNotAvailable.
+    # selects it: an explicit backend, else TERMINOLOGY_BACKEND, IRIS,
+    # VSAC, or local. AdapterFactory normalizes env values, explicit
+    # arguments, and register names with to_s, strip, downcase, to_sym.
+    # A name that is not a String or Symbol raises ArgumentError. An
+    # unknown TERMINOLOGY_BACKEND still returns an adapter; calling it
+    # raises AdapterNotAvailable.
     #
     # Usage:
     #   service = Lakeraven::EHR::TerminologyService.new
@@ -58,16 +61,20 @@ module Lakeraven
         codes
       end
 
-      # Check if a code is in a ValueSet
+      # Check if a code is in a ValueSet. Blank codes in the expansion
+      # match nothing, exact or prefix (an empty member prefix-matches
+      # every string).
       def code_in_valueset?(code, valueset_id, system: nil, prefix: false)
-        codes = expand_valueset(valueset_id)
-        codes.any? do |c|
+        expand_valueset(valueset_id).any? do |entry|
+          member = entry[:code]
+          next false if member.blank?
+
           code_matches = if prefix
-                           code.to_s.upcase.start_with?(c[:code].to_s.upcase)
+                           code.to_s.upcase.start_with?(member.to_s.upcase)
           else
-                           c[:code] == code
+                           member == code
           end
-          code_matches && (system.nil? || c[:system] == system)
+          code_matches && (system.nil? || entry[:system] == system)
         end
       end
 

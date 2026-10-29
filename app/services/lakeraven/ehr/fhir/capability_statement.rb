@@ -79,8 +79,7 @@ module Lakeraven
             source: "A terminology adapter. The local adapter reads ValueSet JSON from the engine " \
                     "db/valuesets directory when it is present, and from files the host app contributes " \
                     "(TerminologyService.additional_valueset_paths). When the selected backend's adapter " \
-                    "is unavailable, search returns an empty Bundle, read returns 404, and $expand returns " \
-                    "not-supported.",
+                    "is unavailable, search, read, and $expand each return not-supported.",
             operations: [ { name: "expand", definition: "http://hl7.org/fhir/OperationDefinition/ValueSet-expand" } ]
           },
           "CoverageEligibilityRequest" => {

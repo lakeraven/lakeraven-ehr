@@ -36,6 +36,8 @@ module Lakeraven
         end
 
         def lookup_code(system, code)
+          return nil if system.blank? || code.blank?
+
           list_valuesets.each do |valueset|
             match = codes_from(valueset).find { |entry| same_code?(entry, system, code) }
             return match if match
@@ -44,6 +46,8 @@ module Lakeraven
         end
 
         def validate_code(system, code, valueset_id:)
+          return false if system.blank? || code.blank?
+
           expand_valueset(valueset_id).any? { |entry| same_code?(entry, system, code) }
         end
 
@@ -93,7 +97,12 @@ module Lakeraven
           { system: system, code: concept["code"], display: concept["display"] }
         end
 
+        # A blank system or code never matches. A concept with no code, or an
+        # include with no system, is not a candidate.
         def same_code?(entry, system, code)
+          return false if system.blank? || code.blank?
+          return false if entry[:system].blank? || entry[:code].blank?
+
           entry[:system] == system && entry[:code] == code
         end
 

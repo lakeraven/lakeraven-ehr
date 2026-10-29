@@ -38,6 +38,8 @@ module Lakeraven
         end
 
         def lookup_code(system, code)
+          return nil if system.blank? || code.blank?
+
           @valuesets.each_value do |valueset|
             match = codes_from(valueset).find { |entry| same_code?(entry, system, code) }
             return match if match
@@ -46,6 +48,8 @@ module Lakeraven
         end
 
         def validate_code(system, code, valueset_id:)
+          return false if system.blank? || code.blank?
+
           expand_valueset(valueset_id).any? { |entry| same_code?(entry, system, code) }
         end
 
@@ -81,7 +85,12 @@ module Lakeraven
           }
         end
 
+        # A blank system or code never matches. A code entry with no system
+        # or no code is not a candidate.
         def same_code?(entry, system, code)
+          return false if system.blank? || code.blank?
+          return false if entry[:system].blank? || entry[:code].blank?
+
           entry[:system] == system && entry[:code] == code
         end
       end
