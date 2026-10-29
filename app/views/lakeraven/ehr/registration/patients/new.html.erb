@@ -75,11 +75,19 @@
   </div>
 
   <div class="flex flex-col gap-1">
-    <%= f.label :ssn, "Social security number (optional)" %>
+    <%= f.label :ssn, "Social security number" %>
     <%= f.text_field :ssn,
           value: @registration.ssn,
           inputmode: "numeric",
           autocomplete: "off",
+          class: "rounded border border-slate-300 px-3 py-2" %>
+  </div>
+
+  <div class="flex flex-col gap-1">
+    <%= f.label :no_ssn_reason, "Or, the reason there is none" %>
+    <%= f.select :no_ssn_reason,
+          Lakeraven::EHR::PatientRegistration::NO_SSN_REASONS.map { |code, label| [ label, code ] },
+          { include_blank: true, selected: @registration.no_ssn_reason },
           class: "rounded border border-slate-300 px-3 py-2" %>
   </div>
 

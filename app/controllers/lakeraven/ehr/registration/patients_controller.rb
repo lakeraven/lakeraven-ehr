@@ -183,7 +183,7 @@ module Lakeraven
         end
 
         def registration_params
-          params.fetch(:registration, {}).permit(:name, :sex, :dob, :ssn, :tribe_ien, :community_ien).to_h
+          params.fetch(:registration, {}).permit(:name, :sex, :dob, :ssn, :no_ssn_reason, :tribe_ien, :community_ien).to_h
         end
 
         def can_register?
