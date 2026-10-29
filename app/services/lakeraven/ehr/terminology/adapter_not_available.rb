@@ -3,9 +3,11 @@
 module Lakeraven
   module EHR
     module Terminology
-      # A recognized backend has no registered adapter. NotImplementedError
-      # so callers that already rescue that class keep their current behavior.
-      class AdapterNotAvailable < NotImplementedError
+      # The selected terminology backend has no registered adapter.
+      # A StandardError, so `rescue => e` and `rescue StandardError` catch
+      # it. It is not a NotImplementedError; callers that rescue that class
+      # also rescue AdapterNotAvailable.
+      class AdapterNotAvailable < StandardError
       end
     end
   end

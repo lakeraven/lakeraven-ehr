@@ -7,7 +7,9 @@ module Lakeraven
       #
       # The engine db/valuesets directory is searched first, then each
       # directory on TerminologyService.additional_valueset_paths. The
-      # first file named for the ValueSet id wins.
+      # first file named for the ValueSet id wins. The id has to pass
+      # ValueSetId: one file name, not a path, not "." or "..", and not a
+      # hidden name. The resolved file has to stay inside that directory.
       class LocalAdapter < BaseAdapter
         def backend
           :local
@@ -25,9 +27,7 @@ module Lakeraven
         end
 
         def list_valuesets
-          valueset_paths.flat_map do |path|
-            Dir.glob(path.join("*.json")).map { |file| JSON.parse(File.read(file)) }
-          end.uniq { |valueset| valueset["id"] || valueset["name"] }
+          valueset_paths.flat_map { |path| valuesets_in(path) }.uniq { |valueset| valueset["id"] || valueset["name"] }
         end
 
         def search(query)
@@ -54,12 +54,28 @@ module Lakeraven
         end
 
         def load_valueset(valueset_id)
-          filename = "#{valueset_id}.json"
-          valueset_paths.each do |path|
-            filepath = path.join(filename)
-            return JSON.parse(File.read(filepath)) if File.exist?(filepath)
+          reject_unsafe_id!(valueset_id)
+
+          valueset_paths.each do |directory|
+            filepath = ValueSetId.file_for(directory, valueset_id)
+            return JSON.parse(File.read(filepath)) if filepath
           end
           nil
+        end
+
+        def reject_unsafe_id!(valueset_id)
+          return if ValueSetId.safe?(valueset_id)
+
+          raise TerminologyService::ValueSetNotFoundError, "Local ValueSet not found: #{valueset_id}"
+        end
+
+        def valuesets_in(directory)
+          Dir.glob(directory.join("*.json")).filter_map { |file| valueset_from(directory, file) }
+        end
+
+        def valueset_from(directory, file)
+          readable = ValueSetId.contained_file(directory, file)
+          JSON.parse(File.read(readable)) if readable
         end
 
         def codes_from(valueset)

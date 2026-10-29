@@ -76,8 +76,11 @@ module Lakeraven
           },
           "ValueSet" => {
             interactions: %w[read search-type],
-            source: "ValueSet JSON files the host app contributes (TerminologyService.additional_valueset_paths). " \
-                    "With IRIS or VSAC terminology configured, search returns an empty Bundle and read returns 404.",
+            source: "A terminology adapter. The local adapter reads ValueSet JSON from the engine " \
+                    "db/valuesets directory when it is present, and from files the host app contributes " \
+                    "(TerminologyService.additional_valueset_paths). When the selected backend's adapter " \
+                    "is unavailable, search returns an empty Bundle, read returns 404, and $expand returns " \
+                    "not-supported.",
             operations: [ { name: "expand", definition: "http://hl7.org/fhir/OperationDefinition/ValueSet-expand" } ]
           },
           "CoverageEligibilityRequest" => {

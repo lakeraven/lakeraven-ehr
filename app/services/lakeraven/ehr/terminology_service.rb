@@ -10,8 +10,9 @@ module Lakeraven
     # expansion lives on Terminology::LocalAdapter.
     #
     # Pass adapter: to inject one. Otherwise AdapterFactory.build(backend)
-    # selects it: an explicit backend, else TERMINOLOGY_BACKEND, IRIS, VSAC,
-    # or local.
+    # selects it: an explicit backend, else TERMINOLOGY_BACKEND (stripped
+    # and downcased), IRIS, VSAC, or local. An unknown TERMINOLOGY_BACKEND
+    # still returns an adapter; calling it raises AdapterNotAvailable.
     #
     # Usage:
     #   service = Lakeraven::EHR::TerminologyService.new
