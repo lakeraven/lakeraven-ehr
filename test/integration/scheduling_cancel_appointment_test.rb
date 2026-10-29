@@ -8,7 +8,7 @@ require "test_helper"
 class SchedulingCancelAppointmentTest < ActionDispatch::IntegrationTest
   DAY = Date.new(2026, 10, 28)
 
-  def at(hour, min = 0) = Time.utc(DAY.year, DAY.month, DAY.day, hour, min)
+  def at(hour, min = 0) = Time.new(DAY.year, DAY.month, DAY.day, hour, min)
 
   RESOURCE = { id: 2, name: "DEMO IHS CLINIC", inactive: false, time_scale: 15, hospital_location_id: 3,
                view: true, overbook: true, modify_schedule: true, modify_appointments: true }.freeze

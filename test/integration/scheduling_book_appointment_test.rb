@@ -8,7 +8,7 @@ require "test_helper"
 class SchedulingBookAppointmentTest < ActionDispatch::IntegrationTest
   DAY = Date.new(2026, 10, 28)
 
-  def at(hour, min = 0) = Time.utc(DAY.year, DAY.month, DAY.day, hour, min)
+  def at(hour, min = 0) = Time.new(DAY.year, DAY.month, DAY.day, hour, min)
 
   RESOURCES = [
     { id: 2, name: "DEMO IHS CLINIC", inactive: false, time_scale: 15, hospital_location_id: 3,

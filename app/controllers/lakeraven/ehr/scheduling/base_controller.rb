@@ -37,7 +37,7 @@ module Lakeraven
         def parse_date(value)
           Date.iso8601(value.to_s)
         rescue Date::Error
-          Date.current
+          Date.today
         end
       end
     end
