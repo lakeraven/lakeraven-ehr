@@ -1,0 +1,11 @@
+<% content_for :title, "No known allergies | Lakeraven EHR" %>
+
+<div class="page-header">
+  <h1><%= nka_failure_heading %></h1>
+</div>
+
+<div class="screening-errors" role="alert">
+  <p><%= nka_failure_detail %></p>
+</div>
+
+<p><%= link_to "Back to chart", patient_chart_path(@dfn) %></p>

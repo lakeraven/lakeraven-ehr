@@ -91,6 +91,72 @@ module Lakeraven
           assert_includes interactions, "create"
         end
       end
+
+      # SPEC #669: capability-gated interactions must match routes in both directions.
+      REGISTRY_GATED_RESOURCE_TYPES = BackendRegistry::CAPABILITY_FHIR_INTERACTIONS.values.flatten(1)
+        .map(&:first).uniq.freeze
+
+      FHIR_ACTION_INTERACTIONS = {
+        "index" => "search-type",
+        "show" => "read",
+        "create" => "create"
+      }.freeze
+
+      test "each capability-gated FHIR interaction has the route kind it needs" do
+        routed = fhir_routes_by_type
+
+        BackendRegistry::CAPABILITY_FHIR_INTERACTIONS.each_value do |pairs|
+          pairs.each do |type, interaction|
+            routes = routed.fetch(type)
+            case interaction
+            when "search-type"
+              assert_includes routes, :index, "#{type} search-type needs a GET index route"
+            when "create"
+              assert_includes routes, :create, "#{type} create needs a POST create route"
+            when "read"
+              assert_includes routes, :show, "#{type} read needs a GET show route"
+            else
+              flunk "unexpected gated interaction #{type} #{interaction}"
+            end
+          end
+        end
+      end
+
+      test "each routed action on a registry-gated resource type maps to a supported interaction" do
+        routed = fhir_routes_by_type
+
+        REGISTRY_GATED_RESOURCE_TYPES.each do |type|
+          routed.fetch(type).each do |route_kind|
+            next unless FHIR_ACTION_INTERACTIONS.key?(route_kind.to_s)
+
+            interaction = FHIR_ACTION_INTERACTIONS.fetch(route_kind.to_s)
+            supported = BackendRegistry.supported_fhir_interactions(type)
+            assert_includes supported, interaction,
+                            "#{type} route #{route_kind} implies #{interaction}, " \
+                            "which must be listed in BASE or a provided capability"
+          end
+        end
+      end
+
+      private
+
+      def fhir_routes_by_type
+        Lakeraven::EHR::Engine.routes.routes.each_with_object(Hash.new { |hash, key| hash[key] = [] }) do |route, types|
+          segments = route.path.spec.to_s.delete_suffix("(.:format)").split("/").reject(&:empty?)
+          type = segments.first
+          next unless type&.match?(/\A[A-Z][A-Za-z]+\z/)
+
+          kind = route_kind(route.verb, segments.drop(1))
+          types[type] << kind if kind
+        end.transform_values(&:uniq)
+      end
+
+      def route_kind(verb, rest)
+        return :show if verb == "GET" && rest.length == 1
+        return :index if verb == "GET" && rest.empty?
+
+        :create if verb == "POST" && rest.empty?
+      end
     end
   end
 end

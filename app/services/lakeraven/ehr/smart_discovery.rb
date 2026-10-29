@@ -15,8 +15,11 @@ module Lakeraven
     #
     # scopes_supported lists only what the token endpoint grants and the API
     # honours (#658), in SMART v2 form: the read wildcard, and one scope per
-    # type the CapabilityStatement declares, with the permissions its
-    # declared interactions need. No wildcard write, no `*.*`.
+    # type /metadata serves on the current backend, with the permissions
+    # those served interactions need. The types and interactions come from
+    # CapabilityStatement.served_interactions_by_type, the same map the
+    # CapabilityStatement is built from, so the two documents cannot disagree.
+    # No wildcard write, no `*.*`.
     class SmartDiscovery
       OAUTH_URIS = "http://fhir-registry.smarthealthit.org/StructureDefinition/oauth-uris"
       GRANT_TYPES = %w[client_credentials].freeze
@@ -47,8 +50,8 @@ module Lakeraven
       end
 
       def scopes_supported
-        per_type = FHIR::CapabilityStatement::RESOURCES.filter_map do |type, declaration|
-          permissions = declaration[:interactions].filter_map { |code| INTERACTION_PERMISSIONS[code] }.join
+        per_type = FHIR::CapabilityStatement.served_interactions_by_type.filter_map do |type, interactions|
+          permissions = interactions.filter_map { |code| INTERACTION_PERMISSIONS[code] }.join
           SmartScope.build("system", type, permissions).to_s if permissions.present?
         end
         [ READ_WILDCARD, *per_type ]
