@@ -12,6 +12,8 @@ require "securerandom"
 #   LIVE_RPMS_ACCESS=PMD123 LIVE_RPMS_VERIFY='PMD123!!' \
 #   bin/rails test test/integration/live_registration_register_patient_test.rb
 class LiveRegistrationRegisterPatientTest < ActionDispatch::IntegrationTest
+  include RegistrationFormHelper
+
   setup do
     skip "live writes: set LIVE_RPMS=1 and LIVE_RPMS_WRITES=1 against a throwaway container" unless
       defined?(LIVE_RPMS) && LIVE_RPMS && ENV["LIVE_RPMS_WRITES"] == "1"
@@ -36,7 +38,7 @@ class LiveRegistrationRegisterPatientTest < ActionDispatch::IntegrationTest
 
   test "S-REG-02.1 a new patient is filed with a health record number, and the front desk finds them" do
     entry = fresh_entry
-    post "/lakeraven-ehr/registration/patients", params: { registration: entry }
+    submit_registration(entry)
 
     assert_response :redirect
     dfn = response.location[%r{/registration/patients/(\d+)\z}, 1]
@@ -48,8 +50,7 @@ class LiveRegistrationRegisterPatientTest < ActionDispatch::IntegrationTest
   end
 
   test "S-REG-02.3 a patient already on file is shown before anything is filed" do
-    post "/lakeraven-ehr/registration/patients",
-         params: { registration: fresh_entry.merge(name: "MOUSE,MICKEY M", sex: "M", dob: "1910-02-14") }
+    submit_registration(fresh_entry.merge(name: "MOUSE,MICKEY M", sex: "M", dob: "1910-02-14"))
 
     assert_response :conflict
     assert_select "#possible-matches tr[data-dfn='3'] td", text: "1001"
@@ -57,11 +58,11 @@ class LiveRegistrationRegisterPatientTest < ActionDispatch::IntegrationTest
 
   test "a different person born the same day is registered once the clerk has reviewed the match" do
     dob = Date.new(1950, 1 + rand(12), 1 + rand(28))
-    post "/lakeraven-ehr/registration/patients", params: { registration: fresh_entry(dob: dob) }
+    submit_registration(fresh_entry(dob: dob))
     assert_response :redirect
 
     second = fresh_entry(dob: dob)
-    post "/lakeraven-ehr/registration/patients", params: { registration: second }
+    submit_registration(second)
     assert_response :conflict
     token = css_select("#confirm-different-person input[name='review_token']").first["value"]
 
