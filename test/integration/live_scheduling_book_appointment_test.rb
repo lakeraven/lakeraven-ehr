@@ -21,7 +21,7 @@ class LiveSchedulingBookAppointmentTest < ActionDispatch::IntegrationTest
   teardown { LiveRpmsSession.sign_on! if defined?(LIVE_RPMS) && LIVE_RPMS && ENV["LIVE_RPMS_WRITES"] == "1" }
 
   def weekday_ahead
-    day = Date.current + 7 + rand(7)
+    day = Date.today + 7 + rand(7)
     day += 1 while day.saturday? || day.sunday?
     day
   end
@@ -79,7 +79,7 @@ class LiveSchedulingBookAppointmentTest < ActionDispatch::IntegrationTest
   test "S-SCH-03.1, 03.7 and 02.5 the scheduler checks a patient in today, once, and it can no longer be cancelled" do
     get "/lakeraven-ehr/scheduling"
     clinic = css_select("#resources a").find { |a| a.text == "DEMO IHS CLINIC" }["href"]
-    today = Date.current
+    today = Date.today
     get clinic, params: { date: today.iso8601 }
     open = css_select("#open-times tr[data-time]").select { |tr| tr.at_css("td[data-open]")["data-open"].to_i.positive? }
     skip "no open time left today on the throwaway container" if open.empty?
@@ -92,7 +92,7 @@ class LiveSchedulingBookAppointmentTest < ActionDispatch::IntegrationTest
 
     get checkin, params: { date: today.iso8601, provider_search: "PROFILE" }
     provider = css_select("#checkin-form label[data-provider]").find { |l| l.text.upcase.include?("PROFILE,MD") }["data-provider"]
-    now = Time.now.utc.strftime("%Y-%m-%dT%H:%M")
+    now = Time.now.strftime("%Y-%m-%dT%H:%M")
     post checkin, params: { date: today.iso8601, checkin: { at: now, provider_ien: provider } }
     assert_response :redirect
     follow_redirect!

@@ -76,7 +76,7 @@
           <td data-status="<%= status.split.first.downcase %>"><%= status %></td>
           <td>
             <% if status == "Booked" && can_book?(@resource) %>
-              <% if appointment[:start_time].to_date == Date.current %>
+              <% if appointment[:start_time].to_date == Date.today %>
                 <%= link_to "Check in",
                       scheduling_checkin_clinic_appointment_path(@resource[:id], appointment[:id], date: @date.iso8601) %>
               <% end %>

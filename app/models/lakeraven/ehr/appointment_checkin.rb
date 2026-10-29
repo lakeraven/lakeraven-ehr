@@ -17,13 +17,8 @@ module Lakeraven
       validates :provider_ien, presence: { message: "is required at this clinic" }, if: -> { provider_required }
       validate :on_the_appointment_day_and_not_ahead
 
-      # The check-in as the clinic's wall-clock time (BSDX times carry no zone).
-      def time
-        m = at.to_s.match(/\A(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})\z/)
-        m && Time.utc(*m.captures.map(&:to_i))
-      rescue ArgumentError
-        nil
-      end
+      # The check-in as the clinic's wall-clock time (WallClock).
+      def time = WallClock.parse(at)
 
       private
 
@@ -32,7 +27,7 @@ module Lakeraven
         return errors.add(:at, "is not a time") unless time
 
         errors.add(:at, "must be on the appointment's day") if appointment && time.to_date != appointment[:start_time].to_date
-        errors.add(:at, "cannot be in the future") if time > Time.now.utc
+        errors.add(:at, "cannot be in the future") if time > Time.now
       end
     end
   end
