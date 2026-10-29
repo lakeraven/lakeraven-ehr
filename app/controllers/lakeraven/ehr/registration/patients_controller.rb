@@ -14,6 +14,8 @@ module Lakeraven
       # registration also the scheduling menu keys (SDZMENU, SDZSUP); registering
       # takes AGZMENU or AGZMGR.
       class PatientsController < WebController
+        include RpmsUnavailableRendering
+
         VIEW_KEYS = %w[registration_menu registration_manager registration_view_only scheduling_user scheduling_supervisor].freeze
         REGISTER_KEYS = %w[registration_menu registration_manager].freeze
         # The search is AG's own lookup (AGG LOOKUP PATIENTS), which RPMS runs for
