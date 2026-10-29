@@ -5,10 +5,13 @@ module Lakeraven
     # Terminology Service - Abstraction for ValueSet Operations
     # Ported from the predecessor app TerminologyService.
     #
-    # Provides a unified interface for terminology operations backed by:
-    #   1. VSAC (NLM's Value Set Authority Center) - production
-    #   2. Local ValueSets (extracted from GPRA) - fallback
-    #   3. IRIS for Health terminology server - future
+    # Operations delegate to a Terminology adapter. Caching, the selected
+    # backend, resolve_oid, and the GPRA-to-VSAC map stay here. Local JSON
+    # expansion lives on Terminology::LocalAdapter.
+    #
+    # Pass adapter: to inject one. Otherwise AdapterFactory.build(backend)
+    # selects it: an explicit backend, else TERMINOLOGY_BACKEND, IRIS, VSAC,
+    # or local.
     #
     # Usage:
     #   service = Lakeraven::EHR::TerminologyService.new
@@ -25,12 +28,13 @@ module Lakeraven
 
       class ValueSetNotFoundError < StandardError; end
 
-      # Configurable valueset search paths.
-      # Allows host apps to contribute additional valueset directories.
+      # Directories LocalAdapter searches after the engine db/valuesets path.
+      # Host apps add their own ValueSet JSON directories here.
       cattr_accessor :additional_valueset_paths, default: []
 
-      def initialize(backend: nil, use_distributed_cache: true)
-        @backend = backend || detect_backend
+      def initialize(backend: nil, use_distributed_cache: true, adapter: nil)
+        @adapter = adapter || Terminology::AdapterFactory.build(backend)
+        @backend = @adapter.backend
         @use_distributed_cache = use_distributed_cache && defined?(Rails) && Rails.cache.present?
         @local_cache = {}
       end
@@ -68,32 +72,17 @@ module Lakeraven
 
       # Get ValueSet metadata (without expansion)
       def get_valueset(valueset_id)
-        case @backend
-        when BACKEND_LOCAL
-          load_local_valueset(valueset_id)
-        else
-          raise NotImplementedError, "get_valueset not available for #{@backend}"
-        end
+        @adapter.get_valueset(valueset_id)
       end
 
       # Search for ValueSets
       def search(query)
-        case @backend
-        when BACKEND_LOCAL
-          search_local(query)
-        else
-          raise NotImplementedError, "search not available for #{@backend}"
-        end
+        @adapter.search(query)
       end
 
       # List all available ValueSets
       def list_valuesets
-        case @backend
-        when BACKEND_LOCAL
-          list_local_valuesets
-        else
-          raise NotImplementedError, "list_valuesets not available for #{@backend}"
-        end
+        @adapter.list_valuesets
       end
 
       # Clear the cache (both local and distributed)
@@ -123,74 +112,7 @@ module Lakeraven
       end
 
       def fetch_valueset_codes(valueset_id)
-        case @backend
-        when BACKEND_LOCAL
-          expand_from_local(valueset_id)
-        else
-          raise "Unknown backend: #{@backend}"
-        end
-      end
-
-      def detect_backend
-        if ENV["IRIS_TERMINOLOGY_URL"].present?
-          BACKEND_IRIS
-        elsif ENV["UMLS_API_KEY"].present?
-          BACKEND_VSAC
-        else
-          BACKEND_LOCAL
-        end
-      end
-
-      # ==========================================================================
-      # Local Backend (GPRA-extracted ValueSets)
-      # ==========================================================================
-
-      def expand_from_local(valueset_id)
-        valueset = load_local_valueset(valueset_id)
-        raise ValueSetNotFoundError, "Local ValueSet not found: #{valueset_id}" unless valueset
-
-        includes = valueset.dig("compose", "include") || []
-        includes.flat_map do |include_set|
-          system = include_set["system"]
-          concepts = include_set["concept"] || []
-          concepts.map do |concept|
-            {
-              system: system,
-              code: concept["code"],
-              display: concept["display"]
-            }
-          end
-        end
-      end
-
-      def load_local_valueset(valueset_id)
-        filename = "#{valueset_id}.json"
-        all_valueset_paths.each do |path|
-          filepath = path.join(filename)
-          return JSON.parse(File.read(filepath)) if File.exist?(filepath)
-        end
-        nil
-      end
-
-      def search_local(query)
-        list_local_valuesets.select do |vs|
-          vs["title"]&.downcase&.include?(query.downcase) ||
-            vs["name"]&.downcase&.include?(query.downcase)
-        end
-      end
-
-      def list_local_valuesets
-        all_valueset_paths.flat_map do |path|
-          Dir.glob(path.join("*.json")).map { |f| JSON.parse(File.read(f)) }
-        end.uniq { |vs| vs["id"] || vs["name"] }
-      end
-
-      # Ordered list of paths to search for ValueSet JSON files.
-      # Engine root first, then any additional paths configured by host app.
-      def all_valueset_paths
-        paths = [ Lakeraven::EHR::Engine.root.join("db", "valuesets") ]
-        paths.concat(self.class.additional_valueset_paths.map { |p| Pathname.new(p) })
-        paths.select { |p| p.exist? }
+        @adapter.expand_valueset(valueset_id)
       end
 
       # ==========================================================================

@@ -39,6 +39,12 @@ module Lakeraven
         render_fhir(expansion)
       rescue TerminologyService::ValueSetNotFoundError
         render_not_found("ValueSet", params[:id])
+      rescue NotImplementedError => error
+        # Expansion is not available on this backend. That is not-supported,
+        # not a missing ValueSet (not-found). Same outcome shape as
+        # FeatureUnavailableRendering.
+        render_operation_outcome(status: :not_found, severity: "error", code: "not-supported",
+          diagnostics: error.message)
       end
     end
   end
