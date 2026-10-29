@@ -109,9 +109,18 @@ module Lakeraven
           assert_match(/vsac/i, error.message)
         end
 
+        BASE_ADAPTER_INTERFACE = %i[
+          expand_valueset get_valueset list_valuesets search lookup_code validate_code backend
+        ].freeze
+
         test "building every documented backend does not raise NameError" do
           %i[local mock iris vsac].each do |backend|
-            assert_nothing_raised(NameError) { AdapterFactory.build(backend) }
+            assert_nothing_raised do
+              adapter = AdapterFactory.build(backend)
+              assert_kind_of BaseAdapter, adapter
+              BASE_ADAPTER_INTERFACE.each { |method| assert_respond_to adapter, method }
+              assert_equal backend, adapter.backend
+            end
           end
         end
 
