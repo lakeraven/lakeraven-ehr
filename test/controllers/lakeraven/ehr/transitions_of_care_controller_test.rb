@@ -117,6 +117,32 @@ module Lakeraven
         refute_includes response.body, "Anderson"
       end
 
+      test "C-CDA is not rendered when egress filter rewrites patient dfn to REDACTED" do
+        stub_egress_filter(->(sections) {
+          sections.merge(patient: sections[:patient].merge(dfn: "REDACTED"))
+        }) do
+          post "/lakeraven-ehr/transitions_of_care",
+            params: { patient_dfn: "1" }, headers: @headers
+        end
+
+        assert_response :service_unavailable
+        assert_includes response.body, "Part 2 egress filter did not return clinical sections"
+        refute_includes response.body, "ClinicalDocument"
+      end
+
+      test "C-CDA is not rendered when egress filter rewrites patient dfn to non-integer string" do
+        stub_egress_filter(->(sections) {
+          sections.merge(patient: sections[:patient].merge(dfn: "12A"))
+        }) do
+          post "/lakeraven-ehr/transitions_of_care",
+            params: { patient_dfn: "1" }, headers: @headers
+        end
+
+        assert_response :service_unavailable
+        assert_includes response.body, "Part 2 egress filter did not return clinical sections"
+        refute_includes response.body, "ClinicalDocument"
+      end
+
       private
 
       def stub_egress_filter(implementation)

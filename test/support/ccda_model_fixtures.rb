@@ -5,6 +5,7 @@ module Lakeraven
     # Synthetic ActiveModel rows for CcdaGenerator specification (#233).
     module CcdaModelFixtures
       SYNTHETIC_DFN = 900_001
+      SYNTHETIC_PRACTITIONER_ID = "4711"
 
       def synthetic_patient(attrs = {})
         Patient.new({
@@ -82,7 +83,7 @@ module Lakeraven
             unit: "mm[Hg]",
             category: "vital-signs",
             status: "final",
-            effective_datetime: Time.zone.parse("2026-03-01 12:00:00")
+            effective_datetime: Time.utc(2026, 3, 1, 12, 0, 0)
           )
         ]
       end
@@ -95,8 +96,8 @@ module Lakeraven
             class_code: "AMB",
             type_code: "99213",
             type_display: "Office visit",
-            period_start: Time.zone.parse("2026-03-01 09:00:00"),
-            practitioner_identifier: "Dr. Smith"
+            period_start: Time.utc(2026, 3, 1, 9, 0, 0),
+            practitioner_identifier: SYNTHETIC_PRACTITIONER_ID
           )
         ]
       end

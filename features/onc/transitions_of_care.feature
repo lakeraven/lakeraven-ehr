@@ -47,6 +47,18 @@ Feature: Transitions of Care — C-CDA Send
     Given the patient has clinical data for a care summary
     When a C-CDA document is generated for the patient
     Then the document should include an encounters section
+    And the encounters section should follow CDA element order
+
+  Scenario: Generated C-CDA omits patient address when all fields blank
+    Given the patient has no address on file for a care summary
+    When a C-CDA document is generated for the patient
+    Then the document should omit patient addr
+
+  Scenario: Transitions of care refuses C-CDA when egress filter rewrites patient dfn
+    Given a patient exists with DFN "1"
+    Given the Part 2 egress filter rewrites the patient dfn to "REDACTED"
+    When a transitions of care document is requested for the patient
+    Then the transitions of care response should refuse egress with status 503
 
   # =============================================================================
   # ROUND-TRIP VALIDATION — generated C-CDA can be re-parsed

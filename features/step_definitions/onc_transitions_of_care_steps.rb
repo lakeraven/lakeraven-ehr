@@ -15,6 +15,97 @@ World(Lakeraven::EHR::CcdaModelFixtures)
 # Given: patient with clinical data for C-CDA generation
 # -----------------------------------------------------------------------------
 
+Given("the patient has no address on file for a care summary") do
+  dfn = (@patient_dfn || Lakeraven::EHR::CcdaModelFixtures::SYNTHETIC_DFN).to_s
+  @care_summary_data = {
+    patient: synthetic_patient(
+      dfn: dfn.to_i,
+      name: "TEST,PATIENT ONE",
+      address_line1: nil,
+      city: nil,
+      state: nil,
+      zip_code: nil
+    ),
+    allergies: [],
+    conditions: [],
+    medications: [],
+    vitals: [],
+    encounters: [],
+    author: synthetic_author
+  }
+end
+
+Given("the Part 2 egress filter rewrites the patient dfn to {string}") do |rewritten_dfn|
+  @egress_filter_impl = ->(sections) {
+    sections.merge(patient: sections[:patient].merge(dfn: rewritten_dfn))
+  }
+end
+
+When("a transitions of care document is requested for the patient") do
+  dfn = @patient_dfn || "1"
+  patient = Lakeraven::EHR::Patient.new(
+    dfn: dfn.to_i,
+    name: "Anderson,Alice",
+    dob: Date.parse("1980-05-15"),
+    sex: "F"
+  )
+  stub_gateway(Lakeraven::EHR::Patient, :find_by_dfn, patient)
+
+  app = Doorkeeper::Application.create!(
+    name: "toc-spec-#{SecureRandom.hex(4)}",
+    redirect_uri: "https://example.test/callback",
+    scopes: "system/*.read system/*.write",
+    confidential: true
+  )
+  token = Doorkeeper::AccessToken.create!(
+    application: app,
+    scopes: "system/*.read system/*.write",
+    expires_in: 3600
+  )
+  header "Authorization", "Bearer #{token.plaintext_token || token.token}"
+
+  filter = Lakeraven::EHR::Part2EgressFilter.singleton_class
+  original = filter.instance_method(:call)
+  filter.define_method(:call, &@egress_filter_impl)
+  begin
+    post "/lakeraven-ehr/transitions_of_care", params: { patient_dfn: dfn }
+    @transitions_of_care_response = last_response
+  ensure
+    filter.define_method(:call, original)
+  end
+end
+
+Then("the transitions of care response should refuse egress with status {int}") do |status|
+  assert_equal status, @transitions_of_care_response.status
+  refute_includes @transitions_of_care_response.body, "ClinicalDocument"
+  assert_includes @transitions_of_care_response.body, "Part 2 egress filter did not return clinical sections"
+end
+
+Then("the document should omit patient addr") do
+  refute @ccda_doc.at_xpath("//xmlns:patientRole/xmlns:addr", "xmlns" => "urn:hl7-org:v3"),
+    "Expected no patient addr when all address fields are blank"
+end
+
+Then("the encounters section should follow CDA element order") do
+  ns = { "xmlns" => "urn:hl7-org:v3" }
+  section = @ccda_doc.at_xpath(
+    "//xmlns:section[xmlns:templateId[@root='2.16.840.1.113883.10.20.22.2.22.1']]",
+    ns
+  )
+  assert section.present?, "Expected encounters section"
+
+  names = section.element_children.map(&:name)
+  template_idx = names.index("templateId")
+  code_idx = names.index("code")
+  title_idx = names.index("title")
+  assert template_idx && code_idx && title_idx
+  assert template_idx < code_idx && code_idx < title_idx,
+    "expected templateId, code, title in order; got #{names.inspect}"
+
+  section_code = section.at_xpath("./xmlns:code", ns)
+  assert_equal "46240-8", section_code&.[]("code")
+end
+
 Given("the patient has clinical data for a care summary") do
   dfn = (@patient_dfn || Lakeraven::EHR::CcdaModelFixtures::SYNTHETIC_DFN).to_s
   @care_summary_data = {
