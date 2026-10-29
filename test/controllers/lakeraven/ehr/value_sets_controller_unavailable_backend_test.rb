@@ -1,21 +1,18 @@
 # frozen_string_literal: true
 
 require "test_helper"
+require "support/terminology_unavailable_backend_test_helper"
 
 module Lakeraven
   module EHR
     # ValueSetsController on backends with no registered production adapter.
     #
-    # Expand pins HTTP 404 + OperationOutcome code "not-supported" (same shape as
-    # FeatureUnavailableRendering): the operation is refused because terminology
-    # expansion is not available on this backend, not because the ValueSet id is
-    # missing (that would be not-found). Index/show stay unchanged: empty bundle /
-    # not-found when list/get raise NotImplementedError (including AdapterNotAvailable).
+    # Index, show, and $expand all refuse with the same not-supported OperationOutcome
+    # (HTTP 404, fixed diagnostics that name neither backend nor adapter class).
+    # A warning naming the backend is logged once per request.
     class ValueSetsControllerUnavailableBackendTest < ActionDispatch::IntegrationTest
       include SmartAuthTestHelper
-
-      VALUESET_EXPAND_NOT_SUPPORTED_DIAGNOSTICS =
-        "ValueSet expansion is not available on this server."
+      include TerminologyUnavailableBackendTestHelper
 
       setup do
         setup_smart_auth
@@ -36,36 +33,35 @@ module Lakeraven
         Terminology::AdapterFactory.reset_registrations!
       end
 
-      test "GET ValueSet index on unavailable backend returns empty searchset bundle" do
+      test "GET ValueSet index on unavailable backend returns not-supported OperationOutcome" do
         get "/lakeraven-ehr/ValueSet", headers: @headers
-        assert_response :ok
-        body = JSON.parse(response.body)
-        assert_equal "Bundle", body["resourceType"]
-        assert_equal "searchset", body["type"]
-        assert_equal [], body["entry"]
+        assert_valueset_terminology_not_supported_response
       end
 
-      test "GET ValueSet show on unavailable backend returns not-found OperationOutcome" do
+      test "GET ValueSet show on unavailable backend returns not-supported OperationOutcome" do
         get "/lakeraven-ehr/ValueSet/gpra-bgpmu-diabetes-dx", headers: @headers
-        assert_response :not_found
-        body = JSON.parse(response.body)
-        assert_equal "OperationOutcome", body["resourceType"]
-        assert_equal "not-found", body["issue"].first["code"]
+        assert_valueset_terminology_not_supported_response
       end
 
       test "GET ValueSet expand on unavailable backend returns not-supported OperationOutcome without 500" do
         get "/lakeraven-ehr/ValueSet/gpra-bgpmu-diabetes-dx/$expand", headers: @headers
-        assert_response :not_found
-        body = JSON.parse(response.body)
-        assert_equal "OperationOutcome", body["resourceType"]
-        assert_equal "not-supported", body["issue"].first["code"]
-        assert_equal "application/fhir+json", response.media_type
+        assert_valueset_terminology_not_supported_response
+      end
 
-        diagnostics = body["issue"].first["diagnostics"]
-        assert_equal VALUESET_EXPAND_NOT_SUPPORTED_DIAGNOSTICS, diagnostics
-        refute_match(/iris/i, diagnostics)
-        refute_match(/Adapter/i, diagnostics)
-        refute_match(/#</, diagnostics)
+      test "unavailable backend logs one warning naming iris per ValueSet index request" do
+        logs = capture_rails_logs do
+          get "/lakeraven-ehr/ValueSet", headers: @headers
+        end
+        assert_valueset_terminology_not_supported_response
+        assert_single_backend_warning_logged(logs, "iris")
+      end
+
+      test "unavailable backend logs one warning naming iris per ValueSet show request" do
+        logs = capture_rails_logs do
+          get "/lakeraven-ehr/ValueSet/gpra-bgpmu-diabetes-dx", headers: @headers
+        end
+        assert_valueset_terminology_not_supported_response
+        assert_single_backend_warning_logged(logs, "iris")
       end
     end
   end

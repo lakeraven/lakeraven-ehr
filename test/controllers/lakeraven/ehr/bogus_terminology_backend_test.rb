@@ -1,11 +1,13 @@
 # frozen_string_literal: true
 
 require "test_helper"
+require "support/terminology_unavailable_backend_test_helper"
 
 module Lakeraven
   module EHR
     class BogusTerminologyBackendTest < ActionDispatch::IntegrationTest
       include SmartAuthTestHelper
+      include TerminologyUnavailableBackendTestHelper
 
       setup do
         setup_smart_auth
@@ -26,21 +28,36 @@ module Lakeraven
         Terminology::AdapterFactory.reset_registrations!
       end
 
-      test "index with bogus TERMINOLOGY_BACKEND returns empty bundle not 500" do
+      test "index with bogus TERMINOLOGY_BACKEND returns not-supported OperationOutcome not 500" do
         get "/lakeraven-ehr/ValueSet", headers: @headers
-        assert_response :ok
-        body = JSON.parse(response.body)
-        assert_equal "Bundle", body["resourceType"]
-        assert_equal "searchset", body["type"]
-        assert_equal [], body["entry"]
+        assert_valueset_terminology_not_supported_response
+      end
+
+      test "show with bogus TERMINOLOGY_BACKEND returns not-supported OperationOutcome not 500" do
+        get "/lakeraven-ehr/ValueSet/gpra-bgpmu-diabetes-dx", headers: @headers
+        assert_valueset_terminology_not_supported_response
       end
 
       test "expand with bogus TERMINOLOGY_BACKEND returns not-supported OperationOutcome not 500" do
         get "/lakeraven-ehr/ValueSet/gpra-bgpmu-diabetes-dx/$expand", headers: @headers
-        assert_response :not_found
-        body = JSON.parse(response.body)
-        assert_equal "OperationOutcome", body["resourceType"]
-        assert_equal "not-supported", body["issue"].first["code"]
+        assert_valueset_terminology_not_supported_response
+      end
+
+      test "typo TERMINOLOGY_BACKEND locla returns not-supported on index and show" do
+        ENV["TERMINOLOGY_BACKEND"] = "locla"
+        get "/lakeraven-ehr/ValueSet", headers: @headers
+        assert_valueset_terminology_not_supported_response
+
+        get "/lakeraven-ehr/ValueSet/gpra-bgpmu-diabetes-dx", headers: @headers
+        assert_valueset_terminology_not_supported_response
+      end
+
+      test "bogus backend logs one warning naming the backend per index request" do
+        logs = capture_rails_logs do
+          get "/lakeraven-ehr/ValueSet", headers: @headers
+        end
+        assert_valueset_terminology_not_supported_response
+        assert_single_backend_warning_logged(logs, "bogus")
       end
     end
   end

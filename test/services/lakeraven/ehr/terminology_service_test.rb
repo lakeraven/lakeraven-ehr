@@ -300,6 +300,38 @@ module Lakeraven
         refute result, "Expected non-prefix match to require exact code"
       end
 
+      test "code_in_valueset with prefix does not match when ValueSet contains a blank code" do
+        extra_dir = Dir.mktmpdir("lakeraven-prefix-blank-code-valuesets")
+        File.write(
+          File.join(extra_dir, "spec-prefix-blank-code-valueset.json"),
+          {
+            resourceType: "ValueSet",
+            id: "spec-prefix-blank-code-valueset",
+            title: "Prefix blank code fixture",
+            status: "active",
+            compose: {
+              include: [
+                {
+                  system: "http://example.com/prefix-blank",
+                  concept: [
+                    { code: "", display: "Blank member code" },
+                    { code: "I21", display: "Parent code" }
+                  ]
+                }
+              ]
+            }
+          }.to_json
+        )
+        TerminologyService.additional_valueset_paths = [ TEST_VALUESETS, extra_dir ]
+        service = TerminologyService.new(backend: :local, use_distributed_cache: false)
+
+        refute service.code_in_valueset?("ANYTHING", "spec-prefix-blank-code-valueset", prefix: true),
+               "Blank ValueSet code must not prefix-match every query string"
+        assert service.code_in_valueset?("I21.9", "spec-prefix-blank-code-valueset", prefix: true)
+      ensure
+        FileUtils.remove_entry(extra_dir) if extra_dir
+      end
+
       # =============================================================================
       # PRC VALUESETS
       # =============================================================================

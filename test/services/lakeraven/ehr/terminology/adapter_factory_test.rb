@@ -204,6 +204,42 @@ module Lakeraven
                  "AdapterNotAvailable must inherit StandardError so bare rescue => e catches it"
           refute AdapterNotAvailable <= NotImplementedError
         end
+
+        test "backend names are normalized for build register and TerminologyService" do
+          iris_sentinel = Class.new(BaseAdapter) do
+            def backend = :iris
+
+            def expand_valueset(_id)
+              [ { system: "http://example.com", code: "IRIS-NORM", display: "From registered IRIS" } ]
+            end
+
+            def get_valueset(_id) = nil
+            def list_valuesets = []
+            def search(_query) = []
+            def lookup_code(_system, _code) = nil
+            def validate_code(_system, _code, valueset_id:) = false
+          end
+
+          AdapterFactory.register("IRIS") { iris_sentinel.new }
+
+          assert_equal "IRIS-NORM", AdapterFactory.build("IRIS").expand_valueset("any").first[:code]
+
+          ENV["TERMINOLOGY_BACKEND"] = "iris"
+          assert_equal "IRIS-NORM", AdapterFactory.build.expand_valueset("any").first[:code]
+
+          service = TerminologyService.new(backend: "IRIS")
+          assert_equal :iris, service.backend
+          assert_equal "IRIS-NORM", service.expand_valueset("any").first[:code]
+
+          local = AdapterFactory.build(" local ")
+          assert_kind_of LocalAdapter, local
+          assert_equal :local, local.backend
+        end
+
+        test "build rejects non-string backend names with ArgumentError not NoMethodError" do
+          assert_raises(ArgumentError) { AdapterFactory.build(false) }
+          assert_raises(ArgumentError) { AdapterFactory.build(1) }
+        end
       end
     end
   end

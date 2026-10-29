@@ -2,12 +2,14 @@
 
 require "test_helper"
 require_relative "support/adapter_contract"
+require_relative "support/blank_input_adapter_examples"
 
 module Lakeraven
   module EHR
     module Terminology
       class LocalAdapterTest < ActiveSupport::TestCase
         include AdapterContract
+        include BlankInputAdapterExamples
 
         TEST_VALUESETS = File.expand_path("../../../../fixtures/files/valuesets", __dir__)
 
@@ -78,6 +80,60 @@ module Lakeraven
           assert adapter.search("diabetes").any?, "search must remain usable"
         ensure
           FileUtils.remove_entry(leak_dir) if leak_dir
+        end
+
+        test "lookup_code and validate_code refuse blank system or code" do
+          assert_blank_inputs_never_verify(
+            @adapter,
+            valid_system: AdapterContract::ICD9_SYSTEM,
+            valid_code: AdapterContract::SAMPLE_CODE,
+            valueset_id: AdapterContract::VALUESET_ID
+          )
+        end
+
+        test "skips concepts without code and includes without system" do
+          extra_dir = Dir.mktmpdir("lakeraven-blank-concept-valuesets")
+          File.write(
+            File.join(extra_dir, "spec-blank-concepts-valueset.json"),
+            {
+              resourceType: "ValueSet",
+              id: "spec-blank-concepts-valueset",
+              title: "Blank concept fixture",
+              status: "active",
+              compose: {
+                include: [
+                  {
+                    concept: [ { code: "ORPHAN", display: "No system on include" } ]
+                  },
+                  {
+                    system: "http://example.com/synthetic-blank",
+                    concept: [
+                      { display: "Missing code" },
+                      { code: "VALID-1", display: "Valid code" },
+                      { code: "", display: "Blank code string" }
+                    ]
+                  }
+                ]
+              }
+            }.to_json
+          )
+          TerminologyService.additional_valueset_paths = [ TEST_VALUESETS, extra_dir ]
+          adapter = LocalAdapter.new
+
+          assert_nil adapter.lookup_code("http://example.com/synthetic-blank", "ORPHAN")
+          refute adapter.validate_code("http://example.com/synthetic-blank", "ORPHAN",
+                                       valueset_id: "spec-blank-concepts-valueset")
+
+          lookup = adapter.lookup_code("http://example.com/synthetic-blank", "VALID-1")
+          assert_equal "VALID-1", lookup[:code]
+          assert adapter.validate_code("http://example.com/synthetic-blank", "VALID-1",
+                                       valueset_id: "spec-blank-concepts-valueset")
+          refute adapter.validate_code("", "VALID-1", valueset_id: "spec-blank-concepts-valueset")
+          assert_nil adapter.lookup_code("http://example.com/synthetic-blank", nil)
+          refute adapter.validate_code("http://example.com/synthetic-blank", nil,
+                                       valueset_id: "spec-blank-concepts-valueset")
+        ensure
+          FileUtils.remove_entry(extra_dir) if extra_dir
         end
 
         test "honours TerminologyService.additional_valueset_paths" do
