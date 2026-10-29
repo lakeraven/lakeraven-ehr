@@ -25,7 +25,7 @@ module Lakeraven
 
         filtered = Part2EgressFilter.call(egress_sections(patient))
         return refuse_unfiltered_egress unless egress_sections?(filtered)
-        return refuse_unfiltered_egress unless positive_integer_dfn?(filtered[:patient][:dfn])
+        return refuse_unfiltered_egress unless requested_patient_dfn?(filtered[:patient][:dfn])
 
         render xml: renderable_ccda(filtered), status: :created, content_type: "application/xml"
       end
@@ -122,12 +122,13 @@ module Lakeraven
         EGRESS_LISTS.all? { |key| filtered[key].is_a?(Array) }
       end
 
-      # Patient#dfn is an integer attribute. "12A".to_i is 12 and
-      # "REDACTED".to_i is 0, so a rewritten dfn that is not already a
-      # positive integer string would be truncated into another id.
-      # That is the same refusal as a filter that returned no sections.
-      def positive_integer_dfn?(dfn)
-        dfn.is_a?(String) && dfn.match?(/\A[1-9]\d*\z/)
+      # "01" and 1 are the requested patient. A rewritten dfn whose
+      # canonical form is missing, or is not params[:patient_dfn],
+      # would name another patient or none. That is the same refusal
+      # as a filter that returned no sections.
+      def requested_patient_dfn?(dfn)
+        canonical = Patient.canonical_dfn(dfn)
+        canonical.present? && canonical == Patient.canonical_dfn(params[:patient_dfn])
       end
 
       # The filter may withhold a row or rewrite a demographic. The model
@@ -146,7 +147,7 @@ module Lakeraven
       def patient_model(demo)
         address = demo[:address] || {}
         Patient.new(
-          dfn: demo[:dfn],
+          dfn: Patient.canonical_dfn(demo[:dfn]),
           name: ccda_patient_name(demo[:name]),
           dob: demo[:dob],
           sex: demo[:sex],

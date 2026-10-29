@@ -343,8 +343,6 @@ module Lakeraven
       end
 
       def condition_code_system_name(condition)
-        return code_system_name(nil) if condition.code_system.blank?
-
         code_system_name(condition_code_system_oid(condition))
       end
 
