@@ -40,6 +40,8 @@ module Lakeraven
           @searched = @query.present?
           @matches = @searched ? PatientLookupGateway.find(@query, dob: @dob) : []
         rescue RpmsRpc::Client::RpcError, RpmsRpc::Client::ConnectionError => e
+          return end_session_for_closed_rpms! if rpms_connection_closed?
+
           Rails.logger.error("[registration] patient lookup failed: #{e.class}")
           @lookup_failed = true
           @matches = []
