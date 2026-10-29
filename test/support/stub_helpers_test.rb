@@ -20,6 +20,7 @@ class SharedStubHelpersTest < ActiveSupport::TestCase
   PARENT_PREPENDED_ONLY = :sh673_parent_prepended_only
   INTERMEDIATE_METHOD = :sh673_p4
   VISIBILITY_ONLY_LOOKUP = :sh673_lookup
+  GRANDPARENT_INHERITED_PRIVATE = :sh673_gp_inherited_private
   ALIAS_FOO = :sh673_foo
   ALIAS_BAR = :sh673_bar
 
@@ -387,7 +388,8 @@ class SharedStubHelpersTest < ActiveSupport::TestCase
 
     assert_singleton_visibility(singleton_of(child), VISIBILITY_ONLY_LOOKUP, :private)
     assert_equal :sh673_real, child.send(VISIBILITY_ONLY_LOOKUP)
-    assert_equal parent.singleton_class, singleton_of(child).instance_method(VISIBILITY_ONLY_LOOKUP).owner
+    assert_equal parent.singleton_class.instance_method(VISIBILITY_ONLY_LOOKUP),
+                 singleton_of(child).instance_method(VISIBILITY_ONLY_LOOKUP)
 
     with_stub(parent, VISIBILITY_ONLY_LOOKUP, :sh673_parent_stub) do
       assert_equal :sh673_parent_stub, child.send(VISIBILITY_ONLY_LOOKUP)
@@ -404,7 +406,8 @@ class SharedStubHelpersTest < ActiveSupport::TestCase
 
     assert_singleton_visibility(singleton_of(child), VISIBILITY_ONLY_LOOKUP, :protected)
     assert_equal :sh673_real, child.send(VISIBILITY_ONLY_LOOKUP)
-    assert_equal parent.singleton_class, singleton_of(child).instance_method(VISIBILITY_ONLY_LOOKUP).owner
+    assert_equal parent.singleton_class.instance_method(VISIBILITY_ONLY_LOOKUP),
+                 singleton_of(child).instance_method(VISIBILITY_ONLY_LOOKUP)
 
     with_stub(parent, VISIBILITY_ONLY_LOOKUP, :sh673_parent_stub) do
       assert_equal :sh673_parent_stub, child.send(VISIBILITY_ONLY_LOOKUP)
@@ -416,14 +419,34 @@ class SharedStubHelpersTest < ActiveSupport::TestCase
 
   test "with_stub on child with visibility-only private new still allocates via Class new without an owned copy" do
     child = Class.new(Class.new)
-    child.singleton_class.send(:private_class_method, :new)
+    child.private_class_method :new
 
     with_stub(child, :new, STUB_VALUE) { }
 
     assert_singleton_visibility(singleton_of(child), :new, :private)
+    assert_raises(NoMethodError) { child.new }
     instance = child.send(:new)
     assert_instance_of child, instance
-    refute_equal child.singleton_class, child.singleton_class.instance_method(:new).owner
+    assert_equal child.singleton_class.superclass.instance_method(:new),
+                 child.singleton_class.instance_method(:new)
+  end
+
+  test "with_stub on child leaves grandparent private singleton body with no own entry on child" do
+    grandparent = Class.new
+    grandparent.singleton_class.class_eval do
+      define_method(GRANDPARENT_INHERITED_PRIVATE) { :sh673_gp_body }
+      private GRANDPARENT_INHERITED_PRIVATE
+    end
+    mid = Class.new(grandparent)
+    child = Class.new(mid)
+
+    with_stub(child, GRANDPARENT_INHERITED_PRIVATE, STUB_VALUE) { }
+
+    assert_singleton_visibility(singleton_of(child), GRANDPARENT_INHERITED_PRIVATE, :private)
+    assert_equal :sh673_gp_body, child.send(GRANDPARENT_INHERITED_PRIVATE)
+    assert_equal grandparent.singleton_class.instance_method(GRANDPARENT_INHERITED_PRIVATE),
+                 singleton_of(child).instance_method(GRANDPARENT_INHERITED_PRIVATE)
+    assert_no_own_or_undef_entry(child, GRANDPARENT_INHERITED_PRIVATE)
   end
 
   # --- Alias of ancestor singleton method with super (lakeraven-ehr#673 round-3) ---
