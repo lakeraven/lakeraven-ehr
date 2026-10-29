@@ -15,6 +15,10 @@ class SharedStubHelpersTest < ActiveSupport::TestCase
   PREPENDED_PUBLIC = :sh673_prepended_public
   PREPENDED_PRIVATE = :sh673_prepended_private
   UNDEF_HIDDEN = :sh673_undef_hidden
+  EXTENDED_PUBLIC = :sh673_extended_public
+  EXTENDED_PRIVATE = :sh673_extended_private
+  PARENT_PREPENDED_ONLY = :sh673_parent_prepended_only
+  INTERMEDIATE_METHOD = :sh673_p4
 
   ORIGINAL = :sh673_original
   STUB_VALUE = :sh673_stubbed
@@ -283,8 +287,92 @@ class SharedStubHelpersTest < ActiveSupport::TestCase
 
     with_stub(child, UNDEF_HIDDEN, STUB_VALUE) { }
 
-    refute child.respond_to?(UNDEF_HIDDEN)
-    assert_raises(NoMethodError) { child.send(UNDEF_HIDDEN) }
+    assert_undef_hidden_on_receiver(child, UNDEF_HIDDEN)
+  end
+
+  # --- undef on receiver stays hidden after stub (lakeraven-ehr#673 round-2) ---
+
+  test "with_stub after undef on receiver leaves extended public singleton method hidden" do
+    host = host_with_extended_singleton_method(:public, EXTENDED_PUBLIC, :sh673_ext_public)
+    host.singleton_class.send(:undef_method, EXTENDED_PUBLIC)
+    assert_undef_hidden_on_receiver(host, EXTENDED_PUBLIC)
+
+    with_stub(host, EXTENDED_PUBLIC, STUB_VALUE) { }
+
+    assert_undef_hidden_on_receiver(host, EXTENDED_PUBLIC)
+  end
+
+  test "with_stub after undef on receiver leaves extended private singleton method hidden" do
+    host = host_with_extended_singleton_method(:private, EXTENDED_PRIVATE, :sh673_ext_private)
+    host.singleton_class.send(:undef_method, EXTENDED_PRIVATE)
+    assert_undef_hidden_on_receiver(host, EXTENDED_PRIVATE, include_all: true)
+
+    with_stub(host, EXTENDED_PRIVATE, STUB_VALUE) { }
+
+    assert_undef_hidden_on_receiver(host, EXTENDED_PRIVATE, include_all: true)
+  end
+
+  test "install_singleton_stub restore after undef on receiver leaves Module name hidden on the class" do
+    host = Class.new
+    host.singleton_class.send(:undef_method, :name)
+    assert_undef_hidden_on_receiver(host, :name)
+
+    restore = install_singleton_stub(host, :name, STUB_VALUE)
+    restore.call
+
+    assert_undef_hidden_on_receiver(host, :name)
+  end
+
+  test "with_stub after undef on receiver leaves Class new hidden" do
+    host = Class.new
+    host.singleton_class.send(:undef_method, :new)
+    assert_undef_hidden_on_receiver(host, :new)
+
+    with_stub(host, :new, STUB_VALUE) { }
+
+    assert_undef_hidden_on_receiver(host, :new)
+  end
+
+  test "with_stub after undef on receiver leaves Kernel frozen? hidden on a plain Object" do
+    host = Object.new
+    host.singleton_class.send(:undef_method, :frozen?)
+    assert_undef_hidden_on_receiver(host, :frozen?)
+
+    with_stub(host, :frozen?, STUB_VALUE) { }
+
+    assert_undef_hidden_on_receiver(host, :frozen?)
+  end
+
+  test "with_stub after undef on receiver leaves method from prepended parent singleton module hidden" do
+    host = host_with_undef_parent_prepended_singleton_only(PARENT_PREPENDED_ONLY)
+    assert_undef_hidden_on_receiver(host, PARENT_PREPENDED_ONLY)
+
+    with_stub(host, PARENT_PREPENDED_ONLY, STUB_VALUE) { }
+
+    assert_undef_hidden_on_receiver(host, PARENT_PREPENDED_ONLY)
+  end
+
+  test "with_stub restores undef on receiver when the block removes the stub method" do
+    host = host_with_undef_inherited_on_receiver(UNDEF_HIDDEN)
+
+    result = with_stub(host, UNDEF_HIDDEN, STUB_VALUE) do
+      host.singleton_class.send(:remove_method, UNDEF_HIDDEN)
+      :sh673_block_result
+    end
+
+    assert_equal :sh673_block_result, result
+    assert_undef_hidden_on_receiver(host, UNDEF_HIDDEN)
+  end
+
+  test "with_stub on leaf does not leave undef on leaf when undef lived on intermediate ancestor singleton" do
+    _grandparent, mid, leaf = host_with_intermediate_singleton_undef(INTERMEDIATE_METHOD)
+
+    with_stub(leaf, INTERMEDIATE_METHOD, STUB_VALUE) { }
+
+    assert_no_own_or_undef_entry(leaf, INTERMEDIATE_METHOD)
+
+    mid.define_singleton_method(INTERMEDIATE_METHOD) { :sh673_mid_restored }
+    assert_equal :sh673_mid_restored, leaf.send(INTERMEDIATE_METHOD)
   end
 
   private
@@ -382,5 +470,68 @@ class SharedStubHelpersTest < ActiveSupport::TestCase
     assert_equal parent.singleton_class, singleton.instance_method(method_name).owner,
                  "receiver singleton class should not own an inherited singleton method"
     assert_singleton_visibility(parent.singleton_class, method_name, visibility)
+  end
+
+  def host_with_extended_singleton_method(visibility, method_name, return_value)
+    host = Class.new
+    extension = Module.new do
+      define_method(method_name) { |*_args, **_kwargs| return_value }
+      send(visibility, method_name) if visibility != :public
+    end
+    host.extend(extension)
+    host
+  end
+
+  def host_with_undef_inherited_on_receiver(method_name)
+    parent = Class.new
+    parent.define_singleton_method(method_name) { :sh673_parent_hidden }
+
+    child = Class.new(parent)
+    child.singleton_class.send(:undef_method, method_name)
+    child
+  end
+
+  def host_with_undef_parent_prepended_singleton_only(method_name)
+    parent = Class.new
+    prepend = Module.new do
+      define_method(method_name) { :sh673_from_parent_prepend }
+    end
+    parent.singleton_class.prepend(prepend)
+    child = Class.new(parent)
+    child.singleton_class.send(:undef_method, method_name)
+    child
+  end
+
+  def host_with_intermediate_singleton_undef(method_name)
+    grandparent = Class.new
+    grandparent.define_singleton_method(method_name) { :sh673_grandparent }
+
+    mid = Class.new(grandparent)
+    mid.singleton_class.send(:undef_method, method_name)
+
+    leaf = Class.new(mid)
+    [ grandparent, mid, leaf ]
+  end
+
+  def assert_undef_hidden_on_receiver(host, method_name, include_all: false)
+    refute host.respond_to?(method_name, include_all),
+           "expected #{method_name} to stay hidden from respond_to?"
+    assert_raises(NoMethodError) { host.send(method_name) }
+    assert singleton_undef_entry?(host, method_name),
+           "expected receiver singleton class to retain an undef entry for #{method_name}"
+  end
+
+  def assert_no_own_or_undef_entry(host, method_name)
+    singleton = singleton_of(host)
+    name = method_name.to_sym
+    refute singleton.instance_methods(false).include?(name)
+    refute singleton.private_instance_methods(false).include?(name)
+    refute singleton.protected_instance_methods(false).include?(name)
+    refute singleton_undef_entry?(host, name),
+           "receiver singleton class should not retain an undef entry for #{name}"
+  end
+
+  def singleton_undef_entry?(host, method_name)
+    singleton_of(host).undefined_instance_methods.include?(method_name.to_sym)
   end
 end
