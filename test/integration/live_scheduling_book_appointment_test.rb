@@ -104,6 +104,31 @@ class LiveSchedulingBookAppointmentTest < ActionDispatch::IntegrationTest
     assert_response :conflict
   end
 
+  test "S-SCH-04.1, 04.5 and 04.7 the scheduler finds an afternoon open time next week and books it, at the length searched for" do
+    get "/lakeraven-ehr/scheduling"
+    clinic = css_select("#resources a").find { |a| a.text == "DEMO IHS CLINIC" }["href"]
+    day = weekday_ahead
+    get "#{clinic}/open_times", params: { from: day.iso8601, to: (day + 6).iso8601, length: "30", part: "pm" }
+    assert_response :ok
+
+    times = css_select("#open-times [data-date='#{day.iso8601}'] a[data-time]")
+    refute_empty times, "the clinic's afternoon on #{day} has open times"
+    assert(times.all? { |a| a["data-time"] >= "12:00" })
+    pick = times.to_a.sample
+    get pick["href"]
+    assert_response :ok
+
+    start = "#{day.iso8601}T#{pick['data-time']}"
+    post "#{clinic}/appointments", params: { booking: { patient_dfn: "3", start: start, length: "30", note: "" } }
+    skip "MOUSE already has an appointment at #{pick['data-time']} on #{day}" if response.status == 422
+    assert_response :redirect
+    follow_redirect!
+    row = css_select("#appointments tr[data-patient='3']").find { |tr| tr.at_css("td").text.start_with?(pick["data-time"]) && tr.at_css("td[data-status='booked']") }
+    assert row, "the booking shows on the clinic's day"
+    finish = (Time.strptime(pick["data-time"], "%H:%M") + 1800).strftime("%H:%M")
+    assert_match(/#{pick['data-time']}.#{finish}/, row.at_css("td").text, "booked for the 30 minutes searched for")
+  end
+
   test "S-SCH-01.12 the front desk, who holds no scheduling key, cannot open scheduling" do
     Lakeraven::EHR::LoginThrottle.reset!
     post "/lakeraven-ehr/login", params: { username: "PREG123", password: "PREG123!!" }

@@ -14,9 +14,10 @@ module Lakeraven
         before_action :load_resource!
         before_action :require_booking_right!
 
-        # GET /scheduling/clinics/:resource_id/appointments/new?start=&q=
+        # GET /scheduling/clinics/:resource_id/appointments/new?start=&length=&q=
         def new
-          @booking = AppointmentBooking.new(start: params[:start], length: @resource[:time_scale], patient_dfn: params.dig(:booking, :patient_dfn))
+          length = params[:length].presence || @resource[:time_scale]
+          @booking = AppointmentBooking.new(start: params[:start], length: length, patient_dfn: params.dig(:booking, :patient_dfn))
           @patients = AppointmentBookingGateway.patients(params[:q])
         end
 

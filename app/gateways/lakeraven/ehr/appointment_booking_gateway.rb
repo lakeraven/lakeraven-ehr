@@ -37,6 +37,19 @@ module Lakeraven
         [ ClinicDay.new(blocks: blocks, appointments: listed.reject { |a| a[:cancelled] }, time_scale: resource[:time_scale]), listed ]
       end
 
+      # The resource's days from from to to, each a ClinicDay, from one read of
+      # the blocks and one of the appointments for the whole range (S-SCH-04).
+      # BSDX SEARCH AVAILABILITY is not used: SEARCH^BSDX24 returns only a
+      # resource's first block and leaves its morning, weekday and type filters
+      # unfinished; the open times come from the blocks, as the day view's do.
+      def self.days(resource, from, to, via: ::RpmsRpc::Scheduling)
+        blocks = Array(via.slot_schedule(resource: resource[:name], start_date: from, end_date: to)).group_by { |b| b[:start_time].to_date }
+        booked = Array(via.appointments(resource: resource[:name], start_date: from, end_date: to)).reject { |a| a[:cancelled] }.group_by { |a| a[:start_time].to_date }
+        (from..to).to_h do |date|
+          [ date, ClinicDay.new(blocks: blocks.fetch(date, []), appointments: booked.fetch(date, []), time_scale: resource[:time_scale]) ]
+        end
+      end
+
       def self.appointment(resource, id, date, via: ::RpmsRpc::Scheduling)
         Array(via.appointments(resource: resource[:name], start_date: date, end_date: date)).find { |a| a[:id] == id.to_i }
       end

@@ -54,6 +54,25 @@ module Lakeraven
       test "a booking with no length has no room" do
         refute day.room_for?(at(9), 0)
       end
+
+      # S-SCH-04.1: an open time starts in an open block, the appointment ends
+      # within it, and every step of it has a place left.
+      test "S-SCH-04.1 the open times for a length are the times an appointment of it fits" do
+        full = day(Array.new(4) { appt(10, 0, 30) })
+        open = full.open_times(30)
+
+        assert_equal at(8), open.first
+        assert_equal at(16, 30), open.last, "16:45 would run past the 17:00 end of the block"
+        refute_includes open, at(10)
+        refute_includes open, at(9, 45), "09:45 for 30 minutes would reach the full 10:00 step"
+        assert_includes open, at(10, 30)
+      end
+
+      test "S-SCH-04.5 the open times can be kept to the morning or the afternoon" do
+        assert(day.open_times(15, part: "am").all? { |t| t.hour < 12 })
+        assert_equal at(12), day.open_times(15, part: "pm").first
+        assert_equal day.open_times(15), day.open_times(15, part: "am") + day.open_times(15, part: "pm")
+      end
     end
   end
 end

@@ -43,6 +43,12 @@
         class: "min-h-9 bg-white px-3 py-2 ring-1 ring-slate-300 ring-inset" %>
 <% end %>
 
+<p>
+  <%= link_to "Find an open time",
+        scheduling_clinic_open_times_path(@resource[:id], from: @date.iso8601),
+        id: "find-open-time" %>
+</p>
+
 <h2>Booked</h2>
 <% if @appointments.empty? %>
   <p class="hint">No appointments.</p>

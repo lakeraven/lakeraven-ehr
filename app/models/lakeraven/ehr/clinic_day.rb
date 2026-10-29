@@ -39,7 +39,21 @@ module Lakeraven
         steps(start, finish).all? { |at| open_at(block, at).positive? }
       end
 
+      # The times an appointment of length minutes fits (room_for?), on the grid,
+      # optionally only before noon ("am") or from noon ("pm"): S-SCH-04.
+      def open_times(length, part: nil)
+        times.map(&:at).uniq.select { |at| in_part?(at, part) && room_for?(at, length) }
+      end
+
       private
+
+      def in_part?(at, part)
+        case part.to_s
+        when "am" then at.hour < 12
+        when "pm" then at.hour >= 12
+        else true
+        end
+      end
 
       def steps(from, to)
         out = []

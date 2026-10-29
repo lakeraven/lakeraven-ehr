@@ -133,6 +133,7 @@ Lakeraven::EHR::Engine.routes.draw do
   namespace :scheduling do
     get "/", to: "clinics#index", as: :home
     get "clinics/:id", to: "clinics#show", as: :clinic, constraints: { id: /\d+/ }
+    get "clinics/:id/open_times", to: "open_times#index", as: :clinic_open_times, constraints: { id: /\d+/ }
     get "clinics/:resource_id/appointments/new", to: "appointments#new", as: :new_clinic_appointment, constraints: { resource_id: /\d+/ }
     post "clinics/:resource_id/appointments", to: "appointments#create", as: :clinic_appointments, constraints: { resource_id: /\d+/ }
     get "clinics/:resource_id/appointments/:appointment_id/cancel", to: "cancellations#new", as: :cancel_clinic_appointment, constraints: { resource_id: /\d+/, appointment_id: /\d+/ }
