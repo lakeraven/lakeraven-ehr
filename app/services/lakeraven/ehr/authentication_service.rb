@@ -67,6 +67,9 @@ module Lakeraven
         # user. A key read that could not be made raises, and the sign-on is
         # refused as unavailable: never a session on keys nobody read (#578).
         symbolic_keys = Roles.symbolize_keys(SecurityKeyGateway.held(Roles::KEY_NAMES.values))
+        # The options the policy grants from (the chart's CIAV VUECENTRIC), asked
+        # the same way and refused the same way when they cannot be read.
+        options = OptionAccessGateway.held(SessionScopePolicy::OPTION_SCOPES.keys)
 
         # Round-trip the server's user type through the short code so
         # :referrals_supervisor or :referrals_manager still elevates to "case_manager".
@@ -79,6 +82,7 @@ module Lakeraven
             name: user_info&.dig(:name) || auth[:name].to_s,
             user_type: Roles.resolve_signon(user_type: server_user_type, security_keys: symbolic_keys),
             security_keys: symbolic_keys,
+            options: options,
             # RPMS said this verify code must be changed (admin reset, or aged
             # out). Dropping the flag granted a full session on a temporary
             # credential where CPRS would force the change first; the caller

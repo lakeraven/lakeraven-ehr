@@ -177,6 +177,10 @@ BASELINE_MOCK_SEEDS = lambda do |m|
   m.seed_user("304", credentials: "lindarodriguez;test123", name: "RODRIGUEZ,LINDA", role: :case_manager)
   # The SECURITY KEYs DUZ 304 holds, answered to CIAVCXUS HASKEYS once 304 signs on.
   m.seed_held_keys("304", [ "BMCZSUPERVISOR", "ORELSE" ])
+  # Everyone RPMS signs on over CIA holds CIAV VUECENTRIC, the context the
+  # sign-on binds to. This mock signs on over XWB, where a user can sign on
+  # without it: CLERK,TEST (303) is that user, with no VueCentric access and no key.
+  %w[301 302 304].each { |duz| m.seed_options(duz, [ "CIAV VUECENTRIC" ]) }
 
   # Practitioner — ORWU USERINFO is single-session-user (per rr-fyf); the
   # mock dispatches on "" since the wrapper passes no params. Test code

@@ -79,7 +79,7 @@ class SsoSessionTokenBridgeTest < ActionDispatch::IntegrationTest
     assert_includes issued, "XUS AV CODE"
   end
 
-  test "a clinician with no security keys signs in but is authorized for nothing" do
+  test "a user RPMS gives neither the chart option nor a key signs in but is authorized for nothing" do
     post "/lakeraven-ehr/login", params: KEYLESS_USER
     assert_response :redirect
     assert_equal "303", session[:duz]
