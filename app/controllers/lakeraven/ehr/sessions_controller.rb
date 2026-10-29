@@ -122,12 +122,13 @@ module Lakeraven
         session[:user_name] = provider[:name]
         session[:user_type] = provider[:user_type].to_s
         session[:security_keys] = Array(provider[:security_keys]).map(&:to_s)
+        session[:options] = Array(provider[:options]).map(&:to_s)
         session[:last_seen_at] = Time.current.to_i
         session[:smart_token] = mint_smart_token(provider)
       end
 
       # Mint a SMART token for this session, bound to the human and scoped by
-      # what that human's RPMS security keys actually authorize.
+      # what that human's RPMS options and security keys actually authorize.
       #
       # Two things this used to get wrong:
       #   * every session got `user/*.read user/*.write`, so a clerk with no
@@ -143,7 +144,8 @@ module Lakeraven
         revoke_previous_tokens_for(provider[:duz])
 
         scopes = SessionScopePolicy.scope_string(
-          security_keys: Array(provider[:security_keys]).map(&:to_sym)
+          security_keys: Array(provider[:security_keys]).map(&:to_sym),
+          options: Array(provider[:options]).map(&:to_s)
         )
         raise "browser session tokens must never carry a patient/ scope" if scopes.include?("patient/")
 
