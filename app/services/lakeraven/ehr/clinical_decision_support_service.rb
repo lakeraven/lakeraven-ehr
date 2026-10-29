@@ -66,7 +66,7 @@ module Lakeraven
 
           proposed = OpenStruct.new(medication_display: proposed_drug, medication_code: nil)
 
-          # Use the local knowledge base service for interaction checking
+          # Configured backend; the local YAML knowledge base when none is set.
           service = DrugInteractionService.new
           active_meds = fetch_active_medications(patient_dfn)
           allergies = fetch_allergies(patient_dfn)
@@ -90,6 +90,10 @@ module Lakeraven
               created_at: Time.current
             }
           end
+
+          # An incomplete check carries no interaction list. One high alert
+          # records that the check did not run.
+          alerts << incomplete_drug_interaction_alert if result.incomplete?
 
           CdsResult.new(patient_dfn: patient_dfn, alerts: alerts)
         end
@@ -130,6 +134,17 @@ module Lakeraven
         end
 
         private
+
+        def incomplete_drug_interaction_alert
+          {
+            id: "cds-di-#{SecureRandom.hex(4)}",
+            category: "drug-interaction-check-incomplete",
+            severity: "high",
+            message: "Drug interactions could not be checked: drug interaction checking is not available on this server.",
+            source: "DrugInteractionService",
+            created_at: Time.current
+          }
+        end
 
         def fetch_active_medications(patient_dfn)
           MedicationRequest.checked_for_patient(patient_dfn)
