@@ -9,9 +9,10 @@ module Lakeraven
     # token: this read lists patients, and a bound token has no cohort it
     # may read. An unknown id, an id that cannot name a record, a cohort
     # with no rows, and a cohort whose member list the egress filter
-    # empties are the same not-found. The diagnostics are fixed: the
-    # caller's id is never copied into them. Quantity is the length of
-    # the member list Part2EgressFilter returns.
+    # empties or omits are the same not-found. A member value that is
+    # not a list is refused. The diagnostics are fixed: the caller's id
+    # is never copied into them. Quantity is the length of the member
+    # list Part2EgressFilter returns.
     class GroupsController < ApplicationController
       NOT_FOUND_DIAGNOSTICS = "Group not found"
 
@@ -57,23 +58,33 @@ module Lakeraven
         false
       end
 
-      # The filter's payload is what we send. Quantity is the length of
-      # its member list. An empty member list is the same not-found as
-      # an unknown cohort. A payload with no member list is rendered
-      # unchanged.
+      # The filter's payload is what we send, with string keys. Member is
+      # read with either key type. When that payload is a Group, no member
+      # list or an empty one is the same not-found as an unknown cohort,
+      # and a member value that is not a list is refused. Quantity is the
+      # length of the list the filter returned. Any other resource is sent
+      # as the filter returned it.
       def render_filtered_group(payload)
         filtered = filter_fhir_for_egress(payload)
         return refuse_unfiltered_fhir_egress unless filtered
 
-        members = filtered["member"]
-        return render_group_not_found if members.is_a?(Array) && members.empty?
+        body = filtered.deep_stringify_keys
+        return render_egress_json(body) unless fhir_resource_type_value(filtered) == "Group"
 
-        render json: filtered, status: :ok, content_type: fhir_egress_content_type
+        members = member_value(filtered)
+        return render_group_not_found if members.nil?
+        return refuse_unfiltered_fhir_egress unless members.is_a?(Array)
+        return render_group_not_found if members.empty?
+
+        render_egress_json(body.merge("quantity" => members.length))
+      end
+
+      def render_egress_json(body)
+        render json: body, status: :ok, content_type: fhir_egress_content_type
       end
 
       # String keys, because the egress seam matches resourceType on the
-      # hash it is given. Quantity is counted afterwards, from whatever
-      # member list the filter returns.
+      # hash it is given.
       def group_resource(group_id, members)
         {
           "resourceType" => "Group",
@@ -84,14 +95,11 @@ module Lakeraven
         }
       end
 
-      # Part2EgressFilter may drop member references. Count the list it
-      # returned. A payload with no member list is rendered unchanged.
-      def egress_filter(payload)
-        filtered = super
-        members = filtered["member"] if filtered.is_a?(Hash)
-        return filtered unless members.is_a?(Array)
-
-        filtered.merge("quantity" => members.length)
+      # Either key type, the same shape as fhir_resource_type_value. Nil
+      # is not a list and does not hide the other key. The first present
+      # value is the member list the filter returned.
+      def member_value(payload)
+        [ payload["member"], payload[:member] ].find { |value| !value.nil? }
       end
 
       def member_reference(row)
