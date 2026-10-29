@@ -47,6 +47,15 @@ Lakeraven::EHR::Engine.routes.draw do
   get  "patients/:dfn/screenings/new", to: "screenings#new",    as: :new_patient_screening, constraints: { dfn: /\d+/ }
   get  "patients/:dfn/screenings/:id", to: "screenings#show",   as: :patient_screening, constraints: { dfn: /\d+/, id: /\d+/ }
 
+  # Chart allergy entry (#644). Writes are POST only — there is no GET
+  # that records an allergy or no-known-allergies.
+  get  "patients/:dfn/allergies/new", to: "allergies#new", as: :new_patient_allergy,
+    constraints: { dfn: /\d+/ }
+  post "patients/:dfn/allergies", to: "allergies#create", as: :patient_allergies,
+    constraints: { dfn: /\d+/ }
+  post "patients/:dfn/allergies/no_known_allergies", to: "allergies#no_known_allergies",
+    as: :patient_no_known_allergies, constraints: { dfn: /\d+/ }
+
   # FHIR CapabilityStatement (#574). Every FHIR type routed below is declared
   # in FHIR::CapabilityStatement, and a route with no controller action
   # behind it is not routed: Medication, DiagnosticReport and CarePlan were,
