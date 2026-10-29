@@ -363,6 +363,11 @@ class CapabilityStatementTest < ActionDispatch::IntegrationTest
     when "AuditEvent"
       Lakeraven::EHR::AuditEvent.create!(event_type: "rest", action: "R", outcome: "0",
                                          entity_type: "Patient", entity_identifier: "1").id
+    when "Group"
+      group_id = "capability-probe-group"
+      Lakeraven::EHR::FhirGroupMember.where(group_id: group_id).delete_all
+      Lakeraven::EHR::FhirGroupMember.create!(group_id: group_id, patient_dfn: "1")
+      group_id
     when "ValueSet" then "capability-probe"
     else "1"
     end

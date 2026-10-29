@@ -120,7 +120,8 @@ module Lakeraven
         "lakeraven/ehr/measure_reports#index",
         "lakeraven/ehr/audit_events#index",
         "lakeraven/ehr/audit_events#show",
-        "lakeraven/ehr/export_files#show"
+        "lakeraven/ehr/export_files#show",
+        "lakeraven/ehr/groups#show"
       ].freeze
 
       test "completeness: all disclosing FHIR read routes are tested for seam wiring" do
@@ -545,6 +546,14 @@ module Lakeraven
               safety_acknowledged_by: "99999"
             )
           }
+        },
+        { name: "groups show", dynamic_path: -> { "/lakeraven-ehr/Group/cohort-synthetic-egress-a" }, method: :get,
+          setup: -> {
+            group_id = "cohort-synthetic-egress-a"
+            ::Lakeraven::EHR::FhirGroupMember.where(group_id: group_id).delete_all
+            ::Lakeraven::EHR::FhirGroupMember.create!(group_id: group_id, patient_dfn: "2")
+            ::Lakeraven::EHR::FhirGroupMember.create!(group_id: group_id, patient_dfn: "1")
+          }
         }
       ].freeze
 
@@ -702,6 +711,35 @@ module Lakeraven
         assert_includes response.body, "Self-harm response recorded"
       end
 
+      # Group#show lists Patient/{dfn} references, not full Patient resources, but
+      # each reference still identifies a patient on the wire. The same contract
+      # as Patient search applies: render_fhir_egress sends Part2EgressFilter's
+      # return value verbatim (see GET /Patient table rows), so a withheld patient
+      # must disappear from member[] and quantity must match — not a silent partial
+      # list with the pre-filter count.
+      test "Group member references reflect Part2EgressFilter output for restricted patients" do
+        endpoint = WIRED_ENDPOINTS.find { |e| e[:name] == "groups show" }
+        instance_exec(&endpoint[:setup])
+        path = instance_exec(&endpoint[:dynamic_path])
+
+        stub_egress_filter(->(payload) {
+          next payload unless payload.is_a?(Hash) && payload["resourceType"] == "Group"
+
+          filtered = payload.deep_dup.deep_stringify_keys
+          filtered["member"].reject! { |member| member.dig("entity", "reference") == "Patient/1" }
+          filtered["quantity"] = filtered["member"].length
+          filtered
+        }) do
+          get path, headers: @headers
+        end
+
+        assert_response :success
+        body = JSON.parse(response.body)
+        references = body.fetch("member").map { |member| member.dig("entity", "reference") }
+        refute_includes references, "Patient/1"
+        assert_includes references, "Patient/2"
+        assert_equal references.length, body["quantity"]
+      end
 
       WIRED_ENDPOINTS.each do |endpoint|
         test_name = endpoint[:name] || endpoint[:path]
