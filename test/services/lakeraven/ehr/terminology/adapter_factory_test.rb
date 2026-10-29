@@ -131,14 +131,21 @@ module Lakeraven
           assert_match(/bogus/i, error.message)
         end
 
-        test "TERMINOLOGY_BACKEND mock is refused in production" do
+        test "TERMINOLOGY_BACKEND mock in production builds without ArgumentError explicit build still refused" do
           Rails.env = "production"
           ENV["TERMINOLOGY_BACKEND"] = "mock"
-          error = assert_raises(ArgumentError) { AdapterFactory.build }
-          assert_match(/production/i, error.message)
+          adapter = assert_nothing_raised { AdapterFactory.build }
+          assert_equal :mock, adapter.backend
 
           error = assert_raises(ArgumentError) { AdapterFactory.build(:mock) }
           assert_match(/production/i, error.message)
+        end
+
+        test "build rejects registration that returns bare BaseAdapter without implemented backend" do
+          AdapterFactory.register(:iris) { BaseAdapter.new }
+          error = assert_raises(ArgumentError) { AdapterFactory.build(:iris) }
+          assert_match(/iris/i, error.message)
+          refute_kind_of NotImplementedError, error.class
         end
 
         test "mock backend builds in test and development" do

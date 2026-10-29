@@ -31,26 +31,40 @@ module Lakeraven
           assert_adapter_contract(@adapter)
         end
 
+        test "get_valueset returns nil without reading disk for nil malformed and hidden ids" do
+          leak_dir = Dir.mktmpdir("lakeraven-leak-valuesets")
+          write_leak_valueset(leak_dir)
+          TerminologyService.additional_valueset_paths = [ leak_dir, TEST_VALUESETS ]
+          adapter = LocalAdapter.new
+
+          [ nil, "bad id", ".hidden" ].each do |bad_id|
+            assert_nil adapter.get_valueset(bad_id),
+                       "get_valueset(#{bad_id.inspect}) must return nil, not raise"
+          end
+        ensure
+          FileUtils.remove_entry(leak_dir) if leak_dir
+        end
+
+        test "expand and validate raise ValueSetNotFoundError for nil malformed and hidden ids without disk read" do
+          leak_dir = Dir.mktmpdir("lakeraven-leak-valuesets")
+          write_leak_valueset(leak_dir)
+          TerminologyService.additional_valueset_paths = [ leak_dir, TEST_VALUESETS ]
+          adapter = LocalAdapter.new
+
+          [ nil, "bad id", ".hidden" ].each do |bad_id|
+            assert_raises(TerminologyService::ValueSetNotFoundError) { adapter.expand_valueset(bad_id) }
+            assert_raises(TerminologyService::ValueSetNotFoundError) do
+              adapter.validate_code("http://example.com/leaked", "LEAKED-CODE", valueset_id: bad_id)
+            end
+          end
+        ensure
+          FileUtils.remove_entry(leak_dir) if leak_dir
+        end
+
         test "invalid ValueSet ids are never read from disk" do
           leak_dir = Dir.mktmpdir("lakeraven-leak-valuesets")
           leak_json = File.join(leak_dir, "LEAKED.json")
-          File.write(
-            leak_json,
-            {
-              resourceType: "ValueSet",
-              id: "LEAKED",
-              title: "Leaked",
-              status: "active",
-              compose: {
-                include: [
-                  {
-                    system: "http://example.com/leaked",
-                    concept: [ { code: "LEAKED-CODE", display: "Leaked code" } ]
-                  }
-                ]
-              }
-            }.to_json
-          )
+          write_leak_valueset(leak_dir)
           TerminologyService.additional_valueset_paths = [ TEST_VALUESETS ]
           adapter = LocalAdapter.new
           leak_id = leak_json.delete_suffix(".json")
@@ -68,7 +82,6 @@ module Lakeraven
 
           invalid_ids.each do |bad_id|
             assert_raises(TerminologyService::ValueSetNotFoundError) { adapter.expand_valueset(bad_id) }
-            assert_raises(TerminologyService::ValueSetNotFoundError) { adapter.get_valueset(bad_id) }
             assert_raises(TerminologyService::ValueSetNotFoundError) do
               adapter.validate_code("http://example.com/leaked", "LEAKED-CODE", valueset_id: bad_id)
             end
@@ -134,6 +147,26 @@ module Lakeraven
                                        valueset_id: "spec-blank-concepts-valueset")
         ensure
           FileUtils.remove_entry(extra_dir) if extra_dir
+        end
+
+        def write_leak_valueset(leak_dir)
+          File.write(
+            File.join(leak_dir, "LEAKED.json"),
+            {
+              resourceType: "ValueSet",
+              id: "LEAKED",
+              title: "Leaked",
+              status: "active",
+              compose: {
+                include: [
+                  {
+                    system: "http://example.com/leaked",
+                    concept: [ { code: "LEAKED-CODE", display: "Leaked code" } ]
+                  }
+                ]
+              }
+            }.to_json
+          )
         end
 
         test "honours TerminologyService.additional_valueset_paths" do
