@@ -13,7 +13,7 @@ module Lakeraven
 
       test "resolve_signon treats Hash security_keys like gem include? on keys" do
         assert_equal "case_manager",
-          Roles.resolve_signon(user_type: "provider", security_keys: { prc_manager: true })
+          Roles.resolve_signon(user_type: "provider", security_keys: { referrals_manager: true })
       end
     end
   end

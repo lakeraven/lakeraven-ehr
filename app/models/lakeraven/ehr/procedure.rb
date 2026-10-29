@@ -10,6 +10,7 @@ module Lakeraven
 
       CODE_SYSTEM_URLS = {
         "cpt" => "http://www.ama-assn.org/go/cpt",
+        "hcpcs" => "urn:oid:2.16.840.1.113883.6.285",
         "snomed" => "http://snomed.info/sct"
       }.freeze
 
@@ -42,6 +43,30 @@ module Lakeraven
       def self.for_patient(dfn)
         gateway.for_patient(dfn)
       end
+
+      # A row of RpmsRpc::Procedure.for_patient (a V CPT entry): a procedure
+      # that was performed, so its status is completed. The row names the
+      # provider and facility but carries no IEN for either.
+      def self.from_rpms_row(row, patient_dfn:)
+        new(
+          ien: row[:ien].to_s.presence,
+          patient_dfn: patient_dfn.to_s,
+          code: row[:cpt_code].presence,
+          code_system: hcpcs_level_ii?(row[:cpt_code]) ? "hcpcs" : "cpt",
+          display: (row[:cpt_name] || row[:name]).presence,
+          status: "completed",
+          performed_datetime: row[:date],
+          performer_name: row[:provider].presence,
+          location_name: row[:facility].presence
+        )
+      end
+
+      # V CPT holds HCPCS Level II codes too (a letter A-V and four digits,
+      # e.g. A4206), which are not CPT.
+      def self.hcpcs_level_ii?(code)
+        code.to_s.match?(/\A[A-V]\d{4}\z/)
+      end
+      private_class_method :hcpcs_level_ii?
 
       def self.resource_class
         "Procedure"

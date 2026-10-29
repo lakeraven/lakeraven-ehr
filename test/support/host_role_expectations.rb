@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
-# Pinned expectations for issue #638 — mirrors rpms-rpc Capabilities/UserRoles
-# behaviour without calling those modules (they are being removed).
+# Pinned expectations for the host's roles (#638) and its key table (#578).
 module HostRoleExpectations
   ROLE_PERMISSIONS = {
     "provider" => %i[view_patients view_referrals create_referrals edit_own_referrals],
@@ -42,17 +41,15 @@ module HostRoleExpectations
 
   UNKNOWN_USER_TYPE = "synthetic_unknown_role"
 
-  # Mirrors the key symbols in the pinned rpms-rpc SecurityKeys registry.
+  # The key symbols in Roles::KEY_NAMES: every one a SECURITY KEY on the build.
   REGISTRY_KEY_SYMBOLS = %i[
-    prc_supervisor prc_tech prc_manager chs_approve chs_clerk
-    consult_manager eligibility_verify scheduling_admin
-    bh_provider bh_supervisor dental_provider dental_supervisor
-    cprs_gui_chart
+    orders_sign orders_release orders_enter
+    referrals_user referrals_supervisor referrals_manager
+    scheduling_admin scheduling_user
+    behavioral_health_user behavioral_health_manager
   ].freeze
 
-  CHS_PRC_RELEVANT_KEYS = %i[
-    prc_supervisor prc_manager prc_tech chs_approve chs_clerk consult_manager
-  ].freeze
+  CHS_PRC_RELEVANT_KEYS = %i[referrals_user referrals_supervisor referrals_manager].freeze
 
   CHS_PRC_KEY_PAIRS = CHS_PRC_RELEVANT_KEYS
     .combination(2)
@@ -66,7 +63,7 @@ module HostRoleExpectations
       *REGISTRY_KEY_SYMBOLS.map { |symbol| [ symbol ] },
       *CHS_PRC_KEY_PAIRS,
       REGISTRY_KEY_SYMBOLS.dup,
-      [ "prc_manager" ],
+      [ "referrals_manager" ],
       [ :unknown_key ]
     ]
   ).freeze
@@ -74,19 +71,16 @@ module HostRoleExpectations
   AUTH_USER_TYPES_FOR_MATRIX = %w[admin provider nurse clerk user case_manager].freeze
 
   RPMS_KEY_STRING_BY_SYMBOL = {
-    prc_supervisor: "PRCFA SUPERVISOR",
-    prc_tech: "PRCFA TECH",
-    prc_manager: "BPRC MANAGER",
-    chs_approve: "BGOZ CHS APPROVE",
-    chs_clerk: "BGOZ CHS CLERK",
-    consult_manager: "GMRC MGR",
-    eligibility_verify: "APCL VERIFY",
+    orders_sign: "ORES",
+    orders_release: "ORELSE",
+    orders_enter: "OREMAS",
+    referrals_user: "BMCZMENU",
+    referrals_supervisor: "BMCZSUPERVISOR",
+    referrals_manager: "BMCZ MGR",
     scheduling_admin: "SD SUPERVISOR",
-    bh_provider: "BGMH PROVIDER",
-    bh_supervisor: "BGMH SUPERVISOR",
-    dental_provider: "DENTP PROVIDER",
-    dental_supervisor: "DENTP SUPERVISOR",
-    cprs_gui_chart: "OR CPRS GUI CHART"
+    scheduling_user: "SDZMENU",
+    behavioral_health_user: "AMHZMENU",
+    behavioral_health_manager: "AMHZMGR"
   }.freeze
 
   module_function
@@ -112,19 +106,20 @@ module HostRoleExpectations
   end
 
   def expected_can_approve_chs?(key_set)
-    holds_symbol_key?(key_set, :prc_supervisor) || holds_symbol_key?(key_set, :prc_manager)
+    holds_symbol_key?(key_set, :referrals_supervisor) || holds_symbol_key?(key_set, :referrals_manager)
   end
 
   def expected_can_process_chs?(key_set)
-    holds_symbol_key?(key_set, :prc_tech) || holds_symbol_key?(key_set, :prc_supervisor)
+    holds_symbol_key?(key_set, :referrals_user) || holds_symbol_key?(key_set, :referrals_supervisor)
   end
 
-  def expected_can_manage_consults?(key_set)
-    holds_symbol_key?(key_set, :consult_manager)
+  # No key decided for consults yet (#578).
+  def expected_can_manage_consults?(_key_set)
+    false
   end
 
   def expected_case_manager?(user_type, key_set)
-    effective_user_type(user_type) == "case_manager" || holds_symbol_key?(key_set, :prc_manager)
+    effective_user_type(user_type) == "case_manager" || holds_symbol_key?(key_set, :referrals_manager)
   end
 
   def expected_capabilities(user_type, key_set)
@@ -135,14 +130,10 @@ module HostRoleExpectations
       caps << :deny_referrals
     end
     caps << :process_claims if expected_can_process_chs?(key_set)
-    caps << :verify_eligibility if holds_symbol_key?(key_set, :eligibility_verify)
     caps << :manage_consults if expected_can_manage_consults?(key_set)
     caps << :manage_scheduling if holds_symbol_key?(key_set, :scheduling_admin)
-    if holds_symbol_key?(key_set, :bh_provider) || holds_symbol_key?(key_set, :bh_supervisor)
+    if holds_symbol_key?(key_set, :behavioral_health_user) || holds_symbol_key?(key_set, :behavioral_health_manager)
       caps << :access_behavioral_health
-    end
-    if holds_symbol_key?(key_set, :dental_provider) || holds_symbol_key?(key_set, :dental_supervisor)
-      caps << :access_dental
     end
 
     caps
@@ -150,7 +141,7 @@ module HostRoleExpectations
 
   def expected_resolved_user_type(auth_user_type, symbolic_keys)
     keys = Array(symbolic_keys)
-    if keys.include?(:prc_supervisor) || keys.include?(:prc_manager)
+    if keys.include?(:referrals_supervisor) || keys.include?(:referrals_manager)
       return "case_manager"
     end
 

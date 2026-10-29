@@ -58,10 +58,26 @@ module Lakeraven
         "lakeraven/ehr/demo_visits#summary",  # Dev-gated demo UI
         "lakeraven/ehr/screenings#create",    # Session-authenticated clinician UI (entry, not disclosure)
         "lakeraven/ehr/screenings#new",       # Session-authenticated clinician UI (entry, not disclosure)
+        "lakeraven/ehr/allergies#new",              # Session-authenticated clinician entry/write surface (#644); discloses no stored clinical data
+        "lakeraven/ehr/allergies#create",            # Session-authenticated clinician entry/write surface (#644); discloses no stored clinical data
+        "lakeraven/ehr/allergies#no_known_allergies", # Session-authenticated clinician entry/write surface (#644); discloses no stored clinical data
         "lakeraven/ehr/sessions#new",         # Web UI login
         "lakeraven/ehr/sessions#create",      # Web UI login
         "lakeraven/ehr/sessions#destroy",     # Web UI logout
         "lakeraven/ehr/dashboards#show",      # Web UI dashboard; banner patient/allergy via filter_fhir_for_egress
+        "lakeraven/ehr/registration/patients#index", # Front-desk lookup: registration demographics (name, HRN, DOB, status), no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/registration/patients#show",  # Registration demographics (name, HRN, DOB, sex), no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/registration/patients#new",     # Registration entry form (S-REG-02), not disclosure
+        "lakeraven/ehr/registration/patients#create",  # Registration entry; possible matches show registration demographics only; revisit with Part 2 (#494)
+        "lakeraven/ehr/registration/patients#confirm", # Registration entry after review; as #create
+        "lakeraven/ehr/scheduling/clinics#index",     # Scheduling: clinic resources, no patient data
+        "lakeraven/ehr/scheduling/clinics#show",      # A clinic day: appointment times and patient names, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/scheduling/appointments#new",   # Booking form: patient name, HRN, date of birth, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/scheduling/appointments#create", # Booking entry, not disclosure
+        "lakeraven/ehr/scheduling/cancellations#new",    # Cancel form: patient name and time, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/scheduling/cancellations#create", # Cancellation entry, not disclosure
+        "lakeraven/ehr/scheduling/checkins#new",         # Check-in form: patient name and time, provider names, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/scheduling/checkins#create",      # Check-in entry, not disclosure
         "lakeraven/ehr/test_sessions#create", # Test only
         "lakeraven/ehr/smart_configuration#show", # Discovery
         "lakeraven/ehr/smart_launch#show",    # Discovery
