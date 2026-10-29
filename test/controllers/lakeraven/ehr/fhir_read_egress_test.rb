@@ -740,6 +740,30 @@ module Lakeraven
         assert_equal references.length, body["quantity"]
       end
 
+      test "Group read returns the same not-found as an unknown cohort when Part2EgressFilter withholds every member" do
+        endpoint = WIRED_ENDPOINTS.find { |e| e[:name] == "groups show" }
+        instance_exec(&endpoint[:setup])
+        path = instance_exec(&endpoint[:dynamic_path])
+        unknown_path = "/lakeraven-ehr/Group/cohort-synthetic-egress-unknown"
+
+        get unknown_path, headers: @headers
+        unknown = [ response.status, JSON.parse(response.body) ]
+
+        stub_egress_filter(->(payload) {
+          next payload unless payload.is_a?(Hash) && payload["resourceType"] == "Group"
+
+          filtered = payload.deep_dup.deep_stringify_keys
+          filtered["member"] = []
+          filtered
+        }) do
+          get path, headers: @headers
+        end
+
+        filtered_all = [ response.status, JSON.parse(response.body) ]
+        assert_equal unknown, filtered_all,
+                     "withholding every member must match unknown-cohort not-found, not 200 with an empty member list"
+      end
+
       WIRED_ENDPOINTS.each do |endpoint|
         test_name = endpoint[:name] || endpoint[:path]
 
