@@ -11,13 +11,20 @@ module Lakeraven
       # normalization: to_s, strip, downcase, to_sym. A name that is not a
       # String or Symbol raises ArgumentError. build with no name (nil)
       # reads the environment instead of normalizing.
-      # :local and :mock are built in. :mock raises ArgumentError in
-      # production. :iris and :vsac build an adapter that raises
-      # AdapterNotAvailable until a host registers one. A TERMINOLOGY_BACKEND
-      # value that names nothing known does the same, so a misconfigured
-      # process still boots. Any other explicit name raises ArgumentError.
-      # register requires a block. build calls it and raises ArgumentError
-      # unless it returns a BaseAdapter whose backend is the normalized name.
+      # :local and :mock are built in. An explicit :mock raises
+      # ArgumentError in production. TERMINOLOGY_BACKEND=mock in production
+      # builds the unavailable adapter; its operations raise
+      # AdapterNotAvailable and say that mock is refused in production.
+      # :iris and :vsac build an adapter that raises AdapterNotAvailable
+      # until a host registers one. A TERMINOLOGY_BACKEND value that names
+      # nothing known does the same, so a misconfigured process still
+      # boots. Any other explicit name raises ArgumentError.
+      # register requires a block. Hosts register adapters inside
+      # Rails.application.config.to_prepare, so registrations survive code
+      # reloads and the engine's constants are loaded. build calls the
+      # block and raises ArgumentError unless it returns a BaseAdapter
+      # whose backend is the normalized name. A #backend that raises, such
+      # as a bare BaseAdapter, is rejected with ArgumentError.
       # reset_registrations! removes host adapters and leaves the built-ins.
       class AdapterFactory
         KNOWN_BACKENDS = %i[local mock iris vsac].freeze
@@ -28,8 +35,9 @@ module Lakeraven
         # still returns an object so detection can succeed; calling an
         # operation names the backend and raises AdapterNotAvailable.
         class Unavailable < BaseAdapter
-          def initialize(backend)
+          def initialize(backend, message = nil)
             @backend = backend
+            @message = message
           end
 
           attr_reader :backend
@@ -61,14 +69,14 @@ module Lakeraven
           private
 
           def unavailable!
-            raise AdapterNotAvailable, "No adapter is registered for the #{@backend} terminology backend"
+            raise AdapterNotAvailable, @message || "No adapter is registered for the #{@backend} terminology backend"
           end
         end
 
         def self.build(backend = nil)
           explicit = !backend.nil?
           name = explicit ? normalize_backend(backend) : detect_backend
-          refuse_mock_in_production!(name)
+          return mock_unavailable_in_production(explicit) if name == :mock && Rails.env.production?
           return materialize(name) if registrations.key?(name)
 
           known_adapter(name, explicit: explicit)
@@ -105,18 +113,31 @@ module Lakeraven
             raise ArgumentError, "Terminology backend #{name} must build a Terminology::BaseAdapter"
           end
 
-          return if adapter.backend == name
+          adapter_backend = adapter_backend_name(name, adapter)
+          return if adapter_backend == name
 
-          raise ArgumentError, "Terminology backend #{name} built an adapter for #{adapter.backend}"
+          raise ArgumentError, "Terminology backend #{name} built an adapter for #{adapter_backend}"
         end
         private_class_method :assert_adapter!
 
-        def self.refuse_mock_in_production!(name)
-          return unless name == :mock && Rails.env.production?
-
-          raise ArgumentError, "The mock terminology backend is refused in production"
+        # #backend on a bare BaseAdapter raises NotImplementedError, which is
+        # not an ArgumentError. Reject that registration the same way as a
+        # backend name that does not match.
+        def self.adapter_backend_name(name, adapter)
+          adapter.backend
+        rescue NotImplementedError, StandardError
+          raise ArgumentError, "Terminology backend #{name} does not implement #backend"
         end
-        private_class_method :refuse_mock_in_production!
+        private_class_method :adapter_backend_name
+
+        def self.mock_unavailable_in_production(explicit)
+          if explicit
+            raise ArgumentError, "The mock terminology backend is refused in production"
+          end
+
+          Unavailable.new(:mock, "The mock terminology backend is refused in production")
+        end
+        private_class_method :mock_unavailable_in_production
 
         def self.detect_backend
           configured_backend || signaled_backend || :local

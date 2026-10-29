@@ -4,7 +4,9 @@ module Lakeraven
   module EHR
     class ValueSetsController < ApplicationController
       # Fixed on purpose: the sentence names neither the backend nor the adapter class.
-      # Index, show, and $expand all use it when the terminology backend has no adapter.
+      # Index, show, and $expand all use it when the terminology backend has no
+      # adapter. Index and show also use it when the registered adapter does
+      # not implement the operation.
       TERMINOLOGY_NOT_SUPPORTED_DIAGNOSTICS = "ValueSet expansion is not available on this server."
 
       def index
@@ -14,7 +16,9 @@ module Lakeraven
         render_bundle(entries)
       rescue Terminology::AdapterNotAvailable => error
         refuse_unavailable_terminology(service, error)
-      rescue TerminologyService::ValueSetNotFoundError, NotImplementedError
+      rescue NotImplementedError
+        render_terminology_not_supported
+      rescue TerminologyService::ValueSetNotFoundError
         render_bundle([])
       end
 
@@ -28,7 +32,9 @@ module Lakeraven
         end
       rescue Terminology::AdapterNotAvailable => error
         refuse_unavailable_terminology(service, error)
-      rescue TerminologyService::ValueSetNotFoundError, NotImplementedError
+      rescue NotImplementedError
+        render_terminology_not_supported
+      rescue TerminologyService::ValueSetNotFoundError
         render_valueset_not_found
       end
 
@@ -71,9 +77,10 @@ module Lakeraven
       # One warning per request names the backend. ActiveSupport::Logger
       # writes only the message, so the severity word is in the text.
       # The OperationOutcome keeps the fixed diagnostics and names neither
-      # the backend nor the adapter class. ValueSetNotFoundError stays
-      # not-found on show and $expand. Index answers an empty Bundle for
-      # ValueSetNotFoundError and NotImplementedError.
+      # the backend nor the adapter class. Index and show answer that same
+      # not-supported outcome when the adapter raises NotImplementedError.
+      # ValueSetNotFoundError stays not-found on show and $expand. Index
+      # answers an empty Bundle for ValueSetNotFoundError.
       def refuse_unavailable_terminology(service, error)
         backend = service&.backend || error.message
         Rails.logger.warn("WARN: ValueSet terminology backend #{backend} is unavailable")

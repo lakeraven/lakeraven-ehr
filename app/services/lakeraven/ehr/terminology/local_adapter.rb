@@ -10,6 +10,10 @@ module Lakeraven
       # first file named for the ValueSet id wins. The id has to pass
       # ValueSetId: one file name, not a path, not "." or "..", and not a
       # hidden name. The resolved file has to stay inside that directory.
+      # Per-file symlinks are not followed. Only a file that resolves
+      # inside the ValueSet directory is read: a symlink in that directory
+      # can name a path outside it, and following the link would read a
+      # file the id was never allowed to name.
       class LocalAdapter < BaseAdapter
         def backend
           :local
@@ -22,7 +26,12 @@ module Lakeraven
           codes_from(valueset)
         end
 
+        # Nil, malformed, and hidden ids are not files. Return nil without
+        # reading the disk. expand and validate still raise
+        # ValueSetNotFoundError for those ids.
         def get_valueset(valueset_id)
+          return nil unless ValueSetId.safe?(valueset_id)
+
           load_valueset(valueset_id)
         end
 
