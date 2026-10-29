@@ -39,6 +39,8 @@
       local: true,
       id: "registration-form",
       class: "card flex flex-col gap-4" do |f| %>
+  <%= hidden_field_tag :submission_id,
+        @submission_id %>
   <div class="flex flex-col gap-1">
     <%= f.label :name, "Name (LAST,FIRST MIDDLE)" %>
     <%= f.text_field :name,

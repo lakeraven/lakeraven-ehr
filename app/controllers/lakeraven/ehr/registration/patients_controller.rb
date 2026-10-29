@@ -14,12 +14,16 @@ module Lakeraven
       # registration also the scheduling menu keys (SDZMENU, SDZSUP); registering
       # takes AGZMENU or AGZMGR.
       class PatientsController < WebController
+        include RpmsUnavailableRendering
+
         VIEW_KEYS = %w[registration_menu registration_manager registration_view_only scheduling_user scheduling_supervisor].freeze
         REGISTER_KEYS = %w[registration_menu registration_manager].freeze
         # The search is AG's own lookup (AGG LOOKUP PATIENTS), which RPMS runs for
         # registration users only: a scheduler is refused it, and finds patients
         # with VueCentric's selection when booking instead.
         SEARCH_KEYS = %w[registration_menu registration_manager registration_view_only].freeze
+        # A form submission token: the UUID the form was issued.
+        SUBMISSION_ID = /\A\h{8}-\h{4}-\h{4}-\h{4}-\h{12}\z/
         REVIEW_PURPOSE = :registration_review
         REVIEW_TTL = 15.minutes
 
@@ -54,12 +58,26 @@ module Lakeraven
         def new
           @registration = PatientRegistration.new(registration_params)
           load_picklists
+          issue_submission
         end
 
-        # POST /registration/patients
+        # POST /registration/patients. A form is filed at most once (#721): its
+        # one-time token is spent, under the same unique index as a review,
+        # before RPMS is asked, so a double click or a resent form stops here.
+        # The form shown again after any answer carries a new token.
         def create
           @registration = PatientRegistration.new(registration_params)
           return render_form(:unprocessable_content) unless @registration.valid?
+
+          submission = params[:submission_id].to_s
+          unless submission.match?(SUBMISSION_ID)
+            flash.now[:alert] = "Open the registration form again, then register the patient."
+            return render_form(:unprocessable_content)
+          end
+          unless RegistrationReview.use!("submission:#{submission}", duz: session[:duz])
+            flash.now[:alert] = "This form was already submitted. Search for the patient before registering again."
+            return render_form(:conflict)
+          end
 
           handle(PatientRegistrationGateway.register(@registration))
         end
@@ -151,7 +169,12 @@ module Lakeraven
 
         def render_form(status)
           load_picklists
+          issue_submission
           render :new, status: status
+        end
+
+        def issue_submission
+          @submission_id = SecureRandom.uuid
         end
 
         def load_picklists

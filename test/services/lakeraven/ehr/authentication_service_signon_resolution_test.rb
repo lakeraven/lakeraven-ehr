@@ -28,6 +28,27 @@ module Lakeraven
         end
       end
 
+      # ORWU HAS OPTION ACCESS answers nil when it could not ask. A chart scope
+      # must not be minted, or withheld, on an option nobody read: the sign-on
+      # is refused as unavailable, as it is for keys.
+      test "an option read that could not be made refuses the sign-on" do
+        with_auth_stubs(auth_user_type: "provider", options_unreadable: true) do
+          error = assert_raises(OptionAccessGateway::Unreadable) do
+            AuthenticationService.new.authenticate(access_code: "synthetic.access", verify_code: "synthetic.verify")
+          end
+          assert_kind_of RpmsRpc::Client::RpcError, error, "the sessions controller answers RpcError as unavailable"
+        end
+      end
+
+      test "sign-on asks RPMS for exactly the options the policy names, and carries the ones the user may run" do
+        with_auth_stubs(auth_user_type: "clerk", options: [ "CIAV VUECENTRIC" ]) do |_asked, asked_options|
+          result = AuthenticationService.new.authenticate(access_code: "synthetic.access", verify_code: "synthetic.verify")
+
+          assert_equal [ SessionScopePolicy::OPTION_SCOPES.keys ], asked_options
+          assert_equal [ "CIAV VUECENTRIC" ], result.value[:options]
+        end
+      end
+
       test "sign-on asks RPMS for exactly the keys the policy table names" do
         with_auth_stubs(auth_user_type: "provider") do |asked|
           AuthenticationService.new.authenticate(access_code: "synthetic.access", verify_code: "synthetic.verify")
@@ -59,8 +80,9 @@ module Lakeraven
 
       private
 
-      def with_auth_stubs(auth_user_type:, raw_keys: [], keys_unreadable: false)
+      def with_auth_stubs(auth_user_type:, raw_keys: [], keys_unreadable: false, options: [], options_unreadable: false)
         asked = []
+        asked_options = []
         RpmsRpc::Authentication.define_singleton_method(:authenticate) do |**_kwargs|
           {
             success: true,
@@ -87,12 +109,20 @@ module Lakeraven
           keys_unreadable ? nil : names.select { |name| raw_keys.include?(name) }
         end
 
-        yield asked
+        # ORWU HAS OPTION ACCESS: the names asked that the user may run, or nil
+        # when it could not ask.
+        RpmsRpc::Authentication.define_singleton_method(:option_access) do |names|
+          asked_options << names
+          options_unreadable ? nil : names.select { |name| options.include?(name) }
+        end
+
+        yield asked, asked_options
       ensure
         RpmsRpc::Authentication.singleton_class.send(:remove_method, :authenticate)
         RpmsRpc::Authentication.singleton_class.send(:remove_method, :user_info)
         RpmsRpc::Authentication.singleton_class.send(:remove_method, :user_type)
         RpmsRpc::Authentication.singleton_class.send(:remove_method, :held_keys)
+        RpmsRpc::Authentication.singleton_class.send(:remove_method, :option_access)
       end
     end
   end

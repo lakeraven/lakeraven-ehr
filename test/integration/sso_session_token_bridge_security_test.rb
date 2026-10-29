@@ -110,22 +110,22 @@ class SsoSessionTokenBridgeSecurityTest < ActionDispatch::IntegrationTest
     assert_response :unauthorized
   end
 
-  # -- B1: deny-by-default scopes from security keys ------------------------
+  # -- B1: deny-by-default scopes from RPMS options and security keys --------
 
-  test "a user with no security keys receives no clinical scopes" do
+  test "a user RPMS gives neither the chart option nor a key receives no clinical scopes" do
     sign_in("testclerk", "test123")
 
     assert_equal "", session_token.scopes.to_s.strip
   end
 
-  test "a user with no security keys cannot read a chart" do
+  test "a user RPMS gives neither the chart option nor a key cannot read a chart" do
     sign_in("testclerk", "test123")
 
     get "/lakeraven-ehr/patients/1"
     assert_response :forbidden
   end
 
-  test "a clerk with no keys receives strictly less than a keyed provider" do
+  test "a clerk with neither the chart option nor a key receives strictly less than a provider" do
     sign_in("testclerk", "test123")
     clerk_scopes = session_token.scopes.to_a
 
@@ -649,8 +649,8 @@ class SsoSessionTokenBridgeSecurityTest < ActionDispatch::IntegrationTest
 
   # -- M: the C-CDA author must not be caller-supplied --------------------
 
-  test "the chart key grants Part 2-bearing resource types and the BH keys grant nothing" do
-    chart = Lakeraven::EHR::SessionScopePolicy.scopes_for(security_keys: [ :orders_sign ])
+  test "the chart option grants Part 2-bearing resource types and the BH keys grant nothing" do
+    chart = Lakeraven::EHR::SessionScopePolicy.scopes_for(security_keys: [], options: [ "CIAV VUECENTRIC" ])
     bh = Lakeraven::EHR::SessionScopePolicy.scopes_for(security_keys: [ :behavioral_health_user, :behavioral_health_manager ])
 
     assert_includes chart, "user/Observation.rs", "PHQ-9 item 9 rides on Observation"
@@ -659,8 +659,11 @@ class SsoSessionTokenBridgeSecurityTest < ActionDispatch::IntegrationTest
     assert_empty Lakeraven::EHR::SessionScopePolicy::BEHAVIORAL_HEALTH_TYPES
   end
 
-  test "no key in the table grants Condition write" do
-    every = Lakeraven::EHR::SessionScopePolicy.scopes_for(security_keys: Lakeraven::EHR::SessionScopePolicy::KEY_SCOPES.keys)
+  test "no option or key in the table grants Condition write" do
+    every = Lakeraven::EHR::SessionScopePolicy.scopes_for(
+      security_keys: Lakeraven::EHR::SessionScopePolicy::KEY_SCOPES.keys,
+      options: Lakeraven::EHR::SessionScopePolicy::OPTION_SCOPES.keys
+    )
 
     assert_equal [ "user/Condition.rs" ], every.select { |scope| scope.start_with?("user/Condition.") }
   end

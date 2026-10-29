@@ -60,7 +60,7 @@ module Lakeraven
         return Result.new(status: :booked, appointment_id: reply[:appointment_id], message: nil) if reply[:success]
 
         Result.new(status: :refused, appointment_id: nil, message: reply[:error].to_s)
-      rescue ::RpmsRpc::Client::RpcError, ::RpmsRpc::Client::ConnectionError, IOError, SystemCallError => e
+      rescue ::RpmsRpc::Error, IOError, SystemCallError => e
         Rails.logger.error("[scheduling] booking raised #{e.class}; the outcome is unknown")
         Result.new(status: :unknown, appointment_id: nil, message: nil)
       end
