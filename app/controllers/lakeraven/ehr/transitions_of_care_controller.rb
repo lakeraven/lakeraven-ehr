@@ -25,6 +25,7 @@ module Lakeraven
 
         filtered = Part2EgressFilter.call(egress_sections(patient))
         return refuse_unfiltered_egress unless egress_sections?(filtered)
+        return refuse_unfiltered_egress unless positive_integer_dfn?(filtered[:patient][:dfn])
 
         render xml: renderable_ccda(filtered), status: :created, content_type: "application/xml"
       end
@@ -119,6 +120,14 @@ module Lakeraven
         return false unless filtered.is_a?(Hash) && filtered[:patient].is_a?(Hash)
 
         EGRESS_LISTS.all? { |key| filtered[key].is_a?(Array) }
+      end
+
+      # Patient#dfn is an integer attribute. "12A".to_i is 12 and
+      # "REDACTED".to_i is 0, so a rewritten dfn that is not already a
+      # positive integer string would be truncated into another id.
+      # That is the same refusal as a filter that returned no sections.
+      def positive_integer_dfn?(dfn)
+        dfn.is_a?(String) && dfn.match?(/\A[1-9]\d*\z/)
       end
 
       # The filter may withhold a row or rewrite a demographic. The model
