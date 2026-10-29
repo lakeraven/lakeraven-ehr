@@ -6,6 +6,18 @@ module DrugInteractionAdapterTestHelper
   UNAVAILABLE_INCOMPLETE_REASON =
     "Drug interaction checking is not available on this server."
 
+  BUILDER_FAILURE_INCOMPLETE_REASON =
+    "Drug interaction check could not be completed."
+
+  CDS_UNAVAILABLE_INCOMPLETE_ALERT_MESSAGE =
+    "Drug interactions could not be checked: drug interaction checking is not available on this server."
+
+  CDS_GENERIC_INCOMPLETE_ALERT_MESSAGE =
+    "Drug interactions could not be checked: the drug interaction check did not complete."
+
+  CDS_DATA_FETCH_INCOMPLETE_ALERT_MESSAGE =
+    "Drug interactions could not be checked: the patient's medications or allergies could not be retrieved."
+
   def drug_interaction_med(display, code)
     ::OpenStruct.new(medication_display: display, medication_code: code)
   end

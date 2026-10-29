@@ -9,9 +9,6 @@ module Lakeraven
       class ClinicalDecisionSupportFailClosedTest < ActiveSupport::TestCase
         include DrugInteractionAdapterTestHelper
 
-        CDS_INCOMPLETE_ALERT_MESSAGE =
-          "Drug interactions could not be checked: drug interaction checking is not available on this server."
-
         setup do
           @_orig_rpms_client = RpmsRpc.configuration.client
           RpmsRpc.mock!(&BASELINE_MOCK_SEEDS)
@@ -51,10 +48,84 @@ module Lakeraven
           alert = incomplete_alerts.first
           assert_equal "drug-interaction-check-incomplete", alert[:category]
           assert_equal "high", alert[:severity]
-          assert_equal CDS_INCOMPLETE_ALERT_MESSAGE, alert[:message]
+          assert_equal CDS_UNAVAILABLE_INCOMPLETE_ALERT_MESSAGE, alert[:message]
           assert_equal "DrugInteractionService", alert[:source]
           assert alert.key?(:id)
           assert alert[:id].present?
+        end
+
+        test "evaluate_medication with adapter check failure uses generic incomplete alert message" do
+          failing_adapter = Class.new(BaseAdapter) do
+            define_method(:backend) { :rpms }
+            define_method(:check_interactions) { |_| raise IOError, "RPC timeout for DFN 123" }
+            define_method(:check_allergies) { |_, _| [] }
+          end
+          drug_interaction_adapter_factory.register(:rpms) { failing_adapter.new }
+          ENV["DRUG_INTERACTION_BACKEND"] = "rpms"
+          seed_active_medications("12345", [
+            { drug_name: "WARFARIN 5MG TAB", status: "ACTIVE" }
+          ])
+
+          result = ClinicalDecisionSupportService.evaluate_medication("12345", "Ibuprofen 400mg")
+
+          assert_empty result.alerts_by_category("drug-interaction")
+          incomplete_alerts = result.alerts_by_category("drug-interaction-check-incomplete")
+          assert_equal 1, incomplete_alerts.length
+          alert = incomplete_alerts.first
+          assert_equal CDS_GENERIC_INCOMPLETE_ALERT_MESSAGE, alert[:message]
+          refute_includes alert[:message], "RPC timeout"
+          refute_includes alert[:message], "not available on this server"
+        end
+
+        test "evaluate_medication when medication fetch fails does not treat empty data as a complete check" do
+          ENV.delete("DRUG_INTERACTION_BACKEND")
+          original = MedicationRequest.method(:checked_for_patient)
+          MedicationRequest.define_singleton_method(:checked_for_patient) { |_dfn| raise "medication gateway down" }
+
+          result = ClinicalDecisionSupportService.evaluate_medication("12345", "Ibuprofen 400mg")
+
+          assert_empty result.alerts_by_category("drug-interaction")
+          incomplete_alerts = result.alerts_by_category("drug-interaction-check-incomplete")
+          assert_equal 1, incomplete_alerts.length
+          assert_equal CDS_DATA_FETCH_INCOMPLETE_ALERT_MESSAGE, incomplete_alerts.first[:message]
+        ensure
+          MedicationRequest.define_singleton_method(:checked_for_patient, original)
+        end
+
+        test "evaluate_medication when allergy fetch fails does not treat empty data as a complete check" do
+          ENV.delete("DRUG_INTERACTION_BACKEND")
+          seed_active_medications("12345", [
+            { drug_name: "WARFARIN 5MG TAB", status: "ACTIVE" }
+          ])
+          original = SupplementalClinicalResources.method(:merged_allergy_intolerances_for_patient)
+          SupplementalClinicalResources.define_singleton_method(:merged_allergy_intolerances_for_patient) do |_dfn|
+            raise "allergy gateway down"
+          end
+
+          result = ClinicalDecisionSupportService.evaluate_medication("12345", "Ibuprofen 400mg")
+
+          assert_empty result.alerts_by_category("drug-interaction")
+          incomplete_alerts = result.alerts_by_category("drug-interaction-check-incomplete")
+          assert_equal 1, incomplete_alerts.length
+          assert_equal CDS_DATA_FETCH_INCOMPLETE_ALERT_MESSAGE, incomplete_alerts.first[:message]
+        ensure
+          SupplementalClinicalResources.define_singleton_method(:merged_allergy_intolerances_for_patient, original)
+        end
+
+        test "registered builder failure surfaces single high incomplete alert without broker message" do
+          drug_interaction_adapter_factory.register(:rpms) { raise "broker down" }
+          ENV["DRUG_INTERACTION_BACKEND"] = "rpms"
+          seed_active_medications("12345", [
+            { drug_name: "WARFARIN 5MG TAB", status: "ACTIVE" }
+          ])
+
+          result = ClinicalDecisionSupportService.evaluate_medication("12345", "Ibuprofen 400mg")
+
+          incomplete_alerts = result.alerts_by_category("drug-interaction-check-incomplete")
+          assert_equal 1, incomplete_alerts.length
+          assert_equal "high", incomplete_alerts.first[:severity]
+          assert_equal CDS_GENERIC_INCOMPLETE_ALERT_MESSAGE, incomplete_alerts.first[:message]
+          assert_empty result.alerts_by_category("drug-interaction")
         end
 
         test "evaluate_medication with default backend returns drug-interaction alerts without incomplete alert" do

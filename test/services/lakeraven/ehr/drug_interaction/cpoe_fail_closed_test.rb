@@ -48,6 +48,29 @@ module Lakeraven
           assert_equal UNAVAILABLE_INCOMPLETE_REASON, checked.incomplete_reason
         end
 
+        test "medication order when adapter builder raises still succeeds with incomplete interaction_result" do
+          drug_interaction_adapter_factory.register(:rpms) { raise "broker down" }
+          ENV["DRUG_INTERACTION_BACKEND"] = "rpms"
+          seed_active_medications("12345", [
+            { drug_name: "WARFARIN 5MG TAB", status: "ACTIVE" }
+          ])
+
+          result = CpoeService.create_medication_order(
+            patient_dfn: "12345",
+            provider_duz: "789",
+            medication: "Ibuprofen 400mg"
+          )
+
+          assert result.success?
+          checked = result.interaction_result
+          assert checked.incomplete?
+          refute checked.safe?
+          assert_empty checked.interactions
+          assert_equal :rpms, checked.decision_source
+          assert_equal BUILDER_FAILURE_INCOMPLETE_REASON, checked.incomplete_reason
+          refute_includes checked.incomplete_reason, "broker down"
+        end
+
         private
 
         def seed_active_medications(dfn, orders)

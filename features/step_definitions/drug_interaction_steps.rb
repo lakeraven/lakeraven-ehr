@@ -27,46 +27,53 @@ Given("patient {string} has no known allergies") do |_dfn|
 end
 
 Given("the drug interaction adapter is unavailable") do
-  @adapter_unavailable = true
+  Lakeraven::EHR::DrugInteraction::AdapterFactory.reset_registrations!
+  ENV["DRUG_INTERACTION_BACKEND"] = "rpms"
 end
 
 Given("the interaction adapter mode is {string}") do |mode|
-  @adapter_mode = mode
+  Lakeraven::EHR::DrugInteraction::AdapterFactory.reset_registrations!
+  ENV["DRUG_INTERACTION_BACKEND"] = mode
+
+  next unless mode == "rpms"
+
+  rpms_local_adapter = Class.new(Lakeraven::EHR::DrugInteraction::LocalAdapter) do
+    define_method(:backend) { :rpms }
+  end
+  Lakeraven::EHR::DrugInteraction::AdapterFactory.register(:rpms) { rpms_local_adapter.new }
 end
 
 Given("the RPMS order check returns a critical drug-drug interaction") do
-  @rpms_critical = true
+  rpms_adapter = Class.new(Lakeraven::EHR::DrugInteraction::BaseAdapter) do
+    define_method(:backend) { :rpms }
+
+    define_method(:check_interactions) do |_meds|
+      [
+        Lakeraven::EHR::InteractionAlert.new(
+          severity: :high,
+          drug_a: "warfarin",
+          drug_b: "aspirin",
+          description: "Synthetic RPMS critical interaction",
+          source: "RPMS"
+        )
+      ]
+    end
+
+    define_method(:check_allergies) { |_, _| [] }
+  end
+
+  Lakeraven::EHR::DrugInteraction::AdapterFactory.register(:rpms) { rpms_adapter.new }
 end
 
 When("I check drug interactions for prescribing {string} with RxNorm {string} to patient {string}") do |name, code, _dfn|
   @allergies ||= []
-
-  if @adapter_unavailable
-    @result = Lakeraven::EHR::DrugInteractionResult.failure(message: "adapter error")
-  elsif @adapter_mode == "rpms"
-    # Simulate RPMS mode — use local adapter but tag as rpms source
-    service = Lakeraven::EHR::DrugInteractionService.new
-    proposed = OpenStruct.new(medication_display: name, medication_code: code)
-    @result = service.check(
-      active_medications: @active_medications || [],
-      proposed_medication: proposed,
-      allergies: @allergies
-    )
-    # Override source for RPMS mode test
-    @result = Lakeraven::EHR::DrugInteractionResult.new(
-      interactions: @result.interactions,
-      decision_source: :rpms,
-      degraded: false
-    )
-  else
-    service = Lakeraven::EHR::DrugInteractionService.new
-    proposed = OpenStruct.new(medication_display: name, medication_code: code)
-    @result = service.check(
-      active_medications: @active_medications || [],
-      proposed_medication: proposed,
-      allergies: @allergies
-    )
-  end
+  service = Lakeraven::EHR::DrugInteractionService.new
+  proposed = OpenStruct.new(medication_display: name, medication_code: code)
+  @result = service.check(
+    active_medications: @active_medications || [],
+    proposed_medication: proposed,
+    allergies: @allergies
+  )
 end
 
 When("I batch check the following medications for patient {string}:") do |_dfn, table|
@@ -97,6 +104,10 @@ end
 
 Then("the interaction check should not be blocking") do
   refute @result.blocking?
+end
+
+Then("the interaction check should be incomplete") do
+  assert @result.incomplete?, "Expected incomplete interaction check"
 end
 
 Then("I should see a drug-drug interaction between {string} and {string} with severity {string}") do |drug_a, drug_b, severity|
@@ -150,15 +161,8 @@ Then("each DetectedIssue should have implicated items") do
   @detected_issues.each { |di| assert di[:implicated].length >= 2 }
 end
 
-Then("the interaction check should indicate an error") do
-  assert @result.message.present?
-end
-
-Then("the error message should mention {string}") do |text|
-  assert_includes @result.message.downcase, text.downcase
-end
-
 Then("the interaction check should not indicate an error") do
+  refute @result.incomplete?, "Expected a complete interaction check"
   assert_nil @result.message
 end
 
@@ -170,7 +174,7 @@ Then("the interaction check should not be degraded") do
   refute @result.degraded?
 end
 
-Then("the interaction source should be {string}") do |_source|
-  # In RPMS mode, interactions are tagged as RPMS-sourced
-  assert_equal :rpms, @result.decision_source
+Then("the interaction source should be {string}") do |source|
+  match = @result.interactions.find { |i| i.source.to_s.casecmp?(source) }
+  assert match, "Expected an interaction sourced from #{source}, got: #{@result.interactions.map(&:source).inspect}"
 end
