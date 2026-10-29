@@ -6,6 +6,8 @@ require "test_helper"
 # failing with a 500. The broker itself fails here, so the real gem modules run
 # and raise their own errors on the way up.
 class RpmsUnavailablePagesTest < ActionDispatch::IntegrationTest
+  include RegistrationFormHelper
+
   NOT_ANSWERED = "RPMS did not answer"
 
   def sign_in(keys, duz:, name:)
@@ -57,8 +59,7 @@ class RpmsUnavailablePagesTest < ActionDispatch::IntegrationTest
   test "a registration cut off by a frame error is reported as not confirmed, not as an error" do
     sign_in("registration_menu", duz: "207", name: "PROFILE,REG")
     with_broker_raising(RpmsRpc::Client::FrameTooLongError.new("request too long for the frame")) do |calls|
-      post "/lakeraven-ehr/registration/patients",
-           params: { registration: { name: "PROBE,ALPHA", sex: "F", dob: "1990-05-01", ssn: "", tribe_ien: "611", community_ien: "16379" } }
+      submit_registration({ name: "PROBE,ALPHA", sex: "F", dob: "1990-05-01", ssn: "", tribe_ien: "611", community_ien: "16379" })
       assert_response :service_unavailable
       assert_select "#outcome-unknown"
       assert calls.any?, "the page asked RPMS"
