@@ -19,6 +19,9 @@ class SharedStubHelpersTest < ActiveSupport::TestCase
   EXTENDED_PRIVATE = :sh673_extended_private
   PARENT_PREPENDED_ONLY = :sh673_parent_prepended_only
   INTERMEDIATE_METHOD = :sh673_p4
+  VISIBILITY_ONLY_LOOKUP = :sh673_lookup
+  ALIAS_FOO = :sh673_foo
+  ALIAS_BAR = :sh673_bar
 
   ORIGINAL = :sh673_original
   STUB_VALUE = :sh673_stubbed
@@ -375,6 +378,106 @@ class SharedStubHelpersTest < ActiveSupport::TestCase
     assert_equal :sh673_mid_restored, leaf.send(INTERMEDIATE_METHOD)
   end
 
+  # --- Visibility-only entry on child singleton (lakeraven-ehr#673 round-3) ---
+
+  test "with_stub on child with visibility-only private inherited singleton keeps private and follows parent" do
+    parent, child = host_with_visibility_only_inherited_singleton(:private, VISIBILITY_ONLY_LOOKUP, :sh673_real)
+
+    with_stub(child, VISIBILITY_ONLY_LOOKUP, STUB_VALUE) { }
+
+    assert_singleton_visibility(singleton_of(child), VISIBILITY_ONLY_LOOKUP, :private)
+    assert_equal :sh673_real, child.send(VISIBILITY_ONLY_LOOKUP)
+    assert_equal parent.singleton_class, singleton_of(child).instance_method(VISIBILITY_ONLY_LOOKUP).owner
+
+    with_stub(parent, VISIBILITY_ONLY_LOOKUP, :sh673_parent_stub) do
+      assert_equal :sh673_parent_stub, child.send(VISIBILITY_ONLY_LOOKUP)
+    end
+
+    parent.define_singleton_method(VISIBILITY_ONLY_LOOKUP) { :sh673_redefined }
+    assert_equal :sh673_redefined, child.send(VISIBILITY_ONLY_LOOKUP)
+  end
+
+  test "with_stub on child with visibility-only protected inherited singleton keeps protected and follows parent" do
+    parent, child = host_with_visibility_only_inherited_singleton(:protected, VISIBILITY_ONLY_LOOKUP, :sh673_real)
+
+    with_stub(child, VISIBILITY_ONLY_LOOKUP, STUB_VALUE) { }
+
+    assert_singleton_visibility(singleton_of(child), VISIBILITY_ONLY_LOOKUP, :protected)
+    assert_equal :sh673_real, child.send(VISIBILITY_ONLY_LOOKUP)
+    assert_equal parent.singleton_class, singleton_of(child).instance_method(VISIBILITY_ONLY_LOOKUP).owner
+
+    with_stub(parent, VISIBILITY_ONLY_LOOKUP, :sh673_parent_stub) do
+      assert_equal :sh673_parent_stub, child.send(VISIBILITY_ONLY_LOOKUP)
+    end
+
+    parent.define_singleton_method(VISIBILITY_ONLY_LOOKUP) { :sh673_redefined }
+    assert_equal :sh673_redefined, child.send(VISIBILITY_ONLY_LOOKUP)
+  end
+
+  test "with_stub on child with visibility-only private new still allocates via Class new without an owned copy" do
+    child = Class.new(Class.new)
+    child.singleton_class.send(:private_class_method, :new)
+
+    with_stub(child, :new, STUB_VALUE) { }
+
+    assert_singleton_visibility(singleton_of(child), :new, :private)
+    instance = child.send(:new)
+    assert_instance_of child, instance
+    refute_equal child.singleton_class, child.singleton_class.instance_method(:new).owner
+  end
+
+  # --- Alias of ancestor singleton method with super (lakeraven-ehr#673 round-3) ---
+
+  test "with_stub on public alias of ancestor singleton method restores alias without double super" do
+    child = host_with_aliased_ancestor_singleton_method(:public)
+    expected = [ :sh673_parent, :sh673_base ]
+
+    assert_equal expected, child.send(ALIAS_BAR)
+
+    with_stub(child, ALIAS_BAR, STUB_VALUE) { }
+
+    assert_equal expected, child.send(ALIAS_BAR)
+  end
+
+  test "with_stub on private alias of ancestor singleton method restores alias without double super" do
+    child = host_with_aliased_ancestor_singleton_method(:private)
+    expected = [ :sh673_parent, :sh673_base ]
+
+    assert_equal expected, child.send(ALIAS_BAR)
+
+    with_stub(child, ALIAS_BAR, STUB_VALUE) { }
+
+    assert_equal expected, child.send(ALIAS_BAR)
+  end
+
+  # --- Block undefs stub on inherited or never-defined method (lakeraven-ehr#673 round-3) ---
+
+  test "with_stub when block undefs inherited stub leaves no undef entry and shows inherited method" do
+    parent, child = host_with_inherited_singleton_methods
+
+    with_stub(child, INHERITED_PUBLIC, STUB_VALUE) do
+      child.singleton_class.send(:undef_method, INHERITED_PUBLIC)
+    end
+
+    refute singleton_undef_entry?(child, INHERITED_PUBLIC)
+    assert_equal :sh673_parent_public, child.send(INHERITED_PUBLIC)
+    assert_inherited_singleton_visible(child, INHERITED_PUBLIC, :public, parent)
+  end
+
+  test "with_stub when block undefs never-defined stub leaves method absent without undef entry" do
+    host = Class.new
+    refute host.singleton_class.method_defined?(NEVER_DEFINED)
+
+    with_stub(host, NEVER_DEFINED, STUB_VALUE) do
+      host.singleton_class.send(:undef_method, NEVER_DEFINED)
+    end
+
+    refute singleton_undef_entry?(host, NEVER_DEFINED)
+    refute host.singleton_class.method_defined?(NEVER_DEFINED)
+    refute host.singleton_class.private_method_defined?(NEVER_DEFINED)
+    assert_raises(NoMethodError) { host.send(NEVER_DEFINED) }
+  end
+
   private
 
   def host_with_owned_singleton_method(visibility, method_name, return_value)
@@ -511,6 +614,29 @@ class SharedStubHelpersTest < ActiveSupport::TestCase
 
     leaf = Class.new(mid)
     [ grandparent, mid, leaf ]
+  end
+
+  def host_with_visibility_only_inherited_singleton(visibility, method_name, return_value)
+    parent = Class.new
+    parent.define_singleton_method(method_name) { return_value }
+    child = Class.new(parent)
+    child.singleton_class.class_eval do
+      send(visibility, method_name)
+    end
+    [ parent, child ]
+  end
+
+  def host_with_aliased_ancestor_singleton_method(bar_visibility)
+    base = Class.new
+    base.define_singleton_method(ALIAS_FOO) { :sh673_base }
+    parent = Class.new(base)
+    parent.define_singleton_method(ALIAS_FOO) { [ :sh673_parent, super() ] }
+    child = Class.new(parent)
+    child.singleton_class.class_eval do
+      alias_method ALIAS_BAR, ALIAS_FOO
+      send(bar_visibility, ALIAS_BAR) unless bar_visibility == :public
+    end
+    child
   end
 
   def assert_undef_hidden_on_receiver(host, method_name, include_all: false)
