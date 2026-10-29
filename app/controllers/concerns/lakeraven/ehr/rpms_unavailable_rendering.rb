@@ -19,6 +19,8 @@ module Lakeraven
       private
 
       def render_rpms_unavailable(error)
+        return end_session_for_closed_rpms! if rpms_connection_closed?
+
         Rails.logger.error("[rpms] #{controller_path}##{action_name} raised #{error.class}")
         @rpms_refusal = error.message if error.is_a?(::RpmsRpc::Client::RpcRefusedError)
         render "lakeraven/ehr/shared/rpms_unavailable", status: (@rpms_refusal ? :forbidden : :service_unavailable)
