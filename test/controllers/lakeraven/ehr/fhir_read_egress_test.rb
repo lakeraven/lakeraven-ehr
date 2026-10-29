@@ -764,6 +764,82 @@ module Lakeraven
                      "withholding every member must match unknown-cohort not-found, not 200 with an empty member list"
       end
 
+      test "Group read matches unknown cohort when Part2EgressFilter drops the member key" do
+        with_groups_show_endpoint do |path, unknown|
+          stub_egress_filter(->(payload) {
+            next payload unless payload.is_a?(Hash) && payload["resourceType"] == "Group"
+
+            payload.deep_dup.tap { |filtered| filtered.delete("member") }
+          }) do
+            get path, headers: @headers
+          end
+
+          assert_not_equal 200, response.status
+          assert_equal unknown, [ response.status, JSON.parse(response.body) ]
+        end
+      end
+
+      test "Group read matches unknown cohort when Part2EgressFilter returns symbol-keyed empty member" do
+        with_groups_show_endpoint do |path, unknown|
+          stub_egress_filter(->(payload) {
+            next payload unless payload.is_a?(Hash) && payload["resourceType"] == "Group"
+
+            {
+              resourceType: "Group",
+              id: payload["id"],
+              type: "person",
+              actual: true,
+              member: []
+            }
+          }) do
+            get path, headers: @headers
+          end
+
+          assert_not_equal 200, response.status
+          assert_equal unknown, [ response.status, JSON.parse(response.body) ]
+        end
+      end
+
+      test "Group read quantity follows symbol-keyed Part2EgressFilter member list" do
+        with_groups_show_endpoint do |path, _unknown|
+          stub_egress_filter(->(payload) {
+            next payload unless payload.is_a?(Hash) && payload["resourceType"] == "Group"
+
+            symbolized = payload.deep_dup.deep_symbolize_keys
+            symbolized[:member].reject! { |member| member.dig(:entity, :reference) == "Patient/1" }
+            symbolized
+          }) do
+            get path, headers: @headers
+          end
+
+          assert_response :success
+          body = JSON.parse(response.body)
+          assert_equal 1, body.fetch("member").length
+          assert_equal 1, body.fetch("quantity")
+          assert_equal "Patient/2", body.dig("member", 0, "entity", "reference")
+          refute_includes body["member"].map { |m| m.dig("entity", "reference") }, "Patient/1"
+        end
+      end
+
+      test "Group read fails closed when Part2EgressFilter member is not an Array" do
+        with_groups_show_endpoint do |path, _unknown|
+          stub_egress_filter(->(payload) {
+            next payload unless payload.is_a?(Hash) && payload["resourceType"] == "Group"
+
+            payload.deep_dup.merge("member" => "not-an-array")
+          }) do
+            get path, headers: @headers
+          end
+
+          assert_not_equal 200, response.status
+          assert_response :service_unavailable
+          body = JSON.parse(response.body)
+          assert_equal "OperationOutcome", body["resourceType"]
+          assert_equal "exception", body.dig("issue", 0, "code")
+          assert_equal "Part 2 egress filter did not return a FHIR payload", body.dig("issue", 0, "diagnostics")
+        end
+      end
+
       WIRED_ENDPOINTS.each do |endpoint|
         test_name = endpoint[:name] || endpoint[:path]
 
@@ -886,6 +962,18 @@ module Lakeraven
         yield
       ensure
         gateway.define_method(:register, original)
+      end
+
+      def with_groups_show_endpoint
+        endpoint = WIRED_ENDPOINTS.find { |e| e[:name] == "groups show" }
+        instance_exec(&endpoint[:setup])
+        path = instance_exec(&endpoint[:dynamic_path])
+        unknown_path = "/lakeraven-ehr/Group/cohort-synthetic-egress-unknown"
+
+        get unknown_path, headers: @headers
+        unknown = [ response.status, JSON.parse(response.body) ]
+
+        yield path, unknown
       end
 
       # session_auth rows (screenings) authenticate through the browser session

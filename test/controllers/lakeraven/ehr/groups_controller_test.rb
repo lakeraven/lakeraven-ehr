@@ -269,6 +269,78 @@ module Lakeraven
         assert_empty calls
       end
 
+      test "Part2EgressFilter payload without member key matches unknown-cohort not-found" do
+        unknown = unknown_group_not_found_snapshot
+
+        stub_egress_filter(->(payload) {
+          next payload unless payload.is_a?(Hash) && payload["resourceType"] == "Group"
+
+          payload.deep_dup.tap { |filtered| filtered.delete("member") }
+        }) do
+          get group_path(MIXED_GROUP_ID), headers: @headers
+        end
+
+        assert_not_equal 200, response.status
+        assert_equal unknown, [ response.status, JSON.parse(response.body) ]
+      end
+
+      test "Part2EgressFilter symbol-keyed empty member list matches unknown-cohort not-found" do
+        unknown = unknown_group_not_found_snapshot
+
+        stub_egress_filter(->(payload) {
+          next payload unless payload.is_a?(Hash) && payload["resourceType"] == "Group"
+
+          {
+            resourceType: "Group",
+            id: payload["id"],
+            type: "person",
+            actual: true,
+            member: []
+          }
+        }) do
+          get group_path(MIXED_GROUP_ID), headers: @headers
+        end
+
+        assert_not_equal 200, response.status
+        assert_equal unknown, [ response.status, JSON.parse(response.body) ]
+      end
+
+      test "Part2EgressFilter symbol-keyed partial member list sets quantity from filtered members" do
+        stub_egress_filter(->(payload) {
+          next payload unless payload.is_a?(Hash) && payload["resourceType"] == "Group"
+
+          symbolized = payload.deep_dup.deep_symbolize_keys
+          symbolized[:member].reject! { |member| member.dig(:entity, :reference) == "Patient/#{DFN_B}" }
+          symbolized
+        }) do
+          get group_path(MIXED_GROUP_ID), headers: @headers
+        end
+
+        assert_response :ok
+        body = JSON.parse(response.body)
+        assert_equal 1, body.fetch("member").length
+        assert_equal 1, body.fetch("quantity")
+        assert_equal "Patient/#{DFN_A}", body.dig("member", 0, "entity", "reference")
+        refute_includes body["member"].map { |m| m.dig("entity", "reference") }, "Patient/#{DFN_B}"
+      end
+
+      test "Part2EgressFilter non-array member fails closed with egress refusal not 200" do
+        stub_egress_filter(->(payload) {
+          next payload unless payload.is_a?(Hash) && payload["resourceType"] == "Group"
+
+          payload.deep_dup.merge("member" => "not-an-array")
+        }) do
+          get group_path(MIXED_GROUP_ID), headers: @headers
+        end
+
+        assert_not_equal 200, response.status
+        assert_response :service_unavailable
+        body = JSON.parse(response.body)
+        assert_equal "OperationOutcome", body["resourceType"]
+        assert_equal "exception", body.dig("issue", 0, "code")
+        assert_equal egress_refusal_diagnostics, body.dig("issue", 0, "diagnostics")
+      end
+
       private
 
       def group_path(id)
@@ -306,6 +378,24 @@ module Lakeraven
         end
 
         statements
+      end
+
+      def unknown_group_not_found_snapshot
+        get group_path(UNKNOWN_GROUP_ID), headers: @headers
+        [ response.status, JSON.parse(response.body) ]
+      end
+
+      def egress_refusal_diagnostics
+        "Part 2 egress filter did not return a FHIR payload"
+      end
+
+      def stub_egress_filter(implementation)
+        filter = Part2EgressFilter.singleton_class
+        original = filter.instance_method(:call)
+        filter.define_method(:call, &implementation)
+        yield
+      ensure
+        filter.define_method(:call, original)
       end
 
       def patient_bound_group_headers(patient_dfn)
