@@ -67,7 +67,7 @@ When("a transitions of care document is requested for the patient") do
 
   filter = Lakeraven::EHR::Part2EgressFilter.singleton_class
   original = filter.instance_method(:call)
-  filter_invoked = [false]
+  filter_invoked = [ false ]
   impl = @egress_filter_impl
   filter.define_method(:call) do |sections|
     filter_invoked[0] = true
