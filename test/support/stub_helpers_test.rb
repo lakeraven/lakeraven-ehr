@@ -10,7 +10,11 @@ class SharedStubHelpersTest < ActiveSupport::TestCase
   OWNED_PROTECTED = :sh673_owned_protected
   INHERITED_PUBLIC = :sh673_inherited_public
   INHERITED_PRIVATE = :sh673_inherited_private
+  INHERITED_PROTECTED = :sh673_inherited_protected
   NEVER_DEFINED = :sh673_never_defined
+  PREPENDED_PUBLIC = :sh673_prepended_public
+  PREPENDED_PRIVATE = :sh673_prepended_private
+  UNDEF_HIDDEN = :sh673_undef_hidden
 
   ORIGINAL = :sh673_original
   STUB_VALUE = :sh673_stubbed
@@ -177,6 +181,112 @@ class SharedStubHelpersTest < ActiveSupport::TestCase
     refute host.singleton_class.private_method_defined?(NEVER_DEFINED)
   end
 
+  # --- Restore idempotency (lakeraven-ehr#673 round-1) ---
+
+  test "restore proc called twice is a no-op for an inherited public singleton method" do
+    parent, child = host_with_inherited_singleton_methods
+
+    restore = install_singleton_stub(child, INHERITED_PUBLIC, STUB_VALUE)
+    restore.call
+    restore.call
+
+    assert_equal :sh673_parent_public, child.send(INHERITED_PUBLIC)
+    assert_inherited_singleton_visible(child, INHERITED_PUBLIC, :public, parent)
+  end
+
+  test "restore proc called twice is a no-op for an inherited private singleton method" do
+    parent, child = host_with_inherited_singleton_methods
+
+    restore = install_singleton_stub(child, INHERITED_PRIVATE, STUB_VALUE)
+    restore.call
+    restore.call
+
+    assert_equal :sh673_parent_private, child.send(INHERITED_PRIVATE)
+    assert_inherited_singleton_visible(child, INHERITED_PRIVATE, :private, parent)
+  end
+
+  test "restore proc called twice is a no-op for an inherited protected singleton method" do
+    parent, child = host_with_inherited_singleton_methods
+
+    restore = install_singleton_stub(child, INHERITED_PROTECTED, STUB_VALUE)
+    restore.call
+    restore.call
+
+    assert_equal :sh673_parent_protected, child.send(INHERITED_PROTECTED)
+    assert_inherited_singleton_visible(child, INHERITED_PROTECTED, :protected, parent)
+  end
+
+  test "restore proc called twice on an owned singleton method leaves the original intact" do
+    host = host_with_owned_singleton_method(:public, OWNED_PUBLIC, ORIGINAL)
+
+    restore = install_singleton_stub(host, OWNED_PUBLIC, STUB_VALUE)
+    restore.call
+    restore.call
+
+    assert_after_restore(host, OWNED_PUBLIC, ORIGINAL, :public)
+  end
+
+  test "Cucumber After-hook style reverse_each over restore procs restores every stub including another receiver" do
+    host_a = host_with_owned_singleton_method(:public, OWNED_PUBLIC, ORIGINAL)
+    host_b = Class.new
+
+    restore_a = install_singleton_stub(host_a, OWNED_PUBLIC, STUB_VALUE)
+    restore_b = install_singleton_stub(host_b, NEVER_DEFINED, STUB_VALUE)
+
+    [ restore_a, restore_b, restore_b ].reverse_each(&:call)
+
+    assert_after_restore(host_a, OWNED_PUBLIC, ORIGINAL, :public)
+    refute host_b.singleton_class.method_defined?(NEVER_DEFINED)
+    refute host_b.singleton_class.private_method_defined?(NEVER_DEFINED)
+  end
+
+  test "with_stub returns normally when the block removes the stub on an inherited singleton method" do
+    _parent, child = host_with_inherited_singleton_methods
+
+    result = with_stub(child, INHERITED_PUBLIC, STUB_VALUE) do
+      child.singleton_class.send(:remove_method, INHERITED_PUBLIC)
+      :sh673_block_result
+    end
+
+    assert_equal :sh673_block_result, result
+    assert_equal :sh673_parent_public, child.send(INHERITED_PUBLIC)
+  end
+
+  # --- Prepended module on the singleton class (lakeraven-ehr#673 round-1) ---
+
+  test "with_stub restores an owned public singleton method with a prepended module and super chain" do
+    host = host_with_prepended_owned_singleton_method(:public, PREPENDED_PUBLIC, :sh673_own)
+
+    with_stub(host, PREPENDED_PUBLIC, STUB_VALUE) { }
+
+    assert_equal [ :sh673_pre, :sh673_own ], host.send(PREPENDED_PUBLIC)
+    assert_includes host.singleton_class.instance_methods(false), PREPENDED_PUBLIC
+  end
+
+  test "with_stub restores an owned private singleton method with a prepended module and super chain" do
+    host = host_with_prepended_owned_singleton_method(:private, PREPENDED_PRIVATE, :sh673_own_private)
+
+    with_stub(host, PREPENDED_PRIVATE, STUB_VALUE) { }
+
+    assert_equal [ :sh673_pre, :sh673_own_private ], host.send(PREPENDED_PRIVATE)
+  end
+
+  # --- undef_method hides inherited singleton method (lakeraven-ehr#673 round-1) ---
+
+  test "with_stub after undef_method on the receiver singleton class leaves the method hidden" do
+    parent = Class.new
+    parent.define_singleton_method(UNDEF_HIDDEN) { :sh673_parent_hidden }
+
+    child = Class.new(parent)
+    child.singleton_class.send(:undef_method, UNDEF_HIDDEN)
+    refute child.respond_to?(UNDEF_HIDDEN)
+
+    with_stub(child, UNDEF_HIDDEN, STUB_VALUE) { }
+
+    refute child.respond_to?(UNDEF_HIDDEN)
+    assert_raises(NoMethodError) { child.send(UNDEF_HIDDEN) }
+  end
+
   private
 
   def host_with_owned_singleton_method(visibility, method_name, return_value)
@@ -194,9 +304,26 @@ class SharedStubHelpersTest < ActiveSupport::TestCase
     parent.singleton_class.class_eval do
       define_method(INHERITED_PRIVATE) { :sh673_parent_private }
       private INHERITED_PRIVATE
+      define_method(INHERITED_PROTECTED) { :sh673_parent_protected }
+      protected INHERITED_PROTECTED
     end
     child = Class.new(parent)
     [ parent, child ]
+  end
+
+  def host_with_prepended_owned_singleton_method(visibility, method_name, own_return)
+    host = Class.new
+    host.singleton_class.class_eval do
+      define_method(method_name) { |*_args, **_kwargs| own_return }
+      send(visibility, method_name)
+    end
+    prepend = Module.new do
+      define_method(method_name) do |*_args, **_kwargs, &block|
+        [ :sh673_pre, super(*_args, **_kwargs, &block) ]
+      end
+    end
+    host.singleton_class.prepend(prepend)
+    host
   end
 
   def singleton_of(host)
