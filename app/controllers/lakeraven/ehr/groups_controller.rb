@@ -7,10 +7,11 @@ module Lakeraven
     # Authorization is decided before the cohort is read. A token without
     # Patient read is the same 403 for every id, and so is a patient-bound
     # token: this read lists patients, and a bound token has no cohort it
-    # may read. An unknown id, an id that cannot name a record, and a
-    # cohort with no members are the same not-found. The diagnostics are
-    # fixed: the caller's id is never copied into them. Quantity is the
-    # length of the member list Part2EgressFilter returns.
+    # may read. An unknown id, an id that cannot name a record, a cohort
+    # with no rows, and a cohort whose member list the egress filter
+    # empties are the same not-found. The diagnostics are fixed: the
+    # caller's id is never copied into them. Quantity is the length of
+    # the member list Part2EgressFilter returns.
     class GroupsController < ApplicationController
       NOT_FOUND_DIAGNOSTICS = "Group not found"
 
@@ -23,7 +24,7 @@ module Lakeraven
         members = FhirGroupMember.members_of(group_id)
         return render_group_not_found if members.empty?
 
-        render_fhir_egress(group_resource(group_id, members))
+        render_filtered_group(group_resource(group_id, members))
       end
 
       private
@@ -54,6 +55,20 @@ module Lakeraven
 
         render_forbidden("Insufficient scope for reading Patient")
         false
+      end
+
+      # The filter's payload is what we send. Quantity is the length of
+      # its member list. An empty member list is the same not-found as
+      # an unknown cohort. A payload with no member list is rendered
+      # unchanged.
+      def render_filtered_group(payload)
+        filtered = filter_fhir_for_egress(payload)
+        return refuse_unfiltered_fhir_egress unless filtered
+
+        members = filtered["member"]
+        return render_group_not_found if members.is_a?(Array) && members.empty?
+
+        render json: filtered, status: :ok, content_type: fhir_egress_content_type
       end
 
       # String keys, because the egress seam matches resourceType on the

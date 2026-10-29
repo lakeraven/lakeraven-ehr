@@ -128,6 +128,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_29_000000) do
     t.string "patient_dfn", null: false
     t.datetime "updated_at", null: false
     t.index [ "group_id", "patient_dfn" ], name: "index_lakeraven_ehr_fhir_group_members_on_group_patient", unique: true
+    t.check_constraint "group_id::text ~ '^[A-Za-z0-9.-]{1,64}$'::text", name: "fhir_group_member_group_id_fhir_id"
+    t.check_constraint "patient_dfn::text ~ '^[1-9][0-9]*$'::text", name: "fhir_group_member_patient_dfn_format"
   end
 
   create_table "lakeraven_ehr_launch_contexts", force: :cascade do |t|
