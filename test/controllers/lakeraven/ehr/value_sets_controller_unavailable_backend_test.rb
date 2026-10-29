@@ -14,6 +14,9 @@ module Lakeraven
     class ValueSetsControllerUnavailableBackendTest < ActionDispatch::IntegrationTest
       include SmartAuthTestHelper
 
+      VALUESET_EXPAND_NOT_SUPPORTED_DIAGNOSTICS =
+        "ValueSet expansion is not available on this server."
+
       setup do
         setup_smart_auth
         @original_terminology_backend = ENV["TERMINOLOGY_BACKEND"]
@@ -57,6 +60,12 @@ module Lakeraven
         assert_equal "OperationOutcome", body["resourceType"]
         assert_equal "not-supported", body["issue"].first["code"]
         assert_equal "application/fhir+json", response.media_type
+
+        diagnostics = body["issue"].first["diagnostics"]
+        assert_equal VALUESET_EXPAND_NOT_SUPPORTED_DIAGNOSTICS, diagnostics
+        refute_match(/iris/i, diagnostics)
+        refute_match(/Adapter/i, diagnostics)
+        refute_match(/#</, diagnostics)
       end
     end
   end

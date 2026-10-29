@@ -29,6 +29,57 @@ module Lakeraven
           assert_adapter_contract(@adapter)
         end
 
+        test "invalid ValueSet ids are never read from disk" do
+          leak_dir = Dir.mktmpdir("lakeraven-leak-valuesets")
+          leak_json = File.join(leak_dir, "LEAKED.json")
+          File.write(
+            leak_json,
+            {
+              resourceType: "ValueSet",
+              id: "LEAKED",
+              title: "Leaked",
+              status: "active",
+              compose: {
+                include: [
+                  {
+                    system: "http://example.com/leaked",
+                    concept: [ { code: "LEAKED-CODE", display: "Leaked code" } ]
+                  }
+                ]
+              }
+            }.to_json
+          )
+          TerminologyService.additional_valueset_paths = [ TEST_VALUESETS ]
+          adapter = LocalAdapter.new
+          leak_id = leak_json.delete_suffix(".json")
+
+          invalid_ids = [
+            leak_id,
+            "../../..",
+            ".",
+            "..",
+            ".hidden-valueset",
+            "nested/segment",
+            "bad id",
+            "foo\\bar"
+          ]
+
+          invalid_ids.each do |bad_id|
+            assert_raises(TerminologyService::ValueSetNotFoundError) { adapter.expand_valueset(bad_id) }
+            assert_raises(TerminologyService::ValueSetNotFoundError) { adapter.get_valueset(bad_id) }
+            assert_raises(TerminologyService::ValueSetNotFoundError) do
+              adapter.validate_code("http://example.com/leaked", "LEAKED-CODE", valueset_id: bad_id)
+            end
+          end
+
+          assert_nil adapter.lookup_code("http://example.com/leaked", "LEAKED-CODE")
+
+          assert adapter.list_valuesets.any?, "list_valuesets must remain usable"
+          assert adapter.search("diabetes").any?, "search must remain usable"
+        ensure
+          FileUtils.remove_entry(leak_dir) if leak_dir
+        end
+
         test "honours TerminologyService.additional_valueset_paths" do
           extra_dir = Dir.mktmpdir("lakeraven-extra-valuesets")
           File.write(

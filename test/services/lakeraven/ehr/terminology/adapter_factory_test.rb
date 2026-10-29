@@ -10,6 +10,7 @@ module Lakeraven
           @original_terminology_backend = ENV["TERMINOLOGY_BACKEND"]
           @original_umls = ENV["UMLS_API_KEY"]
           @original_iris = ENV["IRIS_TERMINOLOGY_URL"]
+          @original_rails_env = Rails.env
           ENV["TERMINOLOGY_BACKEND"] = nil
           ENV["UMLS_API_KEY"] = nil
           ENV["IRIS_TERMINOLOGY_URL"] = nil
@@ -20,6 +21,7 @@ module Lakeraven
           ENV["TERMINOLOGY_BACKEND"] = @original_terminology_backend
           ENV["UMLS_API_KEY"] = @original_umls
           ENV["IRIS_TERMINOLOGY_URL"] = @original_iris
+          Rails.env = @original_rails_env
           AdapterFactory.reset_registrations!
         end
 
@@ -100,13 +102,75 @@ module Lakeraven
           assert_raises(AdapterNotAvailable) { adapter.expand_valueset("gpra-bgpmu-diabetes-dx") }
         end
 
-        test "unknown backend raises ArgumentError listing available backends" do
+        test "explicit unknown backend argument raises ArgumentError listing available backends" do
           error = assert_raises(ArgumentError) { AdapterFactory.build(:nonsense) }
           assert_match(/nonsense/i, error.message)
           assert_match(/local/i, error.message)
           assert_match(/mock/i, error.message)
           assert_match(/iris/i, error.message)
           assert_match(/vsac/i, error.message)
+        end
+
+        test "TERMINOLOGY_BACKEND is stripped and downcased" do
+          ENV["TERMINOLOGY_BACKEND"] = " LOCAL "
+          adapter = AdapterFactory.build
+          assert_kind_of LocalAdapter, adapter
+          assert_equal :local, adapter.backend
+
+          ENV["TERMINOLOGY_BACKEND"] = "Iris"
+          adapter = AdapterFactory.build
+          assert_equal :iris, adapter.backend
+          assert_raises(AdapterNotAvailable) { adapter.expand_valueset("any") }
+        end
+
+        test "configured unknown TERMINOLOGY_BACKEND builds an unavailable adapter" do
+          ENV["TERMINOLOGY_BACKEND"] = "bogus"
+          adapter = AdapterFactory.build
+          assert_equal :bogus, adapter.backend
+          error = assert_raises(AdapterNotAvailable) { adapter.list_valuesets }
+          assert_match(/bogus/i, error.message)
+        end
+
+        test "TERMINOLOGY_BACKEND mock is refused in production" do
+          Rails.env = "production"
+          ENV["TERMINOLOGY_BACKEND"] = "mock"
+          error = assert_raises(ArgumentError) { AdapterFactory.build }
+          assert_match(/production/i, error.message)
+
+          error = assert_raises(ArgumentError) { AdapterFactory.build(:mock) }
+          assert_match(/production/i, error.message)
+        end
+
+        test "mock backend builds in test and development" do
+          Rails.env = "test"
+          assert_kind_of MockAdapter, AdapterFactory.build(:mock)
+
+          Rails.env = "development"
+          assert_kind_of MockAdapter, AdapterFactory.build(:mock)
+        end
+
+        test "register without a block raises ArgumentError at registration time" do
+          assert_raises(ArgumentError) { AdapterFactory.register(:iris) }
+        end
+
+        test "build rejects a registration that does not return a BaseAdapter" do
+          AdapterFactory.register(:iris) { Object.new }
+          assert_raises(ArgumentError) { AdapterFactory.build(:iris) }
+
+          AdapterFactory.reset_registrations!
+          AdapterFactory.register(:iris) { "not-an-adapter" }
+          assert_raises(ArgumentError) { AdapterFactory.build(:iris) }
+
+          AdapterFactory.reset_registrations!
+          AdapterFactory.register(:iris) { LocalAdapter }
+          assert_raises(ArgumentError) { AdapterFactory.build(:iris) }
+        end
+
+        test "build rejects a registration whose adapter backend differs from the registered name" do
+          AdapterFactory.register(:iris) { LocalAdapter.new }
+          error = assert_raises(ArgumentError) { AdapterFactory.build(:iris) }
+          assert_match(/iris/i, error.message)
+          assert_match(/local/i, error.message)
         end
 
         BASE_ADAPTER_INTERFACE = %i[
@@ -124,10 +188,21 @@ module Lakeraven
           end
         end
 
-        test "AdapterNotAvailable is a NotImplementedError subclass" do
+        test "AdapterNotAvailable is a StandardError caught by rescue => e" do
           adapter = AdapterFactory.build(:iris)
-          error = assert_raises(NotImplementedError) { adapter.list_valuesets }
-          assert_kind_of AdapterNotAvailable, error
+          caught_by_standard_rescue = false
+          begin
+            begin
+              adapter.list_valuesets
+            rescue StandardError
+              caught_by_standard_rescue = true
+            end
+          rescue NotImplementedError
+            caught_by_standard_rescue = false
+          end
+          assert caught_by_standard_rescue,
+                 "AdapterNotAvailable must inherit StandardError so bare rescue => e catches it"
+          refute AdapterNotAvailable <= NotImplementedError
         end
       end
     end

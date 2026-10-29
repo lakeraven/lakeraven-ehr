@@ -10,15 +10,20 @@ module Lakeraven
       setup do
         @original_umls = ENV["UMLS_API_KEY"]
         @original_iris = ENV["IRIS_TERMINOLOGY_URL"]
+        @original_terminology_backend = ENV["TERMINOLOGY_BACKEND"]
         ENV["UMLS_API_KEY"] = nil
         ENV["IRIS_TERMINOLOGY_URL"] = nil
+        ENV["TERMINOLOGY_BACKEND"] = nil
         TerminologyService.additional_valueset_paths = [ TEST_VALUESETS ]
+        Terminology::AdapterFactory.reset_registrations!
       end
 
       teardown do
         ENV["UMLS_API_KEY"] = @original_umls
         ENV["IRIS_TERMINOLOGY_URL"] = @original_iris
+        ENV["TERMINOLOGY_BACKEND"] = @original_terminology_backend
         TerminologyService.additional_valueset_paths = []
+        Terminology::AdapterFactory.reset_registrations!
       end
 
       # =============================================================================
@@ -53,6 +58,45 @@ module Lakeraven
         ENV["UMLS_API_KEY"] = "test-api-key"
         service = TerminologyService.new(backend: :local)
         assert_equal :local, service.backend
+      end
+
+      test "unknown TERMINOLOGY_BACKEND does not raise from TerminologyService.new" do
+        ENV["TERMINOLOGY_BACKEND"] = "bogus"
+        service = assert_nothing_raised { TerminologyService.new }
+        assert_equal :bogus, service.backend
+        assert_raises(Terminology::AdapterNotAvailable) { service.list_valuesets }
+      end
+
+      test "distributed cache does not serve local expansions to a registered iris adapter" do
+        iris_sentinel = Class.new(Terminology::BaseAdapter) do
+          def backend = :iris
+
+          def expand_valueset(_id)
+            [ { system: "http://iris.example.com", code: "IRIS-CACHED-CODE", display: "Iris expansion" } ]
+          end
+
+          def get_valueset(_id) = nil
+          def list_valuesets = []
+          def search(_query) = []
+          def lookup_code(_system, _code) = nil
+          def validate_code(_system, _code, valueset_id:) = false
+        end
+
+        Terminology::AdapterFactory.register(:iris) { iris_sentinel.new }
+
+        original_cache = Rails.cache
+        Rails.cache = ActiveSupport::Cache::MemoryStore.new
+        begin
+          local = TerminologyService.new(backend: :local, use_distributed_cache: true)
+          local_codes = local.expand_valueset("gpra-bgpmu-diabetes-dx")
+          refute local_codes.any? { |entry| entry[:code] == "IRIS-CACHED-CODE" }
+
+          iris = TerminologyService.new(backend: :iris, use_distributed_cache: true)
+          iris_codes = iris.expand_valueset("gpra-bgpmu-diabetes-dx")
+          assert_equal "IRIS-CACHED-CODE", iris_codes.first[:code]
+        ensure
+          Rails.cache = original_cache
+        end
       end
 
       # =============================================================================
