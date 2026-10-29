@@ -26,7 +26,7 @@ class LiveRegistrationRegisterPatientTest < ActionDispatch::IntegrationTest
   # A name and date of birth no one on the build has, so the first save files.
   def fresh_entry(dob: Date.new(1900 + rand(100), 1 + rand(12), 1 + rand(28)))
     letters = Array.new(6) { ("A".."Z").to_a.sample }.join
-    { name: "LIVETEST,#{letters}", sex: "F", dob: dob.iso8601, ssn: "", tribe_ien: picked(:tribe), community_ien: picked(:community) }
+    { name: "LIVETEST,#{letters}", sex: "F", dob: dob.iso8601, ssn: "", no_ssn_reason: "N", tribe_ien: picked(:tribe), community_ien: picked(:community) }
   end
 
   def picked(kind)
@@ -76,5 +76,29 @@ class LiveRegistrationRegisterPatientTest < ActionDispatch::IntegrationTest
     assert_response :conflict
     get "/lakeraven-ehr/registration/patients", params: { q: second[:name], dob: second[:dob] }
     assert_select "#matches tbody tr", count: 1
+  end
+  test "S-REG-02.8 an SSN already on another patient is refused with RPMS's reason, and only one chart is filed" do
+    ssn = "6660#{format('%05d', rand(100_000))}"
+    first = fresh_entry.merge(ssn: ssn, no_ssn_reason: "")
+    submit_registration(first)
+    assert_response :redirect
+
+    second = fresh_entry.merge(ssn: ssn, no_ssn_reason: "")
+    submit_registration(second)
+    assert_response :unprocessable_content
+    assert_select "[role=alert]", text: /SSN already used by another patient\./
+    get "/lakeraven-ehr/registration/patients", params: { q: second[:name], dob: second[:dob] }
+    assert_select "#matches tr[data-dfn]", count: 0
+  end
+
+  # On this build AG cannot check a registration with neither (rpms-ops#1040),
+  # so it is refused; when RPMS can answer, it decides.
+  test "S-REG-02.6 neither an SSN nor a reason is refused, and nothing is filed" do
+    entry = fresh_entry.merge(no_ssn_reason: "")
+    submit_registration(entry)
+    assert_response :unprocessable_content
+    assert_select "[role=alert]"
+    get "/lakeraven-ehr/registration/patients", params: { q: entry[:name], dob: entry[:dob] }
+    assert_select "#matches tr[data-dfn]", count: 0
   end
 end

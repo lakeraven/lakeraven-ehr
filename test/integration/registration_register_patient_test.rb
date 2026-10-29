@@ -283,4 +283,27 @@ class RegistrationRegisterPatientTest < ActionDispatch::IntegrationTest
       assert_equal 2, calls.size
     end
   end
+  test "S-REG-02.6 the form offers RPMS's reasons for no SSN, and the chosen one is sent" do
+    sign_in("registration_menu")
+    with_register(registered(990_057)) do |calls|
+      get "/lakeraven-ehr/registration/patients/new"
+      offered = css_select("#registration-form select[name='registration[no_ssn_reason]'] option").map { |o| o["value"] }
+      assert_equal [ "", "R", "S", "N" ], offered
+
+      submit_registration(ENTRY.merge(no_ssn_reason: "N"))
+      assert_response :redirect
+      assert_equal "N", calls.first[:no_ssn_reason]
+    end
+  end
+
+  test "S-REG-02.8 an SSN already on another patient is refused with RPMS's reason, and nothing is filed" do
+    sign_in("registration_menu")
+    refused = { success: false, error: :agg_invalid, field: "AGGPTSSN", message: "SSN already used by another patient." }
+    with_register(refused) do
+      submit_registration(ENTRY.merge(ssn: "666010101"))
+      assert_response :unprocessable_content
+      assert_select "[role=alert]", text: /SSN already used by another patient\./
+      assert_select "#registration-form input[name='registration[ssn]'][value='666010101']"
+    end
+  end
 end
