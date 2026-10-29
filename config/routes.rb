@@ -73,6 +73,7 @@ Lakeraven::EHR::Engine.routes.draw do
   resources :observations, path: "Observation", only: %i[index show]
   resources :encounters, path: "Encounter", only: %i[index]
   resources :organizations, path: "Organization", only: %i[show], param: :ien
+  resources :groups, path: "Group", only: %i[show]
   resources :locations, path: "Location", only: %i[show], param: :ien
   resources :service_requests, path: "ServiceRequest", only: %i[index]
   resources :immunizations, path: "Immunization", only: %i[index]
