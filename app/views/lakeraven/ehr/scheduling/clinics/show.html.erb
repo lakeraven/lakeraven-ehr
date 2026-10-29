@@ -78,7 +78,11 @@
           data-appointment="<%= appointment[:id] %>"
         >
           <td><%= appointment[:start_time].strftime("%H:%M") %>–<%= appointment[:end_time].strftime("%H:%M") %></td>
-          <td><%= appointment[:patient_name] %></td>
+          <td>
+            <%= link_to appointment[:patient_name],
+                  scheduling_patient_appointments_path(appointment[:patient_dfn]),
+                  data: { patient_appointments: true } %>
+          </td>
           <td data-status="<%= status.split.first.downcase %>"><%= status %></td>
           <td>
             <% if status == "Booked" && can_book?(@resource) %>
