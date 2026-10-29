@@ -117,33 +117,81 @@ module Lakeraven
         refute_includes response.body, "Anderson"
       end
 
-      test "C-CDA is not rendered when egress filter rewrites patient dfn to REDACTED" do
+      # Round-2 spec (#233): egress dfn must canonicalize to the same patient as
+      # params[:patient_dfn], not merely match a positive-integer string regex.
+      test "C-CDA is generated when egress filter returns zero-padded dfn for the same patient" do
         stub_egress_filter(->(sections) {
-          sections.merge(patient: sections[:patient].merge(dfn: "REDACTED"))
+          sections.merge(patient: sections[:patient].merge(dfn: "01"))
         }) do
           post "/lakeraven-ehr/transitions_of_care",
             params: { patient_dfn: "1" }, headers: @headers
         end
 
-        assert_response :service_unavailable
-        assert_includes response.body, "Part 2 egress filter did not return clinical sections"
-        refute_includes response.body, "ClinicalDocument"
+        assert_response :created
+        assert_includes response.body, "ClinicalDocument"
+        assert_equal "1", patient_id_extension(response.body)
       end
 
-      test "C-CDA is not rendered when egress filter rewrites patient dfn to non-integer string" do
+      test "C-CDA is generated when request patient_dfn is Integer and egress dfn is the same patient" do
         stub_egress_filter(->(sections) {
-          sections.merge(patient: sections[:patient].merge(dfn: "12A"))
+          sections.merge(patient: sections[:patient].merge(dfn: 1))
         }) do
           post "/lakeraven-ehr/transitions_of_care",
-            params: { patient_dfn: "1" }, headers: @headers
+            params: { patient_dfn: 1 }, headers: @headers
         end
 
-        assert_response :service_unavailable
-        assert_includes response.body, "Part 2 egress filter did not return clinical sections"
-        refute_includes response.body, "ClinicalDocument"
+        assert_response :created
+        assert_equal "1", patient_id_extension(response.body)
+      end
+
+      test "C-CDA is not rendered when egress filter rewrites patient dfn to REDACTED" do
+        assert_refuses_egress_patient_mismatch(rewritten_dfn: "REDACTED")
+      end
+
+      # Previously pinned positive_integer_dfn? rejecting non-digit suffixes only.
+      # Round-2: any egress dfn whose canonical_dfn differs from the request (here nil).
+      test "C-CDA is not rendered when egress filter rewrites patient dfn to non-integer string" do
+        assert_refuses_egress_patient_mismatch(rewritten_dfn: "12A")
+      end
+
+      test "C-CDA is not rendered when egress filter rewrites patient dfn to another patient" do
+        assert_refuses_egress_patient_mismatch(rewritten_dfn: "2")
+      end
+
+      test "C-CDA is not rendered when egress filter rewrites patient dfn to zero" do
+        assert_refuses_egress_patient_mismatch(rewritten_dfn: "0")
+      end
+
+      test "C-CDA is not rendered when egress filter clears patient dfn" do
+        assert_refuses_egress_patient_mismatch(rewritten_dfn: "")
+      end
+
+      test "C-CDA is not rendered when egress filter nils patient dfn" do
+        assert_refuses_egress_patient_mismatch(rewritten_dfn: nil)
       end
 
       private
+
+      def assert_refuses_egress_patient_mismatch(rewritten_dfn:, request_dfn: "1")
+        stub_egress_filter(->(sections) {
+          sections.merge(patient: sections[:patient].merge(dfn: rewritten_dfn))
+        }) do
+          post "/lakeraven-ehr/transitions_of_care",
+            params: { patient_dfn: request_dfn }, headers: @headers
+        end
+
+        assert_response :service_unavailable
+        assert_includes response.body, "Part 2 egress filter did not return clinical sections"
+        refute_includes response.body, "ClinicalDocument"
+      end
+
+      def patient_id_extension(xml)
+        doc = Nokogiri::XML(xml)
+        doc.at_xpath(
+          "//xmlns:patientRole/xmlns:id/@extension",
+          "xmlns" => "urn:hl7-org:v3"
+        )&.value
+      end
 
       def stub_egress_filter(implementation)
         filter = Part2EgressFilter.singleton_class

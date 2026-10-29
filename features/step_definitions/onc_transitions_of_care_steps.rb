@@ -81,6 +81,18 @@ Then("the transitions of care response should refuse egress with status {int}") 
   assert_includes @transitions_of_care_response.body, "Part 2 egress filter did not return clinical sections"
 end
 
+Then("the transitions of care response should include C-CDA with patient id extension {string}") do |extension|
+  assert_equal 201, @transitions_of_care_response.status
+  assert_includes @transitions_of_care_response.body, "ClinicalDocument"
+  doc = Nokogiri::XML(@transitions_of_care_response.body)
+  actual = doc.at_xpath(
+    "//xmlns:patientRole/xmlns:id/@extension",
+    "xmlns" => "urn:hl7-org:v3"
+  )&.value
+  assert_equal extension, actual,
+    "Expected patientRole id extension #{extension.inspect}, got #{actual.inspect}"
+end
+
 Then("the document should omit patient addr") do
   refute @ccda_doc.at_xpath("//xmlns:patientRole/xmlns:addr", "xmlns" => "urn:hl7-org:v3"),
     "Expected no patient addr when all address fields are blank"

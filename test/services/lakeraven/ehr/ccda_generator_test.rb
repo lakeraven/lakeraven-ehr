@@ -487,6 +487,34 @@ module Lakeraven
         assert_equal 2, entries.length
       end
 
+      # Round-2 spec (#233): blank Condition#code_system defaults to ICD-10-CM OID
+      # and a matching codeSystemName, not code_system_name(nil) => "Unknown".
+      test "condition with blank code_system emits ICD-10-CM OID and codeSystemName" do
+        condition = Condition.new(
+          patient_dfn: SYNTHETIC_DFN,
+          code: "Z00.00",
+          display: "Synthetic general exam",
+          code_system: ""
+        )
+        xml = CcdaGenerator.generate(
+          patient: @patient,
+          allergies: [],
+          conditions: [ condition ],
+          medications: [],
+          author: @author
+        )
+        doc = Nokogiri::XML(xml)
+        value = doc.at_xpath(
+          "//xmlns:section[xmlns:templateId[@root='2.16.840.1.113883.10.20.22.2.5.1']]" \
+          "//xmlns:value[@xsi:type='CD']",
+          HL7_NS.merge("xsi" => "http://www.w3.org/2001/XMLSchema-instance")
+        )
+
+        assert_equal "2.16.840.1.113883.6.90", value&.[]("codeSystem")
+        assert_equal "ICD-10-CM", value&.[]("codeSystemName")
+        refute_equal "Unknown", value&.[]("codeSystemName")
+      end
+
       test "includes medications section with template ID" do
         doc = parse_ccda
 
