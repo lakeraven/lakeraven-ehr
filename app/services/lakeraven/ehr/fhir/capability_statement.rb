@@ -15,14 +15,34 @@ module Lakeraven
       # Search parameters come from SearchCapabilities, which is also what
       # FHIRSearchBundle enforces, so there is one list of them, not two.
       #
-      # Never advertise more than is granted. The security element names the
-      # SMART service and the token endpoint, never scopes: the SMART
-      # discovery document lists wildcard write scopes that the token
-      # endpoint does not grant to every client, and this document does not
-      # repeat them.
+      # The security element comes from SmartDiscovery, which also builds
+      # .well-known/smart-configuration, so the two name the same endpoints.
+      # It names no scopes: smart-configuration lists them, and its per-type
+      # scopes are the interactions served_interactions_by_type returns, so
+      # the two documents cannot disagree.
       class CapabilityStatement
         FHIR_VERSION = "4.0.1"
-        OAUTH_URIS = "http://fhir-registry.smarthealthit.org/StructureDefinition/oauth-uris"
+        US_CORE_IG = "http://hl7.org/fhir/us/core/ImplementationGuide/hl7.fhir.us.core|6.1.0"
+        US_CORE = "http://hl7.org/fhir/us/core/StructureDefinition"
+
+        # US Core 6.1.0 profiles, declared only for a type whose served output
+        # the HL7 validator passes with no errors. test/us_core/validate.rb (the
+        # "US Core" CI job) checks what the engine serves against every profile
+        # declared here and fails on an error; a type joins this list when its
+        # output validates, never before. The others are listed in that job's
+        # report with their errors.
+        US_CORE_PROFILES = {
+          "Patient" => %w[us-core-patient],
+          "Practitioner" => %w[us-core-practitioner],
+          "Location" => %w[us-core-location],
+          "AllergyIntolerance" => %w[us-core-allergyintolerance],
+          "Condition" => %w[us-core-condition-problems-health-concerns],
+          "MedicationRequest" => %w[us-core-medicationrequest],
+          "Observation" => %w[us-core-vital-signs],
+          "Immunization" => %w[us-core-immunization],
+          "Procedure" => %w[us-core-procedure],
+          "ServiceRequest" => %w[us-core-servicerequest]
+        }.transform_values { |names| names.map { |name| "#{US_CORE}/#{name}" }.freeze }.freeze
         SEARCH_ONLY_STUB = "No read by id: GET [type]/[id] is routed and always returns 404."
 
         # What each routed type supports, and where its data comes from:
@@ -49,10 +69,6 @@ module Lakeraven
           "ServiceRequest" => { interactions: %w[search-type], source: "RPMS referrals, through rpms-rpc." },
           "Immunization" => { interactions: %w[search-type], source: "RPMS, through rpms-rpc." },
           "Procedure" => { interactions: %w[search-type], source: "RPMS, through rpms-rpc." },
-          "Consent" => {
-            interactions: %w[search-type],
-            source: "Not served yet: a search always returns an empty Bundle. #{SEARCH_ONLY_STUB}"
-          },
           "AuditEvent" => { interactions: %w[read search-type], source: "This server's own audit log." },
           "Measure" => { interactions: %w[search-type], source: "Measure definitions shipped with the engine." },
           "MeasureReport" => {
@@ -74,6 +90,26 @@ module Lakeraven
 
         def self.call(...) = new(...).to_fhir
 
+        # What /metadata serves right now: each type mapped to the interactions
+        # the current backend provides. RESOURCES stays the list of what the
+        # engine can serve. An interaction is kept unless
+        # capability_for_fhir_interaction names a capability the current
+        # backend does not provide. A type left with no interactions is
+        # dropped. Resolved on each call, because the backend can change.
+        # SmartDiscovery#scopes_supported reads this same map.
+        def self.served_interactions_by_type
+          RESOURCES.each_with_object({}) do |(type, declaration), served|
+            interactions = declaration[:interactions].reject { |interaction| interaction_withheld?(type, interaction) }
+            served[type] = interactions unless interactions.empty?
+          end
+        end
+
+        def self.interaction_withheld?(type, interaction)
+          capability = BackendRegistry.capability_for_fhir_interaction(type, interaction)
+          capability && !BackendRegistry.current.provides?(capability)
+        end
+        private_class_method :interaction_withheld?
+
         def initialize(base_url:, token_endpoint:)
           @base_url = base_url
           @token_endpoint = token_endpoint
@@ -90,11 +126,12 @@ module Lakeraven
             software: { name: "Lakeraven EHR", version: Lakeraven::EHR::VERSION },
             implementation: { description: implementation_description, url: @base_url },
             fhirVersion: FHIR_VERSION,
+            implementationGuide: [ US_CORE_IG ],
             format: %w[json application/fhir+json],
             rest: [ {
               mode: "server",
               security: security,
-              resource: RESOURCES.map { |type, declaration| resource(type, declaration) },
+              resource: served_resources,
               searchParam: SearchCapabilities.rest_search_params
             } ]
           }
@@ -118,25 +155,20 @@ module Lakeraven
         end
 
         def security
-          {
-            extension: [ {
-              url: OAUTH_URIS,
-              extension: [ { url: "token", valueUri: @token_endpoint } ]
-            } ],
-            service: [ {
-              coding: [ {
-                system: "http://terminology.hl7.org/CodeSystem/restful-security-service",
-                code: "SMART-on-FHIR"
-              } ]
-            } ],
-            description: "SMART on FHIR. .well-known/smart-configuration lists the endpoints and capabilities."
-          }
+          SmartDiscovery.new(token_endpoint: @token_endpoint).security
+        end
+
+        def served_resources
+          self.class.served_interactions_by_type.map do |type, interactions|
+            resource(type, RESOURCES.fetch(type).merge(interactions: interactions))
+          end
         end
 
         def resource(type, declaration)
           {
             type: type,
             documentation: declaration[:source],
+            supportedProfile: US_CORE_PROFILES[type],
             interaction: declaration[:interactions].map { |code| { code: code } },
             operation: declaration[:operations]
           }.compact.merge(SearchCapabilities.resource_capabilities(type))

@@ -47,22 +47,29 @@ module Lakeraven
       end
 
       def resolve_signon(access_code, verify_code)
-        auth = RpmsRpc::Authentication.authenticate(access_code: access_code, verify_code: verify_code)
+        auth =
+          if cia_broker?
+            cia_signon(access_code, verify_code)
+          else
+            RpmsRpc::Authentication.authenticate(access_code: access_code, verify_code: verify_code)
+          end
         return failure(auth[:error] || "Invalid access/verify code") unless auth[:success]
 
         duz_s = auth[:duz].to_s
-        user_info = RpmsRpc::Authentication.user_info(duz_s)
+        user_info = fetch_user_info(duz_s)
         # The user class is the server's USRCLS from ORWU USERINFO, read for
         # the signed-on DUZ (rpms-rpc #236): XUS AV CODE carries no class
         # (its line 5 is the post-sign-on message count). user_type raises
         # when the class cannot be read, so the sign-on fails closed as
         # unavailable rather than defaulting a role.
         server_user_type = RpmsRpc::Authentication.user_type(duz_s)
-        raw_keys = fetch_raw_security_keys(duz_s)
-        symbolic_keys = Roles.symbolize_keys(raw_keys)
+        # The keys the policy table names, asked of RPMS for the signed-on
+        # user. A key read that could not be made raises, and the sign-on is
+        # refused as unavailable: never a session on keys nobody read (#578).
+        symbolic_keys = Roles.symbolize_keys(SecurityKeyGateway.held(Roles::KEY_NAMES.values))
 
         # Round-trip the server's user type through the short code so
-        # :prc_supervisor or :prc_manager still elevates to "case_manager".
+        # :referrals_supervisor or :referrals_manager still elevates to "case_manager".
         # A class the map does not know stays "user".
         Result.new(
           success?: true,
@@ -81,15 +88,51 @@ module Lakeraven
         )
       end
 
+      # A CIA broker refuses every RPC but the CIANB* ones until CIANBRPC AUTH
+      # has set a DUZ (CANRUN^CIANBACT), and XUS SIGNON SETUP kills DUZ
+      # outright, so the XUS SIGNON SETUP / XUS AV CODE sequence can never sign
+      # on there (#539). The client's own sign-on is the only way in.
+      def cia_broker?
+        defined?(RpmsRpc::CiaClient) && RpmsRpc.client.is_a?(RpmsRpc::CiaClient)
+      end
+
+      # CIA reports a verify code due for change only in the sign-on greeting
+      # (VueCentric shows it and prompts); there is no flag field to read.
+      VERIFY_CHANGE_GREETING = /VERIFY CODE must be changed/i
+
+      def cia_signon(access_code, verify_code)
+        client = RpmsRpc.client
+        client.connect unless client.connected?
+        signon = client.authenticate(access_code, verify_code)
+
+        {
+          success: true,
+          duz: signon[:duz],
+          name: signon[:user],
+          verify_needs_change: VERIFY_CHANGE_GREETING.match?(signon[:greeting].to_s)
+        }
+      rescue RpmsRpc::Client::AuthenticationError => e
+        # The gem sanitizes these messages (RpmsRpc.sanitize_error), so the
+        # reason is safe to log; the clinician still sees one message for
+        # every refusal.
+        Rails.logger.warn("[auth] CIA sign-on refused: #{e.class}: #{e.message}")
+        { success: false, error: "Invalid access/verify code" }
+      end
+
       def failure(message)
         Result.new(success?: false, value: nil, error: message)
       end
 
-      def fetch_raw_security_keys(duz)
-        RpmsRpc::Authentication.user_security_keys(duz)
-      rescue => e
-        Rails.logger.error("Failed to load security keys for DUZ #{duz}: #{e.message}") if defined?(Rails)
-        []
+      # The display name only. Identity is the DUZ sign-on already verified,
+      # so a refused read here is not a refused sign-on: a least-privilege
+      # clinician on a CIA broker is denied XUS GET USER INFO outright (it is
+      # not in CIAV VUECENTRIC's RPC multiple). The name the sign-on itself
+      # resolved stands in.
+      def fetch_user_info(duz)
+        RpmsRpc::Authentication.user_info(duz)
+      rescue RpmsRpc::Client::RpcError => e
+        Rails.logger.warn("[auth] user info unavailable for DUZ #{duz}: #{e.message}")
+        nil
       end
     end
   end

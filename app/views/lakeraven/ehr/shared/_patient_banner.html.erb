@@ -1,0 +1,52 @@
+<%# Stays on screen while a long chart scrolls, so the clinician can still
+    see which patient they are documenting on. %>
+<div
+  id="patient-banner"
+  class="sticky top-0 z-20 bg-slate-50"
+>
+  <% if banner.empty? %>
+    <p>No patient selected</p>
+    <%# No chart-search page exists yet; the dashboard is the nearest
+        signed-in surface, labeled as the search the empty state promises. %>
+    <%= link_to "Chart search", dashboard_path %>
+  <% else %>
+    <% if banner.notice.present? %>
+      <p><%= banner.notice %></p>
+    <% end %>
+
+    <% if banner.demographics %>
+      <div class="banner">
+        <div>
+          <h1><%= banner.demographics.name %></h1>
+        </div>
+        <dl class="demoinfo">
+          <div><dt>DOB</dt><dd><%= banner.demographics.dob_text %></dd></div>
+          <div><dt>Age</dt><dd><%= banner.demographics.age_text %></dd></div>
+          <div><dt>Sex</dt><dd><%= banner.demographics.sex_text %></dd></div>
+          <div><dt>MRN / DFN</dt><dd><%= banner.demographics.mrn %></dd></div>
+        </dl>
+      </div>
+    <% end %>
+
+    <% if banner.allergies %>
+      <div class="patient-banner__allergies" data-allergies-state="<%= banner.allergies.state %>">
+        <span>Allergies</span>
+        <%# Loaded is the names alone. Otherwise #text is "None recorded",
+            "Not loaded", or the known names plus the incomplete-list note. %>
+        <% if banner.allergies.loaded? %>
+          <% banner.allergies.names.each do |name| %>
+            <span><%= name %></span>
+          <% end %>
+        <% else %>
+          <%= banner.allergies.text %>
+        <% end %>
+      </div>
+    <% end %>
+
+    <% if banner.show_clear? %>
+      <%# URL rather than path: the route helper already includes the engine
+          mount, and a root-relative action would be prefixed with it again. %>
+      <%= button_to "Clear patient context", active_patient_context_url, method: :delete %>
+    <% end %>
+  <% end %>
+</div>

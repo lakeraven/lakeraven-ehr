@@ -37,8 +37,6 @@ module Lakeraven
       # RpmsRpc::Registration.update (AGG UPDATE PATIENT).
       UPDATE_RPC = "BHDPTRPC UPDATE"
       # PLACEHOLDER wire name — see header note.
-      SEARCH_RPC = "BHDPTRPC LOOKUP"
-      # PLACEHOLDER wire name — see header note.
       FACE_SHEET_RPC = "BHDPTRPC FACESHEET"
       # PLACEHOLDER wire name — see header note.
       INS_LIST_RPC = "BHDPTRPC INSLIST"
@@ -62,6 +60,7 @@ module Lakeraven
         # ^DPT/^AUPN*; AG's own add path files through FileMan so the .01
         # name xref, SSN xref, and registration audit fire.
         def register(params)
+          CapabilityGuard.ensure!(:bprm_registration)
           params = params.to_h.transform_keys(&:to_sym)
           return validation_error("name is required") if blank?(params[:name])
 
@@ -82,6 +81,7 @@ module Lakeraven
         # (AgSetCorrectPatientName/CellNumber/DateOfDeath/Mbi). File each
         # through ^DIE so the FileMan audit (DD "AUDIT") records the change.
         def update(dfn, changes)
+          CapabilityGuard.ensure!(:bprm_registration)
           changes = changes.to_h.transform_keys(&:to_sym)
           return validation_error("dfn is required") unless valid_id?(dfn)
           return validation_error("no changes given") if changes.empty?
@@ -95,22 +95,12 @@ module Lakeraven
           end
         end
 
-        # --- #4 Search (GET /patients?q=) ----------------------------------
-        # PROVISIONAL: AG search re-expressed via BMX; DOB narrows the match
-        # in-gateway. RPC name/encoding unconfirmed against #8994 — the
-        # confirmed stock search is ORWPT LIST ALL (RpmsRpc::Patient.search).
-        def search(query, dob: nil)
-          RpcSupport.with_broker("Patient lookup service unavailable") do
-            raw = RpcSupport.broker.call_rpc(SEARCH_RPC, query.to_s)
-            patients = RpcSupport.lines(raw).filter_map { |line| parse_search_row(line) }
-            patients = filter_by_dob(patients, dob) if dob
-            { success: true, status: 200, patients: patients }
-          end
-        end
+        # --- #4 Search: PatientLookupGateway (AGG LOOKUP PATIENTS, S-REG-01) --
 
         # --- #4 Face sheet (GET /patients/:dfn/face_sheet) -----------------
         # AgGetPatientFaceSheet + AgGetPatientErrorsAndWarnings (read).
         def face_sheet(dfn)
+          CapabilityGuard.ensure!(:bprm_registration)
           return validation_error("dfn is required") unless valid_id?(dfn)
 
           RpcSupport.with_broker("Patient lookup service unavailable") do
@@ -123,6 +113,7 @@ module Lakeraven
 
         # --- #3 List insurances (GET /patients/:dfn/insurances) ------------
         def insurances(dfn)
+          CapabilityGuard.ensure!(:bprm_registration)
           return validation_error("dfn is required") unless valid_id?(dfn)
 
           RpcSupport.with_broker("Insurance service unavailable") do
@@ -135,6 +126,7 @@ module Lakeraven
         # TODO(sql-mutate→reimpl): file the policy-number change through ^DIE
         # on the patient-insurance multiple rather than a raw UPDATE.
         def update_insurance(dfn, insurance_id, policy_number:)
+          CapabilityGuard.ensure!(:bprm_registration)
           return validation_error("dfn is required") unless valid_id?(dfn)
           return validation_error("insurance id is required") unless valid_id?(insurance_id)
           if RpcSupport.unsafe_field?(policy_number)
@@ -159,6 +151,7 @@ module Lakeraven
         # in-use policy must be refused (409) before any dependent row is
         # touched.
         def delete_insurance(dfn, insurance_id)
+          CapabilityGuard.ensure!(:bprm_registration)
           return validation_error("dfn is required") unless valid_id?(dfn)
           return validation_error("insurance id is required") unless valid_id?(insurance_id)
 
@@ -254,20 +247,6 @@ module Lakeraven
             error: "Cannot confirm the insurance is not in use; delete refused" }
         end
 
-        def parse_search_row(line)
-          parts = line.to_s.split("^", -1)
-          return nil if parts[0].to_s.empty?
-
-          { dfn: parts[0].to_i, name: parts[1], dob: RpmsRpc::FilemanDateParser.parse_date(parts[2]), sex: parts[3] }
-        end
-
-        def filter_by_dob(patients, dob)
-          wanted = Date.parse(dob.to_s)
-          patients.select { |p| p[:dob] == wanted }
-        rescue ArgumentError
-          patients
-        end
-
         def parse_insurance(line)
           parts = line.to_s.split("^", -1)
           return nil if parts[0].to_s.empty?
@@ -300,6 +279,9 @@ module Lakeraven
           { success: false, status: 422, error: message }
         end
       end
+
+      # BPRM registration writes are IHS-only (#647). Stock patient reads
+      # stay on PatientGateway (ORWPT SELECT) and are not checked here.
     end
   end
 end

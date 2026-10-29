@@ -16,7 +16,7 @@ Feature: SMART Backend Services auth for server-to-server FHIR clients
     When the client requests a token with a valid signed assertion and scope "system/Patient.read system/Observation.read"
     Then the response status should be 200
     And the response JSON should include "access_token"
-    And the token response should grant scope "system/Patient.read system/Observation.read"
+    And the token response should grant scope "system/Patient.rs system/Observation.rs"
     And the token response should expire in at most 300 seconds
 
   Scenario: Assertion signed by a key outside the published JWKS is rejected
@@ -49,7 +49,7 @@ Feature: SMART Backend Services auth for server-to-server FHIR clients
     Given a backend client "Example Org A Connector" is registered with a published JWKS and scopes "system/Patient.read"
     When the client requests a token with a valid signed assertion and scope "system/Patient.read system/Observation.read"
     Then the response status should be 200
-    And the token response should grant scope "system/Patient.read"
+    And the token response should grant scope "system/Patient.rs"
 
   Scenario: A request for only unregistered scopes is rejected
     Given a backend client "Example Org A Connector" is registered with a published JWKS and scopes "system/Patient.read"

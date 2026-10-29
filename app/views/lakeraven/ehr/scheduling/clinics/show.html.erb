@@ -1,0 +1,130 @@
+<% content_for :title, "#{@resource[:name]} | Scheduling | Lakeraven EHR" %>
+
+<div class="page-header">
+  <h1><%= @resource[:name] %></h1>
+  <p>
+    <%= @date.strftime("%A, %b %-d, %Y") %>
+  </p>
+</div>
+
+<% if @notice.present? %>
+  <div
+    id="notice"
+    class="alert alert--notice"
+    role="status"
+  >
+    <p><%= @notice %></p>
+  </div>
+<% end %>
+
+<% if @booked_id.present? %>
+  <div
+    id="booked"
+    class="alert alert--notice"
+    role="status"
+  >
+    <p>
+      Booked.
+    </p>
+  </div>
+<% end %>
+
+<%= form_with url: scheduling_clinic_path(@resource[:id]),
+      method: :get,
+      local: true,
+      class: "flex items-end gap-2" do %>
+  <%= label_tag :date, "Day" %>
+  <%= date_field_tag :date,
+        @date,
+        id: "date",
+        class: "rounded border border-slate-300 px-3 py-2" %>
+  <%= submit_tag "Show",
+        name: nil,
+        class: "min-h-9 bg-white px-3 py-2 ring-1 ring-slate-300 ring-inset" %>
+<% end %>
+
+<h2>Booked</h2>
+<% if @appointments.empty? %>
+  <p class="hint">No appointments.</p>
+<% else %>
+  <table
+    id="appointments"
+    class="w-full text-left"
+  >
+    <caption class="sr-only">Appointments on <%= @resource[:name] %></caption>
+    <thead>
+      <tr>
+        <th scope="col">Time</th>
+        <th scope="col">Patient</th>
+        <th scope="col">Status</th>
+        <th scope="col"><span class="sr-only">Actions</span></th>
+      </tr>
+    </thead>
+    <tbody>
+      <% @appointments.sort_by { |a| a[:start_time] }.each do |appointment| %>
+        <% status = if appointment[:cancelled] then "Cancelled"
+                    elsif appointment[:no_show] then "No-show"
+                    elsif appointment[:checkin_time] then "Checked in #{appointment[:checkin_time].strftime('%H:%M')}"
+                    else "Booked"
+                    end %>
+        <tr
+          data-patient="<%= appointment[:patient_dfn] %>"
+          data-appointment="<%= appointment[:id] %>"
+        >
+          <td><%= appointment[:start_time].strftime("%H:%M") %>–<%= appointment[:end_time].strftime("%H:%M") %></td>
+          <td><%= appointment[:patient_name] %></td>
+          <td data-status="<%= status.split.first.downcase %>"><%= status %></td>
+          <td>
+            <% if status == "Booked" && can_book?(@resource) %>
+              <% if appointment[:start_time].to_date == Date.current %>
+                <%= link_to "Check in",
+                      scheduling_checkin_clinic_appointment_path(@resource[:id], appointment[:id], date: @date.iso8601) %>
+              <% end %>
+              <%= link_to "Cancel",
+                    scheduling_cancel_clinic_appointment_path(@resource[:id], appointment[:id], date: @date.iso8601) %>
+            <% end %>
+          </td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+<% end %>
+
+<h2>Open times</h2>
+<% times = @day.times %>
+<% if times.empty? %>
+  <p
+    id="no-open-times"
+    class="hint"
+  >
+    The clinic has no open times this day.
+  </p>
+<% else %>
+  <table
+    id="open-times"
+    class="w-full text-left"
+  >
+    <caption class="sr-only">Open times on <%= @resource[:name] %></caption>
+    <thead>
+      <tr>
+        <th scope="col">Time</th>
+        <th scope="col">Places left</th>
+        <th scope="col"><span class="sr-only">Book</span></th>
+      </tr>
+    </thead>
+    <tbody>
+      <% times.each do |time| %>
+        <tr data-time="<%= time.at.strftime("%H:%M") %>">
+          <td><%= time.at.strftime("%H:%M") %></td>
+          <td data-open="<%= time.open %>"><%= time.open.zero? ? "Full" : time.open %></td>
+          <td>
+            <% if time.open.positive? && can_book?(@resource) %>
+              <%= link_to "Book",
+                    scheduling_new_clinic_appointment_path(@resource[:id], start: time.at.strftime("%Y-%m-%dT%H:%M")) %>
+            <% end %>
+          </td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+<% end %>

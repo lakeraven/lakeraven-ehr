@@ -37,6 +37,15 @@ module Lakeraven
       def medication? = category == "medication"
       def food? = category == "food"
 
+      # A coded allergy with no text still has to show something. The chart
+      # strip and the banner share AllergyListStatus's label so a blank
+      # allergen does not render as an empty span.
+      def display_allergen
+        AllergyListStatus.visible_allergen_name(
+          { text: allergen, coding: [ { code: allergen_code } ] }
+        )
+      end
+
       # Matching key for clinical reconciliation (ONC § 170.315(b)(2))
       def matching_key
         if allergen_code.present?

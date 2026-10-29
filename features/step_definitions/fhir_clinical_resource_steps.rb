@@ -7,6 +7,11 @@
 # and cqm_steps.rb (FHIR Bundle). Only defines steps unique to this feature.
 
 Given("I am authenticated with SMART-on-FHIR") do
+  step %(I am authenticated with SMART-on-FHIR for patient "1")
+end
+
+# A patient/ scope binds the token to one patient (resource_owner_id is its DFN).
+Given("I am authenticated with SMART-on-FHIR for patient {string}") do |dfn|
   @fhir_headers = {
     "Accept" => "application/fhir+json",
     "Content-Type" => "application/fhir+json"
@@ -18,7 +23,7 @@ Given("I am authenticated with SMART-on-FHIR") do
   )
   @smart_token = Doorkeeper::AccessToken.create!(
     application: @oauth_app,
-    resource_owner_id: 1,
+    resource_owner_id: dfn.to_i,
     scopes: "patient/*.read user/*.read launch openid profile",
     expires_in: 3600
   )
@@ -27,7 +32,7 @@ end
 
 Given("patient {string} has clinical data in the system") do |dfn|
   patient = Lakeraven::EHR::Patient.find_by_dfn(dfn.to_i)
-  assert patient, "Expected patient DFN #{dfn} to exist in mock seeds"
+  assert patient, "Expected patient DFN #{dfn} to exist"
 end
 
 When("I request GET {string}") do |path|

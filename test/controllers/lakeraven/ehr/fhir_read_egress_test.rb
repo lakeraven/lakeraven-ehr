@@ -43,8 +43,7 @@ module Lakeraven
         "lakeraven/ehr/allergy_intolerances#show",
         "lakeraven/ehr/conditions#show",
         "lakeraven/ehr/medication_requests#show",
-        "lakeraven/ehr/observations#show",
-        "lakeraven/ehr/consents#show"
+        "lakeraven/ehr/observations#show"
       ].freeze
 
       # Non-disclosing or out-of-scope controller actions that are explicitly allowed to bypass the seam.
@@ -59,10 +58,26 @@ module Lakeraven
         "lakeraven/ehr/demo_visits#summary",  # Dev-gated demo UI
         "lakeraven/ehr/screenings#create",    # Session-authenticated clinician UI (entry, not disclosure)
         "lakeraven/ehr/screenings#new",       # Session-authenticated clinician UI (entry, not disclosure)
+        "lakeraven/ehr/allergies#new",              # Session-authenticated clinician entry/write surface (#644); discloses no stored clinical data
+        "lakeraven/ehr/allergies#create",            # Session-authenticated clinician entry/write surface (#644); discloses no stored clinical data
+        "lakeraven/ehr/allergies#no_known_allergies", # Session-authenticated clinician entry/write surface (#644); discloses no stored clinical data
         "lakeraven/ehr/sessions#new",         # Web UI login
         "lakeraven/ehr/sessions#create",      # Web UI login
         "lakeraven/ehr/sessions#destroy",     # Web UI logout
-        "lakeraven/ehr/dashboards#show",      # Web UI dashboard
+        "lakeraven/ehr/dashboards#show",      # Web UI dashboard; banner patient/allergy via filter_fhir_for_egress
+        "lakeraven/ehr/registration/patients#index", # Front-desk lookup: registration demographics (name, HRN, DOB, status), no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/registration/patients#show",  # Registration demographics (name, HRN, DOB, sex), no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/registration/patients#new",     # Registration entry form (S-REG-02), not disclosure
+        "lakeraven/ehr/registration/patients#create",  # Registration entry; possible matches show registration demographics only; revisit with Part 2 (#494)
+        "lakeraven/ehr/registration/patients#confirm", # Registration entry after review; as #create
+        "lakeraven/ehr/scheduling/clinics#index",     # Scheduling: clinic resources, no patient data
+        "lakeraven/ehr/scheduling/clinics#show",      # A clinic day: appointment times and patient names, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/scheduling/appointments#new",   # Booking form: patient name, HRN, date of birth, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/scheduling/appointments#create", # Booking entry, not disclosure
+        "lakeraven/ehr/scheduling/cancellations#new",    # Cancel form: patient name and time, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/scheduling/cancellations#create", # Cancellation entry, not disclosure
+        "lakeraven/ehr/scheduling/checkins#new",         # Check-in form: patient name and time, provider names, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/scheduling/checkins#create",      # Check-in entry, not disclosure
         "lakeraven/ehr/test_sessions#create", # Test only
         "lakeraven/ehr/smart_configuration#show", # Discovery
         "lakeraven/ehr/smart_launch#show",    # Discovery
@@ -74,6 +89,7 @@ module Lakeraven
         "lakeraven/ehr/exports#show",         # Status/kickoff
         "lakeraven/ehr/exports#destroy",      # Status/kickoff
         "lakeraven/ehr/patient_contexts#create", # Session context
+        "lakeraven/ehr/active_patient_contexts#destroy", # Closes session context, no clinical data
         "lakeraven/ehr/practitioners#index",  # Directory data
         "lakeraven/ehr/practitioners#show",   # Directory data
         "lakeraven/ehr/organizations#show",   # Directory data
@@ -102,7 +118,6 @@ module Lakeraven
         "lakeraven/ehr/procedures#index",
         "lakeraven/ehr/coverage_eligibility_requests#create",
         "lakeraven/ehr/measure_reports#index",
-        "lakeraven/ehr/consents#index",
         "lakeraven/ehr/audit_events#index",
         "lakeraven/ehr/audit_events#show",
         "lakeraven/ehr/export_files#show"
@@ -325,7 +340,7 @@ module Lakeraven
           get "/lakeraven-ehr/patients/1", headers: @headers
         end
         assert_response :service_unavailable
-        refute_includes response.body, "120/80"
+        refute_includes response.body, "117/81"
       end
 
       test "HTML chart fails closed if filter returns hash without resourceType" do
@@ -333,7 +348,7 @@ module Lakeraven
           get "/lakeraven-ehr/patients/1", headers: @headers
         end
         assert_response :service_unavailable
-        refute_includes response.body, "120/80"
+        refute_includes response.body, "117/81"
       end
 
             test "HTML chart retains RPMS text for appointments, missing vitals, and units" do
@@ -415,7 +430,7 @@ module Lakeraven
       end
 
       # Table-driven tests for each wired endpoint that can be successfully invoked with seeded data.
-      # Note: Many /:id show routes (like Consent/:id, AllergyIntolerance/:id) are omitted here because
+      # Note: Many /:id show routes (like AllergyIntolerance/:id) are omitted here because
       # we do not have seeded data for those specific resource IDs. We use the nearest real path
       # (the index search route) to verify the seam is wired for that controller, rather than inventing IDs that return 404.
       WIRED_ENDPOINTS = [
@@ -433,7 +448,6 @@ module Lakeraven
         { path: "/lakeraven-ehr/Procedure", method: :get, params: { patient: "1" } },
         { path: "/lakeraven-ehr/CoverageEligibilityRequest", method: :post, params: { patient_dfn: "1", coverage_type: "medicaid" } },
         { path: "/lakeraven-ehr/MeasureReport", method: :get, params: { patient: "1" } },
-        { path: "/lakeraven-ehr/Consent", method: :get, params: { patient: "1" } },
         { path: "/lakeraven-ehr/AuditEvent", method: :get },
         { name: "AuditEvent show", dynamic_path: -> { "/lakeraven-ehr/AuditEvent/#{@audit_event.id}" }, method: :get },
         { name: "exports file show", dynamic_path: -> { @export_file_path }, method: :get },
@@ -557,8 +571,7 @@ module Lakeraven
         [ "/lakeraven-ehr/AllergyIntolerance/1", { patient: "1" } ],
         [ "/lakeraven-ehr/Condition/1", { patient: "1" } ],
         [ "/lakeraven-ehr/MedicationRequest/1", { patient: "1" } ],
-        [ "/lakeraven-ehr/Observation/1", { patient: "1" } ],
-        [ "/lakeraven-ehr/Consent/1", { patient: "1" } ]
+        [ "/lakeraven-ehr/Observation/1", { patient: "1" } ]
       ].each do |path, params|
         test "stubbed action for #{path} does not serve data and fails if implemented without wiring" do
           begin
@@ -576,7 +589,7 @@ module Lakeraven
         # 1. Verify it appears with the real filter
         get "/lakeraven-ehr/patients/1", headers: @headers
         assert_response :success
-        assert_includes response.body, "120/80"
+        assert_includes response.body, "117/81"
 
         # 2. Mock filter to return an empty bundle and verify it's gone
         calls = 0
@@ -589,7 +602,7 @@ module Lakeraven
 
         assert_response :success
         assert_operator calls, :>=, 1, "HTML chart must invoke Part2EgressFilter"
-        refute_includes response.body, "120/80", "Expected clinical content to be removed when filter returns empty bundle"
+        refute_includes response.body, "117/81", "Expected clinical content to be removed when filter returns empty bundle"
       end
 
       test "HTML chart fails closed if seam returns nil" do
@@ -598,7 +611,7 @@ module Lakeraven
         end
 
         assert_response :service_unavailable
-        refute_includes response.body, "120/80"
+        refute_includes response.body, "117/81"
       end
 
       test "screenings never invent a score when filter removes the score Observation" do
