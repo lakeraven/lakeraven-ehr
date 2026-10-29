@@ -24,24 +24,80 @@ module StubHelpers
   end
 
   def singleton_method_restore(klass, method_name)
-    singleton = klass.singleton_class
+    sc = klass.singleton_class
     name = method_name.to_sym
-    if owned_singleton_method?(singleton, name)
-      original = own_singleton_instance_method(singleton, name)
-      visibility = singleton_method_visibility(singleton, name)
-      -> do
-        singleton.send(:define_method, name, original)
-        singleton.send(visibility, name)
+    kind, visibility = classify_singleton_entry(sc, name)
+
+    hidden = nil
+    prepend_original = nil
+    if kind == :owned
+      entry = sc.instance_method(name)
+      if entry.owner != sc
+        prepend_original = own_singleton_instance_method(sc, name)
+      else
+        hidden = unique_hidden_alias(sc, name)
+        sc.send(:alias_method, hidden, name)
       end
-    elsif singleton.undefined_instance_methods.include?(name)
-      -> { restore_undefined_singleton_method(singleton, name) }
-    else
-      -> { restore_absent_singleton_method(singleton, name) }
+    end
+
+    restored = false
+    -> do
+      return if restored
+
+      restored = true
+      clear_singleton_stub(sc, name, kind)
+
+      case kind
+      when :owned
+        if prepend_original
+          sc.send(:define_method, name, prepend_original)
+          sc.send(visibility, name)
+        else
+          sc.send(:alias_method, name, hidden)
+          sc.send(:remove_method, hidden)
+          sc.send(visibility, name)
+        end
+      when :visibility_only
+        sc.send(visibility, name)
+      when :undefined
+        sc.send(:undef_method, name) unless sc.undefined_instance_methods.include?(name)
+      end
     end
   end
 
-  def owned_singleton_method?(singleton, method_name)
-    singleton_class_own_method?(singleton, method_name)
+  def classify_singleton_entry(sc, name)
+    if sc.undefined_instance_methods.include?(name)
+      [ :undefined, nil ]
+    elsif singleton_class_own_method?(sc, name)
+      visibility = singleton_method_visibility(sc, name)
+      if visibility_only_singleton_entry?(sc, name)
+        [ :visibility_only, visibility ]
+      else
+        [ :owned, visibility ]
+      end
+    else
+      [ :absent, nil ]
+    end
+  end
+
+  def visibility_only_singleton_entry?(sc, name)
+    parent_um = sc.superclass.instance_method(name)
+    sc.instance_method(name) == parent_um
+  rescue NameError
+    false
+  end
+
+  def clear_singleton_stub(sc, name, kind)
+    if singleton_class_own_method?(sc, name)
+      sc.send(:remove_method, name)
+    elsif sc.undefined_instance_methods.include?(name) && kind != :undefined
+      sc.send(:define_method, name) { nil }
+      sc.send(:remove_method, name)
+    end
+  end
+
+  def unique_hidden_alias(sc, name)
+    :"__stub_helpers_#{sc.object_id}_#{name}_#{Process.pid}__"
   end
 
   def own_singleton_instance_method(singleton, method_name)
@@ -69,21 +125,9 @@ module StubHelpers
       singleton.protected_instance_methods(false).include?(name)
   end
 
-  def restore_undefined_singleton_method(singleton, method_name)
-    name = method_name.to_sym
-    singleton.send(:remove_method, name) if owned_singleton_method?(singleton, name)
-    singleton.send(:undef_method, name) unless singleton.undefined_instance_methods.include?(name)
-  end
-
-  def restore_absent_singleton_method(singleton, method_name)
-    name = method_name.to_sym
-    return unless owned_singleton_method?(singleton, name)
-
-    singleton.send(:remove_method, name)
-  end
-
-  private_class_method :singleton_method_restore, :owned_singleton_method?,
+  private_class_method :singleton_method_restore, :classify_singleton_entry,
+                       :visibility_only_singleton_entry?, :clear_singleton_stub,
+                       :unique_hidden_alias,
                        :own_singleton_instance_method, :singleton_method_visibility,
-                       :singleton_class_own_method?, :restore_undefined_singleton_method,
-                       :restore_absent_singleton_method
+                       :singleton_class_own_method?
 end
