@@ -3,7 +3,8 @@
 # Save and restore one singleton method. The previous method is put back in
 # ensure, including when the block raises, with its original visibility.
 # A method the receiver did not define itself is removed again so an inherited
-# method stays inherited.
+# method stays inherited. An undef entry on the receiver singleton class is
+# restored after the stub is removed.
 module StubHelpers
   module_function
 
@@ -32,9 +33,10 @@ module StubHelpers
         singleton.send(:define_method, name, original)
         singleton.send(visibility, name)
       end
+    elsif singleton.undefined_instance_methods.include?(name)
+      -> { restore_undefined_singleton_method(singleton, name) }
     else
-      undef_hidden = singleton_method_undef_hidden?(klass, singleton, name)
-      -> { restore_non_owned_singleton_method(singleton, name, undef_hidden) }
+      -> { restore_absent_singleton_method(singleton, name) }
     end
   end
 
@@ -60,24 +62,6 @@ module StubHelpers
     end
   end
 
-  def singleton_method_undef_hidden?(klass, singleton, method_name)
-    return false if owned_singleton_method?(singleton, method_name)
-    return false if klass.respond_to?(method_name) || klass.respond_to?(method_name, true)
-
-    ancestor_singleton_defines?(singleton, method_name)
-  end
-
-  def ancestor_singleton_defines?(singleton, method_name)
-    name = method_name.to_sym
-    sc = singleton.superclass
-    while sc && sc != Class
-      return true if singleton_class_own_method?(sc, name)
-
-      sc = sc.superclass
-    end
-    false
-  end
-
   def singleton_class_own_method?(singleton, method_name)
     name = method_name.to_sym
     singleton.instance_methods(false).include?(name) ||
@@ -85,19 +69,21 @@ module StubHelpers
       singleton.protected_instance_methods(false).include?(name)
   end
 
-  def restore_non_owned_singleton_method(singleton, method_name, undef_hidden)
+  def restore_undefined_singleton_method(singleton, method_name)
+    name = method_name.to_sym
+    singleton.send(:remove_method, name) if owned_singleton_method?(singleton, name)
+    singleton.send(:undef_method, name) unless singleton.undefined_instance_methods.include?(name)
+  end
+
+  def restore_absent_singleton_method(singleton, method_name)
     name = method_name.to_sym
     return unless owned_singleton_method?(singleton, name)
 
-    if undef_hidden
-      singleton.send(:undef_method, name)
-    else
-      singleton.send(:remove_method, name)
-    end
+    singleton.send(:remove_method, name)
   end
 
   private_class_method :singleton_method_restore, :owned_singleton_method?,
                        :own_singleton_instance_method, :singleton_method_visibility,
-                       :singleton_method_undef_hidden?, :ancestor_singleton_defines?,
-                       :singleton_class_own_method?, :restore_non_owned_singleton_method
+                       :singleton_class_own_method?, :restore_undefined_singleton_method,
+                       :restore_absent_singleton_method
 end
