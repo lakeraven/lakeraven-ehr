@@ -7,8 +7,9 @@ gemspec
 if ENV["RPMS_RPC_PATH"]
   gem "rpms-rpc", path: ENV["RPMS_RPC_PATH"]
 else
-  # Pinned to rpms-rpc main 3b79404: Registration runs AG's own field checks
-  # (AGG WINDOW DATA VALIDATION) before it files, and takes no_ssn_reason (rpms-rpc#503).
+  # Pinned to rpms-rpc main 02444ff: Registration runs AG's own field checks
+  # (AGG WINDOW DATA VALIDATION) before it files, and takes no_ssn_reason (rpms-rpc#503,
+  # #504: neither SSN nor reason is refused without the check that hangs the broker).
   # Earlier, 3e0c31d: Authentication.option_access, which options the
   # signed-on user may run (ORWU HAS OPTION ACCESS; rpms-rpc#490), and a failed BSDX
   # list read raises instead of reading as empty (rpms-rpc#500). Earlier, 49ec8b5:
@@ -24,7 +25,7 @@ else
   # (lakeraven-ehr#540), invented RPC names removed (#310/#311), typed errors for
   # a missing RPC (#370), the user class from ORWU USERINFO (#236). A fixed ref
   # rather than branch:main so the pin does not drift mid-merge.
-  gem "rpms-rpc", github: "lakeraven/rpms-rpc", ref: "3b79404"
+  gem "rpms-rpc", github: "lakeraven/rpms-rpc", ref: "02444ff"
 end
 
 gem "puma"
