@@ -34,6 +34,29 @@ module DrugInteractionAdapterTestHelper
     ENV["DRUG_INTERACTION_BACKEND"] = original
   end
 
+  # ENV may normalize invalid bytes; stub [] so requested_backend_name sees invalid UTF-8.
+  def with_synthetic_invalid_utf8_drug_interaction_backend_env
+    invalid = "r\xFFpms".dup.force_encoding("UTF-8")
+
+    ENV.singleton_class.class_eval do
+      alias_method :__drug_interaction_spec_env_bracket, :[]
+      define_method(:[]) do |key|
+        if key == "DRUG_INTERACTION_BACKEND"
+          invalid
+        else
+          __drug_interaction_spec_env_bracket(key)
+        end
+      end
+    end
+
+    yield
+  ensure
+    ENV.singleton_class.class_eval do
+      alias_method :[], :__drug_interaction_spec_env_bracket
+      remove_method :__drug_interaction_spec_env_bracket
+    end
+  end
+
   def flunk_missing_drug_interaction_constant(name)
     flunk "missing Lakeraven::EHR::DrugInteraction::#{name}"
   end

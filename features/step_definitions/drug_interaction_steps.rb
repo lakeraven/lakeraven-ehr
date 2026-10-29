@@ -119,6 +119,11 @@ Then("I should see a drug-drug interaction between {string} and {string} with se
 end
 
 Then("there should be no interactions detected") do
+  refute @result.incomplete?, "Expected a complete interaction check with no interactions"
+  assert_empty @result.interactions
+end
+
+Then("the interaction alert list should be empty") do
   assert_empty @result.interactions
 end
 
@@ -141,7 +146,9 @@ Then("{string} should have interactions detected") do |drug|
 end
 
 Then("{string} should have no interactions detected") do |drug|
-  assert @batch_results[drug].interactions.empty?, "Expected no interactions for #{drug}"
+  result = @batch_results[drug]
+  refute result.incomplete?, "Expected a complete interaction check with no interactions for #{drug}"
+  assert result.interactions.empty?, "Expected no interactions for #{drug}"
 end
 
 Then("the result should include FHIR DetectedIssue resources") do

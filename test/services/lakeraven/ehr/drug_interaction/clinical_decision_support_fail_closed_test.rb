@@ -128,6 +128,77 @@ module Lakeraven
           assert_empty result.alerts_by_category("drug-interaction")
         end
 
+        test "registered builder LoadError surfaces single high generic incomplete alert" do
+          drug_interaction_adapter_factory.register(:rpms) do
+            raise LoadError, "cannot load such file -- synthetic_kb_client"
+          end
+          ENV["DRUG_INTERACTION_BACKEND"] = "rpms"
+          seed_active_medications("12345", [
+            { drug_name: "WARFARIN 5MG TAB", status: "ACTIVE" }
+          ])
+
+          result = assert_nothing_raised do
+            ClinicalDecisionSupportService.evaluate_medication("12345", "Ibuprofen 400mg")
+          end
+
+          incomplete_alerts = result.alerts_by_category("drug-interaction-check-incomplete")
+          assert_equal 1, incomplete_alerts.length
+          assert_equal "high", incomplete_alerts.first[:severity]
+          assert_equal CDS_GENERIC_INCOMPLETE_ALERT_MESSAGE, incomplete_alerts.first[:message]
+          refute_includes incomplete_alerts.first[:message], "synthetic_kb_client"
+          assert_empty result.alerts_by_category("drug-interaction")
+        end
+
+        test "adapter check_interactions LoadError surfaces single high generic incomplete alert" do
+          load_error_adapter = Class.new(BaseAdapter) do
+            define_method(:backend) { :rpms }
+
+            define_method(:check_interactions) do |_|
+              raise LoadError, "cannot load such file -- synthetic_kb_client"
+            end
+
+            define_method(:check_allergies) { |_, _| [] }
+          end
+          drug_interaction_adapter_factory.register(:rpms) { load_error_adapter.new }
+          ENV["DRUG_INTERACTION_BACKEND"] = "rpms"
+          seed_active_medications("12345", [
+            { drug_name: "WARFARIN 5MG TAB", status: "ACTIVE" }
+          ])
+
+          result = assert_nothing_raised do
+            ClinicalDecisionSupportService.evaluate_medication("12345", "Ibuprofen 400mg")
+          end
+
+          incomplete_alerts = result.alerts_by_category("drug-interaction-check-incomplete")
+          assert_equal 1, incomplete_alerts.length
+          assert_equal "high", incomplete_alerts.first[:severity]
+          assert_equal CDS_GENERIC_INCOMPLETE_ALERT_MESSAGE, incomplete_alerts.first[:message]
+          assert_empty result.alerts_by_category("drug-interaction")
+        end
+
+        test "malformed adapter output surfaces single high generic incomplete alert without raising" do
+          malformed_adapter = Class.new(BaseAdapter) do
+            define_method(:backend) { :rpms }
+            define_method(:check_interactions) { |_| [ nil ] }
+            define_method(:check_allergies) { |_, _| [] }
+          end
+          drug_interaction_adapter_factory.register(:rpms) { malformed_adapter.new }
+          ENV["DRUG_INTERACTION_BACKEND"] = "rpms"
+          seed_active_medications("12345", [
+            { drug_name: "WARFARIN 5MG TAB", status: "ACTIVE" }
+          ])
+
+          result = assert_nothing_raised do
+            ClinicalDecisionSupportService.evaluate_medication("12345", "Ibuprofen 400mg")
+          end
+
+          incomplete_alerts = result.alerts_by_category("drug-interaction-check-incomplete")
+          assert_equal 1, incomplete_alerts.length
+          assert_equal "high", incomplete_alerts.first[:severity]
+          assert_equal CDS_GENERIC_INCOMPLETE_ALERT_MESSAGE, incomplete_alerts.first[:message]
+          assert_empty result.alerts_by_category("drug-interaction")
+        end
+
         test "evaluate_medication with default backend returns drug-interaction alerts without incomplete alert" do
           ENV.delete("DRUG_INTERACTION_BACKEND")
           seed_active_medications("12345", [
