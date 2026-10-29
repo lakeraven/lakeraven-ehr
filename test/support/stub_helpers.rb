@@ -24,45 +24,80 @@ module StubHelpers
 
   def singleton_method_restore(klass, method_name)
     singleton = klass.singleton_class
-    if owned_singleton_method?(singleton, method_name)
-      original = singleton.instance_method(method_name)
-      visibility = singleton_method_visibility(singleton, method_name)
+    name = method_name.to_sym
+    if owned_singleton_method?(singleton, name)
+      original = own_singleton_instance_method(singleton, name)
+      visibility = singleton_method_visibility(singleton, name)
       -> do
-        singleton.send(:define_method, method_name, original)
-        singleton.send(visibility, method_name)
+        singleton.send(:define_method, name, original)
+        singleton.send(visibility, name)
       end
     else
-      -> { remove_singleton_method(singleton, method_name) }
+      undef_hidden = singleton_method_undef_hidden?(klass, singleton, name)
+      -> { restore_non_owned_singleton_method(singleton, name, undef_hidden) }
     end
   end
 
   def owned_singleton_method?(singleton, method_name)
-    singleton_method_defined?(singleton, method_name) &&
-      singleton.instance_method(method_name).owner == singleton
+    singleton_class_own_method?(singleton, method_name)
   end
 
-  def singleton_method_defined?(singleton, method_name)
-    singleton.method_defined?(method_name) ||
-      singleton.private_method_defined?(method_name) ||
-      singleton.protected_method_defined?(method_name)
+  def own_singleton_instance_method(singleton, method_name)
+    name = method_name.to_sym
+    method = singleton.instance_method(name)
+    method = method.super_method while method && method.owner != singleton
+    method
   end
 
   def singleton_method_visibility(singleton, method_name)
-    if singleton.public_method_defined?(method_name)
-      :public
-    elsif singleton.private_method_defined?(method_name)
+    name = method_name.to_sym
+    if singleton.private_instance_methods(false).include?(name)
       :private
-    else
+    elsif singleton.protected_instance_methods(false).include?(name)
       :protected
+    else
+      :public
     end
   end
 
-  def remove_singleton_method(singleton, method_name)
-    return unless singleton_method_defined?(singleton, method_name)
+  def singleton_method_undef_hidden?(klass, singleton, method_name)
+    return false if owned_singleton_method?(singleton, method_name)
+    return false if klass.respond_to?(method_name) || klass.respond_to?(method_name, true)
 
-    singleton.send(:remove_method, method_name)
+    ancestor_singleton_defines?(singleton, method_name)
   end
+
+  def ancestor_singleton_defines?(singleton, method_name)
+    name = method_name.to_sym
+    sc = singleton.superclass
+    while sc && sc != Class
+      return true if singleton_class_own_method?(sc, name)
+
+      sc = sc.superclass
+    end
+    false
+  end
+
+  def singleton_class_own_method?(singleton, method_name)
+    name = method_name.to_sym
+    singleton.instance_methods(false).include?(name) ||
+      singleton.private_instance_methods(false).include?(name) ||
+      singleton.protected_instance_methods(false).include?(name)
+  end
+
+  def restore_non_owned_singleton_method(singleton, method_name, undef_hidden)
+    name = method_name.to_sym
+    return unless owned_singleton_method?(singleton, name)
+
+    if undef_hidden
+      singleton.send(:undef_method, name)
+    else
+      singleton.send(:remove_method, name)
+    end
+  end
+
   private_class_method :singleton_method_restore, :owned_singleton_method?,
-                       :singleton_method_defined?, :singleton_method_visibility,
-                       :remove_singleton_method
+                       :own_singleton_instance_method, :singleton_method_visibility,
+                       :singleton_method_undef_hidden?, :ancestor_singleton_defines?,
+                       :singleton_class_own_method?, :restore_non_owned_singleton_method
 end
