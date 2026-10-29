@@ -36,6 +36,7 @@ Given("the patient has no address on file for a care summary") do
 end
 
 Given("the Part 2 egress filter rewrites the patient dfn to {string}") do |rewritten_dfn|
+  @egress_rewritten_dfn = rewritten_dfn
   @egress_filter_impl = ->(sections) {
     sections.merge(patient: sections[:patient].merge(dfn: rewritten_dfn))
   }
@@ -66,19 +67,40 @@ When("a transitions of care document is requested for the patient") do
 
   filter = Lakeraven::EHR::Part2EgressFilter.singleton_class
   original = filter.instance_method(:call)
-  filter.define_method(:call, &@egress_filter_impl)
+  filter_invoked = [false]
+  impl = @egress_filter_impl
+  filter.define_method(:call) do |sections|
+    filter_invoked[0] = true
+    impl.call(sections)
+  end
   begin
-    post "/lakeraven-ehr/transitions_of_care", params: { patient_dfn: dfn }
+    post "/lakeraven-ehr/transitions_of_care", { patient_dfn: dfn }
     @transitions_of_care_response = last_response
+    @egress_filter_invoked = filter_invoked[0]
   ensure
     filter.define_method(:call, original)
   end
 end
 
 Then("the transitions of care response should refuse egress with status {int}") do |status|
+  assert @egress_filter_invoked, "Expected Part 2 egress filter to run before refusing"
+  requested = Lakeraven::EHR::Patient.canonical_dfn(@patient_dfn || "1")
+  rewritten = Lakeraven::EHR::Patient.canonical_dfn(@egress_rewritten_dfn)
+  assert rewritten.blank? || rewritten != requested,
+         "Expected egress rewrite #{@egress_rewritten_dfn.inspect} to refuse for requested patient #{@patient_dfn.inspect}"
+
   assert_equal status, @transitions_of_care_response.status
   refute_includes @transitions_of_care_response.body, "ClinicalDocument"
-  assert_includes @transitions_of_care_response.body, "Part 2 egress filter did not return clinical sections"
+
+  outcome = JSON.parse(@transitions_of_care_response.body)
+  issue = outcome.fetch("issue").first
+  assert_equal "OperationOutcome", outcome["resourceType"]
+  assert_equal "error", issue["severity"]
+  assert_equal "exception", issue["code"]
+  assert_equal(
+    "Part 2 egress filter did not return clinical sections; C-CDA not generated",
+    issue["diagnostics"]
+  )
 end
 
 Then("the transitions of care response should include C-CDA with patient id extension {string}") do |extension|
