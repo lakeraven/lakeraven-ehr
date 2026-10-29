@@ -1,8 +1,9 @@
 # frozen_string_literal: true
 
 # Save and restore one singleton method. The previous method is put back in
-# ensure, including when the block raises. A method the receiver did not
-# define itself is removed again so an inherited method stays inherited.
+# ensure, including when the block raises, with its original visibility.
+# A method the receiver did not define itself is removed again so an inherited
+# method stays inherited.
 module StubHelpers
   module_function
 
@@ -25,20 +26,43 @@ module StubHelpers
     singleton = klass.singleton_class
     if owned_singleton_method?(singleton, method_name)
       original = singleton.instance_method(method_name)
-      -> { singleton.send(:define_method, method_name, original) }
+      visibility = singleton_method_visibility(singleton, method_name)
+      -> do
+        singleton.send(:define_method, method_name, original)
+        singleton.send(visibility, method_name)
+      end
     else
       -> { remove_singleton_method(singleton, method_name) }
     end
   end
 
   def owned_singleton_method?(singleton, method_name)
-    singleton.method_defined?(method_name) && singleton.instance_method(method_name).owner == singleton
+    singleton_method_defined?(singleton, method_name) &&
+      singleton.instance_method(method_name).owner == singleton
+  end
+
+  def singleton_method_defined?(singleton, method_name)
+    singleton.method_defined?(method_name) ||
+      singleton.private_method_defined?(method_name) ||
+      singleton.protected_method_defined?(method_name)
+  end
+
+  def singleton_method_visibility(singleton, method_name)
+    if singleton.public_method_defined?(method_name)
+      :public
+    elsif singleton.private_method_defined?(method_name)
+      :private
+    else
+      :protected
+    end
   end
 
   def remove_singleton_method(singleton, method_name)
-    return unless singleton.method_defined?(method_name)
+    return unless singleton_method_defined?(singleton, method_name)
 
     singleton.send(:remove_method, method_name)
   end
-  private_class_method :singleton_method_restore, :owned_singleton_method?, :remove_singleton_method
+  private_class_method :singleton_method_restore, :owned_singleton_method?,
+                       :singleton_method_defined?, :singleton_method_visibility,
+                       :remove_singleton_method
 end
