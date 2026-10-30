@@ -40,6 +40,27 @@ Clinical actions are gated inside the RPCs by keys: the ordering role comes from
 It reads the user's keys, secondary menus, primary menu and divisions, puts them in a JWT as claims, and expresses each permission as a claim requirement (for example "holds `AGZMENU` and not `AGZVIEWONLY`" to register a patient).
 Those requirements are checked mostly in the browser (#600).
 
+BPRM 4.0 (p6 source) defines about 30 such policies. The personas they imply are the front office's, and the keys are the ones IHS sites already assign:
+
+| Persona BPRM implies | Keys and menus | What BPRM allows |
+|---|---|---|
+| Registration clerk | `AGZMENU` (or the `AGMENU`, `AGPAT` menus) | register (not with `AGZVIEWONLY`), edit demographics, view, reports |
+| Registration manager | `AGZMGR` | edit HRN, change name, edit death information, registration tables |
+| View only | `AGZVIEWONLY` | view and report; denies registering |
+| SSN viewer | `AGZVIEWSSN` | see the whole SSN |
+| Scheduler | `SDZMENU` (and `SDZ ELIG REPORT` from registration) | scheduling |
+| Scheduler who mini-registers | `SDZREGMENU` | a short registration from scheduling |
+| Scheduling supervisor | `SDZSUP` | all of scheduling, scheduling tables |
+| ADT clerk, nurse | `DGZADT`, `DGZNUR` (`DGZMENU`, `DGZPCC` to open ADT) | admit, discharge, transfer; move patients |
+| Incomplete chart, HIM | `DGZICE`, `DGZPCC` | incomplete chart tracking |
+| ADT supervisor | `DGZSUP`, `DGZSYS` | ADT tables |
+| Security officer | `DG SECURITY OFFICER` | sensitive-record functions |
+| Record flags | `DGPF ASSIGNMENT`, `DGPF MANAGER` | assign flags; flag tables |
+| Benefits | `AGZCREOPN` | reopen a benefits case |
+
+The vocabulary is sound; the enforcement is not. The server checks only that a token is valid, the token carries raw key names, and `CanEditPatients` also accepts `XUPROG` and `XUPROGMODE`.
+This app takes BPRM's catalog as the source of its front-office rows (Decision 1), and enforces each on the server.
+
 Both clients derive permissions from the same two facts, options and keys.
 Neither has a permission keyed by clinic, ward or institution.
 
@@ -73,9 +94,13 @@ Initial rows (each name verified as an option or key on the pinned build):
 | `chart.read` | option `CIAV VUECENTRIC` | `user/Patient.rs`, and read/search on the chart's clinical types |
 | `order.enter` | any key `ORES`, `ORELSE`, `OREMAS` | (write scopes when CPOE writes land, #641) |
 | `order.sign` | key `ORES` | (as above) |
-| `patient.register` | key `AGZMENU`, denied by `AGZVIEWONLY` | `user/Patient.cu` |
+| `registration.search` | any key `AGZMENU`, `AGZMGR`, `AGZVIEWONLY` (BPRM: CanAccessPatientProfile) | none: AG's own lookup |
+| `registration.view` | any key `AGZMENU`, `AGZMGR`, `AGZVIEWONLY`, `SDZMENU`, `SDZSUP` (BPRM: CanViewPatient) | none |
+| `patient.register` | any key `AGZMENU`, `AGZMGR`, denied by `AGZVIEWONLY` (BPRM: CanRegisterPatient, which takes `AGZMENU` only; `AGZMGR` edits patients there, so registers here) | `user/Patient.cu` |
+| `scheduling.open` | any key `SDZMENU`, `SDZSUP` (BPRM: CanAccessScheduling) | none |
+| `scheduling.supervise` | key `SDZSUP`: every resource, whatever its BSDX rights (BPRM: SchedulingSupervisor) | none |
 | `patient.ssn.view` | key `AGZVIEWSSN` | none: a field rule, not a resource |
-| `adt.move` | key `DGZADT` | `user/Encounter.cu` |
+| `adt.move` | any key `DGZADT`, `DGZNUR`, `DGZSUP`, `DGZSYS` (BPRM: CanMovePatient) | `user/Encounter.cu` |
 | `patient.sensitive.open` | key `DG SENSITIVITY` | none: input to the sensitive-patient check (#613) |
 
 Chart read follows the option, not a key, because that is how an IHS site turns on EHR access: it gives the user the `CIAV VUECENTRIC` option.
@@ -129,7 +154,7 @@ A developer operator gets chart access the same way a clinician does: by holding
 
 ### 8. Lifetime
 
-- The capability set is fixed at sign-on and lives as long as the session (idle 30 minutes, 12 hours at most, as today).
+- The capability set is fixed at sign-on and lives as long as the session. The session ends after the shorter of the user's RPMS idle limit (DTIME) and the site's (30 minutes by default), and 12 hours after sign-on however active (#747; NIST SP 800-63B-3 at AAL2).
 - A change to a user's keys or menus in RPMS takes effect at their next sign-on. Revoking a user in RPMS ends their next request, because the per-user broker session (ADR 0008) fails.
 - A verify code that RPMS has flagged as expired gives a session that can only change the verify code (#493).
 
