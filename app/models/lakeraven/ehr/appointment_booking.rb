@@ -28,13 +28,8 @@ module Lakeraven
         self.note = note.to_s.strip.presence
       end
 
-      # The start as the resource's wall-clock time (BSDX times carry no zone).
-      def start_time
-        m = start.to_s.match(/\A(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})\z/)
-        m && Time.utc(*m.captures.map(&:to_i))
-      rescue ArgumentError
-        nil
-      end
+      # The start as the resource's wall-clock time (WallClock).
+      def start_time = WallClock.parse(start)
 
       def end_time = start_time && start_time + (length.to_i * 60)
 

@@ -46,6 +46,8 @@ class AuthenticationServiceCiaTest < ActiveSupport::TestCase
       return USERINFO_REPLY if name == "ORWU USERINFO"
       # CIAVCXUS HASKEYS: this user holds none of the names asked.
       return "\x01\x00".b + params.first.to_s.split("^", -1).map { "0" }.join("^").b if name == "CIAVCXUS HASKEYS"
+      # ORWU HAS OPTION ACCESS: a CIA sign-on binds to CIAV VUECENTRIC, so it holds that.
+      return "\x01\x00".b + (params.first == "CIAV VUECENTRIC" ? "1" : "0").b if name == "ORWU HAS OPTION ACCESS"
 
       ""
     end

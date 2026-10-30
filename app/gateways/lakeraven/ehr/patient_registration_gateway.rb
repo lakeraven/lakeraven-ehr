@@ -25,7 +25,7 @@ module Lakeraven
         attrs = registration.register_attrs
         attrs = attrs.merge(allow_duplicate: true) if allow_duplicate == true
         result_for(via.register(attrs))
-      rescue ::RpmsRpc::Client::RpcError, ::RpmsRpc::Client::ConnectionError, IOError, SystemCallError => e
+      rescue ::RpmsRpc::Error, IOError, SystemCallError => e
         # An error mid-call: the add may already have filed (the gem says so for a
         # frame error), so the outcome is unknown, never "not registered".
         Rails.logger.error("[registration] register raised #{e.class}; the outcome is unknown")

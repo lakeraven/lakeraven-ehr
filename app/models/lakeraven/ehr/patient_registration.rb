@@ -18,11 +18,16 @@ module Lakeraven
       # LAST,FIRST MIDDLE, as RPMS files a name: upper-case letters, spaces,
       # hyphens and apostrophes, and exactly one comma.
       NAME_FORMAT = /\A[A-Z][A-Z' -]*,[A-Z][A-Z' -]*\z/
+      # PATIENT .0906 PSEUDO SSN REASON, the set RPMS keeps (^DD(2,.0906)). Whether a
+      # reason is needed, and whether an SSN may go with one, is AG's own check
+      # (RpmsRpc::Patient.register runs it), not this model's.
+      NO_SSN_REASONS = { "R" => "Refused to provide", "S" => "SSN unknown, follow-up required", "N" => "No SSN assigned" }.freeze
 
       attribute :name, :string
       attribute :sex, :string
       attribute :dob, :date
       attribute :ssn, :string
+      attribute :no_ssn_reason, :string
       attribute :tribe_ien, :integer
       attribute :community_ien, :integer
 
@@ -32,6 +37,7 @@ module Lakeraven
       validates :dob, presence: true
       validate :dob_in_range
       validates :ssn, format: { with: /\A\d{9}\z/, message: "must be nine digits" }, allow_blank: true
+      validates :no_ssn_reason, inclusion: { in: NO_SSN_REASONS.keys, message: "is not one of RPMS's reasons" }, allow_blank: true
       validates :tribe_ien, presence: { message: "of membership is required" }
       validates :community_ien, presence: { message: "of residence is required" }
 
@@ -44,7 +50,8 @@ module Lakeraven
       # What RpmsRpc::Patient.register takes. The community dates from birth:
       # the front desk records where the patient lives, not when they moved.
       def register_attrs
-        { name: name, sex: sex, dob: dob, ssn: ssn.to_s, tribe: tribe_ien, community_ien: community_ien, community_since: :birth }
+        attrs = { name: name, sex: sex, dob: dob, ssn: ssn.to_s, tribe: tribe_ien, community_ien: community_ien, community_since: :birth }
+        no_ssn_reason.present? ? attrs.merge(no_ssn_reason: no_ssn_reason) : attrs
       end
 
       # One value for exactly these details, so a confirmation the clerk gave

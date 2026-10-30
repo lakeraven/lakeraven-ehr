@@ -8,7 +8,7 @@ require "test_helper"
 class SchedulingBookAppointmentTest < ActionDispatch::IntegrationTest
   DAY = Date.new(2026, 10, 28)
 
-  def at(hour, min = 0) = Time.utc(DAY.year, DAY.month, DAY.day, hour, min)
+  def at(hour, min = 0) = Time.new(DAY.year, DAY.month, DAY.day, hour, min)
 
   RESOURCES = [
     { id: 2, name: "DEMO IHS CLINIC", inactive: false, time_scale: 15, hospital_location_id: 3,
@@ -38,7 +38,7 @@ class SchedulingBookAppointmentTest < ActionDispatch::IntegrationTest
         search: ->(_text) { [ { dfn: 3, name: "MOUSE,MICKEY M" } ] },
         brief_header: ->(dfn) { dfn.to_i == 3 ? { name: "MOUSE,MICKEY M", dob: Date.new(1910, 2, 14), mrn: "1001" } : nil }
       }
-    }
+    }.merge(scheduling_setup_stubs)
     stubs.each { |klass, methods| methods.each_key { |m| klass.alias_method(:"__#{m}", m) } }
     stubs.each { |klass, methods| methods.each { |m, body| klass.define_method(m, &body) } }
     yield

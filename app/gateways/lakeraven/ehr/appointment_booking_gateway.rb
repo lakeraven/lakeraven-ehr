@@ -2,6 +2,7 @@
 
 require "rpms_rpc/api/patient"
 require "rpms_rpc/api/scheduling"
+require "rpms_rpc/api/scheduling_setup"
 
 module Lakeraven
   module EHR
@@ -31,14 +32,55 @@ module Lakeraven
       # The resource's day: its blocks, and its appointments with their ids and
       # state (BSDX CREATE APPT SCHEDULE). A cancelled appointment frees its
       # place, so only the others count against the slots.
-      def self.day(resource, date, via: ::RpmsRpc::Scheduling)
+      def self.day(resource, date, via: ::RpmsRpc::Scheduling, setup: ::RpmsRpc::SchedulingSetup)
         blocks = Array(via.slot_schedule(resource: resource[:name], start_date: date, end_date: date))
         listed = Array(via.appointments(resource: resource[:name], start_date: date, end_date: date))
-        [ ClinicDay.new(blocks: blocks, appointments: listed.reject { |a| a[:cancelled] }, time_scale: resource[:time_scale]), listed ]
+        rules = rules_for(resource, date, date, setup: setup)
+        [ ClinicDay.new(blocks: blocks, appointments: listed.reject { |a| a[:cancelled] }, time_scale: resource[:time_scale], **rules.call(date)), listed ]
       end
+
+      # The resource's days from from to to, each a ClinicDay, from one read of
+      # the blocks and one of the appointments for the whole range (S-SCH-04).
+      # BSDX SEARCH AVAILABILITY is not used: SEARCH^BSDX24 returns only a
+      # resource's first block and leaves its morning, weekday and type filters
+      # unfinished; the open times come from the blocks, as the day view's do.
+      def self.days(resource, from, to, via: ::RpmsRpc::Scheduling, setup: ::RpmsRpc::SchedulingSetup)
+        blocks = Array(via.slot_schedule(resource: resource[:name], start_date: from, end_date: to)).group_by { |b| b[:start_time].to_date }
+        booked = Array(via.appointments(resource: resource[:name], start_date: from, end_date: to)).reject { |a| a[:cancelled] }.group_by { |a| a[:start_time].to_date }
+        rules = rules_for(resource, from, to, setup: setup)
+        (from..to).to_h do |date|
+          [ date, ClinicDay.new(blocks: blocks.fetch(date, []), appointments: booked.fetch(date, []), time_scale: resource[:time_scale], **rules.call(date)) ]
+        end
+      end
+
+      # The access types the search can be kept to (S-SCH-04.6): those neither
+      # inactive nor preventing access, by name.
+      def self.access_types(setup: ::RpmsRpc::SchedulingSetup)
+        Array(setup.access_types).reject { |t| t[:inactive] || t[:prevent_access] }
+      end
+
+      # What RPMS says about the resource's clinic over from..to, read once for
+      # the range (SchedulingSetup: the clinic's #44 rules, the holidays, the
+      # access types that prevent access), as a function from a date to
+      # ClinicDay's closed:, prevented: and opens_hour:. A resource with no
+      # clinic has no rules. Today is the server's local date, as BSDX times are.
+      def self.rules_for(resource, from, to, setup:)
+        rules = setup.clinic_rules(resource[:hospital_location_id])
+        holidays = Array(setup.holidays(start_date: from, end_date: to)).map { |h| h[:date] }
+        prevented = Array(setup.access_types).select { |t| t[:prevent_access] }.map { |t| t[:id] }
+        today = Time.now.to_date
+        ->(date) { { closed: ClinicDay.closed_on(date, rules: rules, holidays: holidays, today: today), prevented: prevented, opens_hour: rules&.dig(:display_begins) } }
+      end
+      private_class_method :rules_for
 
       def self.appointment(resource, id, date, via: ::RpmsRpc::Scheduling)
         Array(via.appointments(resource: resource[:name], start_date: date, end_date: date)).find { |a| a[:id] == id.to_i }
+      end
+
+      # One patient's appointments across clinics, earliest first (S-SCH-05.6):
+      # BSDX PATIENT APPT DISPLAY, the scheduling client's own list.
+      def self.patient_appointments(dfn, via: ::RpmsRpc::Scheduling)
+        Array(via.patient_appointments(dfn.to_i)).sort_by { |a| a[:start_time] || Time.at(0) }
       end
 
       # Patients whose names start with the text, each with HRN and date of birth.
@@ -60,7 +102,7 @@ module Lakeraven
         return Result.new(status: :booked, appointment_id: reply[:appointment_id], message: nil) if reply[:success]
 
         Result.new(status: :refused, appointment_id: nil, message: reply[:error].to_s)
-      rescue ::RpmsRpc::Client::RpcError, ::RpmsRpc::Client::ConnectionError, IOError, SystemCallError => e
+      rescue ::RpmsRpc::Error, IOError, SystemCallError => e
         Rails.logger.error("[scheduling] booking raised #{e.class}; the outcome is unknown")
         Result.new(status: :unknown, appointment_id: nil, message: nil)
       end
