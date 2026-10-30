@@ -28,6 +28,12 @@ module EnrollmentFhirTestHelpers
     }.merge(overrides))
   end
 
+  def build_enrollment_request_without_service_date(**overrides)
+    request = build_enrollment_request(**overrides)
+    request.service_date = nil
+    request
+  end
+
   ENROLLMENT_ALT_BASE_URL = "https://enrollment-alt.example.test".freeze
 
   def build_enrollment_client(**options)
@@ -60,15 +66,22 @@ module EnrollmentFhirTestHelpers
     item
   end
 
+  def fhir_eligibility_error_item(code:)
+    { code: { coding: [ { code: code.to_s } ] } }
+  end
+
   def fhir_eligibility_response_body(
     patient_dfn: SYNTHETIC_PATIENT_DFN,
     coverage_type: "medicare_b",
     status: "active",
     outcome: "complete",
     insurance: nil,
-    patient: nil
+    patient: nil,
+    serviced_date: :omit,
+    request_reference: :omit,
+    errors: nil
   )
-    {
+    body = {
       resourceType: "CoverageEligibilityResponse",
       id: SecureRandom.uuid,
       status: status,
@@ -82,6 +95,20 @@ module EnrollmentFhirTestHelpers
         )
       ]
     }
+    body[:servicedDate] = serviced_date unless serviced_date == :omit
+    body[:request] = { reference: request_reference } unless request_reference == :omit
+    body[:error] = errors if errors
+    body
+  end
+
+  def fhir_eligibility_response_for_request(request, **overrides)
+    fhir_eligibility_response_body(
+      patient_dfn: request.patient_dfn,
+      coverage_type: request.coverage_type,
+      serviced_date: request.service_date.iso8601,
+      request_reference: "CoverageEligibilityRequest/#{request.id}",
+      **overrides
+    )
   end
 
   def fhir_eligibility_enrolled_body(patient_dfn: SYNTHETIC_PATIENT_DFN, inforce: true, coverage_type: "medicare_b")
@@ -124,19 +151,28 @@ module EnrollmentFhirTestHelpers
     t
   end
 
-  def fhir_coverage_search_bundle(coverages:, next_url: nil, total: nil)
+  def fhir_coverage_search_bundle(coverages:, next_url: nil, total: :auto, bundle_type: "searchset")
     bundle = {
       resourceType: "Bundle",
-      type: "searchset",
-      total: total.nil? ? coverages.length : total,
+      type: bundle_type,
       entry: coverages.map { |resource| { resource: resource } }
     }
+    bundle[:total] = total == :auto ? coverages.length : total unless total == :omit
     bundle[:link] = [ { relation: "next", url: next_url } ] if next_url
     bundle
   end
 
-  def stub_enrollment_coverage_search(coverages:, status: 200, transport: nil, next_url: nil)
-    body = fhir_coverage_search_bundle(coverages: coverages, next_url: next_url)
+  def fhir_empty_coverage_search_bundle_without_total
+    { resourceType: "Bundle", type: "searchset", entry: [] }
+  end
+
+  def stub_enrollment_coverage_search(coverages:, status: 200, transport: nil, next_url: nil, total: :auto, bundle_type: "searchset")
+    body = fhir_coverage_search_bundle(
+      coverages: coverages,
+      next_url: next_url,
+      total: total,
+      bundle_type: bundle_type
+    )
 
     t = transport || @enrollment_transport || RecordingFakeEnrollmentHttpTransport.new
     @enrollment_transport = t
@@ -157,12 +193,20 @@ module EnrollmentFhirTestHelpers
     t
   end
 
-  def sample_medicaid_coverage_resource(beneficiary_dfn: SYNTHETIC_PATIENT_DFN, status: "active", id: "cov-test-1")
+  def sample_medicaid_coverage_resource(
+    beneficiary_dfn: SYNTHETIC_PATIENT_DFN,
+    status: "active",
+    id: "cov-test-1",
+    coverage_type: "medicaid",
+    period: { start: "2026-01-01", end: "2026-12-31" }
+  )
     {
       resourceType: "Coverage",
       id: id,
       status: status,
       beneficiary: { reference: "Patient/#{beneficiary_dfn}" },
+      type: { coding: [ { code: coverage_type } ] },
+      period: period,
       class: [
         {
           type: { coding: [ { system: "http://terminology.hl7.org/CodeSystem/coverage-class", code: "plan" } ] },
@@ -170,6 +214,24 @@ module EnrollmentFhirTestHelpers
         }
       ],
       payor: [ { display: "TEST State Medicaid Payor" } ]
+    }
+  end
+
+  def sample_coverage_resource_with_type_text(
+    coverage_type:,
+    type_text:,
+    beneficiary_dfn: SYNTHETIC_PATIENT_DFN,
+    status: "active",
+    id: "cov-type-text",
+    period: { start: "2026-01-01", end: "2026-12-31" }
+  )
+    {
+      resourceType: "Coverage",
+      id: id,
+      status: status,
+      beneficiary: { reference: "Patient/#{beneficiary_dfn}" },
+      type: { text: type_text },
+      period: period
     }
   end
 

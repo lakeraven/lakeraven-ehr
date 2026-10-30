@@ -10,6 +10,8 @@ module Lakeraven
       include ActiveJob::TestHelper
       include ActiveSupport::Testing::TimeHelpers
 
+      RETRY_ENQUEUE_FAILED_LOG = "Enrollment eligibility retry could not be enqueued"
+
       setup do
         @enrollment_transport = RecordingFakeEnrollmentHttpTransport.new
         @request = build_enrollment_request
@@ -217,6 +219,32 @@ module Lakeraven
         end
       end
 
+      test "returns pending and logs fixed line when retry job enqueue raises without PHI" do
+        with_enrollment_job_adapter do
+          stub_enrollment_eligibility_post_failures(503, 503, 503, transport: @enrollment_transport)
+          client, = build_enrollment_client(http: @enrollment_transport)
+          request_body = @request.to_fhir.to_json
+          original_perform_later = Lakeraven::EHR::EnrollmentEligibilityRetryJob.method(:perform_later)
+          Lakeraven::EHR::EnrollmentEligibilityRetryJob.define_singleton_method(:perform_later) do |*_args, **_kwargs|
+            raise Redis::CannotConnectError, "synthetic queue failure"
+          end
+
+          logs = capture_rails_logs do
+            result = client.check_eligibility(@request)
+            assert result.pending?
+            refute result.enrolled?
+            refute result.not_enrolled?
+          end
+
+          assert_includes logs, RETRY_ENQUEUE_FAILED_LOG
+          refute_includes logs, SYNTHETIC_PATIENT_DFN
+          refute_includes logs, SYNTHETIC_BEARER_TOKEN
+          refute_includes logs, request_body
+        ensure
+          Lakeraven::EHR::EnrollmentEligibilityRetryJob.define_singleton_method(:perform_later, original_perform_later)
+        end
+      end
+
       test "does not retry non-429 4xx responses" do
         stub_enrollment_eligibility_post(body: { resourceType: "OperationOutcome" }, status: 400, transport: @enrollment_transport)
         client, _, _, transport = build_enrollment_client(http: @enrollment_transport)
@@ -270,8 +298,9 @@ module Lakeraven
         assert_equal "TEST State Medicaid Payor", coverages.first.dig("payor", 0, "display")
       end
 
-      test "coverage_for empty search result returns empty array without claiming absent coverage" do
-        stub_enrollment_coverage_search(coverages: [], transport: @enrollment_transport)
+      test "coverage_for searchset with no entry and no total returns empty array without verifying absence" do
+        bundle = fhir_empty_coverage_search_bundle_without_total
+        stub_enrollment_coverage_search_pages([ bundle ], transport: @enrollment_transport)
         client, = build_enrollment_client(http: @enrollment_transport)
 
         coverages = client.coverage_for(patient_dfn: SYNTHETIC_PATIENT_DFN, coverage_type: "medicaid")
@@ -334,6 +363,88 @@ module Lakeraven
         client, = build_enrollment_client(http: @enrollment_transport)
 
         assert client.check_eligibility(@request).error?
+      end
+
+      # --- Round-3 spec: response must answer this request ------------------------
+
+      test "2xx response with servicedDate for a different service date yields error and is not cached" do
+        stub_enrollment_eligibility_post(
+          body: fhir_eligibility_response_body(serviced_date: "2026-04-01"),
+          transport: @enrollment_transport
+        )
+        client, cache, _, = build_enrollment_client(http: @enrollment_transport)
+
+        result = client.check_eligibility(@request)
+
+        assert result.error?
+        assert_empty memory_cache_keys(cache)
+      end
+
+      test "2xx response with request reference for another CoverageEligibilityRequest yields error" do
+        stub_enrollment_eligibility_post(
+          body: fhir_eligibility_response_body(
+            request_reference: "CoverageEligibilityRequest/#{SecureRandom.uuid}"
+          ),
+          transport: @enrollment_transport
+        )
+        client, cache, _, = build_enrollment_client(http: @enrollment_transport)
+
+        result = client.check_eligibility(@request)
+
+        assert result.error?
+        assert_empty memory_cache_keys(cache)
+      end
+
+      test "2xx response with matching servicedDate and request reference yields enrolled" do
+        request = build_enrollment_request
+        stub_enrollment_eligibility_post(
+          body: fhir_eligibility_response_for_request(request),
+          transport: @enrollment_transport
+        )
+        client, = build_enrollment_client(http: @enrollment_transport)
+
+        assert client.check_eligibility(request).enrolled?
+      end
+
+      # --- Round-3 spec: CoverageEligibilityResponse.error[] ----------------------
+
+      test "2xx response with transient AAA error code yields pending retry and is not cached" do
+        transient_code = Lakeraven::EHR::CoverageEligibilityResponse::TRANSIENT_ERROR_CODES.first
+        with_enrollment_job_adapter do
+          stub_enrollment_eligibility_post(
+            body: fhir_eligibility_response_body(
+              outcome: "complete",
+              errors: [ fhir_eligibility_error_item(code: transient_code) ]
+            ),
+            transport: @enrollment_transport
+          )
+          client, cache, _, = build_enrollment_client(http: @enrollment_transport)
+
+          assert_enqueued_with(job: Lakeraven::EHR::EnrollmentEligibilityRetryJob) do
+            result = client.check_eligibility(@request)
+            assert result.pending?
+            refute result.enrolled?
+            refute result.not_enrolled?
+          end
+          assert_empty memory_cache_keys(cache)
+        end
+      end
+
+      test "2xx response with non-transient error code yields error and is not cached" do
+        stub_enrollment_eligibility_post(
+          body: fhir_eligibility_response_body(
+            outcome: "complete",
+            errors: [ fhir_eligibility_error_item(code: "99") ]
+          ),
+          transport: @enrollment_transport
+        )
+        client, cache, _, = build_enrollment_client(http: @enrollment_transport)
+
+        result = client.check_eligibility(@request)
+
+        assert result.error?
+        refute result.enrolled?
+        assert_empty memory_cache_keys(cache)
       end
 
       # --- Round-1 spec: coverage type matching on insurance items -----------------
@@ -618,6 +729,71 @@ module Lakeraven
         assert client.check_eligibility(@request).enrolled?
       end
 
+      test "benefit period start after end yields error not not_enrolled" do
+        stub_enrollment_eligibility_post(
+          body: fhir_eligibility_response_body(
+            insurance: [
+              fhir_eligibility_insurance_item(
+                coverage_type: "medicare_b",
+                inforce: true,
+                benefit_period: { start: "2026-12-01", end: "2026-01-01" }
+              )
+            ]
+          ),
+          transport: @enrollment_transport
+        )
+        client, cache, _, = build_enrollment_client(http: @enrollment_transport)
+
+        result = client.check_eligibility(@request)
+
+        assert result.error?
+        refute result.not_enrolled?
+        assert_empty memory_cache_keys(cache)
+      end
+
+      test "benefitPeriod on matching insurance yields error when request has no service_date" do
+        request = build_enrollment_request_without_service_date
+        stub_enrollment_eligibility_post(
+          body: fhir_eligibility_response_body(
+            insurance: [
+              fhir_eligibility_insurance_item(
+                coverage_type: "medicare_b",
+                inforce: true,
+                benefit_period: { start: "2026-01-01", end: "2026-12-31" }
+              )
+            ]
+          ),
+          transport: @enrollment_transport
+        )
+        client, = build_enrollment_client(http: @enrollment_transport)
+
+        result = client.check_eligibility(request)
+
+        assert result.error?
+        refute result.not_enrolled?
+      end
+
+      test "benefitPeriod dateTime values are compared by calendar date for the service date" do
+        stub_enrollment_eligibility_post(
+          body: fhir_eligibility_response_body(
+            insurance: [
+              fhir_eligibility_insurance_item(
+                coverage_type: "medicare_b",
+                inforce: true,
+                benefit_period: {
+                  start: "2026-01-01T00:00:00Z",
+                  end: "2026-12-31T23:59:59Z"
+                }
+              )
+            ]
+          ),
+          transport: @enrollment_transport
+        )
+        client, = build_enrollment_client(http: @enrollment_transport)
+
+        assert client.check_eligibility(@request).enrolled?
+      end
+
       # --- Round-1 spec: malformed insurance and transport errors -----------------
 
       test "non-Hash insurance entry yields error without raising from check_eligibility" do
@@ -690,6 +866,131 @@ module Lakeraven
 
         assert_equal 1, coverages.length
         assert_equal "cov-active", coverages.first["id"]
+      end
+
+      test "coverage_for excludes Coverage whose type coding does not match requested coverage_type" do
+        stub_enrollment_coverage_search(
+          coverages: [
+            sample_medicaid_coverage_resource(id: "cov-wrong-type", coverage_type: "medicare_b"),
+            sample_medicaid_coverage_resource(id: "cov-match", coverage_type: "medicaid")
+          ],
+          transport: @enrollment_transport
+        )
+        client, = build_enrollment_client(http: @enrollment_transport)
+
+        coverages = client.coverage_for(patient_dfn: SYNTHETIC_PATIENT_DFN, coverage_type: "medicaid")
+
+        assert_equal 1, coverages.length
+        assert_equal "cov-match", coverages.first["id"]
+      end
+
+      test "coverage_for matches requested coverage_type against type.text case-insensitively" do
+        stub_enrollment_coverage_search(
+          coverages: [
+            sample_coverage_resource_with_type_text(
+              coverage_type: "medicaid",
+              type_text: "Medicaid",
+              id: "cov-text-match"
+            )
+          ],
+          transport: @enrollment_transport
+        )
+        client, = build_enrollment_client(http: @enrollment_transport)
+
+        coverages = client.coverage_for(patient_dfn: SYNTHETIC_PATIENT_DFN, coverage_type: "medicaid")
+
+        assert_equal 1, coverages.length
+        assert_equal "cov-text-match", coverages.first["id"]
+      end
+
+      test "coverage_for excludes Coverage whose period ended before today" do
+        travel_to Time.zone.local(2026, 6, 15, 12, 0, 0) do
+          stub_enrollment_coverage_search(
+            coverages: [
+              sample_medicaid_coverage_resource(
+                id: "cov-expired",
+                period: { start: "2026-01-01", end: "2026-05-31" }
+              ),
+              sample_medicaid_coverage_resource(
+                id: "cov-current",
+                period: { start: "2026-01-01", end: "2026-12-31" }
+              )
+            ],
+            transport: @enrollment_transport
+          )
+          client, = build_enrollment_client(http: @enrollment_transport)
+
+          coverages = client.coverage_for(patient_dfn: SYNTHETIC_PATIENT_DFN, coverage_type: "medicaid")
+
+          assert_equal 1, coverages.length
+          assert_equal "cov-current", coverages.first["id"]
+        end
+      end
+
+      test "coverage_for excludes Coverage whose period starts after today" do
+        travel_to Time.zone.local(2026, 6, 15, 12, 0, 0) do
+          stub_enrollment_coverage_search(
+            coverages: [
+              sample_medicaid_coverage_resource(
+                id: "cov-future",
+                period: { start: "2026-07-01", end: "2026-12-31" }
+              )
+            ],
+            transport: @enrollment_transport
+          )
+          client, = build_enrollment_client(http: @enrollment_transport)
+
+          coverages = client.coverage_for(patient_dfn: SYNTHETIC_PATIENT_DFN, coverage_type: "medicaid")
+
+          assert_equal [], coverages
+        end
+      end
+
+      test "coverage_for raises ClientError when bundle type is not searchset" do
+        stub_enrollment_coverage_search(
+          coverages: [ sample_medicaid_coverage_resource ],
+          transport: @enrollment_transport,
+          bundle_type: "collection"
+        )
+        client, = build_enrollment_client(http: @enrollment_transport)
+
+        assert_raises(Lakeraven::EHR::EnrollmentFHIRClient::ClientError) do
+          client.coverage_for(patient_dfn: SYNTHETIC_PATIENT_DFN, coverage_type: "medicaid")
+        end
+      end
+
+      test "coverage_for follows relative next link starting with slash on the enrollment origin" do
+        page_one = fhir_coverage_search_bundle(
+          coverages: [ sample_medicaid_coverage_resource(id: "cov-relative-slash") ],
+          next_url: "/Coverage?page=2"
+        )
+        page_two = fhir_coverage_search_bundle(
+          coverages: [ sample_medicaid_coverage_resource(id: "cov-relative-slash-page-2") ]
+        )
+        stub_enrollment_coverage_search_pages([ page_one, page_two ], transport: @enrollment_transport)
+        client, _, _, transport = build_enrollment_client(http: @enrollment_transport)
+
+        coverages = client.coverage_for(patient_dfn: SYNTHETIC_PATIENT_DFN, coverage_type: "medicaid")
+
+        assert_equal 2, coverages.length
+        assert_equal 2, transport.gets_starting_with("#{ENROLLMENT_BASE_URL}/Coverage").length
+      end
+
+      test "coverage_for follows relative next link without leading slash on the enrollment origin" do
+        page_one = fhir_coverage_search_bundle(
+          coverages: [ sample_medicaid_coverage_resource(id: "cov-relative-bare") ],
+          next_url: "Coverage?page=2"
+        )
+        page_two = fhir_coverage_search_bundle(
+          coverages: [ sample_medicaid_coverage_resource(id: "cov-relative-bare-page-2") ]
+        )
+        stub_enrollment_coverage_search_pages([ page_one, page_two ], transport: @enrollment_transport)
+        client, _, _, transport = build_enrollment_client(http: @enrollment_transport)
+
+        coverages = client.coverage_for(patient_dfn: SYNTHETIC_PATIENT_DFN, coverage_type: "medicaid")
+
+        assert_equal 2, coverages.length
+        assert_equal 2, transport.gets_starting_with("#{ENROLLMENT_BASE_URL}/Coverage").length
       end
 
       test "coverage_for raises ClientError when bundle includes OperationOutcome with error severity" do

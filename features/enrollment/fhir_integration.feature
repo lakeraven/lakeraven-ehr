@@ -60,3 +60,8 @@ Feature: Enrollment FHIR integration
     Given the enrollment service returns in-force Medicare Part B through benefit period end "2026-02"
     When I check Medicare Part B eligibility for patient "900001" on "2026-03-15"
     Then the eligibility outcome should be not enrolled
+
+  Scenario: Eligibility response servicedDate must match the requested service date
+    Given the enrollment service returns in-force Medicare for patient "900001" with servicedDate "2026-04-01"
+    When I check Medicare Part B eligibility for patient "900001" on "2026-03-15"
+    Then the eligibility outcome should be error

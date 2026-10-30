@@ -49,6 +49,22 @@ Given("the enrollment service is unavailable for eligibility checks") do
   )
 end
 
+Given("the enrollment service returns in-force Medicare for patient {string} with servicedDate {string}") do |dfn, serviced_date|
+  stub_enrollment_eligibility_post(
+    body: fhir_eligibility_response_body(
+      patient_dfn: dfn,
+      coverage_type: "medicare_b",
+      serviced_date: serviced_date
+    ),
+    transport: @enrollment_transport
+  )
+  @enrollment_client, @enrollment_cache, @enrollment_sleep_log, @enrollment_transport = build_enrollment_client(
+    http: @enrollment_transport,
+    cache: @enrollment_cache,
+    sleep_log: @enrollment_sleep_log
+  )
+end
+
 Given("the enrollment service returns in-force Medicare for patient {string}") do |dfn|
   stub_enrollment_eligibility_post(
     body: fhir_eligibility_enrolled_body(patient_dfn: dfn, coverage_type: "medicare_b"),

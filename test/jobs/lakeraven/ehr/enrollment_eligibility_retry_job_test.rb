@@ -10,6 +10,7 @@ module Lakeraven
       include ActiveJob::TestHelper
 
       RETRY_SKIPPED_LOG = "Enrollment eligibility retry skipped: client is not configured"
+      RETRY_ENDPOINT_CHANGED_LOG = "Enrollment eligibility retry skipped: endpoint changed"
       RETRY_ERROR_LOG = "Enrollment eligibility retry received error outcome"
       RETRY_EXHAUSTED_LOG = "Enrollment eligibility retry exhausted without terminal outcome"
 
@@ -138,7 +139,10 @@ module Lakeraven
         end
       end
 
-      test "perform uses job base_url argument for the eligibility endpoint when configured adapter is EnrollmentFHIRClient" do
+      # Round-3 spec (replaces round-2 rule that job uses its base_url argument): retry
+      # only calls the currently configured endpoint; a mismatched queued base_url
+      # is skipped without sending PHI or the token to the stale host.
+      test "perform logs endpoint changed and makes no request when job base_url differs from configured adapter" do
         alt_transport = RecordingFakeEnrollmentHttpTransport.new
         stub_enrollment_eligibility_post(
           body: fhir_eligibility_enrolled_body,
@@ -148,10 +152,25 @@ module Lakeraven
         Lakeraven::EHR.configuration.eligibility_adapter = primary_client
         args = @job_args.merge(base_url: ENROLLMENT_ALT_BASE_URL)
 
-        EnrollmentEligibilityRetryJob.perform_now(**args)
+        logs = capture_rails_logs do
+          EnrollmentEligibilityRetryJob.perform_now(**args)
+        end
 
-        assert_equal 1, alt_transport.posts_to(enrollment_eligibility_post_url_for(ENROLLMENT_ALT_BASE_URL)).length
+        assert_includes logs, RETRY_ENDPOINT_CHANGED_LOG
+        assert_empty alt_transport.posts_to(enrollment_eligibility_post_url_for(ENROLLMENT_ALT_BASE_URL))
         assert_empty @enrollment_transport.posts_to(enrollment_eligibility_post_url)
+        refute_includes logs, SYNTHETIC_PATIENT_DFN
+        refute_includes logs, SYNTHETIC_BEARER_TOKEN
+      end
+
+      test "perform uses configured adapter endpoint when job base_url matches" do
+        stub_enrollment_eligibility_post(body: fhir_eligibility_enrolled_body, transport: @enrollment_transport)
+        adapter_client, = build_enrollment_client(http: @enrollment_transport, schedule_retry: false)
+        Lakeraven::EHR.configuration.eligibility_adapter = adapter_client
+
+        EnrollmentEligibilityRetryJob.perform_now(**@job_args)
+
+        assert_equal 1, @enrollment_transport.posts_to(enrollment_eligibility_post_url).length
       end
 
       test "perform falls back to configured adapter base_url when job base_url is nil" do
