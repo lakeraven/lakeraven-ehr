@@ -7,7 +7,9 @@ gemspec
 if ENV["RPMS_RPC_PATH"]
   gem "rpms-rpc", path: ENV["RPMS_RPC_PATH"]
 else
-  # Pinned to rpms-rpc main f132143: Scheduling.patient_appointments, one patient's
+  # Pinned to rpms-rpc main a40dec0: CiaClient#poll keeps a broker session open, and
+  # Authentication.timed_read names the user's idle limit (rpms-rpc#508). Earlier, f132143:
+  # Scheduling.patient_appointments, one patient's
   # appointments across clinics (BSDX PATIENT APPT DISPLAY; rpms-rpc#505). Earlier, 02444ff:
   # Registration runs AG's own field checks
   # (AGG WINDOW DATA VALIDATION) before it files, and takes no_ssn_reason (rpms-rpc#503,
@@ -27,7 +29,7 @@ else
   # (lakeraven-ehr#540), invented RPC names removed (#310/#311), typed errors for
   # a missing RPC (#370), the user class from ORWU USERINFO (#236). A fixed ref
   # rather than branch:main so the pin does not drift mid-merge.
-  gem "rpms-rpc", github: "lakeraven/rpms-rpc", ref: "f132143"
+  gem "rpms-rpc", github: "lakeraven/rpms-rpc", ref: "a40dec0"
 end
 
 gem "puma"
