@@ -55,13 +55,17 @@ module Lakeraven
         # so does this. Establishing no session is the fail-closed answer
         # until the change flow exists (#493 tracks building it).
         if provider[:verify_needs_change]
+          provider[:client]&.disconnect
           terminate_session!
           flash.now[:alert] = "Your verify code must be changed before you can sign in."
           return render :new, status: :forbidden
         end
 
         LoginThrottle.clear_account(access_code)
-        establish_session(provider)
+        pool_key = adopt_connection(provider)
+        return render_at_capacity if pool_key == :full
+
+        establish_session(provider, pool_key)
         redirect_to dashboard_path
       end
 
@@ -106,13 +110,34 @@ module Lakeraven
         render :new, status: :too_many_requests
       end
 
+      # Hold the user's own RPMS connection for this session (ADR 0011), and
+      # return its key; nil when this process does not pool connections (a mock).
+      # A pool full of users in mid-request refuses the sign-in rather than share
+      # or evict a connection in use; :full says so, and the connection closes.
+      def adopt_connection(provider)
+        client = provider[:client]
+        return nil unless client
+
+        RpmsSessions.adopt(client)
+      rescue RpmsRpc::SessionPool::PoolExhaustedError
+        client.disconnect
+        :full
+      end
+
+      def render_at_capacity
+        flash.now[:alert] = "RPMS is at capacity right now. Try again shortly."
+        render :new, status: :service_unavailable
+      end
+
       def render_broker_unavailable
         flash.now[:alert] = "RPMS is not reachable right now. Try again shortly."
         render :new, status: :service_unavailable
       end
 
-      def establish_session(provider)
+      def establish_session(provider, pool_key = nil)
         reset_session
+        # The key to this user's own RPMS connection (RpmsSessions).
+        session[:rpms_pool_key] = pool_key
         session[:duz] = provider[:duz]
         session[:user_name] = provider[:name]
         session[:user_type] = provider[:user_type].to_s

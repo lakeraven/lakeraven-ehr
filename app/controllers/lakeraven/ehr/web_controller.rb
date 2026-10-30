@@ -11,6 +11,7 @@ module Lakeraven
       # need no row and are not refused one; see `audit_settled?`.
       include AuditableClinicalAccess
       include PatientBannerRendering
+      include RpmsUserScope
 
       helper ApplicationHelper
       layout "lakeraven/ehr/application"
@@ -78,13 +79,10 @@ module Lakeraven
         keep_rpms_session_alive!
       end
 
-      # Keep the broker session open for as long as the user may sit idle
-      # (BrokerKeepAlive). Not in the test suite, whose client is a mock.
+      # Keep this user's RPMS connection open for as long as they may sit idle;
+      # the pool's keeper ends it after (RpmsSessions, SessionPool#touch).
       def keep_rpms_session_alive!
-        return if Rails.env.test?
-
-        BrokerKeepAlive.instance.touch!(session_idle_limit)
-        BrokerKeepAlive.instance.start!
+        RpmsSessions.touch(session[:rpms_pool_key], idle_for: session_idle_limit) if RpmsSessions.enabled?
       end
 
       # RPMS ends an idle broker session on its own clock, and the session was
@@ -93,6 +91,8 @@ module Lakeraven
       # ends too and the user signs in again (a new connection). Pages that read
       # nothing from RPMS stop loading as if it were still there.
       def rpms_connection_closed?
+        return !RpmsSessions.held?(session[:rpms_pool_key]) if RpmsSessions.enabled?
+
         client = RpmsRpc.configuration.client
         client.respond_to?(:connected?) && !client.connected?
       end
@@ -107,6 +107,7 @@ module Lakeraven
       # different human signing in at this workstation.
       def terminate_session!
         revoke_session_token!
+        RpmsSessions.release(session[:rpms_pool_key]) if RpmsSessions.enabled?
         reset_session
       end
 

@@ -65,8 +65,18 @@ module Lakeraven
           return
         end
 
-        client = RpmsRpc.client_for(settings[:broker], host: settings[:host], port: settings[:port])
-        RpmsRpc.configure { |c| c.client = client }
+        # Every signed-in user gets a connection of their own (ADR 0011,
+        # RpmsSessions); the web process holds no shared client, so a request
+        # outside its user's scope reaches no RPMS at all. The test
+        # environment's live suite (LIVE_RPMS=1) signs one shared client on
+        # itself and drives gateways directly, so it keeps one; its pooled
+        # path is tested on its own.
+        factory = -> { RpmsRpc.client_for(settings[:broker], host: settings[:host], port: settings[:port]) }
+        if Rails.env.test?
+          RpmsRpc.configure { |c| c.client = factory.call }
+        else
+          RpmsSessions.configure!(factory: factory, max_sessions: Integer(settings[:max_sessions] || 64))
+        end
       end
 
       initializer "lakeraven-ehr.inflections" do
