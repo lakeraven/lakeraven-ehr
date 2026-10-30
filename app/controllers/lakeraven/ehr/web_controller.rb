@@ -42,6 +42,7 @@ module Lakeraven
           terminate_session!
           return redirect_to login_path, alert: "Your session timed out. Please sign in again."
         end
+        return end_session_for_closed_rpms! if session[:duz].present? && rpms_connection_closed?
 
         return touch_session! if session[:duz].present?
 
@@ -58,6 +59,21 @@ module Lakeraven
 
       def touch_session!
         session[:last_seen_at] = Time.current.to_i
+      end
+
+      # RPMS ends an idle broker session on its own clock, and the session was
+      # bound at sign-on with the user's codes, which this app does not keep. A
+      # closed connection cannot be reopened for them, so the browser session
+      # ends too and the user signs in again (a new connection). Pages that read
+      # nothing from RPMS stop loading as if it were still there.
+      def rpms_connection_closed?
+        client = RpmsRpc.configuration.client
+        client.respond_to?(:connected?) && !client.connected?
+      end
+
+      def end_session_for_closed_rpms!
+        terminate_session!
+        redirect_to login_path, alert: "Your RPMS session ended. Sign in again."
       end
 
       # End the session AND kill the credential it was carrying. Used by
@@ -80,6 +96,23 @@ module Lakeraven
 
       def current_security_keys
         Array(session[:security_keys])
+      end
+
+      # Whether the signed-in user holds the named capability (Capabilities,
+      # ADR 0010), from the keys RPMS reported at sign-on. Views ask the same
+      # question, so a control a user sees is one the server allows.
+      def capability?(name)
+        Capabilities.allows?(current_security_keys, name)
+      end
+      helper_method :capability?
+
+      # Refuse the request unless the user holds the capability: the one
+      # server-side check every screen's before_action uses.
+      def require_capability!(name)
+        return if capability?(name)
+
+        note_audit_denial("browser access refused: lacks #{name}")
+        head :forbidden
       end
     end
   end

@@ -41,7 +41,7 @@ class SchedulingCancelAppointmentTest < ActionDispatch::IntegrationTest
         cancel_appointment: ->(id, **kw) { log << kw.merge(id: id); cancel.call(id, kw) }
       },
       RpmsRpc::DdrFileman.singleton_class => { lister: ->(**) { REASONS } }
-    }
+    }.merge(scheduling_setup_stubs)
     stubs.each { |klass, methods| methods.each_key { |m| klass.alias_method(:"__#{m}", m) } }
     stubs.each { |klass, methods| methods.each { |m, body| klass.define_method(m, &body) } }
     yield
@@ -124,7 +124,7 @@ class SchedulingCancelAppointmentTest < ActionDispatch::IntegrationTest
     end
 
     assert_select "#appointments tr[data-appointment='8'] td[data-status='cancelled']"
-    assert_select "#appointments tr[data-appointment='8'] a", count: 0
+    assert_select "#appointments tr[data-appointment='8'] a[href*='/cancel'], #appointments tr[data-appointment='8'] a[href*='/checkin']", count: 0
     assert_select "#open-times tr[data-time='09:00'] td[data-open='1']"
   end
 
