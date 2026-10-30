@@ -12,7 +12,7 @@ class AuthenticationServiceCiaTest < ActiveSupport::TestCase
   # A CiaClient with the wire replaced: records what the service asked of it
   # and answers the sign-on the way CiaClient#authenticate does.
   class FakeCiaClient < RpmsRpc::CiaClient
-    attr_reader :signons, :rpcs
+    attr_reader :signons, :rpcs, :callers
 
     def initialize(greeting: "MANAGER,SYSTEM signed on.  Good evening", reject: false, denied: [])
       super(host: "127.0.0.1", port: 9100)
@@ -21,15 +21,19 @@ class AuthenticationServiceCiaTest < ActiveSupport::TestCase
       @denied = denied
       @signons = []
       @rpcs = []
+      @callers = []
       @connected = false
     end
 
     def connect(*) = (@connected = true)
     def connected? = @connected
 
-    def authenticate(access_code, verify_code, **)
+    def authenticate(access_code, verify_code, **caller)
       @signons << [ access_code, verify_code ]
+      @callers << caller
       raise RpmsRpc::Client::AuthenticationError, "CIA sign-on rejected" if @reject
+
+      @session_uid = "405"
 
       { success: true, user: "PROVIDER,TEST", duz: 77, greeting: @greeting }
     end
@@ -123,6 +127,27 @@ class AuthenticationServiceCiaTest < ActiveSupport::TestCase
   end
 
   private
+
+# docs/identity-passthrough.md: RPMS records the workstation and the
+# browser's address against the sign-on, and the CIA session it opened is
+# kept so audit rows can lead to it.
+test "tells RPMS the workstation and the browser's address, and keeps the CIA session" do
+  client = use(FakeCiaClient.new)
+
+  result = service.authenticate(access_code: "PROV123", verify_code: "VERIFY", client_ip: "203.0.113.9")
+
+  assert_equal [ { workstation: Lakeraven::EHR::AuthenticationService.workstation, workstation_ip: "203.0.113.9" } ], client.callers
+  assert_match(/\Alakeraven-ehr /, Lakeraven::EHR::AuthenticationService.workstation)
+  assert_equal "405", result.value[:rpms_session_id]
+end
+
+test "without a browser address, none is sent" do
+  client = use(FakeCiaClient.new)
+
+  service.authenticate(access_code: "PROV123", verify_code: "VERIFY")
+
+  assert_nil client.callers.first[:workstation_ip]
+end
 
   def service = Lakeraven::EHR::AuthenticationService.new
 
