@@ -65,8 +65,12 @@ class SmartV2ScopesTest < ActionDispatch::IntegrationTest
         # A create can also need read scope for what it hands back
         # (discloses_clinical_data); the companion supplies that, and the
         # refusal without the scope under test shows the scope is what
-        # passes the check.
-        companion = permission == "c" ? [ "system/*.rs" ] : []
+        # passes the check. A Group read lists Patient references (#216), so
+        # it also needs Patient read; Patient read alone still lacks Group
+        # read and is refused.
+        companion = []
+        companion << "system/*.rs" if permission == "c"
+        companion << "system/Patient.rs" if permission == "r" && target == "Group"
         token = grant(([ scope ] + companion).uniq)
         perform(token, interaction, target)
         refute_includes [ 401, 403 ], response.status, "#{scope} on #{interaction} #{target}: #{response.body}"

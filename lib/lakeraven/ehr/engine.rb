@@ -74,6 +74,10 @@ module Lakeraven
           inflect.acronym "EHR"
           inflect.acronym "FHIR"
         end
+
+        # The FHIR acronym would camelize this file to FHIRGroupMember.
+        # The cohort model is FhirGroupMember (#216).
+        Rails.autoloaders.main.inflector.inflect("fhir_group_member" => "FhirGroupMember")
       end
 
       # The dummy app lives inside this engine and never copies migrations via

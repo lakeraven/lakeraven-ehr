@@ -52,6 +52,10 @@ module Lakeraven
           "Patient" => { interactions: %w[read search-type create], source: "RPMS, through rpms-rpc." },
           "Practitioner" => { interactions: %w[read search-type], source: "RPMS, through rpms-rpc." },
           "Organization" => { interactions: %w[read], source: "RPMS, through rpms-rpc." },
+          "Group" => {
+            interactions: %w[read],
+            source: "Bulk-export cohort membership stored by this server. RPMS has no FHIR Group."
+          },
           "Location" => { interactions: %w[read], source: "RPMS, through rpms-rpc." },
           "AllergyIntolerance" => {
             interactions: %w[search-type],

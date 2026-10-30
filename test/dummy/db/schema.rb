@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_27_000000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_29_000000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -120,6 +120,16 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_27_000000) do
     t.index [ "accessed_by" ], name: "index_lakeraven_ehr_emergency_accesses_on_accessed_by"
     t.index [ "expires_at" ], name: "index_lakeraven_ehr_emergency_accesses_on_expires_at"
     t.index [ "patient_dfn" ], name: "index_lakeraven_ehr_emergency_accesses_on_patient_dfn"
+  end
+
+  create_table "lakeraven_ehr_fhir_group_members", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "group_id", null: false
+    t.string "patient_dfn", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "group_id", "patient_dfn" ], name: "index_lakeraven_ehr_fhir_group_members_on_group_patient", unique: true
+    t.check_constraint "group_id::text ~ '^[A-Za-z0-9.-]{1,64}$'::text", name: "fhir_group_member_group_id_fhir_id"
+    t.check_constraint "patient_dfn::text ~ '^[1-9][0-9]*$'::text", name: "fhir_group_member_patient_dfn_format"
   end
 
   create_table "lakeraven_ehr_launch_contexts", force: :cascade do |t|
