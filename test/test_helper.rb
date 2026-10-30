@@ -21,6 +21,7 @@ require_relative "support/global_store_isolation"
 require_relative "support/host_role_expectations"
 require_relative "support/fake_gateway"
 require_relative "support/stub_helpers"
+require_relative "support/scheduling_setup_stubs"
 require_relative "support/registration_form_helper"
 require_relative "support/ihs_feature_availability_test_helper"
 require "rpms_rpc/mock_client"
@@ -343,3 +344,4 @@ end
 
 ActiveSupport::TestCase.include GlobalStoreIsolation
 ActiveSupport::TestCase.include StubHelpers
+ActiveSupport::TestCase.include SchedulingSetupStubs
