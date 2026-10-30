@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require "webmock/minitest"
+require_relative "recording_fake_enrollment_http_transport"
 require "active_job/test_helper"
 
 module EnrollmentFhirTestHelpers
@@ -32,16 +32,20 @@ module EnrollmentFhirTestHelpers
     cache = options.delete(:cache) || ActiveSupport::Cache.lookup_store(:memory_store)
     sleeps = options.delete(:sleep_log) || []
     sleeper = options.delete(:sleeper) || ->(seconds) { sleeps << seconds }
-    client = Lakeraven::EHR::EnrollmentFhirClient.new(
+    transport = options.delete(:http) || @enrollment_transport || RecordingFakeEnrollmentHttpTransport.new
+    @enrollment_transport = transport
+    ttl = options.key?(:ttl) ? options.delete(:ttl) : 24.hours
+    client = Lakeraven::EHR::EnrollmentFHIRClient.new(
       base_url: ENROLLMENT_BASE_URL,
       token: SYNTHETIC_BEARER_TOKEN,
       cache: cache,
-      ttl: 24.hours,
+      ttl: ttl,
       max_attempts: 3,
       sleeper: sleeper,
+      http: transport,
       **options
     )
-    [ client, cache, sleeps ]
+    [ client, cache, sleeps, transport ]
   end
 
   def fhir_eligibility_enrolled_body(patient_dfn: SYNTHETIC_PATIENT_DFN, inforce: true)
@@ -64,22 +68,26 @@ module EnrollmentFhirTestHelpers
     }
   end
 
-  def stub_enrollment_eligibility_post(body:, status: 200)
-    stub_request(:post, enrollment_eligibility_post_url)
-      .with(
-        headers: {
-          "Content-Type" => "application/fhir+json",
-          "Authorization" => "Bearer #{SYNTHETIC_BEARER_TOKEN}"
-        }
+  def stub_enrollment_eligibility_post(body:, status: 200, transport: nil)
+    t = transport || @enrollment_transport || RecordingFakeEnrollmentHttpTransport.new
+    @enrollment_transport = t
+    t.queue_post(
+      RecordingFakeEnrollmentHttpTransport::Response.new(
+        code: status,
+        body: body.is_a?(String) ? body : body.to_json
       )
-      .to_return(
-        status: status,
-        body: body.is_a?(String) ? body : body.to_json,
-        headers: { "Content-Type" => "application/fhir+json" }
-      )
+    )
+    t
   end
 
-  def stub_enrollment_coverage_search(coverages:, status: 200)
+  def stub_enrollment_eligibility_post_failures(*statuses, transport: nil)
+    t = transport || @enrollment_transport || RecordingFakeEnrollmentHttpTransport.new
+    @enrollment_transport = t
+    statuses.each { |status| t.queue_post(status: status, body: "") }
+    t
+  end
+
+  def stub_enrollment_coverage_search(coverages:, status: 200, transport: nil)
     body =
       if coverages.empty?
         { resourceType: "Bundle", type: "searchset", total: 0, entry: [] }
@@ -92,9 +100,12 @@ module EnrollmentFhirTestHelpers
         }
       end
 
-    stub_request(:get, enrollment_coverage_search_url)
-      .with(query: hash_including("patient" => SYNTHETIC_PATIENT_DFN, "type" => "medicaid"))
-      .to_return(status: status, body: body.to_json, headers: { "Content-Type" => "application/fhir+json" })
+    t = transport || @enrollment_transport || RecordingFakeEnrollmentHttpTransport.new
+    @enrollment_transport = t
+    t.queue_get(
+      RecordingFakeEnrollmentHttpTransport::Response.new(code: status, body: body.to_json)
+    )
+    t
   end
 
   def sample_medicaid_coverage_resource
