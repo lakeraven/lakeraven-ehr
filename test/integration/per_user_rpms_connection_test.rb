@@ -68,7 +68,7 @@ class PerUserRpmsConnectionTest < ActionDispatch::IntegrationTest
       sched.alias_method(:resources, :__resources)
       sched.remove_method(:__resources)
     end
-    Lakeraven::EHR::RpmsSessions.reset!
+    # The pool itself is reset before every test (GlobalStoreIsolation).
   end
 
   def sign_in(access_code)
