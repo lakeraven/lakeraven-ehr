@@ -11,6 +11,8 @@ module GlobalStoreIsolation
     -> { Lakeraven::EHR::ProvenanceStore.reset_instance! },
     -> { Lakeraven::EHR::ExportsController.reset_store! },
     -> { Lakeraven::EHR::LoginThrottle.reset! },
+    # The per-user RPMS connection pool (#585), once the engine has one.
+    -> { Lakeraven::EHR::RpmsSessions.reset! if defined?(Lakeraven::EHR::RpmsSessions) },
     -> { Lakeraven::EHR::ClinicalDecisionSupportService.rule_overrides.clear },
     -> { Lakeraven::EHR::EncounterStore.reset_instance! },
     -> { Lakeraven::EHR::MedicationStore.reset_instance! },
