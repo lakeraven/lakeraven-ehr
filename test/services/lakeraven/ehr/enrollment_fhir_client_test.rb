@@ -287,6 +287,469 @@ module Lakeraven
           client.coverage_for(patient_dfn: SYNTHETIC_PATIENT_DFN, coverage_type: "medicaid")
         end
       end
+
+      # --- Round-1 spec: patient reference must match requested DFN exactly --------
+
+      test "2xx response with no patient element yields error not a coverage answer" do
+        body = fhir_eligibility_enrolled_body
+        body.delete(:patient)
+        stub_enrollment_eligibility_post(body: body, transport: @enrollment_transport)
+        client, cache, _, = build_enrollment_client(http: @enrollment_transport)
+
+        result = client.check_eligibility(@request)
+
+        assert result.error?
+        refute result.enrolled?
+        refute result.not_enrolled?
+        assert_empty memory_cache_keys(cache)
+      end
+
+      test "2xx response with blank patient reference yields error" do
+        stub_enrollment_eligibility_post(
+          body: fhir_eligibility_response_body(patient: { reference: "" }),
+          transport: @enrollment_transport
+        )
+        client, = build_enrollment_client(http: @enrollment_transport)
+
+        assert client.check_eligibility(@request).error?
+      end
+
+      test "2xx response with non-Hash patient yields error" do
+        stub_enrollment_eligibility_post(
+          body: fhir_eligibility_response_body(patient: "Patient/#{SYNTHETIC_PATIENT_DFN}"),
+          transport: @enrollment_transport
+        )
+        client, = build_enrollment_client(http: @enrollment_transport)
+
+        assert_nothing_raised do
+          assert client.check_eligibility(@request).error?
+        end
+      end
+
+      test "2xx response for a different patient yields error" do
+        stub_enrollment_eligibility_post(
+          body: fhir_eligibility_enrolled_body(patient_dfn: "900002"),
+          transport: @enrollment_transport
+        )
+        client, = build_enrollment_client(http: @enrollment_transport)
+
+        assert client.check_eligibility(@request).error?
+      end
+
+      # --- Round-1 spec: coverage type matching on insurance items -----------------
+
+      test "in-force insurance for another coverage type does not enroll the requested type" do
+        stub_enrollment_eligibility_post(
+          body: fhir_eligibility_response_body(
+            insurance: [ fhir_eligibility_insurance_item(coverage_type: "medicaid", inforce: true) ]
+          ),
+          transport: @enrollment_transport
+        )
+        client, = build_enrollment_client(http: @enrollment_transport)
+
+        result = client.check_eligibility(@request)
+
+        assert result.error?
+        refute result.enrolled?
+      end
+
+      test "matching insurance item with inforce true yields enrolled" do
+        stub_enrollment_eligibility_post(
+          body: fhir_eligibility_response_body(
+            insurance: [
+              fhir_eligibility_insurance_item(coverage_type: "medicaid", inforce: false),
+              fhir_eligibility_insurance_item(coverage_type: "medicare_b", inforce: true)
+            ]
+          ),
+          transport: @enrollment_transport
+        )
+        client, = build_enrollment_client(http: @enrollment_transport)
+
+        assert client.check_eligibility(@request).enrolled?
+      end
+
+      test "matching insurance items all inforce false yield not_enrolled" do
+        stub_enrollment_eligibility_post(
+          body: fhir_eligibility_response_body(
+            insurance: [
+              fhir_eligibility_insurance_item(coverage_type: "medicare_b", inforce: false),
+              fhir_eligibility_insurance_item(coverage_type: "MEDICARE_B", inforce: false)
+            ]
+          ),
+          transport: @enrollment_transport
+        )
+        client, = build_enrollment_client(http: @enrollment_transport)
+
+        assert client.check_eligibility(@request).not_enrolled?
+      end
+
+      test "no insurance item matching requested coverage type yields error" do
+        stub_enrollment_eligibility_post(
+          body: fhir_eligibility_response_body(
+            insurance: [ fhir_eligibility_insurance_item(coverage_type: "va_benefits", inforce: true) ]
+          ),
+          transport: @enrollment_transport
+        )
+        client, = build_enrollment_client(http: @enrollment_transport)
+
+        assert client.check_eligibility(@request).error?
+      end
+
+      test "coverage type match accepts coverage reference carrying the type case-insensitively" do
+        stub_enrollment_eligibility_post(
+          body: fhir_eligibility_response_body(
+            insurance: [
+              {
+                inforce: true,
+                coverage: { reference: "Coverage/plan-Medicare_B-synthetic" }
+              }
+            ]
+          ),
+          transport: @enrollment_transport
+        )
+        client, = build_enrollment_client(http: @enrollment_transport)
+
+        assert client.check_eligibility(@request).enrolled?
+      end
+
+      # --- Round-1 spec: CoverageEligibilityResponse.status -----------------------
+
+      %w[cancelled entered-in-error draft].each do |bad_status|
+        test "CoverageEligibilityResponse status #{bad_status} yields error" do
+          stub_enrollment_eligibility_post(
+            body: fhir_eligibility_response_body(status: bad_status),
+            transport: @enrollment_transport
+          )
+          client, = build_enrollment_client(http: @enrollment_transport)
+
+          assert client.check_eligibility(@request).error?
+        end
+      end
+
+      test "CoverageEligibilityResponse with missing status yields error" do
+        body = fhir_eligibility_enrolled_body
+        body.delete(:status)
+        stub_enrollment_eligibility_post(body: body, transport: @enrollment_transport)
+        client, = build_enrollment_client(http: @enrollment_transport)
+
+        assert client.check_eligibility(@request).error?
+      end
+
+      # --- Round-1 spec: benefit period vs service date ---------------------------
+
+      test "service date outside matching benefit period yields not_enrolled" do
+        stub_enrollment_eligibility_post(
+          body: fhir_eligibility_response_body(
+            insurance: [
+              fhir_eligibility_insurance_item(
+                coverage_type: "medicare_b",
+                inforce: true,
+                benefit_period: { start: "2025-01-01", end: "2025-12-31" }
+              )
+            ]
+          ),
+          transport: @enrollment_transport
+        )
+        client, = build_enrollment_client(http: @enrollment_transport)
+
+        assert client.check_eligibility(@request).not_enrolled?
+      end
+
+      test "malformed benefit period on matching insurance yields error" do
+        stub_enrollment_eligibility_post(
+          body: fhir_eligibility_response_body(
+            insurance: [
+              fhir_eligibility_insurance_item(
+                coverage_type: "medicare_b",
+                inforce: true,
+                benefit_period: { start: "not-a-date", end: "2026-12-31" }
+              )
+            ]
+          ),
+          transport: @enrollment_transport
+        )
+        client, = build_enrollment_client(http: @enrollment_transport)
+
+        assert client.check_eligibility(@request).error?
+      end
+
+      # --- Round-1 spec: malformed insurance and transport errors -----------------
+
+      test "non-Hash insurance entry yields error without raising from check_eligibility" do
+        stub_enrollment_eligibility_post(
+          body: fhir_eligibility_response_body(insurance: [ "not-a-hash" ]),
+          transport: @enrollment_transport
+        )
+        client, = build_enrollment_client(http: @enrollment_transport)
+
+        assert_nothing_raised do
+          assert client.check_eligibility(@request).error?
+        end
+      end
+
+      %w[Net::HTTPBadResponse Net::HTTPHeaderSyntaxError OpenSSL::SSL::SSLError Zlib::Error].each do |error_class|
+        test "retries #{error_class} on eligibility post then pending with retry job" do
+          with_enrollment_job_adapter do
+            error = error_class.constantize.new("synthetic transport failure")
+            @enrollment_transport.raise_on_every_post(error)
+            client, _, _, transport = build_enrollment_client(http: @enrollment_transport)
+
+            assert_enqueued_with(job: Lakeraven::EHR::EnrollmentEligibilityRetryJob) do
+              assert_nothing_raised do
+                result = client.check_eligibility(@request)
+                assert result.pending?
+                refute result.enrolled?
+                refute result.not_enrolled?
+              end
+            end
+
+            assert_equal 3, transport.posts_to(enrollment_eligibility_post_url).length
+          end
+        end
+      end
+
+      test "coverage_for wraps transport StandardError in ClientError" do
+        @enrollment_transport.raise_on_every_get(Zlib::Error.new("synthetic zlib failure"))
+        client, = build_enrollment_client(http: @enrollment_transport)
+
+        assert_raises(Lakeraven::EHR::EnrollmentFHIRClient::ClientError) do
+          client.coverage_for(patient_dfn: SYNTHETIC_PATIENT_DFN, coverage_type: "medicaid")
+        end
+      end
+
+      # --- Round-1 spec: coverage_for bundle rules --------------------------------
+
+      test "coverage_for raises ClientError when beneficiary reference does not match patient dfn" do
+        stub_enrollment_coverage_search(
+          coverages: [ sample_medicaid_coverage_resource(beneficiary_dfn: "900002") ],
+          transport: @enrollment_transport
+        )
+        client, = build_enrollment_client(http: @enrollment_transport)
+
+        assert_raises(Lakeraven::EHR::EnrollmentFHIRClient::ClientError) do
+          client.coverage_for(patient_dfn: SYNTHETIC_PATIENT_DFN, coverage_type: "medicaid")
+        end
+      end
+
+      test "coverage_for excludes Coverage resources whose status is not active" do
+        stub_enrollment_coverage_search(
+          coverages: [
+            sample_medicaid_coverage_resource(status: "cancelled", id: "cov-cancelled"),
+            sample_medicaid_coverage_resource(status: "active", id: "cov-active")
+          ],
+          transport: @enrollment_transport
+        )
+        client, = build_enrollment_client(http: @enrollment_transport)
+
+        coverages = client.coverage_for(patient_dfn: SYNTHETIC_PATIENT_DFN, coverage_type: "medicaid")
+
+        assert_equal 1, coverages.length
+        assert_equal "cov-active", coverages.first["id"]
+      end
+
+      test "coverage_for raises ClientError when bundle includes OperationOutcome with error severity" do
+        bundle = fhir_coverage_search_bundle(coverages: [])
+        bundle[:entry] = [
+          {
+            search: { mode: "outcome" },
+            resource: {
+              resourceType: "OperationOutcome",
+              issue: [ { severity: "error", diagnostics: "synthetic search failure" } ]
+            }
+          }
+        ]
+        stub_enrollment_coverage_search_pages([ bundle ], transport: @enrollment_transport)
+        client, = build_enrollment_client(http: @enrollment_transport)
+
+        assert_raises(Lakeraven::EHR::EnrollmentFHIRClient::ClientError) do
+          client.coverage_for(patient_dfn: SYNTHETIC_PATIENT_DFN, coverage_type: "medicaid")
+        end
+      end
+
+      test "coverage_for follows next links on the same https origin and returns all active pages" do
+        page_one = fhir_coverage_search_bundle(
+          coverages: [ sample_medicaid_coverage_resource(id: "cov-page-1") ],
+          next_url: "#{ENROLLMENT_BASE_URL}/Coverage?page=2"
+        )
+        page_two = fhir_coverage_search_bundle(
+          coverages: [ sample_medicaid_coverage_resource(id: "cov-page-2") ]
+        )
+        stub_enrollment_coverage_search_pages([ page_one, page_two ], transport: @enrollment_transport)
+        client, _, _, transport = build_enrollment_client(http: @enrollment_transport)
+
+        coverages = client.coverage_for(patient_dfn: SYNTHETIC_PATIENT_DFN, coverage_type: "medicaid")
+
+        assert_equal 2, coverages.length
+        assert_equal 2, transport.gets_starting_with(enrollment_coverage_search_url).length
+      end
+
+      test "coverage_for raises ClientError when next link targets another https origin" do
+        page = fhir_coverage_search_bundle(
+          coverages: [ sample_medicaid_coverage_resource(id: "cov-page-1") ],
+          next_url: "https://other-host.example.test/Coverage?page=2"
+        )
+        stub_enrollment_coverage_search_pages([ page ], transport: @enrollment_transport)
+        client, = build_enrollment_client(http: @enrollment_transport)
+
+        assert_raises(Lakeraven::EHR::EnrollmentFHIRClient::ClientError) do
+          client.coverage_for(patient_dfn: SYNTHETIC_PATIENT_DFN, coverage_type: "medicaid")
+        end
+      end
+
+      test "coverage_for raises ClientError when more than ten next pages remain" do
+        pages = 11.times.map do |index|
+          fhir_coverage_search_bundle(
+            coverages: [ sample_medicaid_coverage_resource(id: "cov-page-#{index}") ],
+            next_url: "#{ENROLLMENT_BASE_URL}/Coverage?page=#{index + 2}"
+          )
+        end
+        stub_enrollment_coverage_search_pages(pages, transport: @enrollment_transport)
+        client, = build_enrollment_client(http: @enrollment_transport)
+
+        assert_raises(Lakeraven::EHR::EnrollmentFHIRClient::ClientError) do
+          client.coverage_for(patient_dfn: SYNTHETIC_PATIENT_DFN, coverage_type: "medicaid")
+        end
+      end
+
+      # --- Round-1 spec: cache behavior -------------------------------------------
+
+      test "from_environment defaults cache to Rails.cache" do
+        previous_base = ENV["LAKERAVEN_ENROLLMENT_FHIR_BASE_URL"]
+        ENV["LAKERAVEN_ENROLLMENT_FHIR_BASE_URL"] = ENROLLMENT_BASE_URL
+        client = Lakeraven::EHR::EnrollmentFHIRClient.from_environment
+        cache = client.instance_variable_get(:@cache)
+        assert_equal Rails.cache, cache
+      ensure
+        ENV["LAKERAVEN_ENROLLMENT_FHIR_BASE_URL"] = previous_base
+      end
+
+      test "cache key material includes base_url so different hosts do not share entries" do
+        stub_enrollment_eligibility_post(body: fhir_eligibility_enrolled_body, transport: @enrollment_transport)
+        shared_cache = ActiveSupport::Cache.lookup_store(:memory_store)
+        client_a, _, _, transport_a = build_enrollment_client(
+          http: @enrollment_transport,
+          cache: shared_cache,
+          base_url: ENROLLMENT_BASE_URL
+        )
+        client_a.check_eligibility(@request)
+
+        transport_b = RecordingFakeEnrollmentHttpTransport.new
+        stub_enrollment_eligibility_post(body: fhir_eligibility_enrolled_body, transport: transport_b)
+        client_b, _, _, = build_enrollment_client(
+          http: transport_b,
+          cache: shared_cache,
+          base_url: ENROLLMENT_ALT_BASE_URL
+        )
+        client_b.check_eligibility(@request)
+
+        assert_equal 1, transport_b.posts_to(enrollment_eligibility_post_url_for(ENROLLMENT_ALT_BASE_URL)).length
+      end
+
+      test "cached terminal answer is ignored when stored patient_dfn does not match request" do
+        stub_enrollment_eligibility_post(body: fhir_eligibility_enrolled_body, transport: @enrollment_transport)
+        client, cache, _, transport = build_enrollment_client(http: @enrollment_transport)
+        client.check_eligibility(@request)
+        transport.reset!
+        stub_enrollment_eligibility_post(body: fhir_eligibility_enrolled_body, transport: transport)
+
+        key = enrollment_cache_key_for(client, @request)
+        write_memory_cache_entry(
+          cache,
+          key,
+          {
+            "patient_dfn" => "900002",
+            "coverage_type" => @request.coverage_type,
+            "status" => "enrolled",
+            "request_id" => SecureRandom.uuid,
+            "start_date" => "2026-01-01",
+            "end_date" => "2026-12-31"
+          }
+        )
+
+        client.check_eligibility(@request)
+
+        assert_equal 1, transport.posts_to(enrollment_eligibility_post_url).length
+      end
+
+      test "cached terminal answer is ignored when stored coverage_type does not match request" do
+        stub_enrollment_eligibility_post(body: fhir_eligibility_enrolled_body, transport: @enrollment_transport)
+        client, cache, _, transport = build_enrollment_client(http: @enrollment_transport)
+        client.check_eligibility(@request)
+        transport.reset!
+        stub_enrollment_eligibility_post(body: fhir_eligibility_enrolled_body, transport: transport)
+
+        key = enrollment_cache_key_for(client, @request)
+        write_memory_cache_entry(
+          cache,
+          key,
+          {
+            "patient_dfn" => @request.patient_dfn,
+            "coverage_type" => "medicaid",
+            "status" => "enrolled",
+            "request_id" => SecureRandom.uuid
+          }
+        )
+
+        client.check_eligibility(@request)
+
+        assert_equal 1, transport.posts_to(enrollment_eligibility_post_url).length
+      end
+
+      test "cached terminal answer is ignored when stored service_date does not match request" do
+        stub_enrollment_eligibility_post(body: fhir_eligibility_enrolled_body, transport: @enrollment_transport)
+        client, cache, _, transport = build_enrollment_client(http: @enrollment_transport)
+        client.check_eligibility(@request)
+        transport.reset!
+        stub_enrollment_eligibility_post(body: fhir_eligibility_enrolled_body, transport: transport)
+
+        key = enrollment_cache_key_for(client, @request)
+        write_memory_cache_entry(
+          cache,
+          key,
+          {
+            "patient_dfn" => @request.patient_dfn,
+            "coverage_type" => @request.coverage_type,
+            "status" => "enrolled",
+            "request_id" => SecureRandom.uuid,
+            "service_date" => "2026-04-01"
+          }
+        )
+
+        client.check_eligibility(@request)
+
+        assert_equal 1, transport.posts_to(enrollment_eligibility_post_url).length
+      end
+
+      test "cache hit returns enrolled status with the current request id" do
+        stub_enrollment_eligibility_post(body: fhir_eligibility_enrolled_body, transport: @enrollment_transport)
+        client, _, _, = build_enrollment_client(http: @enrollment_transport)
+
+        first = client.check_eligibility(@request)
+        @request.id = SecureRandom.uuid
+        second = client.check_eligibility(@request)
+
+        assert second.enrolled?
+        assert_equal @request.id, second.request_id
+        refute_equal first.request_id, second.request_id
+      end
+
+      test "cached payload stores request identity digest not plaintext patient dfn" do
+        stub_enrollment_eligibility_post(body: fhir_eligibility_enrolled_body, transport: @enrollment_transport)
+        client, cache, _, = build_enrollment_client(http: @enrollment_transport)
+
+        client.check_eligibility(@request)
+
+        entries = memory_cache_entries(cache)
+        assert entries.any?, "expected a cached eligibility payload"
+        entries.each do |entry|
+          next unless entry.is_a?(Hash)
+
+          refute_equal SYNTHETIC_PATIENT_DFN, entry["patient_dfn"]
+          refute entry.values.any? { |value| value.to_s.include?(SYNTHETIC_PATIENT_DFN) },
+                 "cached value must not embed the raw patient identifier"
+          assert entry.key?("request_identity_digest"), "expected digest of request identity in cache payload"
+        end
+      end
     end
   end
 end

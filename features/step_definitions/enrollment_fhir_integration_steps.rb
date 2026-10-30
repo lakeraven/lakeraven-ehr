@@ -49,6 +49,30 @@ Given("the enrollment service is unavailable for eligibility checks") do
   )
 end
 
+Given("the enrollment service returns in-force Medicare for patient {string}") do |dfn|
+  stub_enrollment_eligibility_post(
+    body: fhir_eligibility_enrolled_body(patient_dfn: dfn, coverage_type: "medicare_b"),
+    transport: @enrollment_transport
+  )
+  @enrollment_client, @enrollment_cache, @enrollment_sleep_log, @enrollment_transport = build_enrollment_client(
+    http: @enrollment_transport,
+    cache: @enrollment_cache,
+    sleep_log: @enrollment_sleep_log
+  )
+end
+
+Given("the enrollment service returns a cancelled Medicare eligibility response for patient {string}") do |dfn|
+  stub_enrollment_eligibility_post(
+    body: fhir_eligibility_response_body(patient_dfn: dfn, coverage_type: "medicare_b", status: "cancelled"),
+    transport: @enrollment_transport
+  )
+  @enrollment_client, @enrollment_cache, @enrollment_sleep_log, @enrollment_transport = build_enrollment_client(
+    http: @enrollment_transport,
+    cache: @enrollment_cache,
+    sleep_log: @enrollment_sleep_log
+  )
+end
+
 Given("the enrollment service lists active Medicaid coverage for patient {string}") do |_dfn|
   stub_enrollment_coverage_search(coverages: [ sample_medicaid_coverage_resource ], transport: @enrollment_transport)
   @enrollment_client, @enrollment_cache, @enrollment_sleep_log, @enrollment_transport = build_enrollment_client(
@@ -96,6 +120,12 @@ end
 
 Then("the eligibility outcome should be pending") do
   assert @enrollment_response.pending?, "expected pending (checking), got #{@enrollment_response.status}"
+  refute @enrollment_response.enrolled?
+  refute @enrollment_response.not_enrolled?
+end
+
+Then("the eligibility outcome should be error") do
+  assert @enrollment_response.error?, "expected error, got #{@enrollment_response.status}"
   refute @enrollment_response.enrolled?
   refute @enrollment_response.not_enrolled?
 end

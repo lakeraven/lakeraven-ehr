@@ -30,6 +30,16 @@ Feature: Enrollment FHIR integration
     Then the eligibility outcome should be enrolled
     And the enrollment service should have received one CoverageEligibilityRequest
 
+  Scenario: Eligibility response for another patient is an error not enrolled
+    Given the enrollment service returns in-force Medicare for patient "900002"
+    When I check Medicare Part B eligibility for patient "900001" on "2026-03-15"
+    Then the eligibility outcome should be error
+
+  Scenario: Cancelled eligibility response is an error
+    Given the enrollment service returns a cancelled Medicare eligibility response for patient "900001"
+    When I check Medicare Part B eligibility for patient "900001" on "2026-03-15"
+    Then the eligibility outcome should be error
+
   Scenario: Active Medicaid coverage is returned as a FHIR Coverage resource with plan details
     Given the enrollment service lists active Medicaid coverage for patient "900001"
     When I fetch Medicaid coverage from enrollment for patient "900001"
