@@ -54,11 +54,27 @@ module Lakeraven
         last_seen = session[:last_seen_at]
         return false if last_seen.blank?
 
-        Time.current.to_i - last_seen.to_i > SmartAuthentication::SESSION_IDLE_TIMEOUT.to_i
+        Time.current.to_i - last_seen.to_i > session_idle_limit
+      end
+
+      # How long this session may sit idle: RPMS's limit for the user (their
+      # DTIME, read at sign-on), else the app's own.
+      def session_idle_limit
+        session[:rpms_idle_seconds].presence&.to_i || SmartAuthentication::SESSION_IDLE_TIMEOUT.to_i
       end
 
       def touch_session!
         session[:last_seen_at] = Time.current.to_i
+        keep_rpms_session_alive!
+      end
+
+      # Keep the broker session open for as long as the user may sit idle
+      # (BrokerKeepAlive). Not in the test suite, whose client is a mock.
+      def keep_rpms_session_alive!
+        return if Rails.env.test?
+
+        BrokerKeepAlive.instance.touch!(session_idle_limit)
+        BrokerKeepAlive.instance.start!
       end
 
       # RPMS ends an idle broker session on its own clock, and the session was

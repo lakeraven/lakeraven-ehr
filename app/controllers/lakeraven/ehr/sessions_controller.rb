@@ -124,7 +124,9 @@ module Lakeraven
         session[:security_keys] = Array(provider[:security_keys]).map(&:to_s)
         session[:options] = Array(provider[:options]).map(&:to_s)
         session[:last_seen_at] = Time.current.to_i
+        session[:rpms_idle_seconds] = provider[:idle_seconds]
         session[:smart_token] = mint_smart_token(provider)
+        keep_rpms_session_alive!
       end
 
       # Mint a SMART token for this session, bound to the human and scoped by
