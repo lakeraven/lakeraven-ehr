@@ -41,7 +41,7 @@ class SchedulingCancelAppointmentTest < ActionDispatch::IntegrationTest
         cancel_appointment: ->(id, **kw) { log << kw.merge(id: id); cancel.call(id, kw) }
       },
       RpmsRpc::DdrFileman.singleton_class => { lister: ->(**) { REASONS } }
-    }
+    }.merge(scheduling_setup_stubs)
     stubs.each { |klass, methods| methods.each_key { |m| klass.alias_method(:"__#{m}", m) } }
     stubs.each { |klass, methods| methods.each { |m, body| klass.define_method(m, &body) } }
     yield
