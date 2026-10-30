@@ -45,3 +45,18 @@ Feature: Enrollment FHIR integration
     When I fetch Medicaid coverage from enrollment for patient "900001"
     Then I should receive a FHIR Coverage with plan name "TEST Medicaid Plan"
     And the Coverage payor should be "TEST State Medicaid Payor"
+
+  Scenario: Coverage reference id must match requested type exactly
+    Given the enrollment service returns in-force Medicare Part A under reference "Coverage/medicare_advantage_x"
+    When I check Medicare Part A eligibility for patient "900001" on "2026-03-15"
+    Then the eligibility outcome should be error
+
+  Scenario: Benefit period ending in the service month keeps enrollment in force
+    Given the enrollment service returns in-force Medicare Part B through benefit period end "2026-03"
+    When I check Medicare Part B eligibility for patient "900001" on "2026-03-15"
+    Then the eligibility outcome should be enrolled
+
+  Scenario: Benefit period ending before the service month yields not enrolled
+    Given the enrollment service returns in-force Medicare Part B through benefit period end "2026-02"
+    When I check Medicare Part B eligibility for patient "900001" on "2026-03-15"
+    Then the eligibility outcome should be not enrolled

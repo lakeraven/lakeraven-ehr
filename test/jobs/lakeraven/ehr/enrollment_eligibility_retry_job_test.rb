@@ -86,14 +86,83 @@ module Lakeraven
         assert_equal 1, @enrollment_transport.posts_to(enrollment_eligibility_post_url).length
       end
 
-      test "perform raises Unavailable when eligibility is still pending" do
+      test "perform_now does not raise when eligibility is still pending and Active Job will retry" do
         stub_enrollment_eligibility_post_failures(503, 503, 503, transport: @enrollment_transport)
         adapter_client, = build_enrollment_client(http: @enrollment_transport, schedule_retry: false)
         Lakeraven::EHR.configuration.eligibility_adapter = adapter_client
-
-        assert_raises(EnrollmentFHIRClient::Unavailable) do
-          EnrollmentEligibilityRetryJob.perform_now(**@job_args)
+        mid_retry_job = Class.new(EnrollmentEligibilityRetryJob) do
+          def executions
+            1
+          end
         end
+
+        assert_nothing_raised do
+          mid_retry_job.perform_now(**@job_args)
+        end
+      end
+
+      test "perform_now does not raise on the final exhausted pending attempt" do
+        stub_enrollment_eligibility_post_failures(503, 503, 503, transport: @enrollment_transport)
+        adapter_client, = build_enrollment_client(http: @enrollment_transport, schedule_retry: false)
+        Lakeraven::EHR.configuration.eligibility_adapter = adapter_client
+        exhausted_job = Class.new(EnrollmentEligibilityRetryJob) do
+          def executions
+            EnrollmentEligibilityRetryJob::MAX_ATTEMPTS
+          end
+        end
+
+        logs = capture_rails_logs do
+          assert_nothing_raised do
+            exhausted_job.perform_now(**@job_args)
+          end
+        end
+
+        assert_includes logs, RETRY_EXHAUSTED_LOG
+      end
+
+      test "perform does not enqueue another enrollment eligibility retry job when adapter leaves schedule_retry enabled" do
+        with_enrollment_job_adapter do
+          stub_enrollment_eligibility_post_failures(503, 503, 503, transport: @enrollment_transport)
+          adapter_client, = build_enrollment_client(http: @enrollment_transport)
+          Lakeraven::EHR.configuration.eligibility_adapter = adapter_client
+          clear_enqueued_jobs
+          job = EnrollmentEligibilityRetryJob.new
+          job.define_singleton_method(:executions) { 1 }
+
+          assert_raises(EnrollmentFHIRClient::Unavailable) do
+            job.perform(**@job_args)
+          end
+
+          assert_empty enqueued_jobs.select { |entry| entry[:job] == EnrollmentEligibilityRetryJob },
+                       "retry job must not schedule another EnrollmentEligibilityRetryJob"
+        end
+      end
+
+      test "perform uses job base_url argument for the eligibility endpoint when configured adapter is EnrollmentFHIRClient" do
+        alt_transport = RecordingFakeEnrollmentHttpTransport.new
+        stub_enrollment_eligibility_post(
+          body: fhir_eligibility_enrolled_body,
+          transport: alt_transport
+        )
+        primary_client, = build_enrollment_client(http: @enrollment_transport, schedule_retry: false)
+        Lakeraven::EHR.configuration.eligibility_adapter = primary_client
+        args = @job_args.merge(base_url: ENROLLMENT_ALT_BASE_URL)
+
+        EnrollmentEligibilityRetryJob.perform_now(**args)
+
+        assert_equal 1, alt_transport.posts_to(enrollment_eligibility_post_url_for(ENROLLMENT_ALT_BASE_URL)).length
+        assert_empty @enrollment_transport.posts_to(enrollment_eligibility_post_url)
+      end
+
+      test "perform falls back to configured adapter base_url when job base_url is nil" do
+        stub_enrollment_eligibility_post(body: fhir_eligibility_enrolled_body, transport: @enrollment_transport)
+        adapter_client, = build_enrollment_client(http: @enrollment_transport, schedule_retry: false)
+        Lakeraven::EHR.configuration.eligibility_adapter = adapter_client
+        args = @job_args.merge(base_url: nil)
+
+        EnrollmentEligibilityRetryJob.perform_now(**args)
+
+        assert_equal 1, @enrollment_transport.posts_to(enrollment_eligibility_post_url).length
       end
 
       test "perform logs exhausted message without dfn after the final pending attempt" do

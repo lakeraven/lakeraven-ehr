@@ -395,7 +395,7 @@ module Lakeraven
         assert client.check_eligibility(@request).error?
       end
 
-      test "coverage type match accepts coverage reference carrying the type case-insensitively" do
+      test "coverage reference id segment must match requested type exactly not as substring" do
         stub_enrollment_eligibility_post(
           body: fhir_eligibility_response_body(
             insurance: [
@@ -409,7 +409,88 @@ module Lakeraven
         )
         client, = build_enrollment_client(http: @enrollment_transport)
 
-        assert client.check_eligibility(@request).enrolled?
+        assert client.check_eligibility(@request).error?
+      end
+
+      # --- Round-2 spec: exact coverage-type matching --------------------------------
+
+      test "medicare_a request does not match reference id medicare_advantage_x" do
+        assert_coverage_reference_yields_error(
+          coverage_type: "medicare_a",
+          reference: "Coverage/medicare_advantage_x"
+        )
+      end
+
+      test "medicaid request does not match reference id private_insurance-secondary-to-medicaid" do
+        assert_coverage_reference_yields_error(
+          coverage_type: "medicaid",
+          reference: "Coverage/private_insurance-secondary-to-medicaid"
+        )
+      end
+
+      test "medicare_b request does not match reference id plan-medicare_benefits-only" do
+        assert_coverage_reference_yields_error(
+          coverage_type: "medicare_b",
+          reference: "Coverage/plan-medicare_benefits-only"
+        )
+      end
+
+      test "medicaid request does not match reference id not_medicaid" do
+        assert_coverage_reference_yields_error(
+          coverage_type: "medicaid",
+          reference: "Coverage/not_medicaid"
+        )
+      end
+
+      test "medicaid request matches reference id medicaid exactly" do
+        stub_enrollment_eligibility_post(
+          body: fhir_eligibility_response_body(
+            coverage_type: "medicaid",
+            insurance: [
+              { inforce: true, coverage: { reference: "Coverage/medicaid" } }
+            ]
+          ),
+          transport: @enrollment_transport
+        )
+        client, = build_enrollment_client(http: @enrollment_transport)
+        request = build_enrollment_request(coverage_type: "medicaid")
+
+        assert client.check_eligibility(request).enrolled?
+      end
+
+      test "medicaid request matches coverage display Medicaid case-insensitively" do
+        stub_enrollment_eligibility_post(
+          body: fhir_eligibility_response_body(
+            coverage_type: "medicaid",
+            insurance: [
+              { inforce: true, coverage: { display: "Medicaid" } }
+            ]
+          ),
+          transport: @enrollment_transport
+        )
+        client, = build_enrollment_client(http: @enrollment_transport)
+        request = build_enrollment_request(coverage_type: "medicaid")
+
+        assert client.check_eligibility(request).enrolled?
+      end
+
+      test "insurance item does not match when display and reference disagree on coverage type" do
+        stub_enrollment_eligibility_post(
+          body: fhir_eligibility_response_body(
+            coverage_type: "medicaid",
+            insurance: [
+              {
+                inforce: true,
+                coverage: { display: "Medicaid", reference: "Coverage/medicare_b" }
+              }
+            ]
+          ),
+          transport: @enrollment_transport
+        )
+        client, = build_enrollment_client(http: @enrollment_transport)
+        request = build_enrollment_request(coverage_type: "medicaid")
+
+        assert client.check_eligibility(request).error?
       end
 
       # --- Round-1 spec: CoverageEligibilityResponse.status -----------------------
@@ -471,6 +552,70 @@ module Lakeraven
         client, = build_enrollment_client(http: @enrollment_transport)
 
         assert client.check_eligibility(@request).error?
+      end
+
+      # --- Round-2 spec: FHIR partial dates in benefitPeriod -------------------------
+
+      test "benefit period end YYYY-MM covering March service date yields enrolled when in force" do
+        assert_benefit_period_enrollment(
+          service_date: Date.new(2026, 3, 15),
+          benefit_period: { start: "2026-01-01", end: "2026-03" },
+          expected_enrolled: true
+        )
+      end
+
+      test "benefit period end YYYY-MM before service month yields not_enrolled when in force" do
+        assert_benefit_period_enrollment(
+          service_date: Date.new(2026, 3, 15),
+          benefit_period: { start: "2026-01-01", end: "2026-02" },
+          expected_enrolled: false
+        )
+      end
+
+      test "benefit period start and end YYYY covering service date in that year yields enrolled" do
+        assert_benefit_period_enrollment(
+          service_date: Date.new(2026, 6, 1),
+          benefit_period: { start: "2026", end: "2026" },
+          expected_enrolled: true
+        )
+      end
+
+      %w[--0131 20260131 2026-3-1 2026-13].each do |bad_date|
+        test "benefit period date #{bad_date.inspect} is not a FHIR date and yields error" do
+          stub_enrollment_eligibility_post(
+            body: fhir_eligibility_response_body(
+              insurance: [
+                fhir_eligibility_insurance_item(
+                  coverage_type: "medicare_b",
+                  inforce: true,
+                  benefit_period: { start: bad_date, end: "2026-12-31" }
+                )
+              ]
+            ),
+            transport: @enrollment_transport
+          )
+          client, = build_enrollment_client(http: @enrollment_transport)
+
+          assert client.check_eligibility(@request).error?
+        end
+      end
+
+      test "empty benefitPeriod hash is treated as no period and answers from inforce alone" do
+        stub_enrollment_eligibility_post(
+          body: fhir_eligibility_response_body(
+            insurance: [
+              fhir_eligibility_insurance_item(
+                coverage_type: "medicare_b",
+                inforce: true,
+                benefit_period: {}
+              )
+            ]
+          ),
+          transport: @enrollment_transport
+        )
+        client, = build_enrollment_client(http: @enrollment_transport)
+
+        assert client.check_eligibility(@request).enrolled?
       end
 
       # --- Round-1 spec: malformed insurance and transport errors -----------------
@@ -748,6 +893,92 @@ module Lakeraven
           refute entry.values.any? { |value| value.to_s.include?(SYNTHETIC_PATIENT_DFN) },
                  "cached value must not embed the raw patient identifier"
           assert entry.key?("request_identity_digest"), "expected digest of request identity in cache payload"
+        end
+      end
+
+      # --- Round-2 spec: cache reads require full identity -----------------------------
+
+      test "cache entry with only enrolled status is a miss and eligibility is fetched again" do
+        stub_enrollment_eligibility_post(body: fhir_eligibility_not_enrolled_body, transport: @enrollment_transport)
+        client, cache, _, transport = build_enrollment_client(http: @enrollment_transport)
+        client.check_eligibility(@request)
+        transport.reset!
+        stub_enrollment_eligibility_post(body: fhir_eligibility_enrolled_body, transport: transport)
+
+        key = enrollment_cache_key_for(client, @request)
+        write_memory_cache_entry(cache, key, { "status" => "enrolled" })
+
+        result = client.check_eligibility(@request)
+
+        assert result.enrolled?, "expected fresh service answer, not forged cache status"
+        assert_equal 1, transport.posts_to(enrollment_eligibility_post_url).length
+      end
+
+      test "cache entry missing request_identity_digest is a miss even when coverage_type and service_date match" do
+        stub_enrollment_eligibility_post(body: fhir_eligibility_not_enrolled_body, transport: @enrollment_transport)
+        client, cache, _, transport = build_enrollment_client(http: @enrollment_transport)
+        client.check_eligibility(@request)
+        transport.reset!
+        stub_enrollment_eligibility_post(body: fhir_eligibility_enrolled_body, transport: transport)
+
+        key = enrollment_cache_key_for(client, @request)
+        write_memory_cache_entry(
+          cache,
+          key,
+          {
+            "status" => "not_enrolled",
+            "coverage_type" => @request.coverage_type,
+            "service_date" => @request.service_date.iso8601
+          }
+        )
+
+        result = client.check_eligibility(@request)
+
+        assert result.enrolled?, "expected fresh service answer when digest is absent"
+        assert_equal 1, transport.posts_to(enrollment_eligibility_post_url).length
+      end
+
+      private
+
+      def assert_coverage_reference_yields_error(coverage_type:, reference:)
+        stub_enrollment_eligibility_post(
+          body: fhir_eligibility_response_body(
+            coverage_type: coverage_type,
+            insurance: [ { inforce: true, coverage: { reference: reference } } ]
+          ),
+          transport: @enrollment_transport
+        )
+        client, = build_enrollment_client(http: @enrollment_transport)
+        request = build_enrollment_request(coverage_type: coverage_type)
+
+        result = client.check_eligibility(request)
+
+        assert result.error?, "expected error for #{coverage_type} vs #{reference}"
+        refute result.enrolled?
+      end
+
+      def assert_benefit_period_enrollment(service_date:, benefit_period:, expected_enrolled:)
+        stub_enrollment_eligibility_post(
+          body: fhir_eligibility_response_body(
+            insurance: [
+              fhir_eligibility_insurance_item(
+                coverage_type: "medicare_b",
+                inforce: true,
+                benefit_period: benefit_period
+              )
+            ]
+          ),
+          transport: @enrollment_transport
+        )
+        client, = build_enrollment_client(http: @enrollment_transport)
+        request = build_enrollment_request(service_date: service_date)
+
+        result = client.check_eligibility(request)
+
+        if expected_enrolled
+          assert result.enrolled?, "expected enrolled for #{benefit_period.inspect} on #{service_date}"
+        else
+          assert result.not_enrolled?, "expected not_enrolled for #{benefit_period.inspect} on #{service_date}"
         end
       end
     end

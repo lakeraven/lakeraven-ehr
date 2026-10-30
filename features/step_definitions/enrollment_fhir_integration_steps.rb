@@ -94,6 +94,54 @@ Given("I checked Medicare Part B eligibility for patient {string} one hour ago")
   end
 end
 
+Given("the enrollment service returns in-force Medicare Part A under reference {string}") do |reference|
+  stub_enrollment_eligibility_post(
+    body: fhir_eligibility_response_body(
+      coverage_type: "medicare_a",
+      insurance: [ { inforce: true, coverage: { reference: reference } } ]
+    ),
+    transport: @enrollment_transport
+  )
+  @enrollment_client, @enrollment_cache, @enrollment_sleep_log, @enrollment_transport = build_enrollment_client(
+    http: @enrollment_transport,
+    cache: @enrollment_cache,
+    sleep_log: @enrollment_sleep_log
+  )
+end
+
+Given("the enrollment service returns in-force Medicare Part B through benefit period end {string}") do |end_date|
+  stub_enrollment_eligibility_post(
+    body: fhir_eligibility_response_body(
+      coverage_type: "medicare_b",
+      insurance: [
+        fhir_eligibility_insurance_item(
+          coverage_type: "medicare_b",
+          inforce: true,
+          benefit_period: { start: "2026-01-01", end: end_date }
+        )
+      ]
+    ),
+    transport: @enrollment_transport
+  )
+  @enrollment_client, @enrollment_cache, @enrollment_sleep_log, @enrollment_transport = build_enrollment_client(
+    http: @enrollment_transport,
+    cache: @enrollment_cache,
+    sleep_log: @enrollment_sleep_log
+  )
+end
+
+When("I check Medicare Part A eligibility for patient {string} on {string}") do |dfn, service_date|
+  @enrollment_request = build_enrollment_request(
+    patient_dfn: dfn,
+    coverage_type: "medicare_a",
+    service_date: Date.parse(service_date)
+  )
+  @enrollment_response =
+    travel_to Time.zone.local(2026, 3, 15, 10, 0, 0) do
+      @enrollment_client.check_eligibility(@enrollment_request)
+    end
+end
+
 When("I check Medicare Part B eligibility for patient {string} on {string}") do |dfn, service_date|
   @enrollment_request = build_enrollment_request(
     patient_dfn: dfn,
@@ -128,6 +176,11 @@ Then("the eligibility outcome should be error") do
   assert @enrollment_response.error?, "expected error, got #{@enrollment_response.status}"
   refute @enrollment_response.enrolled?
   refute @enrollment_response.not_enrolled?
+end
+
+Then("the eligibility outcome should be not enrolled") do
+  assert @enrollment_response.not_enrolled?, "expected not_enrolled, got #{@enrollment_response.status}"
+  refute @enrollment_response.enrolled?
 end
 
 Then("an enrollment eligibility retry job should be enqueued for that request") do
