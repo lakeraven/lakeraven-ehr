@@ -75,6 +75,7 @@ module Lakeraven
         if Rails.env.test?
           RpmsRpc.configure { |c| c.client = factory.call }
         else
+          RpmsSessions.assert_single_process!
           RpmsSessions.configure!(factory: factory, max_sessions: Integer(settings[:max_sessions] || 64))
         end
       end

@@ -62,10 +62,9 @@ module Lakeraven
         end
 
         LoginThrottle.clear_account(access_code)
-        pool_key = adopt_connection(provider)
-        return render_at_capacity if pool_key == :full
+        establish_session(provider)
+        return render_at_capacity unless adopt_connection(provider)
 
-        establish_session(provider, pool_key)
         redirect_to dashboard_path
       end
 
@@ -110,18 +109,25 @@ module Lakeraven
         render :new, status: :too_many_requests
       end
 
-      # Hold the user's own RPMS connection for this session (ADR 0011), and
-      # return its key; nil when this process does not pool connections (a mock).
-      # A pool full of users in mid-request refuses the sign-in rather than share
-      # or evict a connection in use; :full says so, and the connection closes.
+      # Hold the user's own RPMS connection for the session just established
+      # (ADR 0011), keyed to its SMART token: every way the session ends
+      # revokes that token, and each revocation releases the connection. True,
+      # or true at once when this process does not pool connections (a mock).
+      # At capacity the sign-in is refused, without evicting anyone already
+      # signed in: the connection closes and the new session ends.
       def adopt_connection(provider)
         client = provider[:client]
-        return nil unless client
+        return true unless client
 
-        RpmsSessions.adopt(client)
+        key = RpmsSessions.key_for(Doorkeeper::AccessToken.by_token(session[:smart_token]))
+        RpmsSessions.adopt(key, client)
+        session[:rpms_pool_key] = key
+        keep_rpms_session_alive!
+        true
       rescue RpmsRpc::SessionPool::PoolExhaustedError
         client.disconnect
-        :full
+        terminate_session!
+        false
       end
 
       def render_at_capacity
@@ -134,10 +140,8 @@ module Lakeraven
         render :new, status: :service_unavailable
       end
 
-      def establish_session(provider, pool_key = nil)
+      def establish_session(provider)
         reset_session
-        # The key to this user's own RPMS connection (RpmsSessions).
-        session[:rpms_pool_key] = pool_key
         session[:duz] = provider[:duz]
         session[:user_name] = provider[:name]
         session[:user_type] = provider[:user_type].to_s
@@ -192,9 +196,14 @@ module Lakeraven
       # revocable by the clinician who owned them. One human, one live browser
       # token — which also bounds the table's growth.
       def revoke_previous_tokens_for(duz)
+        # Each revoked token's RPMS connection goes with it (ADR 0011 §4): the
+        # earlier browser's session can no longer reach RPMS as this user.
         Doorkeeper::AccessToken
           .where(application_id: browser_sso_application.id, resource_owner_id: duz.to_i, revoked_at: nil)
-          .find_each(&:revoke)
+          .find_each do |token|
+            token.revoke
+            RpmsSessions.release(RpmsSessions.key_for(token)) if RpmsSessions.enabled?
+          end
       end
 
       # Race-safe lookup/creation of the one browser SSO Doorkeeper application.

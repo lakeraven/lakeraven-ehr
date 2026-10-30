@@ -43,12 +43,28 @@ module Lakeraven
           terminate_session!
           return redirect_to login_path, alert: "Your session timed out. Please sign in again."
         end
+        if session[:duz].present? && session_token_revoked?
+          terminate_session!
+          return redirect_to login_path, alert: "Your session ended. Please sign in again."
+        end
         return end_session_for_closed_rpms! if session[:duz].present? && rpms_connection_closed?
 
         return touch_session! if session[:duz].present?
 
         note_audit_denial("browser access refused: not signed in")
         redirect_to login_path, alert: "Please sign in"
+      end
+
+      # Whether the credential this session was signed in with is no longer
+      # valid: revoked (a sign-in by the same user elsewhere, a sign-out, an
+      # administrator) or expired. The session dies with it (ADR 0011 §4). A
+      # session that carries no token (the test-only sign-in) has none to check.
+      def session_token_revoked?
+        raw = session[:smart_token].presence
+        return false if raw.nil?
+
+        token = Doorkeeper::AccessToken.by_token(raw)
+        token.nil? || token.revoked? || token.expired?
       end
 
       def session_idle_expired?
@@ -91,7 +107,8 @@ module Lakeraven
       # ends too and the user signs in again (a new connection). Pages that read
       # nothing from RPMS stop loading as if it were still there.
       def rpms_connection_closed?
-        return !RpmsSessions.held?(session[:rpms_pool_key]) if RpmsSessions.enabled?
+        # Held AND connected: a connection the broker dropped ends the session.
+        return !RpmsSessions.live?(session[:rpms_pool_key]) if RpmsSessions.enabled? && session[:rpms_pool_key].present?
 
         client = RpmsRpc.configuration.client
         client.respond_to?(:connected?) && !client.connected?

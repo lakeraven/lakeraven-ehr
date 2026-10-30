@@ -16,12 +16,13 @@ class PerUserRpmsConnectionTest < ActionDispatch::IntegrationTest
   USERS = { "PSCH123" => [ 208, "PROFILE,SCHED" ], "PSCH456" => [ 209, "PROFILE,SCHED2" ] }.freeze
 
   class UserClient < RpmsRpc::CiaClient
-    attr_reader :disconnected
+    attr_reader :disconnected, :rpcs
 
     def initialize
       super(host: "127.0.0.1", port: 9100)
       @connected = false
       @disconnected = false
+      @rpcs = []
     end
 
     def connect(*) = (@connected = true)
@@ -39,6 +40,7 @@ class PerUserRpmsConnectionTest < ActionDispatch::IntegrationTest
     # ORWU USERINFO (class 3), CIAVCXUS HASKEYS (SDZMENU only), ORWU HAS OPTION
     # ACCESS (CIAV VUECENTRIC), ORWU USERINFO's DTIME, framed as a CIA broker does.
     def call_rpc_raw(name, *params)
+      @rpcs << name
       body = case name
       when "ORWU USERINFO" then "#{@duz}^USER^3^1^1^3^0^99999^20^1^1^5^DEMO.IHS.GOV^1^180"
       when "CIAVCXUS HASKEYS" then params.first.to_s.split("^", -1).map { |k| k == "SDZMENU" ? "1" : "0" }.join("^")
@@ -69,6 +71,13 @@ class PerUserRpmsConnectionTest < ActionDispatch::IntegrationTest
       sched.remove_method(:__resources)
     end
     # The pool itself is reset before every test (GlobalStoreIsolation).
+  end
+
+  def configure_pool(max_sessions:)
+    Lakeraven::EHR::RpmsSessions.reset!
+    clients = @clients
+    Lakeraven::EHR::RpmsSessions.configure!(factory: -> { UserClient.new.tap { |c| clients << c } },
+                                            max_sessions: max_sessions, keeper: false)
   end
 
   def sign_in(access_code)
@@ -128,4 +137,47 @@ class PerUserRpmsConnectionTest < ActionDispatch::IntegrationTest
 
     assert_raises(RpmsRpc::NotConfiguredError) { RpmsRpc.client }
   end
+# -- from the review of #766 ----------------------------------------------
+
+test "the patient chart runs on the signed-in user's own connection" do
+  first = sign_in("PSCH123")
+  before = @clients[0].rpcs.size
+
+  first.get "/lakeraven-ehr/patients/1"
+  refute_equal 503, first.response.status, "the chart had no RPMS connection of its own"
+  assert_operator @clients[0].rpcs.size, :>, before, "the chart read RPMS on the user's connection"
+end
+
+test "signing in again elsewhere revokes the earlier session and closes its connection" do
+  earlier = sign_in("PSCH123")
+  later = sign_in("PSCH123") # the same user, another browser
+
+  assert @clients[0].disconnected, "the earlier browser's connection is closed"
+  earlier.get "/lakeraven-ehr/scheduling"
+  earlier.assert_redirected_to "/lakeraven-ehr/login"
+  assert_equal "CLINIC OF DUZ 208", clinic_shown(later)
+end
+
+test "a connection the broker dropped ends the session, whatever the pool holds" do
+  first = sign_in("PSCH123")
+  @clients[0].disconnect # the broker closed it
+
+  first.get "/lakeraven-ehr/dashboard"
+  first.assert_redirected_to "/lakeraven-ehr/login"
+  refute Lakeraven::EHR::RpmsSessions.held?(first.session[:rpms_pool_key])
+end
+
+test "at capacity a new sign-in is refused and no signed-in user is evicted" do
+  configure_pool(max_sessions: 1)
+  reading = sign_in("PSCH123")
+
+  late = open_session
+  late.post "/lakeraven-ehr/login", params: { username: "PSCH456", password: "VERIFY" }
+  assert_equal 503, late.response.status
+  assert @clients.last.disconnected, "the refused sign-in's connection is closed"
+  assert_nil late.session[:duz], "the refused sign-in holds no session"
+  refute @clients[0].disconnected, "the user already signed in keeps their connection"
+  assert_equal "CLINIC OF DUZ 208", clinic_shown(reading)
+end
+
 end
