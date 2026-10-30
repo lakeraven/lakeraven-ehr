@@ -64,8 +64,10 @@ class PerUserRpmsConnectionTest < ActionDispatch::IntegrationTest
 
   teardown do
     sched = RpmsRpc::Scheduling.singleton_class
-    sched.alias_method(:resources, :__resources)
-    sched.remove_method(:__resources)
+    if sched.method_defined?(:__resources) # restore only what setup installed
+      sched.alias_method(:resources, :__resources)
+      sched.remove_method(:__resources)
+    end
     Lakeraven::EHR::RpmsSessions.reset!
   end
 
