@@ -18,7 +18,7 @@ module Lakeraven
 
           @when = params[:when].presence_in(WHEN)
           @appointments = AppointmentBookingGateway.patient_appointments(@dfn).select { |a| in_when?(a[:start_time]&.to_date) }
-          @my_resource_ids = AppointmentBookingGateway.resources.select { |r| r[:view] || held_keys.include?(SUPERVISOR_KEY) }.map { |r| r[:id] }
+          @my_resource_ids = AppointmentBookingGateway.resources.select { |r| visible?(r) }.map { |r| r[:id] }
         end
 
         private
