@@ -14,11 +14,6 @@ module Lakeraven
       # than the un-indexed `name` (race-safety — see #browser_sso_application).
       BROWSER_SSO_APP_UID = "lakeraven-ehr-browser-sso"
 
-      # How long a session may sit idle before it is signed out. RPMS sessions
-      # are not 12-hour credentials and neither is this one; the token's own
-      # expiry is the outer bound, this is the inner one.
-      IDLE_TIMEOUT = SmartAuthentication::SESSION_IDLE_TIMEOUT
-      TOKEN_LIFETIME = 12.hours
 
       def new
         # login form
@@ -60,6 +55,7 @@ module Lakeraven
         # so does this. Establishing no session is the fail-closed answer
         # until the change flow exists (#493 tracks building it).
         if provider[:verify_needs_change]
+          provider[:client]&.disconnect
           terminate_session!
           flash.now[:alert] = "Your verify code must be changed before you can sign in."
           return render :new, status: :forbidden
@@ -67,6 +63,8 @@ module Lakeraven
 
         LoginThrottle.clear_account(access_code)
         establish_session(provider)
+        return render_at_capacity unless adopt_connection(provider)
+
         redirect_to dashboard_path
       end
 
@@ -111,6 +109,32 @@ module Lakeraven
         render :new, status: :too_many_requests
       end
 
+      # Hold the user's own RPMS connection for the session just established
+      # (ADR 0011), keyed to its SMART token: every way the session ends
+      # revokes that token, and each revocation releases the connection. True,
+      # or true at once when this process does not pool connections (a mock).
+      # At capacity the sign-in is refused, without evicting anyone already
+      # signed in: the connection closes and the new session ends.
+      def adopt_connection(provider)
+        client = provider[:client]
+        return true unless client
+
+        key = RpmsSessions.key_for(Doorkeeper::AccessToken.by_token(session[:smart_token]))
+        RpmsSessions.adopt(key, client)
+        session[:rpms_pool_key] = key
+        keep_rpms_session_alive!
+        true
+      rescue RpmsRpc::SessionPool::PoolExhaustedError
+        client.disconnect
+        terminate_session!
+        false
+      end
+
+      def render_at_capacity
+        flash.now[:alert] = "RPMS is at capacity right now. Try again shortly."
+        render :new, status: :service_unavailable
+      end
+
       def render_broker_unavailable
         flash.now[:alert] = "RPMS is not reachable right now. Try again shortly."
         render :new, status: :service_unavailable
@@ -125,8 +149,10 @@ module Lakeraven
         session[:options] = Array(provider[:options]).map(&:to_s)
         # The CIA session RPMS opened for this sign-on, so audit rows lead to it.
         session[:rpms_session_id] = provider[:rpms_session_id]
-        session[:last_seen_at] = Time.current.to_i
+        session[:signed_in_at] = session[:last_seen_at] = Time.current.to_i
+        session[:rpms_idle_seconds] = provider[:idle_seconds]
         session[:smart_token] = mint_smart_token(provider)
+        keep_rpms_session_alive!
       end
 
       # Mint a SMART token for this session, bound to the human and scoped by
@@ -155,7 +181,7 @@ module Lakeraven
           application: browser_sso_application,
           scopes: scopes,
           resource_owner_id: provider[:duz].to_i,
-          expires_in: TOKEN_LIFETIME.to_i
+          expires_in: Lakeraven::EHR.configuration.session_lifetime.to_i
         )
         # Intrinsic marker: what makes this a BROWSER credential travels on the
         # token itself, not on a renameable application label. See
@@ -170,9 +196,14 @@ module Lakeraven
       # revocable by the clinician who owned them. One human, one live browser
       # token — which also bounds the table's growth.
       def revoke_previous_tokens_for(duz)
+        # Each revoked token's RPMS connection goes with it (ADR 0011 §4): the
+        # earlier browser's session can no longer reach RPMS as this user.
         Doorkeeper::AccessToken
           .where(application_id: browser_sso_application.id, resource_owner_id: duz.to_i, revoked_at: nil)
-          .find_each(&:revoke)
+          .find_each do |token|
+            token.revoke
+            RpmsSessions.release(RpmsSessions.key_for(token)) if RpmsSessions.enabled?
+          end
       end
 
       # Race-safe lookup/creation of the one browser SSO Doorkeeper application.
