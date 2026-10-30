@@ -73,7 +73,7 @@ module Lakeraven
       private
 
       def authenticate(access_code:, verify_code:)
-        AuthenticationService.new.authenticate(access_code: access_code, verify_code: verify_code)
+        AuthenticationService.new.authenticate(access_code: access_code, verify_code: verify_code, client_ip: request.remote_ip)
       rescue RpmsRpc::Client::ConnectionError, RpmsRpc::NotConfiguredError, Errno::ECONNREFUSED,
              IOError, SocketError,
              # A broker that answers but refuses the sign-on RPCs themselves (a CIA-only
@@ -118,6 +118,8 @@ module Lakeraven
         session[:user_type] = provider[:user_type].to_s
         session[:security_keys] = Array(provider[:security_keys]).map(&:to_s)
         session[:options] = Array(provider[:options]).map(&:to_s)
+        # The CIA session RPMS opened for this sign-on, so audit rows lead to it.
+        session[:rpms_session_id] = provider[:rpms_session_id]
         session[:signed_in_at] = session[:last_seen_at] = Time.current.to_i
         session[:rpms_idle_seconds] = provider[:idle_seconds]
         session[:smart_token] = mint_smart_token(provider)

@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "socket"
 require "rpms_rpc/api/authentication"
 
 module Lakeraven
@@ -25,11 +26,19 @@ module Lakeraven
       #
       # NOTE: even serialized, one global client still holds one broker
       # identity — this narrows the window, it does not close it (rpms-rpc#234).
-      def authenticate(access_code:, verify_code:)
+      #
+      # client_ip is the browser's address. RPMS records it, with this
+      # application's workstation name, against the sign-on
+      # (docs/identity-passthrough.md).
+      def authenticate(access_code:, verify_code:, client_ip: nil)
         return failure("Password required") if verify_code.to_s.empty?
 
-        with_broker_wire_lock { resolve_signon(access_code, verify_code) }
+        with_broker_wire_lock { resolve_signon(access_code, verify_code, client_ip) }
       end
+
+      # What RPMS records as the workstation of a lakeraven-ehr sign-on (CIA
+      # AUTH's WID): this application, and the host it runs on.
+      def self.workstation = "lakeraven-ehr #{Socket.gethostname}"[0, 40]
 
       private
 
@@ -46,10 +55,10 @@ module Lakeraven
         BROKER_WIRE_MUTEX.synchronize(&block)
       end
 
-      def resolve_signon(access_code, verify_code)
+      def resolve_signon(access_code, verify_code, client_ip)
         auth =
           if cia_broker?
-            cia_signon(access_code, verify_code)
+            cia_signon(access_code, verify_code, client_ip)
           else
             RpmsRpc::Authentication.authenticate(access_code: access_code, verify_code: verify_code)
           end
@@ -92,7 +101,9 @@ module Lakeraven
             # credential where CPRS would force the change first; the caller
             # decides, but it can only decide if it is told.
             verify_needs_change: auth[:verify_needs_change] == true,
-            idle_seconds: idle_seconds
+            idle_seconds: idle_seconds,
+            # The CIA session RPMS opened for this sign-on (nil over XWB).
+            rpms_session_id: auth[:rpms_session_id]
           }
         )
       end
@@ -109,16 +120,18 @@ module Lakeraven
       # (VueCentric shows it and prompts); there is no flag field to read.
       VERIFY_CHANGE_GREETING = /VERIFY CODE must be changed/i
 
-      def cia_signon(access_code, verify_code)
+      def cia_signon(access_code, verify_code, client_ip)
         client = RpmsRpc.client
         client.connect unless client.connected?
-        signon = client.authenticate(access_code, verify_code)
+        signon = client.authenticate(access_code, verify_code,
+                                     workstation: self.class.workstation, workstation_ip: client_ip.presence)
 
         {
           success: true,
           duz: signon[:duz],
           name: signon[:user],
-          verify_needs_change: VERIFY_CHANGE_GREETING.match?(signon[:greeting].to_s)
+          verify_needs_change: VERIFY_CHANGE_GREETING.match?(signon[:greeting].to_s),
+          rpms_session_id: client.session_uid
         }
       rescue RpmsRpc::Client::AuthenticationError => e
         # The gem sanitizes these messages (RpmsRpc.sanitize_error), so the

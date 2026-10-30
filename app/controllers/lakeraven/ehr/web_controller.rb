@@ -123,6 +123,23 @@ module Lakeraven
       def current_security_keys
         Array(session[:security_keys])
       end
+
+      # Whether the signed-in user holds the named capability (Capabilities,
+      # ADR 0010), from the keys RPMS reported at sign-on. Views ask the same
+      # question, so a control a user sees is one the server allows.
+      def capability?(name)
+        Capabilities.allows?(current_security_keys, name)
+      end
+      helper_method :capability?
+
+      # Refuse the request unless the user holds the capability: the one
+      # server-side check every screen's before_action uses.
+      def require_capability!(name)
+        return if capability?(name)
+
+        note_audit_denial("browser access refused: lacks #{name}")
+        head :forbidden
+      end
     end
   end
 end

@@ -7,37 +7,149 @@
 #   "a patient exists with DFN {string}" — cpoe_steps.rb
 #   "the generation should complete in under {int} seconds" — electronic_prescribing_steps.rb
 
+require_relative "../../test/support/ccda_model_fixtures"
+
+World(Lakeraven::EHR::CcdaModelFixtures)
+
 # -----------------------------------------------------------------------------
 # Given: patient with clinical data for C-CDA generation
 # -----------------------------------------------------------------------------
 
-Given("the patient has clinical data for a care summary") do
+Given("the patient has no address on file for a care summary") do
+  dfn = (@patient_dfn || Lakeraven::EHR::CcdaModelFixtures::SYNTHETIC_DFN).to_s
   @care_summary_data = {
-    patient: {
-      dfn: @patient_dfn || "12345",
-      name: { given: "Alice", family: "Anderson" },
-      dob: "1975-06-15", sex: "F",
-      address: { street: "123 Main St", city: "Anchorage", state: "AK", zip: "99501" }
-    },
-    allergies: [
-      { code: "7980", code_system: "2.16.840.1.113883.6.88", display: "Penicillin", status: "active" },
-      { code: "36567", code_system: "2.16.840.1.113883.6.88", display: "Simvastatin", status: "active" }
-    ],
-    conditions: [
-      { code: "E11.9", code_system: "2.16.840.1.113883.6.90", display: "Type 2 diabetes mellitus", status: "active" },
-      { code: "I10", code_system: "2.16.840.1.113883.6.90", display: "Essential hypertension", status: "active" }
-    ],
-    medications: [
-      { code: "311364", code_system: "2.16.840.1.113883.6.88", display: "Lisinopril 10 MG Oral Tablet" },
-      { code: "860975", code_system: "2.16.840.1.113883.6.88", display: "Metformin 500 MG Oral Tablet" }
-    ],
-    vitals: [
-      { code: "8480-6", display: "Systolic BP", value: "120", units: "mm[Hg]", date: "2026-03-01" }
-    ],
-    encounters: [
-      { date: "2026-03-01", type_code: "99213", type_display: "Office visit", performer: "Dr. Smith" }
-    ],
-    author: { name: "Dr. Smith", institution: "Example Health Center" }
+    patient: synthetic_patient(
+      dfn: dfn.to_i,
+      name: "TEST,PATIENT ONE",
+      address_line1: nil,
+      city: nil,
+      state: nil,
+      zip_code: nil
+    ),
+    allergies: [],
+    conditions: [],
+    medications: [],
+    vitals: [],
+    encounters: [],
+    author: synthetic_author
+  }
+end
+
+Given("the Part 2 egress filter rewrites the patient dfn to {string}") do |rewritten_dfn|
+  @egress_rewritten_dfn = rewritten_dfn
+  @egress_filter_impl = ->(sections) {
+    sections.merge(patient: sections[:patient].merge(dfn: rewritten_dfn))
+  }
+end
+
+When("a transitions of care document is requested for the patient") do
+  dfn = @patient_dfn || "1"
+  patient = Lakeraven::EHR::Patient.new(
+    dfn: dfn.to_i,
+    name: "Anderson,Alice",
+    dob: Date.parse("1980-05-15"),
+    sex: "F"
+  )
+  stub_gateway(Lakeraven::EHR::Patient, :find_by_dfn, patient)
+
+  app = Doorkeeper::Application.create!(
+    name: "toc-spec-#{SecureRandom.hex(4)}",
+    redirect_uri: "https://example.test/callback",
+    scopes: "system/*.read system/*.write",
+    confidential: true
+  )
+  token = Doorkeeper::AccessToken.create!(
+    application: app,
+    scopes: "system/*.read system/*.write",
+    expires_in: 3600
+  )
+  header "Authorization", "Bearer #{token.plaintext_token || token.token}"
+
+  filter = Lakeraven::EHR::Part2EgressFilter.singleton_class
+  original = filter.instance_method(:call)
+  filter_invoked = [ false ]
+  impl = @egress_filter_impl
+  filter.define_method(:call) do |sections|
+    filter_invoked[0] = true
+    impl.call(sections)
+  end
+  begin
+    post "/lakeraven-ehr/transitions_of_care", { patient_dfn: dfn }
+    @transitions_of_care_response = last_response
+    @egress_filter_invoked = filter_invoked[0]
+  ensure
+    filter.define_method(:call, original)
+  end
+end
+
+Then("the transitions of care response should refuse egress with status {int}") do |status|
+  assert @egress_filter_invoked, "Expected Part 2 egress filter to run before refusing"
+  requested = Lakeraven::EHR::Patient.canonical_dfn(@patient_dfn || "1")
+  rewritten = Lakeraven::EHR::Patient.canonical_dfn(@egress_rewritten_dfn)
+  assert rewritten.blank? || rewritten != requested,
+         "Expected egress rewrite #{@egress_rewritten_dfn.inspect} to refuse for requested patient #{@patient_dfn.inspect}"
+
+  assert_equal status, @transitions_of_care_response.status
+  refute_includes @transitions_of_care_response.body, "ClinicalDocument"
+
+  outcome = JSON.parse(@transitions_of_care_response.body)
+  issue = outcome.fetch("issue").first
+  assert_equal "OperationOutcome", outcome["resourceType"]
+  assert_equal "error", issue["severity"]
+  assert_equal "exception", issue["code"]
+  assert_equal(
+    "Part 2 egress filter did not return clinical sections; C-CDA not generated",
+    issue["diagnostics"]
+  )
+end
+
+Then("the transitions of care response should include C-CDA with patient id extension {string}") do |extension|
+  assert_equal 201, @transitions_of_care_response.status
+  assert_includes @transitions_of_care_response.body, "ClinicalDocument"
+  doc = Nokogiri::XML(@transitions_of_care_response.body)
+  actual = doc.at_xpath(
+    "//xmlns:patientRole/xmlns:id/@extension",
+    "xmlns" => "urn:hl7-org:v3"
+  )&.value
+  assert_equal extension, actual,
+    "Expected patientRole id extension #{extension.inspect}, got #{actual.inspect}"
+end
+
+Then("the document should omit patient addr") do
+  refute @ccda_doc.at_xpath("//xmlns:patientRole/xmlns:addr", "xmlns" => "urn:hl7-org:v3"),
+    "Expected no patient addr when all address fields are blank"
+end
+
+Then("the encounters section should follow CDA element order") do
+  ns = { "xmlns" => "urn:hl7-org:v3" }
+  section = @ccda_doc.at_xpath(
+    "//xmlns:section[xmlns:templateId[@root='2.16.840.1.113883.10.20.22.2.22.1']]",
+    ns
+  )
+  assert section.present?, "Expected encounters section"
+
+  names = section.element_children.map(&:name)
+  template_idx = names.index("templateId")
+  code_idx = names.index("code")
+  title_idx = names.index("title")
+  assert template_idx && code_idx && title_idx
+  assert template_idx < code_idx && code_idx < title_idx,
+    "expected templateId, code, title in order; got #{names.inspect}"
+
+  section_code = section.at_xpath("./xmlns:code", ns)
+  assert_equal "46240-8", section_code&.[]("code")
+end
+
+Given("the patient has clinical data for a care summary") do
+  dfn = (@patient_dfn || Lakeraven::EHR::CcdaModelFixtures::SYNTHETIC_DFN).to_s
+  @care_summary_data = {
+    patient: synthetic_patient(dfn: dfn.to_i, name: "TEST,PATIENT ONE"),
+    allergies: synthetic_allergies.map { |a| a.tap { |row| row.patient_dfn = dfn } },
+    conditions: synthetic_conditions.map { |c| c.tap { |row| row.patient_dfn = dfn } },
+    medications: synthetic_medications.map { |m| m.tap { |row| row.patient_dfn = dfn } },
+    vitals: synthetic_vitals.map { |v| v.tap { |row| row.patient_dfn = dfn } },
+    encounters: synthetic_encounters.map { |e| e.tap { |row| row.patient_dfn = dfn.to_i } },
+    author: synthetic_author.merge(institution: "Example Health Center")
   }
 end
 
