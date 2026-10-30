@@ -6,9 +6,6 @@
 #           or xwb (a stock VistA XWB broker)
 #   host    the broker's host
 #   port    the broker's port
-#   max_sessions  how many signed-in users this process holds at once, each on its
-#           own RPMS connection (an M job on the RPMS host). Default 64. Sign-in
-#           is refused while every one is in use.
 #
 # Each value can come from the environment, as database.yml takes DATABASE_URL.
 # broker and host are quoted: a bare `on` or `null` would otherwise load as a boolean or nil.
@@ -16,7 +13,6 @@ default: &default
   broker: "<%= ENV.fetch("VISTA_BROKER", "cia") %>"
   host: "<%= ENV["VISTA_RPC_HOST"] %>"
   port: <%= ENV.fetch("VISTA_RPC_PORT", 9100) %>
-  max_sessions: <%= ENV.fetch("RPMS_MAX_SESSIONS", 64) %>
 
 # A local rpms-ops image: docker run -p 127.0.0.1:9100:9100 ghcr.io/lakeraven/rpms-ydb:$TAG
 development:

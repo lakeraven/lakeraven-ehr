@@ -62,6 +62,11 @@ Each value can come from the environment (`VISTA_BROKER`, `VISTA_RPC_HOST`, `VIS
 With no host named, the app boots and logs `No RPMS backend configured`, and sign-in fails.
 A host app may instead set `RpmsRpc.configure { |c| c.client = ... }` in an initializer; the engine leaves a configured client alone.
 
+Each signed-in user gets an RPMS connection of their own, opened at sign-in and closed when their session ends, so RPMS runs every request as that user (ADR 0011).
+`max_sessions` in `config/rpms.yml` caps how many users one app process holds at once (default 64); each is an M job on the RPMS host.
+Sign-in is refused while every one is in use.
+The connections live in the process's memory, so run one app process per instance (threads are fine), or route each browser to the same process.
+
 **Local: an rpms-ops release in Docker.**
 `docker compose up -d` runs one ("Development", above); development's defaults point at it.
 
