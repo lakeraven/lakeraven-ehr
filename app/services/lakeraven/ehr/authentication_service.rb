@@ -79,6 +79,10 @@ module Lakeraven
         # The options the policy grants from (the chart's CIAV VUECENTRIC), asked
         # the same way and refused the same way when they cannot be read.
         options = OptionAccessGateway.held(SessionScopePolicy::OPTION_SCOPES.keys)
+        # How long RPMS lets this user sit idle (their DTIME): the session lasts
+        # that long, on RPMS's clock. Not knowing it is not a refused sign-on;
+        # the app's own limit applies instead.
+        idle_seconds = rpms_idle_seconds(duz_s)
 
         # Round-trip the server's user type through the short code so
         # :referrals_supervisor or :referrals_manager still elevates to "case_manager".
@@ -97,6 +101,7 @@ module Lakeraven
             # credential where CPRS would force the change first; the caller
             # decides, but it can only decide if it is told.
             verify_needs_change: auth[:verify_needs_change] == true,
+            idle_seconds: idle_seconds,
             # The CIA session RPMS opened for this sign-on (nil over XWB).
             rpms_session_id: auth[:rpms_session_id]
           }
@@ -134,6 +139,13 @@ module Lakeraven
         # every refusal.
         Rails.logger.warn("[auth] CIA sign-on refused: #{e.class}: #{e.message}")
         { success: false, error: "Invalid access/verify code" }
+      end
+
+      def rpms_idle_seconds(duz)
+        RpmsRpc::Authentication.timed_read(duz)
+      rescue RpmsRpc::Client::RpcError => e
+        Rails.logger.warn("[auth] idle limit unavailable for DUZ #{duz}: #{e.class}")
+        nil
       end
 
       def failure(message)

@@ -14,11 +14,6 @@ module Lakeraven
       # than the un-indexed `name` (race-safety — see #browser_sso_application).
       BROWSER_SSO_APP_UID = "lakeraven-ehr-browser-sso"
 
-      # How long a session may sit idle before it is signed out. RPMS sessions
-      # are not 12-hour credentials and neither is this one; the token's own
-      # expiry is the outer bound, this is the inner one.
-      IDLE_TIMEOUT = SmartAuthentication::SESSION_IDLE_TIMEOUT
-      TOKEN_LIFETIME = 12.hours
 
       def new
         # login form
@@ -125,8 +120,10 @@ module Lakeraven
         session[:options] = Array(provider[:options]).map(&:to_s)
         # The CIA session RPMS opened for this sign-on, so audit rows lead to it.
         session[:rpms_session_id] = provider[:rpms_session_id]
-        session[:last_seen_at] = Time.current.to_i
+        session[:signed_in_at] = session[:last_seen_at] = Time.current.to_i
+        session[:rpms_idle_seconds] = provider[:idle_seconds]
         session[:smart_token] = mint_smart_token(provider)
+        keep_rpms_session_alive!
       end
 
       # Mint a SMART token for this session, bound to the human and scoped by
@@ -155,7 +152,7 @@ module Lakeraven
           application: browser_sso_application,
           scopes: scopes,
           resource_owner_id: provider[:duz].to_i,
-          expires_in: TOKEN_LIFETIME.to_i
+          expires_in: Lakeraven::EHR.configuration.session_lifetime.to_i
         )
         # Intrinsic marker: what makes this a BROWSER credential travels on the
         # token itself, not on a renameable application label. See

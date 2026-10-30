@@ -38,7 +38,7 @@ module Lakeraven
       # rather than merely forgetting, because CookieStore leaves the client a
       # valid cookie after reset_session.
       def require_authentication
-        if session[:duz].present? && session_idle_expired?
+        if session[:duz].present? && (session_idle_expired? || session_lifetime_expired?)
           terminate_session!
           return redirect_to login_path, alert: "Your session timed out. Please sign in again."
         end
@@ -54,11 +54,37 @@ module Lakeraven
         last_seen = session[:last_seen_at]
         return false if last_seen.blank?
 
-        Time.current.to_i - last_seen.to_i > SmartAuthentication::SESSION_IDLE_TIMEOUT.to_i
+        Time.current.to_i - last_seen.to_i > session_idle_limit
+      end
+
+      # Whether the session has outlived the site's session_lifetime since
+      # sign-on, however active it has been. A session with no sign-on time was
+      # not made by sign-on, and ends.
+      def session_lifetime_expired?
+        signed_in = session[:signed_in_at]
+        signed_in.blank? || Time.current.to_i - signed_in.to_i > Lakeraven::EHR.configuration.session_lifetime.to_i
+      end
+
+      # How long this session may sit idle: the site's limit, or the user's RPMS
+      # limit (their DTIME, read at sign-on) when that is shorter. RPMS may make
+      # it stricter, never looser.
+      def session_idle_limit
+        site = Lakeraven::EHR.configuration.session_idle_limit.to_i
+        [ session[:rpms_idle_seconds].presence&.to_i, site ].compact.min
       end
 
       def touch_session!
         session[:last_seen_at] = Time.current.to_i
+        keep_rpms_session_alive!
+      end
+
+      # Keep the broker session open for as long as the user may sit idle
+      # (BrokerKeepAlive). Not in the test suite, whose client is a mock.
+      def keep_rpms_session_alive!
+        return if Rails.env.test?
+
+        BrokerKeepAlive.instance.touch!(session_idle_limit)
+        BrokerKeepAlive.instance.start!
       end
 
       # RPMS ends an idle broker session on its own clock, and the session was
