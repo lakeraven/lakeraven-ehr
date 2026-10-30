@@ -32,6 +32,7 @@ module Lakeraven
       # (docs/identity-passthrough.md).
       def authenticate(access_code:, verify_code:, client_ip: nil)
         return failure("Password required") if verify_code.to_s.empty?
+        return authenticate_on_own_connection(access_code, verify_code, client_ip) if RpmsSessions.enabled?
 
         with_broker_wire_lock { resolve_signon(access_code, verify_code, client_ip) }
       end
@@ -41,6 +42,24 @@ module Lakeraven
       def self.workstation = "lakeraven-ehr #{Socket.gethostname}"[0, 40]
 
       private
+
+      # Sign on over a fresh connection of the user's own (ADR 0011 §3). The
+      # whole sign-on sequence runs inside that connection's scope, so every
+      # read in it (the user, class, keys, options, idle limit) asks the
+      # connection that just signed on, and nothing is shared with any other
+      # sign-on: no lock is needed. On success the value carries the client,
+      # for the caller to adopt into RpmsSessions; on any failure the
+      # connection is closed here.
+      def authenticate_on_own_connection(access_code, verify_code, client_ip)
+        client = RpmsSessions.new_client
+        result = RpmsRpc.with_client(client) { resolve_signon(access_code, verify_code, client_ip) }
+        return result.tap { client.disconnect } unless result.success?
+
+        Result.new(success?: true, error: nil, value: result.value.merge(client: client))
+      rescue StandardError
+        client&.disconnect
+        raise
+      end
 
       # Prefer the gem's cross-client wire lock when present; otherwise fall
       # back to a process-local mutex rather than running unsynchronized. Do

@@ -55,6 +55,7 @@ module Lakeraven
         # so does this. Establishing no session is the fail-closed answer
         # until the change flow exists (#493 tracks building it).
         if provider[:verify_needs_change]
+          provider[:client]&.disconnect
           terminate_session!
           flash.now[:alert] = "Your verify code must be changed before you can sign in."
           return render :new, status: :forbidden
@@ -62,6 +63,8 @@ module Lakeraven
 
         LoginThrottle.clear_account(access_code)
         establish_session(provider)
+        return render_at_capacity unless adopt_connection(provider)
+
         redirect_to dashboard_path
       end
 
@@ -104,6 +107,32 @@ module Lakeraven
         response.headers["Retry-After"] = LoginThrottle.retry_after.to_s
         flash.now[:alert] = "Too many sign-in attempts. Try again later."
         render :new, status: :too_many_requests
+      end
+
+      # Hold the user's own RPMS connection for the session just established
+      # (ADR 0011), keyed to its SMART token: every way the session ends
+      # revokes that token, and each revocation releases the connection. True,
+      # or true at once when this process does not pool connections (a mock).
+      # At capacity the sign-in is refused, without evicting anyone already
+      # signed in: the connection closes and the new session ends.
+      def adopt_connection(provider)
+        client = provider[:client]
+        return true unless client
+
+        key = RpmsSessions.key_for(Doorkeeper::AccessToken.by_token(session[:smart_token]))
+        RpmsSessions.adopt(key, client)
+        session[:rpms_pool_key] = key
+        keep_rpms_session_alive!
+        true
+      rescue RpmsRpc::SessionPool::PoolExhaustedError
+        client.disconnect
+        terminate_session!
+        false
+      end
+
+      def render_at_capacity
+        flash.now[:alert] = "RPMS is at capacity right now. Try again shortly."
+        render :new, status: :service_unavailable
       end
 
       def render_broker_unavailable
@@ -167,9 +196,14 @@ module Lakeraven
       # revocable by the clinician who owned them. One human, one live browser
       # token — which also bounds the table's growth.
       def revoke_previous_tokens_for(duz)
+        # Each revoked token's RPMS connection goes with it (ADR 0011 §4): the
+        # earlier browser's session can no longer reach RPMS as this user.
         Doorkeeper::AccessToken
           .where(application_id: browser_sso_application.id, resource_owner_id: duz.to_i, revoked_at: nil)
-          .find_each(&:revoke)
+          .find_each do |token|
+            token.revoke
+            RpmsSessions.release(RpmsSessions.key_for(token)) if RpmsSessions.enabled?
+          end
       end
 
       # Race-safe lookup/creation of the one browser SSO Doorkeeper application.

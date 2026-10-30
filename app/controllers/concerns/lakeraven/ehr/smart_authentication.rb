@@ -365,10 +365,13 @@ module Lakeraven
         if raw
           token = Doorkeeper::AccessToken.by_token(raw)
           token.revoke if token && !token.revoked?
+          # The token's RPMS connection goes with it (ADR 0011 §4).
+          RpmsSessions.release(RpmsSessions.key_for(token)) if token && RpmsSessions.enabled?
         end
         session.delete(:smart_token)
         session.delete(:duz)
         session.delete(:last_seen_at)
+        session.delete(:rpms_pool_key)
       rescue StandardError => e
         Rails.logger.error("Session token revocation failed: #{e.class}")
       end
