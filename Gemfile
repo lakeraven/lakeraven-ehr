@@ -7,7 +7,8 @@ gemspec
 if ENV["RPMS_RPC_PATH"]
   gem "rpms-rpc", path: ENV["RPMS_RPC_PATH"]
 else
-  # Pinned to rpms-rpc main d59fe4a: RpmsRpc.with_client scopes a request to its user's
+  # Pinned to rpms-rpc main 6723a7f: SessionPool can refuse at capacity instead of evicting, and
+  # its keeper releases a dropped connection (rpms-rpc#542). Earlier, d59fe4a: RpmsRpc.with_client scopes a request to its user's
   # connection, and SessionPool releases and keeps sessions open (rpms-rpc#518, #533).
   # Earlier, 8c136a1: CIA sign-on tells RPMS the application, the workstation
   # and the person's address (rpms-rpc#516). Earlier, 320cea0: SchedulingSetup reads the access types, holidays and a
@@ -33,7 +34,7 @@ else
   # (lakeraven-ehr#540), invented RPC names removed (#310/#311), typed errors for
   # a missing RPC (#370), the user class from ORWU USERINFO (#236). A fixed ref
   # rather than branch:main so the pin does not drift mid-merge.
-  gem "rpms-rpc", github: "lakeraven/rpms-rpc", ref: "d59fe4a"
+  gem "rpms-rpc", github: "lakeraven/rpms-rpc", ref: "6723a7f"
 end
 
 gem "puma"
