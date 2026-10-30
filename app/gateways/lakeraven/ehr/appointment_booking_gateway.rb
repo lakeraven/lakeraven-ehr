@@ -54,6 +54,12 @@ module Lakeraven
         Array(via.appointments(resource: resource[:name], start_date: date, end_date: date)).find { |a| a[:id] == id.to_i }
       end
 
+      # One patient's appointments across clinics, earliest first (S-SCH-05.6):
+      # BSDX PATIENT APPT DISPLAY, the scheduling client's own list.
+      def self.patient_appointments(dfn, via: ::RpmsRpc::Scheduling)
+        Array(via.patient_appointments(dfn.to_i)).sort_by { |a| a[:start_time] || Time.at(0) }
+      end
+
       # Patients whose names start with the text, each with HRN and date of birth.
       def self.patients(text, via: ::RpmsRpc::Patient)
         text = text.to_s.strip.upcase

@@ -45,5 +45,10 @@
 </dl>
 
 <p class="mt-6">
+  <% if (Array(session[:security_keys]) & %w[scheduling_user scheduling_supervisor]).any? %>
+    <%= link_to "Appointments",
+          scheduling_patient_appointments_path(params[:dfn]),
+          id: "patient-appointments-link" %>
+  <% end %>
   <%= link_to "Back to search", registration_patients_path %>
 </p>

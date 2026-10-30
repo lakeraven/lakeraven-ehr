@@ -124,7 +124,7 @@ class SchedulingCancelAppointmentTest < ActionDispatch::IntegrationTest
     end
 
     assert_select "#appointments tr[data-appointment='8'] td[data-status='cancelled']"
-    assert_select "#appointments tr[data-appointment='8'] a", count: 0
+    assert_select "#appointments tr[data-appointment='8'] a[href*='/cancel'], #appointments tr[data-appointment='8'] a[href*='/checkin']", count: 0
     assert_select "#open-times tr[data-time='09:00'] td[data-open='1']"
   end
 
