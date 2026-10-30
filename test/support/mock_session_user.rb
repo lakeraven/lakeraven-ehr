@@ -18,9 +18,14 @@ require "rpms_rpc/mock_client"
 # one 0/1 per name asked, from the keys seed_held_keys gave that DUZ (HASKEY,
 # CIAVCXUS.m:8-12, reads ^XUSEC(KEY,DUZ)). With nobody signed on it answers
 # nothing, which held_keys reads as "could not ask".
+#
+# ORWU HAS OPTION ACCESS likewise answers for the user the sign-on bound: ["1"]
+# for an option seed_options gave that DUZ, ["0"] for any other (the shape a
+# real broker sends), and nothing with nobody signed on.
 module MockSessionUser
   AV_CODE_RPC = "XUS AV CODE"
   HELD_KEYS_RPC = "CIAVCXUS HASKEYS"
+  OPTION_ACCESS_RPC = "ORWU HAS OPTION ACCESS"
 
   def seed_user(duz, credentials:, name:, role:)
     super
@@ -32,10 +37,16 @@ module MockSessionUser
     (@held_keys ||= {})[duz.to_i] = Array(names)
   end
 
+  # The options DUZ may run: what ORWU HAS OPTION ACCESS would say.
+  def seed_options(duz, names)
+    (@options ||= {})[duz.to_i] = Array(names)
+  end
+
   def seeded_reply(rpc_name, *params)
     reply = super
     bind_session_user(reply) if rpc_name == AV_CODE_RPC
     return held_keys_reply(params.first) if rpc_name == HELD_KEYS_RPC && reply == "" && @session_duz
+    return option_access_reply(params.first) if rpc_name == OPTION_ACCESS_RPC && reply == "" && @session_duz
 
     reply
   end
@@ -50,6 +61,10 @@ module MockSessionUser
     @session_duz = duz
     user = @session_users&.dig(duz)
     seed_user(duz.to_s, **user) if user
+  end
+
+  def option_access_reply(name)
+    [ Array(@options&.dig(@session_duz)).include?(name.to_s) ? "1" : "0" ]
   end
 
   def held_keys_reply(asked)

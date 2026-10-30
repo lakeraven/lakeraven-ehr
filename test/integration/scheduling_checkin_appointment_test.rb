@@ -10,7 +10,7 @@ class SchedulingCheckinAppointmentTest < ActionDispatch::IntegrationTest
   RESOURCE = { id: 2, name: "DEMO IHS CLINIC", inactive: false, time_scale: 15, hospital_location_id: 3,
                view: true, overbook: true, modify_schedule: true, modify_appointments: true }.freeze
 
-  def today = Date.current
+  def today = Date.today
   def at(hour, min = 0, day: today) = Time.utc(day.year, day.month, day.day, hour, min)
 
   def appointment(**state)
@@ -41,7 +41,7 @@ class SchedulingCheckinAppointmentTest < ActionDispatch::IntegrationTest
 
   def checkins = @checkins || []
   def path = "/lakeraven-ehr/scheduling/clinics/2/appointments/8/checkin"
-  def now_param = Time.now.utc.strftime("%Y-%m-%dT%H:%M")
+  def now_param = Time.now.strftime("%Y-%m-%dT%H:%M")
   def checkin_params(**changes) = { date: today.iso8601, checkin: { at: now_param, provider_ien: "206" }.merge(changes) }
 
   test "S-SCH-03.1 a patient with an appointment today is checked in, with the provider named" do
@@ -84,7 +84,7 @@ class SchedulingCheckinAppointmentTest < ActionDispatch::IntegrationTest
       post path, params: checkin_params(at: (today - 1).strftime("%Y-%m-%dT09:00"))
       assert_select "#checkin-errors li", text: /must be on the appointment's day/
 
-      post path, params: checkin_params(at: (Time.now.utc + 3600).strftime("%Y-%m-%dT%H:%M"))
+      post path, params: checkin_params(at: (Time.now + 3600).strftime("%Y-%m-%dT%H:%M"))
       assert_select "#checkin-errors li", text: /cannot be in the future/
       assert_empty checkins
     end

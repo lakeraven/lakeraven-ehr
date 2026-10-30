@@ -9,25 +9,23 @@ module Lakeraven
       # The front desk finds a patient before registering one (rpms-ux S-REG-01),
       # and registers a new one (S-REG-02).
       #
-      # Gated on the keys BPRM's registration screens gate on: searching takes one
-      # of the registration keys (AGZMENU, AGZMGR, AGZVIEWONLY); opening a
-      # registration also the scheduling menu keys (SDZMENU, SDZSUP); registering
-      # takes AGZMENU or AGZMGR.
+      # Gated on capabilities (Capabilities, ADR 0010): registration.search,
+      # registration.view and patient.register.
       class PatientsController < WebController
-        VIEW_KEYS = %w[registration_menu registration_manager registration_view_only scheduling_user scheduling_supervisor].freeze
-        REGISTER_KEYS = %w[registration_menu registration_manager].freeze
-        # The search is AG's own lookup (AGG LOOKUP PATIENTS), which RPMS runs for
-        # registration users only: a scheduler is refused it, and finds patients
-        # with VueCentric's selection when booking instead.
-        SEARCH_KEYS = %w[registration_menu registration_manager registration_view_only].freeze
+        include RpmsUnavailableRendering
+
+        # A form submission token: the UUID the form was issued.
+        SUBMISSION_ID = /\A\h{8}-\h{4}-\h{4}-\h{4}-\h{12}\z/
         REVIEW_PURPOSE = :registration_review
         REVIEW_TTL = 15.minutes
 
         before_action :require_authentication
-        before_action :require_registration_search_key!, only: :index
-        before_action :require_registration_view_key!, only: :show
-        before_action :require_registration_key!, only: %i[new create confirm]
-        helper_method :can_register?
+        # The search is AG's own lookup (AGG LOOKUP PATIENTS), which RPMS runs for
+        # registration users only: a scheduler is refused it, and finds patients
+        # with VueCentric's selection when booking instead.
+        before_action -> { require_capability!("registration.search") }, only: :index
+        before_action -> { require_capability!("registration.view") }, only: :show
+        before_action -> { require_capability!("patient.register") }, only: %i[new create confirm]
 
         # GET /registration/patients?q=&dob=
         def index
@@ -36,6 +34,8 @@ module Lakeraven
           @searched = @query.present?
           @matches = @searched ? PatientLookupGateway.find(@query, dob: @dob) : []
         rescue RpmsRpc::Client::RpcError, RpmsRpc::Client::ConnectionError => e
+          return end_session_for_closed_rpms! if rpms_connection_closed?
+
           Rails.logger.error("[registration] patient lookup failed: #{e.class}")
           @lookup_failed = true
           @matches = []
@@ -54,12 +54,26 @@ module Lakeraven
         def new
           @registration = PatientRegistration.new(registration_params)
           load_picklists
+          issue_submission
         end
 
-        # POST /registration/patients
+        # POST /registration/patients. A form is filed at most once (#721): its
+        # one-time token is spent, under the same unique index as a review,
+        # before RPMS is asked, so a double click or a resent form stops here.
+        # The form shown again after any answer carries a new token.
         def create
           @registration = PatientRegistration.new(registration_params)
           return render_form(:unprocessable_content) unless @registration.valid?
+
+          submission = params[:submission_id].to_s
+          unless submission.match?(SUBMISSION_ID)
+            flash.now[:alert] = "Open the registration form again, then register the patient."
+            return render_form(:unprocessable_content)
+          end
+          unless RegistrationReview.use!("submission:#{submission}", duz: session[:duz])
+            flash.now[:alert] = "This form was already submitted. Search for the patient before registering again."
+            return render_form(:conflict)
+          end
 
           handle(PatientRegistrationGateway.register(@registration))
         end
@@ -151,7 +165,12 @@ module Lakeraven
 
         def render_form(status)
           load_picklists
+          issue_submission
           render :new, status: status
+        end
+
+        def issue_submission
+          @submission_id = SecureRandom.uuid
         end
 
         def load_picklists
@@ -160,26 +179,7 @@ module Lakeraven
         end
 
         def registration_params
-          params.fetch(:registration, {}).permit(:name, :sex, :dob, :ssn, :tribe_ien, :community_ien).to_h
-        end
-
-        def can_register?
-          held = Array(session[:security_keys])
-          REGISTER_KEYS.any? { |key| held.include?(key) }
-        end
-
-        def require_registration_view_key!
-          held = Array(session[:security_keys])
-          head :forbidden unless VIEW_KEYS.any? { |key| held.include?(key) }
-        end
-
-        def require_registration_search_key!
-          held = Array(session[:security_keys])
-          head :forbidden unless SEARCH_KEYS.any? { |key| held.include?(key) }
-        end
-
-        def require_registration_key!
-          head :forbidden unless can_register?
+          params.fetch(:registration, {}).permit(:name, :sex, :dob, :ssn, :no_ssn_reason, :tribe_ien, :community_ien).to_h
         end
 
         def parse_dob(value)

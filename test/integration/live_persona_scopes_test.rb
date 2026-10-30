@@ -4,7 +4,7 @@ require "test_helper"
 require_relative "../support/demo_persona_keys"
 
 # Live (#578): each demo persona signs on to a real RPMS and gets the scopes
-# its held keys grant, the same ones PersonaScopesTest computes from the key
+# its held keys and options grant, the same ones PersonaScopesTest computes from the key
 # sets the build files. Skipped unless LIVE_RPMS=1 (see test_helper.rb), e.g.
 #
 #   LIVE_RPMS=1 VISTA_BROKER=cia VISTA_RPC_HOST=127.0.0.1 VISTA_RPC_PORT=9110 \
@@ -28,15 +28,17 @@ class LivePersonaScopesTest < ActiveSupport::TestCase
   teardown { LiveRpmsSession.sign_on! if defined?(LIVE_RPMS) && LIVE_RPMS }
 
   PAIRS.each do |persona, (access, verify)|
-    test "#{persona} signs on and gets exactly the scopes its held keys grant" do
+    test "#{persona} signs on and gets exactly the scopes its held keys and options grant" do
       result = Lakeraven::EHR::AuthenticationService.new.authenticate(access_code: access, verify_code: verify)
       assert result.success?, "#{persona}: #{result.error}"
       assert_equal persona, result.value[:name]
 
       expected_keys = Lakeraven::EHR::Roles.symbolize_keys(DemoPersonaKeys::BY_PERSONA.fetch(persona))
       assert_equal expected_keys.sort, result.value[:security_keys].sort, "#{persona}: the keys RPMS reported"
-      assert_equal Lakeraven::EHR::SessionScopePolicy.scopes_for(security_keys: expected_keys),
-                   Lakeraven::EHR::SessionScopePolicy.scopes_for(security_keys: result.value[:security_keys])
+      expected_options = DemoPersonaKeys::OPTIONS_BY_PERSONA.fetch(persona)
+      assert_equal expected_options.sort, result.value[:options].sort, "#{persona}: the options RPMS reported"
+      assert_equal Lakeraven::EHR::SessionScopePolicy.scopes_for(security_keys: expected_keys, options: expected_options),
+                   Lakeraven::EHR::SessionScopePolicy.scopes_for(security_keys: result.value[:security_keys], options: result.value[:options])
     end
   end
 end

@@ -25,6 +25,7 @@ module Lakeraven
 
         filtered = Part2EgressFilter.call(egress_sections(patient))
         return refuse_unfiltered_egress unless egress_sections?(filtered)
+        return refuse_unfiltered_egress unless requested_patient_dfn?(filtered[:patient][:dfn])
 
         render xml: renderable_ccda(filtered), status: :created, content_type: "application/xml"
       end
@@ -90,9 +91,11 @@ module Lakeraven
         }
       end
 
-      # for_patient may raise, or return something other than an array,
-      # until #233. An unreadable section becomes []. That empty array is
-      # not a claim that the patient has no such records.
+      # for_patient may raise, or return something other than an array.
+      # An unreadable section becomes []. That empty array is not a claim
+      # that the patient has no such records. These hashes are only the
+      # Part 2 filter's input. CcdaGenerator takes model objects built
+      # from the filtered sections (#233), never these unfiltered rows.
       def coded_rows(model, dfn, code_key, display_key, system_key = nil)
         rows = model.for_patient(dfn)
         rows = [] unless rows.is_a?(Array)
@@ -119,14 +122,68 @@ module Lakeraven
         EGRESS_LISTS.all? { |key| filtered[key].is_a?(Array) }
       end
 
+      # "01" and 1 are the requested patient. A rewritten dfn whose
+      # canonical form is missing, or is not params[:patient_dfn],
+      # would name another patient or none. That is the same refusal
+      # as a filter that returned no sections.
+      def requested_patient_dfn?(dfn)
+        canonical = Patient.canonical_dfn(dfn)
+        canonical.present? && canonical == Patient.canonical_dfn(params[:patient_dfn])
+      end
+
+      # The filter may withhold a row or rewrite a demographic. The model
+      # objects are built from that returned hash, not from a second read
+      # of the chart, so a withheld row cannot reappear in the document.
       def renderable_ccda(sections)
         CcdaGenerator.generate(
-          patient: sections[:patient],
-          allergies: sections[:allergies],
-          conditions: sections[:conditions],
-          medications: sections[:medications],
+          patient: patient_model(sections[:patient]),
+          allergies: allergy_models(sections[:allergies]),
+          conditions: condition_models(sections[:conditions]),
+          medications: medication_models(sections[:medications]),
           author: ccda_author
         )
+      end
+
+      def patient_model(demo)
+        address = demo[:address] || {}
+        Patient.new(
+          dfn: Patient.canonical_dfn(demo[:dfn]),
+          name: ccda_patient_name(demo[:name]),
+          dob: demo[:dob],
+          sex: demo[:sex],
+          address_line1: address[:street],
+          city: address[:city],
+          state: address[:state],
+          zip_code: address[:zip]
+        )
+      end
+
+      # Patient#name is FAMILY,GIVEN. A missing given name is left
+      # uncomma'd so it round-trips as the family name alone.
+      def ccda_patient_name(name)
+        return if name.blank?
+
+        family = name[:family]
+        given = name[:given]
+        given.nil? ? family.to_s : "#{family},#{given}"
+      end
+
+      def allergy_models(rows)
+        rows.map do |row|
+          AllergyIntolerance.new(allergen_code: row[:code], allergen: row[:display])
+        end
+      end
+
+      def condition_models(rows)
+        rows.map do |row|
+          Condition.new(code: row[:code], display: row[:display], code_system: row[:code_system])
+        end
+      end
+
+      def medication_models(rows)
+        rows.map do |row|
+          MedicationRequest.new(medication_code: row[:code], medication_display: row[:display])
+        end
       end
 
       def refuse_unfiltered_egress

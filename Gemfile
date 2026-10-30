@@ -7,7 +7,22 @@ gemspec
 if ENV["RPMS_RPC_PATH"]
   gem "rpms-rpc", path: ENV["RPMS_RPC_PATH"]
 else
-  # Pinned to rpms-rpc main 49ec8b5: Scheduling.appointments (ids and state, for
+  # Pinned to rpms-rpc main 6723a7f: SessionPool can refuse at capacity instead of evicting, and
+  # its keeper releases a dropped connection (rpms-rpc#542). Earlier, d59fe4a: RpmsRpc.with_client scopes a request to its user's
+  # connection, and SessionPool releases and keeps sessions open (rpms-rpc#518, #533).
+  # Earlier, 8c136a1: CIA sign-on tells RPMS the application, the workstation
+  # and the person's address (rpms-rpc#516). Earlier, 320cea0: SchedulingSetup reads the access types, holidays and a
+  # clinic's booking rules (rpms-rpc#509). Earlier, a40dec0: CiaClient#poll keeps a broker session open, and
+  # Authentication.timed_read names the user's idle limit (rpms-rpc#508). Earlier, f132143:
+  # Scheduling.patient_appointments, one patient's
+  # appointments across clinics (BSDX PATIENT APPT DISPLAY; rpms-rpc#505). Earlier, 02444ff:
+  # Registration runs AG's own field checks
+  # (AGG WINDOW DATA VALIDATION) before it files, and takes no_ssn_reason (rpms-rpc#503,
+  # #504: neither SSN nor reason is refused without the check that hangs the broker).
+  # Earlier, 3e0c31d: Authentication.option_access, which options the
+  # signed-on user may run (ORWU HAS OPTION ACCESS; rpms-rpc#490), and a failed BSDX
+  # list read raises instead of reading as empty (rpms-rpc#500). Earlier, 49ec8b5:
+  # Scheduling.appointments (ids and state, for
   # cancel and check-in; rpms-rpc#496). Earlier: Scheduling.resources and slot_schedule (the
   # user's resources and rights, each block's slots; rpms-rpc#495). Earlier:
   # Tribal.communities lists COMMUNITY entries
@@ -19,7 +34,7 @@ else
   # (lakeraven-ehr#540), invented RPC names removed (#310/#311), typed errors for
   # a missing RPC (#370), the user class from ORWU USERINFO (#236). A fixed ref
   # rather than branch:main so the pin does not drift mid-merge.
-  gem "rpms-rpc", github: "lakeraven/rpms-rpc", ref: "49ec8b5"
+  gem "rpms-rpc", github: "lakeraven/rpms-rpc", ref: "6723a7f"
 end
 
 gem "puma"
