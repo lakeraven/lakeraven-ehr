@@ -179,5 +179,4 @@ test "at capacity a new sign-in is refused and no signed-in user is evicted" do
   refute @clients[0].disconnected, "the user already signed in keeps their connection"
   assert_equal "CLINIC OF DUZ 208", clinic_shown(reading)
 end
-
 end
