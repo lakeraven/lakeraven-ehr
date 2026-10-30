@@ -81,9 +81,18 @@ Lakeraven::EHR::Engine.routes.draw do
   resources :measures, path: "Measure", only: %i[index]
   resources :measure_reports, path: "MeasureReport", only: %i[index]
   resources :audit_events, path: "AuditEvent", only: %i[index show]
-  resources :value_sets, path: "ValueSet", only: %i[index show] do
+  # Show accepts any single path segment, dots included, as $expand does,
+  # so an OID or "gpra.v1" is the id. format: false keeps the dot in the
+  # id; "." is still a segment separator without it. The actions still
+  # render application/fhir+json.
+  resources :value_sets, path: "ValueSet", only: %i[index show], format: false,
+    constraints: { id: %r{[^/]+} } do
     member do
-      get "$expand", action: :expand
+      # "." is a route separator, so one encoded segment such as
+      # ..%2F..%2F.. never reaches expand and the client gets an HTML 404.
+      # Accept any single segment here. LocalAdapter still refuses an id
+      # that is not one file name inside the ValueSet directory.
+      get "$expand", action: :expand, constraints: { id: %r{[^/]+} }
     end
   end
 
