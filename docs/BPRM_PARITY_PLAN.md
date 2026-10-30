@@ -70,7 +70,7 @@ byte-identical HTTP bodies (the two apps' JSON differs by design).
 ## Harness shape
 
 ```
-features/bprm_twin/*.feature        # domain scenarios (exist) + parity.feature (new)
+test/integration/*registration*_test.rb, *scheduling*_test.rb  # the scenarios, by rpms-ux id (the Cucumber twin is retired)
 features/support/
   backends.rb                       # BACKEND=ydb|iris → rpms_rpc connection
   bprm_golden.rb                    # invoke BMW.BSF.SP procs on IRIS, capture FileMan read-back
