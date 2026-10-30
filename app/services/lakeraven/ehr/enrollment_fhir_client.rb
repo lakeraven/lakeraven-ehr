@@ -13,17 +13,22 @@ module Lakeraven
     # Eligibility is fail-closed. A response is enrolled or not_enrolled only
     # when it is an active, complete CoverageEligibilityResponse for this
     # patient, and only from insurance items for the requested coverage type.
-    # The patient reference must be exactly Patient/<dfn>. A benefit period,
-    # when present, must be readable and must cover the service date; a date
-    # outside that window is not_enrolled. Malformed data is an error.
+    # The patient reference must be exactly Patient/<dfn>. A coverage type
+    # matches a trimmed display, or the reference id, exactly and without
+    # case. When both are present they must agree. A benefit period, when
+    # present, must be a FHIR date (YYYY, YYYY-MM, or YYYY-MM-DD) and must
+    # cover the service date. A partial start is the first day of that year
+    # or month, and a partial end is the last day. A date outside that
+    # window is not_enrolled. Malformed data is an error.
     # check_eligibility does not raise: transport errors are retried, then
     # the check is pending and a retry job is enqueued.
     #
     # Terminal answers are cached under a digest of the base URL and the
     # request identity. The raw patient identifier is not the key and is not
-    # stored. A hit is used only when the stored identity still matches, and
-    # it is returned with the current request id. Pending and error results
-    # are not cached.
+    # stored. A hit requires a terminal status, the identity digest, the
+    # coverage type, and the service date when the request has one. It is
+    # returned with the current request id. Pending and error results are
+    # not cached.
     #
     # The bearer token defaults from LAKERAVEN_ENROLLMENT_FHIR_TOKEN.
     # EnrollmentEligibilityRetryJob reads that same variable; it is not put
@@ -80,6 +85,8 @@ module Lakeraven
       TERMINAL_STATUSES = %w[enrolled not_enrolled].freeze
       ACTIVE_COVERAGE_STATUS = "active"
       OUTCOME_ERROR_SEVERITIES = %w[error fatal].freeze
+      # FHIR R4 date: YYYY, YYYY-MM, or YYYY-MM-DD. Year 0000 is not a year.
+      FHIR_DATE_FORMAT = /\A(?<year>\d{4})(?:-(?<month>0[1-9]|1[0-2])(?:-(?<day>0[1-9]|[12]\d|3[01]))?)?\z/
 
       def self.from_environment(base_url: nil)
         url = base_url.presence || ENV["LAKERAVEN_ENROLLMENT_FHIR_BASE_URL"].presence
@@ -122,6 +129,21 @@ module Lakeraven
 
       def call(request)
         check_eligibility(request)
+      end
+
+      # Same transport and cache, with retry scheduling turned off. A base
+      # URL from the retry job replaces the host this client was built with.
+      def for_retry(base_url: nil)
+        self.class.new(
+          base_url: base_url.presence || @base_url,
+          token: @token,
+          cache: @cache,
+          ttl: @ttl,
+          max_attempts: @max_attempts,
+          sleeper: @sleeper,
+          http: @http,
+          schedule_retry: false
+        )
       end
 
       def coverage_for(patient_dfn:, coverage_type:)
@@ -269,48 +291,101 @@ module Lakeraven
         value if value == true || value == false
       end
 
+      # Display is trimmed. The reference id is the final path segment.
+      # Both comparisons are exact and case-insensitive. A display and a
+      # reference that name different types do not match either type.
       def coverage_match?(item, coverage_type)
         coverage = item["coverage"]
         return false unless coverage.is_a?(Hash)
 
-        needle = coverage_type.to_s
+        needle = coverage_type.to_s.strip
         return false if needle.empty?
 
-        display_matches?(coverage["display"], needle) || reference_matches?(coverage["reference"], needle)
+        display = normalized_coverage_display(coverage["display"])
+        reference_id = coverage_reference_id(coverage["reference"])
+        return false if coverage_labels_conflict?(display, reference_id)
+
+        label_matches?(display, needle) || label_matches?(reference_id, needle)
       end
 
-      def display_matches?(display, needle)
-        !display.nil? && display.to_s.casecmp?(needle)
+      def normalized_coverage_display(display)
+        return if display.nil?
+
+        display.to_s.strip.presence
       end
 
-      def reference_matches?(reference, needle)
-        reference.to_s.downcase.include?(needle.downcase)
+      def coverage_reference_id(reference)
+        return if reference.nil?
+
+        reference.to_s.split("/").reject(&:empty?).last
+      end
+
+      def coverage_labels_conflict?(display, reference_id)
+        display.present? && reference_id.present? && !display.casecmp?(reference_id)
+      end
+
+      def label_matches?(label, needle)
+        label.present? && label.casecmp?(needle)
       end
 
       # :open has no period. :inside covers the service date. :outside does
       # not, which is not_enrolled even when inforce is true. :malformed is
       # an error for the whole response.
       def benefit_window(item, service_date)
+        period = readable_benefit_period(item)
+        return period unless period.is_a?(Hash)
+
+        start_on = period_bound(period["start"], :start)
+        end_on = period_bound(period["end"], :end)
+        return :malformed if start_on == :invalid || end_on == :invalid
+        return :open if start_on.nil? && end_on.nil?
+        return :outside if outside_window?(service_date, start_on, end_on)
+
+        :inside
+      end
+
+      def readable_benefit_period(item)
         return :open unless item.key?("benefitPeriod")
 
         period = item["benefitPeriod"]
         return :open if period.nil?
         return :malformed unless period.is_a?(Hash)
 
-        start_on = strict_date(period["start"])
-        end_on = strict_date(period["end"])
-        return :malformed if start_on == :invalid || end_on == :invalid
-        return :outside if outside_window?(service_date, start_on, end_on)
-
-        :inside
+        period
       end
 
-      def strict_date(value)
-        return if value.nil? || value.to_s.strip.empty?
+      # A partial start is the first day of that year or month. A partial
+      # end is the last day. Blank is absent. Anything else is invalid.
+      def period_bound(value, bound)
+        text = value.to_s
+        return if text.strip.empty?
 
-        Date.iso8601(value.to_s)
+        match = FHIR_DATE_FORMAT.match(text)
+        return :invalid unless match
+        return :invalid if match[:year] == "0000"
+
+        fhir_calendar_date(match, bound)
       rescue ArgumentError, TypeError
         :invalid
+      end
+
+      def fhir_calendar_date(match, bound)
+        year = match[:year].to_i
+        month = match[:month]&.to_i
+        day = match[:day]&.to_i
+        return Date.new(year, month, day) if day
+        return month_bound(year, month, bound) if month
+
+        year_bound(year, bound)
+      end
+
+      def month_bound(year, month, bound)
+        day = bound == :end ? -1 : 1
+        Date.new(year, month, day)
+      end
+
+      def year_bound(year, bound)
+        bound == :end ? Date.new(year, 12, 31) : Date.new(year, 1, 1)
       end
 
       def outside_window?(service_date, start_on, end_on)
@@ -324,7 +399,15 @@ module Lakeraven
         return {} unless window == :inside || window == :outside
 
         period = item["benefitPeriod"]
-        { start: strict_date(period["start"]), end: strict_date(period["end"]) }
+        {
+          start: period_date(period["start"], :start),
+          end: period_date(period["end"], :end)
+        }
+      end
+
+      def period_date(value, bound)
+        parsed = period_bound(value, bound)
+        parsed if parsed.is_a?(Date)
       end
 
       def chosen_period(outcomes, status)
@@ -393,13 +476,35 @@ module Lakeraven
       end
 
       def cache_payload_valid?(payload, request)
-        return false unless TERMINAL_STATUSES.include?(payload["status"].to_s)
-        return false if field_mismatch?(payload, "patient_dfn", request.patient_dfn)
-        return false if field_mismatch?(payload, "coverage_type", request.coverage_type)
-        return false if field_mismatch?(payload, "service_date", request.service_date&.iso8601)
-        return false if field_mismatch?(payload, "request_identity_digest", request_identity_digest(request))
+        terminal_cache_status?(payload) &&
+          cache_identity_matches?(payload, request) &&
+          cache_coverage_type_matches?(payload, request) &&
+          cache_service_date_matches?(payload, request) &&
+          !field_mismatch?(payload, "patient_dfn", request.patient_dfn)
+      end
 
-        true
+      def terminal_cache_status?(payload)
+        TERMINAL_STATUSES.include?(payload["status"].to_s)
+      end
+
+      def cache_identity_matches?(payload, request)
+        digest = payload["request_identity_digest"]
+        digest.present? && digest.to_s == request_identity_digest(request)
+      end
+
+      def cache_coverage_type_matches?(payload, request)
+        payload.key?("coverage_type") && payload["coverage_type"].to_s == request.coverage_type.to_s
+      end
+
+      def cache_service_date_matches?(payload, request)
+        expected = request.service_date&.iso8601
+        return stored_service_date_blank?(payload) if expected.nil?
+
+        payload["service_date"].to_s == expected
+      end
+
+      def stored_service_date_blank?(payload)
+        !payload.key?("service_date") || payload["service_date"].blank?
       end
 
       def field_mismatch?(payload, key, expected)

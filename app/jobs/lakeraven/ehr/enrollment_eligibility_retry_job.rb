@@ -6,12 +6,15 @@ module Lakeraven
     # failure. The arguments include a patient identifier, so they are not
     # written to the log. The bearer token is not an argument.
     #
-    # The configured eligibility adapter is used when it is an
-    # EnrollmentFHIRClient, so the retry hits the same cache. Otherwise the
-    # job builds a client from the environment. A still-pending result is
-    # raised so Active Job retries, until the attempt bound, where a fixed
-    # line is logged and the job stops. An error outcome is logged and not
-    # raised. The job never records enrolled or not_enrolled on its own.
+    # The check always uses a client with schedule_retry disabled: a copy of
+    # the configured EnrollmentFHIRClient when that is the adapter, otherwise
+    # a client built from the environment. The copy keeps the adapter's
+    # transport and cache. The job's base_url is used when one was given.
+    # A still-pending result raises Unavailable so Active Job can retry. On
+    # the final attempt the job logs a fixed line and stops. perform_now
+    # leaves that retry with Active Job and does not re-raise it. An error
+    # outcome is logged and not raised. The job never records enrolled or
+    # not_enrolled on its own.
     class EnrollmentEligibilityRetryJob < ApplicationJob
       queue_as :integrations
 
@@ -20,15 +23,6 @@ module Lakeraven
       MAX_ATTEMPTS = 5
 
       retry_on EnrollmentFHIRClient::Unavailable, wait: :polynomially_longer, attempts: MAX_ATTEMPTS
-
-      # Active Job's retry_on handles Unavailable inside perform_now and
-      # returns it. A pending check is still a failure, so the caller sees it.
-      def perform_now
-        outcome = super
-        raise outcome if outcome.is_a?(EnrollmentFHIRClient::Unavailable)
-
-        outcome
-      end
 
       def perform(patient_dfn:, coverage_type:, service_date: nil, provider_npi: nil, purpose: nil, base_url: nil)
         client = retry_client(base_url)
@@ -43,6 +37,10 @@ module Lakeraven
       private
 
       def retry_client(base_url)
+        configured_fhir_client(base_url)&.for_retry(base_url: base_url)
+      end
+
+      def configured_fhir_client(base_url)
         adapter = Lakeraven::EHR.configuration.eligibility_adapter
         return adapter if adapter.is_a?(EnrollmentFHIRClient)
 
