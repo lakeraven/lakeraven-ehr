@@ -5,6 +5,7 @@ require "open3"
 require "tmpdir"
 require "fileutils"
 require "yaml"
+require "timeout"
 
 # Contract for bin/red-before-green (written before the script; the builder
 # does not edit these tests).
@@ -750,7 +751,324 @@ class RedBeforeGreenTest < Minitest::Test
     refute_includes out[/^PWD=.*$/].to_s, @dir, "the tests must run in the scratch worktree, not the PR checkout"
   end
 
+  # --- lakeraven-ehr#663 panel round 1 ----------------------------------------
+  # Spec amendment: scratch worktree runs need a throwaway test DB when DATABASE_URL
+  # is unset (the default per-worktree name does not exist there).
+
+  def test_without_database_url_setup_teardown_and_test_share_test_database_in_scratch_worktree
+    fixed_pr
+    env = fake_runner(<<~RUBY).merge(fake_db_commands)
+      puts "RUNNER TEST_DATABASE=\#{ENV['TEST_DATABASE']}"
+      puts "Failure:\\nGreeterTest#test_it [test/greeter_test.rb:3]:\\nExpected: 1"
+      puts "#{FIN}1 runs, 1 assertions, 1 failures, 0 errors, 0 skips"
+      exit 1
+    RUBY
+
+    out, status = run_script(env: env.merge("DATABASE_URL" => ""))
+
+    assert_equal 0, status.exitstatus, out
+    assert_match(/^VERDICT: RED$/, out)
+    setup = out[/^DB_SETUP .*$/m]
+    runner = out[/^RUNNER TEST_DATABASE=.*$/m]
+    teardown = out[/^DB_TEARDOWN .*$/m]
+    refute_nil setup
+    refute_nil runner
+    refute_nil teardown, "teardown must run even after a RED verdict"
+    db = setup[/TEST_DATABASE=(\S+)/, 1]
+    assert_match(/\Alakeraven_ehr_rbg_[a-z0-9_]+\z/, db)
+    assert_equal db, runner[/TEST_DATABASE=(\S+)/, 1]
+    assert_equal db, teardown[/TEST_DATABASE=(\S+)/, 1]
+    assert_match(/DB_SETUP pwd=wt /, setup)
+    assert_match(/DB_TEARDOWN pwd=wt /, teardown)
+  end
+
+  def test_without_database_url_two_invocations_get_different_test_database_names
+    fixed_pr
+    env = fake_runner(<<~RUBY).merge(fake_db_commands).merge("DATABASE_URL" => "")
+      puts "RUNNER TEST_DATABASE=\#{ENV['TEST_DATABASE']}"
+      puts "#{FIN}1 runs, 1 assertions, 1 failures, 0 errors, 0 skips"
+      exit 1
+    RUBY
+
+    out1, = run_script(env: env)
+    out2, = run_script(env: env)
+    name1 = out1[/^RUNNER TEST_DATABASE=(\S+)/m, 1]
+    name2 = out2[/^RUNNER TEST_DATABASE=(\S+)/m, 1]
+
+    refute_equal name1, name2
+  end
+
+  def test_with_database_url_set_no_test_database_setup_or_teardown
+    fixed_pr
+    env = fake_runner(<<~RUBY).merge(fake_db_commands).merge("DATABASE_URL" => "postgres://ci.example/test")
+      puts "RUNNER TEST_DATABASE=\#{ENV['TEST_DATABASE'].inspect}"
+      puts "#{FIN}1 runs, 1 assertions, 1 failures, 0 errors, 0 skips"
+      exit 1
+    RUBY
+
+    out, status = run_script(env: env)
+
+    assert_equal 0, status.exitstatus, out
+    assert_match(/^VERDICT: RED$/, out)
+    assert_match(/^RUNNER TEST_DATABASE=nil$/, out[/^RUNNER TEST_DATABASE=nil$/m])
+    refute_match(/^DB_SETUP /m, out)
+    refute_match(/^DB_TEARDOWN /m, out)
+  end
+
+  def test_database_setup_failure_is_undetermined_not_red_or_green
+    fixed_pr
+    env = fake_runner(<<~RUBY).merge(fake_db_commands(setup_exit: 1)).merge("DATABASE_URL" => "")
+      puts "#{FIN}1 runs, 1 assertions, 0 failures, 0 errors, 0 skips"
+    RUBY
+
+    out, status = run_script(env: env)
+
+    assert_equal 2, status.exitstatus, out
+    assert_match(/^VERDICT: UNDETERMINED/, out)
+    assert_match(/database setup/i, out)
+    refute_match(/^VERDICT: RED$/, out)
+    refute_match(/^VERDICT: GREEN-WITHOUT-FIX/, out)
+  end
+
+  # --- lakeraven-ehr#663 panel round 2 ----------------------------------------
+  # Spec amendment: trap must run teardown only after the test process exits on
+  # SIGTERM/SIGINT, not only on normal EXIT.
+
+  def test_sigterm_stops_the_test_process_before_teardown_runs
+    assert_signal_cleanup("TERM")
+  end
+
+  def test_sigint_stops_the_test_process_before_teardown_runs
+    assert_signal_cleanup("INT")
+  end
+
+  # --- lakeraven-ehr#663 panel round 3 ----------------------------------------
+  # Spec amendment: Opus / GLM findings on TEST_ENV_NUMBER, double TERM, cleanup
+  # under signal. The builder does not edit these.
+
+  def test_without_database_url_db_commands_unset_test_env_number_and_share_printed_test_database
+    fixed_pr
+    env = fake_runner(<<~RUBY).merge(fake_db_commands).merge("DATABASE_URL" => "", "TEST_ENV_NUMBER" => "2")
+      puts "RUNNER TEST_DATABASE=\#{ENV['TEST_DATABASE']} TEST_ENV_NUMBER=\#{ENV['TEST_ENV_NUMBER'].inspect}"
+      puts "Failure:\\nGreeterTest#test_it [test/greeter_test.rb:3]:\\nExpected: 1"
+      puts "#{FIN}1 runs, 1 assertions, 1 failures, 0 errors, 0 skips"
+      exit 1
+    RUBY
+
+    out, status = run_script(env: env)
+
+    assert_equal 0, status.exitstatus, out
+    assert_match(/^VERDICT: RED$/, out)
+    printed_db = out[/^test database: (\S+)/m, 1]
+    refute_nil printed_db, "script must print the throwaway TEST_DATABASE name\n#{out}"
+    setup = out.lines.find { |l| l.start_with?("DB_SETUP ") }
+    runner = out.lines.find { |l| l.start_with?("RUNNER TEST_DATABASE=") }
+    teardown = out.lines.find { |l| l.start_with?("DB_TEARDOWN pwd=") }
+    refute_nil setup
+    refute_nil runner
+    refute_nil teardown
+    assert_match(/TEST_ENV_NUMBER=<unset>/, setup)
+    assert_match(/TEST_ENV_NUMBER=nil/, runner)
+    assert_match(/TEST_ENV_NUMBER=<unset>/, teardown)
+    [ setup, runner, teardown ].each do |line|
+      assert_equal printed_db, line[/TEST_DATABASE=(\S+)/, 1],
+                   "every step must use the printed TEST_DATABASE exactly\n#{line}"
+    end
+  end
+
+  def test_second_term_while_test_ignores_term_waits_for_kill_before_teardown
+    test_pid = nil
+    fixed_pr
+    pid_file = File.join(@dir, "rbg-test.pid")
+    runner = <<~RUBY
+      Signal.trap("TERM", "IGNORE")
+      File.write(#{pid_file.inspect}, Process.pid.to_s)
+      $stdout.sync = true
+      puts "RUNNER STARTED pid=\#{Process.pid}"
+      sleep 30
+    RUBY
+    env = fake_runner(runner).merge(fake_db_commands(test_pid_file: pid_file)).merge("DATABASE_URL" => "")
+
+    out, status, elapsed, test_pid = run_script_async(signal: "TERM", second_signal: "TERM", second_delay: 0.5, env: env)
+
+    assert_operator elapsed, :<, 12,
+                    "script should escalate past a TERM-ignoring test and finish cleanup\n#{out}"
+    refute_equal 0, status.exitstatus, out
+    refute process_listed_in_ps?(test_pid), "test process must not survive double TERM handling\n#{ps_snapshot}\n#{out}"
+    refute_match(/^DB_TEARDOWN VIOLATION /m, out)
+    refute_match(/child_alive_at_teardown=yes/, out)
+    assert_match(/^DB_TEARDOWN .* child_alive_at_teardown=no/m, out)
+  ensure
+    kill_orphan(test_pid)
+  end
+
+  def test_term_during_slow_teardown_still_drops_db_removes_worktree_and_exits_red
+    fixed_pr
+    worktrees_before = git("worktree", "list")
+    env = fake_runner(<<~RUBY).merge(fake_db_commands(teardown_sleep: 2)).merge("DATABASE_URL" => "")
+      puts "Failure:\\nGreeterTest#test_it [test/greeter_test.rb:3]:\\nExpected: 1"
+      puts "#{FIN}1 runs, 1 assertions, 1 failures, 0 errors, 0 skips"
+      exit 1
+    RUBY
+
+    out, status = run_script_until_teardown_then_signal(env: env, signal: "TERM")
+
+    refute_nil status
+    assert status.exited?, "script must exit normally after cleanup, not only from an uncaught signal\n#{out}"
+    assert_equal 0, status.exitstatus, "RED verdict exit code must survive a signal during cleanup\n#{out}"
+    assert_match(/^VERDICT: RED$/, out)
+    assert_match(/^DB_TEARDOWN_DONE /m, out, "slow teardown must finish despite TERM\n#{out}")
+    assert_match(/^DB_TEARDOWN_START /m, out)
+    done_at = out.index("DB_TEARDOWN_DONE ")
+    start_at = out.index("DB_TEARDOWN_START ")
+    refute_nil start_at
+    refute_nil done_at
+    assert_operator done_at, :>, start_at
+    assert_equal worktrees_before, git("worktree", "list"),
+                 "scratch worktree must be removed after cleanup"
+  end
+
   private
+
+  def kill_orphan(test_pid)
+    return unless test_pid && process_alive?(test_pid)
+
+    begin
+      Process.kill("KILL", test_pid)
+    rescue Errno::ESRCH, Errno::EPERM
+      nil
+    end
+  end
+
+  def assert_signal_cleanup(signal)
+    test_pid = nil
+    fixed_pr
+    pid_file = File.join(@dir, "rbg-test.pid")
+    runner = <<~RUBY
+      File.write(#{pid_file.inspect}, Process.pid.to_s)
+      $stdout.sync = true
+      puts "RUNNER STARTED pid=\#{Process.pid}"
+      sleep 30
+    RUBY
+    env = fake_runner(runner).merge(fake_db_commands(test_pid_file: pid_file)).merge("DATABASE_URL" => "")
+
+    out, status, elapsed, test_pid = run_script_async(signal: signal, env: env)
+
+    assert_operator elapsed, :<, 8, "script should exit promptly on #{signal}, not wait for the fake test sleep"
+    refute_equal 0, status.exitstatus, "script should exit non-zero when interrupted (#{signal})\n#{out}"
+    refute process_alive?(test_pid), "fake test process should not be orphaned after #{signal}\n#{out}"
+    refute_match(/^DB_TEARDOWN VIOLATION /m, out, "teardown must run only after the test process has ended")
+    setup_db = out.lines.find { |l| l.start_with?("DB_SETUP ") }[/TEST_DATABASE=(\S+)/, 1]
+    teardown = out.lines.find { |l| l.start_with?("DB_TEARDOWN pwd=") }
+    refute_nil teardown, "teardown must run on #{signal}\n#{out}"
+    assert_equal setup_db, teardown[/TEST_DATABASE=(\S+)/, 1]
+  ensure
+    if test_pid && process_alive?(test_pid)
+      begin
+        Process.kill("KILL", test_pid)
+      rescue Errno::ESRCH, Errno::EPERM
+        nil
+      end
+    end
+  end
+
+  def run_script_until_teardown_then_signal(env:, signal:)
+    reader, writer = IO.pipe
+    child = ENV.to_h.merge("RBG_EXEMPT" => "0")
+    child.delete("DATABASE_URL") unless env.key?("DATABASE_URL")
+    db_env = env.key?("RBG_DB_SETUP_CMD") ? {} : fake_db_commands
+    full_env = child.merge(db_env).merge(env)
+    script_pid = spawn(full_env, SCRIPT, "--base", @base, chdir: @dir, out: writer, err: writer)
+    writer.close
+    buf = +""
+    reader_thread = Thread.new do
+      loop do
+        buf << reader.readpartial(4096)
+      rescue EOFError
+        break
+      end
+    end
+    Timeout.timeout(20) do
+      sleep 0.05 until buf.include?("DB_TEARDOWN_START ")
+    end
+    sleep 0.2
+    Process.kill(signal, script_pid)
+    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 15
+    status = nil
+    loop do
+      waited_pid, st = Process.wait2(script_pid, Process::WNOHANG)
+      if waited_pid
+        status = st
+        break
+      end
+      if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+        Process.kill("KILL", script_pid)
+        flunk "script did not finish within 15s after signal during teardown\n#{buf}"
+      end
+      sleep 0.05
+    end
+    reader_thread.join(5)
+    [ buf, status ]
+  end
+
+  def run_script_async(signal:, env: {}, second_signal: nil, second_delay: nil)
+    test_pid_path = File.join(@dir, "rbg-test.pid")
+    reader, writer = IO.pipe
+    child = ENV.to_h.merge("RBG_EXEMPT" => "0")
+    child.delete("DATABASE_URL") unless env.key?("DATABASE_URL")
+    full_env = child.merge(fake_db_commands(test_pid_file: test_pid_path)).merge(env)
+    args = [ "--base", @base ]
+    script_pid = spawn(full_env, SCRIPT, *args, chdir: @dir, out: writer, err: writer)
+    writer.close
+    buf = +""
+    reader_thread = Thread.new { buf << reader.read }
+    test_pid = nil
+    Timeout.timeout(15) do
+      sleep 0.05 until File.exist?(test_pid_path)
+      test_pid = File.read(test_pid_path).strip.to_i
+      break if test_pid.positive?
+    end
+    flunk("fake test never wrote #{test_pid_path}") unless test_pid&.positive?
+
+    t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    Process.kill(signal, script_pid)
+    if second_signal
+      sleep second_delay || 0.5
+      Process.kill(second_signal, script_pid) if process_alive?(script_pid)
+    end
+    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 10
+    status = nil
+    loop do
+      waited_pid, st = Process.wait2(script_pid, Process::WNOHANG)
+      if waited_pid
+        status = st
+        break
+      end
+      if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+        Process.kill("KILL", script_pid)
+        flunk "script did not exit within 10s after #{signal} (must stop the test process and run teardown)"
+      end
+      sleep 0.05
+    end
+    elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0
+    reader_thread.join(5)
+    [ buf, status, elapsed, test_pid ]
+  end
+
+  def process_alive?(pid)
+    Process.kill(0, pid)
+    true
+  rescue Errno::ESRCH
+    false
+  end
+
+  def ps_snapshot
+    `ps -eo pid,ppid,cmd`
+  end
+
+  def process_listed_in_ps?(pid)
+    ps_snapshot.lines.any? { |line| line.split.first.to_i == pid }
+  end
 
   def fixed_pr
     write "app/greeter.rb", "# fixed\n"
@@ -759,15 +1077,64 @@ class RedBeforeGreenTest < Minitest::Test
   end
 
   def fake_runner(body = FAKE_RUNNER)
-    # Outside the temp repo so it never shows up as a change.
-    path = File.join(Dir.mktmpdir("rbg-runner"), "runner.rb")
+    # Under .git so it never shows up as a change; removed with @dir in teardown.
+    @runner_seq = (@runner_seq || 0) + 1
+    dir = File.join(@dir, ".git", "rbg-runner-#{@runner_seq}")
+    FileUtils.mkdir_p(dir)
+    path = File.join(dir, "runner.rb")
     File.write(path, body)
     { "RBG_TEST_CMD" => "ruby #{path}" }
   end
 
+  def fake_db_commands(setup_exit: 0, test_pid_file: nil, teardown_sleep: 0)
+    @db_cmd_seq = (@db_cmd_seq || 0) + 1
+    dir = File.join(@dir, ".git", "rbg-db-cmd-#{@db_cmd_seq}")
+    FileUtils.mkdir_p(dir)
+    setup = File.join(dir, "setup.sh")
+    teardown = File.join(dir, "teardown.sh")
+    teardown_child_check = if test_pid_file
+                             <<~SH
+                               test_pid=$(cat #{test_pid_file} 2>/dev/null || true)
+                               child_alive=no
+                               if [ -n "$test_pid" ] && kill -0 "$test_pid" 2>/dev/null; then
+                                 child_alive=yes
+                                 echo "DB_TEARDOWN VIOLATION test_pid_still_running=$test_pid TEST_DATABASE=${TEST_DATABASE:-}"
+                                 exit 1
+                               fi
+                             SH
+    else
+                             <<~SH
+                               child_alive=no
+                             SH
+    end
+    env_number_field = 'if [ -n "${TEST_ENV_NUMBER+x}" ]; then echo -n "TEST_ENV_NUMBER=${TEST_ENV_NUMBER}"; else echo -n "TEST_ENV_NUMBER=<unset>"; fi'
+    File.write(setup, <<~SH)
+      #!/usr/bin/env bash
+      echo "DB_SETUP pwd=$(basename "$PWD") TEST_DATABASE=${TEST_DATABASE:-} $(#{env_number_field})"
+      exit #{setup_exit}
+    SH
+    File.write(teardown, <<~SH)
+      #!/usr/bin/env bash
+      #{teardown_child_check}
+      echo "DB_TEARDOWN pwd=$(basename "$PWD") TEST_DATABASE=${TEST_DATABASE:-} $(#{env_number_field}) child_alive_at_teardown=$child_alive"
+      echo "DB_TEARDOWN_START TEST_DATABASE=${TEST_DATABASE:-}"
+      sleep #{teardown_sleep.to_f}
+      echo "DB_TEARDOWN_DONE TEST_DATABASE=${TEST_DATABASE:-}"
+    SH
+    FileUtils.chmod(0o755, setup)
+    FileUtils.chmod(0o755, teardown)
+    {
+      "RBG_DB_SETUP_CMD" => setup,
+      "RBG_DB_TEARDOWN_CMD" => teardown
+    }
+  end
+
   def run_script(*args, env: {})
     args = [ "--base", @base ] + args unless args.include?("--base")
-    out, status = Open3.capture2e({ "RBG_EXEMPT" => "0" }.merge(env), SCRIPT, *args, chdir: @dir)
+    child = ENV.to_h.merge("RBG_EXEMPT" => "0")
+    child.delete("DATABASE_URL") unless env.key?("DATABASE_URL")
+    db_env = env.key?("RBG_DB_SETUP_CMD") ? {} : fake_db_commands
+    out, status = Open3.capture2e(child.merge(db_env).merge(env), SCRIPT, *args, chdir: @dir)
     [ out, status ]
   end
 
