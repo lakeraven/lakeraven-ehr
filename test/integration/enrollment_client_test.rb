@@ -9,7 +9,10 @@ class EnrollmentClientIntegrationTest < ActiveSupport::TestCase
   setup do
     @enrollment_transport = RecordingFakeEnrollmentHttpTransport.new
     @original_adapter = Lakeraven::EHR.configuration.eligibility_adapter
-    stub_enrollment_eligibility_post(body: fhir_eligibility_enrolled_body(inforce: true), transport: @enrollment_transport)
+    stub_enrollment_eligibility_post(
+      body: fhir_eligibility_enrolled_body(inforce: true, coverage_type: "medicare_a"),
+      transport: @enrollment_transport
+    )
     client, _, _, = build_enrollment_client(http: @enrollment_transport, token: nil)
     @client = client
     Lakeraven::EHR.configuration.eligibility_adapter = @client
