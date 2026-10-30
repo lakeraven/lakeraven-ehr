@@ -10,18 +10,25 @@ module Lakeraven
   module EHR
     # FHIR client for an external enrollment service.
     #
-    # Eligibility is fail-closed: a response is enrolled or not_enrolled only
-    # when it is a complete CoverageEligibilityResponse with an explicit
-    # inforce flag. Anything else (malformed body, missing outcome, transport
-    # failure) is error or pending, never a coverage answer. Pending checks
-    # are not cached. Terminal answers are cached under a digest so the raw
-    # patient identifier is not the key. Logs and errors omit the patient
-    # identifier, the bearer token, and the request body.
+    # Eligibility is fail-closed. A response is enrolled or not_enrolled only
+    # when it is an active, complete CoverageEligibilityResponse for this
+    # patient, and only from insurance items for the requested coverage type.
+    # The patient reference must be exactly Patient/<dfn>. A benefit period,
+    # when present, must be readable and must cover the service date; a date
+    # outside that window is not_enrolled. Malformed data is an error.
+    # check_eligibility does not raise: transport errors are retried, then
+    # the check is pending and a retry job is enqueued.
+    #
+    # Terminal answers are cached under a digest of the base URL and the
+    # request identity. The raw patient identifier is not the key and is not
+    # stored. A hit is used only when the stored identity still matches, and
+    # it is returned with the current request id. Pending and error results
+    # are not cached.
     #
     # The bearer token defaults from LAKERAVEN_ENROLLMENT_FHIR_TOKEN.
     # EnrollmentEligibilityRetryJob reads that same variable; it is not put
-    # on the job. LAKERAVEN_ENROLLMENT_FHIR_BASE_URL is the fallback host
-    # when a retry runs without the URL captured from the original client.
+    # on the job. Logs and errors omit the patient identifier, the bearer
+    # token, and the request body.
     class EnrollmentFHIRClient
       class ClientError < StandardError; end
 
@@ -69,19 +76,16 @@ module Lakeraven
       DEFAULT_TTL = 24.hours
       DEFAULT_ATTEMPTS = 3
       BACKOFF_SECONDS = 0.5
-      RETRYABLE_NETWORK_ERRORS = [
-        SystemCallError,
-        SocketError,
-        IOError,
-        Timeout::Error,
-        OpenSSL::SSL::SSLError
-      ].freeze
+      MAX_COVERAGE_PAGES = 10
+      TERMINAL_STATUSES = %w[enrolled not_enrolled].freeze
+      ACTIVE_COVERAGE_STATUS = "active"
+      OUTCOME_ERROR_SEVERITIES = %w[error fatal].freeze
 
       def self.from_environment(base_url: nil)
         url = base_url.presence || ENV["LAKERAVEN_ENROLLMENT_FHIR_BASE_URL"].presence
         return if url.blank?
 
-        new(base_url: url, cache: (Rails.cache if defined?(Rails.cache)), schedule_retry: false)
+        new(base_url: url, cache: Rails.cache, schedule_retry: false)
       end
 
       def initialize(
@@ -112,6 +116,8 @@ module Lakeraven
         write_cache(request, result)
         schedule_retry(request) if result.pending?
         result
+      rescue StandardError
+        error_result(request)
       end
 
       def call(request)
@@ -119,9 +125,10 @@ module Lakeraven
       end
 
       def coverage_for(patient_dfn:, coverage_type:)
-        response = @http.get(coverage_url(patient_dfn, coverage_type), headers: fhir_headers)
-        coverage_entries(response)
-      rescue *RETRYABLE_NETWORK_ERRORS
+        read_coverages(patient_dfn, coverage_type)
+      rescue ClientError
+        raise
+      rescue StandardError
         raise ClientError, "Enrollment coverage request failed"
       end
 
@@ -148,15 +155,13 @@ module Lakeraven
       end
 
       def with_retries(request)
+        body = fhir_body(request)
         last_error = nil
 
         @max_attempts.times do |attempt|
-          result = post_once(request)
-          return result unless result.nil?
+          result, error = post_attempt(request, body)
+          return result if result
 
-          last_error = nil
-          pause(attempt)
-        rescue *RETRYABLE_NETWORK_ERRORS => error
           last_error = error
           pause(attempt)
         end
@@ -165,17 +170,29 @@ module Lakeraven
         pending_result(request)
       end
 
-      def post_once(request)
-        response = @http.post(eligibility_url, body: fhir_body(request), headers: fhir_headers)
-        interpret_eligibility(request, response)
+      # A transport failure is the exception object. Anything else is
+      # [status code, body]. Interpretation stays outside this rescue so
+      # malformed payloads become error results instead of retries.
+      def post_attempt(request, body)
+        delivered = post_eligibility(body)
+        return [ nil, delivered ] if delivered.is_a?(StandardError)
+
+        code, raw = delivered
+        [ interpret_status(request, code, raw), nil ]
       end
 
-      def interpret_eligibility(request, response)
-        code = response.code.to_i
+      def post_eligibility(body)
+        response = @http.post(eligibility_url, body: body, headers: fhir_headers)
+        [ response.code.to_i, response.body ]
+      rescue StandardError => error
+        error
+      end
+
+      def interpret_status(request, code, body)
         return if retryable_status?(code)
         return error_result(request) unless success_status?(code)
 
-        eligibility_from_body(request, response.body)
+        eligibility_from_body(request, body)
       end
 
       def retryable_status?(code)
@@ -186,43 +203,65 @@ module Lakeraven
         code.between?(200, 299)
       end
 
-      # Nil means "not an answer". Callers turn that into error, never
-      # enrolled or not_enrolled.
       def eligibility_from_body(request, body)
         payload = json_object(body)
-        status = payload && answered_status(payload, request)
-        return error_result(request) unless status
+        return error_result(request) unless acceptable_response?(payload, request)
 
-        result_for(request, status, benefit_period(payload))
-      end
-
-      def answered_status(payload, request)
-        return unless payload["resourceType"] == "CoverageEligibilityResponse"
-        return unless patient_matches?(payload, request)
-
-        status_from_outcome(payload)
-      end
-
-      def patient_matches?(payload, request)
-        reference = payload.dig("patient", "reference")
-        reference.blank? || reference == "Patient/#{request.patient_dfn}"
-      end
-
-      def status_from_outcome(payload)
         case payload["outcome"]
-        when "complete" then inforce_status(payload["insurance"])
-        when "queued" then "pending"
+        when "complete" then answer_from_insurance(request, payload["insurance"])
+        when "queued" then pending_result(request)
+        else error_result(request)
         end
       end
 
-      def inforce_status(insurance)
-        return unless insurance.is_a?(Array) && insurance.any?
+      def acceptable_response?(payload, request)
+        payload.is_a?(Hash) &&
+          payload["resourceType"] == "CoverageEligibilityResponse" &&
+          payload["status"] == ACTIVE_COVERAGE_STATUS &&
+          patient_matches?(payload, request)
+      end
 
-        flags = insurance.map { |item| item.is_a?(Hash) ? boolean_inforce(item["inforce"]) : nil }
-        return "enrolled" if flags.any?(true)
-        return "not_enrolled" if flags.all?(false)
+      def patient_matches?(payload, request)
+        patient = payload["patient"]
+        return false unless patient.is_a?(Hash)
 
-        nil
+        patient["reference"] == "Patient/#{request.patient_dfn}"
+      end
+
+      def answer_from_insurance(request, insurance)
+        items = insurance_items(insurance)
+        return error_result(request) unless items
+
+        matches = items.select { |item| coverage_match?(item, request.coverage_type) }
+        return error_result(request) if matches.empty?
+
+        decide_matches(request, matches)
+      end
+
+      # A non-Hash entry is malformed. It is not skipped: the response is
+      # not a coverage answer.
+      def insurance_items(insurance)
+        return unless insurance.is_a?(Array)
+        return if insurance.empty? || insurance.any? { |item| !item.is_a?(Hash) }
+
+        insurance
+      end
+
+      def decide_matches(request, matches)
+        outcomes = matches.map { |item| item_outcome(item, request.service_date) }
+        return error_result(request) if outcomes.any? { |outcome| outcome[:status].nil? }
+
+        status = outcomes.any? { |outcome| outcome[:status] == "enrolled" } ? "enrolled" : "not_enrolled"
+        result_for(request, status, chosen_period(outcomes, status))
+      end
+
+      def item_outcome(item, service_date)
+        inforce = boolean_inforce(item["inforce"])
+        window = benefit_window(item, service_date)
+        return { status: nil } if inforce.nil? || window == :malformed
+
+        status = inforce && window != :outside ? "enrolled" : "not_enrolled"
+        { status: status, period: window_period(item, window) }
       end
 
       # JSON true/false only. A string or a missing flag is not an answer.
@@ -230,19 +269,68 @@ module Lakeraven
         value if value == true || value == false
       end
 
-      def benefit_period(payload)
-        period = payload.dig("insurance", 0, "benefitPeriod")
-        return {} unless period.is_a?(Hash)
+      def coverage_match?(item, coverage_type)
+        coverage = item["coverage"]
+        return false unless coverage.is_a?(Hash)
 
-        { start: iso_date(period["start"]), end: iso_date(period["end"]) }
+        needle = coverage_type.to_s
+        return false if needle.empty?
+
+        display_matches?(coverage["display"], needle) || reference_matches?(coverage["reference"], needle)
       end
 
-      def iso_date(value)
-        return if value.blank?
+      def display_matches?(display, needle)
+        !display.nil? && display.to_s.casecmp?(needle)
+      end
+
+      def reference_matches?(reference, needle)
+        reference.to_s.downcase.include?(needle.downcase)
+      end
+
+      # :open has no period. :inside covers the service date. :outside does
+      # not, which is not_enrolled even when inforce is true. :malformed is
+      # an error for the whole response.
+      def benefit_window(item, service_date)
+        return :open unless item.key?("benefitPeriod")
+
+        period = item["benefitPeriod"]
+        return :open if period.nil?
+        return :malformed unless period.is_a?(Hash)
+
+        start_on = strict_date(period["start"])
+        end_on = strict_date(period["end"])
+        return :malformed if start_on == :invalid || end_on == :invalid
+        return :outside if outside_window?(service_date, start_on, end_on)
+
+        :inside
+      end
+
+      def strict_date(value)
+        return if value.nil? || value.to_s.strip.empty?
 
         Date.iso8601(value.to_s)
-      rescue ArgumentError
-        nil
+      rescue ArgumentError, TypeError
+        :invalid
+      end
+
+      def outside_window?(service_date, start_on, end_on)
+        return false unless start_on || end_on
+        return true unless service_date.is_a?(Date)
+
+        (start_on.is_a?(Date) && service_date < start_on) || (end_on.is_a?(Date) && service_date > end_on)
+      end
+
+      def window_period(item, window)
+        return {} unless window == :inside || window == :outside
+
+        period = item["benefitPeriod"]
+        { start: strict_date(period["start"]), end: strict_date(period["end"]) }
+      end
+
+      def chosen_period(outcomes, status)
+        preferred = outcomes.find { |outcome| outcome[:status] == status && outcome[:period].present? }
+        preferred ||= outcomes.find { |outcome| outcome[:period].present? }
+        preferred ? preferred[:period] : {}
       end
 
       def result_for(request, status, period = {})
@@ -272,7 +360,7 @@ module Lakeraven
       end
 
       def log_unavailable(error)
-        reason = error ? error.class.name : "transient HTTP status"
+        reason = error.is_a?(Exception) ? error.class.name : "transient HTTP status"
         Rails.logger.error("Enrollment eligibility check unavailable after retries: #{reason}")
       end
 
@@ -296,24 +384,51 @@ module Lakeraven
       def read_cache(request)
         return unless @cache
 
-        stored = @cache.read(cache_key(request))
-        return unless stored.is_a?(Hash)
+        payload = cache_hash(@cache.read(cache_key(request)))
+        return unless payload && cache_payload_valid?(payload, request)
 
-        CoverageEligibilityResponse.new(stored.symbolize_keys)
+        result_for(request, payload["status"].to_s, cached_period(payload))
+      rescue StandardError
+        nil
+      end
+
+      def cache_payload_valid?(payload, request)
+        return false unless TERMINAL_STATUSES.include?(payload["status"].to_s)
+        return false if field_mismatch?(payload, "patient_dfn", request.patient_dfn)
+        return false if field_mismatch?(payload, "coverage_type", request.coverage_type)
+        return false if field_mismatch?(payload, "service_date", request.service_date&.iso8601)
+        return false if field_mismatch?(payload, "request_identity_digest", request_identity_digest(request))
+
+        true
+      end
+
+      def field_mismatch?(payload, key, expected)
+        payload.key?(key) && payload[key].to_s != expected.to_s
+      end
+
+      def cached_period(payload)
+        { start: payload["start_date"], end: payload["end_date"] }
       end
 
       def write_cache(request, result)
         return unless @cache
         return unless result.enrolled? || result.not_enrolled?
 
-        @cache.write(cache_key(request), cache_payload(result), expires_in: @ttl)
+        @cache.write(cache_key(request), cache_payload(request, result), expires_in: @ttl)
+      rescue StandardError
+        nil
       end
 
       def cache_key(request)
-        "enrollment-eligibility/#{Digest::SHA256.hexdigest(cache_material(request))}"
+        material = [ @base_url, request_identity(request) ].join("\x1f")
+        "enrollment-eligibility/#{Digest::SHA256.hexdigest(material)}"
       end
 
-      def cache_material(request)
+      def request_identity_digest(request)
+        Digest::SHA256.hexdigest(request_identity(request))
+      end
+
+      def request_identity(request)
         [
           request.patient_dfn.to_s,
           request.coverage_type.to_s,
@@ -323,27 +438,57 @@ module Lakeraven
         ].join("\x1f")
       end
 
-      def cache_payload(result)
+      # The patient identifier is an input to the digest only. It is not
+      # stored, so a cache read cannot leak it and a forged entry that names
+      # a different patient is ignored.
+      def cache_payload(request, result)
         {
-          "patient_dfn" => result.patient_dfn,
-          "coverage_type" => result.coverage_type,
           "status" => result.status,
-          "request_id" => result.request_id,
+          "coverage_type" => result.coverage_type,
+          "service_date" => request.service_date&.iso8601,
+          "request_identity_digest" => request_identity_digest(request),
           "start_date" => result.start_date&.iso8601,
           "end_date" => result.end_date&.iso8601
         }
       end
 
-      def coverage_entries(response)
+      def cache_hash(stored)
+        return unless stored.is_a?(Hash)
+
+        stored.each_with_object({}) { |(key, value), copy| copy[key.to_s] = value }
+      end
+
+      def read_coverages(patient_dfn, coverage_type)
+        url = coverage_url(patient_dfn, coverage_type)
+        found = []
+
+        MAX_COVERAGE_PAGES.times do
+          payload = fetch_bundle(url)
+          found.concat(coverages_from_bundle(payload, patient_dfn))
+          url = next_page_url(payload)
+          return found unless url
+        end
+
+        raise ClientError, "Enrollment coverage search exceeded the page limit"
+      end
+
+      def fetch_bundle(url)
+        response = @http.get(url, headers: fhir_headers)
         code = response.code.to_i
         raise ClientError, "Enrollment coverage request failed with HTTP #{code}" unless success_status?(code)
 
-        list_coverages(json_object(response.body))
+        payload = json_object(response.body)
+        raise ClientError, "Enrollment coverage response was malformed" unless bundle?(payload)
+
+        payload
       end
 
-      def list_coverages(payload)
-        raise ClientError, "Enrollment coverage response was malformed" unless payload.is_a?(Hash)
-        raise ClientError, "Enrollment coverage response was malformed" unless payload["resourceType"] == "Bundle"
+      def bundle?(payload)
+        payload.is_a?(Hash) && payload["resourceType"] == "Bundle"
+      end
+
+      def coverages_from_bundle(payload, patient_dfn)
+        raise ClientError, "Enrollment coverage search returned an error" if outcome_error?(payload)
 
         entries = payload["entry"]
         return [] if entries.blank? && !positive_total?(payload)
@@ -352,7 +497,26 @@ module Lakeraven
         resources = entries.filter_map { |entry| coverage_resource(entry) }
         raise ClientError, "Enrollment coverage response was malformed" if resources.empty? && positive_total?(payload)
 
-        resources
+        resources.each { |resource| verify_beneficiary!(resource, patient_dfn) }
+        resources.select { |resource| resource["status"] == ACTIVE_COVERAGE_STATUS }
+      end
+
+      def outcome_error?(payload)
+        entries = payload["entry"]
+        return false unless entries.is_a?(Array)
+
+        entries.any? { |entry| operation_outcome_error?(entry) }
+      end
+
+      def operation_outcome_error?(entry)
+        resource = entry.is_a?(Hash) ? entry["resource"] : nil
+        return false unless resource.is_a?(Hash)
+        return false unless resource["resourceType"] == "OperationOutcome"
+
+        issues = resource["issue"]
+        return false unless issues.is_a?(Array)
+
+        issues.any? { |issue| issue.is_a?(Hash) && OUTCOME_ERROR_SEVERITIES.include?(issue["severity"]) }
       end
 
       def positive_total?(payload)
@@ -364,10 +528,47 @@ module Lakeraven
         resource if resource.is_a?(Hash) && resource["resourceType"] == "Coverage"
       end
 
+      def verify_beneficiary!(resource, patient_dfn)
+        return if beneficiary_matches?(resource, patient_dfn)
+
+        raise ClientError, "Enrollment coverage beneficiary did not match the requested patient"
+      end
+
+      def beneficiary_matches?(resource, patient_dfn)
+        beneficiary = resource["beneficiary"]
+        return false unless beneficiary.is_a?(Hash)
+
+        beneficiary["reference"] == "Patient/#{patient_dfn}"
+      end
+
+      def next_page_url(payload)
+        url = link_url(payload, "next")
+        return if url.nil?
+        raise ClientError, "Enrollment coverage page is not on the enrollment host" unless same_origin?(url)
+
+        url
+      end
+
+      def link_url(payload, relation)
+        links = payload["link"]
+        return unless links.is_a?(Array)
+
+        link = links.find { |item| item.is_a?(Hash) && item["relation"] == relation }
+        link && link["url"].presence
+      end
+
+      def same_origin?(url)
+        uri = URI.parse(url.to_s)
+        base = URI.parse(@base_url)
+        uri.is_a?(URI::HTTPS) && uri.host.to_s.casecmp?(base.host.to_s) && uri.port == base.port
+      rescue URI::InvalidURIError
+        false
+      end
+
       def coverage_url(patient_dfn, coverage_type)
         query = URI.encode_www_form(
           "beneficiary" => "Patient/#{patient_dfn}",
-          "status" => "active",
+          "status" => ACTIVE_COVERAGE_STATUS,
           "type" => coverage_type.to_s
         )
         "#{@base_url}/Coverage?#{query}"
@@ -393,7 +594,7 @@ module Lakeraven
       def json_object(body)
         parsed = JSON.parse(body.to_s)
         parsed if parsed.is_a?(Hash)
-      rescue JSON::ParserError
+      rescue JSON::ParserError, TypeError
         nil
       end
     end
