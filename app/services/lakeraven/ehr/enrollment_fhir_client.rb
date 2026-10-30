@@ -12,16 +12,23 @@ module Lakeraven
     #
     # Eligibility is fail-closed. A response is enrolled or not_enrolled only
     # when it is an active, complete CoverageEligibilityResponse for this
-    # patient, and only from insurance items for the requested coverage type.
-    # The patient reference must be exactly Patient/<dfn>. A coverage type
-    # matches a trimmed display, or the reference id, exactly and without
-    # case. When both are present they must agree. A benefit period, when
-    # present, must be a FHIR date (YYYY, YYYY-MM, or YYYY-MM-DD) and must
-    # cover the service date. A partial start is the first day of that year
-    # or month, and a partial end is the last day. A date outside that
-    # window is not_enrolled. Malformed data is an error.
-    # check_eligibility does not raise: transport errors are retried, then
-    # the check is pending and a retry job is enqueued.
+    # patient and this request, and only from insurance items for the
+    # requested coverage type. The patient reference must be exactly
+    # Patient/<dfn>. servicedDate, when present, must be this request's
+    # service date. request.reference, when present, must name this
+    # CoverageEligibilityRequest. A non-empty error list is never terminal:
+    # transient AAA codes are pending and a retry is enqueued; any other
+    # code is an error. A coverage type matches a trimmed display, or the
+    # reference id, exactly and without case. When both are present they
+    # must agree. A benefit period, when present, must be a FHIR date or
+    # dateTime and must cover the service date. A dateTime is compared by
+    # its calendar date. A partial start is the first day of that year or
+    # month, and a partial end is the last day. A date outside that window
+    # is not_enrolled. A period that starts after it ends, or a period when
+    # the request has no service date, is an error. Malformed data is an
+    # error. check_eligibility does not raise: transport errors are retried,
+    # then the check is pending and a retry job is enqueued. If that enqueue
+    # raises, the check stays pending and a fixed line is logged.
     #
     # Terminal answers are cached under a digest of the base URL and the
     # request identity. The raw patient identifier is not the key and is not
@@ -29,6 +36,11 @@ module Lakeraven
     # coverage type, and the service date when the request has one. It is
     # returned with the current request id. Pending and error results are
     # not cached.
+    #
+    # coverage_for returns active Coverage resources whose type coding code
+    # or type text matches the requested type exactly, without case, and
+    # whose period covers today. The bundle must be a searchset. A next
+    # link may be relative to the base URL and must stay on that origin.
     #
     # The bearer token defaults from LAKERAVEN_ENROLLMENT_FHIR_TOKEN.
     # EnrollmentEligibilityRetryJob reads that same variable; it is not put
@@ -85,8 +97,19 @@ module Lakeraven
       TERMINAL_STATUSES = %w[enrolled not_enrolled].freeze
       ACTIVE_COVERAGE_STATUS = "active"
       OUTCOME_ERROR_SEVERITIES = %w[error fatal].freeze
+      SEARCHSET_BUNDLE = "searchset"
+      RETRY_ENQUEUE_FAILED = "Enrollment eligibility retry could not be enqueued"
       # FHIR R4 date: YYYY, YYYY-MM, or YYYY-MM-DD. Year 0000 is not a year.
       FHIR_DATE_FORMAT = /\A(?<year>\d{4})(?:-(?<month>0[1-9]|1[0-2])(?:-(?<day>0[1-9]|[12]\d|3[01]))?)?\z/
+      # Time on a FHIR dateTime. The zone is required and is not applied;
+      # callers keep the calendar date in the date portion.
+      FHIR_TIME_FORMAT = /
+        \AT
+        (?:[01]\d|2[0-3]):[0-5]\d:(?:[0-5]\d|60)
+        (?:\.\d+)?
+        (?:Z|[+-](?:(?:0\d|1[0-3]):[0-5]\d|14:00))
+        \z
+      /x
 
       def self.from_environment(base_url: nil)
         url = base_url.presence || ENV["LAKERAVEN_ENROLLMENT_FHIR_BASE_URL"].presence
@@ -131,11 +154,11 @@ module Lakeraven
         check_eligibility(request)
       end
 
-      # Same transport and cache, with retry scheduling turned off. A base
-      # URL from the retry job replaces the host this client was built with.
-      def for_retry(base_url: nil)
+      # Same transport and cache, with retry scheduling turned off. The
+      # endpoint stays the one this client was built with.
+      def for_retry
         self.class.new(
-          base_url: base_url.presence || @base_url,
+          base_url: @base_url,
           token: @token,
           cache: @cache,
           ttl: @ttl,
@@ -144,6 +167,13 @@ module Lakeraven
           http: @http,
           schedule_retry: false
         )
+      end
+
+      # A blank URL means the caller did not pin an endpoint. Any other URL
+      # must be the one this client was configured with.
+      def current_endpoint?(base_url)
+        given = base_url.to_s.strip.sub(%r{/+\z}, "")
+        given.empty? || given == @base_url
       end
 
       def coverage_for(patient_dfn:, coverage_type:)
@@ -229,6 +259,13 @@ module Lakeraven
         payload = json_object(body)
         return error_result(request) unless acceptable_response?(payload, request)
 
+        from_errors = listed_error_result(request, payload)
+        return from_errors if from_errors
+
+        outcome_result(request, payload)
+      end
+
+      def outcome_result(request, payload)
         case payload["outcome"]
         when "complete" then answer_from_insurance(request, payload["insurance"])
         when "queued" then pending_result(request)
@@ -236,11 +273,49 @@ module Lakeraven
         end
       end
 
+      # A non-empty error list is never enrolled or not_enrolled. Transient
+      # AAA codes are pending so the retry job can run. Anything else in
+      # that list is an error. No list, or an empty one, is not an error by
+      # itself.
+      def listed_error_result(request, payload)
+        return unless payload.key?("error")
+
+        errors = payload["error"]
+        return error_result(request) unless errors.is_a?(Array)
+        return if errors.empty?
+
+        transient_error_list?(errors) ? pending_result(request) : error_result(request)
+      end
+
+      def transient_error_list?(errors)
+        codes = eligibility_error_codes(errors)
+        codes.any? && codes.all? { |code| transient_error_code?(code) }
+      end
+
+      def transient_error_code?(code)
+        CoverageEligibilityResponse::TRANSIENT_ERROR_CODES.include?(code)
+      end
+
+      def eligibility_error_codes(errors)
+        errors.flat_map { |item| codes_on_error_item(item) }
+      end
+
+      def codes_on_error_item(item)
+        return [] unless item.is_a?(Hash)
+
+        codeable = item["code"]
+        return [] unless codeable.is_a?(Hash)
+
+        coding_codes(codeable["coding"])
+      end
+
       def acceptable_response?(payload, request)
         payload.is_a?(Hash) &&
           payload["resourceType"] == "CoverageEligibilityResponse" &&
           payload["status"] == ACTIVE_COVERAGE_STATUS &&
-          patient_matches?(payload, request)
+          patient_matches?(payload, request) &&
+          serviced_date_matches?(payload, request) &&
+          request_reference_matches?(payload, request)
       end
 
       def patient_matches?(payload, request)
@@ -248,6 +323,31 @@ module Lakeraven
         return false unless patient.is_a?(Hash)
 
         patient["reference"] == "Patient/#{request.patient_dfn}"
+      end
+
+      # Omitted servicedDate does not constrain the answer. A present value
+      # must be this request's service date, by calendar date.
+      def serviced_date_matches?(payload, request)
+        return true unless payload.key?("servicedDate")
+
+        answered = calendar_date(payload["servicedDate"])
+        answered.is_a?(Date) && answered == request.service_date
+      end
+
+      def calendar_date(value)
+        parsed = period_bound(value, :start)
+        parsed if parsed.is_a?(Date)
+      end
+
+      # Omitted request does not constrain the answer. A present reference
+      # must name this CoverageEligibilityRequest.
+      def request_reference_matches?(payload, request)
+        return true unless payload.key?("request")
+
+        element = payload["request"]
+        return false unless element.is_a?(Hash)
+
+        element["reference"] == "CoverageEligibilityRequest/#{request.id}"
       end
 
       def answer_from_insurance(request, insurance)
@@ -330,18 +430,45 @@ module Lakeraven
 
       # :open has no period. :inside covers the service date. :outside does
       # not, which is not_enrolled even when inforce is true. :malformed is
-      # an error for the whole response.
+      # an error for the whole response, including a start after the end and
+      # a period when the request has no service date.
       def benefit_window(item, service_date)
         period = readable_benefit_period(item)
         return period unless period.is_a?(Hash)
 
-        start_on = period_bound(period["start"], :start)
-        end_on = period_bound(period["end"], :end)
-        return :malformed if start_on == :invalid || end_on == :invalid
+        classify_benefit_window(*period_bounds(period), service_date)
+      end
+
+      def period_bounds(period)
+        [ period_bound(period["start"], :start), period_bound(period["end"], :end) ]
+      end
+
+      def classify_benefit_window(start_on, end_on, service_date)
+        return :malformed unless valid_benefit_bounds?(start_on, end_on, service_date)
         return :open if start_on.nil? && end_on.nil?
         return :outside if outside_window?(service_date, start_on, end_on)
 
         :inside
+      end
+
+      def valid_benefit_bounds?(start_on, end_on, service_date)
+        return false if invalid_bound?(start_on) || invalid_bound?(end_on)
+        return false if inverted_period?(start_on, end_on)
+        return false if dated_period?(start_on, end_on) && !service_date.is_a?(Date)
+
+        true
+      end
+
+      def invalid_bound?(bound)
+        bound == :invalid
+      end
+
+      def inverted_period?(start_on, end_on)
+        start_on.is_a?(Date) && end_on.is_a?(Date) && start_on > end_on
+      end
+
+      def dated_period?(start_on, end_on)
+        start_on.is_a?(Date) || end_on.is_a?(Date)
       end
 
       def readable_benefit_period(item)
@@ -355,18 +482,38 @@ module Lakeraven
       end
 
       # A partial start is the first day of that year or month. A partial
-      # end is the last day. Blank is absent. Anything else is invalid.
+      # end is the last day. A FHIR dateTime keeps the calendar date in the
+      # date portion and does not apply the offset. Blank is absent.
+      # Anything else is invalid.
       def period_bound(value, bound)
-        text = value.to_s
-        return if text.strip.empty?
+        text = value.to_s.strip
+        return if text.empty?
 
-        match = FHIR_DATE_FORMAT.match(text)
-        return :invalid unless match
-        return :invalid if match[:year] == "0000"
+        date_text = fhir_date_text(text)
+        return :invalid unless date_text
+
+        match = FHIR_DATE_FORMAT.match(date_text)
+        return :invalid unless match && match[:year] != "0000"
 
         fhir_calendar_date(match, bound)
       rescue ArgumentError, TypeError
         :invalid
+      end
+
+      def fhir_date_text(text)
+        date_text, separator, time_text = text.partition("T")
+        return text if separator.empty?
+        return unless fhir_time?(time_text) && full_fhir_date?(date_text)
+
+        date_text
+      end
+
+      def fhir_time?(time_text)
+        FHIR_TIME_FORMAT.match?("T#{time_text}")
+      end
+
+      def full_fhir_date?(text)
+        FHIR_DATE_FORMAT.match(text)&.[](:day).present?
       end
 
       def fhir_calendar_date(match, bound)
@@ -389,9 +536,6 @@ module Lakeraven
       end
 
       def outside_window?(service_date, start_on, end_on)
-        return false unless start_on || end_on
-        return true unless service_date.is_a?(Date)
-
         (start_on.is_a?(Date) && service_date < start_on) || (end_on.is_a?(Date) && service_date > end_on)
       end
 
@@ -451,6 +595,8 @@ module Lakeraven
         return unless @schedule_retry
 
         EnrollmentEligibilityRetryJob.perform_later(**retry_arguments(request))
+      rescue StandardError
+        Rails.logger.error(RETRY_ENQUEUE_FAILED)
       end
 
       def retry_arguments(request)
@@ -569,7 +715,7 @@ module Lakeraven
 
         MAX_COVERAGE_PAGES.times do
           payload = fetch_bundle(url)
-          found.concat(coverages_from_bundle(payload, patient_dfn))
+          found.concat(coverages_from_bundle(payload, patient_dfn, coverage_type))
           url = next_page_url(payload)
           return found unless url
         end
@@ -589,10 +735,12 @@ module Lakeraven
       end
 
       def bundle?(payload)
-        payload.is_a?(Hash) && payload["resourceType"] == "Bundle"
+        payload.is_a?(Hash) &&
+          payload["resourceType"] == "Bundle" &&
+          payload["type"] == SEARCHSET_BUNDLE
       end
 
-      def coverages_from_bundle(payload, patient_dfn)
+      def coverages_from_bundle(payload, patient_dfn, coverage_type)
         raise ClientError, "Enrollment coverage search returned an error" if outcome_error?(payload)
 
         entries = payload["entry"]
@@ -603,7 +751,68 @@ module Lakeraven
         raise ClientError, "Enrollment coverage response was malformed" if resources.empty? && positive_total?(payload)
 
         resources.each { |resource| verify_beneficiary!(resource, patient_dfn) }
-        resources.select { |resource| resource["status"] == ACTIVE_COVERAGE_STATUS }
+        resources.select { |resource| current_coverage?(resource, coverage_type) }
+      end
+
+      def current_coverage?(resource, coverage_type)
+        resource["status"] == ACTIVE_COVERAGE_STATUS &&
+          coverage_type_matches?(resource, coverage_type) &&
+          coverage_period_current?(resource)
+      end
+
+      # type.coding code or type.text, the whole value, without case.
+      def coverage_type_matches?(resource, coverage_type)
+        needle = coverage_type.to_s.strip
+        return false if needle.empty?
+
+        coverage_type_labels(resource).any? { |label| label_matches?(label, needle) }
+      end
+
+      def coverage_type_labels(resource)
+        type = resource["type"]
+        return [] unless type.is_a?(Hash)
+
+        coding_codes(type["coding"]) + [ normalized_coverage_display(type["text"]) ].compact
+      end
+
+      def coding_codes(coding)
+        return [] unless coding.is_a?(Array)
+
+        coding.filter_map { |entry| coding_code(entry) }
+      end
+
+      def coding_code(entry)
+        return unless entry.is_a?(Hash)
+        return if entry["code"].nil?
+
+        entry["code"].to_s.strip.presence
+      end
+
+      # A missing period does not exclude the resource. A start after today,
+      # an end before today, or an unreadable period does.
+      def coverage_period_current?(resource, today = Date.current)
+        period = resource["period"]
+        return true if period.nil?
+        return false unless period.is_a?(Hash)
+
+        start_on, end_on = period_bounds(period)
+        return false unless valid_coverage_bounds?(start_on, end_on)
+
+        covers_day?(today, start_on, end_on)
+      end
+
+      def valid_coverage_bounds?(start_on, end_on)
+        return false if invalid_bound?(start_on) || invalid_bound?(end_on)
+        return false if inverted_period?(start_on, end_on)
+
+        true
+      end
+
+      def covers_day?(day, start_on, end_on)
+        return false if start_on.is_a?(Date) && day < start_on
+        return false if end_on.is_a?(Date) && day > end_on
+
+        true
       end
 
       def outcome_error?(payload)
@@ -647,11 +856,27 @@ module Lakeraven
       end
 
       def next_page_url(payload)
-        url = link_url(payload, "next")
-        return if url.nil?
-        raise ClientError, "Enrollment coverage page is not on the enrollment host" unless same_origin?(url)
+        raw = link_url(payload, "next")
+        return if raw.nil?
+
+        url = absolute_page_url(raw)
+        raise ClientError, "Enrollment coverage page is not on the enrollment host" unless url && same_origin?(url)
 
         url
+      end
+
+      # A path or bare relative link is resolved against the base URL.
+      # An absolute link is left unchanged so same_origin? can reject it.
+      def absolute_page_url(url)
+        text = url.to_s.strip
+        return if text.empty?
+
+        parsed = URI.parse(text)
+        return text if parsed.scheme.present? || parsed.host.present?
+
+        URI.join("#{@base_url}/", text).to_s
+      rescue URI::InvalidURIError
+        nil
       end
 
       def link_url(payload, relation)
