@@ -517,7 +517,7 @@ class SsoSessionTokenBridgeSecurityTest < ActionDispatch::IntegrationTest
 
   test "an idle session past the timeout is signed out" do
     sign_in
-    travel(Lakeraven::EHR::SessionsController::IDLE_TIMEOUT + 1.minute) do
+    travel(Lakeraven::EHR.configuration.session_idle_limit + 1.minute) do
       get "/lakeraven-ehr/patients/1"
       assert_response :unauthorized
     end
@@ -571,7 +571,7 @@ class SsoSessionTokenBridgeSecurityTest < ActionDispatch::IntegrationTest
   # compartment left nothing behind.
   test "an idle session past the timeout cannot reach the dashboard" do
     sign_in
-    travel(Lakeraven::EHR::SessionsController::IDLE_TIMEOUT + 1.minute) do
+    travel(Lakeraven::EHR.configuration.session_idle_limit + 1.minute) do
       get "/lakeraven-ehr/dashboard"
       assert_response :redirect
     end
@@ -581,7 +581,7 @@ class SsoSessionTokenBridgeSecurityTest < ActionDispatch::IntegrationTest
     sign_in
     token = session_token
 
-    travel(Lakeraven::EHR::SessionsController::IDLE_TIMEOUT + 1.minute) do
+    travel(Lakeraven::EHR.configuration.session_idle_limit + 1.minute) do
       get "/lakeraven-ehr/patients/1"
       assert_response :unauthorized
     end

@@ -36,6 +36,8 @@ module Lakeraven
     # test/dummy/lib/lakeraven_demo_seeds.rb).
     class ChartsController < ActionController::Base
       helper ApplicationHelper
+      # The chart reads RPMS on its signed-in user's own connection (ADR 0011).
+      include RpmsUserScope
       include SmartAuthentication
       # FAIL-CLOSED audit, the same terms the clinician screening surface is
       # held to. The chart now carries scored screenings (#474), so it serves
