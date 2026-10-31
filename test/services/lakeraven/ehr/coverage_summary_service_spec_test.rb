@@ -4,10 +4,11 @@ require "test_helper"
 
 module Lakeraven
   module EHR
-    # Issue #239 — CoverageSummaryService payer order (factory spec, panel round 2).
+    # Issue #239 — CoverageSummaryService payer order (factory spec, panel round 3).
     #
     # Contract: PRC is appended on a referral only when prc_eligible is explicitly true.
     # Unknown (nil) prc_eligible fails closed — no PRC in payer order.
+    # Summary#prc_eligible mirrors the same gate (true / false / not true when unknown).
     class CoverageSummaryServiceSpecTest < ActiveSupport::TestCase
       PRC_PAYER = CoverageSummaryService::PRC_PAYER
 
@@ -33,6 +34,16 @@ module Lakeraven
           service_request: build_referral_service_request,
           prc_eligible: prc_eligible
         )
+      end
+
+      test "referral summarize prc_eligible is true only when gate is explicitly true" do
+        coverages = [
+          Coverage.new(patient_dfn: "1", coverage_type: "medicaid", status: "active")
+        ]
+
+        assert referral_summary(coverages, prc_eligible: true).summarize.prc_eligible
+        refute referral_summary(coverages, prc_eligible: false).summarize.prc_eligible
+        refute referral_summary(coverages, prc_eligible: nil).summarize.prc_eligible
       end
 
       test "without referral context payer hierarchy omits PRC" do

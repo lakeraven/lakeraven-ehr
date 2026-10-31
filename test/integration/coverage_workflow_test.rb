@@ -6,12 +6,14 @@ module Lakeraven
   module EHR
     # Issue #239 — Coverage records in PRC referral / alternate-resource workflow.
     #
-    # Contract (panel round 2): On a PRC referral with prc_eligible true, payer order
+    # Contract (panel round 3): On a PRC referral with prc_eligible true, payer order
     # lists every active alternate resource in COB priority, then IHS Purchased/Referred
     # Care once at the end; with no coverage records, PRC is still primary. PRC appears
     # only when EligibilityService marks the patient prc_eligible. Outside a referral
     # context, payer summaries omit PRC. refresh with empty coverages and no
-    # service_request leaves coverage_summary nil (unchanged).
+    # service_request leaves coverage_summary nil (unchanged). summarize with no coverage
+    # records on file matches refresh (PRC-primary when eligible). Summary#prc_eligible
+    # agrees with the eligibility gate on referrals.
     class CoverageWorkflowTest < ActiveSupport::TestCase
       PRC_PAYER = CoverageSummaryService::PRC_PAYER
 
@@ -93,6 +95,7 @@ module Lakeraven
 
         refute result.prc_eligible
         summary = result.coverage_summary
+        refute summary.prc_eligible, "Summary#prc_eligible must match eligibility gate"
         refute_includes summary.payer_hierarchy, PRC_PAYER
         assert_equal [ "Blue Cross" ], summary.payer_hierarchy
       end
@@ -127,8 +130,28 @@ module Lakeraven
         assert result.prc_eligible, "Expected eligible patient for PRC referral context"
         summary = result.coverage_summary
         assert summary, "Expected coverage summary for PRC-eligible referral without coverage records"
+        assert summary.prc_eligible, "Summary#prc_eligible must match eligibility gate"
         assert_equal PRC_PAYER, summary.primary_payer
         assert_equal [ PRC_PAYER ], summary.payer_hierarchy
+      end
+
+      test "summarize matches refresh PRC-primary summary with no coverage on file" do
+        refreshed = PatientEligibilitySummaryService.refresh(
+          patient: @patient,
+          service_request: @service_request,
+          coverages: []
+        )
+        summarized = PatientEligibilitySummaryService.summarize(
+          patient: @patient,
+          service_request: @service_request
+        )
+
+        assert refreshed.prc_eligible
+        assert summarized.prc_eligible
+        assert summarized.coverage_summary, "Expected summarize coverage summary on eligible referral"
+        assert_equal refreshed.coverage_summary.primary_payer, summarized.coverage_summary.primary_payer
+        assert_equal refreshed.coverage_summary.payer_hierarchy, summarized.coverage_summary.payer_hierarchy
+        assert_equal PRC_PAYER, summarized.coverage_summary.primary_payer
       end
 
       test "alternate resource check is linked to the patient Coverage records used for the referral" do

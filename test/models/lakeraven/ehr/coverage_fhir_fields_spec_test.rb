@@ -4,13 +4,20 @@ require "test_helper"
 
 module Lakeraven
   module EHR
-    # Issue #239 — Coverage FHIR serialization gaps (factory spec, panel round 2).
+    # Issue #239 — Coverage FHIR serialization gaps (factory spec, panel round 3).
     #
     # Contract:
     # - Coverage.type is exactly one coding in urn:lakeraven:fhir:CodeSystem:coverage-type;
     #   code is the internal coverage_type value; every COVERAGE_TYPES value round-trips.
-    # - No v3-ActCode or SOPT on Coverage.type in this issue.
-    # - subscriberId is subscriber_id only; member_id is MB identifier only.
+    # - Outbound Coverage.type does not claim v3-ActCode or SOPT. Inbound foreign codings:
+    #   MEDICARE, MEDICAID, HIP, VET, WCBPOL, AUTOPOL map like origin/main (any system);
+    #   local-system codes map exactly; unknown or missing type -> coverage_type nil (invalid).
+    #   Deliberate fail-closed change from main: main defaulted unknown foreign codes to
+    #   private_insurance; #239 must not guess private_insurance for unrecognised codes.
+    # - subscriberId is subscriber_id; member_id is MB identifier only on local payloads.
+    #   External payloads without local type and no MB: subscriberId -> member_id only when
+    #   relationship is absent or self; dependents keep subscriberId on subscriber_id only.
+    # - Coverage.order round-trips through to_fhir / from_fhir.
     # - PRC statuses map to R4 fm-status on Coverage.status and round-trip via extension
     #   urn:lakeraven:fhir:StructureDefinition/prc-coverage-status.
     class CoverageFhirFieldsSpecTest < ActiveSupport::TestCase
@@ -23,7 +30,18 @@ module Lakeraven
       COVERAGE_CLASS_SYSTEM = "http://terminology.hl7.org/CodeSystem/coverage-class"
       IDENTIFIER_TYPE_SYSTEM = "http://terminology.hl7.org/CodeSystem/v2-0203"
       COVERAGE_TYPE_SYSTEM = "urn:lakeraven:fhir:CodeSystem:coverage-type"
+      V3_ACT_CODE_SYSTEM = "http://terminology.hl7.org/CodeSystem/v3-ActCode"
+      SYNTHETIC_FOREIGN_TYPE_SYSTEM = "urn:synthetic:external:coverage-type"
       PRC_STATUS_EXTENSION_URL = "urn:lakeraven:fhir:StructureDefinition/prc-coverage-status"
+
+      FOREIGN_COVERAGE_TYPE_CODES = {
+        "MEDICARE" => "medicare_a",
+        "MEDICAID" => "medicaid",
+        "HIP" => "private_insurance",
+        "VET" => "va_benefits",
+        "WCBPOL" => "workers_comp",
+        "AUTOPOL" => "auto_insurance"
+      }.freeze
 
       SYNTHETIC_MEMBER_ID = "BC-SYNTH-0001"
       SYNTHETIC_SUBSCRIBER_ID = "BC-SUB-9000"
@@ -203,6 +221,113 @@ module Lakeraven
         refute_equal "http://terminology.hl7.org/CodeSystem/v3-ActCode", codings.first[:system]
       end
 
+      test "from_fhir maps legacy foreign type codes regardless of coding system" do
+        FOREIGN_COVERAGE_TYPE_CODES.each do |code, expected_type|
+          [ V3_ACT_CODE_SYSTEM, SYNTHETIC_FOREIGN_TYPE_SYSTEM ].each do |system|
+            cov = Coverage.from_fhir(minimal_fhir_coverage(type_coding: { system: system, code: code }))
+
+            assert_equal expected_type, cov.coverage_type,
+              "Expected #{code} @ #{system} -> #{expected_type}"
+            assert cov.valid?, cov.errors.full_messages.join(", ")
+          end
+        end
+      end
+
+      test "from_fhir v3-ActCode MEDICAID maps to medicaid not private_insurance" do
+        cov = Coverage.from_fhir(
+          minimal_fhir_coverage(type_coding: { system: V3_ACT_CODE_SYSTEM, code: "MEDICAID" })
+        )
+
+        assert_equal "medicaid", cov.coverage_type
+        refute_equal "private_insurance", cov.coverage_type
+      end
+
+      test "from_fhir foreign MEDICAID ranks after Medicare not as misclassified private primary" do
+        medicare = Coverage.from_fhir(
+          minimal_fhir_coverage(
+            type_coding: { system: COVERAGE_TYPE_SYSTEM, code: "medicare_a", display: "Medicare Part A" }
+          )
+        )
+        medicaid = Coverage.from_fhir(
+          minimal_fhir_coverage(
+            type_coding: { system: V3_ACT_CODE_SYSTEM, code: "MEDICAID", display: "Medicaid" }
+          )
+        )
+
+        hierarchy = CoverageSummaryService.new([ medicare, medicaid ]).determine_payer_hierarchy
+
+        assert_equal [ "Medicare", "Medicaid" ], hierarchy
+      end
+
+      test "from_fhir unrecognised foreign Coverage.type code yields nil type and invalid coverage" do
+        # Fail closed vs origin/main: main mapped unknown codes to private_insurance.
+        cov = Coverage.from_fhir(
+          minimal_fhir_coverage(
+            type_coding: { system: V3_ACT_CODE_SYSTEM, code: "SYNTH-UNKNOWN-PAYER" }
+          )
+        )
+
+        assert_nil cov.coverage_type
+        refute cov.valid?
+        assert cov.errors[:coverage_type].any?
+      end
+
+      test "from_fhir without Coverage.type yields nil type and invalid coverage" do
+        cov = Coverage.from_fhir(
+          {
+            resourceType: "Coverage",
+            status: "active",
+            beneficiary: { reference: "Patient/1" },
+            payor: [ { display: "Synthetic Payor" } ]
+          }
+        )
+
+        assert_nil cov.coverage_type
+        refute cov.valid?
+        assert cov.errors[:coverage_type].any?
+      end
+
+      test "from_fhir round-trips Coverage.order" do
+        original = Coverage.new(
+          patient_dfn: "1",
+          coverage_type: "medicaid",
+          order: 2,
+          start_date: Date.new(2024, 1, 1),
+          status: "active"
+        )
+
+        round_tripped = Coverage.from_fhir(original.to_fhir)
+
+        assert_equal 2, round_tripped.order
+      end
+
+      test "from_fhir external payload copies subscriberId to member_id when relationship absent" do
+        cov = Coverage.from_fhir(
+          external_legacy_fhir(subscriber_id: SYNTHETIC_SUBSCRIBER_ID, relationship: nil)
+        )
+
+        assert_equal SYNTHETIC_SUBSCRIBER_ID, cov.member_id
+        assert_nil cov.subscriber_id
+      end
+
+      test "from_fhir external payload copies subscriberId to member_id when relationship self" do
+        cov = Coverage.from_fhir(
+          external_legacy_fhir(subscriber_id: SYNTHETIC_SUBSCRIBER_ID, relationship_code: "self")
+        )
+
+        assert_equal SYNTHETIC_SUBSCRIBER_ID, cov.member_id
+        assert_nil cov.subscriber_id
+      end
+
+      test "from_fhir external payload dependent keeps subscriberId on subscriber_id only" do
+        cov = Coverage.from_fhir(
+          external_legacy_fhir(subscriber_id: SYNTHETIC_SUBSCRIBER_ID, relationship_code: "child")
+        )
+
+        assert_equal SYNTHETIC_SUBSCRIBER_ID, cov.subscriber_id
+        assert_nil cov.member_id
+      end
+
       test "every COVERAGE_TYPES value round-trips through to_fhir and from_fhir" do
         Coverage::COVERAGE_TYPES.each do |type|
           original = Coverage.new(
@@ -379,6 +504,33 @@ module Lakeraven
         Array(fhir[:extension] || fhir["extension"]).find do |ext|
           (ext[:url] || ext["url"]) == PRC_STATUS_EXTENSION_URL
         end
+      end
+
+      def minimal_fhir_coverage(type_coding:)
+        {
+          resourceType: "Coverage",
+          status: "active",
+          beneficiary: { reference: "Patient/1" },
+          type: { coding: [ type_coding ] },
+          payor: [ { display: "Synthetic Payor" } ]
+        }
+      end
+
+      def external_legacy_fhir(subscriber_id:, relationship: :omit, relationship_code: nil)
+        fhir = {
+          resourceType: "Coverage",
+          status: "active",
+          beneficiary: { reference: "Patient/1" },
+          type: { coding: [ { system: V3_ACT_CODE_SYSTEM, code: "HIP" } ] },
+          subscriberId: subscriber_id,
+          payor: [ { display: "Blue Cross" } ]
+        }
+        if relationship != :omit
+          fhir[:relationship] = relationship
+        elsif relationship_code
+          fhir[:relationship] = { coding: [ { code: relationship_code } ] }
+        end
+        fhir
       end
     end
   end
