@@ -104,10 +104,32 @@ module Lakeraven
         )
       end
 
-      test "build_period parses String dates to ISO8601" do
+      test "build_period passes String values through unchanged" do
+        assert_equal(
+          { start: "2024-01-01" },
+          @host.call_build_period(start_date: "2024-01-01", end_date: nil)
+        )
         assert_equal(
           { start: "2024-03-15T14:30:00Z" },
           @host.call_build_period(start_date: "2024-03-15T14:30:00Z", end_date: nil)
+        )
+      end
+
+      test "build_period treats blank String as absent" do
+        assert_equal(
+          { start: "2024-01-01" },
+          @host.call_build_period(start_date: "2024-01-01", end_date: "")
+        )
+        assert_nil @host.call_build_period(start_date: "", end_date: "")
+      end
+
+      test "build_period serializes DateTime and TimeWithZone as iso8601" do
+        start = DateTime.new(2024, 6, 1, 10, 0, 0)
+        finish = Time.zone.parse("2024-06-01 11:00:00")
+
+        assert_equal(
+          { start: start.iso8601, end: finish.iso8601 },
+          @host.call_build_period(start_date: start, end_date: finish)
         )
       end
     end
