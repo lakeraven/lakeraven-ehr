@@ -53,6 +53,17 @@ module Lakeraven
         end
       end
 
+      # Whether a clinic keeps this user out (#729, S-SCH-01.13): its HOSPITAL
+      # LOCATION prohibits access (#44 field 2500) and the user is not one of its
+      # privileged users, or its principal clinic's, as RPMS's own scheduling
+      # checks (SDM1.m:33). SDZSUP is checked by the caller.
+      def self.kept_out?(resource, duz, setup: ::RpmsRpc::SchedulingSetup)
+        rules = setup.clinic_rules(resource[:hospital_location_id])
+        return false unless rules&.dig(:prohibit_access)
+
+        !Array(rules[:privileged_users]).include?(duz.to_i)
+      end
+
       # The access types the search can be kept to (S-SCH-04.6): those neither
       # inactive nor preventing access, by name.
       def self.access_types(setup: ::RpmsRpc::SchedulingSetup)

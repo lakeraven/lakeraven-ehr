@@ -22,8 +22,22 @@ module Lakeraven
         # every one for a supervisor.
         def visible?(resource) = resource[:view] || supervisor?
 
+        # Booking, cancelling and checking in on a resource (S-SCH-01.13): an
+        # active resource, and SDZSUP, or the user's modify-appointments right on it
+        # in a clinic that does not keep them out (#44 PROHIBIT ACCESS, #729).
         def can_book?(resource)
-          !resource[:inactive] && (resource[:modify_appointments] || supervisor?)
+          return false if resource[:inactive]
+          return true if supervisor?
+
+          resource[:modify_appointments] && !kept_out?(resource)
+        end
+
+        # Whether the resource's clinic prohibits access and this user is not one
+        # of its privileged users. Read once per request per resource.
+        def kept_out?(resource)
+          (@kept_out ||= {}).fetch(resource[:id]) do
+            @kept_out[resource[:id]] = AppointmentBookingGateway.kept_out?(resource, session[:duz])
+          end
         end
 
         def load_resource!
