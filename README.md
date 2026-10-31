@@ -8,7 +8,7 @@ How to use my plugin.
 ## Development
 
 Rails runs on your machine; RPMS runs in Docker, from a pinned [rpms-ops](https://github.com/lakeraven/rpms-ops) release (`compose.yml`).
-You need Ruby 3.4, Docker and PostgreSQL.
+You need Ruby 4.0 (the version in `.ruby-version`), Docker and PostgreSQL.
 
 Once, log in to the private image registry:
 

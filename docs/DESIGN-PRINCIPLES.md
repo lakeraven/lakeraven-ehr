@@ -146,7 +146,7 @@ There is no implementation-guide declaration yet, and FHIR output is validated b
 | Structured, PHI-free telemetry | Rails 8.1's event reporting |
 | Content Security Policy | strict CSP with nonces, from the engine's install generator, since the host app owns the setting |
 
-- Test on the Ruby versions CI runs (3.4 and 4.0), and keep `rails` current within 8.1.
+- Test on the one Ruby `.ruby-version` names, which CI runs and production uses, and keep `rails` current within 8.1.
 
 **Today.** None of the table is in use. The CSP initializer in the test host is commented out.
 
