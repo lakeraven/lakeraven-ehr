@@ -3,6 +3,9 @@
 Rails.application.routes.draw do
   mount Lakeraven::EHR::Engine => "/lakeraven-ehr"
 
+  # Health check for the container and its load balancer: 200 once the app boots.
+  get "up" => "rails/health#show", as: :rails_health_check
+
   # Demo convenience: expose the engine's read-only chart at the host root
   # so the partner demo URL is simply /patients/:dfn (issue #452).
   get "patients/:dfn(.:format)", to: "lakeraven/ehr/charts#show", constraints: { dfn: /\d+/ }

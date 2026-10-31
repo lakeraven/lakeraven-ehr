@@ -1,0 +1,16 @@
+# Keep the build context to what the image needs. See Dockerfile.
+/.git/
+/.github/
+/.bundle/
+/doc/
+/pkg/
+/tmp/
+/log/
+/coverage/
+/test/dummy/log/*
+/test/dummy/tmp/*
+/test/dummy/storage/*
+/test/dummy/public/assets/
+.env*
+Dockerfile
+.dockerignore
