@@ -22,6 +22,12 @@ module Lakeraven
     module PatientCompartment
       extend ActiveSupport::Concern
 
+      included do
+        # { action => { param:, require_param: } } for every compartment_bound
+        # declaration, so a withheld capability can run the same authorization.
+        class_attribute :compartment_declarations, instance_writer: false, default: {}.freeze
+      end
+
       class_methods do
         # Bind `actions` to the patient compartment named by `param`.
         #
@@ -39,6 +45,8 @@ module Lakeraven
         # 400 for EVERY caller — the search-usability rule that clinical
         # indexes already had. It is not a security control and never was.
         def compartment_bound(*actions, param:, require_param: false)
+          declarations = actions.to_h { |action| [ action.to_sym, { param: param, require_param: require_param }.freeze ] }
+          self.compartment_declarations = compartment_declarations.merge(declarations).freeze
           before_action(only: actions) do
             enforce_declared_compartment!(param, require_param: require_param)
           end
@@ -46,6 +54,21 @@ module Lakeraven
       end
 
       private
+
+      # The compartment check as authorization alone, for a capability that is
+      # withheld (see FeatureUnavailableRendering). A missing required parameter
+      # is a 400 for every caller, not a refusal, so it is left to the
+      # not-supported 404 that follows.
+      def authorize_before_unavailable!
+        super
+        return if performed?
+
+        declaration = compartment_declarations[action_name.to_sym]
+        return unless declaration
+        return if declaration[:require_param] && params[declaration[:param]].blank?
+
+        authorize_patient_search!(extract_patient_dfn(params[declaration[:param]]))
+      end
 
       def enforce_declared_compartment!(param, require_param: false)
         return render_missing_patient_param if require_param && params[param].blank?

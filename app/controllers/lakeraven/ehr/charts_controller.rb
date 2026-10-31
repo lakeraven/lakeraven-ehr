@@ -35,6 +35,9 @@ module Lakeraven
     # serializers; only the RPMS data source is mocked (see
     # test/dummy/lib/lakeraven_demo_seeds.rb).
     class ChartsController < ActionController::Base
+      helper ApplicationHelper
+      # The chart reads RPMS on its signed-in user's own connection (ADR 0011).
+      include RpmsUserScope
       include SmartAuthentication
       # FAIL-CLOSED audit, the same terms the clinician screening surface is
       # held to. The chart now carries scored screenings (#474), so it serves
@@ -43,36 +46,179 @@ module Lakeraven
       # shared concern IS the fail-closed one: if the access cannot be
       # recorded, it is not completed.
       include AuditableClinicalAccess
+      include FHIRReadEgress
+      # close_patient_context! only. This controller keeps its own
+      # enforce_patient_context! (token compartment, not the session gate);
+      # a GET still must not open a context.
+      include ClinicianPatientContext
 
       FHIR_CONTENT_TYPE = "application/fhir+json"
 
+      # VistA DFN width. Patient.canonical_dfn has no length cap; the chart
+      # route treats a longer digit string as a malformed identifier (#467).
+      MAX_CHART_DFN_DIGITS = 18
+
+      # Static on purpose: the flash names the problem, never the raw segment.
+      # A leaked error string or markup in the URL must not be echoed.
+      INVALID_CHART_IDENTIFIER_ALERT =
+        "Patient identifier is not a valid record id. " \
+        "A record id is a positive integer of at most 18 digits; 0 is not valid."
+
+      # The alert names 0, and the numeral 18 is itself a prefix of a refused
+      # segment (" 1"). The audit reason spells the bound with no digits, so
+      # neither the row nor the OperationOutcome can match the raw segment.
+      INVALID_CHART_IDENTIFIER_AUDIT_REASON =
+        "Patient identifier is not a valid record id. " \
+        "A record id is a positive integer of at most eighteen digits."
+
+      # Chart sections an IHS capability owns. A backend that withholds one
+      # adds an outcome entry instead of those resources (#647).
+      CHART_CAPABILITY_RESOURCES = { ihs_immunization: "Immunization" }.freeze
+
       before_action :authenticate_chart_request!
       before_action :require_patient_scope!
+      # After authentication and Patient scope, before the token compartment
+      # check. A malformed id never reaches enforce_patient_context! and
+      # never becomes a repository read. A well-formed id falls through and
+      # the authorization decision is unchanged.
+      before_action :reject_invalid_chart_dfn!
       before_action :enforce_patient_context!
 
-      # RPMS problem-list status codes -> FHIR clinical-status
-      PROBLEM_STATUS = { "A" => "active", "I" => "inactive" }.freeze
       # ORWPT APPTLST status text -> FHIR Encounter.status
       APPOINTMENT_STATUS = {
         "scheduled" => "planned", "checked in" => "arrived",
         "checked out" => "finished", "cancelled" => "cancelled",
         "no show" => "cancelled"
       }.freeze
+      # Encounter.status is the FHIR code. The HTML chart shows the RPMS
+      # text, which has to ride on the resource the filter returns.
+      RPMS_APPOINTMENT_STATUS = "https://lakeraven.com/fhir/StructureDefinition/rpms-appointment-status"
 
-      def show
-        @patient = Patient.find_by_dfn(params[:dfn])
-        return render_missing_patient unless @patient
-
-        load_clinical_collections
-
-        if fhir_requested?
-          render json: fhir_bundle, content_type: FHIR_CONTENT_TYPE
-        else
-          render :show, layout: false
+      # Screening row the HTML chart reads back out of a filtered Observation.
+      ChartScreening = Struct.new(
+        :effective_at, :instrument, :total_score, :severity_band,
+        keyword_init: true
+      ) do
+        def severity_slug
+          severity_band.to_s.parameterize
         end
       end
 
+      def show
+        @patient = find_chart_patient
+        return if performed?
+        return render_missing_patient unless @patient
+
+        load_clinical_collections
+        render_chart
+      end
+
       private
+
+      # -- Identifier format (#467) ----------------------------------------------
+      #
+      # The RAW route segment, never stripped. It must be 1..18 ASCII digits
+      # and Patient.canonical_dfn must resolve to a positive id. Leading zeros
+      # are valid ("007"). Whitespace and control characters are malformed
+      # even though canonical_dfn would strip them. The static alert names the
+      # problem and never echoes the segment.
+
+      def reject_invalid_chart_dfn!
+        return if chart_dfn_well_formed?
+
+        close_patient_context!
+        note_audit_denial(INVALID_CHART_IDENTIFIER_AUDIT_REASON)
+        respond_to_invalid_chart_dfn
+      end
+
+      def respond_to_invalid_chart_dfn
+        if fhir_requested?
+          render_invalid_chart_dfn
+        else
+          redirect_to dashboard_path, alert: INVALID_CHART_IDENTIFIER_ALERT
+        end
+      end
+
+      def render_invalid_chart_dfn
+        render json: invalid_chart_dfn_outcome,
+               status: :bad_request,
+               content_type: FHIR_CONTENT_TYPE
+      end
+
+      # The HTML alert names 0 as an example. That digit is itself a refused
+      # id, so the OperationOutcome uses the audit reason: a diagnostics
+      # string must not contain a digit the raw segment could match.
+      def invalid_chart_dfn_outcome
+        {
+          resourceType: "OperationOutcome",
+          issue: [ {
+            severity: "error",
+            code: "invalid",
+            diagnostics: INVALID_CHART_IDENTIFIER_AUDIT_REASON
+          } ]
+        }
+      end
+
+      def chart_dfn_well_formed?
+        raw = raw_chart_dfn_segment
+        return false unless raw.match?(/\A\d{1,#{MAX_CHART_DFN_DIGITS}}\z/)
+
+        Patient.canonical_dfn(raw).present?
+      end
+
+      # Exactly the routed segment. No strip and no presence: a blank-looking
+      # value made of whitespace is still not a record id.
+      def raw_chart_dfn_segment
+        path = request.path_parameters
+        segment = path.key?(:dfn) ? path[:dfn] : path["dfn"]
+        segment.to_s
+      end
+
+      # PatientRepository.find / PatientGateway.find do not raise a dedicated
+      # backend error. The URL-context specs stub `find` with StandardError
+      # ("rpms unavailable"), and a broker failure arrives as whatever the
+      # RPC client raises — also a StandardError. Rescue is limited to this
+      # lookup so a programming error while rendering the chart still
+      # propagates.
+      def find_chart_patient
+        Patient.find_by_dfn(params[:dfn])
+      rescue StandardError => error
+        log_chart_backend_failure(error)
+        render_chart_backend_failure
+        nil
+      end
+
+      def log_chart_backend_failure(error)
+        Rails.logger.warn(
+          "[chart] patient could not be loaded: #{error.class}: " \
+          "#{PhiSanitizer.sanitize_message(error.message)}"
+        )
+      end
+
+      def render_chart_backend_failure
+        close_patient_context!
+        if fhir_requested?
+          render_chart_backend_failure_fhir
+        else
+          render_chart_backend_failure_html
+        end
+      end
+
+      def render_chart_backend_failure_fhir
+        render json: {
+          resourceType: "OperationOutcome",
+          issue: [ {
+            severity: "error",
+            code: "exception",
+            diagnostics: "The chart could not be loaded"
+          } ]
+        }, status: :service_unavailable, content_type: FHIR_CONTENT_TYPE
+      end
+
+      def render_chart_backend_failure_html
+        @patient_banner = PatientBanner.empty
+        render :unavailable, layout: false, status: :service_unavailable
+      end
 
       # -- Authentication / authorization (fail closed) -------------------------
 
@@ -123,8 +269,32 @@ module Lakeraven
 
       # AuditableClinicalAccess records entity_type from this; the chart is a
       # Patient-centric aggregate, so audit it against Patient + the dfn.
+      # The dfn is the route segment. `params` also carries the query string,
+      # so `?id=` or `?dfn=` must not name a record this chart did not open.
       def fhir_resource_type
         "Patient"
+      end
+
+      # The route may say "01". The chart shows the patient the repository
+      # resolves, and the audit row names that same canonical dfn. A segment
+      # the format gate refused is not that patient: canonical_dfn still
+      # accepts a whitespace-padded "1", and a non-canonical fallback would
+      # record "0" or a 19-digit id. Those refusals name no entity.
+      def direct_audit_identifier
+        return unless chart_dfn_well_formed?
+
+        segment = raw_chart_dfn_segment
+        Patient.canonical_dfn(segment) || segment
+      end
+
+      # The shared rule degrades a missing direct identifier to ?patient=.
+      # That is right for a search that still served the patient's data, and
+      # wrong here: a segment the format gate refused did not open a chart.
+      # A well-formed id keeps the shared rule, which records the route dfn.
+      def audit_entity_reference
+        return [ "Patient", nil ] unless chart_dfn_well_formed?
+
+        super
       end
 
       # AuditableClinicalAccess hook: demo-bypass requests carry no token but
@@ -150,14 +320,37 @@ module Lakeraven
         dfn = @patient.dfn.to_s
         @conditions    = readable?("Condition") ? build_conditions(dfn) : []
         @medications   = readable?("MedicationRequest") ? build_medications(dfn) : []
-        @allergies     = readable?("AllergyIntolerance") ? build_allergies(dfn) : []
-        @vitals        = readable?("Observation") ? safe { ObservationGateway.for_patient(dfn) } : []
-        @observations  = Observation.from_vital_hashes(@vitals, patient_dfn: dfn)
-        @immunizations = readable?("Immunization") ? safe { Immunization.for_patient(dfn) } : []
+        @allergies     = build_allergies(dfn)
+        # Through the seam, like the FHIR search: converting the raw vitals here
+        # would stamp this patient's DFN over whatever a row stated, and would
+        # omit a configured supplemental provider's rows from the chart while
+        # showing them in the search.
+        @observations  = readable?("Observation") ? safe { SupplementalClinicalResources.merged_observations_for_patient(dfn) } || [] : []
+        @immunizations = ihs_immunizations(dfn)
         @procedures    = readable?("Procedure") ? build_procedures(dfn) : []
         @encounters    = readable?("Encounter") ? safe { EncounterGateway.for_patient(dfn) } : []
         @encounter_resources = build_encounter_resources(dfn)
         load_screenings(dfn)
+      end
+
+      # Immunizations are an IHS-only chart section. A backend without the
+      # capability never sees the gateway call, and the card is omitted.
+      # A read that raises is a failed card, not an empty list.
+      def ihs_immunizations(dfn)
+        return [] unless readable?("Immunization") && BackendRegistry.current.provides?(:ihs_immunization)
+
+        Immunization.for_patient(dfn)
+      rescue StandardError => error
+        record_immunization_load_failure(error)
+        []
+      end
+
+      def record_immunization_load_failure(error)
+        @immunizations_load_failed = true
+        Rails.logger.warn(
+          "[chart] immunizations could not be loaded: #{error.class}: " \
+          "#{PhiSanitizer.sanitize_message(error.message)}"
+        )
       end
 
       # Scored screening instruments (#474). Engine-owned records rather than an
@@ -210,32 +403,11 @@ module Lakeraven
       end
 
       def build_conditions(dfn)
-        safe { Condition.for_patient(dfn) }.map do |h|
-          Condition.new(
-            ien: problem_id(dfn, h), patient_dfn: dfn,
-            code: h[:icd_code], code_system: "icd10", display: h[:description],
-            clinical_status: PROBLEM_STATUS[h[:status]] || "active",
-            category: "problem-list-item"
-          )
-        end
-      end
-
-      # Same deterministic-id policy as allergy_id: prefer a real IEN, else
-      # derive a stable id (never random/urn:uuid) so the Bundle entry's
-      # relative `subject` reference stays resolvable per Bundle rules.
-      def problem_id(dfn, hash)
-        hash[:ien].to_s.presence || "problem-#{dfn}-#{hash[:icd_code].to_s.parameterize}"
+        safe { Condition.for_patient(dfn) }.map { |h| Condition.from_rpms_row(h, patient_dfn: dfn) }
       end
 
       def build_medications(dfn)
-        safe { MedicationRequest.for_patient(dfn) }.map do |h|
-          MedicationRequest.new(
-            ien: h[:ien]&.to_s, patient_dfn: dfn,
-            medication_display: h[:drug_name], dosage_instruction: h[:sig],
-            status: valid_status(h[:status], MedicationRequest::VALID_STATUSES, "active"),
-            intent: "order"
-          )
-        end
+        safe { MedicationRequest.for_patient(dfn) }.map { |h| MedicationRequest.from_rpms_row(h, patient_dfn: dfn) }
       end
 
       # `status` has a REQUIRED binding in FHIR. RPMS status text like
@@ -246,14 +418,24 @@ module Lakeraven
         valid.include?(normalized) ? normalized : fallback
       end
 
+      # Through the shared normalizer, so this bundle and the FHIR search cannot
+      # disagree about the same wire row -- they previously read different keys
+      # for the reaction -- and so a configured supplemental provider's rows are
+      # in the chart rather than only in the search.
+      #
+      # Not `safe`. That helper turns a raise and a real [] into the same [],
+      # and the banner then cannot tell "not loaded" from "none recorded".
+      # Other sections still use `safe`.
       def build_allergies(dfn)
-        safe { AllergyIntolerance.for_patient(dfn) }.map do |h|
-          AllergyIntolerance.new(
-            ien: allergy_id(dfn, h), patient_dfn: dfn,
-            allergen: h[:allergen], reaction: h[:reaction],
-            severity: h[:severity], clinical_status: "active",
-            criticality: h[:severity].to_s.downcase == "severe" ? "high" : "low"
-          )
+        @allergy_source = chart_allergy_source(dfn)
+        @allergy_source.records
+      end
+
+      def chart_allergy_source(dfn)
+        return AllergySource.unauthorized unless readable?("AllergyIntolerance")
+
+        AllergySource.fetch(log_label: "[chart]") do
+          SupplementalClinicalResources.merged_allergy_intolerances_for_patient(dfn)
         end
       end
 
@@ -320,7 +502,11 @@ module Lakeraven
         resources.concat(safe_map(@screening_answers, &:to_questionnaire_response))
         resources.concat(@immunizations.map(&:to_fhir))
         resources.concat(@procedures.map(&:to_fhir))
-        resources.concat(@encounter_resources.map { |e| encounter_to_fhir(e) })
+        resources.concat(chart_encounter_entries)
+
+        entries = resources.map do |resource|
+          { fullUrl: entry_full_url(resource), resource: resource, search: { mode: "match" } }
+        end
 
         {
           resourceType: "Bundle",
@@ -329,9 +515,40 @@ module Lakeraven
           type: "searchset",
           total: resources.length,
           link: [ { relation: "self", url: request.original_url } ],
-          entry: resources.map do |r|
-            { fullUrl: entry_full_url(r), resource: r, search: { mode: "match" } }
-          end
+          entry: entries + withheld_chart_outcomes + immunization_load_outcomes
+        }
+      end
+
+      def withheld_chart_outcomes
+        CHART_CAPABILITY_RESOURCES.filter_map do |capability, resource_type|
+          next if BackendRegistry.current.provides?(capability)
+
+          chart_feature_outcome(
+            code: "not-supported",
+            diagnostics: "#{resource_type} is not available on this system"
+          )
+        end
+      end
+
+      # The capability is present, but the read failed. The diagnostics stay
+      # fixed: the exception message can carry broker detail and stays in the log.
+      def immunization_load_outcomes
+        return [] unless @immunizations_load_failed
+
+        [ chart_feature_outcome(code: "exception", diagnostics: "Immunizations could not be loaded.") ]
+      end
+
+      def chart_feature_outcome(code:, diagnostics:)
+        {
+          resource: {
+            resourceType: "OperationOutcome",
+            issue: [ {
+              severity: "error",
+              code: code,
+              diagnostics: diagnostics
+            } ]
+          },
+          search: { mode: "outcome" }
         }
       end
 
@@ -341,10 +558,372 @@ module Lakeraven
       # appointment yields the same resolvable fullUrl on every request. If a
       # real visit IEN ever flows through, Encounter#to_fhir uses it and this
       # fallback is skipped.
-      def encounter_to_fhir(encounter)
+      #
+      # APPTLST datetimes are date-only, so distinct appointments on the same
+      # day compute the same fallback. chart_encounter_entries counts those
+      # fallbacks and passes fallback_id only when that value belongs to one
+      # Encounter in the bundle. When the same fallback would be used by more
+      # than one Encounter, it is not set on any of them (fail closed);
+      # entry_full_url then gives each a urn:uuid. A unique fallback keeps its
+      # id. An Encounter whose to_fhir already returned an id is unchanged.
+      def encounter_to_fhir(encounter, source = {}, fallback_id: nil)
         fhir = encounter.to_fhir
-        fhir[:id] ||= "appt-#{encounter.patient_identifier}-#{encounter.period_start&.strftime('%Y%m%d%H%M')}"
+        assign_fallback_encounter_id(fhir, fallback_id)
+        stamp_location_display(fhir, source[:location] || source["location"])
+        stamp_rpms_status(fhir, source[:status] || source["status"])
         fhir
+      end
+
+      def assign_fallback_encounter_id(fhir, fallback_id)
+        return if fhir[:id].present?
+        return if fallback_id.blank?
+
+        fhir[:id] = fallback_id
+      end
+
+      def appointment_fhir_id(encounter)
+        "appt-#{encounter.patient_identifier}-#{encounter.period_start&.strftime("%Y%m%d%H%M")}"
+      end
+
+      def stamp_rpms_status(fhir, status_text)
+        return if status_text.blank?
+
+        fhir[:extension] = Array(fhir[:extension]) + [ {
+          url: RPMS_APPOINTMENT_STATUS,
+          valueString: status_text.to_s
+        } ]
+      end
+
+      def stamp_location_display(fhir, name)
+        return if name.blank?
+
+        locations = fhir[:location] || fhir["location"]
+        locations = fhir[:location] = [ { location: {} } ] if locations.blank?
+        locations.each do |entry|
+          place = entry[:location] || entry["location"]
+          place[:display] = name if place.is_a?(Hash)
+        end
+      end
+
+      def chart_encounter_entries
+        rows = encounter_fallback_rows
+        counts = fallback_id_counts(rows)
+        rows.map do |row|
+          encounter_to_fhir(row[:encounter], row[:source], fallback_id: sole_fallback_id(row[:fallback], counts))
+        end
+      end
+
+      def encounter_fallback_rows
+        @encounters.zip(@encounter_resources).map do |source, encounter|
+          { source: source, encounter: encounter, fallback: appointment_fallback_for(encounter) }
+        end
+      end
+
+      # Appointment-derived Encounters are those Encounter#to_fhir left without
+      # an id. A real visit IEN is already on the resource and is not a fallback.
+      def appointment_fallback_for(encounter)
+        return if encounter.to_fhir[:id].present?
+
+        appointment_fhir_id(encounter)
+      end
+
+      def fallback_id_counts(rows)
+        rows.filter_map { |row| row[:fallback] }.tally
+      end
+
+      def sole_fallback_id(fallback, counts)
+        return if fallback.blank?
+        return if counts[fallback] > 1
+
+        fallback
+      end
+
+      def render_chart
+        if fhir_requested?
+          render_fhir_egress(fhir_bundle)
+        else
+          render_html_chart
+        end
+      end
+
+      # The page is the filtered bundle. Loader collections are only the input
+      # to fhir_bundle; they are not what the template renders.
+      def render_html_chart
+        bundle = filter_fhir_for_egress(fhir_bundle)
+        return refuse_unfiltered_fhir_egress unless bundle
+
+        assign_chart_from_bundle(bundle)
+        assign_patient_banner
+        render :show, layout: false
+      end
+
+      # The banner and the allergy sections both read the filtered bundle.
+      # Source status is what tells a withheld list from a genuinely empty one.
+      def assign_patient_banner
+        @allergy_list_status = chart_allergy_status
+        @patient_banner = PatientBanner.for_chart(@patient, @allergy_list_status)
+      end
+
+      def chart_allergy_status
+        @allergy_source.to_list_status(@allergies.map(&:display_allergen))
+      end
+
+      def assign_chart_from_bundle(bundle)
+        grouped = resources_by_type(bundle)
+        observations = grouped["Observation"]
+        @patient = chart_patient(grouped["Patient"]&.first)
+        @conditions = chart_conditions(grouped["Condition"])
+        @medications = chart_medications(grouped["MedicationRequest"])
+        @allergies = chart_allergies(grouped["AllergyIntolerance"])
+        @vitals = chart_vitals(observations)
+        @immunizations = chart_immunizations(grouped["Immunization"])
+        @encounters = chart_encounters(grouped["Encounter"])
+        @screenings = chart_screenings(observations)
+      end
+
+      def resources_by_type(bundle)
+        bundle_resources(bundle).group_by { |resource| fhir_field(resource, "resourceType").to_s }
+      end
+
+      def bundle_resources(bundle)
+        fhir_list(fhir_field(bundle, "entry")).filter_map do |entry|
+          resource = fhir_field(entry, "resource")
+          resource if resource.is_a?(Hash)
+        end
+      end
+
+      def chart_patient(resource)
+        return Patient.new(dfn: params[:dfn]) if resource.nil?
+
+        Patient.from_fhir(stringify_fhir(resource))
+      end
+
+      def stringify_fhir(value)
+        case value
+        when Hash
+          value.each_with_object({}) { |(key, inner), copy| copy[key.to_s] = stringify_fhir(inner) }
+        when Array
+          value.map { |inner| stringify_fhir(inner) }
+        else
+          value
+        end
+      end
+
+      def chart_conditions(resources)
+        fhir_list(resources).map { |resource| condition_from_fhir(resource) }
+      end
+
+      def condition_from_fhir(resource)
+        code = fhir_field(resource, "code")
+        Condition.new(
+          display: codeable_text(code),
+          code: fhir_coding_code(code),
+          clinical_status: fhir_coding_code(fhir_field(resource, "clinicalStatus"))
+        )
+      end
+
+      def chart_medications(resources)
+        fhir_list(resources).map { |resource| medication_from_fhir(resource) }
+      end
+
+      def medication_from_fhir(resource)
+        dose = fhir_first(fhir_field(resource, "dosageInstruction"))
+        MedicationRequest.new(
+          medication_display: codeable_text(fhir_field(resource, "medicationCodeableConcept")),
+          dosage_instruction: fhir_field(dose, "text"),
+          status: fhir_field(resource, "status")
+        )
+      end
+
+      def chart_allergies(resources)
+        fhir_list(resources).map { |resource| allergy_from_fhir(resource) }
+      end
+
+      def allergy_from_fhir(resource)
+        code = fhir_field(resource, "code")
+        reaction = fhir_first(fhir_field(resource, "reaction"))
+        manifestation = fhir_first(fhir_field(reaction, "manifestation"))
+        AllergyIntolerance.new(
+          allergen: codeable_text(code),
+          allergen_code: fhir_coding_code(code),
+          reaction: fhir_field(manifestation, "text"),
+          severity: fhir_field(reaction, "severity")
+        )
+      end
+
+      def chart_immunizations(resources)
+        fhir_list(resources).map { |resource| immunization_from_fhir(resource) }
+      end
+
+      def immunization_from_fhir(resource)
+        Immunization.new(
+          vaccine_display: codeable_text(fhir_field(resource, "vaccineCode")),
+          occurrence_datetime: parse_fhir_time(fhir_field(resource, "occurrenceDateTime")),
+          status: fhir_field(resource, "status")
+        )
+      end
+
+      def chart_encounters(resources)
+        fhir_list(resources).map { |resource| encounter_row_from_fhir(resource) }
+      end
+
+      def encounter_row_from_fhir(resource)
+        location = fhir_first(fhir_field(resource, "location"))
+        {
+          datetime: parse_fhir_time(fhir_field(fhir_field(resource, "period"), "start")),
+          location: fhir_field(fhir_field(location, "location"), "display"),
+          status: rpms_status_text(resource) || fhir_field(resource, "status")
+        }
+      end
+
+      def rpms_status_text(resource)
+        extension = fhir_list(fhir_field(resource, "extension")).find do |ext|
+          fhir_field(ext, "url") == RPMS_APPOINTMENT_STATUS
+        end
+        fhir_field(extension, "valueString").presence
+      end
+
+      def chart_vitals(observations)
+        fhir_list(observations).filter_map { |resource| vital_row_from_fhir(resource) }
+      end
+
+      def vital_row_from_fhir(resource)
+        return unless observation_category(resource) == "vital-signs"
+
+        code = fhir_coding_code(fhir_field(resource, "code"))
+        type = vital_type_for(code)&.first
+        type = codeable_text(fhir_field(resource, "code")) if type.nil?
+        return if type.blank?
+
+        { type: type, value: vital_display_value(resource, code), units: vital_units_from(resource) }
+      end
+
+      # The unit RPMS recorded, from valueQuantity.unit. Blood pressure has no
+      # top-level quantity; the same recorded unit is on each component.
+      def vital_units_from(resource)
+        stated = fhir_field(fhir_field(resource, "valueQuantity"), "unit")
+        return stated unless stated.nil?
+
+        component_unit(resource)
+      end
+
+      def component_unit(resource)
+        component = fhir_first(fhir_field(resource, "component"))
+        fhir_field(fhir_field(component, "valueQuantity"), "unit")
+      end
+
+      def vital_type_for(code)
+        Observation::VITAL_TYPE_MAP.find { |_type, mapping| mapping[:code] == code }
+      end
+
+      def vital_display_value(resource, code)
+        displayed = if code == Observation::VITAL_SIGNS_CODES[:blood_pressure]
+          blood_pressure_reading(resource)
+        else
+          quantity = fhir_field(fhir_field(resource, "valueQuantity"), "value")
+          format_fhir_number(quantity) unless quantity.nil?
+        end
+        return displayed unless displayed.nil?
+
+        fhir_field(resource, "valueString").presence
+      end
+
+      def blood_pressure_reading(resource)
+        components = fhir_list(fhir_field(resource, "component"))
+        systolic = component_quantity(components, Observation::VITAL_SIGNS_CODES[:systolic])
+        diastolic = component_quantity(components, Observation::VITAL_SIGNS_CODES[:diastolic])
+        return if systolic.nil? || diastolic.nil?
+
+        "#{format_fhir_number(systolic)}/#{format_fhir_number(diastolic)}"
+      end
+
+      def component_quantity(components, code)
+        match = components.find { |component| fhir_coding_code(fhir_field(component, "code")) == code }
+        fhir_field(fhir_field(match, "valueQuantity"), "value")
+      end
+
+      def format_fhir_number(value)
+        number = Float(value)
+        (number % 1).zero? ? number.to_i.to_s : number.to_s
+      rescue ArgumentError, TypeError
+        value.to_s
+      end
+
+      def chart_screenings(observations)
+        fhir_list(observations).filter_map { |resource| screening_from_fhir(resource) }
+      end
+
+      def screening_from_fhir(resource)
+        return unless observation_category(resource) == "survey"
+
+        instrument = screening_instrument_for(resource)
+        total = screening_total(resource)
+        effective_at = parse_fhir_time(fhir_field(resource, "effectiveDateTime"))
+        return if instrument.nil? || total.nil? || effective_at.nil?
+
+        ChartScreening.new(
+          effective_at: effective_at,
+          instrument: instrument,
+          total_score: total,
+          severity_band: instrument.band_label_for(total).to_s
+        )
+      end
+
+      def screening_instrument_for(resource)
+        code = fhir_coding_code(fhir_field(resource, "code"))
+        ScreeningInstrument::ALL.find { |instrument| instrument.total_score_code == code }
+      end
+
+      def screening_total(resource)
+        value = fhir_field(fhir_field(resource, "valueQuantity"), "value")
+        number = Float(value)
+        (number % 1).zero? ? number.to_i : number
+      rescue ArgumentError, TypeError
+        nil
+      end
+
+      def observation_category(resource)
+        fhir_coding_code(fhir_first(fhir_field(resource, "category")))
+      end
+
+      def codeable_text(codeable)
+        text = fhir_field(codeable, "text")
+        return text if text.present?
+
+        fhir_field(fhir_first(fhir_field(codeable, "coding")), "display")
+      end
+
+      def fhir_coding_code(codeable)
+        fhir_field(fhir_first(fhir_field(codeable, "coding")), "code")
+      end
+
+      def fhir_first(value)
+        value.is_a?(Array) ? value.first : value
+      end
+
+      def fhir_list(value)
+        case value
+        when nil then []
+        when Array then value
+        else [ value ]
+        end
+      end
+
+      def fhir_field(object, key)
+        return unless object.is_a?(Hash)
+        return object[key.to_s] if object.key?(key.to_s)
+
+        object[key.to_sym] if object.key?(key.to_sym)
+      end
+
+      def parse_fhir_time(value)
+        return if value.blank?
+        return value if value.respond_to?(:strftime)
+
+        text = value.to_s
+        text.include?("T") ? Time.iso8601(text) : Date.iso8601(text).to_time
+      rescue ArgumentError, TypeError
+        nil
       end
 
       # Absolute fullUrl for a resource. Resources whose serializer emits an id

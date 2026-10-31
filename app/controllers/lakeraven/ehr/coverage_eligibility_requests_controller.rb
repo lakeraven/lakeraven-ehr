@@ -25,7 +25,7 @@ module Lakeraven
         end
 
         result = EligibilityCheck.call(request)
-        render_fhir(result.to_fhir)
+        render_fhir_egress(result.to_fhir)
       end
 
       private

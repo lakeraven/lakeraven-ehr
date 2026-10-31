@@ -5,11 +5,24 @@ module Lakeraven
     class ApplicationController < ActionController::API
       include SmartAuthentication
       include AuditableClinicalAccess
+      include FHIRReadEgress
+      include FHIRSearchBundle
+      include FeatureUnavailableRendering
 
       FHIR_CONTENT_TYPE = "application/fhir+json"
 
       before_action :authenticate_smart_token!
       before_action :authorize_fhir_scope!
+      # A withheld endpoint reports itself unavailable (#647) before any
+      # request parameter is judged, so a malformed one cannot turn
+      # not-supported into a 400. After the token checks, so an
+      # unauthenticated or out-of-scope caller learns nothing from it.
+      before_action :ensure_backend_supports_interaction!
+      # Every index here is a FHIR search. Its result parameters are checked
+      # after the token, so an unauthenticated or out-of-scope caller learns
+      # nothing from a 400.
+      before_action :validate_fhir_paging!, if: :fhir_search?
+      before_action :validate_fhir_sort_and_include!, if: :fhir_search?
 
       # Actions that DISCLOSE clinical data even though they are shaped as
       # writes — generating a C-CDA, running a bulk export, requesting an
@@ -77,6 +90,37 @@ module Lakeraven
         render_forbidden("Insufficient scope for writing #{fhir_resource_type}")
       end
 
+      # A configured supplemental provider that fails makes the chart INCOMPLETE,
+      # so the read fails rather than returning a partial list that reads as a
+      # whole one. The diagnostics are deliberately generic: the exception
+      # message and the DFN stay in the server log, because this response field
+      # is caller-visible and the same reasoning as the audit note below applies
+      # -- a rescued message is free text that can carry PHI.
+      # An API request carries a token, not a signed-in user's RPMS connection,
+      # and this process holds no shared one (ADR 0011). Until a deployment
+      # gives backend clients a named service account (ADR 0011 §6), a request
+      # that reaches for RPMS is refused, never served on another user's
+      # connection.
+      rescue_from RpmsRpc::NotConfiguredError do
+        Rails.logger.warn("[rpms] API request with no RPMS identity: #{controller_path}##{action_name}")
+        render_operation_outcome(
+          status: :service_unavailable,
+          severity: "error",
+          code: "transient",
+          diagnostics: "This request has no RPMS connection of its own."
+        )
+      end
+
+      rescue_from Lakeraven::EHR::SupplementalProviderError do |error|
+        Rails.logger.error("supplemental clinical provider failed: #{error.message}")
+        render_operation_outcome(
+          status: :internal_server_error,
+          severity: "error",
+          code: "exception",
+          diagnostics: "A configured supplemental clinical data provider failed."
+        )
+      end
+
       def render_operation_outcome(status:, severity:, code:, diagnostics: nil)
         outcome = {
           resourceType: "OperationOutcome",
@@ -106,13 +150,7 @@ module Lakeraven
       end
 
       def render_bundle(entries, type: "searchset")
-        bundle = {
-          resourceType: "Bundle",
-          type: type,
-          total: entries.length,
-          entry: entries.map { |e| { resource: e } }
-        }
-        render json: bundle, status: :ok, content_type: FHIR_CONTENT_TYPE
+        render json: fhir_search_bundle(entries, type: type), status: :ok, content_type: FHIR_CONTENT_TYPE
       end
     end
   end

@@ -8,51 +8,69 @@ Feature: US Core Patient API
 
   Background:
     Given the system is configured for FHIR API access
-    And I have a valid SMART token with scope "patient/Patient.read"
+    # POPULATION services (the (g)(10)(i) criterion this feature cites covers
+    # "patient and population services"). These scenarios search across
+    # patients by _id, name, gender and identifier, naming no patient
+    # compartment. A patient/ scope is patient-CONTEXT-bound and cannot issue a
+    # cross-patient search -- PatientCompartment refuses it, correctly. The
+    # scope was wrong here, not the refusal.
+    And I have a valid SMART token with scope "user/Patient.read"
 
   Scenario: Search by _id returns patient with US Core profile in meta
-    When I request GET "/fhir/Patient?_id=1" with the Bearer token
+    When I request GET "/fhir/Patient?_id=4" with the Bearer token
     Then the response status should be 200
     And the response should be a FHIR Bundle
     And the Bundle should contain at least 1 entries
     And the first patient entry should include US Core Patient profile in meta
 
   Scenario: Search by name returns matching patients in Bundle
-    When I request GET "/fhir/Patient?name=Anderson" with the Bearer token
+    When I request GET "/fhir/Patient?name=DEMO" with the Bearer token
     Then the response status should be 200
     And the response should be a FHIR Bundle
     And each entry should have resourceType "Patient"
 
   Scenario: Search by name and birthdate combination works
-    When I request GET "/fhir/Patient?name=Anderson&birthdate=1980-05-15" with the Bearer token
+    When I request GET "/fhir/Patient?name=DEMO&birthdate=2001-01-01" with the Bearer token
     Then the response status should be 200
     And the response should be a FHIR Bundle
     And the Bundle should contain at least 1 entries
 
   Scenario: Search by name and gender combination works
-    When I request GET "/fhir/Patient?name=Anderson&gender=female" with the Bearer token
+    When I request GET "/fhir/Patient?name=DEMO&gender=female" with the Bearer token
     Then the response status should be 200
     And the response should be a FHIR Bundle
     And the Bundle should contain at least 1 entries
 
   Scenario: Search by identifier with system|value format works
-    When I request GET "/fhir/Patient?identifier=http://hl7.org/fhir/sid/us-ssn|111-11-1111" with the Bearer token
+    When I request GET "/fhir/Patient?identifier=http://hl7.org/fhir/sid/us-ssn|666-01-0101" with the Bearer token
     Then the response status should be 200
     And the response should be a FHIR Bundle
     And the Bundle should contain at least 1 entries
 
+  # DEFERRED (@unsourced): the read this needs lives in rpms-rpc, not the
+    # engine, and the field numbers were only verified against the live DD on
+    # 2026-10-01. Needs a populated race value. #2 .06 is flagged HISTORICAL PURPOSES ONLY in
+    # its input transform; the USCDI source is the #2 RACE INFORMATION multiple.
+    # No new code table needed -- RACE_CODE_MAP already keys the external form.
+    # Tracked: lakeraven-ehr#564 and rpms-rpc#294.
+  @unsourced
   Scenario: Patient resource includes US Core race extension with ombCategory coding
-    When I request GET "/fhir/Patient?_id=1" with the Bearer token
+    When I request GET "/fhir/Patient?_id=4" with the Bearer token
     Then the response status should be 200
     And the first patient entry should include US Core race extension
     And the race extension should contain an ombCategory coding
 
   Scenario: Patient resource includes US Core ethnicity extension
-    When I request GET "/fhir/Patient?_id=1" with the Bearer token
+    When I request GET "/fhir/Patient?_id=4" with the Bearer token
     Then the response status should be 200
     And the first patient entry should include US Core ethnicity extension
 
   Scenario: Show returns 403 for patient outside SMART context
+    # This scenario is ABOUT patient-context enforcement, so it needs a
+    # patient-CONTEXT-bound token and overrides the population scope in the
+    # Background. With an unbound user/ token there is no context to be
+    # outside of, and the request correctly 404s instead.
+    Given I have a valid SMART token with scope "patient/Patient.read"
     When I request GET "/fhir/Patient/999999" with the Bearer token
     Then the response status should be 403
     And the response should be a FHIR OperationOutcome with code "forbidden"

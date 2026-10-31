@@ -1,5 +1,9 @@
 <% content_for :title, "Dashboard | Lakeraven EHR" %>
 
+<% if flash.now[:alert] || flash[:alert] %>
+  <p role="alert"><%= flash[:alert] %></p>
+<% end %>
+
 <div class="page-header">
   <h1>Dashboard</h1>
   <p>Care team overview and pending work</p>
@@ -14,8 +18,11 @@
     <span class="summary-count__number"><%= @my_tasks_count %></span>
     <span class="summary-count__label"><span class="sr-only">Number of </span>My Tasks</span>
   </div>
-  <div class="summary-count">
-    <span class="summary-count__number"><%= @pending_referrals_count %></span>
-    <span class="summary-count__label"><span class="sr-only">Number of </span>Pending Referrals</span>
-  </div>
+  <%# PRC referrals are IHS-only (#647). %>
+  <% if feature_available?(:prc_referrals) %>
+    <div class="summary-count">
+      <span class="summary-count__number"><%= @pending_referrals_count %></span>
+      <span class="summary-count__label"><span class="sr-only">Number of </span>Pending Referrals</span>
+    </div>
+  <% end %>
 </div>

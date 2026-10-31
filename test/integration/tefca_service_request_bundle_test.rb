@@ -7,6 +7,7 @@ class TefcaServiceRequestBundleTest < ActionDispatch::IntegrationTest
 
   setup do
     setup_smart_auth
+    seed_service_requests
   end
 
   teardown do
@@ -32,7 +33,9 @@ class TefcaServiceRequestBundleTest < ActionDispatch::IntegrationTest
   test "ServiceRequest bundle entries have resource key" do
     get "/lakeraven-ehr/ServiceRequest", params: { patient: "1" }, headers: @headers
     body = JSON.parse(response.body)
-    body["entry"]&.each do |entry|
+    entries = body["entry"]
+    assert entries.is_a?(Array) && entries.any?, "ServiceRequest bundle should include entries"
+    entries.each do |entry|
       assert entry.key?("resource"), "Each entry should have a resource key"
     end
   end
@@ -42,18 +45,27 @@ class TefcaServiceRequestBundleTest < ActionDispatch::IntegrationTest
   test "ServiceRequest entries reference the queried patient" do
     get "/lakeraven-ehr/ServiceRequest", params: { patient: "1" }, headers: @headers
     body = JSON.parse(response.body)
-    body["entry"]&.each do |entry|
-      subject_ref = entry.dig("resource", "subject", "reference")
-      next unless subject_ref
-      assert_match(/Patient\/1\z/, subject_ref,
-        "ServiceRequest should reference queried patient")
+    entries = body["entry"]
+    assert entries.is_a?(Array) && entries.any?, "ServiceRequest bundle should include entries"
+    entries.each do |entry|
+      resource = entry["resource"] || {}
+      subject_ref = resource.dig("subject", "reference")
+      if subject_ref
+        assert_match(/Patient\/1\z/, subject_ref,
+          "ServiceRequest should reference queried patient")
+      else
+        assert_includes [ 1, "1" ], resource["patient_dfn"],
+          "ServiceRequest entry must identify patient 1 via patient_dfn"
+      end
     end
   end
 
   test "ServiceRequest entries have correct resourceType" do
     get "/lakeraven-ehr/ServiceRequest", params: { patient: "1" }, headers: @headers
     body = JSON.parse(response.body)
-    body["entry"]&.each do |entry|
+    entries = body["entry"]
+    assert entries.is_a?(Array) && entries.any?, "ServiceRequest bundle should include entries"
+    entries.each do |entry|
       assert_equal "ServiceRequest", entry.dig("resource", "resourceType")
     end
   end
@@ -91,5 +103,16 @@ class TefcaServiceRequestBundleTest < ActionDispatch::IntegrationTest
   test "ServiceRequest bundle returns FHIR content type" do
     get "/lakeraven-ehr/ServiceRequest", params: { patient: "1" }, headers: @headers
     assert_equal "application/fhir+json", response.media_type
+  end
+
+  private
+
+  def seed_service_requests
+    RpmsRpc.client.seed_keyed_collection(:referral_search, "1", [
+      { ien: "1001", patient_dfn: 1, status: "active", type: "C",
+        date: Date.new(2026, 1, 15), provider: "MARTINEZ,SARAH" },
+      { ien: "1002", patient_dfn: 1, status: "completed", type: "N",
+        date: Date.new(2025, 11, 1), provider: "CHEN,JAMES" }
+    ])
   end
 end

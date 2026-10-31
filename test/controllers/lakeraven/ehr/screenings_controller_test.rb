@@ -378,6 +378,40 @@ module Lakeraven
         assert_select "table.screening-responses tfoot td", "12"
       end
 
+
+      def stub_egress_filter(implementation)
+        filter = Part2EgressFilter.singleton_class
+        original = filter.instance_method(:call)
+        filter.define_method(:call, &implementation)
+        yield
+      ensure
+        filter.define_method(:call, original)
+      end
+
+      test "the flash notice on create does not contain the score or severity band when filtered" do
+        stub_egress_filter(->(payload) {
+          if payload.is_a?(Hash)
+            payload = payload.deep_dup.deep_stringify_keys
+            if payload["resourceType"] == "Bundle"
+              payload["entry"].reject! { |e| e.dig("resource", "resourceType") == "Observation" }
+            end
+          end
+          payload
+        }) do
+          submit(answers: answers(PHQ9, [ 3, 3, 3, 3, 3, 3, 3, 3, 0 ]))
+          follow_redirect_authorized!
+        end
+
+        assert_response :ok
+        # Scoped: the whole page also carries a CSRF token, which can contain "24".
+        [ ".flash-notice", ".screening-score", "tfoot" ].each do |selector|
+          css_select(selector).each do |node|
+            assert_no_match(/\b24\b/, node.text, "#{selector} shows the withheld total")
+            assert_no_match(/severe/i, node.text, "#{selector} shows the withheld band")
+          end
+        end
+      end
+
       # -- Incomplete ----------------------------------------------------------
 
       test "an incomplete submission re-renders the form, names the items and stores nothing" do
@@ -645,10 +679,22 @@ module Lakeraven
         assert_audit_reference("QuestionnaireResponse/100")
       end
 
+      # The guard below is the point of this test: if the audit named the DFN
+      # instead of the screening, an id that happened to equal DFN_PARAM would
+      # hide it. So GUARANTEE the two differ rather than asserting and hoping —
+      # the sequence is shared across the suite and Minitest randomises order,
+      # so whether this row lands on id 1 (== DFN_PARAM) varied per seed and the
+      # guard failed the run outright roughly whenever it did. Same pinning
+      # idiom as the screening-100 reproduction above.
       test "the create audit names the screening that was created" do
+        ScreeningResponse.connection.execute(
+          "ALTER SEQUENCE lakeraven_ehr_screening_responses_id_seq RESTART WITH 500"
+        )
+
         submit
         record = ScreeningResponse.last
 
+        assert_equal 500, record.id, "the sequence pin above should decide this id"
         assert_not_equal DFN_PARAM, record.id.to_s,
                          "guard: with id == dfn this test would pass vacuously"
         assert_audit_reference("QuestionnaireResponse/#{record.id}")
@@ -766,7 +812,7 @@ module Lakeraven
         submit(submission_token: SecureRandom.uuid)
         landing_page = "#{BASE}/#{ScreeningResponse.last.id}"
         follow_redirect_authorized! # consume this submission's own notice
-        assert_match(/recorded — score 8/i, response.body, "guard: show renders the flash")
+        assert_select ".flash-notice", text: /recorded/i # guard: show renders the flash (I1: it carries no score)
 
         with_broken_audit do
           submit(answers: answers(PHQ9, [ 3, 3, 3, 3, 3, 3, 3, 3, 0 ]),

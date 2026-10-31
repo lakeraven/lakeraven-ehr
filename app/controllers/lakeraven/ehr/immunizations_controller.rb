@@ -9,7 +9,7 @@ module Lakeraven
 
       def index
         dfn = patient_compartment_dfn
-        render_bundle(Immunization.for_patient(dfn).map(&:to_fhir))
+        render_bundle_egress(Immunization.for_patient(dfn).map(&:to_fhir))
       end
     end
   end

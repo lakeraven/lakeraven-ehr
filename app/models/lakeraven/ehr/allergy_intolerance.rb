@@ -16,6 +16,9 @@ module Lakeraven
       attribute :category, :string
       attribute :criticality, :string
 
+      RXNORM_SYSTEM = "http://www.nlm.nih.gov/research/umls/rxnorm"
+      VALID_CRITICALITIES = %w[low high unable-to-assess].freeze
+
       # -- Gateway DI -----------------------------------------------------------
 
       class << self
@@ -33,6 +36,15 @@ module Lakeraven
       def active? = clinical_status == "active"
       def medication? = category == "medication"
       def food? = category == "food"
+
+      # A coded allergy with no text still has to show something. The chart
+      # strip and the banner share AllergyListStatus's label so a blank
+      # allergen does not render as an empty span.
+      def display_allergen
+        AllergyListStatus.visible_allergen_name(
+          { text: allergen, coding: [ { code: allergen_code } ] }
+        )
+      end
 
       # Matching key for clinical reconciliation (ONC § 170.315(b)(2))
       def matching_key
@@ -53,7 +65,11 @@ module Lakeraven
           resourceType: "AllergyIntolerance",
           id: ien&.to_s,
           clinicalStatus: { coding: [ { system: CLINICAL_STATUS_SYSTEM, code: clinical_status } ] },
-          code: { text: allergen },
+          # A coded allergen carries its coding; the mapped RPC surface returns
+          # text only, so the coding is present exactly when something upstream
+          # could supply one.
+          code: { coding: allergen_coding, text: allergen }.compact,
+          criticality: fhir_criticality,
           patient: { reference: "Patient/#{patient_dfn}" },
           # FHIR JSON forbids empty arrays — omit reaction entirely when absent.
           reaction: reaction ? [ { manifestation: [ { text: reaction } ], severity: fhir_reaction_severity }.compact ] : nil
@@ -61,6 +77,25 @@ module Lakeraven
       end
 
       private
+
+      # Required binding: an RxCUI is a numeric concept id. Emitting any
+      # non-blank string under the RxNorm system publishes a coding that is not
+      # an RxNorm code -- "not-rxnorm", or a whitespace-padded value a consumer
+      # cannot look up -- and a wrong coding is worse than an absent one,
+      # because a consumer trusts the system URI. Anything that is not an RxCUI
+      # is dropped and the allergen survives as text.
+      def allergen_coding
+        rxcui = allergen_code.to_s.strip
+        return nil unless rxcui.match?(/\A\d+\z/)
+
+        [ { system: RXNORM_SYSTEM, code: rxcui, display: allergen }.compact ]
+      end
+
+      # Required binding: omit anything that is not a legal criticality code.
+      def fhir_criticality
+        normalized = criticality.to_s.strip.downcase
+        VALID_CRITICALITIES.include?(normalized) ? normalized : nil
+      end
 
       # Required binding: emit severity only when it normalizes to a legal code.
       def fhir_reaction_severity

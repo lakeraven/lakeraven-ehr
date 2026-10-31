@@ -14,23 +14,23 @@ module Lakeraven
       end
 
       def can?(permission)
-        RpmsRpc::Capabilities.can?(self, permission)
+        Roles.can?(self, permission)
       end
 
       def can_approve_chs?
-        RpmsRpc::Capabilities.can_approve_chs?(self)
+        Roles.can_approve_chs?(self)
       end
 
       def can_process_chs?
-        RpmsRpc::Capabilities.can_process_chs?(self)
+        Roles.can_process_chs?(self)
       end
 
       def can_manage_consults?
-        RpmsRpc::Capabilities.can_manage_consults?(self)
+        Roles.can_manage_consults?(self)
       end
 
       def capabilities
-        RpmsRpc::Capabilities.capabilities_for(self)
+        Roles.capabilities_for(self)
       end
 
       def provider? = @user_type == "provider"
@@ -38,7 +38,7 @@ module Lakeraven
       def clerk? = @user_type == "clerk"
 
       def case_manager?
-        @user_type == "case_manager" || RpmsRpc::Capabilities.has_key?(self, :prc_manager)
+        @user_type == "case_manager" || Roles.has_key?(self, :referrals_manager)
       end
     end
   end

@@ -42,9 +42,10 @@ module Lakeraven
       #                                   patient gateway returns nil
       #                                   (chart still renders)
       #   - vitals/problems/allergies   — default to [] if the gateway returns nil
-      #   - reminders                   — soft-fail; default to []. The
-      #                                   underlying RPC primitive may not have
-      #                                   shipped yet (see RemindersGateway).
+      #   - reminders                   — the reminder engine's evaluation
+      #                                   for the encounter's location (RPMS
+      #                                   keys reminders by location, not visit;
+      #                                   see RemindersGateway). Default [].
       #                                   The returned context includes a
       #                                   `reminders_status:` field of
       #                                   :ok | :rpc_unavailable so callers
@@ -65,7 +66,7 @@ module Lakeraven
           vitals:            @observation_gateway.for_patient(@dfn) || [],
           problems:          @condition_gateway.for_patient(@dfn) || [],
           allergies:         @allergy_gateway.for_patient(@dfn) || [],
-          reminders:         @reminders_gateway.for_visit(@dfn, @visit_ien) || [],
+          reminders:         @reminders_gateway.applicable(@dfn, encounter[:location_ien]) || [],
           reminders_status:  reminders_status
         }
 

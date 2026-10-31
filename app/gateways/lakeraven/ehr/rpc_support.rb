@@ -10,7 +10,7 @@ module Lakeraven
     # Shared helpers for the BPRM registration/scheduling/ADT twin gateways.
     #
     # Every reg/sched gateway follows the same shape: build a caret-delimited
-    # payload, call one (or a few) RPMS RPCs through RpmsRpc.client, parse the
+    # payload, call one (or a few) RPMS RPCs through the backend client, parse the
     # caret response, and return a transport-neutral result Hash carrying an
     # HTTP :status so a thin controller can render it directly.
     #
@@ -21,17 +21,18 @@ module Lakeraven
     module RpcSupport
       module_function
 
-      # The configured broker (real BmxClient/CiaClient in production, a mock
-      # or FakeBroker in tests). Kept behind a helper so gateways never reach
-      # for RpmsRpc.client directly — which is also what makes it the one
-      # place an audit can be fastened to every backend action.
+      # The configured backend's client (real BmxClient/CiaClient in
+      # production, a mock or FakeBroker in tests), from BackendRegistry.
+      # Kept behind a helper so gateways never reach for the rpms-rpc client
+      # directly — which is also what makes it the one place an audit can be
+      # fastened to every backend action.
       #
       # Wrapped fresh each call rather than memoized: tests swap the
       # configured client mid-run, and a cached wrapper would keep calling
       # the old one. `wrap` is idempotent, so an already-audited broker is
       # returned as-is and never records twice.
       def broker
-        AuditedBroker.wrap(RpmsRpc.client)
+        AuditedBroker.wrap(BackendRegistry.current.client)
       end
 
       # Run a broker interaction, translating a broker-unreachable condition

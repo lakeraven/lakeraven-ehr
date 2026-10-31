@@ -22,7 +22,7 @@ module Lakeraven
         assert_equal 45, patient.age
       end
 
-      test "find merges identifier fields from patient_id_info" do
+      test "find does not read a race code or site from ORWPT ID INFO" do
         # ORWPT ID INFO surfaces race_code and site_ien on top of
         # patient_select. Extended demographics (full race string,
         # address, phone, tribal_enrollment_number, service_area,
@@ -31,8 +31,9 @@ module Lakeraven
         # "BHDPTRPC provenance").
         patient = PatientGateway.find(1)
 
-        assert_equal "I", patient.race_code
-        assert_equal 7819, patient.site_ien
+        # ORWPT ID INFO pieces 4 and 6 are the VETERAN flag and the ward (rpms-rpc #309), not a race code and a site.
+        assert_nil patient.race_code
+        assert_nil patient.site_ien
       end
 
       test "find returns nil for invalid DFN" do

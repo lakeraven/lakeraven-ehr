@@ -11,6 +11,7 @@ module Lakeraven
 
       # Record a CPT procedure against an open encounter.
       def self.add(dfn, visit_ien, cpt_code, modifiers: [], narrative: nil, quantity: 1)
+        CapabilityGuard.ensure!(:pcc_screens)
         RpmsRpc::Procedure.add(dfn.to_s, visit_ien.to_s, cpt_code,
           modifiers: modifiers, narrative: narrative, quantity: quantity)
       end

@@ -132,13 +132,13 @@ module Lakeraven
         private
 
         def fetch_active_medications(patient_dfn)
-          MedicationRequest.for_patient(patient_dfn)
+          MedicationRequest.checked_for_patient(patient_dfn)
         rescue
           []
         end
 
         def fetch_allergies(patient_dfn)
-          AllergyIntolerance.for_patient(patient_dfn)
+          SupplementalClinicalResources.merged_allergy_intolerances_for_patient(patient_dfn)
         rescue
           []
         end

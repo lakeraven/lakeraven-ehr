@@ -244,6 +244,34 @@ module Lakeraven
         refute consent.allows?(:view_referrals)
       end
 
+      test "sud-counseling is its own consent scope" do
+        consent = Consent.new(patient_dfn: "12345", scope: "sud-counseling", status: "active")
+
+        assert consent.valid?, consent.errors.full_messages.to_sentence
+        assert_equal "Substance-use counseling notes", consent.scope_display
+        assert consent.allows?("sud-counseling")
+      end
+
+      test "full_access does not allow substance-use counseling notes" do
+        consent = Consent.new(status: "active", scope: "full_access")
+
+        refute consent.allows?("sud-counseling")
+        assert consent.allows?(:view_referrals)
+      end
+
+      test "a treatment consent does not allow substance-use counseling notes" do
+        consent = Consent.new(status: "active", scope: "treatment")
+
+        refute consent.allows?("sud-counseling")
+      end
+
+      test "sud-counseling does not grant a general permission" do
+        consent = Consent.new(status: "active", scope: "sud-counseling")
+
+        refute consent.allows?(:view_records)
+        refute consent.allows?(:full_access)
+      end
+
       # =============================================================================
       # EXPIRED
       # =============================================================================
