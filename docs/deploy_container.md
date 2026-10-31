@@ -31,6 +31,8 @@ A deployed instance therefore needs a real (non-debug) RPMS user.
 
 ## Build and run locally
 
+The example reaches a stack through an SSM port forward, so `VISTA_RPC_PORT` is the forward's local port (19200 here), not the stack's 9100.
+
 ```sh
 docker build -t lakeraven-ehr .
 docker run --rm -p 3000:3000 \

@@ -38,7 +38,6 @@ jobs:
           images: ghcr.io/lakeraven/lakeraven-ehr
           tags: |
             type=sha,prefix=sha-
-            type=ref,event=branch
             type=semver,pattern={{version}}
 
       # amd64 only: the AWS module runs it on an x86_64 box.

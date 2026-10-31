@@ -11,7 +11,7 @@
 #     -e VISTA_BROKER=cia -e VISTA_RPC_HOST=10.0.0.5 -e VISTA_RPC_PORT=9100 \
 #     lakeraven-ehr
 
-ARG RUBY_VERSION=3.4
+ARG RUBY_VERSION=4.0.2
 FROM docker.io/library/ruby:$RUBY_VERSION-slim AS base
 
 WORKDIR /rails
@@ -23,6 +23,7 @@ RUN apt-get update -qq && \
 
 ENV RAILS_ENV="production" \
     BUNDLE_DEPLOYMENT="1" \
+    BUNDLE_WITHOUT="development:test" \
     BUNDLE_PATH="/usr/local/bundle" \
     LD_PRELOAD="libjemalloc.so.2"
 
