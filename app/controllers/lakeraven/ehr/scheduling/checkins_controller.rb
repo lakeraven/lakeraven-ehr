@@ -44,9 +44,11 @@ module Lakeraven
           checkin
         end
 
+        # The visit provider is a provider: only holders of the PROVIDER key,
+        # as VueCentric's provider selection asks ORWU NEWPERS (#726).
         def providers
           text = params[:provider_search].to_s.strip
-          text.empty? ? [] : PractitionerGateway.search(text).first(15)
+          text.empty? ? [] : PractitionerGateway.search(text, key: "PROVIDER").first(15)
         end
 
         def require_booking_right!

@@ -30,7 +30,13 @@ class SchedulingCheckinAppointmentTest < ActionDispatch::IntegrationTest
         clinic_setup: ->(*) { setup },
         checkin_appointment: ->(id, **kw) { log << kw.merge(id: id); checkin.call(id, kw) }
       },
-      RpmsRpc::Practitioner.singleton_class => { search: ->(_text) { [ { ien: 206, name: "PROFILE,MD" } ] } }
+      # RPMS answers as on a stock image: PROFILE,MD holds PROVIDER, PROFILE,SCHED does not.
+      RpmsRpc::Practitioner.singleton_class => {
+        search: lambda do |_text, key: nil|
+          md = { ien: 206, name: "PROFILE,MD" }
+          key == "PROVIDER" ? [ md ] : [ md, { ien: 208, name: "PROFILE,SCHED" } ]
+        end
+      }
     }.merge(scheduling_setup_stubs)
     stubs.each { |klass, methods| methods.each_key { |m| klass.alias_method(:"__#{m}", m) } }
     stubs.each { |klass, methods| methods.each { |m, body| klass.define_method(m, &body) } }
@@ -108,6 +114,16 @@ class SchedulingCheckinAppointmentTest < ActionDispatch::IntegrationTest
     end
 
     assert_select "#checkin-form label[data-provider='206']", text: /PROFILE,MD/
+  end
+
+  test "S-SCH-03.1 the visit provider offered is a provider, not any user" do
+    sign_in
+    with_rpms do
+      get path, params: { date: today.iso8601, provider_search: "PROF" }
+    end
+
+    assert_select "#checkin-form label[data-provider='206']"
+    assert_select "#checkin-form label[data-provider='208']", count: 0
   end
 
   test "a refusal from RPMS shows its reason" do
