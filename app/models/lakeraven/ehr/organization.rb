@@ -6,6 +6,7 @@ module Lakeraven
       include ActiveModel::Model
       include ActiveModel::Attributes
       include ActiveModel::Validations
+      include FHIRSerializable
 
       # Organization type codes (aligned with FHIR organization-type ValueSet)
       TYPES = {
@@ -157,22 +158,28 @@ module Lakeraven
 
         # IEN / RPMS identifier
         if ien.present?
-          identifiers << { use: "usual", system: "http://ihs.gov/rpms/organization-id", value: ien.to_s }
+          identifiers << { use: "usual" }.merge(
+            build_identifier(system: "http://ihs.gov/rpms/organization-id", value: ien)
+          )
         end
 
         # Station number
         if station_number.present?
-          identifiers << { system: "http://hl7.org/fhir/sid/us-npi", value: station_number }
+          identifiers << build_identifier(system: "http://hl7.org/fhir/sid/us-npi", value: station_number)
         end
 
         # NPI identifier
         if npi.present?
-          identifiers << { use: "official", system: "http://hl7.org/fhir/sid/us-npi", value: npi }
+          identifiers << { use: "official" }.merge(
+            build_identifier(system: "http://hl7.org/fhir/sid/us-npi", value: npi)
+          )
         end
 
         # Tax ID identifier
         if tax_id.present?
-          identifiers << { use: "official", system: "urn:oid:2.16.840.1.113883.4.4", value: tax_id }
+          identifiers << { use: "official" }.merge(
+            build_identifier(system: "urn:oid:2.16.840.1.113883.4.4", value: tax_id)
+          )
         end
 
         identifiers
@@ -205,9 +212,7 @@ module Lakeraven
       end
 
       def build_fhir_part_of
-        return nil unless parent_organization_ien.present?
-
-        { reference: "Organization/#{parent_organization_ien}" }
+        build_reference("Organization", parent_organization_ien)
       end
 
       def self.extract_npi_from_fhir(fhir_resource)

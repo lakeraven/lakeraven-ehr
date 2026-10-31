@@ -7,6 +7,7 @@ module Lakeraven
     class Consent
       include ActiveModel::Model
       include ActiveModel::Attributes
+      include FHIRSerializable
 
       # Consent status codes
       STATUSES = {
@@ -141,7 +142,7 @@ module Lakeraven
         resource = {
           resourceType: "Consent",
           status: status,
-          patient: patient_dfn.present? ? { reference: "Patient/#{patient_dfn}" } : nil,
+          patient: patient_dfn.present? ? build_reference("Patient", patient_dfn) : nil,
           scope: build_fhir_scope,
           category: build_fhir_category,
           dateTime: date_time&.iso8601,
@@ -207,7 +208,8 @@ module Lakeraven
 
       def build_fhir_performer
         return [] unless performer_ien.present?
-        [ { reference: "Practitioner/rpms-practitioner-#{performer_ien}" } ]
+
+        [ build_reference("Practitioner", "rpms-practitioner-#{performer_ien}") ]
       end
 
       def build_fhir_provision
@@ -225,13 +227,13 @@ module Lakeraven
         if provision_actor_related_person_id.present?
           actors << {
             role: { coding: [ { code: "DPOWATT", display: "Durable Power of Attorney" } ] },
-            reference: { reference: "RelatedPerson/#{provision_actor_related_person_id}" }
+            reference: build_reference("RelatedPerson", provision_actor_related_person_id)
           }
         end
         if provision_actor_practitioner_ien.present?
           actors << {
             role: { coding: [ { code: "CST", display: "Custodian" } ] },
-            reference: { reference: "Practitioner/rpms-practitioner-#{provision_actor_practitioner_ien}" }
+            reference: build_reference("Practitioner", "rpms-practitioner-#{provision_actor_practitioner_ien}")
           }
         end
         actors
@@ -239,7 +241,12 @@ module Lakeraven
 
       def build_provision_actions
         return nil if provision_action.blank?
-        [ { coding: [ { system: "http://terminology.hl7.org/CodeSystem/consentaction", code: provision_action } ] } ]
+
+        [ build_codeable_concept(
+          system: "http://terminology.hl7.org/CodeSystem/consentaction",
+          code: provision_action,
+          display: nil
+        ) ]
       end
 
       def build_provision_period
