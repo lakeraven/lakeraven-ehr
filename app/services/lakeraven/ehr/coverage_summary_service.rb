@@ -106,9 +106,9 @@ module Lakeraven
         [ PAYER_PRIORITY[coverage.coverage_type] || 50, coverage.payor_display || "" ]
       end
 
-      # PRC is appended once, after every active payer, on a referral.
-      # An explicit ineligible answer from EligibilityService omits it.
-      # With no active coverage, PRC is the primary payer.
+      # PRC is appended once, after every active payer, only on a referral
+      # whose caller passed prc_eligible: true. Nil and false fail closed.
+      # With no active coverage, that still makes PRC the primary payer.
       def append_prc_last(hierarchy)
         return hierarchy unless prc_last_resort?
 
@@ -116,10 +116,7 @@ module Lakeraven
       end
 
       def prc_last_resort?
-        return false unless @service_request
-        return false if @patient_prc_eligible == false
-
-        true
+        @service_request.present? && @patient_prc_eligible == true
       end
 
       def determine_prc_eligibility(active = nil, exhausted = nil)

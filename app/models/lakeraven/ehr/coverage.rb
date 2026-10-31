@@ -18,20 +18,11 @@ module Lakeraven
       PRC_STATUSES = %w[exhausted not_enrolled denied pending].freeze
       VALID_STATUSES = (FHIR_STATUSES + PRC_STATUSES).freeze
 
-      ACT_CODE_SYSTEM = "http://terminology.hl7.org/CodeSystem/v3-ActCode"
       COVERAGE_CLASS_SYSTEM = "http://terminology.hl7.org/CodeSystem/coverage-class"
       MEMBER_IDENTIFIER_SYSTEM = "http://terminology.hl7.org/CodeSystem/v2-0203"
-
-      # Inverse of from_fhir: v3-ActCode policy codes that round-trip to a coverage type.
-      ACT_CODE_TO_COVERAGE_TYPE = {
-        "MEDICARE" => "medicare_a",
-        "MEDICAID" => "medicaid",
-        "HIP" => "private_insurance",
-        "VET" => "va_benefits",
-        "WCBPOL" => "workers_comp",
-        "AUTOPOL" => "auto_insurance"
-      }.freeze
-      COVERAGE_TYPE_TO_ACT_CODE = ACT_CODE_TO_COVERAGE_TYPE.invert.freeze
+      # Local codes only. Coverage.type does not claim v3-ActCode or SOPT.
+      COVERAGE_TYPE_SYSTEM = "urn:lakeraven:fhir:CodeSystem:coverage-type"
+      PRC_STATUS_EXTENSION_URL = "urn:lakeraven:fhir:StructureDefinition/prc-coverage-status"
 
       # PRC-internal statuses are not R4 fm-status codes. Mapping is serialization-only.
       PRC_STATUS_TO_FHIR = {
@@ -144,6 +135,7 @@ module Lakeraven
           resourceType: "Coverage",
           id: id,
           status: fhir_status,
+          extension: fhir_prc_status_extension,
           type: fhir_coverage_type,
           beneficiary: { reference: "Patient/#{patient_dfn}" },
           subscriberId: fhir_subscriber_id,
@@ -161,7 +153,7 @@ module Lakeraven
         new(
           id: fhir_hash[:id] || fhir_hash["id"],
           patient_dfn: extract_patient_dfn(fhir_hash),
-          status: fhir_hash[:status] || fhir_hash["status"] || "active",
+          status: extract_status(fhir_hash),
           coverage_type: extract_coverage_type(fhir_hash),
           payor_name: extract_payor_name(fhir_hash),
           **extract_period(fhir_hash),
@@ -243,25 +235,30 @@ module Lakeraven
         PRC_STATUS_TO_FHIR.fetch(status, status)
       end
 
+      # PRC-internal statuses are not R4 fm-status codes. The extension keeps the
+      # original value so from_fhir can prefer it over the mapped Coverage.status.
+      def fhir_prc_status_extension
+        return unless PRC_STATUS_TO_FHIR.key?(status)
+
+        [ { url: PRC_STATUS_EXTENSION_URL, valueCode: status } ]
+      end
+
       def fhir_subscriber_id
-        subscriber_id.presence || member_id.presence
+        subscriber_id.presence
       end
 
       def fhir_coverage_type
-        code = fhir_coverage_type_code
-        return if code.blank?
+        return if coverage_type.blank?
 
-        { coding: [ fhir_type_coding(code) ] }
+        { coding: [ local_coverage_type_coding ] }
       end
 
-      def fhir_coverage_type_code
-        COVERAGE_TYPE_TO_ACT_CODE[coverage_type] || coverage_type
-      end
-
-      def fhir_type_coding(code)
-        coding = { code: code }
-        coding[:system] = ACT_CODE_SYSTEM if ACT_CODE_TO_COVERAGE_TYPE.key?(code)
-        coding
+      def local_coverage_type_coding
+        {
+          system: COVERAGE_TYPE_SYSTEM,
+          code: coverage_type,
+          display: default_payor_type
+        }
       end
 
       def member_identifier_list
@@ -286,7 +283,7 @@ module Lakeraven
       end
 
       # R4 Coverage.class (plan).value is the plan identifier; .name is the plan name.
-      # Member id is subscriberId, never this value.
+      # Member id is the MB identifier, never this value.
       def plan_fhir_class
         value = plan_id.presence || plan_name.presence
         return unless value
@@ -323,24 +320,64 @@ module Lakeraven
         reference&.gsub("Patient/", "")
       end
 
+      def self.extract_status(fhir_hash)
+        prc_status = prc_status_extension_value(fhir_hash)
+        return prc_status if prc_status.present?
+
+        fhir_hash[:status] || fhir_hash["status"] || "active"
+      end
+
+      def self.prc_status_extension_value(fhir_hash)
+        extension = extension_entries(fhir_hash).find { |ext| extension_url(ext) == PRC_STATUS_EXTENSION_URL }
+        return unless extension
+
+        extension[:valueCode] || extension["valueCode"]
+      end
+
+      def self.extension_entries(fhir_hash)
+        raw = fhir_hash[:extension] || fhir_hash["extension"]
+        case raw
+        when Array then raw
+        when Hash then [ raw ]
+        else []
+        end
+      end
+
+      def self.extension_url(ext)
+        ext[:url] || ext["url"]
+      end
+
       def self.extract_coverage_type(fhir_hash)
-        code = codeable_concept_code(fhir_hash[:type] || fhir_hash["type"])
+        code = coverage_type_code(fhir_hash[:type] || fhir_hash["type"])
         return nil if code.blank?
 
         coverage_type_for_code(code)
       end
 
-      def self.codeable_concept_code(concept)
-        return unless concept.is_a?(Hash)
-
-        coding = Array(concept[:coding] || concept["coding"]).first
-        return unless coding.is_a?(Hash)
+      def self.coverage_type_code(concept)
+        coding = preferred_type_coding(concept)
+        return unless coding
 
         coding[:code] || coding["code"]
       end
 
+      # The local coverage-type coding is the code. A foreign coding is not claimed.
+      def self.preferred_type_coding(concept)
+        codings = concept_codings(concept)
+        codings.find { |coding| coding_system(coding) == COVERAGE_TYPE_SYSTEM } || codings.first
+      end
+
+      def self.concept_codings(concept)
+        return [] unless concept.is_a?(Hash)
+
+        Array(concept[:coding] || concept["coding"]).select { |coding| coding.is_a?(Hash) }
+      end
+
+      def self.coding_system(coding)
+        coding[:system] || coding["system"]
+      end
+
       def self.coverage_type_for_code(code)
-        return ACT_CODE_TO_COVERAGE_TYPE[code] if ACT_CODE_TO_COVERAGE_TYPE.key?(code)
         return code if COVERAGE_TYPES.include?(code)
 
         "private_insurance"
@@ -388,8 +425,19 @@ module Lakeraven
         result[:subscriber_id] = subscriber if subscriber.present?
 
         member = mb_identifier_value(fhir_hash)
-        result[:member_id] = member if member.present?
-        result[:member_id] ||= subscriber if result[:member_id].blank? && subscriber.present?
+        if member.present?
+          result[:member_id] = member
+        elsif result[:member_id].blank? && subscriber.present? && !local_coverage_type?(fhir_hash)
+          result[:member_id] = subscriber
+        end
+      end
+
+      # Resources that name the local coverage-type CodeSystem keep subscriberId
+      # and the MB identifier distinct. Older payloads without that system still
+      # carry the member number in subscriberId when no MB identifier is present.
+      def self.local_coverage_type?(fhir_hash)
+        concept = fhir_hash[:type] || fhir_hash["type"]
+        concept_codings(concept).any? { |coding| coding_system(coding) == COVERAGE_TYPE_SYSTEM }
       end
 
       def self.mb_identifier_value(fhir_hash)

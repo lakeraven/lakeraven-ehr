@@ -56,9 +56,13 @@ module Lakeraven
         end
 
         def build_coverage_summary(coverages, service_request: nil, prc_result: nil)
-          return nil if coverages.empty?
+          return nil if coverages.blank? && !prc_eligible_referral?(service_request, prc_result)
 
           coverage_summary_for(coverages, service_request, prc_result)
+        end
+
+        def prc_eligible_referral?(service_request, prc_result)
+          service_request.present? && prc_result&.eligible?
         end
 
         def coverage_summary_for(coverages, service_request, prc_result)
