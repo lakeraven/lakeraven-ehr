@@ -19,6 +19,9 @@ module Lakeraven
         "ihs_prc" => 99
       }.freeze
 
+      # Residual payer on a PRC referral. Not a Coverage record.
+      PRC_PAYER = "IHS Purchased/Referred Care"
+
       Summary = Struct.new(
         :coverages,
         :active_coverages,
@@ -34,8 +37,12 @@ module Lakeraven
         keyword_init: true
       )
 
-      def initialize(coverages)
+      # prc_eligible is EligibilityService's answer when the eligibility summary
+      # already has one. Nil means the caller did not supply that answer.
+      def initialize(coverages, service_request: nil, prc_eligible: nil)
         @coverages = Array(coverages)
+        @service_request = service_request
+        @patient_prc_eligible = prc_eligible
       end
 
       def summarize
@@ -59,7 +66,7 @@ module Lakeraven
           payer_hierarchy: hierarchy,
           primary_payer: primary,
           secondary_payers: secondary,
-          prc_eligible: prc_result[:eligible],
+          prc_eligible: summary_prc_eligible(prc_result),
           requires_coordination: active.any?,
           authorization_reason: prc_result[:reason]
         )
@@ -67,11 +74,7 @@ module Lakeraven
 
       def determine_payer_hierarchy(active_coverages = nil)
         coverages = active_coverages || @coverages.select(&:active?)
-
-        coverages
-          .sort_by { |c| [ PAYER_PRIORITY[c.coverage_type] || 50, c.payor_display || "" ] }
-          .map(&:payor_display)
-          .uniq
+        append_prc_last(ranked_payor_names(coverages))
       end
 
       def primary_payer
@@ -94,6 +97,36 @@ module Lakeraven
       end
 
       private
+
+      def ranked_payor_names(coverages)
+        coverages.sort_by { |coverage| payer_sort_key(coverage) }.map(&:payer_hierarchy_name).uniq
+      end
+
+      def payer_sort_key(coverage)
+        [ PAYER_PRIORITY[coverage.coverage_type] || 50, coverage.payer_hierarchy_name || "" ]
+      end
+
+      # On a referral, Summary#prc_eligible matches the eligibility gate:
+      # true only when the caller passed true. Without a referral, the
+      # coverage-derived answer stands.
+      def summary_prc_eligible(prc_result)
+        return @patient_prc_eligible == true if @service_request.present?
+
+        prc_result[:eligible]
+      end
+
+      # PRC is appended once, after every active payer, only on a referral
+      # whose caller passed prc_eligible: true. Nil and false fail closed.
+      # With no active coverage, that still makes PRC the primary payer.
+      def append_prc_last(hierarchy)
+        return hierarchy unless prc_last_resort?
+
+        hierarchy.reject { |payer| payer == PRC_PAYER } + [ PRC_PAYER ]
+      end
+
+      def prc_last_resort?
+        @service_request.present? && @patient_prc_eligible == true
+      end
 
       def determine_prc_eligibility(active = nil, exhausted = nil)
         active ||= @coverages.select(&:active?)

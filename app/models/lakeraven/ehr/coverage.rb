@@ -18,6 +18,29 @@ module Lakeraven
       PRC_STATUSES = %w[exhausted not_enrolled denied pending].freeze
       VALID_STATUSES = (FHIR_STATUSES + PRC_STATUSES).freeze
 
+      COVERAGE_CLASS_SYSTEM = "http://terminology.hl7.org/CodeSystem/coverage-class"
+      MEMBER_IDENTIFIER_SYSTEM = "http://terminology.hl7.org/CodeSystem/v2-0203"
+      # Local codes only. Coverage.type does not claim v3-ActCode or SOPT.
+      COVERAGE_TYPE_SYSTEM = "urn:lakeraven:fhir:CodeSystem:coverage-type"
+      PRC_STATUS_EXTENSION_URL = "urn:lakeraven:fhir:StructureDefinition/prc-coverage-status"
+      # origin/main inbound map. Applies on any coding system. Unknown codes are nil.
+      FOREIGN_COVERAGE_TYPE_CODES = {
+        "MEDICARE" => "medicare_a",
+        "MEDICAID" => "medicaid",
+        "HIP" => "private_insurance",
+        "VET" => "va_benefits",
+        "WCBPOL" => "workers_comp",
+        "AUTOPOL" => "auto_insurance"
+      }.freeze
+
+      # PRC-internal statuses are not R4 fm-status codes. Mapping is serialization-only.
+      PRC_STATUS_TO_FHIR = {
+        "exhausted" => "cancelled",
+        "not_enrolled" => "cancelled",
+        "denied" => "cancelled",
+        "pending" => "draft"
+      }.freeze
+
       attribute :id, :string
       attribute :created_at, :datetime
       attribute :patient_dfn, :string
@@ -95,6 +118,14 @@ module Lakeraven
         payor_name || default_payor_name
       end
 
+      # COB order names Medicare, Medicaid, and VA by program. A shared payor
+      # display must not collapse those programs or rank Medicaid as a private plan.
+      def payer_hierarchy_name
+        return default_payor_name if government_payer?
+
+        payor_display
+      end
+
       # Display name for the payor type (e.g., "Medicare Part A")
       def payor_type_display
         payor_type || default_payor_type
@@ -120,8 +151,12 @@ module Lakeraven
         {
           resourceType: "Coverage",
           id: id,
-          status: status,
+          status: fhir_status,
+          extension: fhir_prc_status_extension,
+          type: fhir_coverage_type,
           beneficiary: { reference: "Patient/#{patient_dfn}" },
+          subscriberId: fhir_subscriber_id,
+          identifier: member_identifier_list,
           payor: [ payor_fhir_reference ],
           period: build_period,
           class: build_class_array,
@@ -135,18 +170,24 @@ module Lakeraven
         new(
           id: fhir_hash[:id] || fhir_hash["id"],
           patient_dfn: extract_patient_dfn(fhir_hash),
-          status: fhir_hash[:status] || fhir_hash["status"] || "active",
+          status: extract_status(fhir_hash),
           coverage_type: extract_coverage_type(fhir_hash),
           payor_name: extract_payor_name(fhir_hash),
+          order: extract_order(fhir_hash),
           **extract_period(fhir_hash),
-          **extract_class_info(fhir_hash)
+          **extract_class_info(fhir_hash),
+          **relationship_attributes(fhir_hash)
         )
       end
 
       def self.from_eligibility_response(response)
         return nil unless response.enrolled?
 
-        new(
+        new(eligibility_attributes(response)).tap { |coverage| assign_medicaid_payor(coverage) }
+      end
+
+      def self.eligibility_attributes(response)
+        {
           patient_dfn: response.patient_dfn,
           coverage_type: response.coverage_type,
           status: "active",
@@ -155,7 +196,11 @@ module Lakeraven
           plan_name: response.plan_name,
           member_id: response.policy_id,
           group_id: response.group_id
-        )
+        }
+      end
+
+      def self.assign_medicaid_payor(coverage)
+        coverage.payor_name = "Medicaid" if coverage.medicaid?
       end
 
       private
@@ -205,17 +250,68 @@ module Lakeraven
         p
       end
 
+      def fhir_status
+        PRC_STATUS_TO_FHIR.fetch(status, status)
+      end
+
+      # PRC-internal statuses are not R4 fm-status codes. The extension keeps the
+      # original value so from_fhir can prefer it over the mapped Coverage.status.
+      def fhir_prc_status_extension
+        return unless PRC_STATUS_TO_FHIR.key?(status)
+
+        [ { url: PRC_STATUS_EXTENSION_URL, valueCode: status } ]
+      end
+
+      def fhir_subscriber_id
+        subscriber_id.presence
+      end
+
+      def fhir_coverage_type
+        return if coverage_type.blank?
+
+        { coding: [ local_coverage_type_coding ] }
+      end
+
+      def local_coverage_type_coding
+        {
+          system: COVERAGE_TYPE_SYSTEM,
+          code: coverage_type,
+          display: default_payor_type
+        }
+      end
+
+      def member_identifier_list
+        value = member_id.presence
+        return if value.blank?
+
+        [ { type: member_identifier_type, value: value } ]
+      end
+
+      def member_identifier_type
+        { coding: [ { system: MEMBER_IDENTIFIER_SYSTEM, code: "MB" } ] }
+      end
+
       def build_class_array
-        classes = []
-        classes << { type: { coding: [ { code: "group" } ] }, value: group_id } if group_id
-        if plan_name.present? || subscriber_id.present?
-          classes << {
-            type: { coding: [ { code: "plan" } ] },
-            value: subscriber_id || plan_name,
-            name: plan_name
-          }.compact
-        end
-        classes.empty? ? nil : classes
+        [ group_fhir_class, plan_fhir_class ].compact.presence
+      end
+
+      def group_fhir_class
+        return if group_id.blank?
+
+        { type: fhir_class_type("group"), value: group_id }
+      end
+
+      # R4 Coverage.class (plan).value is the plan identifier; .name is the plan name.
+      # Member id is the MB identifier, never this value.
+      def plan_fhir_class
+        value = plan_id.presence || plan_name.presence
+        return unless value
+
+        { type: fhir_class_type("plan"), value: value, name: plan_name.presence }.compact
+      end
+
+      def fhir_class_type(code)
+        { coding: [ { system: COVERAGE_CLASS_SYSTEM, code: code } ] }
       end
 
       def payor_fhir_reference
@@ -243,21 +339,93 @@ module Lakeraven
         reference&.gsub("Patient/", "")
       end
 
-      def self.extract_coverage_type(fhir_hash)
-        type = fhir_hash[:type] || fhir_hash["type"]
-        return nil unless type
-        coding = type[:coding]&.first || type["coding"]&.first
-        code = coding&.dig(:code) || coding&.dig("code")
+      def self.extract_status(fhir_hash)
+        prc_status = prc_status_extension_value(fhir_hash)
+        return prc_status if prc_status.present?
 
-        case code
-        when "MEDICARE" then "medicare_a"
-        when "MEDICAID" then "medicaid"
-        when "HIP" then "private_insurance"
-        when "VET" then "va_benefits"
-        when "WCBPOL" then "workers_comp"
-        when "AUTOPOL" then "auto_insurance"
-        else "private_insurance"
+        fhir_hash[:status] || fhir_hash["status"] || "active"
+      end
+
+      def self.prc_status_extension_value(fhir_hash)
+        extension = extension_entries(fhir_hash).find { |ext| extension_url(ext) == PRC_STATUS_EXTENSION_URL }
+        return unless extension
+
+        extension[:valueCode] || extension["valueCode"]
+      end
+
+      def self.extension_entries(fhir_hash)
+        raw = fhir_hash[:extension] || fhir_hash["extension"]
+        case raw
+        when Array then raw
+        when Hash then [ raw ]
+        else []
         end
+      end
+
+      def self.extension_url(ext)
+        ext[:url] || ext["url"]
+      end
+
+      def self.extract_coverage_type(fhir_hash)
+        code = coverage_type_code(fhir_hash[:type] || fhir_hash["type"])
+        return nil if code.blank?
+
+        coverage_type_for_code(code)
+      end
+
+      def self.coverage_type_code(concept)
+        coding = preferred_type_coding(concept)
+        return unless coding
+
+        coding[:code] || coding["code"]
+      end
+
+      # Prefer a local coverage-type coding. Otherwise the first coding is mapped.
+      def self.preferred_type_coding(concept)
+        codings = concept_codings(concept)
+        codings.find { |coding| coding_system(coding) == COVERAGE_TYPE_SYSTEM } || codings.first
+      end
+
+      def self.concept_codings(concept)
+        return [] unless concept.is_a?(Hash)
+
+        Array(concept[:coding] || concept["coding"]).select { |coding| coding.is_a?(Hash) }
+      end
+
+      def self.coding_system(coding)
+        coding[:system] || coding["system"]
+      end
+
+      # Local codes map exactly. Foreign codes keep origin/main's map.
+      # Anything else is nil so the record fails closed instead of becoming private insurance.
+      def self.coverage_type_for_code(code)
+        return code if COVERAGE_TYPES.include?(code)
+
+        FOREIGN_COVERAGE_TYPE_CODES[code]
+      end
+
+      def self.extract_order(fhir_hash)
+        return fhir_hash[:order] if fhir_hash.key?(:order)
+        return fhir_hash["order"] if fhir_hash.key?("order")
+
+        nil
+      end
+
+      def self.relationship_attributes(fhir_hash)
+        code = relationship_code(fhir_hash)
+        return {} if code.blank?
+
+        { relationship: code }
+      end
+
+      def self.relationship_code(fhir_hash)
+        relationship = fhir_hash[:relationship] || fhir_hash["relationship"]
+        return if relationship.blank?
+
+        coding = concept_codings(relationship).first
+        return unless coding
+
+        coding[:code] || coding["code"]
       end
 
       def self.extract_payor_name(fhir_hash)
@@ -276,24 +444,77 @@ module Lakeraven
       end
 
       def self.extract_class_info(fhir_hash)
-        classes = fhir_hash[:class] || fhir_hash["class"]
-        return {} unless classes
-
         result = {}
-        classes.each do |cls|
-          type_coding = cls[:type]&.dig(:coding, 0) || cls["type"]&.dig("coding", 0)
-          code = type_coding&.dig(:code) || type_coding&.dig("code")
-
-          case code
-          when "group"
-            result[:group_id] = cls[:value] || cls["value"]
-          when "plan"
-            result[:plan_name] = cls[:name] || cls["name"]
-          when "rxid"
-            result[:member_id] = cls[:value] || cls["value"]
-          end
-        end
+        Array(fhir_hash[:class] || fhir_hash["class"]).each { |cls| assign_class_field(result, cls) }
+        assign_member_id(result, fhir_hash)
         result
+      end
+
+      def self.assign_class_field(result, cls)
+        value = cls[:value] || cls["value"]
+        case fhir_class_code(cls)
+        when "group" then result[:group_id] = value
+        when "plan" then assign_plan_class(result, cls, value)
+        when "rxid" then result[:member_id] = value
+        end
+      end
+
+      def self.assign_plan_class(result, cls, value)
+        name = cls[:name] || cls["name"]
+        result[:plan_name] = name if name.present?
+        result[:plan_id] = value if value.present?
+      end
+
+      def self.assign_member_id(result, fhir_hash)
+        subscriber = fhir_hash[:subscriberId] || fhir_hash["subscriberId"]
+        member = mb_identifier_value(fhir_hash)
+        if member.present?
+          assign_distinct_identifiers(result, subscriber, member)
+        elsif copy_subscriber_to_member?(result, fhir_hash, subscriber)
+          result[:member_id] = subscriber
+        elsif subscriber.present?
+          result[:subscriber_id] = subscriber
+        end
+      end
+
+      def self.assign_distinct_identifiers(result, subscriber, member)
+        result[:subscriber_id] = subscriber if subscriber.present?
+        result[:member_id] = member
+      end
+
+      # External payloads with no MB identifier copy subscriberId onto member_id
+      # only when relationship is missing or self. Dependents keep subscriberId
+      # on subscriber_id. Local coverage-type payloads never use that copy.
+      def self.copy_subscriber_to_member?(result, fhir_hash, subscriber)
+        subscriber.present? && result[:member_id].blank? &&
+          !local_coverage_type?(fhir_hash) && beneficiary_is_subscriber?(fhir_hash)
+      end
+
+      def self.beneficiary_is_subscriber?(fhir_hash)
+        code = relationship_code(fhir_hash)
+        code.blank? || code == "self"
+      end
+
+      def self.local_coverage_type?(fhir_hash)
+        concept = fhir_hash[:type] || fhir_hash["type"]
+        concept_codings(concept).any? { |coding| coding_system(coding) == COVERAGE_TYPE_SYSTEM }
+      end
+
+      def self.mb_identifier_value(fhir_hash)
+        identifiers = Array(fhir_hash[:identifier] || fhir_hash["identifier"])
+        entry = identifiers.find { |item| mb_identifier?(item) }
+        return unless entry
+
+        entry[:value] || entry["value"]
+      end
+
+      def self.mb_identifier?(entry)
+        entry.is_a?(Hash) && fhir_class_code(entry) == "MB"
+      end
+
+      def self.fhir_class_code(cls)
+        coding = cls[:type]&.dig(:coding, 0) || cls["type"]&.dig("coding", 0)
+        coding&.dig(:code) || coding&.dig("code")
       end
 
       def self.parse_date(value)

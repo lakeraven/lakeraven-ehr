@@ -28,16 +28,17 @@ module Lakeraven
 
       INVALID_KEYWORDS = [ "patient prefers", "patient wants", "patient requests" ].freeze
 
-      def self.check(service_request)
-        AlternateResourceResult.new(service_request)
+      def self.check(service_request, coverages: [])
+        AlternateResourceResult.new(service_request, coverages: coverages)
       end
     end
 
     class AlternateResourceResult
-      attr_reader :service_request, :justification_keywords, :denial_reasons
+      attr_reader :service_request, :justification_keywords, :denial_reasons, :coverages
 
-      def initialize(service_request)
+      def initialize(service_request, coverages: [])
         @service_request = service_request
+        @coverages = Array(coverages).dup
         @justification_keywords = []
         @denial_reasons = []
         analyze_justification
