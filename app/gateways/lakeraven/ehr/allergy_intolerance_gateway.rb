@@ -70,7 +70,7 @@ module Lakeraven
         clear_mark
         return unless mark && mark[:rows].equal?(rows)
 
-        { assessed: mark[:assessed], nka: mark[:nka] }
+        { assessed: mark[:assessed], nka: mark[:nka], conflict: mark[:conflict] }
       end
 
       def self.remember_assessment(result)
@@ -80,6 +80,8 @@ module Lakeraven
         capture[:mark] = {
           assessed: result[:assessed] == true,
           nka: result[:nka] == true,
+          # A marker beside rows, or twice: a corrupted reply (rpms-rpc#483).
+          conflict: result[:conflict] == true,
           rows: result[:allergies]
         }
       end
