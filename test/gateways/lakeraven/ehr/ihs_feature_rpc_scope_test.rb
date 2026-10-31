@@ -20,8 +20,7 @@ module Lakeraven
           "TribalEnrollmentGateway.eligibility" => "DDR GETS ENTRY DATA"
         },
         bprm_registration: {
-          "RegistrationGateway.register" => "AGG ADD NEW PATIENT",
-          "RegistrationGateway.update" => "AGG UPDATE PATIENT"
+          "PatientRegistrationGateway.register" => "AGG ADD NEW PATIENT"
         },
         bprm_scheduling: {
           "AppointmentBookingGateway.book" => "BSDX ADD NEW APPOINTMENT",
@@ -52,9 +51,9 @@ module Lakeraven
         assert_equal "ORWPT APPTLST", STOCK_VISTA_GATEWAY_RPCS.fetch("EncounterGateway.for_patient")
       end
 
-      test "RegistrationGateway register/update target AGG while PatientGateway stays on ORWPT" do
+      test "registration targets AGG while PatientGateway stays on ORWPT" do
         reg = GATED_METHOD_IHS_RPC.fetch(:bprm_registration)
-        assert reg.fetch("RegistrationGateway.register").start_with?("AGG")
+        assert reg.fetch("PatientRegistrationGateway.register").start_with?("AGG")
         assert STOCK_VISTA_GATEWAY_RPCS.fetch("PatientGateway.find").start_with?("ORWPT")
       end
     end

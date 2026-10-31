@@ -80,14 +80,6 @@ module Lakeraven
         gw.define_singleton_method(:enrollment_details, original)
       end
 
-      test "bprm_registration: RegistrationGateway.register raises without a broker call" do
-        fake = FakeBroker.new.on(RegistrationGateway::REGISTER_RPC, "1^99^")
-        with_restricted_backend(client: fake) do
-          assert_feature_unavailable(:bprm_registration) { RegistrationGateway.register(name: "SYNTH,TEST") }
-        end
-        assert_empty fake.calls
-      end
-
       test "bprm_registration does not gate PatientGateway.find (stock ORWPT patient read)" do
         with_restricted_backend do
           patient = PatientGateway.find(1)
@@ -132,27 +124,13 @@ module Lakeraven
                                .bind_call(ImmunizationGateway, 1)
           },
           track_rpc: true
-        },
-        "RegistrationGateway.register via method().call" => {
-          capability: :bprm_registration,
-          invoke: -> { RegistrationGateway.method(:register).call(name: "SYNTH,TEST") },
-          track_rpc: false
-        },
-        "RegistrationGateway.register via instance_method#bind_call" => {
-          capability: :bprm_registration,
-          invoke: lambda {
-            RegistrationGateway.singleton_class
-                                .instance_method(:register)
-                                .bind_call(RegistrationGateway, name: "SYNTH,TEST")
-          },
-          track_rpc: false
         }
       }.freeze
 
       GUARD_BYPASS_CASES.each do |label, config|
         test "guard bypass: #{label} raises FeatureUnavailable with no backend call" do
           before_rpc = RpmsRpc.client.received_calls.length
-          fake = FakeBroker.new.on(RegistrationGateway::REGISTER_RPC, "1^99^")
+          fake = FakeBroker.new
           with_restricted_backend(client: fake) do
             assert_feature_unavailable(config.fetch(:capability)) { config.fetch(:invoke).call }
           end
@@ -161,36 +139,19 @@ module Lakeraven
         end
       end
 
-      %i[for_patient register].each do |method_name|
-        gateway = method_name == :for_patient ? ImmunizationGateway : RegistrationGateway
-        capability = method_name == :for_patient ? :ihs_immunization : :bprm_registration
+      test "guard bypass: restored ImmunizationGateway.for_patient works on rpms and stays guarded when restricted" do
+        eigen = ImmunizationGateway.singleton_class
+        eigen.alias_method :__ihs_feature_stub_for_patient, :for_patient
+        eigen.define_method(:for_patient) { |*_args, **_kwargs| :stubbed }
+        eigen.remove_method(:for_patient)
+        eigen.alias_method :for_patient, :__ihs_feature_stub_for_patient
+        eigen.remove_method(:__ihs_feature_stub_for_patient)
 
-        test "guard bypass: restored #{gateway.name}.#{method_name} works on rpms and stays guarded when restricted" do
-          stub_name = :"__ihs_feature_stub_#{method_name}"
-          eigen = gateway.singleton_class
-          eigen.alias_method stub_name, method_name
-          eigen.define_method(method_name) { |*_args, **_kwargs| :stubbed }
-          eigen.remove_method(method_name)
-          eigen.alias_method method_name, stub_name
-          eigen.remove_method(stub_name)
+        assert_equal :rpms, Lakeraven::EHR.configuration.backend
+        assert_kind_of Array, ImmunizationGateway.for_patient(1)
 
-          assert_equal :rpms, Lakeraven::EHR.configuration.backend
-          if method_name == :for_patient
-            assert_kind_of Array, gateway.for_patient(1)
-          else
-            fake = FakeBroker.new.on(RegistrationGateway::REGISTER_RPC, "1^12345^")
-            use_broker(fake) { assert gateway.register(name: "SYNTH,TEST")[:success] }
-          end
-
-          with_restricted_backend do
-            assert_feature_unavailable(capability) do
-              if method_name == :register
-                gateway.register(name: "SYNTH,TEST")
-              else
-                gateway.for_patient(1)
-              end
-            end
-          end
+        with_restricted_backend do
+          assert_feature_unavailable(:ihs_immunization) { ImmunizationGateway.for_patient(1) }
         end
       end
 

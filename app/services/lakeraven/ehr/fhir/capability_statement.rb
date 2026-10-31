@@ -49,7 +49,7 @@ module Lakeraven
         # integrators were told in prose which resources are live and which
         # are not, and this is where a client can read it.
         RESOURCES = {
-          "Patient" => { interactions: %w[read search-type create], source: "RPMS, through rpms-rpc." },
+          "Patient" => { interactions: %w[read search-type], source: "RPMS, through rpms-rpc." },
           "Practitioner" => { interactions: %w[read search-type], source: "RPMS, through rpms-rpc." },
           "Organization" => { interactions: %w[read], source: "RPMS, through rpms-rpc." },
           "Location" => { interactions: %w[read], source: "RPMS, through rpms-rpc." },

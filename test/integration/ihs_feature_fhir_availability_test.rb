@@ -204,17 +204,6 @@ class IhsFeatureFhirAvailabilityTest < ActionDispatch::IntegrationTest
     end
   end
 
-  test "POST Patient returns not-supported without bprm_registration and makes no broker call" do
-    fake = FakeBroker.new.on(Lakeraven::EHR::RegistrationGateway::REGISTER_RPC, "1^12345^")
-    with_restricted_backend(client: fake) do
-      post "/lakeraven-ehr/Patient",
-        params: registration_patient_json,
-        headers: fhir_write_headers
-      assert_fhir_feature_unavailable(response, capability: :bprm_registration)
-      assert_empty fake.calls
-    end
-  end
-
   test "GET ServiceRequest as HTML returns a not available on this system page without prc_referrals" do
     with_restricted_backend do
       get "/lakeraven-ehr/ServiceRequest",

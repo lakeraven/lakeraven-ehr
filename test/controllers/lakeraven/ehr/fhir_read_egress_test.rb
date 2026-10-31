@@ -106,7 +106,6 @@ module Lakeraven
       WIRED_ACTIONS = [
         "lakeraven/ehr/patients#index",
         "lakeraven/ehr/patients#show",
-        "lakeraven/ehr/patients#create",
         "lakeraven/ehr/charts#show",
         "lakeraven/ehr/screenings#index",
         "lakeraven/ehr/screenings#show",
@@ -439,7 +438,6 @@ module Lakeraven
         { path: "/lakeraven-ehr/Patient", method: :get, params: { name: "Anderson" } },
         { path: "/lakeraven-ehr/Patient/1", method: :get },
         # POST /Patient requires an RPC response to register a patient, which isn't seeded data
-        { path: "/lakeraven-ehr/Patient", method: :post, params: { resourceType: "Patient", name: [ { family: "Test" } ], gender: "female", birthDate: "1985-06-15", identifier: [ { system: "http://hl7.org/fhir/sid/us-ssn", value: "111-11-1111" } ] }.to_json, content_type: "application/fhir+json", needs_registration_stub: true },
         { path: "/lakeraven-ehr/AllergyIntolerance", method: :get, params: { patient: "1" } },
         { path: "/lakeraven-ehr/Condition", method: :get, params: { patient: "1" } },
         { path: "/lakeraven-ehr/MedicationRequest", method: :get, params: { patient: "1" } },
@@ -723,11 +721,7 @@ module Lakeraven
           }
 
           if is_html
-            if endpoint[:needs_registration_stub]
-              with_registration_success(&call_proc)
-            else
-              call_proc.call
-            end
+            call_proc.call
             assert_response :success
             assert_includes response.body, "Mild", "Expected seeded data (mild) to appear before filtering"
 
@@ -736,11 +730,7 @@ module Lakeraven
               calls += 1
               { "resourceType" => "Bundle", "type" => "searchset", "entry" => [] }
             }) do
-              if endpoint[:needs_registration_stub]
-                with_registration_success(&call_proc)
-              else
-                call_proc.call
-              end
+              call_proc.call
             end
 
             assert_response :success, "Expected successful response but got #{response.status}. Body: #{response.body}"
@@ -757,11 +747,7 @@ module Lakeraven
                 marker
               end
             }) do
-              if endpoint[:needs_registration_stub]
-                with_registration_success(&call_proc)
-              else
-                call_proc.call
-              end
+              call_proc.call
             end
 
             assert_response :success, "Expected successful response but got #{response.status}. Body: #{response.body}"
@@ -788,46 +774,22 @@ module Lakeraven
 
             instance_exec(&endpoint[:setup]) if endpoint[:setup]
             path = endpoint[:dynamic_path] ? instance_exec(&endpoint[:dynamic_path]) : endpoint[:path]
-            if endpoint[:needs_registration_stub]
-              with_registration_success(&call_proc)
-            else
-              call_proc.call
-            end
+            call_proc.call
           end
 
-          if endpoint[:method] == :post && endpoint[:needs_registration_stub]
-            assert_response :created
-            assert_not_nil response.headers["Location"], "Expected Location header on refused POST representation"
+          assert_response :service_unavailable
+          if test_name == "exports file show"
+            refute_includes response.body, "resourceType"
+          else
             body = JSON.parse(response.body)
             assert_equal "OperationOutcome", body["resourceType"]
-            refute_includes response.body, "Test" # the name from the request
-            refute_includes response.body, "111-11-1111"
-          else
-            assert_response :service_unavailable
-            if test_name == "exports file show"
-              refute_includes response.body, "resourceType"
-            else
-              body = JSON.parse(response.body)
-              assert_equal "OperationOutcome", body["resourceType"]
-              refute body.key?("entry")
-              refute_includes response.body, "Anderson"
-            end
+            refute body.key?("entry")
+            refute_includes response.body, "Anderson"
           end
         end
       end
 
       private
-
-      # Minitest 6 no longer ships minitest/mock; swap the method the same way
-      # stub_egress_filter does.
-      def with_registration_success
-        gateway = RegistrationGateway.singleton_class
-        original = gateway.instance_method(:register)
-        gateway.define_method(:register) { |*, **| { success: true, dfn: 123 } }
-        yield
-      ensure
-        gateway.define_method(:register, original)
-      end
 
       # session_auth rows (screenings) authenticate through the browser session
       # their setup opens; the class's system bearer token would replace it.
