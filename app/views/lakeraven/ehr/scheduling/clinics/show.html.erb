@@ -17,6 +17,16 @@
   </div>
 <% end %>
 
+<% if flash[:alert].present? %>
+  <div
+    id="clinic-alert"
+    class="alert alert--error"
+    role="alert"
+  >
+    <p><%= flash[:alert] %></p>
+  </div>
+<% end %>
+
 <% if @booked_id.present? %>
   <div
     id="booked"
