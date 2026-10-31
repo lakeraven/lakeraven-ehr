@@ -7,6 +7,8 @@ require "test_helper"
 # tests stand in for it at the gem boundary and check what the screens do with
 # its answers, above all that the "different person" override cannot be forged.
 class RegistrationRegisterPatientTest < ActionDispatch::IntegrationTest
+  include RegistrationFormHelper
+
   ENTRY = { name: "PROBE,ALPHA", sex: "F", dob: "1990-05-01", ssn: "", tribe_ien: "611", community_ien: "16379" }.freeze
   HEADERS = {
     3 => { name: "MOUSE,MICKEY M", dob: Date.new(1910, 2, 14), sex: "M", mrn: "1001" },
@@ -56,7 +58,7 @@ class RegistrationRegisterPatientTest < ActionDispatch::IntegrationTest
   test "S-REG-02.1 a new patient is registered and shows the health record number RPMS gave" do
     sign_in("registration_menu")
     with_register(registered(990_057)) do |calls|
-      post "/lakeraven-ehr/registration/patients", params: { registration: ENTRY }
+      submit_registration(ENTRY)
 
       assert_equal 1, calls.size
       refute calls.first.key?(:allow_duplicate), "a first save never overrides"
@@ -69,7 +71,7 @@ class RegistrationRegisterPatientTest < ActionDispatch::IntegrationTest
   test "S-REG-02.2 a missing field is named and RPMS is not asked" do
     sign_in("registration_menu")
     with_register do |calls|
-      post "/lakeraven-ehr/registration/patients", params: { registration: ENTRY.merge(sex: "") }
+      submit_registration(ENTRY.merge(sex: ""))
 
       assert_response :unprocessable_content
       assert_select "#registration-errors li", text: /Sex/
@@ -80,7 +82,7 @@ class RegistrationRegisterPatientTest < ActionDispatch::IntegrationTest
   test "S-REG-02.3 possible matches are shown with their chart numbers, and nothing is filed" do
     sign_in("registration_menu")
     with_register(possible(3)) do |calls|
-      post "/lakeraven-ehr/registration/patients", params: { registration: ENTRY }
+      submit_registration(ENTRY)
 
       assert_response :conflict
       assert_select "#possible-matches tr[data-dfn='3'] td", text: "1001"
@@ -92,7 +94,7 @@ class RegistrationRegisterPatientTest < ActionDispatch::IntegrationTest
   test "confirming a different person asks again, and files with the override only for the matches reviewed" do
     sign_in("registration_menu")
     with_register(possible(3), possible(3), registered(990_057)) do |calls|
-      post "/lakeraven-ehr/registration/patients", params: { registration: ENTRY }
+      submit_registration(ENTRY)
       post "/lakeraven-ehr/registration/patients/confirm", params: { review_token: review_token, registration: ENTRY }
 
       assert_redirected_to "/lakeraven-ehr/registration/patients/990057"
@@ -103,7 +105,7 @@ class RegistrationRegisterPatientTest < ActionDispatch::IntegrationTest
   test "a match that appears after the review is shown, not overridden" do
     sign_in("registration_menu")
     with_register(possible(3), possible(3, 77)) do |calls|
-      post "/lakeraven-ehr/registration/patients", params: { registration: ENTRY }
+      submit_registration(ENTRY)
       post "/lakeraven-ehr/registration/patients/confirm", params: { review_token: review_token, registration: ENTRY }
 
       assert_response :conflict
@@ -116,7 +118,7 @@ class RegistrationRegisterPatientTest < ActionDispatch::IntegrationTest
   test "a review cannot be replayed onto other details" do
     sign_in("registration_menu")
     with_register(possible(3)) do |calls|
-      post "/lakeraven-ehr/registration/patients", params: { registration: ENTRY }
+      submit_registration(ENTRY)
       post "/lakeraven-ehr/registration/patients/confirm", params: { review_token: review_token, registration: ENTRY.merge(dob: "1985-01-01") }
 
       assert_response :unprocessable_content
@@ -127,7 +129,7 @@ class RegistrationRegisterPatientTest < ActionDispatch::IntegrationTest
   test "a review cannot be used by another user, forged, or used after it expires" do
     sign_in("registration_menu")
     with_register(possible(3)) do |calls|
-      post "/lakeraven-ehr/registration/patients", params: { registration: ENTRY }
+      submit_registration(ENTRY)
       token = review_token
 
       sign_in("registration_menu", duz: "208")
@@ -152,7 +154,7 @@ class RegistrationRegisterPatientTest < ActionDispatch::IntegrationTest
   test "a possible match RPMS cannot describe leaves no override, only a search" do
     sign_in("registration_menu")
     with_register(possible(3, 88)) do |calls|
-      post "/lakeraven-ehr/registration/patients", params: { registration: ENTRY }
+      submit_registration(ENTRY)
 
       assert_response :conflict
       assert_select "#possible-matches tr[data-dfn='3']"
@@ -166,7 +168,7 @@ class RegistrationRegisterPatientTest < ActionDispatch::IntegrationTest
   test "a review files at most once: a second confirm of it is refused before RPMS is asked" do
     sign_in("registration_menu")
     with_register(possible(3), possible(3), registered(990_057)) do |calls|
-      post "/lakeraven-ehr/registration/patients", params: { registration: ENTRY }
+      submit_registration(ENTRY)
       token = review_token
       post "/lakeraven-ehr/registration/patients/confirm", params: { review_token: token, registration: ENTRY }
       assert_redirected_to "/lakeraven-ehr/registration/patients/990057"
@@ -183,7 +185,7 @@ class RegistrationRegisterPatientTest < ActionDispatch::IntegrationTest
   test "a chart filed without its health record number opens, and says the number is missing" do
     sign_in("registration_menu")
     with_register({ success: false, error: :hrn_file_failed, dfn: 990_057, message: "" }) do
-      post "/lakeraven-ehr/registration/patients", params: { registration: ENTRY }
+      submit_registration(ENTRY)
 
       assert_redirected_to "/lakeraven-ehr/registration/patients/990057"
       follow_redirect!
@@ -194,18 +196,19 @@ class RegistrationRegisterPatientTest < ActionDispatch::IntegrationTest
   test "no answer from RPMS, or an error mid-save, is an unknown outcome with a search, not a retry" do
     sign_in("registration_menu")
     with_register(nil) do
-      post "/lakeraven-ehr/registration/patients", params: { registration: ENTRY }
+      submit_registration(ENTRY)
 
       assert_response :service_unavailable
       assert_select "#outcome-unknown", text: /do not register them again yet/
-      assert_select "#search-after-unknown[href*='q=PROBE%2CALPHA']"
+      # The search is posted with the name, never linked with it in the URL (#722).
+      assert_select "form[action='/lakeraven-ehr/registration/patients/search'][method='post'] input[name='q'][value='PROBE,ALPHA']"
       assert_select "#registration-form", count: 0
     end
 
     patient = RpmsRpc::Patient.singleton_class
     patient.alias_method(:__register, :register)
     RpmsRpc::Patient.define_singleton_method(:register) { |_attrs| raise RpmsRpc::Client::ConnectionError, "socket closed" }
-    post "/lakeraven-ehr/registration/patients", params: { registration: ENTRY }
+    submit_registration(ENTRY)
     assert_response :service_unavailable
     assert_select "#outcome-unknown"
   ensure
@@ -218,7 +221,7 @@ class RegistrationRegisterPatientTest < ActionDispatch::IntegrationTest
   test "a registration RPMS refuses shows its reason" do
     sign_in("registration_menu")
     with_register({ success: false, error: :agg_rejected, message: "AG refused: NAME is required" }) do
-      post "/lakeraven-ehr/registration/patients", params: { registration: ENTRY }
+      submit_registration(ENTRY)
 
       assert_response :unprocessable_content
       assert_select "[role='alert']", text: /AG refused: NAME is required/
@@ -231,11 +234,77 @@ class RegistrationRegisterPatientTest < ActionDispatch::IntegrationTest
     gateway.alias_method(:__find, :find)
     Lakeraven::EHR::PatientLookupGateway.define_singleton_method(:find) { |*, **| [] }
 
-    get "/lakeraven-ehr/registration/patients", params: { q: "PROBE,ALPHA", dob: "1990-05-01" }
+    post "/lakeraven-ehr/registration/patients/search", params: { q: "PROBE,ALPHA", dob: "1990-05-01" }
 
     assert_select "#register-new-patient[href*='registration%5Bname%5D=PROBE%2CALPHA']"
   ensure
     gateway.alias_method(:find, :__find)
     gateway.remove_method(:__find)
+  end
+
+  # #721: a double click, or a browser resending the form, posts the same form
+  # twice. The second is refused before RPMS is asked, so one chart is filed.
+  test "S-REG-02.1 a form submitted twice files one chart" do
+    sign_in("registration_menu")
+    with_register(registered(990_057), registered(990_058)) do |calls|
+      token = registration_form_token
+      post "/lakeraven-ehr/registration/patients", params: { submission_id: token, registration: ENTRY }
+      assert_response :redirect
+
+      post "/lakeraven-ehr/registration/patients", params: { submission_id: token, registration: ENTRY }
+      assert_response :conflict
+      assert_select "[role=alert]", text: /already submitted/
+      assert_equal 1, calls.size, "RPMS was asked once"
+    end
+  end
+
+  test "a registration that does not come from the form is refused before RPMS is asked" do
+    sign_in("registration_menu")
+    with_register(registered(990_057)) do |calls|
+      post "/lakeraven-ehr/registration/patients", params: { registration: ENTRY }
+      assert_response :unprocessable_content
+      post "/lakeraven-ehr/registration/patients", params: { submission_id: "not-a-token", registration: ENTRY }
+      assert_response :unprocessable_content
+      assert_empty calls
+    end
+  end
+
+  test "a form shown again after RPMS refused it can be submitted again" do
+    sign_in("registration_menu")
+    refused = { success: false, error: :agg_rejected, message: "Tribe is required" }
+    with_register(refused, registered(990_057)) do |calls|
+      first = registration_form_token
+      post "/lakeraven-ehr/registration/patients", params: { submission_id: first, registration: ENTRY }
+      assert_response :unprocessable_content
+      again = css_select("#registration-form input[name='submission_id']").first["value"]
+      refute_equal first, again, "the form shown again carries a new token"
+
+      post "/lakeraven-ehr/registration/patients", params: { submission_id: again, registration: ENTRY }
+      assert_response :redirect
+      assert_equal 2, calls.size
+    end
+  end
+  test "S-REG-02.6 the form offers RPMS's reasons for no SSN, and the chosen one is sent" do
+    sign_in("registration_menu")
+    with_register(registered(990_057)) do |calls|
+      get "/lakeraven-ehr/registration/patients/new"
+      offered = css_select("#registration-form select[name='registration[no_ssn_reason]'] option").map { |o| o["value"] }
+      assert_equal [ "", "R", "S", "N" ], offered
+
+      submit_registration(ENTRY.merge(no_ssn_reason: "N"))
+      assert_response :redirect
+      assert_equal "N", calls.first[:no_ssn_reason]
+    end
+  end
+
+  test "S-REG-02.8 an SSN already on another patient is refused with RPMS's reason, and nothing is filed" do
+    sign_in("registration_menu")
+    refused = { success: false, error: :agg_invalid, field: "AGGPTSSN", message: "SSN already used by another patient." }
+    with_register(refused) do
+      submit_registration(ENTRY.merge(ssn: "666010101"))
+      assert_response :unprocessable_content
+      assert_select "[role=alert]", text: /SSN already used by another patient\./
+      assert_select "#registration-form input[name='registration[ssn]'][value='666010101']"
+    end
   end
 end

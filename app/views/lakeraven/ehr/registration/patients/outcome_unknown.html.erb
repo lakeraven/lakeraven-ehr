@@ -18,7 +18,8 @@
 </div>
 
 <p class="mt-6">
-  <%= link_to "Search for #{@registration.name}",
-        registration_patients_path(q: @registration.name, dob: @registration.dob&.iso8601),
+  <%= button_to "Search for #{@registration.name}",
+        registration_search_patients_path,
+        params: { q: @registration.name, dob: @registration.dob&.iso8601 },
         id: "search-after-unknown" %>
 </p>

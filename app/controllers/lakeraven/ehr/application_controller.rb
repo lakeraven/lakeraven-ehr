@@ -96,6 +96,21 @@ module Lakeraven
       # message and the DFN stay in the server log, because this response field
       # is caller-visible and the same reasoning as the audit note below applies
       # -- a rescued message is free text that can carry PHI.
+      # An API request carries a token, not a signed-in user's RPMS connection,
+      # and this process holds no shared one (ADR 0011). Until a deployment
+      # gives backend clients a named service account (ADR 0011 §6), a request
+      # that reaches for RPMS is refused, never served on another user's
+      # connection.
+      rescue_from RpmsRpc::NotConfiguredError do
+        Rails.logger.warn("[rpms] API request with no RPMS identity: #{controller_path}##{action_name}")
+        render_operation_outcome(
+          status: :service_unavailable,
+          severity: "error",
+          code: "transient",
+          diagnostics: "This request has no RPMS connection of its own."
+        )
+      end
+
       rescue_from Lakeraven::EHR::SupplementalProviderError do |error|
         Rails.logger.error("supplemental clinical provider failed: #{error.message}")
         render_operation_outcome(

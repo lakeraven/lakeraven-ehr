@@ -1,0 +1,62 @@
+<% content_for :title, "Appointments | #{@patient[:name]} | Scheduling | Lakeraven EHR" %>
+
+<div class="page-header">
+  <h1>Appointments for <%= @patient[:name] %></h1>
+  <p>
+    Health record number <%= @patient[:mrn].presence || "not on file" %>.
+  </p>
+</div>
+
+<nav
+  id="appointment-filter"
+  class="flex gap-3"
+  aria-label="Which appointments"
+>
+  <% [ [ "All", nil ], [ "Today", "today" ], [ "Past", "past" ], [ "Future", "future" ] ].each do |label, value| %>
+    <%= link_to label,
+          scheduling_patient_appointments_path(@dfn, when: value),
+          aria: { current: (@when == value ? "page" : nil) } %>
+  <% end %>
+</nav>
+
+<% if @appointments.empty? %>
+  <p id="no-appointments">
+    No appointments.
+  </p>
+<% else %>
+  <table id="patient-appointments">
+    <thead>
+      <tr>
+        <th scope="col">When</th>
+        <th scope="col">Clinic</th>
+        <th scope="col">Type</th>
+        <th scope="col">Status</th>
+        <th scope="col">Made by</th>
+        <th scope="col">Note</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% @appointments.each do |appointment| %>
+        <tr
+          data-start="<%= appointment[:start_time]&.iso8601 %>"
+          data-status="<%= appointment[:status] %>"
+        >
+          <td><%= appointment[:start_time]&.strftime("%b %-d, %Y %H:%M") %></td>
+          <td>
+            <% if @my_resource_ids.include?(appointment[:resource_id]) && appointment[:start_time] %>
+              <%= link_to appointment[:clinic],
+                    scheduling_clinic_path(appointment[:resource_id], date: appointment[:start_time].to_date.iso8601),
+                    data: { clinic_day: true } %>
+            <% else %>
+              <%= appointment[:clinic] %>
+            <% end %>
+          </td>
+          <td><%= appointment[:type] %></td>
+          <td><%= appointment[:status] %></td>
+          <td><%= appointment[:made_by] %><%= ", #{appointment[:made_at].strftime('%b %-d, %Y')}" if appointment[:made_at] %></td>
+          <td><%= appointment[:note] %></td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+<% end %>

@@ -15,7 +15,7 @@ module Lakeraven
 
         # GET /scheduling/clinics/:resource_id/appointments/:appointment_id/checkin?date=&provider_search=
         def new
-          @checkin = build(at: Time.now.utc.strftime("%Y-%m-%dT%H:%M"))
+          @checkin = build(at: Time.now.strftime("%Y-%m-%dT%H:%M"))
           @providers = providers
         end
 
@@ -25,9 +25,13 @@ module Lakeraven
           @providers = providers
           return render(:new, status: :unprocessable_content) unless @checkin.valid?
 
-          result = AppointmentCheckinGateway.check_in(@appointment[:id], at: @checkin.time, provider_ien: @checkin.provider_ien)
+          result = AppointmentCheckinGateway.check_in(
+            @appointment[:id], at: @checkin.time, provider_ien: @checkin.provider_ien,
+            reread: -> { AppointmentBookingGateway.appointment(@resource, @appointment[:id], @date) }
+          )
           if result.checked_in?
             flash[:notice] = "Checked in #{@appointment[:patient_name]} at #{@checkin.time.strftime('%H:%M')}."
+            flash[:alert] = "RPMS filed the check-in but reported: #{result.message} Check the visit." if result.message
             redirect_to scheduling_clinic_path(@resource[:id], date: @date.iso8601)
           else
             flash.now[:alert] = result.message.presence || "RPMS did not confirm the check-in. Check the clinic's day."
@@ -44,9 +48,11 @@ module Lakeraven
           checkin
         end
 
+        # The visit provider is a provider: only holders of the PROVIDER key,
+        # as VueCentric's provider selection asks ORWU NEWPERS (#726).
         def providers
           text = params[:provider_search].to_s.strip
-          text.empty? ? [] : PractitionerGateway.search(text).first(15)
+          text.empty? ? [] : PractitionerGateway.search(text, key: "PROVIDER").first(15)
         end
 
         def require_booking_right!

@@ -8,7 +8,7 @@ require "test_helper"
 class SchedulingCancelAppointmentTest < ActionDispatch::IntegrationTest
   DAY = Date.new(2026, 10, 28)
 
-  def at(hour, min = 0) = Time.utc(DAY.year, DAY.month, DAY.day, hour, min)
+  def at(hour, min = 0) = Time.new(DAY.year, DAY.month, DAY.day, hour, min)
 
   RESOURCE = { id: 2, name: "DEMO IHS CLINIC", inactive: false, time_scale: 15, hospital_location_id: 3,
                view: true, overbook: true, modify_schedule: true, modify_appointments: true }.freeze
@@ -41,7 +41,7 @@ class SchedulingCancelAppointmentTest < ActionDispatch::IntegrationTest
         cancel_appointment: ->(id, **kw) { log << kw.merge(id: id); cancel.call(id, kw) }
       },
       RpmsRpc::DdrFileman.singleton_class => { lister: ->(**) { REASONS } }
-    }
+    }.merge(scheduling_setup_stubs)
     stubs.each { |klass, methods| methods.each_key { |m| klass.alias_method(:"__#{m}", m) } }
     stubs.each { |klass, methods| methods.each { |m, body| klass.define_method(m, &body) } }
     yield
@@ -124,7 +124,7 @@ class SchedulingCancelAppointmentTest < ActionDispatch::IntegrationTest
     end
 
     assert_select "#appointments tr[data-appointment='8'] td[data-status='cancelled']"
-    assert_select "#appointments tr[data-appointment='8'] a", count: 0
+    assert_select "#appointments tr[data-appointment='8'] a[href*='/cancel'], #appointments tr[data-appointment='8'] a[href*='/checkin']", count: 0
     assert_select "#open-times tr[data-time='09:00'] td[data-open='1']"
   end
 

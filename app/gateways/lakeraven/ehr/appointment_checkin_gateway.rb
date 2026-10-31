@@ -9,6 +9,12 @@ module Lakeraven
     # clinic and, for a clinic set to, the visit. Live on a built image it files
     # a check-in with no provider at a clinic that requires one, and a second
     # check-in of a checked-in appointment; so those are decided here.
+    #
+    # BSDX25 files the check-in (BSDXCHK) before it checks in the PIMS
+    # appointment and makes the visit (APCHK), with no rollback, so an error
+    # there comes back after the check-in is filed. When RPMS does not answer
+    # success, the appointment is read again: a check-in time means it was
+    # filed, and RPMS's message is a warning about the visit (#727).
     class AppointmentCheckinGateway
       Result = Data.define(:status, :message) do
         def checked_in? = status == :checked_in
@@ -23,16 +29,32 @@ module Lakeraven
         setup.nil? || setup[:visit_provider_required].to_s.upcase != "NO"
       end
 
-      def self.check_in(appointment_id, at:, provider_ien:, via: ::RpmsRpc::Scheduling)
+      # reread: returns the appointment as RPMS now has it.
+      def self.check_in(appointment_id, at:, provider_ien:, reread:, via: ::RpmsRpc::Scheduling)
+        result = file(appointment_id, at: at, provider_ien: provider_ien, via: via)
+        return result if result.checked_in? || !filed?(reread)
+
+        Result.new(status: :checked_in, message: result.message.presence || "RPMS did not confirm the visit.")
+      end
+
+      def self.file(appointment_id, at:, provider_ien:, via:)
         reply = via.checkin_appointment(appointment_id, checkin_time: at, provider: provider_ien)
         return Result.new(status: :unknown, message: nil) if reply.nil?
         return Result.new(status: :checked_in, message: nil) if reply[:success]
 
         Result.new(status: :refused, message: reply[:error].to_s)
-      rescue ::RpmsRpc::Client::RpcError, ::RpmsRpc::Client::ConnectionError, IOError, SystemCallError => e
+      rescue ::RpmsRpc::Error, IOError, SystemCallError => e
         Rails.logger.error("[scheduling] check-in raised #{e.class}; the outcome is unknown")
         Result.new(status: :unknown, message: nil)
       end
+      private_class_method :file
+
+      def self.filed?(reread)
+        reread.call&.dig(:checkin_time).present?
+      rescue ::RpmsRpc::Error, IOError, SystemCallError
+        false
+      end
+      private_class_method :filed?
     end
   end
 end

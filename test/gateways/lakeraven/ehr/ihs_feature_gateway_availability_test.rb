@@ -167,7 +167,7 @@ module Lakeraven
         fake.define_singleton_method(:record) { |*| called = true; { success: true } }
         with_restricted_backend do
           assert_feature_unavailable(:ihs_immunization) do
-            ImmunizationRefusalGateway.record(1, "207", reason_code: "PATOBJ", via: fake)
+            ImmunizationRefusalGateway.record(1, "207", reason_ien: "4", via: fake)
           end
         end
         refute called

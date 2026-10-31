@@ -122,7 +122,12 @@ Lakeraven::EHR::Engine.routes.draw do
   # The front desk finds a patient (rpms-ux S-REG-01) and registers a new one (S-REG-02).
   namespace :registration do
     get "patients", to: "patients#index", as: :patients
+    # A search names a patient (an SSN, a name, a date of birth), so it is posted,
+    # never carried in a URL, browser history or a log line (#722).
+    post "patients/search", to: "patients#index", as: :search_patients
     get "patients/new", to: "patients#new", as: :new_patient
+    # The tribe and community look-ups post the form back, with its demographics (#722).
+    post "patients/new", to: "patients#new"
     post "patients", to: "patients#create"
     post "patients/confirm", to: "patients#confirm", as: :confirm_patient
     get "patients/:dfn", to: "patients#show", as: :patient, constraints: { dfn: /\d+/ }
@@ -133,6 +138,8 @@ Lakeraven::EHR::Engine.routes.draw do
   namespace :scheduling do
     get "/", to: "clinics#index", as: :home
     get "clinics/:id", to: "clinics#show", as: :clinic, constraints: { id: /\d+/ }
+    get "clinics/:id/open_times", to: "open_times#index", as: :clinic_open_times, constraints: { id: /\d+/ }
+    get "patients/:dfn/appointments", to: "patient_appointments#index", as: :patient_appointments, constraints: { dfn: /\d+/ }
     get "clinics/:resource_id/appointments/new", to: "appointments#new", as: :new_clinic_appointment, constraints: { resource_id: /\d+/ }
     post "clinics/:resource_id/appointments", to: "appointments#create", as: :clinic_appointments, constraints: { resource_id: /\d+/ }
     get "clinics/:resource_id/appointments/:appointment_id/cancel", to: "cancellations#new", as: :cancel_clinic_appointment, constraints: { resource_id: /\d+/, appointment_id: /\d+/ }
