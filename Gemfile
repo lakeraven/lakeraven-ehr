@@ -7,7 +7,8 @@ gemspec
 if ENV["RPMS_RPC_PATH"]
   gem "rpms-rpc", path: ENV["RPMS_RPC_PATH"]
 else
-  # Pinned to rpms-rpc main 33f4c64: Practitioner.search can list only the holders of a key
+  # Pinned to rpms-rpc main 24aaef5: PatientSelection.find finds a patient the way VueCentric's
+  # patient selection does (rpms-rpc#550). Earlier, 33f4c64: Practitioner.search can list only the holders of a key
   # (rpms-rpc#545). Earlier, 326d167: SchedulingSetup.clinic_rules names a prohibited clinic's
   # privileged users (rpms-rpc#544). Earlier, 6723a7f: SessionPool can refuse at capacity instead of evicting, and
   # its keeper releases a dropped connection (rpms-rpc#542). Earlier, d59fe4a: RpmsRpc.with_client scopes a request to its user's
@@ -36,7 +37,7 @@ else
   # (lakeraven-ehr#540), invented RPC names removed (#310/#311), typed errors for
   # a missing RPC (#370), the user class from ORWU USERINFO (#236). A fixed ref
   # rather than branch:main so the pin does not drift mid-merge.
-  gem "rpms-rpc", github: "lakeraven/rpms-rpc", ref: "33f4c64"
+  gem "rpms-rpc", github: "lakeraven/rpms-rpc", ref: "24aaef5"
 end
 
 gem "puma"
