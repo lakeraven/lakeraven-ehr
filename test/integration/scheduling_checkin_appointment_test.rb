@@ -20,13 +20,14 @@ class SchedulingCheckinAppointmentTest < ActionDispatch::IntegrationTest
 
   def sign_in = post("/lakeraven-ehr/test_session", params: { duz: "208", user_type: "user", user_name: "PROFILE,SCHED", security_keys: "scheduling_user" })
 
-  def with_rpms(listed: [ appointment ], provider_required: "YES", checkin: ->(*) { { success: true } })
+  # after_checkin: the day as RPMS lists it once a check-in has been sent.
+  def with_rpms(listed: [ appointment ], after_checkin: listed, provider_required: "YES", checkin: ->(*) { { success: true } })
     log = (@checkins ||= [])
     setup = [ { location_ien: 3, location: "DEMO IHS CLINIC", visit_provider_required: provider_required } ]
     stubs = {
       RpmsRpc::Scheduling.singleton_class => {
         resources: ->(*) { [ RESOURCE ] },
-        appointments: ->(**) { listed },
+        appointments: ->(**) { log.empty? ? listed : after_checkin },
         clinic_setup: ->(*) { setup },
         checkin_appointment: ->(id, **kw) { log << kw.merge(id: id); checkin.call(id, kw) }
       },
@@ -134,5 +135,28 @@ class SchedulingCheckinAppointmentTest < ActionDispatch::IntegrationTest
 
     assert_response :unprocessable_content
     assert_select "[role='alert']", text: /temporary chart number/
+  end
+
+  # BSDX25 files the check-in, then makes the visit; an error trapped there
+  # answers ERROR^BSDX25's "RPMS Error" with the check-in already filed.
+  test "S-SCH-03.1 a check-in RPMS filed is reported as filed, even when the visit errored" do
+    sign_in
+    filed = appointment(checkin_time: at(0, 20))
+    with_rpms(after_checkin: [ filed ], checkin: ->(*) { { success: false, error: "RPMS Error" } }) do
+      post path, params: checkin_params
+      assert_redirected_to "/lakeraven-ehr/scheduling/clinics/2?date=#{today.iso8601}"
+    end
+
+    assert_match(/Checked in MOUSE,MICKEY M/, flash[:notice])
+    assert_match(/filed the check-in but reported: RPMS Error/, flash[:alert])
+  end
+
+  test "a check-in whose outcome is unknown is reported as filed when RPMS shows it" do
+    sign_in
+    with_rpms(after_checkin: [ appointment(checkin_time: at(0, 20)) ], checkin: ->(*) { raise IOError }) do
+      post path, params: checkin_params
+    end
+
+    assert_response :redirect
   end
 end

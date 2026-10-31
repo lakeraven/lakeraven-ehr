@@ -25,9 +25,13 @@ module Lakeraven
           @providers = providers
           return render(:new, status: :unprocessable_content) unless @checkin.valid?
 
-          result = AppointmentCheckinGateway.check_in(@appointment[:id], at: @checkin.time, provider_ien: @checkin.provider_ien)
+          result = AppointmentCheckinGateway.check_in(
+            @appointment[:id], at: @checkin.time, provider_ien: @checkin.provider_ien,
+            reread: -> { AppointmentBookingGateway.appointment(@resource, @appointment[:id], @date) }
+          )
           if result.checked_in?
             flash[:notice] = "Checked in #{@appointment[:patient_name]} at #{@checkin.time.strftime('%H:%M')}."
+            flash[:alert] = "RPMS filed the check-in but reported: #{result.message} Check the visit." if result.message
             redirect_to scheduling_clinic_path(@resource[:id], date: @date.iso8601)
           else
             flash.now[:alert] = result.message.presence || "RPMS did not confirm the check-in. Check the clinic's day."
