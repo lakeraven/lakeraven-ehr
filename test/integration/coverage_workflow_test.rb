@@ -5,8 +5,14 @@ require "test_helper"
 module Lakeraven
   module EHR
     # Issue #239 — Coverage records in PRC referral / alternate-resource workflow.
+    #
+    # Contract (panel round 1): On a PRC referral, payer order lists every active
+    # alternate resource in COB priority, then IHS Purchased/Referred Care once at
+    # the end; with no active coverage, PRC is primary. PRC appears only when
+    # EligibilityService marks the patient prc_eligible. Outside a referral context,
+    # payer summaries omit PRC.
     class CoverageWorkflowTest < ActiveSupport::TestCase
-      PRC_SECONDARY_LABEL = "IHS Purchased/Referred Care"
+      PRC_PAYER = CoverageSummaryService::PRC_PAYER
 
       setup do
         @patient = Patient.new(
@@ -43,26 +49,66 @@ module Lakeraven
         )
       end
 
-      test "referral eligibility summary lists private insurance primary and PRC secondary" do
+      test "referral eligibility summary lists private insurance primary and PRC last" do
+        result = refresh_with_coverages([ @private_coverage ])
+
+        summary = result.coverage_summary
+        assert summary, "Expected coverage summary when referral has active private insurance"
+        assert result.prc_eligible, "Expected eligible patient for PRC referral context"
+
+        assert_equal "Blue Cross", summary.primary_payer
+        assert_equal [ "Blue Cross", PRC_PAYER ], summary.payer_hierarchy
+        assert_equal 1, summary.payer_hierarchy.count(PRC_PAYER)
+      end
+
+      test "referral Medicare and Medicaid active coverages list PRC last once" do
+        coverages = [
+          Coverage.new(patient_dfn: "100", coverage_type: "medicare_a", status: "active"),
+          Coverage.new(patient_dfn: "100", coverage_type: "medicaid", status: "active")
+        ]
+
+        summary = refresh_with_coverages(coverages).coverage_summary
+
+        assert_equal [ "Medicare", "Medicaid", PRC_PAYER ], summary.payer_hierarchy
+      end
+
+      test "PRC-ineligible patient referral coverage summary omits PRC from payer order" do
+        ineligible_patient = Patient.new(
+          dfn: 100,
+          name: "DOE,JANE",
+          sex: "F",
+          tribal_enrollment_number: "INVALID",
+          service_area: "Anchorage",
+          coverage_type: "Private Insurance/IHS"
+        )
+        patient = ineligible_patient
+        @service_request.define_singleton_method(:patient) { patient }
+
+        result = PatientEligibilitySummaryService.refresh(
+          patient: ineligible_patient,
+          service_request: @service_request,
+          coverages: [ @private_coverage ]
+        )
+
+        refute result.prc_eligible
+        summary = result.coverage_summary
+        refute_includes summary.payer_hierarchy, PRC_PAYER
+        assert_equal [ "Blue Cross" ], summary.payer_hierarchy
+      end
+
+      test "refresh without service_request does not append PRC to payer hierarchy" do
         result = PatientEligibilitySummaryService.refresh(
           patient: @patient,
-          service_request: @service_request,
           coverages: [ @private_coverage ]
         )
 
         summary = result.coverage_summary
-        assert summary, "Expected coverage summary when referral has active private insurance"
-
-        assert_equal "Blue Cross", summary.primary_payer
-        assert_includes summary.secondary_payers, PRC_SECONDARY_LABEL
+        assert_equal [ "Blue Cross" ], summary.payer_hierarchy
+        refute_includes summary.payer_hierarchy, PRC_PAYER
       end
 
       test "alternate resource check is linked to the patient Coverage records used for the referral" do
-        result = PatientEligibilitySummaryService.refresh(
-          patient: @patient,
-          service_request: @service_request,
-          coverages: [ @private_coverage ]
-        )
+        result = refresh_with_coverages([ @private_coverage ])
 
         check = result.alternate_resource_check
         assert check, "Expected alternate resource check on referral workflow result"
@@ -98,7 +144,17 @@ module Lakeraven
         ).coverage_summary
 
         assert_equal "Blue Cross", summary.primary_payer
-        assert_includes summary.secondary_payers, PRC_SECONDARY_LABEL
+        assert_equal [ "Blue Cross", PRC_PAYER ], summary.payer_hierarchy
+      end
+
+      private
+
+      def refresh_with_coverages(coverages)
+        PatientEligibilitySummaryService.refresh(
+          patient: @patient,
+          service_request: @service_request,
+          coverages: coverages
+        )
       end
     end
   end

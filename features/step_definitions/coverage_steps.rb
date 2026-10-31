@@ -127,4 +127,49 @@ Then("the FHIR Coverage plan class name should be {string}") do |name|
   assert_equal name, plan_class[:name]
 end
 
+Given("the coverage group id is {string}") do |group_id|
+  @coverage.group_id = group_id
+end
+
+Given("the coverage subscriber id is {string}") do |subscriber_id|
+  @coverage.subscriber_id = subscriber_id
+end
+
+Then("each FHIR Coverage class type coding system should be {string}") do |system|
+  assert @fhir[:class].present?, "Expected Coverage.class"
+  @fhir[:class].each do |cls|
+    coding_system = cls.dig(:type, :coding, 0, :system)
+    assert_equal system, coding_system
+  end
+end
+
+Then("the FHIR Coverage member identifier type system should be {string}") do |system|
+  mb = member_identifier_entry
+  assert mb, "Expected identifier with type MB"
+  assert_equal system, mb.dig(:type, :coding, 0, :system)
+end
+
+Then("the FHIR Coverage member identifier type code should be {string}") do |code|
+  mb = member_identifier_entry
+  assert mb, "Expected identifier with type MB"
+  assert_equal code, mb.dig(:type, :coding, 0, :code)
+end
+
+Then("the FHIR Coverage member identifier value should be {string}") do |value|
+  mb = member_identifier_entry
+  assert mb, "Expected identifier with type MB"
+  assert_equal value, mb[:value]
+end
+
+Then("the coverage model status should be {string}") do |status|
+  assert_equal status, @coverage.status
+end
+
+def member_identifier_entry
+  @fhir[:identifier]&.find do |id|
+    coding = id.dig(:type, :coding, 0)
+    coding&.dig(:code) == "MB"
+  end
+end
+
 # "the FHIR period start/end should be" defined in encounter_model_steps.rb
