@@ -22,7 +22,7 @@ class SchedulingBookAppointmentTest < ActionDispatch::IntegrationTest
   end
 
   # Stands in for RpmsRpc::Scheduling and the patient selection; records bookings.
-  def with_rpms(appointments: [], book: ->(_args) { { success: true, appointment_id: 9 } })
+  def with_rpms(appointments: [], book: ->(_args) { { success: true, appointment_id: 9 } }, setup: {})
     blocks = [ { start_time: at(0, 1), end_time: at(8), slots: 0 }, { start_time: at(8), end_time: at(17), slots: 4 } ]
     log = (@booked ||= [])
     sched = RpmsRpc::Scheduling.singleton_class
@@ -38,7 +38,7 @@ class SchedulingBookAppointmentTest < ActionDispatch::IntegrationTest
         search: ->(_text) { [ { dfn: 3, name: "MOUSE,MICKEY M" } ] },
         brief_header: ->(dfn) { dfn.to_i == 3 ? { name: "MOUSE,MICKEY M", dob: Date.new(1910, 2, 14), mrn: "1001" } : nil }
       }
-    }
+    }.merge(scheduling_setup_stubs(**setup))
     stubs.each { |klass, methods| methods.each_key { |m| klass.alias_method(:"__#{m}", m) } }
     stubs.each { |klass, methods| methods.each { |m, body| klass.define_method(m, &body) } }
     yield
@@ -169,4 +169,36 @@ class SchedulingBookAppointmentTest < ActionDispatch::IntegrationTest
     assert_response :ok
     assert_select "#booking-form label[data-patient='3']", text: /MOUSE,MICKEY M,\s+HRN 1001,\s+born Feb 14, 1910/
   end
+# #729: a clinic whose HOSPITAL LOCATION prohibits access (#44 field 2500).
+def prohibited(privileged: []) = { rules: { id: 3, prohibit_access: true, privileged_users: privileged } }
+
+test "S-SCH-01.13 a clinic that prohibits access can be seen, not booked, by a user it does not name" do
+  sign_in("scheduling_user")
+  with_rpms(setup: prohibited) do
+    get "/lakeraven-ehr/scheduling/clinics/2", params: { date: "2026-10-28" }
+    assert_response :ok
+    assert_select "#open-times a", count: 0
+
+    post "/lakeraven-ehr/scheduling/clinics/2/appointments", params: book_params
+    assert_response :forbidden
+    assert_empty booked
+  end
+end
+
+test "S-SCH-01.13 a privileged user of a clinic that prohibits access books there" do
+  sign_in("scheduling_user")
+  with_rpms(setup: prohibited(privileged: [ 208 ])) do
+    post "/lakeraven-ehr/scheduling/clinics/2/appointments", params: book_params
+    assert_response :redirect
+    refute_empty booked
+  end
+end
+
+test "S-SCH-01.13 SDZSUP books on a clinic that prohibits access" do
+  sign_in("scheduling_supervisor")
+  with_rpms(setup: prohibited) do
+    post "/lakeraven-ehr/scheduling/clinics/2/appointments", params: book_params
+    assert_response :redirect
+  end
+end
 end

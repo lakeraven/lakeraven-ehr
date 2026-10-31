@@ -98,14 +98,14 @@ class SchedulingPatientAppointmentsTest < ActionDispatch::IntegrationTest
     sign_in("scheduling_user")
     day = [ { id: 7, start_time: at(TODAY, 9), end_time: at(TODAY, 9, 15), checkin_time: nil, patient_dfn: 3,
               patient_name: "MOUSE,MICKEY M", cancelled: false, no_show: false, checkout_time: nil } ]
-    sched = RpmsRpc::Scheduling.singleton_class
-    stubs = { resources: ->(*) { RESOURCES }, slot_schedule: ->(**) { [] }, appointments: ->(**) { day } }
-    stubs.each_key { |m| sched.alias_method(:"__#{m}", m) }
-    stubs.each { |m, body| sched.define_method(m, &body) }
+    stubs = { RpmsRpc::Scheduling.singleton_class => { resources: ->(*) { RESOURCES }, slot_schedule: ->(**) { [] }, appointments: ->(**) { day } } }
+      .merge(scheduling_setup_stubs)
+    stubs.each { |klass, methods| methods.each_key { |m| klass.alias_method(:"__#{m}", m) } }
+    stubs.each { |klass, methods| methods.each { |m, body| klass.define_method(m, &body) } }
     get "/lakeraven-ehr/scheduling/clinics/2", params: { date: TODAY.iso8601 }
 
     assert_select "#appointments tr[data-patient='3'] a[data-patient-appointments][href='/lakeraven-ehr/scheduling/patients/3/appointments']"
   ensure
-    stubs.each_key { |m| sched.alias_method(m, :"__#{m}"); sched.remove_method(:"__#{m}") }
+    stubs.each { |klass, methods| methods.each_key { |m| klass.alias_method(m, :"__#{m}"); klass.remove_method(:"__#{m}") } }
   end
 end

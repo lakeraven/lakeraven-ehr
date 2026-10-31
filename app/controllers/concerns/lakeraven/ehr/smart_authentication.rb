@@ -16,12 +16,6 @@ module Lakeraven
       # semantics stable.
       BROWSER_SSO_APP_NAME = "Lakeraven EHR Browser SSO"
 
-      # How long a browser session may sit idle before its token stops being
-      # accepted. The token's own 12-hour expiry is the outer bound; this is
-      # the inner one, and without it a signed-in workstation stayed signed in
-      # for half a day of inactivity.
-      SESSION_IDLE_TIMEOUT = 30.minutes
-
       # GET/HEAD/OPTIONS are reads. Defined here rather than assumed from a
       # sibling branch: #501 introduces the same constant in this same module
       # for its verb-aware authorization, and this file must be correct without
@@ -356,7 +350,10 @@ module Lakeraven
         last_seen = session[:last_seen_at]
         return false if last_seen.blank?
 
-        Time.current.to_i - last_seen.to_i > SESSION_IDLE_TIMEOUT.to_i
+        # The site's idle limit (Configuration#session_idle_limit): without it a
+        # signed-in workstation stayed signed in for half a day of inactivity.
+        # The token's own expiry (session_lifetime) is the outer bound.
+        Time.current.to_i - last_seen.to_i > Lakeraven::EHR.configuration.session_idle_limit.to_i
       end
 
       # Revoke whatever SMART token this session carries, then clear it. Every
@@ -368,10 +365,13 @@ module Lakeraven
         if raw
           token = Doorkeeper::AccessToken.by_token(raw)
           token.revoke if token && !token.revoked?
+          # The token's RPMS connection goes with it (ADR 0011 §4).
+          RpmsSessions.release(RpmsSessions.key_for(token)) if token && RpmsSessions.enabled?
         end
         session.delete(:smart_token)
         session.delete(:duz)
         session.delete(:last_seen_at)
+        session.delete(:rpms_pool_key)
       rescue StandardError => e
         Rails.logger.error("Session token revocation failed: #{e.class}")
       end

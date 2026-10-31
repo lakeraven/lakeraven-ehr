@@ -5,7 +5,7 @@ require "test_helper"
 # Every process-global in-memory store with a class-level reset hook must be
 # cleared via GlobalStoreIsolation::STORE_RESETS (see test/support/global_store_isolation.rb).
 class GlobalStoreIsolationConventionTest < ActiveSupport::TestCase
-  RESET_METHOD_NAMES = %i[reset! reset_instance! reset_store!].freeze
+  RESET_METHOD_NAMES = %i[reset! reset_instance! reset_store! reset_registrations!].freeze
 
   # Classes that define reset! / reset_instance! / reset_store! but are not
   # suite-wide process globals — each entry must stay commented with a reason.

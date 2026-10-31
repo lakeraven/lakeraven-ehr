@@ -28,6 +28,10 @@ module Lakeraven
       initializer "lakeraven-ehr.filter_credentials" do |app|
         # `allergy` is the chart entry payload: allergen, comments, symptoms.
         app.config.filter_parameters += %i[username access_code verify_code allergy]
+        # A patient's identity never reaches a log line (#722): the registration form,
+        # any SSN, and the search's q and dob (matched exactly: a bare :q would also
+        # match every key containing a q).
+        app.config.filter_parameters += [ :registration, :ssn, /\Aq\z/, /\Adob\z/ ]
       end
 
       NO_RPMS_BACKEND = "[lakeraven-ehr] No RPMS backend configured: name a broker in " \
@@ -65,8 +69,19 @@ module Lakeraven
           return
         end
 
-        client = RpmsRpc.client_for(settings[:broker], host: settings[:host], port: settings[:port])
-        RpmsRpc.configure { |c| c.client = client }
+        # Every signed-in user gets a connection of their own (ADR 0011,
+        # RpmsSessions); the web process holds no shared client, so a request
+        # outside its user's scope reaches no RPMS at all. The test
+        # environment's live suite (LIVE_RPMS=1) signs one shared client on
+        # itself and drives gateways directly, so it keeps one; its pooled
+        # path is tested on its own.
+        factory = -> { RpmsRpc.client_for(settings[:broker], host: settings[:host], port: settings[:port]) }
+        if Rails.env.test?
+          RpmsRpc.configure { |c| c.client = factory.call }
+        else
+          RpmsSessions.assert_single_process!
+          RpmsSessions.configure!(factory: factory, max_sessions: Integer(settings[:max_sessions] || 64))
+        end
       end
 
       initializer "lakeraven-ehr.inflections" do

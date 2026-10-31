@@ -9,7 +9,7 @@ module Lakeraven
 
         # GET /scheduling
         def index
-          @resources = AppointmentBookingGateway.resources.select { |r| r[:view] || held_keys.include?(SUPERVISOR_KEY) }
+          @resources = AppointmentBookingGateway.resources.select { |r| visible?(r) }
         end
 
         # GET /scheduling/clinics/:id?date=

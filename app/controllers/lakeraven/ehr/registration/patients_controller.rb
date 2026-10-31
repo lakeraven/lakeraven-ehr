@@ -9,34 +9,30 @@ module Lakeraven
       # The front desk finds a patient before registering one (rpms-ux S-REG-01),
       # and registers a new one (S-REG-02).
       #
-      # Gated on the keys BPRM's registration screens gate on: searching takes one
-      # of the registration keys (AGZMENU, AGZMGR, AGZVIEWONLY); opening a
-      # registration also the scheduling menu keys (SDZMENU, SDZSUP); registering
-      # takes AGZMENU or AGZMGR.
+      # Gated on capabilities (Capabilities, ADR 0010): registration.search,
+      # registration.view and patient.register.
       class PatientsController < WebController
         include RpmsUnavailableRendering
 
-        VIEW_KEYS = %w[registration_menu registration_manager registration_view_only scheduling_user scheduling_supervisor].freeze
-        REGISTER_KEYS = %w[registration_menu registration_manager].freeze
-        # The search is AG's own lookup (AGG LOOKUP PATIENTS), which RPMS runs for
-        # registration users only: a scheduler is refused it, and finds patients
-        # with VueCentric's selection when booking instead.
-        SEARCH_KEYS = %w[registration_menu registration_manager registration_view_only].freeze
         # A form submission token: the UUID the form was issued.
         SUBMISSION_ID = /\A\h{8}-\h{4}-\h{4}-\h{4}-\h{12}\z/
         REVIEW_PURPOSE = :registration_review
         REVIEW_TTL = 15.minutes
 
         before_action :require_authentication
-        before_action :require_registration_search_key!, only: :index
-        before_action :require_registration_view_key!, only: :show
-        before_action :require_registration_key!, only: %i[new create confirm]
-        helper_method :can_register?
+        # The search is AG's own lookup (AGG LOOKUP PATIENTS), which RPMS runs for
+        # registration users only: a scheduler is refused it, and finds patients
+        # with VueCentric's selection when booking instead.
+        before_action -> { require_capability!("registration.search") }, only: :index
+        before_action -> { require_capability!("registration.view") }, only: :show
+        before_action -> { require_capability!("patient.register") }, only: %i[new create confirm]
 
-        # GET /registration/patients?q=&dob=
+        # GET /registration/patients: the search form.
+        # POST /registration/patients/search (q, dob): the search. Only a POST searches,
+        # so a patient's SSN, name or date of birth never travels in a URL (#722).
         def index
-          @query = params[:q].to_s.strip
-          @dob = parse_dob(params[:dob])
+          @query = request.post? ? params[:q].to_s.strip : ""
+          @dob = request.post? ? parse_dob(params[:dob]) : nil
           @searched = @query.present?
           @matches = @searched ? PatientLookupGateway.find(@query, dob: @dob) : []
         rescue RpmsRpc::Client::RpcError, RpmsRpc::Client::ConnectionError => e
@@ -186,25 +182,6 @@ module Lakeraven
 
         def registration_params
           params.fetch(:registration, {}).permit(:name, :sex, :dob, :ssn, :no_ssn_reason, :tribe_ien, :community_ien).to_h
-        end
-
-        def can_register?
-          held = Array(session[:security_keys])
-          REGISTER_KEYS.any? { |key| held.include?(key) }
-        end
-
-        def require_registration_view_key!
-          held = Array(session[:security_keys])
-          head :forbidden unless VIEW_KEYS.any? { |key| held.include?(key) }
-        end
-
-        def require_registration_search_key!
-          held = Array(session[:security_keys])
-          head :forbidden unless SEARCH_KEYS.any? { |key| held.include?(key) }
-        end
-
-        def require_registration_key!
-          head :forbidden unless can_register?
         end
 
         def parse_dob(value)

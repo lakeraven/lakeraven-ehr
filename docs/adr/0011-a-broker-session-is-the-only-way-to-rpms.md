@@ -4,6 +4,7 @@
 **Date:** 2026-10-06
 **Implements:** #585 · **Builds on:** #539/#586 (CIA sign-on), rpms-rpc ADR 0005 (`SessionPool`), ADR 0006 (explicit clients), ADR 0010 (the consumer contract)
 **Changes:** #553's single-organization guard, `AuthenticationService`'s wire mutex
+**Amended:** 2026-10-30. The request's client is **scoped**, not threaded through every call (see "Amendment" below). Every other decision stands.
 
 ## Context
 
@@ -57,8 +58,7 @@ It never holds a checked-out client between calls (rpms-rpc ADR 0006, "Lifetime"
   The pool already makes a mismatch structurally impossible, so this check guards against a bug in the pool itself.
 - **`RpcSupport.broker` takes the session.** It becomes `RpcSupport.broker(session)` and wraps the session in `AuditedBroker`.
   The zero-argument accessor over the global is removed, so its 18 direct `call_rpc` sites cannot compile against the old shape.
-- **Gem modules get the client explicitly.** `RpmsRpc::Patient.brief_header(dfn, client: c)` and the rest (rpms-rpc ADR 0006 option A).
-  The gateways' existing `via:`/`default_provider` seam carries the session.
+- **Gem modules get the user's client through a scope** (amended 2026-10-30). The request runs inside `RpmsRpc.with_client(client) { ... }`, and every gem module resolves `RpmsRpc.client` underneath, so no method signature changes. See "Amendment".
 
 ### 3. Sign-on never touches a shared client
 
@@ -121,17 +121,42 @@ A backend client reaches the RPMS its service account signs on to, and nothing e
 - **Lifecycle tests:** sign-out, idle timeout, token revocation and re-sign-in each leave the pool without the old key, and the old client disconnected.
 - **Capacity test:** a full pool refuses sign-in with 503 and leaves every existing session's client untouched.
 
+## Amendment, 2026-10-30: a scoped client, not a threaded one
+
+**What changed.** §2 said every gem module would take the client explicitly (`client:`).
+Measured on rpms-rpc `main` on 2026-10-30, that is not 30 references but every public API method, about 240 signatures, because each resolves `RpmsRpc.client` beneath it.
+The request's client is scoped instead: `RpmsRpc.with_client(client) { ... }` (rpms-rpc#518).
+Inside the block, `RpmsRpc.client` is that client, for this fiber and the fibers and threads it starts. It is restored after the block, and a thread already running elsewhere never sees it.
+
+**Why it keeps the guarantee.** The rejected-alternatives entry below turned the ambient approach down because "it relies on every path remembering to wrap, and threads lose the scope".
+§1 removes that risk: the web process configures no global client.
+A path that forgets to wrap, or a thread that lost the scope, finds no client and raises `RpmsRpc::NotConfiguredError`.
+It cannot borrow another user's connection, because there is none to borrow.
+The failure is loud, which is what §1 asked of the explicit design too.
+
+**What stays as decided:**
+- one door (§2);
+- sign-on that adopts a fresh client (§3);
+- the pool key dying with the session, with `SessionPool#release` (§4, also in rpms-rpc#518);
+- a miss meaning sign in again (§5);
+- system access as a named identity or none (§6);
+- the tests (§7).
+
+`BrokerSession` wraps the request in the scope rather than handing a client to each call.
+The identity assertion on checkout stays.
+
+**Proven** at the gem level on a live container: two personas on two connections, with calls interleaved by scope. Each call ran as its own connection's user, whichever signed on last (rpms-rpc `test/live/scoped_client_two_identities_live_test.rb`).
+
 ## Rollout
 
 Two pull requests, in order.
 Neither leaves a mixed state where a request path can still reach the global client.
 
 1. **rpms-rpc:**
-   - an optional `client:` keyword on `DataMapper`'s fetch helpers and on every API module that reaches `RpmsRpc.client` (about 30 references in 16 files on `92827ba`), defaulting to the global so other hosts keep working;
+   - `RpmsRpc.with_client` (amended: in place of an optional `client:` keyword on every API method);
    - `SessionPool#release(key)`;
    - live specs for both.
-   The keyword is optional in the gem because the guarantee comes from §1: the engine never configures the global client in a web process.
-   Making it required everywhere is ADR 0010's later breaking release.
+   The guarantee comes from §1: the engine never configures the global client in a web process.
 2. **lakeraven-ehr (#585):** §1-§7 on the new gem pin.
 
 ## Consequences
@@ -144,14 +169,14 @@ Neither leaves a mixed state where a request path can still reach the global cli
 
 **Negative**
 
-- Every gateway call site threads the session (25 files), a wide but mechanical diff.
+- ~~Every gateway call site threads the session (25 files), a wide but mechanical diff.~~ Amended: no call site changes; a request is wrapped once.
 - A process restart signs every user out.
   That is the honest consequence of holding no credentials.
 - Backend services need an RPMS service account per deployment before `system/` tokens work against a live broker.
 
 **Rejected**
 
-- **Ambient fiber-local session** (rpms-rpc ADR 0006 option B): it relies on every path remembering to wrap, and threads lose the scope.
-  §1 gives the same small diff at call sites with no silent fallback.
+- ~~**Ambient fiber-local session** (rpms-rpc ADR 0006 option B): it relies on every path remembering to wrap, and threads lose the scope.
+  §1 gives the same small diff at call sites with no silent fallback.~~ Adopted by the 2026-10-30 amendment: with §1, a missed wrap raises instead of falling back.
 - **Key the pool by DUZ:** two sign-ins by one clinician would share a socket, and a sign-out couldn't release just one of them.
 - **Re-authenticate a pooled client per request:** this is the #234 hazard in another form, and it needs stored credentials.
