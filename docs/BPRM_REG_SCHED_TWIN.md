@@ -1,10 +1,13 @@
 # BPRM Registration + Scheduling — Executable-Spec Twin
 
-> **Status (2026-10-30):** the twin's scheduling and ADT gateways
-> (`SchedulingGateway`, `AdtGateway`) were retired: nothing called them, and most of
-> their RPC names are registered on no RPMS baseline (#542). The scheduling screens
-> run on `RpmsRpc::Scheduling` instead; `docs/BPRM_PARITY_PLAN.md` is the current plan.
-> The scenarios below remain the behaviour to reach.
+> **Superseded (2026-10-29).** The executable twin (`features/bprm_twin/`) is retired: its scenarios never ran
+> (51 had no step definitions, 11 stopped at a pending placeholder) and described an earlier JSON API.
+> The stories now live once, independent of any UI, in rpms-ux `docs/product-cycle/STORIES.md` (S-REG, S-SCH, ...).
+> Each UI proves the same scenario ids in its own specs: BPRM in cloud-rpms browser specs, lakeraven-ehr in
+> `test/integration` (live and mock), the terminal in persona transcripts; `bin/scenario-plan` reports this
+> repo's to rpms-ux. The analysis below is kept as background.
+> The twin's scheduling and ADT gateways (`SchedulingGateway`, `AdtGateway`) were retired too: nothing
+> called them, and most of their RPC names are registered on no RPMS baseline (#542).
 
 Behavioral spec ("digital twin") for RPMS **BPRM v4** (IHS Practice Management):
 patient **registration** and appointment **scheduling**. The goal is to let
