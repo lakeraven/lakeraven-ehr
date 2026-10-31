@@ -34,9 +34,21 @@ module Lakeraven
         get "/lakeraven-ehr/Observation", params: { patient: "1" }, headers: @headers
         assert_response :ok
         body = JSON.parse(response.body)
-        body["entry"]&.each do |entry|
+        entries = body["entry"]
+        assert entries.is_a?(Array) && entries.any?, "Observation bundle should include entries"
+        entries.each do |entry|
           assert_equal "Observation", entry.dig("resource", "resourceType")
         end
+      end
+
+      # ORQQVI VITALS piece 1 is the V MEASUREMENT IEN (:measurement_ien since
+      # rpms-rpc #188); a vital read from RPMS keeps it as its id.
+      test "a vital read from RPMS carries its V MEASUREMENT IEN as its id" do
+        get "/lakeraven-ehr/Observation", params: { patient: "1" }, headers: @headers
+        assert_response :ok
+
+        ids = JSON.parse(response.body)["entry"].map { |entry| entry.dig("resource", "id") }
+        assert_includes ids, "8"
       end
 
       test "returns FHIR JSON content type" do

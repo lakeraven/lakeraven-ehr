@@ -5,41 +5,30 @@ require "test_helper"
 module Lakeraven
   module EHR
     class RemindersGatewayTest < ActiveSupport::TestCase
-      # Test double for the eventual RpmsRpc::Reminders module — captures
-      # calls so we can prove the gateway actually delegates.
-      class FakeRemindersAPI
-        attr_reader :calls
-
-        def initialize(returns)
-          @returns = returns
-          @calls = []
-        end
-
-        def for_visit(dfn, visit_ien)
-          @calls << { dfn: dfn, visit_ien: visit_ien }
-          @returns
-        end
-      end
-
-      test "for_visit returns empty array when no provider is available" do
-        result = RemindersGateway.for_visit(8791, 2090061, via: nil)
+      test "applicable returns empty array when no provider is available" do
+        result = RemindersGateway.applicable(8791, 44, via: nil)
         assert_equal [], result
       end
 
-      test "for_visit delegates to the provider's for_visit with dfn and visit_ien" do
-        reminders = [ { id: 1, name: "Annual physical due" } ]
-        fake = FakeRemindersAPI.new(reminders)
-        result = RemindersGateway.for_visit(8791, 2090061, via: fake)
+      # Through the gem's own Reminders.applicable and the ORQQPXRM REMINDERS
+      # APPLICABLE mapping: the frame carries the patient and the location,
+      # and the engine's due flag becomes the row's status.
+      test "applicable reads the reminder engine for the patient at the location" do
+        RpmsRpc.client.seed_keyed_collection(:reminders_applicable, "8791", [
+          { ien: 12, print_name: "Diabetic eye exam", due_flag: 1, due_date: "DUE NOW" },
+          { ien: 13, print_name: "Tobacco screen", due_flag: 2, due_date: "" }
+        ])
 
-        assert_equal reminders, result
-        # Gateway normalizes identifiers to strings before delegating.
-        assert_equal [ { dfn: "8791", visit_ien: "2090061" } ], fake.calls
+        result = RemindersGateway.applicable(8791, 44)
+
+        assert_equal [ %w[8791 44] ], RpmsRpc.client.received_calls
+          .select { |c| c[:rpc] == "ORQQPXRM REMINDERS APPLICABLE" }.map { |c| c[:params] }
+        assert_equal [ [ "Diabetic eye exam", :due, true ], [ "Tobacco screen", :not_applicable, false ] ],
+          result.map { |r| [ r[:name], r[:status], r[:due_now] ] }
       end
 
-      test "default_provider resolves to RpmsRpc::Reminders now that the gem ships it" do
-        provider = RemindersGateway.default_provider
-        refute_nil provider, "expected RpmsRpc::Reminders to be loaded via the gateway's guarded require"
-        assert_equal "RpmsRpc::Reminders", provider.name
+      test "default_provider resolves to RpmsRpc::Reminders" do
+        assert_equal "RpmsRpc::Reminders", RemindersGateway.default_provider.name
       end
     end
   end

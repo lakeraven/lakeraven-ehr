@@ -5,33 +5,12 @@ require "test_helper"
 module Lakeraven
   module EHR
     class EncounterLifecycleServiceTest < ActiveSupport::TestCase
-      # FakeGateway — a clean test double accepting a fixed return value (or
-      # a Proc for argument capture). Used via constructor injection on
-      # EncounterLifecycleService so we never mutate the production gateway
-      # classes.
-      class FakeGateway
-        attr_reader :calls
-
-        def initialize(method_name, return_value)
-          @method_name = method_name
-          @return_value = return_value
-          @calls = []
-          fake = self
-          define_singleton_method(method_name) do |*args, **kwargs|
-            fake.calls << { args: args, kwargs: kwargs }
-            fake.instance_variable_get(:@return_value).respond_to?(:call) ?
-              fake.instance_variable_get(:@return_value).call(*args, **kwargs) :
-              fake.instance_variable_get(:@return_value)
-          end
-        end
-      end
-
       setup do
         @dfn = 26664
         @visit_ien = 2090061
         @encounter = {
           visit_ien: @visit_ien, patient_dfn: @dfn,
-          location: "PS CLINICS", provider: "SAND,ASH", status: "A",
+          location: "PS CLINICS", location_ien: 44, provider: "SAND,ASH", status: "A",
           missing_components: [
             { component: "POV", message: "Visit has no note" },
             { component: "E&M", message: "Visit has no note" }
@@ -49,7 +28,7 @@ module Lakeraven
         @obs_gw = FakeGateway.new(:for_patient, @vitals)
         @cond_gw = FakeGateway.new(:for_patient, @problems)
         @allerg_gw = FakeGateway.new(:for_patient, @allergies)
-        @rem_gw = FakeGateway.new(:for_visit, @reminders)
+        @rem_gw = FakeGateway.new(:applicable, @reminders)
       end
 
       def build_service(requester: nil, **overrides)
@@ -98,7 +77,8 @@ module Lakeraven
         assert_equal [ @dfn ], @obs_gw.calls.first[:args]
         assert_equal [ @dfn ], @cond_gw.calls.first[:args]
         assert_equal [ @dfn ], @allerg_gw.calls.first[:args]
-        assert_equal [ @dfn, @visit_ien ], @rem_gw.calls.first[:args]
+        # Reminders are keyed by the encounter's location, not the visit.
+        assert_equal [ @dfn, 44 ], @rem_gw.calls.first[:args]
       end
 
       # === Failure modes ===
@@ -156,14 +136,6 @@ module Lakeraven
         result = build_service(patient_gateway: nil_pt).open
         assert result.success?
         assert_nil result.context[:brief_header]
-      end
-
-      # === Default reminders gateway returns [] safely when RPC primitive isn't ready ===
-
-      test "default RemindersGateway returns empty array when underlying RPC not implemented" do
-        skip "real RpmsRpc::Reminders shipped" if RemindersGateway.default_provider
-        result = RemindersGateway.for_visit(1, 100)
-        assert_equal [], result
       end
     end
   end

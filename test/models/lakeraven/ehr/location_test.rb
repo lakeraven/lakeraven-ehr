@@ -71,7 +71,15 @@ module Lakeraven
       test "to_fhir omits alias when no abbreviation" do
         loc = Location.new(ien: 1, name: "Test", abbreviation: nil)
         fhir = loc.to_fhir
-        assert_equal [], fhir[:alias]
+        refute fhir.key?(:alias)
+      end
+
+      # FHIR ele-1: an element with no values is left out, never an empty array.
+      test "to_fhir leaves out every element that has no values" do
+        fhir = Location.new(ien: 1, name: "Test").to_fhir
+
+        empty = fhir.select { |_key, value| value == [] }.keys
+        assert_empty empty, "empty arrays: #{empty.join(', ')}"
       end
 
       test "to_param returns IEN string" do

@@ -169,17 +169,23 @@ module Lakeraven
         render_invalid_client("undecodable")
       end
 
-      # Grant the intersection of the requested scopes and the client's
-      # registered scopes, restricted to system/ scopes. A registered
-      # wildcard (system/*.read) covers per-resource requests
-      # (system/Patient.read); the reverse is not true.
+      # Grant each requested system/ scope narrowed to the client's
+      # registration, in SMART v2 form whichever form either side used
+      # (SmartScope). A registered wildcard (system/*.rs) covers a per-type
+      # request (system/Patient.rs); the reverse is not true. Permissions
+      # beyond the registration are dropped, not the scope:
+      # system/Patient.cruds against a system/Patient.rs registration is
+      # issued system/Patient.rs.
       def granted_scopes(app)
-        registered = app.scopes.to_s.split
-        requested = requested_scope_values(app)
+        registered = system_scopes(app.scopes.to_s)
 
-        requested.uniq.select do |scope|
-          scope.start_with?("system/") && scope_registered?(scope, registered)
-        end
+        system_scopes(requested_scope_values(app)).filter_map { |requested|
+          registered.filter_map { |allowed| requested.narrowed_by(allowed) }.reduce(:merge)&.to_s
+        }.uniq
+      end
+
+      def system_scopes(scopes)
+        SmartScope.parse_all(scopes).select { |scope| scope.context == "system" }
       end
 
       # A non-string scope (scope[]=system/Patient.read arrives as an Array)
@@ -190,16 +196,6 @@ module Lakeraven
         return [] unless raw.nil? || raw.is_a?(String)
 
         (raw.presence || app.scopes.to_s).split
-      end
-
-      def scope_registered?(scope, registered)
-        return true if registered.include?(scope) || registered.include?("system/*.*")
-
-        if (match = scope.match(%r{\Asystem/[^.]+\.(read|write)\z}))
-          registered.include?("system/*.#{match[1]}")
-        else
-          false
-        end
       end
 
       # The expected assertion audience. When the deployment configures its

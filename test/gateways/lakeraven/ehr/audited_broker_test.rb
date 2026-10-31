@@ -115,7 +115,7 @@ module Lakeraven
         fake = FakeBroker.new
 
         use_broker(fake) do
-          assert RpcSupport.broker.supports?(:anything)
+          assert RpcSupport.broker.connected?
         end
       end
 
@@ -175,7 +175,6 @@ module Lakeraven
 
         use_broker(fake) do
           broker = RpcSupport.broker
-          assert broker.supports?(:anything)
           assert broker.connected?
           assert_equal "fake-broker.test", broker.hostname
         end

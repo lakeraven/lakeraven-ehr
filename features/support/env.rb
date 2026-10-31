@@ -14,7 +14,17 @@ module CucumberRackHelpers
   end
 end
 
+# ActiveSupport::TestCase aliases refute_nil as assert_not_nil. Cucumber's
+# world only includes Minitest::Assertions, so steps that call the Rails
+# name need the same alias.
+module CucumberAssertionAliases
+  def assert_not_nil(object, message = nil)
+    refute_nil(object, message)
+  end
+end
+
 World(Minitest::Assertions)
+World(CucumberAssertionAliases)
 World(CucumberRackHelpers)
 
 # Minitest requires this for World inclusion

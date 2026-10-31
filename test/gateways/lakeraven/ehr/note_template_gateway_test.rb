@@ -25,16 +25,6 @@ module Lakeraven
           @returns[:items] || []
         end
 
-        def boilerplate(template_ien, dfn:, visit_ien:)
-          @calls << { method: :boilerplate, args: [ template_ien, dfn, visit_ien ] }
-          @returns[:boilerplate]
-        end
-
-        def text(template_ien)
-          @calls << { method: :text, args: [ template_ien ] }
-          @returns[:text]
-        end
-
         def access_level(template_ien, user_duz)
           @calls << { method: :access_level, args: [ template_ien, user_duz ] }
           @returns[:access_level]
@@ -52,11 +42,11 @@ module Lakeraven
       end
 
       test "boilerplate returns nil when no provider is available" do
-        assert_nil NoteTemplateGateway.boilerplate(101, dfn: 1, visit_ien: 2090061, via: nil)
+        assert_nil NoteTemplateGateway.boilerplate(101, via: nil)
       end
 
       test "text returns nil when no provider is available" do
-        assert_nil NoteTemplateGateway.text(101, via: nil)
+        assert_nil NoteTemplateGateway.text([ "S: |PATIENT NAME|" ], dfn: 4, via: nil)
       end
 
       test "access_level returns nil when no provider is available" do
@@ -81,18 +71,24 @@ module Lakeraven
         assert_equal [ "7" ], fake.calls.first[:args]
       end
 
-      test "boilerplate delegates with all identifiers coerced to strings" do
-        fake = FakeNoteTemplateAPI.new(returns: { boilerplate: "S: Patient seen for..." })
+      # Through the real RpmsRpc::NoteTemplate, so a change to the gem's
+      # signature fails here. Replies are what a fresh rpms-ydb e9b78c8 sent.
+      test "boilerplate sends the template alone (GETBOIL)" do
+        RpmsRpc.client.seed_raw_lines(:template_boilerplate, "3454", [])
 
-        result = NoteTemplateGateway.boilerplate(7, dfn: 1, visit_ien: 2090061, via: fake)
-
-        assert_equal "S: Patient seen for...", result
-        assert_equal [ "7", "1", "2090061" ], fake.calls.first[:args]
+        assert_nil NoteTemplateGateway.boilerplate(3454)
+        assert_equal [ "3454" ], RpmsRpc.client.received_calls.last[:params]
       end
 
-      test "text delegates" do
-        fake = FakeNoteTemplateAPI.new(returns: { text: "S: {PATIENT NAME}" })
-        assert_equal "S: {PATIENT NAME}", NoteTemplateGateway.text(7, via: fake)
+      test "text sends the patient and the lines, and returns the RPMS expansion (GETTEXT)" do
+        RpmsRpc.client.seed_raw_lines(:template_text, "4", [ "^^1^1^3261027^^", "Patient: DEMO,PATIENT ONE" ])
+
+        expanded = NoteTemplateGateway.text([ "Patient: |PATIENT NAME|" ], dfn: 4)
+
+        assert_includes expanded.to_s, "Patient: DEMO,PATIENT ONE"
+        dfn, visit, lines = RpmsRpc.client.received_calls.last[:params]
+        assert_equal [ "4", "" ], [ dfn, visit ]
+        assert_equal "Patient: |PATIENT NAME|", lines.values.first
       end
 
       test "access_level delegates" do

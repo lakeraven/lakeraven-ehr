@@ -22,6 +22,29 @@ module Lakeraven
         assert_equal "user", user.user_type
       end
 
+      test "string-keyed attrs behave like symbol-keyed attrs" do
+        symbol_attrs = {
+          user_type: "provider",
+          security_keys: [ :referrals_supervisor ],
+          duz: "501",
+          name: "TEST,USER"
+        }
+        string_attrs = {
+          "user_type" => "provider",
+          "security_keys" => [ :referrals_supervisor ],
+          "duz" => "501",
+          "name" => "TEST,USER"
+        }
+
+        from_symbols = CurrentUser.new(symbol_attrs)
+        from_strings = CurrentUser.new(string_attrs)
+
+        assert_equal from_symbols.user_type, from_strings.user_type
+        assert_equal from_symbols.can?(:create_referrals), from_strings.can?(:create_referrals)
+        assert_equal from_symbols.can_approve_chs?, from_strings.can_approve_chs?
+        assert_equal from_symbols.capabilities, from_strings.capabilities
+      end
+
       # =============================================================================
       # ROLE CHECKS
       # =============================================================================
@@ -46,8 +69,8 @@ module Lakeraven
         assert user.case_manager?
       end
 
-      test "case_manager? returns true for user with prc_manager key" do
-        user = build_user(user_type: "clerk", security_keys: [ :prc_manager ])
+      test "case_manager? returns true for user with referrals_manager key" do
+        user = build_user(user_type: "clerk", security_keys: [ :referrals_manager ])
         assert user.case_manager?
       end
 
@@ -90,9 +113,9 @@ module Lakeraven
       # CHS-SPECIFIC PERMISSIONS
       # =============================================================================
 
-      test "can_approve_chs? requires prc_supervisor or prc_manager key" do
-        user_with_supervisor = build_user(user_type: "clerk", security_keys: [ :prc_supervisor ])
-        user_with_manager = build_user(user_type: "clerk", security_keys: [ :prc_manager ])
+      test "can_approve_chs? requires referrals_supervisor or referrals_manager key" do
+        user_with_supervisor = build_user(user_type: "clerk", security_keys: [ :referrals_supervisor ])
+        user_with_manager = build_user(user_type: "clerk", security_keys: [ :referrals_manager ])
         user_without_key = build_user(user_type: "case_manager", security_keys: [])
 
         assert user_with_supervisor.can_approve_chs?
@@ -100,9 +123,9 @@ module Lakeraven
         refute user_without_key.can_approve_chs?
       end
 
-      test "can_process_chs? requires prc_tech or prc_supervisor key" do
-        user_with_tech = build_user(user_type: "clerk", security_keys: [ :prc_tech ])
-        user_with_supervisor = build_user(user_type: "clerk", security_keys: [ :prc_supervisor ])
+      test "can_process_chs? requires referrals_user or referrals_supervisor key" do
+        user_with_tech = build_user(user_type: "clerk", security_keys: [ :referrals_user ])
+        user_with_supervisor = build_user(user_type: "clerk", security_keys: [ :referrals_supervisor ])
         user_without_key = build_user(user_type: "clerk", security_keys: [])
 
         assert user_with_tech.can_process_chs?
@@ -110,14 +133,16 @@ module Lakeraven
         refute user_without_key.can_process_chs?
       end
 
-      test "can_manage_consults? requires consult_manager key" do
-        user_with_key = build_user(user_type: "provider", security_keys: [ :consult_manager ])
-        user_without_key = build_user(user_type: "provider", security_keys: [])
+      # The analyst has not named a key for consults, eligibility verification
+      # or dental yet (#578), so no key the EHR knows grants them.
+      test "consults, eligibility and dental are granted by no key until one is decided" do
+        user = build_user(user_type: "provider", security_keys: Lakeraven::EHR::Roles::KEY_NAMES.keys)
 
-        assert user_with_key.can_manage_consults?
-        refute user_without_key.can_manage_consults?
+        refute user.can_manage_consults?
+        refute_includes user.capabilities, :manage_consults
+        refute_includes user.capabilities, :verify_eligibility
+        refute_includes user.capabilities, :access_dental
       end
-
       # =============================================================================
       # CAPABILITIES (aggregated permissions)
       # =============================================================================
@@ -132,7 +157,7 @@ module Lakeraven
       end
 
       test "capabilities includes key-derived approve_referrals permission" do
-        user = build_user(user_type: "clerk", security_keys: [ :prc_supervisor ])
+        user = build_user(user_type: "clerk", security_keys: [ :referrals_supervisor ])
         caps = user.capabilities
 
         assert caps.include?(:approve_referrals)
@@ -140,24 +165,10 @@ module Lakeraven
       end
 
       test "capabilities includes key-derived process_claims permission" do
-        user = build_user(user_type: "clerk", security_keys: [ :prc_tech ])
+        user = build_user(user_type: "clerk", security_keys: [ :referrals_user ])
         caps = user.capabilities
 
         assert caps.include?(:process_claims)
-      end
-
-      test "capabilities includes verify_eligibility for eligibility key" do
-        user = build_user(user_type: "clerk", security_keys: [ :eligibility_verify ])
-        caps = user.capabilities
-
-        assert caps.include?(:verify_eligibility)
-      end
-
-      test "capabilities includes manage_consults for consult manager" do
-        user = build_user(user_type: "provider", security_keys: [ :consult_manager ])
-        caps = user.capabilities
-
-        assert caps.include?(:manage_consults)
       end
 
       test "capabilities includes manage_scheduling for scheduling admin" do
@@ -168,18 +179,12 @@ module Lakeraven
       end
 
       test "capabilities includes access_behavioral_health for BH providers" do
-        user = build_user(user_type: "provider", security_keys: [ :bh_provider ])
+        user = build_user(user_type: "provider", security_keys: [ :behavioral_health_user ])
         caps = user.capabilities
 
         assert caps.include?(:access_behavioral_health)
       end
 
-      test "capabilities includes access_dental for dental providers" do
-        user = build_user(user_type: "provider", security_keys: [ :dental_provider ])
-        caps = user.capabilities
-
-        assert caps.include?(:access_dental)
-      end
 
       private
 
