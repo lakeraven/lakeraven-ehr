@@ -122,6 +122,8 @@ module Lakeraven
           id: id,
           status: status,
           beneficiary: { reference: "Patient/#{patient_dfn}" },
+          subscriberId: member_identifier,
+          identifier: member_identifier_list,
           payor: [ payor_fhir_reference ],
           period: build_period,
           class: build_class_array,
@@ -146,7 +148,11 @@ module Lakeraven
       def self.from_eligibility_response(response)
         return nil unless response.enrolled?
 
-        new(
+        new(eligibility_attributes(response)).tap { |coverage| assign_medicaid_payor(coverage) }
+      end
+
+      def self.eligibility_attributes(response)
+        {
           patient_dfn: response.patient_dfn,
           coverage_type: response.coverage_type,
           status: "active",
@@ -155,7 +161,11 @@ module Lakeraven
           plan_name: response.plan_name,
           member_id: response.policy_id,
           group_id: response.group_id
-        )
+        }
+      end
+
+      def self.assign_medicaid_payor(coverage)
+        coverage.payor_name = "Medicaid" if coverage.medicaid?
       end
 
       private
@@ -205,17 +215,36 @@ module Lakeraven
         p
       end
 
+      def member_identifier
+        member_id.presence || subscriber_id.presence
+      end
+
+      def member_identifier_list
+        value = member_identifier
+        [ { value: value } ] if value
+      end
+
       def build_class_array
-        classes = []
-        classes << { type: { coding: [ { code: "group" } ] }, value: group_id } if group_id
-        if plan_name.present? || subscriber_id.present?
-          classes << {
-            type: { coding: [ { code: "plan" } ] },
-            value: subscriber_id || plan_name,
-            name: plan_name
-          }.compact
-        end
-        classes.empty? ? nil : classes
+        [ group_fhir_class, plan_fhir_class ].compact.presence
+      end
+
+      def group_fhir_class
+        return if group_id.blank?
+
+        { type: fhir_class_type("group"), value: group_id }
+      end
+
+      # R4 Coverage.class (plan).value is the plan identifier; .name is the plan name.
+      # Member id is subscriberId, never this value.
+      def plan_fhir_class
+        value = plan_id.presence || plan_name.presence
+        return unless value
+
+        { type: fhir_class_type("plan"), value: value, name: plan_name.presence }.compact
+      end
+
+      def fhir_class_type(code)
+        { coding: [ { code: code } ] }
       end
 
       def payor_fhir_reference
@@ -276,24 +305,35 @@ module Lakeraven
       end
 
       def self.extract_class_info(fhir_hash)
-        classes = fhir_hash[:class] || fhir_hash["class"]
-        return {} unless classes
-
         result = {}
-        classes.each do |cls|
-          type_coding = cls[:type]&.dig(:coding, 0) || cls["type"]&.dig("coding", 0)
-          code = type_coding&.dig(:code) || type_coding&.dig("code")
-
-          case code
-          when "group"
-            result[:group_id] = cls[:value] || cls["value"]
-          when "plan"
-            result[:plan_name] = cls[:name] || cls["name"]
-          when "rxid"
-            result[:member_id] = cls[:value] || cls["value"]
-          end
-        end
+        Array(fhir_hash[:class] || fhir_hash["class"]).each { |cls| assign_class_field(result, cls) }
+        assign_member_id(result, fhir_hash)
         result
+      end
+
+      def self.assign_class_field(result, cls)
+        value = cls[:value] || cls["value"]
+        case fhir_class_code(cls)
+        when "group" then result[:group_id] = value
+        when "plan" then assign_plan_class(result, cls, value)
+        when "rxid" then result[:member_id] = value
+        end
+      end
+
+      def self.assign_plan_class(result, cls, value)
+        name = cls[:name] || cls["name"]
+        result[:plan_name] = name if name.present?
+        result[:plan_id] = value if value.present? && value != name
+      end
+
+      def self.assign_member_id(result, fhir_hash)
+        subscriber_id = fhir_hash[:subscriberId] || fhir_hash["subscriberId"]
+        result[:member_id] = subscriber_id if subscriber_id.present?
+      end
+
+      def self.fhir_class_code(cls)
+        coding = cls[:type]&.dig(:coding, 0) || cls["type"]&.dig("coding", 0)
+        coding&.dig(:code) || coding&.dig("code")
       end
 
       def self.parse_date(value)

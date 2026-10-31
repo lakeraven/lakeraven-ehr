@@ -19,6 +19,10 @@ module Lakeraven
         "ihs_prc" => 99
       }.freeze
 
+      # Payer of last resort on a PRC referral when private insurance is primary.
+      # Not a Coverage record — PRC is residual coordination, not another plan.
+      PRC_PAYER = "IHS Purchased/Referred Care"
+
       Summary = Struct.new(
         :coverages,
         :active_coverages,
@@ -34,8 +38,9 @@ module Lakeraven
         keyword_init: true
       )
 
-      def initialize(coverages)
+      def initialize(coverages, service_request: nil)
         @coverages = Array(coverages)
+        @service_request = service_request
       end
 
       def summarize
@@ -67,11 +72,8 @@ module Lakeraven
 
       def determine_payer_hierarchy(active_coverages = nil)
         coverages = active_coverages || @coverages.select(&:active?)
-
-        coverages
-          .sort_by { |c| [ PAYER_PRIORITY[c.coverage_type] || 50, c.payor_display || "" ] }
-          .map(&:payor_display)
-          .uniq
+        hierarchy = ranked_payor_names(coverages)
+        with_prc_secondary(hierarchy, coverages)
       end
 
       def primary_payer
@@ -94,6 +96,28 @@ module Lakeraven
       end
 
       private
+
+      def ranked_payor_names(coverages)
+        coverages.sort_by { |coverage| payer_sort_key(coverage) }.map(&:payor_display).uniq
+      end
+
+      def payer_sort_key(coverage)
+        [ PAYER_PRIORITY[coverage.coverage_type] || 50, coverage.payor_display || "" ]
+      end
+
+      def with_prc_secondary(hierarchy, coverages)
+        return hierarchy unless prc_secondary?(coverages)
+
+        hierarchy.include?(PRC_PAYER) ? hierarchy : hierarchy + [ PRC_PAYER ]
+      end
+
+      # PRC is the secondary payer only for a referral whose primary active coverage is private insurance.
+      def prc_secondary?(coverages)
+        return false unless @service_request
+
+        primary = coverages.min_by { |coverage| payer_sort_key(coverage) }
+        primary&.private_insurance?
+      end
 
       def determine_prc_eligibility(active = nil, exhausted = nil)
         active ||= @coverages.select(&:active?)

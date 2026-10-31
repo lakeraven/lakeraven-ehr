@@ -164,6 +164,15 @@ module Lakeraven
         urgency.blank? || urgency == "ROUTINE"
       end
 
+      # Optional coded justification. A plain referral is checked from reason text.
+      def alternate_resource_justification
+        nil
+      end
+
+      def alternate_resource_justification_symbol
+        nil
+      end
+
       # -- Class methods (FHIR) -----------------------------------------------
 
       def self.resource_class

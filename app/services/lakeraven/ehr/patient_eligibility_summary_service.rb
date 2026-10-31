@@ -9,6 +9,7 @@ module Lakeraven
         :prc_checks, :prc_eligible, :prc_denial_reason, :prc_checked_at,
         :coverage_summary, :coverage_retrieved_at,
         :payer_verification_results, :payer_verified_at, :payer_verification_skip_reason,
+        :alternate_resource_check,
         keyword_init: true
       )
 
@@ -17,15 +18,21 @@ module Lakeraven
       class << self
         def summarize(patient:, service_request: nil)
           prc_result = check_prc(service_request) if service_request
-          coverage = build_coverage_from_patient(patient)
+          coverage = build_coverage_from_patient(patient, service_request: service_request)
           build_result(prc_result: prc_result, coverage: coverage, payer_verification: nil)
         end
 
         def refresh(patient:, service_request: nil, coverages: [])
           prc_result = check_prc(service_request) if service_request
-          coverage = build_coverage_summary(coverages)
+          coverage = build_coverage_summary(coverages, service_request: service_request)
           payer_verification, skip_reason = check_payer_verification(patient: patient, coverages: coverages)
-          build_result(prc_result: prc_result, coverage: coverage, payer_verification: payer_verification, payer_verification_skip_reason: skip_reason)
+          build_result(
+            prc_result: prc_result,
+            coverage: coverage,
+            payer_verification: payer_verification,
+            payer_verification_skip_reason: skip_reason,
+            alternate_resource_check: alternate_resource_check_for(service_request, coverages)
+          )
         end
 
         private
@@ -34,7 +41,7 @@ module Lakeraven
           EligibilityService.check(service_request)
         end
 
-        def build_coverage_from_patient(patient)
+        def build_coverage_from_patient(patient, service_request: nil)
           coverages = []
           if patient.coverage_type.present?
             coverages << Coverage.new(
@@ -44,12 +51,18 @@ module Lakeraven
             )
           end
           return nil if coverages.empty?
-          CoverageSummaryService.new(coverages).summarize
+          CoverageSummaryService.new(coverages, service_request: service_request).summarize
         end
 
-        def build_coverage_summary(coverages)
+        def build_coverage_summary(coverages, service_request: nil)
           return nil if coverages.empty?
-          CoverageSummaryService.new(coverages).summarize
+          CoverageSummaryService.new(coverages, service_request: service_request).summarize
+        end
+
+        def alternate_resource_check_for(service_request, coverages)
+          return nil unless service_request
+
+          AlternateResourceService.check(service_request, coverages: coverages)
         end
 
         def check_payer_verification(patient:, coverages:)
@@ -67,7 +80,7 @@ module Lakeraven
           [ nil, "Payer verification is temporarily unavailable" ]
         end
 
-        def build_result(prc_result:, coverage:, payer_verification:, payer_verification_skip_reason: nil)
+        def build_result(prc_result:, coverage:, payer_verification:, payer_verification_skip_reason: nil, alternate_resource_check: nil)
           now = Time.current
 
           prc_checks = {}
@@ -89,7 +102,8 @@ module Lakeraven
             coverage_retrieved_at: coverage ? now : nil,
             payer_verification_results: payer_verification || [],
             payer_verified_at: payer_verification&.any? ? now : nil,
-            payer_verification_skip_reason: payer_verification_skip_reason
+            payer_verification_skip_reason: payer_verification_skip_reason,
+            alternate_resource_check: alternate_resource_check
           )
         end
 
