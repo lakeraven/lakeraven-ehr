@@ -27,10 +27,12 @@ module Lakeraven
         before_action -> { require_capability!("registration.view") }, only: :show
         before_action -> { require_capability!("patient.register") }, only: %i[new create confirm]
 
-        # GET /registration/patients?q=&dob=
+        # GET /registration/patients: the search form.
+        # POST /registration/patients/search (q, dob): the search. Only a POST searches,
+        # so a patient's SSN, name or date of birth never travels in a URL (#722).
         def index
-          @query = params[:q].to_s.strip
-          @dob = parse_dob(params[:dob])
+          @query = request.post? ? params[:q].to_s.strip : ""
+          @dob = request.post? ? parse_dob(params[:dob]) : nil
           @searched = @query.present?
           @matches = @searched ? PatientLookupGateway.find(@query, dob: @dob) : []
         rescue RpmsRpc::Client::RpcError, RpmsRpc::Client::ConnectionError => e

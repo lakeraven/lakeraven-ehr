@@ -12,6 +12,8 @@ class CapabilityRefusalMatrixTest < ActionDispatch::IntegrationTest
   ROUTES = {
     "GET /registration/patients" => "registration.search",
     "GET /registration/patients/new" => "patient.register",
+    "POST /registration/patients/new" => "patient.register",
+    "POST /registration/patients/search" => "registration.search",
     "POST /registration/patients" => "patient.register",
     "POST /registration/patients/confirm" => "patient.register",
     "GET /registration/patients/:dfn" => "registration.view",

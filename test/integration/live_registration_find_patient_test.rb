@@ -23,13 +23,13 @@ class LiveRegistrationFindPatientTest < ActionDispatch::IntegrationTest
     assert_response :redirect
     assert_includes session[:security_keys], "registration_menu"
 
-    get "/lakeraven-ehr/registration/patients", params: { q: "MOUSE", dob: "1910-02-14" }
+    post "/lakeraven-ehr/registration/patients/search", params: { q: "MOUSE", dob: "1910-02-14" }
 
     assert_response :ok
     assert_select "#matches tr[data-dfn='3'] td", text: "1001"
     assert_select "#matches tr[data-dfn='3'] td[data-status='active']"
 
-    get "/lakeraven-ehr/registration/patients", params: { q: "ZZZNOBODY" }
+    post "/lakeraven-ehr/registration/patients/search", params: { q: "ZZZNOBODY" }
     assert_select "#no-match"
 
     get "/lakeraven-ehr/registration/patients/3"
@@ -44,7 +44,7 @@ class LiveRegistrationFindPatientTest < ActionDispatch::IntegrationTest
     post "/lakeraven-ehr/login", params: { username: "PMD123", password: "PMD123!!" }
     assert_response :redirect
 
-    get "/lakeraven-ehr/registration/patients", params: { q: "MOUSE" }
+    post "/lakeraven-ehr/registration/patients/search", params: { q: "MOUSE" }
     assert_response :forbidden
   end
 end
