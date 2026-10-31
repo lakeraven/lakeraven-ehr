@@ -18,5 +18,5 @@ Feature: Coverage FHIR resources for payer coordination
     And the coverage period starts on "2024-01-01"
     When I serialize the coverage to FHIR
     Then the FHIR Coverage subscriber id should be "BC-SYNTH-0001"
-    And the FHIR Coverage plan class value should be "BC-SYNTH-0001"
+    And the FHIR Coverage plan class value should be "PPO Gold"
     And the FHIR Coverage plan class name should be "PPO Gold"

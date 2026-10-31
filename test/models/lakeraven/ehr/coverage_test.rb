@@ -222,12 +222,20 @@ module Lakeraven
         assert_equal "Medicare", fhir[:payor].first[:display]
       end
 
-      test "to_fhir includes class with subscriber_id" do
-        cov = Coverage.new(patient_dfn: "1", coverage_type: "medicaid", subscriber_id: "MCD123")
+      # FHIR R4: Coverage.class (type plan).value is the plan identifier; Coverage.subscriberId
+      # is the member/subscriber id (https://hl7.org/fhir/R4/coverage-definitions.html).
+      test "to_fhir plan class value is plan name not subscriber id" do
+        cov = Coverage.new(
+          patient_dfn: "1", coverage_type: "medicaid",
+          subscriber_id: "MCD123", plan_name: "State Medicaid"
+        )
         fhir = cov.to_fhir
 
         plan_class = fhir[:class]&.find { |c| c.dig(:type, :coding, 0, :code) == "plan" }
-        assert_equal "MCD123", plan_class[:value]
+        assert plan_class, "Expected class[type=plan] when plan_name is set"
+        assert_equal "State Medicaid", plan_class[:value]
+        refute_equal "MCD123", plan_class[:value]
+        assert_equal "MCD123", fhir[:subscriberId]
       end
 
       test "to_fhir includes class for group and plan" do
@@ -280,6 +288,7 @@ module Lakeraven
         fhir = {
           resourceType: "Coverage",
           beneficiary: { reference: "Patient/12345" },
+          subscriberId: "MEM999",
           class: [
             { type: { coding: [ { code: "group" } ] }, value: "GRP001" },
             { type: { coding: [ { code: "plan" } ] }, value: "PLAN123", name: "PPO Gold" }
@@ -290,6 +299,8 @@ module Lakeraven
 
         assert_equal "GRP001", cov.group_id
         assert_equal "PPO Gold", cov.plan_name
+        assert_equal "PLAN123", cov.plan_id
+        assert_equal "MEM999", cov.member_id
       end
 
       # -- Factory: from_eligibility_response ------------------------------------

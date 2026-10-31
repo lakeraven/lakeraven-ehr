@@ -32,7 +32,7 @@ module Lakeraven
         assert fhir[:identifier].any? { |id| (id[:value] || id["value"]) == SYNTHETIC_MEMBER_ID }
       end
 
-      test "to_fhir plan class carries member id as value and plan name as name" do
+      test "to_fhir plan class value is plan id or plan name, never member id" do
         cov = Coverage.new(
           patient_dfn: "1",
           coverage_type: "private_insurance",
@@ -47,8 +47,52 @@ module Lakeraven
         plan_class = fhir[:class]&.find { |c| c.dig(:type, :coding, 0, :code) == "plan" }
 
         assert plan_class, "Expected class[type=plan]"
-        assert_equal SYNTHETIC_MEMBER_ID, plan_class[:value]
+        assert_equal "PPO Gold", plan_class[:value],
+          "R4 Coverage.class (plan).value is the plan identifier (here plan_name when plan_id absent)"
         assert_equal "PPO Gold", plan_class[:name]
+        refute_equal SYNTHETIC_MEMBER_ID, plan_class[:value],
+          "Member id belongs in subscriberId/identifier, not class[type=plan].value"
+      end
+
+      test "to_fhir plan class value prefers plan_id over plan_name" do
+        cov = Coverage.new(
+          patient_dfn: "1",
+          coverage_type: "private_insurance",
+          payor_name: "Blue Cross",
+          plan_id: "BC-PLAN-8842",
+          plan_name: "PPO Gold",
+          member_id: SYNTHETIC_MEMBER_ID,
+          start_date: Date.new(2024, 1, 1),
+          status: "active"
+        )
+
+        fhir = cov.to_fhir
+        plan_class = fhir[:class]&.find { |c| c.dig(:type, :coding, 0, :code) == "plan" }
+
+        assert plan_class, "Expected class[type=plan]"
+        assert_equal "BC-PLAN-8842", plan_class[:value]
+        assert_equal "PPO Gold", plan_class[:name]
+      end
+
+      test "from_fhir maps subscriberId to member_id and plan class value to plan_id when distinct from name" do
+        fhir = {
+          resourceType: "Coverage",
+          beneficiary: { reference: "Patient/1" },
+          subscriberId: SYNTHETIC_MEMBER_ID,
+          class: [
+            {
+              type: { coding: [ { code: "plan" } ] },
+              value: "BC-PLAN-8842",
+              name: "PPO Gold"
+            }
+          ]
+        }
+
+        cov = Coverage.from_fhir(fhir)
+
+        assert_equal SYNTHETIC_MEMBER_ID, cov.member_id
+        assert_equal "BC-PLAN-8842", cov.plan_id
+        assert_equal "PPO Gold", cov.plan_name
       end
 
       test "to_fhir satisfies FHIR R4 Coverage required elements and element names" do
