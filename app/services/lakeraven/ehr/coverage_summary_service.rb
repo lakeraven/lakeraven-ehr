@@ -66,7 +66,7 @@ module Lakeraven
           payer_hierarchy: hierarchy,
           primary_payer: primary,
           secondary_payers: secondary,
-          prc_eligible: prc_result[:eligible],
+          prc_eligible: summary_prc_eligible(prc_result),
           requires_coordination: active.any?,
           authorization_reason: prc_result[:reason]
         )
@@ -99,11 +99,20 @@ module Lakeraven
       private
 
       def ranked_payor_names(coverages)
-        coverages.sort_by { |coverage| payer_sort_key(coverage) }.map(&:payor_display).uniq
+        coverages.sort_by { |coverage| payer_sort_key(coverage) }.map(&:payer_hierarchy_name).uniq
       end
 
       def payer_sort_key(coverage)
-        [ PAYER_PRIORITY[coverage.coverage_type] || 50, coverage.payor_display || "" ]
+        [ PAYER_PRIORITY[coverage.coverage_type] || 50, coverage.payer_hierarchy_name || "" ]
+      end
+
+      # On a referral, Summary#prc_eligible matches the eligibility gate:
+      # true only when the caller passed true. Without a referral, the
+      # coverage-derived answer stands.
+      def summary_prc_eligible(prc_result)
+        return @patient_prc_eligible == true if @service_request.present?
+
+        prc_result[:eligible]
       end
 
       # PRC is appended once, after every active payer, only on a referral

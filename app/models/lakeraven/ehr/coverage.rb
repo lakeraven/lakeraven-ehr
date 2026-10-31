@@ -23,6 +23,15 @@ module Lakeraven
       # Local codes only. Coverage.type does not claim v3-ActCode or SOPT.
       COVERAGE_TYPE_SYSTEM = "urn:lakeraven:fhir:CodeSystem:coverage-type"
       PRC_STATUS_EXTENSION_URL = "urn:lakeraven:fhir:StructureDefinition/prc-coverage-status"
+      # origin/main inbound map. Applies on any coding system. Unknown codes are nil.
+      FOREIGN_COVERAGE_TYPE_CODES = {
+        "MEDICARE" => "medicare_a",
+        "MEDICAID" => "medicaid",
+        "HIP" => "private_insurance",
+        "VET" => "va_benefits",
+        "WCBPOL" => "workers_comp",
+        "AUTOPOL" => "auto_insurance"
+      }.freeze
 
       # PRC-internal statuses are not R4 fm-status codes. Mapping is serialization-only.
       PRC_STATUS_TO_FHIR = {
@@ -109,6 +118,14 @@ module Lakeraven
         payor_name || default_payor_name
       end
 
+      # COB order names Medicare, Medicaid, and VA by program. A shared payor
+      # display must not collapse those programs or rank Medicaid as a private plan.
+      def payer_hierarchy_name
+        return default_payor_name if government_payer?
+
+        payor_display
+      end
+
       # Display name for the payor type (e.g., "Medicare Part A")
       def payor_type_display
         payor_type || default_payor_type
@@ -156,8 +173,10 @@ module Lakeraven
           status: extract_status(fhir_hash),
           coverage_type: extract_coverage_type(fhir_hash),
           payor_name: extract_payor_name(fhir_hash),
+          order: extract_order(fhir_hash),
           **extract_period(fhir_hash),
-          **extract_class_info(fhir_hash)
+          **extract_class_info(fhir_hash),
+          **relationship_attributes(fhir_hash)
         )
       end
 
@@ -361,7 +380,7 @@ module Lakeraven
         coding[:code] || coding["code"]
       end
 
-      # The local coverage-type coding is the code. A foreign coding is not claimed.
+      # Prefer a local coverage-type coding. Otherwise the first coding is mapped.
       def self.preferred_type_coding(concept)
         codings = concept_codings(concept)
         codings.find { |coding| coding_system(coding) == COVERAGE_TYPE_SYSTEM } || codings.first
@@ -377,10 +396,36 @@ module Lakeraven
         coding[:system] || coding["system"]
       end
 
+      # Local codes map exactly. Foreign codes keep origin/main's map.
+      # Anything else is nil so the record fails closed instead of becoming private insurance.
       def self.coverage_type_for_code(code)
         return code if COVERAGE_TYPES.include?(code)
 
-        "private_insurance"
+        FOREIGN_COVERAGE_TYPE_CODES[code]
+      end
+
+      def self.extract_order(fhir_hash)
+        return fhir_hash[:order] if fhir_hash.key?(:order)
+        return fhir_hash["order"] if fhir_hash.key?("order")
+
+        nil
+      end
+
+      def self.relationship_attributes(fhir_hash)
+        code = relationship_code(fhir_hash)
+        return {} if code.blank?
+
+        { relationship: code }
+      end
+
+      def self.relationship_code(fhir_hash)
+        relationship = fhir_hash[:relationship] || fhir_hash["relationship"]
+        return if relationship.blank?
+
+        coding = concept_codings(relationship).first
+        return unless coding
+
+        coding[:code] || coding["code"]
       end
 
       def self.extract_payor_name(fhir_hash)
@@ -422,19 +467,34 @@ module Lakeraven
 
       def self.assign_member_id(result, fhir_hash)
         subscriber = fhir_hash[:subscriberId] || fhir_hash["subscriberId"]
-        result[:subscriber_id] = subscriber if subscriber.present?
-
         member = mb_identifier_value(fhir_hash)
         if member.present?
-          result[:member_id] = member
-        elsif result[:member_id].blank? && subscriber.present? && !local_coverage_type?(fhir_hash)
+          assign_distinct_identifiers(result, subscriber, member)
+        elsif copy_subscriber_to_member?(result, fhir_hash, subscriber)
           result[:member_id] = subscriber
+        elsif subscriber.present?
+          result[:subscriber_id] = subscriber
         end
       end
 
-      # Resources that name the local coverage-type CodeSystem keep subscriberId
-      # and the MB identifier distinct. Older payloads without that system still
-      # carry the member number in subscriberId when no MB identifier is present.
+      def self.assign_distinct_identifiers(result, subscriber, member)
+        result[:subscriber_id] = subscriber if subscriber.present?
+        result[:member_id] = member
+      end
+
+      # External payloads with no MB identifier copy subscriberId onto member_id
+      # only when relationship is missing or self. Dependents keep subscriberId
+      # on subscriber_id. Local coverage-type payloads never use that copy.
+      def self.copy_subscriber_to_member?(result, fhir_hash, subscriber)
+        subscriber.present? && result[:member_id].blank? &&
+          !local_coverage_type?(fhir_hash) && beneficiary_is_subscriber?(fhir_hash)
+      end
+
+      def self.beneficiary_is_subscriber?(fhir_hash)
+        code = relationship_code(fhir_hash)
+        code.blank? || code == "self"
+      end
+
       def self.local_coverage_type?(fhir_hash)
         concept = fhir_hash[:type] || fhir_hash["type"]
         concept_codings(concept).any? { |coding| coding_system(coding) == COVERAGE_TYPE_SYSTEM }

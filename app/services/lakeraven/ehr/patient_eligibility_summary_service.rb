@@ -18,7 +18,7 @@ module Lakeraven
       class << self
         def summarize(patient:, service_request: nil)
           prc_result = check_prc(service_request) if service_request
-          coverage = build_coverage_from_patient(patient, service_request: service_request, prc_result: prc_result)
+          coverage = summarized_coverage(patient, service_request, prc_result)
           build_result(prc_result: prc_result, coverage: coverage, payer_verification: nil)
         end
 
@@ -39,6 +39,18 @@ module Lakeraven
 
         def check_prc(service_request)
           EligibilityService.check(service_request)
+        end
+
+        # A referral summarize has no Coverage records on file. It matches
+        # refresh with an empty list, so an eligible referral is PRC-primary.
+        # patient.coverage_type stays an eligibility fact. Without a referral,
+        # that chart type is still the coverage summary.
+        def summarized_coverage(patient, service_request, prc_result)
+          if service_request
+            build_coverage_summary([], service_request: service_request, prc_result: prc_result)
+          else
+            build_coverage_from_patient(patient, prc_result: prc_result)
+          end
         end
 
         def build_coverage_from_patient(patient, service_request: nil, prc_result: nil)
