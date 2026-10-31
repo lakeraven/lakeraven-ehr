@@ -1,0 +1,1 @@
+{"resourceType": "Observation", "id": "o102", "status": "final", "code": {"coding": [{"system": "http://loinc.org", "code": "44261-6"}]}, "subject": {"reference": "Patient/102"}, "effectiveDateTime": "2025-09-15", "valueQuantity": {"value": 3}}

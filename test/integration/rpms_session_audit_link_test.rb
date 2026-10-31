@@ -53,7 +53,7 @@ class RpmsSessionAuditLinkTest < ActionDispatch::IntegrationTest
   test "sign-in sends the browser's address to RPMS, and the user's audit rows name the RPMS session" do
     post "/lakeraven-ehr/login", params: { username: "PROV123", password: "VERIFY" },
                                  headers: { "REMOTE_ADDR" => "203.0.113.9" }
-    assert_redirected_to "/lakeraven-ehr/dashboard"
+    assert_redirected_to "/lakeraven-ehr/"
     assert_equal "203.0.113.9", @client.callers.last[:workstation_ip]
     assert_equal "405", session[:rpms_session_id]
 

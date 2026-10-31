@@ -27,6 +27,11 @@ module Lakeraven
         refute Capabilities.allows?(%w[scheduling_user], "scheduling.supervise")
       end
 
+      test "the GPRA report takes BGPZMENU, and its patient lists BGPZ PATIENT LISTS" do
+        assert_equal %w[gpra.view], Capabilities.for(Roles.symbolize_keys([ "BGPZMENU" ]))
+        assert_equal %w[gpra.patient_lists], Capabilities.for(Roles.symbolize_keys([ "BGPZ PATIENT LISTS" ]))
+      end
+
       test "no keys, unknown keys and programmer mode grant nothing" do
         assert_empty Capabilities.for([])
         assert_empty Capabilities.for(nil)

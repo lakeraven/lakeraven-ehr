@@ -65,7 +65,11 @@ module Lakeraven
 
         # Behavioral health (AMH)
         behavioral_health_user: "AMHZMENU",
-        behavioral_health_manager: "AMHZMGR"
+        behavioral_health_manager: "AMHZMGR",
+
+        # Clinical Reporting System (BGP): the GPRA report and its patient lists.
+        quality_reports_user: "BGPZMENU",
+        quality_reports_patient_lists: "BGPZ PATIENT LISTS"
       }.freeze
 
       KEY_SYMBOLS = KEY_NAMES.invert.freeze

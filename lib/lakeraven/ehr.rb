@@ -59,6 +59,16 @@ module Lakeraven
       # its SMART token is valid.
       attr_accessor :session_lifetime
 
+      # Where the GPRA report (#780) reads its population: an object whose
+      # #resources returns FHIR resource hashes shaped per rook's FHIR mapping,
+      # such as Gpra::NdjsonDirectorySource. Unset, no report is computed and
+      # the homepage says so.
+      attr_accessor :gpra_source
+
+      # The site's target rate for a GPRA measure, by rook measure id, as a
+      # proportion (0.0..1.0). A measure with no target shows none.
+      attr_accessor :gpra_targets
+
       def initialize
         @session_idle_limit = 30.minutes
         @session_lifetime = 12.hours
@@ -72,6 +82,8 @@ module Lakeraven
         }
         @eligibility_adapter = MockEligibilityAdapter.new
         @backend = :rpms
+        @gpra_source = nil
+        @gpra_targets = {}
       end
     end
 
