@@ -6,11 +6,12 @@ module Lakeraven
   module EHR
     # Issue #239 — Coverage records in PRC referral / alternate-resource workflow.
     #
-    # Contract (panel round 1): On a PRC referral, payer order lists every active
-    # alternate resource in COB priority, then IHS Purchased/Referred Care once at
-    # the end; with no active coverage, PRC is primary. PRC appears only when
-    # EligibilityService marks the patient prc_eligible. Outside a referral context,
-    # payer summaries omit PRC.
+    # Contract (panel round 2): On a PRC referral with prc_eligible true, payer order
+    # lists every active alternate resource in COB priority, then IHS Purchased/Referred
+    # Care once at the end; with no coverage records, PRC is still primary. PRC appears
+    # only when EligibilityService marks the patient prc_eligible. Outside a referral
+    # context, payer summaries omit PRC. refresh with empty coverages and no
+    # service_request leaves coverage_summary nil (unchanged).
     class CoverageWorkflowTest < ActiveSupport::TestCase
       PRC_PAYER = CoverageSummaryService::PRC_PAYER
 
@@ -105,6 +106,29 @@ module Lakeraven
         summary = result.coverage_summary
         assert_equal [ "Blue Cross" ], summary.payer_hierarchy
         refute_includes summary.payer_hierarchy, PRC_PAYER
+      end
+
+      test "refresh with no service_request and empty coverages leaves coverage summary nil" do
+        result = PatientEligibilitySummaryService.refresh(
+          patient: @patient,
+          coverages: []
+        )
+
+        assert_nil result.coverage_summary
+      end
+
+      test "referral refresh with empty coverages makes PRC primary for eligible patient" do
+        result = PatientEligibilitySummaryService.refresh(
+          patient: @patient,
+          service_request: @service_request,
+          coverages: []
+        )
+
+        assert result.prc_eligible, "Expected eligible patient for PRC referral context"
+        summary = result.coverage_summary
+        assert summary, "Expected coverage summary for PRC-eligible referral without coverage records"
+        assert_equal PRC_PAYER, summary.primary_payer
+        assert_equal [ PRC_PAYER ], summary.payer_hierarchy
       end
 
       test "alternate resource check is linked to the patient Coverage records used for the referral" do

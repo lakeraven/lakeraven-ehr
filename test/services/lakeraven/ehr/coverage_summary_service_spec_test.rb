@@ -4,7 +4,10 @@ require "test_helper"
 
 module Lakeraven
   module EHR
-    # Issue #239 — CoverageSummaryService payer order (factory spec, panel round 1).
+    # Issue #239 — CoverageSummaryService payer order (factory spec, panel round 2).
+    #
+    # Contract: PRC is appended on a referral only when prc_eligible is explicitly true.
+    # Unknown (nil) prc_eligible fails closed — no PRC in payer order.
     class CoverageSummaryServiceSpecTest < ActiveSupport::TestCase
       PRC_PAYER = CoverageSummaryService::PRC_PAYER
 
@@ -24,6 +27,14 @@ module Lakeraven
         sr
       end
 
+      def referral_summary(coverages, prc_eligible: true)
+        CoverageSummaryService.new(
+          coverages,
+          service_request: build_referral_service_request,
+          prc_eligible: prc_eligible
+        )
+      end
+
       test "without referral context payer hierarchy omits PRC" do
         coverages = [
           Coverage.new(patient_dfn: "1", coverage_type: "medicare_a", status: "active"),
@@ -36,55 +47,65 @@ module Lakeraven
         refute_includes hierarchy, PRC_PAYER
       end
 
-      test "referral context lists active payers in hierarchy order then PRC once" do
-        service_request = build_referral_service_request
+      test "referral with unknown prc_eligible does not append PRC" do
+        coverages = [
+          Coverage.new(patient_dfn: "1", coverage_type: "medicaid", status: "active")
+        ]
+
+        hierarchy = CoverageSummaryService.new(
+          coverages,
+          service_request: build_referral_service_request,
+          prc_eligible: nil
+        ).determine_payer_hierarchy
+
+        assert_equal [ "Medicaid" ], hierarchy
+        refute_includes hierarchy, PRC_PAYER
+      end
+
+      test "referral context lists active payers in hierarchy order then PRC once when prc eligible" do
         coverages = [
           Coverage.new(patient_dfn: "1", coverage_type: "medicare_a", status: "active"),
           Coverage.new(patient_dfn: "1", coverage_type: "medicaid", status: "active")
         ]
 
-        hierarchy = CoverageSummaryService.new(coverages, service_request: service_request).determine_payer_hierarchy
+        hierarchy = referral_summary(coverages).determine_payer_hierarchy
 
         assert_equal [ "Medicare", "Medicaid", PRC_PAYER ], hierarchy
         assert_equal 1, hierarchy.count(PRC_PAYER)
       end
 
       test "referral with workers comp and private insurance appends PRC after both actives" do
-        service_request = build_referral_service_request
         coverages = [
           Coverage.new(patient_dfn: "1", coverage_type: "private_insurance", status: "active", payor_name: "Blue Cross"),
           Coverage.new(patient_dfn: "1", coverage_type: "workers_comp", status: "active", payor_name: "Workers Compensation")
         ]
 
-        hierarchy = CoverageSummaryService.new(coverages, service_request: service_request).determine_payer_hierarchy
+        hierarchy = referral_summary(coverages).determine_payer_hierarchy
 
         assert_equal [ "Workers Compensation", "Blue Cross", PRC_PAYER ], hierarchy
       end
 
-      test "referral Medicaid-only hierarchy ends with PRC" do
-        service_request = build_referral_service_request
+      test "referral Medicaid-only hierarchy ends with PRC when prc eligible" do
         coverages = [
           Coverage.new(patient_dfn: "1", coverage_type: "medicaid", status: "active")
         ]
 
-        hierarchy = CoverageSummaryService.new(coverages, service_request: service_request).determine_payer_hierarchy
+        hierarchy = referral_summary(coverages).determine_payer_hierarchy
 
         assert_equal [ "Medicaid", PRC_PAYER ], hierarchy
       end
 
-      test "referral VA-only hierarchy ends with PRC" do
-        service_request = build_referral_service_request
+      test "referral VA-only hierarchy ends with PRC when prc eligible" do
         coverages = [
           Coverage.new(patient_dfn: "1", coverage_type: "va_benefits", status: "active")
         ]
 
-        hierarchy = CoverageSummaryService.new(coverages, service_request: service_request).determine_payer_hierarchy
+        hierarchy = referral_summary(coverages).determine_payer_hierarchy
 
         assert_equal [ "Department of Veterans Affairs", PRC_PAYER ], hierarchy
       end
 
       test "referral excludes expired coverage from payer order before PRC" do
-        service_request = build_referral_service_request
         coverages = [
           Coverage.new(
             patient_dfn: "1",
@@ -97,19 +118,18 @@ module Lakeraven
           Coverage.new(patient_dfn: "1", coverage_type: "medicaid", status: "active")
         ]
 
-        hierarchy = CoverageSummaryService.new(coverages, service_request: service_request).determine_payer_hierarchy
+        hierarchy = referral_summary(coverages).determine_payer_hierarchy
 
         assert_equal [ "Medicaid", PRC_PAYER ], hierarchy
         refute_includes hierarchy, "Blue Cross"
       end
 
-      test "referral with no active coverage makes PRC the primary payer" do
-        service_request = build_referral_service_request
+      test "referral with no active coverage makes PRC the primary payer when prc eligible" do
         coverages = [
           Coverage.new(patient_dfn: "1", coverage_type: "medicare_a", status: "cancelled")
         ]
 
-        summary = CoverageSummaryService.new(coverages, service_request: service_request).summarize
+        summary = referral_summary(coverages).summarize
 
         assert_equal PRC_PAYER, summary.primary_payer
         assert_equal [ PRC_PAYER ], summary.payer_hierarchy

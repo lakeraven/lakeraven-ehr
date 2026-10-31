@@ -10,14 +10,15 @@ Feature: Coverage FHIR resources for payer coordination
     And the coverage payor should be "Medicaid"
     And the coverage type should be "medicaid"
 
-  Scenario: FHIR Coverage serialization includes member id and plan class
+  Scenario: FHIR Coverage serialization puts member id on MB identifier not subscriberId
     Given a coverage with type "private_insurance" for patient "1"
     And the coverage payor name is "Blue Cross"
     And the coverage plan name is "PPO Gold"
     And the coverage member id is "BC-SYNTH-0001"
     And the coverage period starts on "2024-01-01"
     When I serialize the coverage to FHIR
-    Then the FHIR Coverage subscriber id should be "BC-SYNTH-0001"
+    Then the FHIR Coverage subscriber id should be absent
+    And the FHIR Coverage member identifier value should be "BC-SYNTH-0001"
     And the FHIR Coverage plan class value should be "PPO Gold"
     And the FHIR Coverage plan class name should be "PPO Gold"
 
@@ -38,11 +39,19 @@ Feature: Coverage FHIR resources for payer coordination
     And the FHIR Coverage member identifier type code should be "MB"
     And the FHIR Coverage member identifier value should be "BC-SYNTH-0001"
 
-  Scenario Outline: PRC-internal coverage status maps to FHIR R4 fm-status
+  Scenario: FHIR Coverage type uses local coverage-type CodeSystem
+    Given a coverage with type "medicare_b" for patient "1"
+    When I serialize the coverage to FHIR
+    Then the FHIR Coverage type coding system should be "urn:lakeraven:fhir:CodeSystem:coverage-type"
+    And the FHIR Coverage type coding code should be "medicare_b"
+    And the FHIR Coverage type coding display should be present
+
+  Scenario Outline: PRC-internal coverage status maps to FHIR R4 fm-status and extension
     Given a coverage with type "medicaid" and status "<prc_status>" for patient "1"
     When I serialize the coverage to FHIR
     Then the FHIR coverage status should be "<fhir_status>"
     And the coverage model status should be "<prc_status>"
+    And the FHIR Coverage PRC status extension should be "<prc_status>"
 
     Examples:
       | prc_status   | fhir_status |

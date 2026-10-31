@@ -115,6 +115,10 @@ Then("the FHIR Coverage subscriber id should be {string}") do |subscriber_id|
   assert_equal subscriber_id, @fhir[:subscriberId]
 end
 
+Then("the FHIR Coverage subscriber id should be absent") do
+  assert @fhir[:subscriberId].blank?, "Expected no FHIR Coverage.subscriberId"
+end
+
 Then("the FHIR Coverage plan class value should be {string}") do |value|
   plan_class = @fhir[:class]&.find { |c| c.dig(:type, :coding, 0, :code) == "plan" }
   assert plan_class, "Expected class[type=plan]"
@@ -163,6 +167,31 @@ end
 
 Then("the coverage model status should be {string}") do |status|
   assert_equal status, @coverage.status
+end
+
+Then("the FHIR Coverage type coding system should be {string}") do |system|
+  coding = @fhir.dig(:type, :coding, 0)
+  assert coding, "Expected Coverage.type coding"
+  assert_equal system, coding[:system]
+end
+
+Then("the FHIR Coverage type coding code should be {string}") do |code|
+  coding = @fhir.dig(:type, :coding, 0)
+  assert coding, "Expected Coverage.type coding"
+  assert_equal code, coding[:code]
+end
+
+Then("the FHIR Coverage type coding display should be present") do
+  display = @fhir.dig(:type, :coding, 0, :display)
+  assert display.present?, "Expected display on Coverage.type coding"
+end
+
+PRC_STATUS_EXTENSION_URL = "urn:lakeraven:fhir:StructureDefinition/prc-coverage-status"
+
+Then("the FHIR Coverage PRC status extension should be {string}") do |prc_status|
+  extension = Array(@fhir[:extension]).find { |ext| ext[:url] == PRC_STATUS_EXTENSION_URL }
+  assert extension, "Expected PRC status extension on Coverage"
+  assert_equal prc_status, extension[:valueCode]
 end
 
 def member_identifier_entry
