@@ -1,0 +1,73 @@
+<% content_for :title, "Find a patient | Lakeraven EHR" %>
+
+<div class="page-header">
+  <h1>Find a patient</h1>
+  <p>
+    Search by name, health record number, date of birth, or the last four digits of the SSN.
+  </p>
+</div>
+
+<%# With no patient open the bar above holds the search; with one open, it is here. %>
+<% unless patient_banner&.empty? %>
+  <%= render "lakeraven/ehr/shared/patient_search_form", query: @query %>
+<% end %>
+
+<% if @lookup_failed %>
+  <div
+    class="alert alert--error"
+    role="alert"
+  >
+    <p>
+      The patient lookup did not answer, so this list is not complete.
+    </p>
+  </div>
+<% elsif @query.present? && @matches.empty? %>
+  <p
+    id="no-match"
+    class="hint"
+  >
+    No patient matches “<%= @query %>”.
+  </p>
+<% end %>
+
+<% patients, caption = @query.present? ? [ @matches, "Patients matching “#{@query}”" ] : [ @recent, "My recent patients" ] %>
+<% if patients.present? %>
+  <table
+    id="<%= @query.present? ? 'matches' : 'recent-patients' %>"
+    class="mt-6 w-full text-left"
+  >
+    <caption class="text-left font-semibold"><%= caption %></caption>
+    <thead>
+      <tr>
+        <th scope="col">Name</th>
+        <th scope="col">Date of birth</th>
+        <th scope="col">Sex</th>
+        <th scope="col">Health record number</th>
+        <th scope="col"><span class="sr-only">Open</span></th>
+      </tr>
+    </thead>
+    <tbody>
+      <% patients.each do |patient| %>
+        <tr data-dfn="<%= patient.dfn %>">
+          <td><%= patient.name %></td>
+          <td><%= patient.dob&.strftime("%b %-d, %Y") %></td>
+          <td><%= patient.sex %></td>
+          <td><%= patient.hrn || "None at this facility" %></td>
+          <td>
+            <%= button_to "Open chart",
+                  patient_context_url(patient.dfn),
+                  method: :post,
+                  class: "underline" %>
+          </td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+<% elsif @query.blank? && !@lookup_failed %>
+  <p
+    id="no-recent"
+    class="hint mt-6"
+  >
+    Patients you open will be listed here.
+  </p>
+<% end %>
