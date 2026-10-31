@@ -19,6 +19,7 @@ module Lakeraven
         REVIEW_PURPOSE = :registration_review
         REVIEW_TTL = 15.minutes
 
+        before_action :require_bprm_registration!
         before_action :require_authentication
         # The search is AG's own lookup (AGG LOOKUP PATIENTS), which RPMS runs for
         # registration users only: a scheduler is refused it, and finds patients
@@ -108,6 +109,14 @@ module Lakeraven
         end
 
         private
+
+        # Registration runs on AG, which only an IHS backend serves (#647).
+        def require_bprm_registration!
+          return if BackendRegistry.current.provides?(:bprm_registration)
+
+          note_audit_denial("browser access refused: backend lacks bprm_registration")
+          render plain: "Registration is not available on this backend.", status: :not_found
+        end
 
         def handle(result)
           if result.registered?

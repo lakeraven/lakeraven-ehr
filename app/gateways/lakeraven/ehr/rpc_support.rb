@@ -7,15 +7,17 @@ require "rpms_rpc/fileman_date_parser"
 
 module Lakeraven
   module EHR
-    # Shared helpers for the BPRM registration/scheduling/ADT twin gateways.
+    # Shared helpers for the BPRM registration/scheduling/ADT twin gateways,
+    # which were retired unused (#542). No gateway calls RpcSupport now;
+    # AuditedBroker hangs off its broker (ADR 0005), so it stays until the
+    # audit moves to a client hook in rpms-rpc.
     #
     # Every reg/sched gateway follows the same shape: build a caret-delimited
     # payload, call one (or a few) RPMS RPCs through the backend client, parse the
     # caret response, and return a transport-neutral result Hash carrying an
     # HTTP :status so a thin controller can render it directly.
     #
-    # Response convention for write RPCs (BSDX / DG* / the placeholder
-    # BHDPTRPC wire names — see RegistrationGateway's header note): the first
+    # Response convention for write RPCs (BSDX / DG*): the first
     # caret piece is a success flag ("1"/"0"); on failure the human-readable
     # M-side message follows. Reads return an Array of caret-delimited lines.
     module RpcSupport

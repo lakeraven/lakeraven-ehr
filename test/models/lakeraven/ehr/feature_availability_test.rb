@@ -6,7 +6,7 @@ module Lakeraven
   module EHR
     # Pins the CapabilityStatement source of truth for #574 / #647: each IHS
     # capability names the FHIR interactions it owns; Patient read/search stay
-    # available without any IHS capability (registration only gates create).
+    # available without any IHS capability; registration owns no FHIR interaction.
     class FeatureAvailabilityTest < ActiveSupport::TestCase
       include IhsFeatureAvailabilityTestHelper
 
@@ -17,9 +17,7 @@ module Lakeraven
           %w[ServiceRequest search-type]
         ],
         tribal_enrollment: [],
-        bprm_registration: [
-          %w[Patient create]
-        ],
+        bprm_registration: [],
         bprm_scheduling: [],
         ihs_immunization: [
           %w[Immunization search-type]
@@ -81,14 +79,6 @@ module Lakeraven
           assert_includes BackendRegistry.supported_fhir_interactions("Patient"), "read"
           assert_includes BackendRegistry.supported_fhir_interactions("Patient"), "search-type"
           refute_includes BackendRegistry.supported_fhir_interactions("Patient"), "create"
-        end
-      end
-
-      test "supported_fhir_interactions adds Patient create when bprm_registration is provided" do
-        with_restricted_backend(capabilities: [ :bprm_registration ]) do
-          interactions = BackendRegistry.supported_fhir_interactions("Patient")
-          assert_includes interactions, "read"
-          assert_includes interactions, "create"
         end
       end
 
