@@ -33,7 +33,7 @@ class GlobalStoreIsolationConventionExemptionTest < ActiveSupport::TestCase
 
   test "unregistered resetter is reported and alias does not hide it" do
     probe = Class.new
-    probe.define_singleton_method(:reset!) {}
+    probe.define_singleton_method(:reset!) { }
     Lakeraven::EHR.const_set(UNREGISTERED_PROBE, probe)
     probe_constant = "Lakeraven::EHR::#{UNREGISTERED_PROBE}"
 
