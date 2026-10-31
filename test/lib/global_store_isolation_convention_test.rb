@@ -23,7 +23,15 @@ class GlobalStoreIsolationConventionTest < ActiveSupport::TestCase
   test "every class-level store reset is invoked by GlobalStoreIsolation.reset!" do
     eager_load_engine!
 
+    # Resolve every EXEMPTED key up front. The walk may never visit an entry
+    # (a core class, or a finder that returns nothing), and a stale key must
+    # still fail this check.
+    exempted_objects
     resetters = constants_with_class_level_reset
+    refute_empty resetters,
+                 "no class-level store resetters were found under Lakeraven::EHR, " \
+                 "so the check cannot pass vacuously"
+
     called = resetters.to_h { |constant_name, _klass, _method| [ constant_name, false ] }
 
     invoke_with_reset_stubs(resetters, called) { GlobalStoreIsolation.reset! }
@@ -63,7 +71,9 @@ class GlobalStoreIsolationConventionTest < ActiveSupport::TestCase
 
   # EXEMPTED is keyed by constant name, but resetters are deduplicated by object
   # and reported under the canonical class name. Match the resolved object so an
-  # alias of an exempted class is exempt too. Resolve once per check.
+  # alias of an exempted class is exempt too. The key itself must be that
+  # canonical name, and the constant must define a class-level reset. Resolve
+  # once per check.
   def exempted_object?(object)
     exempted_objects.any? { |exempted| exempted.equal?(object) }
   end
@@ -73,7 +83,15 @@ class GlobalStoreIsolationConventionTest < ActiveSupport::TestCase
   end
 
   def resolve_exempted(name)
-    name.constantize
+    object = name.constantize
+    if !object.is_a?(Module)
+      flunk "stale EXEMPTED entry does not resolve to a module: #{name}"
+    elsif object.name != name
+      flunk "EXEMPTED key #{name} must be the canonical name #{object.name}"
+    elsif class_level_reset_method(object).nil?
+      flunk "EXEMPTED entry #{name} covers nothing (no class-level reset)"
+    end
+    object
   rescue NameError
     flunk "stale EXEMPTED entry does not resolve to a constant: #{name}"
   end
