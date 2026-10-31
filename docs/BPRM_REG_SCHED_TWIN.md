@@ -1,5 +1,11 @@
 # BPRM Registration + Scheduling — Executable-Spec Twin
 
+> **Status (2026-10-30):** the twin's scheduling and ADT gateways
+> (`SchedulingGateway`, `AdtGateway`) were retired: nothing called them, and most of
+> their RPC names are registered on no RPMS baseline (#542). The scheduling screens
+> run on `RpmsRpc::Scheduling` instead; `docs/BPRM_PARITY_PLAN.md` is the current plan.
+> The scenarios below remain the behaviour to reach.
+
 Behavioral spec ("digital twin") for RPMS **BPRM v4** (IHS Practice Management):
 patient **registration** and appointment **scheduling**. The goal is to let
 `lakeraven-ehr` reimplement BPRM's user-facing behavior over the **VistA RPC
