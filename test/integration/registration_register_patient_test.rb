@@ -200,7 +200,8 @@ class RegistrationRegisterPatientTest < ActionDispatch::IntegrationTest
 
       assert_response :service_unavailable
       assert_select "#outcome-unknown", text: /do not register them again yet/
-      assert_select "#search-after-unknown[href*='q=PROBE%2CALPHA']"
+      # The search is posted with the name, never linked with it in the URL (#722).
+      assert_select "form[action='/lakeraven-ehr/registration/patients/search'][method='post'] input[name='q'][value='PROBE,ALPHA']"
       assert_select "#registration-form", count: 0
     end
 
@@ -233,7 +234,7 @@ class RegistrationRegisterPatientTest < ActionDispatch::IntegrationTest
     gateway.alias_method(:__find, :find)
     Lakeraven::EHR::PatientLookupGateway.define_singleton_method(:find) { |*, **| [] }
 
-    get "/lakeraven-ehr/registration/patients", params: { q: "PROBE,ALPHA", dob: "1990-05-01" }
+    post "/lakeraven-ehr/registration/patients/search", params: { q: "PROBE,ALPHA", dob: "1990-05-01" }
 
     assert_select "#register-new-patient[href*='registration%5Bname%5D=PROBE%2CALPHA']"
   ensure

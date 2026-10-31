@@ -122,7 +122,12 @@ Lakeraven::EHR::Engine.routes.draw do
   # The front desk finds a patient (rpms-ux S-REG-01) and registers a new one (S-REG-02).
   namespace :registration do
     get "patients", to: "patients#index", as: :patients
+    # A search names a patient (an SSN, a name, a date of birth), so it is posted,
+    # never carried in a URL, browser history or a log line (#722).
+    post "patients/search", to: "patients#index", as: :search_patients
     get "patients/new", to: "patients#new", as: :new_patient
+    # The tribe and community look-ups post the form back, with its demographics (#722).
+    post "patients/new", to: "patients#new"
     post "patients", to: "patients#create"
     post "patients/confirm", to: "patients#confirm", as: :confirm_patient
     get "patients/:dfn", to: "patients#show", as: :patient, constraints: { dfn: /\d+/ }
