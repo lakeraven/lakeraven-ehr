@@ -83,7 +83,11 @@ class GlobalStoreIsolationConventionTest < ActiveSupport::TestCase
   end
 
   def resolve_exempted(name)
-    object = name.constantize
+    object = begin
+      name.constantize
+    rescue NameError
+      flunk "stale EXEMPTED entry does not resolve to a constant: #{name}"
+    end
     if !object.is_a?(Module)
       flunk "stale EXEMPTED entry does not resolve to a module: #{name}"
     elsif object.name != name
@@ -92,8 +96,6 @@ class GlobalStoreIsolationConventionTest < ActiveSupport::TestCase
       flunk "EXEMPTED entry #{name} covers nothing (no class-level reset)"
     end
     object
-  rescue NameError
-    flunk "stale EXEMPTED entry does not resolve to a constant: #{name}"
   end
 
   def walk_constants(mod, prefix = "Lakeraven::EHR", visited = nil)
