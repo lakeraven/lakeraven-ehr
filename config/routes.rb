@@ -120,6 +120,11 @@ Lakeraven::EHR::Engine.routes.draw do
   delete "logout" => "sessions#destroy", as: :logout
   get "dashboard" => "dashboards#show", as: :dashboard
 
+  # The patient bar's search and recent patients (rpms-ux S-CHT-01). A search
+  # names a patient, so it is posted, never carried in a URL (#722).
+  get "chart_search", to: "chart_searches#show", as: :chart_search
+  post "chart_search", to: "chart_searches#create"
+
   # The front desk finds a patient (rpms-ux S-REG-01) and registers a new one (S-REG-02).
   namespace :registration do
     get "patients", to: "patients#index", as: :patients

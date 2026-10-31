@@ -5,10 +5,10 @@
   class="sticky top-0 z-20 bg-slate-50"
 >
   <% if banner.empty? %>
-    <p>No patient selected</p>
-    <%# No chart-search page exists yet; the dashboard is the nearest
-        signed-in surface, labeled as the search the empty state promises. %>
-    <%= link_to "Chart search", dashboard_path %>
+    <%# No patient open: the bar holds the search (rpms-ux S-CHT-01.7). %>
+    <% if patient_search_allowed? %>
+      <%= render "lakeraven/ehr/shared/patient_search_form", query: @query %>
+    <% end %>
   <% else %>
     <% if banner.notice.present? %>
       <p><%= banner.notice %></p>
@@ -41,6 +41,13 @@
           <%= banner.allergies.text %>
         <% end %>
       </div>
+    <% end %>
+
+    <%# Another patient can be found without closing this chart (S-CHT-01.9). %>
+    <% if patient_search_allowed? %>
+      <%= link_to "Switch patient",
+            chart_search_path,
+            id: "switch-patient" %>
     <% end %>
 
     <% if banner.show_clear? %>

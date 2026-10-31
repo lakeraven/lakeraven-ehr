@@ -155,10 +155,11 @@ module PatientBannerTestHelper
 
   def assert_empty_banner!
     banner = assert_patient_banner!
-    assert_includes banner.text, "No patient selected"
-    link = banner.css("a").find { |a| a.text.match?(/chart search/i) }
-    assert link, "Expected a chart search link in the empty banner"
-    assert link["href"].present?, "Chart search link must have an href"
+    # No patient open: the bar is the patient search (rpms-ux S-CHT-01.7), posted.
+    form = banner.at_css("form#patient-search")
+    assert form, "Expected the patient search in the empty banner"
+    assert_equal "post", form["method"]
+    assert form.at_css("input[name='q']"), "Expected a search field in the empty banner"
   end
 
   def submit_clear_patient_context!
@@ -283,7 +284,7 @@ module PatientBannerTestHelper
     refute_includes banner.text, "Penicillin"
     refute_includes banner.text, "Shellfish"
     refute_match(/MRN\s*\/\s*DFN/i, banner.text)
-    refute_includes banner.text, "No patient selected"
+    assert_nil banner.at_css("form#patient-search"), "patient mode shows the patient, not the search"
     clear = banner.css("button, input[type=submit]").find { |n| n.text.match?(/clear patient context/i) }
     assert clear, "Expected Clear patient context control in banner"
   end
