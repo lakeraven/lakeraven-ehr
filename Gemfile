@@ -47,7 +47,7 @@ gem "pg"
 # SaaS host runs. Engine pages link the host's Tailwind build (tailwind.css);
 # without an asset pipeline that link has no route and every page load 404s it.
 gem "propshaft"
-gem "tailwindcss-rails", "~> 4.4"
+gem "tailwindcss-rails", "~> 4.7"
 
 gem "cucumber-rails", require: false
 gem "minitest"
