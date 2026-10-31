@@ -4,10 +4,10 @@ require "test_helper"
 
 module Lakeraven
   module EHR
-    class FhirSerializableTest < ActiveSupport::TestCase
-      # Host class exposes private FhirSerializable helpers for contract tests.
+    class FHIRSerializableTest < ActiveSupport::TestCase
+      # Host class exposes private FHIRSerializable helpers for contract tests.
       class HelperHost
-        include Lakeraven::EHR::FhirSerializable
+        include Lakeraven::EHR::FHIRSerializable
 
         def call_build_identifier(**kwargs) = build_identifier(**kwargs)
         def call_build_reference(resource_type, id) = build_reference(resource_type, id)

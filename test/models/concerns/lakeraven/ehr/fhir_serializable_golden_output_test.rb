@@ -4,7 +4,7 @@ require "test_helper"
 
 module Lakeraven
   module EHR
-    class FhirSerializableGoldenOutputTest < ActiveSupport::TestCase
+    class FHIRSerializableGoldenOutputTest < ActiveSupport::TestCase
       ORGANIZATION_GOLDEN_FHIR = {
         resourceType: "Organization",
         id: "242",
@@ -156,10 +156,10 @@ module Lakeraven
       ].freeze
 
       FHIR_ADOPTION_MODELS.each do |model|
-        test "#{model.name.demodulize} includes FhirSerializable" do
+        test "#{model.name.demodulize} includes FHIRSerializable" do
           assert(
-            model.included_modules.any? { |mod| mod.name == "Lakeraven::EHR::FhirSerializable" },
-            "expected #{model.name} to include Lakeraven::EHR::FhirSerializable"
+            model.included_modules.any? { |mod| mod.name == "Lakeraven::EHR::FHIRSerializable" },
+            "expected #{model.name} to include Lakeraven::EHR::FHIRSerializable"
           )
         end
       end
