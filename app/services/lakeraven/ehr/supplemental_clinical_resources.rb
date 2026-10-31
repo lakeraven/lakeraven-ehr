@@ -17,7 +17,7 @@ module Lakeraven
     # dropped -- an unattributable clinical resource cannot be shown to be this
     # patient's.
     class SupplementalClinicalResources
-      WireAllergyBatch = Struct.new(:records, :dropped_count, :assessed, :nka, keyword_init: true)
+      WireAllergyBatch = Struct.new(:records, :dropped_count, :assessed, :nka, :conflict, keyword_init: true)
       # Not a placeholder and not ASCII digits. Never an identity that can match.
       MALFORMED_ALLERGEN_CODE = :malformed
       private_constant :WireAllergyBatch, :MALFORMED_ALLERGEN_CODE
@@ -54,7 +54,8 @@ module Lakeraven
             records,
             dropped_count: wire.dropped_count + supplemental_dropped + differing_drops,
             assessed: wire.assessed,
-            nka: wire.nka
+            nka: wire.nka,
+            conflict: wire.conflict
           )
         end
 
@@ -78,10 +79,10 @@ module Lakeraven
         end
 
         def wire_allergy_batch(dfn)
-          assessed, nka, rows = wire_allergy_reply(dfn)
+          assessed, nka, conflict, rows = wire_allergy_reply(dfn)
           kept, dropped = split_owned_wire_allergies(rows, dfn)
           WireAllergyBatch.new(
-            records: kept, dropped_count: dropped, assessed: assessed, nka: nka
+            records: kept, dropped_count: dropped, assessed: assessed, nka: nka, conflict: conflict
           )
         end
 
@@ -91,8 +92,7 @@ module Lakeraven
         def wire_allergy_reply(dfn)
           begin_wire_assessment_capture
           rows = Array(AllergyIntolerance.for_patient(dfn))
-          assessed, nka = assessment_flags(assessment_state_for(rows))
-          [ assessed, nka, rows ]
+          [ *assessment_flags(assessment_state_for(rows)), rows ]
         ensure
           end_wire_assessment_capture
         end
@@ -115,9 +115,9 @@ module Lakeraven
         end
 
         def assessment_flags(state)
-          return [ false, false ] unless state.is_a?(Hash)
+          return [ false, false, false ] unless state.is_a?(Hash)
 
-          [ state[:assessed] == true, state[:nka] == true ]
+          [ state[:assessed] == true, state[:nka] == true, state[:conflict] == true ]
         end
 
         # A dropped wire row is not this patient's allergy, and it is not

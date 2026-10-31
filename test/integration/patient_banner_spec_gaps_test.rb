@@ -38,6 +38,28 @@ class PatientBannerSpecGapsTest < ActionDispatch::IntegrationTest
     end
   end
 
+  # #672: LIST^ORQQAL writes a marker only where it writes no rows, so a marker
+  # beside a row, or twice, is a corrupted reply (rpms-rpc#483). Its rows may be
+  # another call's or truncated: shown, never as a complete list.
+  [
+    [ "a marker beside a row", [ "1^LATEX", RpmsRpc::Allergy::NKA_SENTINEL ] ],
+    [ "a marker twice, beside a row", [ RpmsRpc::Allergy::NKA_SENTINEL, "1^LATEX", RpmsRpc::Allergy::NKA_SENTINEL ] ]
+  ].each do |label, lines|
+    test "a conflicting ORQQAL reply (#{label}) shows its allergies as incomplete on every page" do
+      with_demo_clinical_seeds do
+        sign_in_clinician!
+        open_patient_context!(1)
+        seed_orqqal_reply!("1", lines)
+
+        assert_dashboard_and_chart_allergies_incomplete_with_known_names!("LATEX")
+
+        get "#{MOUNT}/patients/1/screenings"
+        assert_response :ok
+        assert_allergies_incomplete_with_known_names!("LATEX")
+      end
+    end
+  end
+
   test "empty ORQQAL reply shows not-loaded on dashboard and chart" do
     with_demo_clinical_seeds do
       sign_in_clinician!
