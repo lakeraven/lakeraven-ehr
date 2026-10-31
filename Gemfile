@@ -39,6 +39,10 @@ else
   gem "rpms-rpc", github: "lakeraven/rpms-rpc", ref: "33f4c64"
 end
 
+# The GPRA measure engine the homepage report runs (#780). A fixed ref, like
+# rpms-rpc's, so measure logic does not change under a deploy.
+gem "rook", github: "lakeraven/rook", ref: "c48bcd1"
+
 gem "puma"
 gem "pg"
 

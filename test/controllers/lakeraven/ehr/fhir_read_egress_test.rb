@@ -80,6 +80,8 @@ module Lakeraven
         "lakeraven/ehr/scheduling/cancellations#create", # Cancellation entry, not disclosure
         "lakeraven/ehr/scheduling/checkins#new",         # Check-in form: patient name and time, provider names, no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/scheduling/checkins#create",      # Check-in entry, not disclosure
+        "lakeraven/ehr/gpra/reports#show",               # GPRA report: measure counts and rates, no patient (#780)
+        "lakeraven/ehr/gpra/care_gaps#index",            # A measure's care gaps: patient name, date of birth, measure and reason; the measures use no substance-use codes; revisit with Part 2 (#494)
         "lakeraven/ehr/test_sessions#create", # Test only
         "lakeraven/ehr/smart_configuration#show", # Discovery
         "lakeraven/ehr/smart_launch#show",    # Discovery

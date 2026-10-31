@@ -3,7 +3,7 @@
 require "test_helper"
 require_relative "../support/demo_persona_keys"
 
-# Every registration and scheduling screen is refused on the server to a demo
+# Every registration, scheduling and GPRA patient-list screen is refused on the server to a demo
 # persona without the capability it needs, and not refused to one with it
 # (ADR 0010). The check runs before any RPMS read, so a refusal needs no RPMS;
 # an allowed request may go on to answer anything but 403. A route with no row
@@ -26,13 +26,14 @@ class CapabilityRefusalMatrixTest < ActionDispatch::IntegrationTest
     "GET /scheduling/clinics/:resource_id/appointments/:appointment_id/cancel" => "scheduling.open",
     "POST /scheduling/clinics/:resource_id/appointments/:appointment_id/cancel" => "scheduling.open",
     "GET /scheduling/clinics/:resource_id/appointments/:appointment_id/checkin" => "scheduling.open",
-    "POST /scheduling/clinics/:resource_id/appointments/:appointment_id/checkin" => "scheduling.open"
+    "POST /scheduling/clinics/:resource_id/appointments/:appointment_id/checkin" => "scheduling.open",
+    "GET /gpra/measures/:measure_id/care_gaps" => "gpra.patient_lists"
   }.freeze
 
   def engine_routes
     Lakeraven::EHR::Engine.routes.routes.filter_map do |route|
       path = route.path.spec.to_s.delete_suffix("(.:format)")
-      "#{route.verb} #{path}" if path.match?(%r{\A/(registration|scheduling)(/|\z)})
+      "#{route.verb} #{path}" if path.match?(%r{\A/(registration|scheduling|gpra)(/|\z)})
     end
   end
 
@@ -47,7 +48,7 @@ class CapabilityRefusalMatrixTest < ActionDispatch::IntegrationTest
     verb == "GET" ? get(url) : post(url)
   end
 
-  test "every registration and scheduling route has a row" do
+  test "every registration, scheduling and GPRA route has a row" do
     assert_equal engine_routes.sort, ROUTES.keys.sort
   end
 

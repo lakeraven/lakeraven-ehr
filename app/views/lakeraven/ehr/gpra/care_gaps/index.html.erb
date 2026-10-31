@@ -1,0 +1,44 @@
+<% content_for :title, "Care gaps | Lakeraven EHR" %>
+
+<div class="page-header">
+  <h1><%= @measure["title"] %></h1>
+  <p>
+    <%= @total %> patients with a care gap, as of
+    <time datetime="<%= @run.finished_at.iso8601 %>"><%= @run.finished_at.strftime("%-d %b %Y %H:%M %Z") %></time>.
+  </p>
+</div>
+
+<table id="care-gaps">
+  <thead>
+    <tr>
+      <th scope="col">Patient</th>
+      <th scope="col">Date of birth</th>
+      <th scope="col">Why</th>
+    </tr>
+  </thead>
+  <tbody>
+    <% @gaps.each do |gap| %>
+      <tr data-dfn="<%= gap[:dfn] %>">
+        <td>
+          <% if gap[:header] %>
+            <%= link_to gap[:header][:name], patient_chart_path(gap[:dfn]) %>
+          <% else %>
+            Not found in RPMS
+          <% end %>
+        </td>
+        <td><%= gap[:header]&.dig(:dob)&.strftime("%-d %b %Y") %></td>
+        <td><%= gap[:reason] %></td>
+      </tr>
+    <% end %>
+  </tbody>
+</table>
+
+<% if @pages > 1 %>
+  <nav class="mt-4 flex gap-4 text-sm" aria-label="Pages">
+    <% if @page > 1 %><%= link_to "Previous", gpra_measure_care_gaps_path(@measure["id"], page: @page - 1) %><% end %>
+    <span>Page <%= @page %> of <%= @pages %></span>
+    <% if @page < @pages %><%= link_to "Next", gpra_measure_care_gaps_path(@measure["id"], page: @page + 1) %><% end %>
+  </nav>
+<% end %>
+
+<p class="mt-6 text-sm"><%= link_to "Back to the GPRA report", root_path %></p>

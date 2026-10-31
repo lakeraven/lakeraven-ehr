@@ -65,7 +65,7 @@ module Lakeraven
         establish_session(provider)
         return render_at_capacity unless adopt_connection(provider)
 
-        redirect_to dashboard_path
+        redirect_to root_path
       end
 
       def destroy

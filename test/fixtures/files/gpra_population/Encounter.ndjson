@@ -1,0 +1,3 @@
+{"resourceType": "Encounter", "id": "e101", "status": "finished", "class": {"code": "AMB"}, "subject": {"reference": "Patient/101"}, "period": {"start": "2025-09-15"}}
+{"resourceType": "Encounter", "id": "e102", "status": "finished", "class": {"code": "AMB"}, "subject": {"reference": "Patient/102"}, "period": {"start": "2025-09-15"}}
+{"resourceType": "Encounter", "id": "e103", "status": "finished", "class": {"code": "AMB"}, "subject": {"reference": "Patient/103"}, "period": {"start": "2025-09-15"}}

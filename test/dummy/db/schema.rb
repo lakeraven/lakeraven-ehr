@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_30_000000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_31_000000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -121,6 +121,27 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_30_000000) do
     t.index [ "accessed_by" ], name: "index_lakeraven_ehr_emergency_accesses_on_accessed_by"
     t.index [ "expires_at" ], name: "index_lakeraven_ehr_emergency_accesses_on_expires_at"
     t.index [ "patient_dfn" ], name: "index_lakeraven_ehr_emergency_accesses_on_patient_dfn"
+  end
+
+  create_table "lakeraven_ehr_gpra_care_gaps", force: :cascade do |t|
+    t.bigint "gpra_run_id", null: false
+    t.string "measure_id", null: false
+    t.string "patient_dfn", null: false
+    t.string "reason", null: false
+    t.index [ "gpra_run_id", "measure_id" ], name: "index_lakeraven_ehr_gpra_care_gaps_on_run_and_measure"
+  end
+
+  create_table "lakeraven_ehr_gpra_runs", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "error_class"
+    t.datetime "finished_at"
+    t.jsonb "measures", default: [], null: false
+    t.date "period_end", null: false
+    t.date "period_start", null: false
+    t.datetime "started_at", null: false
+    t.string "status", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "status", "finished_at" ], name: "index_lakeraven_ehr_gpra_runs_on_status_and_finished_at"
   end
 
   create_table "lakeraven_ehr_launch_contexts", force: :cascade do |t|
@@ -296,6 +317,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_30_000000) do
     t.index [ "uid" ], name: "index_oauth_applications_on_uid", unique: true
   end
 
+  add_foreign_key "lakeraven_ehr_gpra_care_gaps", "lakeraven_ehr_gpra_runs", column: "gpra_run_id", on_delete: :cascade
   add_foreign_key "lakeraven_ehr_reconciliation_items", "lakeraven_ehr_reconciliation_sessions", column: "reconciliation_session_id"
   add_foreign_key "lakeraven_ehr_treatment_plan_concurrences", "lakeraven_ehr_treatment_plans", column: "treatment_plan_id"
   add_foreign_key "lakeraven_ehr_treatment_plan_progress_reviews", "lakeraven_ehr_treatment_plans", column: "treatment_plan_id"

@@ -120,6 +120,14 @@ Lakeraven::EHR::Engine.routes.draw do
   delete "logout" => "sessions#destroy", as: :logout
   get "dashboard" => "dashboards#show", as: :dashboard
 
+  # The signed-in homepage: the site's GPRA report, and each measure's
+  # care-gap patient list (#780).
+  root to: "gpra/reports#show"
+  namespace :gpra do
+    get "measures/:measure_id/care_gaps", to: "care_gaps#index", as: :measure_care_gaps,
+      constraints: { measure_id: /[a-z0-9-]+/ }
+  end
+
   # The front desk finds a patient (rpms-ux S-REG-01) and registers a new one (S-REG-02).
   namespace :registration do
     get "patients", to: "patients#index", as: :patients

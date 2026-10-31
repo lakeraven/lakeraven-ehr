@@ -38,7 +38,13 @@ module Lakeraven
         "scheduling.open" => rule(any: %i[scheduling_user scheduling_supervisor]),
         # Every resource of the facility, and booking on any of them, whatever
         # its BSDX rights say. BPRM: SchedulingSupervisor.
-        "scheduling.supervise" => rule(any: %i[scheduling_supervisor])
+        "scheduling.supervise" => rule(any: %i[scheduling_supervisor]),
+        # The site's GPRA report: rates and counts, no patient (#780). CRS
+        # opens its menu with BGPZMENU.
+        "gpra.view" => rule(any: %i[quality_reports_user]),
+        # Who is in a measure's care gap, by name. CRS lets a user run patient
+        # lists only with BGPZ PATIENT LISTS.
+        "gpra.patient_lists" => rule(any: %i[quality_reports_patient_lists])
       }.freeze
 
       NAMES = TABLE.keys.freeze

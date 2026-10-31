@@ -18,7 +18,7 @@ class RpmsIdleLimitTest < ActionDispatch::IntegrationTest
   def sign_in
     Lakeraven::EHR::LoginThrottle.reset!
     post "/lakeraven-ehr/login", params: { username: "testprovider", password: "test123" }
-    assert_redirected_to "/lakeraven-ehr/dashboard"
+    assert_redirected_to "/lakeraven-ehr/"
   end
 
   test "the session ends when the user's RPMS idle limit passes, not the app's" do

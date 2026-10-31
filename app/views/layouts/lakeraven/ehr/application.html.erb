@@ -24,7 +24,7 @@
 <header class="border-b border-slate-200 bg-white">
   <div class="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 px-4 py-3">
     <%= link_to "Lakeraven EHR",
-          session[:duz].present? ? dashboard_path : login_path,
+          session[:duz].present? ? root_path : login_path,
           class: "text-lg font-semibold text-slate-900 no-underline hover:text-slate-700" %>
 
     <% if session[:duz].present? %>

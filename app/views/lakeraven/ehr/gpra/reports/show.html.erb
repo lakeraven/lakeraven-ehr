@@ -1,0 +1,67 @@
+<% content_for :title, "GPRA report | Lakeraven EHR" %>
+
+<div class="page-header">
+  <h1>GPRA report</h1>
+  <% if @run %>
+    <p>
+      GPRA year <%= @run.period_start.strftime("%-d %b %Y") %> to <%= @run.period_end.strftime("%-d %b %Y") %>.
+      As of <time datetime="<%= @run.finished_at.iso8601 %>"><%= @run.finished_at.strftime("%-d %b %Y %H:%M %Z") %></time>.
+    </p>
+  <% end %>
+</div>
+
+<% if @latest&.failed? %>
+  <p id="gpra-latest-failed" role="alert" class="alert alert--error">
+    The latest GPRA run, started <%= @latest.started_at.strftime("%-d %b %Y %H:%M %Z") %>, failed.
+    <% if @run %>The report below is from the run before it.<% end %>
+  </p>
+<% elsif @latest&.running? %>
+  <p id="gpra-running" class="alert alert--notice">
+    A GPRA run started <%= @latest.started_at.strftime("%-d %b %Y %H:%M %Z") %> is still computing.
+  </p>
+<% end %>
+
+<% if @run.nil? %>
+  <p id="gpra-no-run" class="hint">
+    No GPRA report has been computed for this site yet.
+  </p>
+<% else %>
+  <ul id="gpra-measures" class="grid list-none gap-4 p-0 sm:grid-cols-2">
+    <% @run.measures.each do |measure| %>
+      <% target = @targets[measure["id"]] %>
+      <% meets = gpra_meets_target?(measure, target) %>
+      <% change = gpra_change(measure, @previous) %>
+      <li class="summary-count" data-measure="<%= measure["id"] %>">
+        <h2 class="text-base font-semibold text-slate-900"><%= measure["title"] %></h2>
+        <span class="summary-count__number mt-2"><%= gpra_percent(measure["rate"]) %></span>
+        <span class="summary-count__label">
+          <%= measure["numerator"] %> of <%= measure["denominator"] %> patients
+        </span>
+        <span class="hint"><%= gpra_lower_is_better?(measure) ? "Lower is better." : "Higher is better." %></span>
+        <% unless target.nil? %>
+          <span class="hint" data-target>
+            Target <%= gpra_percent(target) %>:
+            <strong class="<%= meets ? "text-emerald-800" : "text-red-800" %>"><%= meets ? "met" : "not met" %></strong>
+          </span>
+        <% end %>
+        <% if change %>
+          <span class="hint" data-change="<%= change[:direction] %>">
+            <% if change[:direction] == :same %>
+              No change since the previous run.
+            <% else %>
+              <%= change[:points].positive? ? "Up" : "Down" %> <%= change[:points].abs %> points since the previous run (<%= change[:direction] %>).
+            <% end %>
+          </span>
+        <% end %>
+        <% if capability?("gpra.patient_lists") && measure["care_gap_count"].to_i.positive? %>
+          <%= link_to "#{measure["care_gap_count"]} patients with a care gap",
+                gpra_measure_care_gaps_path(measure["id"]), class: "mt-3 text-sm" %>
+        <% elsif measure["care_gap_count"].to_i.positive? %>
+          <span class="hint"><%= measure["care_gap_count"] %> patients with a care gap.</span>
+        <% end %>
+      </li>
+    <% end %>
+  </ul>
+<% end %>
+
+<p class="mt-6 text-sm"><%= link_to "Dashboard", dashboard_path %></p>

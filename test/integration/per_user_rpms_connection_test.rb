@@ -83,7 +83,7 @@ class PerUserRpmsConnectionTest < ActionDispatch::IntegrationTest
   def sign_in(access_code)
     open_session do |s|
       s.post "/lakeraven-ehr/login", params: { username: access_code, password: "VERIFY" }
-      s.assert_redirected_to "/lakeraven-ehr/dashboard"
+      s.assert_redirected_to "/lakeraven-ehr/"
     end
   end
 

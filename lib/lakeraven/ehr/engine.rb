@@ -3,6 +3,8 @@
 # The rpms-rpc entry point loads its whole public API (rpms-rpc #321), so
 # the engine requires it once here rather than leaning on a side effect.
 require "rpms_rpc"
+# rook computes the GPRA measures the homepage shows (#780).
+require "rook"
 
 module Lakeraven
   module EHR

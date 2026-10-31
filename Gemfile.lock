@@ -1,4 +1,12 @@
 GIT
+  remote: https://github.com/lakeraven/rook.git
+  revision: c48bcd17912dc76846bfd5ee5cf5ac6e0e8fc6f2
+  ref: c48bcd1
+  specs:
+    rook (0.1.0)
+      fhir_models (~> 4.3)
+
+GIT
   remote: https://github.com/lakeraven/rpms-rpc.git
   revision: 33f4c64fb128896288b6d05f05df8d332db52a64
   ref: 33f4c64
@@ -17,6 +25,7 @@ PATH
       ostruct
       pundit (~> 2.4)
       rails (>= 8.1.0)
+      rook (~> 0.1)
       rpms-rpc (~> 0.1)
 
 GEM
@@ -100,6 +109,8 @@ GEM
       public_suffix (>= 2.0.2, < 8.0)
     ast (2.4.3)
     base64 (0.3.0)
+    bcp47 (0.3.3)
+      i18n
     bigdecimal (4.1.3)
     builder (3.3.0)
     capybara (3.40.0)
@@ -148,6 +159,7 @@ GEM
       capybara (~> 3.0)
       ferrum (~> 0.19.1)
     date (3.5.1)
+    date_time_precision (0.8.1)
     diff-lcs (1.6.2)
     doorkeeper (5.9.0)
       railties (>= 5)
@@ -167,6 +179,11 @@ GEM
     ffi (1.17.4-x86_64-darwin)
     ffi (1.17.4-x86_64-linux-gnu)
     ffi (1.17.4-x86_64-linux-musl)
+    fhir_models (4.3.0)
+      bcp47 (>= 0.3)
+      date_time_precision (>= 0.8)
+      mime-types (>= 3.0)
+      nokogiri (>= 1.11.4)
     globalid (1.4.0)
       activesupport (>= 6.1)
     i18n (1.15.2)
@@ -195,6 +212,10 @@ GEM
     marcel (1.2.1)
     matrix (0.4.3)
     memoist3 (1.0.0)
+    mime-types (3.7.0)
+      logger
+      mime-types-data (~> 3.2025, >= 3.2025.0507)
+    mime-types-data (3.2026.1027)
     mini_mime (1.1.5)
     minitest (6.0.5)
       drb (~> 2.0)
@@ -385,6 +406,7 @@ DEPENDENCIES
   pg
   propshaft
   puma
+  rook!
   rpms-rpc!
   rubocop-rails-omakase
   tailwindcss-rails (~> 4.4)
