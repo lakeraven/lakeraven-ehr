@@ -112,6 +112,18 @@ class GlobalStoreIsolationConventionExemptionTest < ActiveSupport::TestCase
                "empty resetter list must not pass convention check vacuously"
   end
 
+  test "NoMethodError from class_level_reset_method is not reported as stale EXEMPTED entry" do
+    synthetic_message = "synthetic introspection failure"
+    error = assert_raises(NoMethodError) do
+      run_convention_check do |probe|
+        probe.define_singleton_method(:class_level_reset_method) do |_klass|
+          raise NoMethodError, synthetic_message
+        end
+      end
+    end
+    assert_equal synthetic_message, error.message
+  end
+
   private
 
   def run_convention_check
