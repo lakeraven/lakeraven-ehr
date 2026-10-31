@@ -61,6 +61,23 @@ class GlobalStoreIsolationConventionTest < ActiveSupport::TestCase
     by_object_id.values
   end
 
+  # EXEMPTED is keyed by constant name, but resetters are deduplicated by object
+  # and reported under the canonical class name. Match the resolved object so an
+  # alias of an exempted class is exempt too. Resolve once per check.
+  def exempted_object?(object)
+    exempted_objects.any? { |exempted| exempted.equal?(object) }
+  end
+
+  def exempted_objects
+    @exempted_objects ||= EXEMPTED.each_key.map { |name| resolve_exempted(name) }
+  end
+
+  def resolve_exempted(name)
+    name.constantize
+  rescue NameError
+    flunk "stale EXEMPTED entry does not resolve to a constant: #{name}"
+  end
+
   def walk_constants(mod, prefix = "Lakeraven::EHR", visited = nil)
     visited ||= {}
     return [] if visited[mod.object_id]
@@ -68,7 +85,7 @@ class GlobalStoreIsolationConventionTest < ActiveSupport::TestCase
     visited[mod.object_id] = true
 
     found_self =
-      if EXEMPTED.key?(prefix)
+      if exempted_object?(mod)
         nil
       else
         class_level_reset_method(mod)&.then { |method_name| [ prefix, mod, method_name ] }
@@ -80,7 +97,7 @@ class GlobalStoreIsolationConventionTest < ActiveSupport::TestCase
 
       full_name = "#{prefix}::#{name}"
       found =
-        if EXEMPTED.key?(full_name)
+        if exempted_object?(const)
           nil
         else
           class_level_reset_method(const)&.then { |method_name| [ full_name, const, method_name ] }
