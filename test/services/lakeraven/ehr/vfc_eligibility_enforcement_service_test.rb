@@ -185,6 +185,33 @@ module Lakeraven
         end
       end
 
+# Through the real gateway, with RPMS stood in for at the gem boundary
+# (#583): before, find_lot called a gateway method that did not exist,
+# and every check failed closed with "lookup failed: NoMethodError".
+test "validate reads the lot through the gateway: a VFC lot and an eligible patient pass" do
+  vfc_lot = { ien: 10, lot_number: "VFC-123", active: true, vaccine_ien: 4, vaccine: "MMR", cvx: "03",
+              expiration_date: Date.new(2027, 1, 31), source: "v", source_label: "VFC" }
+  with_stub(RpmsRpc::ImmunizationLot, :find, vfc_lot) do
+    with_eligibility_lookup("V04") do
+      result = VfcEligibilityEnforcementService.validate(patient_dfn: "1", lot_ien: "10")
+
+      assert result[:success], result[:reason]
+    end
+  end
+end
+
+test "eligible_lots_for_patient lists lots through the gateway" do
+  lots = [ { ien: 10, lot_number: "VFC-123", active: true, cvx: "03", source: "v", source_label: "VFC" },
+           { ien: 11, lot_number: "PVT-9", active: true, cvx: "03", source: "n", source_label: "NON-VFC" } ]
+  with_stub(RpmsRpc::ImmunizationLot, :list, lots) do
+    with_eligibility_lookup("V01") do
+      listed = VfcEligibilityEnforcementService.eligible_lots_for_patient(patient_dfn: "1", vaccine_code: "03")
+
+      assert_equal %w[PVT-9], listed.map { |l| l[:lot_number] }, "a patient not VFC-eligible is offered only non-VFC lots"
+    end
+  end
+end
+
       private
 
       def with_lot_finder(funding_source: nil, returns_nil: false, raises: false)

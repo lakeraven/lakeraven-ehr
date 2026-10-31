@@ -80,6 +80,49 @@ module Lakeraven
         assert_not_nil ai_an
         assert_equal "Am Indian/AK Native", ai_an[:label]
       end
+# === vaccine lots, for the VFC check (#583) ===
+#
+# RpmsRpc::ImmunizationLot's shape: source is VACCINE SOURCE's internal
+# code ("v" is VFC), cvx the vaccine's HL7-CVX CODE.
+class LotSource
+  LOTS = {
+    10 => { ien: 10, lot_number: "VFC-123", active: true, vaccine_ien: 4, vaccine: "MMR", cvx: "03",
+            expiration_date: Date.new(2027, 1, 31), source: "v", source_label: "VFC" },
+    11 => { ien: 11, lot_number: "PVT-9", active: true, vaccine_ien: 4, vaccine: "MMR", cvx: "03",
+            expiration_date: Date.new(2027, 1, 31), source: "n", source_label: "NON-VFC" }
+  }.freeze
+
+  def self.find(ien) = LOTS[ien.to_i]
+  def self.list = LOTS.values
+end
+
+class NoAnswer
+  def self.list = nil
+end
+
+test "find_lot reads the lot's VFC source and CVX code" do
+  lot = EligibilityGateway.find_lot("10", via: LotSource)
+
+  assert_equal "VFC", lot[:funding_source]
+  assert_equal "03", lot[:vaccine_code]
+  assert_equal "VFC-123", lot[:lot_number]
+end
+
+test "a lot from another source is not VFC" do
+  assert_equal "NON-VFC", EligibilityGateway.find_lot("11", via: LotSource)[:funding_source]
+end
+
+test "an unknown lot is nil" do
+  assert_nil EligibilityGateway.find_lot("999", via: LotSource)
+end
+
+test "list_lots lists every lot in the same shape" do
+  assert_equal %w[VFC NON-VFC], EligibilityGateway.list_lots(via: LotSource).map { |l| l[:funding_source] }
+end
+
+test "list_lots raises when RPMS gives no answer, rather than reading as no lots" do
+  assert_raises(RpmsRpc::Client::RpcError) { EligibilityGateway.list_lots(via: NoAnswer) }
+end
     end
   end
 end

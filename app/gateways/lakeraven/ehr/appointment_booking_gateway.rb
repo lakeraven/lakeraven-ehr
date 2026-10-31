@@ -21,6 +21,13 @@ module Lakeraven
 
       PATIENT_LIMIT = 15
 
+      # BSDX ADD NEW APPOINTMENT locks only the patient (BSDX07.m:40) and
+      # never refuses a full slot, and BSDX has no lock RPC, so the check for
+      # room and the booking run under a lock per resource and day here (#725).
+      # It covers every lakeraven-ehr user (one web process, ADR 0011), not a
+      # VueCentric user booking at the same moment, as stock RPMS does not.
+      BOOKING_LOCKS = Array.new(64) { Mutex.new }.freeze
+
       def self.resources(via: ::RpmsRpc::Scheduling)
         Array(via.resources)
       end
@@ -51,6 +58,17 @@ module Lakeraven
         (from..to).to_h do |date|
           [ date, ClinicDay.new(blocks: blocks.fetch(date, []), appointments: booked.fetch(date, []), time_scale: resource[:time_scale], **rules.call(date)) ]
         end
+      end
+
+      # Whether a clinic keeps this user out (#729, S-SCH-01.13): its HOSPITAL
+      # LOCATION prohibits access (#44 field 2500) and the user is not one of its
+      # privileged users, or its principal clinic's, as RPMS's own scheduling
+      # checks (SDM1.m:33). SDZSUP is checked by the caller.
+      def self.kept_out?(resource, duz, setup: ::RpmsRpc::SchedulingSetup)
+        rules = setup.clinic_rules(resource[:hospital_location_id])
+        return false unless rules&.dig(:prohibit_access)
+
+        !Array(rules[:privileged_users]).include?(duz.to_i)
       end
 
       # The access types the search can be kept to (S-SCH-04.6): those neither
@@ -91,6 +109,17 @@ module Lakeraven
         Array(via.search(text)).select { |row| row[:name].to_s.upcase.start_with?(text) }.first(PATIENT_LIMIT).filter_map do |row|
           header = via.brief_header(row[:dfn].to_i)
           header && { dfn: row[:dfn].to_i, name: header[:name] || row[:name], hrn: header[:mrn].presence, dob: header[:dob] }
+        end
+      end
+
+      # Books if the time still has room, read again under the lock; :full if not.
+      def self.book_if_room(booking, resource, via: ::RpmsRpc::Scheduling, setup: ::RpmsRpc::SchedulingSetup)
+        date = booking.start_time.to_date
+        BOOKING_LOCKS[[ resource[:id], date ].hash % BOOKING_LOCKS.size].synchronize do
+          clinic_day, = day(resource, date, via: via, setup: setup)
+          next Result.new(status: :full, appointment_id: nil, message: nil) unless clinic_day.room_for?(booking.start_time, booking.length)
+
+          book(booking, resource, via: via)
         end
       end
 
