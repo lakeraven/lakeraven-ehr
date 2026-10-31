@@ -19,8 +19,7 @@ module Lakeraven
         "ihs_prc" => 99
       }.freeze
 
-      # Payer of last resort on a PRC referral when private insurance is primary.
-      # Not a Coverage record — PRC is residual coordination, not another plan.
+      # Residual payer on a PRC referral. Not a Coverage record.
       PRC_PAYER = "IHS Purchased/Referred Care"
 
       Summary = Struct.new(
@@ -38,9 +37,12 @@ module Lakeraven
         keyword_init: true
       )
 
-      def initialize(coverages, service_request: nil)
+      # prc_eligible is EligibilityService's answer when the eligibility summary
+      # already has one. Nil means the caller did not supply that answer.
+      def initialize(coverages, service_request: nil, prc_eligible: nil)
         @coverages = Array(coverages)
         @service_request = service_request
+        @patient_prc_eligible = prc_eligible
       end
 
       def summarize
@@ -72,8 +74,7 @@ module Lakeraven
 
       def determine_payer_hierarchy(active_coverages = nil)
         coverages = active_coverages || @coverages.select(&:active?)
-        hierarchy = ranked_payor_names(coverages)
-        with_prc_secondary(hierarchy, coverages)
+        append_prc_last(ranked_payor_names(coverages))
       end
 
       def primary_payer
@@ -105,18 +106,20 @@ module Lakeraven
         [ PAYER_PRIORITY[coverage.coverage_type] || 50, coverage.payor_display || "" ]
       end
 
-      def with_prc_secondary(hierarchy, coverages)
-        return hierarchy unless prc_secondary?(coverages)
+      # PRC is appended once, after every active payer, on a referral.
+      # An explicit ineligible answer from EligibilityService omits it.
+      # With no active coverage, PRC is the primary payer.
+      def append_prc_last(hierarchy)
+        return hierarchy unless prc_last_resort?
 
-        hierarchy.include?(PRC_PAYER) ? hierarchy : hierarchy + [ PRC_PAYER ]
+        hierarchy.reject { |payer| payer == PRC_PAYER } + [ PRC_PAYER ]
       end
 
-      # PRC is the secondary payer only for a referral whose primary active coverage is private insurance.
-      def prc_secondary?(coverages)
+      def prc_last_resort?
         return false unless @service_request
+        return false if @patient_prc_eligible == false
 
-        primary = coverages.min_by { |coverage| payer_sort_key(coverage) }
-        primary&.private_insurance?
+        true
       end
 
       def determine_prc_eligibility(active = nil, exhausted = nil)

@@ -18,6 +18,29 @@ module Lakeraven
       PRC_STATUSES = %w[exhausted not_enrolled denied pending].freeze
       VALID_STATUSES = (FHIR_STATUSES + PRC_STATUSES).freeze
 
+      ACT_CODE_SYSTEM = "http://terminology.hl7.org/CodeSystem/v3-ActCode"
+      COVERAGE_CLASS_SYSTEM = "http://terminology.hl7.org/CodeSystem/coverage-class"
+      MEMBER_IDENTIFIER_SYSTEM = "http://terminology.hl7.org/CodeSystem/v2-0203"
+
+      # Inverse of from_fhir: v3-ActCode policy codes that round-trip to a coverage type.
+      ACT_CODE_TO_COVERAGE_TYPE = {
+        "MEDICARE" => "medicare_a",
+        "MEDICAID" => "medicaid",
+        "HIP" => "private_insurance",
+        "VET" => "va_benefits",
+        "WCBPOL" => "workers_comp",
+        "AUTOPOL" => "auto_insurance"
+      }.freeze
+      COVERAGE_TYPE_TO_ACT_CODE = ACT_CODE_TO_COVERAGE_TYPE.invert.freeze
+
+      # PRC-internal statuses are not R4 fm-status codes. Mapping is serialization-only.
+      PRC_STATUS_TO_FHIR = {
+        "exhausted" => "cancelled",
+        "not_enrolled" => "cancelled",
+        "denied" => "cancelled",
+        "pending" => "draft"
+      }.freeze
+
       attribute :id, :string
       attribute :created_at, :datetime
       attribute :patient_dfn, :string
@@ -120,9 +143,10 @@ module Lakeraven
         {
           resourceType: "Coverage",
           id: id,
-          status: status,
+          status: fhir_status,
+          type: fhir_coverage_type,
           beneficiary: { reference: "Patient/#{patient_dfn}" },
-          subscriberId: member_identifier,
+          subscriberId: fhir_subscriber_id,
           identifier: member_identifier_list,
           payor: [ payor_fhir_reference ],
           period: build_period,
@@ -215,13 +239,40 @@ module Lakeraven
         p
       end
 
-      def member_identifier
-        member_id.presence || subscriber_id.presence
+      def fhir_status
+        PRC_STATUS_TO_FHIR.fetch(status, status)
+      end
+
+      def fhir_subscriber_id
+        subscriber_id.presence || member_id.presence
+      end
+
+      def fhir_coverage_type
+        code = fhir_coverage_type_code
+        return if code.blank?
+
+        { coding: [ fhir_type_coding(code) ] }
+      end
+
+      def fhir_coverage_type_code
+        COVERAGE_TYPE_TO_ACT_CODE[coverage_type] || coverage_type
+      end
+
+      def fhir_type_coding(code)
+        coding = { code: code }
+        coding[:system] = ACT_CODE_SYSTEM if ACT_CODE_TO_COVERAGE_TYPE.key?(code)
+        coding
       end
 
       def member_identifier_list
-        value = member_identifier
-        [ { value: value } ] if value
+        value = member_id.presence
+        return if value.blank?
+
+        [ { type: member_identifier_type, value: value } ]
+      end
+
+      def member_identifier_type
+        { coding: [ { system: MEMBER_IDENTIFIER_SYSTEM, code: "MB" } ] }
       end
 
       def build_class_array
@@ -244,7 +295,7 @@ module Lakeraven
       end
 
       def fhir_class_type(code)
-        { coding: [ { code: code } ] }
+        { coding: [ { system: COVERAGE_CLASS_SYSTEM, code: code } ] }
       end
 
       def payor_fhir_reference
@@ -273,20 +324,26 @@ module Lakeraven
       end
 
       def self.extract_coverage_type(fhir_hash)
-        type = fhir_hash[:type] || fhir_hash["type"]
-        return nil unless type
-        coding = type[:coding]&.first || type["coding"]&.first
-        code = coding&.dig(:code) || coding&.dig("code")
+        code = codeable_concept_code(fhir_hash[:type] || fhir_hash["type"])
+        return nil if code.blank?
 
-        case code
-        when "MEDICARE" then "medicare_a"
-        when "MEDICAID" then "medicaid"
-        when "HIP" then "private_insurance"
-        when "VET" then "va_benefits"
-        when "WCBPOL" then "workers_comp"
-        when "AUTOPOL" then "auto_insurance"
-        else "private_insurance"
-        end
+        coverage_type_for_code(code)
+      end
+
+      def self.codeable_concept_code(concept)
+        return unless concept.is_a?(Hash)
+
+        coding = Array(concept[:coding] || concept["coding"]).first
+        return unless coding.is_a?(Hash)
+
+        coding[:code] || coding["code"]
+      end
+
+      def self.coverage_type_for_code(code)
+        return ACT_CODE_TO_COVERAGE_TYPE[code] if ACT_CODE_TO_COVERAGE_TYPE.key?(code)
+        return code if COVERAGE_TYPES.include?(code)
+
+        "private_insurance"
       end
 
       def self.extract_payor_name(fhir_hash)
@@ -323,12 +380,28 @@ module Lakeraven
       def self.assign_plan_class(result, cls, value)
         name = cls[:name] || cls["name"]
         result[:plan_name] = name if name.present?
-        result[:plan_id] = value if value.present? && value != name
+        result[:plan_id] = value if value.present?
       end
 
       def self.assign_member_id(result, fhir_hash)
-        subscriber_id = fhir_hash[:subscriberId] || fhir_hash["subscriberId"]
-        result[:member_id] = subscriber_id if subscriber_id.present?
+        subscriber = fhir_hash[:subscriberId] || fhir_hash["subscriberId"]
+        result[:subscriber_id] = subscriber if subscriber.present?
+
+        member = mb_identifier_value(fhir_hash)
+        result[:member_id] = member if member.present?
+        result[:member_id] ||= subscriber if result[:member_id].blank? && subscriber.present?
+      end
+
+      def self.mb_identifier_value(fhir_hash)
+        identifiers = Array(fhir_hash[:identifier] || fhir_hash["identifier"])
+        entry = identifiers.find { |item| mb_identifier?(item) }
+        return unless entry
+
+        entry[:value] || entry["value"]
+      end
+
+      def self.mb_identifier?(entry)
+        entry.is_a?(Hash) && fhir_class_code(entry) == "MB"
       end
 
       def self.fhir_class_code(cls)

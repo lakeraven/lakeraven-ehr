@@ -18,13 +18,13 @@ module Lakeraven
       class << self
         def summarize(patient:, service_request: nil)
           prc_result = check_prc(service_request) if service_request
-          coverage = build_coverage_from_patient(patient, service_request: service_request)
+          coverage = build_coverage_from_patient(patient, service_request: service_request, prc_result: prc_result)
           build_result(prc_result: prc_result, coverage: coverage, payer_verification: nil)
         end
 
         def refresh(patient:, service_request: nil, coverages: [])
           prc_result = check_prc(service_request) if service_request
-          coverage = build_coverage_summary(coverages, service_request: service_request)
+          coverage = build_coverage_summary(coverages, service_request: service_request, prc_result: prc_result)
           payer_verification, skip_reason = check_payer_verification(patient: patient, coverages: coverages)
           build_result(
             prc_result: prc_result,
@@ -41,7 +41,7 @@ module Lakeraven
           EligibilityService.check(service_request)
         end
 
-        def build_coverage_from_patient(patient, service_request: nil)
+        def build_coverage_from_patient(patient, service_request: nil, prc_result: nil)
           coverages = []
           if patient.coverage_type.present?
             coverages << Coverage.new(
@@ -51,12 +51,22 @@ module Lakeraven
             )
           end
           return nil if coverages.empty?
-          CoverageSummaryService.new(coverages, service_request: service_request).summarize
+
+          coverage_summary_for(coverages, service_request, prc_result)
         end
 
-        def build_coverage_summary(coverages, service_request: nil)
+        def build_coverage_summary(coverages, service_request: nil, prc_result: nil)
           return nil if coverages.empty?
-          CoverageSummaryService.new(coverages, service_request: service_request).summarize
+
+          coverage_summary_for(coverages, service_request, prc_result)
+        end
+
+        def coverage_summary_for(coverages, service_request, prc_result)
+          CoverageSummaryService.new(
+            coverages,
+            service_request: service_request,
+            prc_eligible: prc_result&.eligible?
+          ).summarize
         end
 
         def alternate_resource_check_for(service_request, coverages)
