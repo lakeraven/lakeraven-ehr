@@ -6,6 +6,8 @@
 > Each UI proves the same scenario ids in its own specs: BPRM in cloud-rpms browser specs, lakeraven-ehr in
 > `test/integration` (live and mock), the terminal in persona transcripts; `bin/scenario-plan` reports this
 > repo's to rpms-ux. The analysis below is kept as background.
+> The twin's scheduling and ADT gateways (`SchedulingGateway`, `AdtGateway`) were retired too: nothing
+> called them, and most of their RPC names are registered on no RPMS baseline (#542).
 
 Behavioral spec ("digital twin") for RPMS **BPRM v4** (IHS Practice Management):
 patient **registration** and appointment **scheduling**. The goal is to let

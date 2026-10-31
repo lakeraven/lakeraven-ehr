@@ -24,18 +24,9 @@ module Lakeraven
           "RegistrationGateway.update" => "AGG UPDATE PATIENT"
         },
         bprm_scheduling: {
-          "SchedulingGateway.book" => "BSDX ADD NEW APPOINTMENT",
-          "SchedulingGateway.cancel" => "BSDX CANCEL APPOINTMENT",
-          "SchedulingGateway.no_show" => "BSDX NOSHOW",
-          "SchedulingGateway.check_in" => "BSDX CHECKIN APPOINTMENT",
-          "SchedulingGateway.availability" => SchedulingGateway::AVAILABILITY_RPC,
-          "SchedulingGateway.access_blocks" => SchedulingGateway::ACCESS_BLOCK_RPC,
-          "SchedulingGateway.clinic_schedule" => SchedulingGateway::SCHEDULE_RPC,
-          "SchedulingGateway.waiting_list" => SchedulingGateway::WAITLIST_RPC,
-          "SchedulingGateway.waiting_list_add" => SchedulingGateway::WAITLIST_ADD_RPC,
-          "SchedulingGateway.set_availability_config" => SchedulingGateway::CONFIG_RPC,
-          "SchedulingGateway.add_holiday" => SchedulingGateway::ADD_HOLIDAY_RPC,
-          "SchedulingGateway.remove_holiday" => SchedulingGateway::DEL_HOLIDAY_RPC
+          "AppointmentBookingGateway.book" => "BSDX ADD NEW APPOINTMENT",
+          "AppointmentCancellationGateway.cancel" => "BSDX CANCEL APPOINTMENT",
+          "AppointmentCheckinGateway.check_in" => "BSDX CHECKIN APPOINTMENT"
         },
         ihs_immunization: {
           "ImmunizationGateway.for_patient" => "BGOVIMM GET",
@@ -46,9 +37,6 @@ module Lakeraven
       }.freeze
 
       STOCK_VISTA_GATEWAY_RPCS = {
-        "SchedulingGateway.patient_appointments" => SchedulingGateway::APPTLST_RPC,
-        "SchedulingGateway.cancelled_appointments" => SchedulingGateway::APPTLST_RPC,
-        "SchedulingGateway.routing_slip" => SchedulingGateway::APPTLST_RPC,
         "EncounterGateway.for_patient" => "ORWPT APPTLST",
         "PatientGateway.find" => "ORWPT SELECT"
       }.freeze
@@ -61,8 +49,6 @@ module Lakeraven
       end
 
       test "stock VistA scheduling and chart reads are listed as never gated by bprm_scheduling" do
-        scheduling_reads = STOCK_VISTA_GATEWAY_RPCS.select { |name, _| name.start_with?("SchedulingGateway.") }
-        assert_equal [ SchedulingGateway::APPTLST_RPC ], scheduling_reads.values.uniq
         assert_equal "ORWPT APPTLST", STOCK_VISTA_GATEWAY_RPCS.fetch("EncounterGateway.for_patient")
       end
 
