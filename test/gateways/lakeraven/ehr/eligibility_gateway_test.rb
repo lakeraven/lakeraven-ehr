@@ -123,7 +123,6 @@ end
 test "list_lots raises when RPMS gives no answer, rather than reading as no lots" do
   assert_raises(RpmsRpc::Client::RpcError) { EligibilityGateway.list_lots(via: NoAnswer) }
 end
-
     end
   end
 end
