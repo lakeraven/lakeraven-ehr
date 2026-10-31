@@ -31,7 +31,7 @@ class SchedulingCheckinAppointmentTest < ActionDispatch::IntegrationTest
         checkin_appointment: ->(id, **kw) { log << kw.merge(id: id); checkin.call(id, kw) }
       },
       RpmsRpc::Practitioner.singleton_class => { search: ->(_text) { [ { ien: 206, name: "PROFILE,MD" } ] } }
-    }
+    }.merge(scheduling_setup_stubs)
     stubs.each { |klass, methods| methods.each_key { |m| klass.alias_method(:"__#{m}", m) } }
     stubs.each { |klass, methods| methods.each { |m, body| klass.define_method(m, &body) } }
     yield
