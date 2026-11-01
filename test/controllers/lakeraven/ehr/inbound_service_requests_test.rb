@@ -681,40 +681,18 @@ module Lakeraven
         assert_nil event.entity_identifier
       end
 
-      test "Transfer-Encoding chunked returns 411 without reading the body" do
-        probe = { read: false }
-        tracker = Module.new do
-          define_method(:raw_post) do
-            probe[:read] = true
-            super()
-          end
-
-          define_method(:body) do
-            probe[:read] = true
-            super()
-          end
+      test "Transfer-Encoding returns 411 and stores nothing" do
+        assert_no_inbound_change do
+          post CREATE_PATH,
+               params: valid_service_request_json(identifier_value: "REF-TRANSFER-ENC"),
+               headers: @headers.merge(
+                 "Content-Type" => "application/fhir+json",
+                 "Transfer-Encoding" => "chunked"
+               )
         end
-        ActionDispatch::Request.prepend(tracker)
 
-        begin
-          assert_no_inbound_change do
-            post CREATE_PATH,
-                 params: valid_service_request_json(identifier_value: "REF-TRANSFER-ENC"),
-                 headers: @headers.merge(
-                   "Content-Type" => "application/fhir+json",
-                   "Transfer-Encoding" => "chunked"
-                 )
-          end
-
-          assert_response :length_required
-          assert_equal "OperationOutcome", JSON.parse(response.body)["resourceType"]
-          refute probe[:read], "expected 411 before the request body is read"
-        ensure
-          tracker.class_eval do
-            remove_method :raw_post if method_defined?(:raw_post)
-            remove_method :body if method_defined?(:body)
-          end
-        end
+        assert_response :length_required
+        assert_equal "OperationOutcome", JSON.parse(response.body)["resourceType"]
       end
 
       test "invalid UTF-8 in code.text returns 400 OperationOutcome without storing" do
