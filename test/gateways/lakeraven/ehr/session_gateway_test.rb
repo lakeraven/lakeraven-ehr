@@ -3,8 +3,8 @@
 require "test_helper"
 
 # Tests for SessionGateway — the cold-launch bootstrap that resolves a user
-# DUZ to the client-config root, registry hints, and default division IEN.
-# Wraps RpmsRpc::Session (lakeraven/rpms-rpc#99).
+# DUZ to VIM info (CIAVCXUS VIMINFO). Wraps RpmsRpc::Session
+# (lakeraven/rpms-rpc#99).
 module Lakeraven
   module EHR
     class SessionGatewayTest < ActiveSupport::TestCase
@@ -28,7 +28,7 @@ module Lakeraven
       end
 
       test "bootstrap delegates and coerces duz to a string" do
-        payload = { vim_info: {}, registry: {} }
+        payload = { vim_info: {} }
         fake = FakeSessionAPI.new(payload)
 
         result = SessionGateway.bootstrap(301, via: fake)
@@ -49,14 +49,13 @@ module Lakeraven
         skip "Requires RpmsRpc::Session.bootstrap (lakeraven/rpms-rpc#99)" unless
           SessionGateway.default_provider
 
-        RpmsRpc.client.seed(:session_registry, "", { root: 'HKLM\\Software\\IHS\\CIAVM' })
         RpmsRpc.client.seed(:session_vim_info, "301", {
           duz: 301, user_name: "PROVIDER,TEST", timeouts: "300"
         })
 
         result = SessionGateway.bootstrap("301")
 
-        assert_equal [ :registry, :vim_info ], result.keys
+        assert_includes result.keys, :vim_info
         assert_equal "PROVIDER,TEST", result[:vim_info][:user_name]
       end
     end
