@@ -14,7 +14,8 @@ module Lakeraven
 
       PINNED_CAPABILITY_FHIR_INTERACTIONS = {
         prc_referrals: [
-          %w[ServiceRequest search-type]
+          %w[ServiceRequest search-type],
+          %w[ServiceRequest create]
         ],
         tribal_enrollment: [],
         bprm_registration: [],
@@ -32,10 +33,14 @@ module Lakeraven
 
       # The engine routes ServiceRequest and Immunization as index only, so the
       # map must not advertise a read it does not serve (Copilot round, #659).
-      test "ServiceRequest and Immunization advertise search-type only, because they have no show route" do
-        %w[ServiceRequest Immunization].each do |type|
-          assert_equal [ "search-type" ], BackendRegistry.supported_fhir_interactions(type), type
-        end
+      test "Immunization advertises search-type only; ServiceRequest advertises search-type and create without read" do
+        immunization = BackendRegistry.supported_fhir_interactions("Immunization")
+        assert_equal [ "search-type" ], immunization
+        refute_includes immunization, "read"
+
+        service_request = BackendRegistry.supported_fhir_interactions("ServiceRequest")
+        assert_equal %w[create search-type].sort, service_request.sort
+        refute_includes service_request, "read"
       end
 
       # Walks everything actually advertised (capability-owned and base), and

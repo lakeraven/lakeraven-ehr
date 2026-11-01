@@ -117,6 +117,7 @@ module Lakeraven
         "lakeraven/ehr/observations#index",
         "lakeraven/ehr/encounters#index",
         "lakeraven/ehr/service_requests#index",
+        "lakeraven/ehr/service_requests#create",
         "lakeraven/ehr/immunizations#index",
         "lakeraven/ehr/procedures#index",
         "lakeraven/ehr/coverage_eligibility_requests#create",
@@ -446,6 +447,27 @@ module Lakeraven
         { path: "/lakeraven-ehr/Observation", method: :get, params: { patient: "1" } },
         { path: "/lakeraven-ehr/Encounter", method: :get, params: { patient: "1" } },
         { path: "/lakeraven-ehr/ServiceRequest", method: :get, params: { patient: "1" } },
+        { path: "/lakeraven-ehr/ServiceRequest", method: :post,
+          content_type: "application/fhir+json",
+          params: {
+            "resourceType" => "ServiceRequest",
+            "status" => "active",
+            "intent" => "order",
+            "identifier" => [
+              { "system" => "https://snf.example.test/referrals", "value" => "REF-EGRESS-INTAKE-0001" }
+            ],
+            "code" => {
+              "coding" => [
+                { "system" => "http://snomed.info/sct", "code" => "3457005", "display" => "Patient referral" }
+              ]
+            },
+            "subject" => {
+              "identifier" => {
+                "system" => "https://example.test/mrn",
+                "value" => "MRN-EGRESS-INTAKE-0001"
+              }
+            }
+          }.to_json },
         { path: "/lakeraven-ehr/Immunization", method: :get, params: { patient: "1" } },
         { path: "/lakeraven-ehr/Procedure", method: :get, params: { patient: "1" } },
         { path: "/lakeraven-ehr/CoverageEligibilityRequest", method: :post, params: { patient_dfn: "1", coverage_type: "medicaid" } },
