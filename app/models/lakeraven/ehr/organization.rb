@@ -212,6 +212,8 @@ module Lakeraven
       end
 
       def build_fhir_part_of
+        return nil unless parent_organization_ien.present?
+
         build_reference("Organization", parent_organization_ien)
       end
 
