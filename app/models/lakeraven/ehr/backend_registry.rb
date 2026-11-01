@@ -30,9 +30,10 @@ module Lakeraven
       # FHIR interactions each IHS capability owns (#574, #647). Patient
       # read and search stay available with no capability; registration is
       # AG's screens, not a FHIR interaction (#542). The supported set is this map filtered
-      # by BackendRegistry.current.provides?. ServiceRequest and Immunization
-      # are routed index-only, so only search-type is listed; add read with
-      # its show route.
+      # by BackendRegistry.current.provides?. ServiceRequest search-type is the
+      # RPMS referral read. ServiceRequest create is local intake and is not
+      # listed here: it does not reach RPMS (ADR 0011). Immunization is
+      # search-type only; add read with its show route.
       CAPABILITY_FHIR_INTERACTIONS = {
         prc_referrals: [
           %w[ServiceRequest search-type]
@@ -49,6 +50,11 @@ module Lakeraven
       # Stock interactions that do not belong to an IHS capability.
       BASE_FHIR_INTERACTIONS = {
         "Patient" => %w[read search-type].freeze
+      }.freeze
+
+      # Local intake. Not owned by prc_referrals: the write never reaches RPMS.
+      INTAKE_FHIR_INTERACTIONS = {
+        "ServiceRequest" => %w[create].freeze
       }.freeze
 
       # A registered backend: a client source (called on every request, so a
@@ -103,12 +109,12 @@ module Lakeraven
         end
 
         def supported_fhir_resource_types
-          (BASE_FHIR_INTERACTIONS.keys + provided_fhir_pairs.map(&:first)).uniq
+          (BASE_FHIR_INTERACTIONS.keys + INTAKE_FHIR_INTERACTIONS.keys + provided_fhir_pairs.map(&:first)).uniq
         end
 
         def supported_fhir_interactions(resource_type)
           owned = provided_fhir_pairs.filter_map { |type, name| name if type == resource_type }
-          (Array(BASE_FHIR_INTERACTIONS[resource_type]) + owned).uniq
+          (Array(BASE_FHIR_INTERACTIONS[resource_type]) + Array(INTAKE_FHIR_INTERACTIONS[resource_type]) + owned).uniq
         end
 
         # The capability that owns this FHIR interaction, or nil when the

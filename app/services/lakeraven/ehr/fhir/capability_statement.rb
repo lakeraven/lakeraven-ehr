@@ -66,7 +66,11 @@ module Lakeraven
                     "when one is configured. #{SEARCH_ONLY_STUB}"
           },
           "Encounter" => { interactions: %w[search-type], source: "RPMS, through rpms-rpc." },
-          "ServiceRequest" => { interactions: %w[search-type], source: "RPMS referrals, through rpms-rpc." },
+          "ServiceRequest" => {
+            interactions: %w[search-type create],
+            source: "Search reads RPMS referrals through rpms-rpc. " \
+                    "Create stores an intake record and does not reach RPMS."
+          },
           "Immunization" => { interactions: %w[search-type], source: "RPMS, through rpms-rpc." },
           "Procedure" => { interactions: %w[search-type], source: "RPMS, through rpms-rpc." },
           "AuditEvent" => { interactions: %w[read search-type], source: "This server's own audit log." },

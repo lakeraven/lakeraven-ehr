@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_30_000000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_01_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -121,6 +121,31 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_30_000000) do
     t.index [ "accessed_by" ], name: "index_lakeraven_ehr_emergency_accesses_on_accessed_by"
     t.index [ "expires_at" ], name: "index_lakeraven_ehr_emergency_accesses_on_expires_at"
     t.index [ "patient_dfn" ], name: "index_lakeraven_ehr_emergency_accesses_on_patient_dfn"
+  end
+
+  create_table "lakeraven_ehr_inbound_referral_identifiers", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.bigint "inbound_referral_id", null: false
+    t.integer "oauth_application_id", null: false
+    t.string "system", null: false
+    t.datetime "updated_at", null: false
+    t.string "value", null: false
+    t.index [ "inbound_referral_id" ], name: "index_ehr_inbound_ref_identifiers_on_referral_id"
+    t.index [ "oauth_application_id", "system", "value" ], name: "index_ehr_inbound_ref_ids_on_app_system_value", unique: true
+  end
+
+  create_table "lakeraven_ehr_inbound_referrals", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.integer "oauth_application_id", null: false
+    t.string "organization_id"
+    t.string "patient_identifier_system", null: false
+    t.string "patient_identifier_value", null: false
+    t.string "public_id", null: false
+    t.jsonb "resource", null: false
+    t.string "status", default: "received", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "oauth_application_id" ], name: "index_lakeraven_ehr_inbound_referrals_on_oauth_application_id"
+    t.index [ "public_id" ], name: "index_lakeraven_ehr_inbound_referrals_on_public_id", unique: true
   end
 
   create_table "lakeraven_ehr_launch_contexts", force: :cascade do |t|
@@ -296,6 +321,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_30_000000) do
     t.index [ "uid" ], name: "index_oauth_applications_on_uid", unique: true
   end
 
+  add_foreign_key "lakeraven_ehr_inbound_referral_identifiers", "lakeraven_ehr_inbound_referrals", column: "inbound_referral_id"
   add_foreign_key "lakeraven_ehr_reconciliation_items", "lakeraven_ehr_reconciliation_sessions", column: "reconciliation_session_id"
   add_foreign_key "lakeraven_ehr_treatment_plan_concurrences", "lakeraven_ehr_treatment_plans", column: "treatment_plan_id"
   add_foreign_key "lakeraven_ehr_treatment_plan_progress_reviews", "lakeraven_ehr_treatment_plans", column: "treatment_plan_id"
