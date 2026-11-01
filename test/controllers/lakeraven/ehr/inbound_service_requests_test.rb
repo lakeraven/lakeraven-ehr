@@ -642,9 +642,11 @@ module Lakeraven
         end
 
         assert_response :created
+        response_id = JSON.parse(response.body)["id"]
         event = AuditEvent.recent.first
         assert_equal "ServiceRequest", event.entity_type
-        assert_nil event.entity_identifier
+        assert_equal response_id, event.entity_identifier
+        refute_equal "42", event.entity_identifier
       end
 
       test "audit entity is not Patient and omits top-level JSON patient on successful create" do
@@ -659,8 +661,10 @@ module Lakeraven
         end
 
         assert_response :created
+        response_id = JSON.parse(response.body)["id"]
         event = AuditEvent.recent.first
         refute_equal "Patient", event.entity_type
+        assert_equal response_id, event.entity_identifier
         refute_includes audit_event_text_columns(event), body_patient
       end
 
