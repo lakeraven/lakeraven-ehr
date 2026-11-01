@@ -25,6 +25,7 @@ module Lakeraven
       # UTF-8 can exceed that inside a character limit.
       MAX_IDENTIFIER_VALUE_BYTES = 255
       MAX_IDENTIFIER_SYSTEM_BYTES = 1024
+      MAX_IDENTIFIER_ENTRIES = 20
       NUL_BYTE = "\u0000"
       # Fixed text only. A path would copy client keys and indexes into the
       # OperationOutcome, and those are submitted text.
@@ -44,20 +45,40 @@ module Lakeraven
         problems = validation_problems
         return Result.invalid(problems) if problems.any?
 
-        persist
-      rescue ActiveRecord::RecordNotUnique, ActiveRecord::Deadlocked
-        # The savepoint already rolled back. One more lookup, outside it.
-        replay_after_race
+        persist_with_race_recovery
       end
 
       private
 
       attr_reader :resource, :application
 
+      # RecordNotUnique is one re-lookup, outside the savepoint. A deadlock
+      # retries the whole persist once: the retried insert waits on the
+      # winner's unique-index entry, then resolves as created, replay, or
+      # RecordNotUnique (that re-lookup). A second deadlock conflicts. Both
+      # rescues sit outside the savepoint.
+      def persist_with_race_recovery
+        persist_once
+      rescue ActiveRecord::Deadlocked
+        retry_persist_after_deadlock
+      end
+
+      def retry_persist_after_deadlock
+        persist_once
+      rescue ActiveRecord::Deadlocked
+        Result.conflict
+      end
+
+      def persist_once
+        persist
+      rescue ActiveRecord::RecordNotUnique
+        replay_after_race
+      end
+
       def persist
         # Own savepoint. AuditableClinicalAccess already holds a transaction;
-        # a unique violation must roll back only this insert so the retry and
-        # the audit row can still commit.
+        # a unique violation or deadlock must roll back only this insert so
+        # the retry and the audit row can still commit.
         ActiveRecord::Base.transaction(requires_new: true) { resolve }
       end
 
@@ -171,6 +192,7 @@ module Lakeraven
       def identifier_problems
         entries = resource["identifier"]
         return [ "ServiceRequest.identifier" ] unless entries.is_a?(Array) && entries.any?
+        return [ "ServiceRequest.identifier" ] if entries.size > MAX_IDENTIFIER_ENTRIES
 
         entries.each_with_index.flat_map { |entry, index| identifier_entry_problems(entry, index) }
       end

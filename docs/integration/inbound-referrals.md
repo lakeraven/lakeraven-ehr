@@ -32,7 +32,7 @@ The token must be a pure system token. ServiceRequest create must come from a `s
 | `resourceType` | `ServiceRequest` |
 | `status` | `draft` or `active` |
 | `intent` | a FHIR R4 RequestIntent code (`proposal`, `plan`, `directive`, `order`, `original-order`, `reflex-order`, `filler-order`, `instance-order`, `option`) |
-| `identifier` | one or more entries, each with `system` and `value` |
+| `identifier` | 1 to 20 entries, each with `system` and `value` |
 | `subject.identifier` | `system` and `value` (a reference alone is not enough) |
 | `code` | a non-blank `text`, or at least one `coding` entry that is an object with a non-blank `code` |
 
@@ -50,7 +50,9 @@ Uniqueness is per OAuth client (the token's application) and per `identifier.sys
 - The identifiers match exactly one stored referral, but `subject.identifier` differs from the stored patient identifier: **409 Conflict**. Nothing is written.
 - The same identifier from a different OAuth client is a different referral.
 
-A concurrent duplicate insert, including a deadlock, is resolved the same way. After the failed insert is rolled back, the identifiers are looked up once more. Exactly one referral with the same subject returns that resource (200); otherwise 409.
+A concurrent duplicate that loses the unique index is rolled back, then the identifiers are looked up once. Exactly one referral with the same subject returns that resource (200); otherwise 409.
+
+A deadlock rolls the insert back and the whole write is tried once more. That retry waits on the winner's unique-index entry, then finishes as a create (201), a replay (200), or a unique-index collision that is looked up once as above. A second deadlock is 409. Nothing is written on 409.
 
 ## Capability
 
@@ -58,8 +60,11 @@ ServiceRequest create belongs to the referrals capability (`prc_referrals`), wit
 
 ## Limits
 
+- A `Transfer-Encoding` header (including `chunked`) is **411**: Rails parameter instrumentation may already have read a transfer-encoded body, and the size limit that protects memory belongs at the proxy / app server; clients must send `Content-Length`.
 - `Content-Length` greater than 1,048,576 (1 MiB) is **413**, and the body is not read.
 - A raw body larger than 1,048,576 bytes is **413** and is not stored. This still applies when `Content-Length` is absent or smaller than the body.
+- A body that is not valid UTF-8 is **400** and is not stored.
+- `identifier` has at most 20 entries. More than 20 is **422**. The diagnostic is `ServiceRequest.identifier` and does not include submitted values.
 - `identifier.value` and `subject.identifier.value` are at most 255 bytes (UTF-8).
 - `identifier.system` and `subject.identifier.system` are at most 1024 bytes (UTF-8).
 - Any string in the body, including an object key, that contains a NUL (`U+0000`) is **422** and is not stored. The diagnostic is the fixed text `ServiceRequest (string contains NUL)`. It does not include keys, indexes, or any submitted text.
@@ -72,12 +77,14 @@ All errors are a FHIR `OperationOutcome`. Validation diagnostics name the elemen
 |---|---|---|
 | 401 | `login` | missing, invalid, or expired token |
 | 403 | `forbidden` | the token's ServiceRequest create permission does not come from a `system/` scope, or the token carries a `patient/` or `user/` scope |
-| 400 | `invalid` or `structure` | the body is not a JSON object |
+| 400 | `invalid` | the body is not valid UTF-8, or not JSON |
+| 400 | `structure` | the JSON value is not an object |
 | 404 | `not-supported` | this backend does not provide referrals |
+| 411 | `structure` | `Transfer-Encoding` is set. Clients must send `Content-Length`. |
 | 413 | `too-costly` | `Content-Length` or the raw body is larger than 1 MiB |
 | 415 | `not-supported` | `Content-Type` is not `application/fhir+json` or `application/json` |
-| 422 | `invalid` | a required element is missing, not in the value set above, too long, or contains a NUL |
-| 409 | `conflict` | the identifiers match more than one stored referral, or one referral whose subject identifier differs |
+| 422 | `invalid` | a required element is missing, not in the value set above, too long, more than 20 `identifier` entries, or contains a NUL |
+| 409 | `conflict` | the identifiers match more than one stored referral, or one referral whose subject identifier differs, or a second deadlock |
 
 ## Example
 

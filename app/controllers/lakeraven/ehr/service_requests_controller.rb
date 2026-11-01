@@ -61,11 +61,14 @@ module Lakeraven
           !patient_context_scope? && !user_context_scope?
       end
 
-      # Media type, then Content-Length, before raw_post. A transfer-encoded
-      # body has no usable Content-Length; the bytesize check below still applies.
+      # Media type, then Transfer-Encoding, then Content-Length, before raw_post.
+      # Rails parameter instrumentation may already have read a transfer-encoded
+      # body. The size limit that protects memory belongs at the proxy / app
+      # server.
       def guard_intake_body!
         return if performed?
         return refuse_intake_body(:unsupported_media_type, "not-supported") unless accepted_intake_media_type?
+        return refuse_intake_body(:length_required, "structure") if transfer_encoded_intake?
         return if declared_content_length <= MAX_INTAKE_BYTES
 
         refuse_intake_body(:content_too_large, "too-costly")
@@ -75,15 +78,20 @@ module Lakeraven
         ACCEPTED_INTAKE_MEDIA_TYPES.include?(request.media_type)
       end
 
-      def declared_content_length
-        return 0 if request.has_header?(ActionDispatch::Request::TRANSFER_ENCODING)
+      def transfer_encoded_intake?
+        request.has_header?(ActionDispatch::Request::TRANSFER_ENCODING)
+      end
 
-        request.content_length
+      def declared_content_length
+        request.get_header("CONTENT_LENGTH").to_i
       end
 
       def intake_resource
-        body = request.raw_post.to_s
-        return refuse_intake_body(:content_too_large, "too-costly") if body.bytesize > MAX_INTAKE_BYTES
+        raw = request.raw_post.to_s
+        return refuse_intake_body(:content_too_large, "too-costly") if raw.bytesize > MAX_INTAKE_BYTES
+
+        body = raw.dup.force_encoding(Encoding::UTF_8)
+        return refuse_intake_body(:bad_request, "invalid") unless body.valid_encoding?
 
         parse_intake_body(body)
       end

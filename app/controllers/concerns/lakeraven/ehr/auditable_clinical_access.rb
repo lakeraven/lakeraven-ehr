@@ -560,19 +560,17 @@ module Lakeraven
         audit_parameters[:patient].to_s.delete_prefix("Patient/")
       end
 
-      # `params` parses the body. An unparseable body raises ParseError, and
-      # this wrapper would then discard the response as an unrecorded 503.
-      # Path and query parameters still name the record; other errors propagate.
+      # Path and query only. `params` parses the body, so a refused payload
+      # — a 413 application/json body, for one — was still read and
+      # JSON-parsed, and an unparseable body raised ParseError inside this
+      # wrapper. The record is named by the route and the query string.
+      # Path parameters are merged over the query string, so a route segment
+      # wins when both name the same key.
       def audit_parameters
         return @audit_parameters if defined?(@audit_parameters)
 
-        @audit_parameters = params
-      rescue ActionDispatch::Http::Parameters::ParseError
-        @audit_parameters = parameters_without_body
-      end
-
-      def parameters_without_body
-        ActionController::Parameters.new(request.query_parameters).merge(request.path_parameters)
+        @audit_parameters = ActionController::Parameters.new(request.query_parameters)
+                                                         .merge(request.path_parameters)
       end
 
       # FHIR R4's "id" grammar. Anything outside it — a reference, markup,
