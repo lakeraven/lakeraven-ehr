@@ -246,10 +246,11 @@ module UrlPatientContextTestHelper
   def assert_empty_banner_in_html!(html)
     banner = Nokogiri::HTML(html).at_css("#patient-banner")
     assert banner, "Expected #patient-banner on the page"
-    assert_includes banner.text, "No patient selected"
-    link = banner.css("a").find { |a| a.text.match?(/chart search/i) }
-    assert link, "Expected a chart search link in the empty banner"
-    assert link["href"].present?, "Chart search link must have an href"
+    # No patient open: the bar is the patient search (rpms-ux S-CHT-01.7), posted.
+    form = banner.at_css("form#patient-search")
+    assert form, "Expected the patient search in the empty banner"
+    assert_equal "post", form["method"]
+    assert form.at_css("input[name='q']"), "Expected a search field in the empty banner"
   end
 
   def without_show_exceptions

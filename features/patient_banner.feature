@@ -31,10 +31,10 @@ Feature: Persistent patient banner
     Then no patient is in context
     And the banner shows the empty state directing to chart search
 
-  Scenario: No patient selected
+  Scenario: No patient open: the bar is the patient search (rpms-ux S-CHT-01.7)
     Given the clinician is signed in with no patient in context
     When the clinician navigates to the dashboard
-    Then the banner shows "No patient selected" with a link to chart search
+    Then the banner shows the empty state directing to chart search
     And no clinical screen renders patient data
 
   Scenario: Signed out login page shows no patient data
