@@ -28,9 +28,11 @@ module Lakeraven
       MAX_IDENTIFIER_ENTRIES = 20
       NUL_BYTE = "\u0000"
       # Fixed text only. A path would copy client keys and indexes into the
-      # OperationOutcome, and those are submitted text.
+      # OperationOutcome, and those are submitted text. JSON.parse turns
+      # 1e400 into a non-finite Float.
       NUL_DIAGNOSTIC = "ServiceRequest (string contains NUL)"
-      private_constant :NUL_BYTE, :NUL_DIAGNOSTIC
+      NON_FINITE_DIAGNOSTIC = "ServiceRequest (non-finite number)"
+      private_constant :NUL_BYTE, :NUL_DIAGNOSTIC, :NON_FINITE_DIAGNOSTIC
 
       def self.call(resource, application)
         new(resource, application).call
@@ -177,7 +179,8 @@ module Lakeraven
           *identifier_problems,
           *subject_problems,
           *code_problems,
-          *nul_byte_problems
+          *nul_byte_problems,
+          *non_finite_problems
         ].compact
       end
 
@@ -269,6 +272,30 @@ module Lakeraven
 
       def nul_byte_in_hash?(node)
         node.any? { |key, child| key.to_s.include?(NUL_BYTE) || nul_byte_in?(child) }
+      end
+
+      def non_finite_problems
+        return [] unless non_finite_in?(resource)
+
+        [ NON_FINITE_DIAGNOSTIC ]
+      end
+
+      # Same walk as the NUL check. A Float that is not finite is Infinity or NaN.
+      def non_finite_in?(node)
+        case node
+        when Float
+          !node.finite?
+        when Array
+          node.any? { |child| non_finite_in?(child) }
+        when Hash
+          non_finite_in_hash?(node)
+        else
+          false
+        end
+      end
+
+      def non_finite_in_hash?(node)
+        node.any? { |key, child| non_finite_in?(key) || non_finite_in?(child) }
       end
     end
   end

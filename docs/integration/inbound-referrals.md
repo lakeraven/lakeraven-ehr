@@ -60,7 +60,7 @@ ServiceRequest create belongs to the referrals capability (`prc_referrals`), wit
 
 ## Limits
 
-- A `Transfer-Encoding` header (including `chunked`) is **411**: Rails parameter instrumentation may already have read a transfer-encoded body, and the size limit that protects memory belongs at the proxy / app server; clients must send `Content-Length`.
+- A `Transfer-Encoding` header (including `chunked`) is **411** when the app still sees it. Some app servers (Puma) de-chunk the body and set `Content-Length` before the app, in which case the size limit applies instead of 411. Clients should send `Content-Length`.
 - `Content-Length` greater than 1,048,576 (1 MiB) is **413**, and the body is not read.
 - A raw body larger than 1,048,576 bytes is **413** and is not stored. This still applies when `Content-Length` is absent or smaller than the body.
 - A body that is not valid UTF-8 is **400** and is not stored.
@@ -68,10 +68,11 @@ ServiceRequest create belongs to the referrals capability (`prc_referrals`), wit
 - `identifier.value` and `subject.identifier.value` are at most 255 bytes (UTF-8).
 - `identifier.system` and `subject.identifier.system` are at most 1024 bytes (UTF-8).
 - Any string in the body, including an object key, that contains a NUL (`U+0000`) is **422** and is not stored. The diagnostic is the fixed text `ServiceRequest (string contains NUL)`. It does not include keys, indexes, or any submitted text.
+- Any non-finite number in the body (`Infinity` or `NaN`, including a JSON number such as `1e400`) is **422** and is not stored. The diagnostic is the fixed text `ServiceRequest (non-finite number)`. It does not include keys, indexes, or any submitted text.
 
 ## Errors
 
-All errors are a FHIR `OperationOutcome`. Validation diagnostics name the element path only (`ServiceRequest.status`, `ServiceRequest.identifier[0].system`). They do not repeat submitted values. A NUL is the exception: its diagnostic is always `ServiceRequest (string contains NUL)`, with no key or index.
+All errors are a FHIR `OperationOutcome`. Validation diagnostics name the element path only (`ServiceRequest.status`, `ServiceRequest.identifier[0].system`). They do not repeat submitted values. A NUL and a non-finite number are the exceptions: their diagnostics are always `ServiceRequest (string contains NUL)` and `ServiceRequest (non-finite number)`, with no key, index, or submitted text.
 
 | HTTP | `issue.code` | When |
 |---|---|---|
@@ -80,10 +81,10 @@ All errors are a FHIR `OperationOutcome`. Validation diagnostics name the elemen
 | 400 | `invalid` | the body is not valid UTF-8, or not JSON |
 | 400 | `structure` | the JSON value is not an object |
 | 404 | `not-supported` | this backend does not provide referrals |
-| 411 | `structure` | `Transfer-Encoding` is set. Clients must send `Content-Length`. |
+| 411 | `structure` | `Transfer-Encoding` is set on the request the app sees. Some app servers (Puma) de-chunk the body and set `Content-Length` before the app, in which case the size limit applies instead of 411. Clients should send `Content-Length`. |
 | 413 | `too-costly` | `Content-Length` or the raw body is larger than 1 MiB |
 | 415 | `not-supported` | `Content-Type` is not `application/fhir+json` or `application/json` |
-| 422 | `invalid` | a required element is missing, not in the value set above, too long, more than 20 `identifier` entries, or contains a NUL |
+| 422 | `invalid` | a required element is missing, not in the value set above, too long, more than 20 `identifier` entries, contains a NUL, or is a non-finite number |
 | 409 | `conflict` | the identifiers match more than one stored referral, or one referral whose subject identifier differs, or a second deadlock |
 
 ## Example
@@ -156,6 +157,10 @@ A created response uses the same resource, with the queue id:
 ```
 
 Posting that identifier again for the same client returns 200 and this same body, even if `status` or `intent` in the new request differ.
+
+## Audit
+
+The audit entity for create is the queue id. The AuditEvent is `ServiceRequest` plus that id when the intake created or replayed a referral, and `ServiceRequest` with no identifier otherwise. The query string is not consulted. A client `id` in the body is not the audit identifier.
 
 ## Not in this slice
 

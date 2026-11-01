@@ -62,9 +62,9 @@ module Lakeraven
       end
 
       # Media type, then Transfer-Encoding, then Content-Length, before raw_post.
-      # Rails parameter instrumentation may already have read a transfer-encoded
-      # body. The size limit that protects memory belongs at the proxy / app
-      # server.
+      # 411 only when Transfer-Encoding is still present. Puma de-chunks and
+      # sets Content-Length before the app; the size limit applies instead.
+      # Clients should send Content-Length.
       def guard_intake_body!
         return if performed?
         return refuse_intake_body(:unsupported_media_type, "not-supported") unless accepted_intake_media_type?
@@ -112,12 +112,24 @@ module Lakeraven
       end
 
       def render_intake(result)
+        # Queue id for the audit row, when this result created or replayed one.
+        @intake_public_id = result.referral&.public_id
         case result.status
         when :created then render_fhir_egress(result.referral.to_fhir, status: :created)
         when :replayed then render_fhir_egress(result.referral.to_fhir, status: :ok)
         when :conflict then render_intake_conflict
         when :invalid then render_invalid_intake(result)
         end
+      end
+
+      # Create does not read the query string. ?patient= and ?id= would name
+      # a record this intake never touched. Index keeps the shared rule.
+      # The audited entity is ServiceRequest plus the queue id set above,
+      # passed through the shared sanitizer.
+      def audit_entity_reference
+        return super unless action_name == "create"
+
+        [ "ServiceRequest", sanitize_identifier_for(fhir_resource_type, @intake_public_id) ]
       end
 
       def render_intake_conflict
