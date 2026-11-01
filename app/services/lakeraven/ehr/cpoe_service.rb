@@ -154,7 +154,11 @@ module Lakeraven
       end
 
       def has_interaction_alerts?
-        interaction_result&.interactions&.any? || false
+        interaction_check_incomplete? || interaction_alerts.any?
+      end
+
+      def interaction_check_incomplete?
+        interaction_result&.incomplete? || false
       end
 
       def interaction_alerts

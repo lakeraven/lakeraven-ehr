@@ -8,6 +8,7 @@ module Lakeraven
       include ActiveModel::Model
       include ActiveModel::Attributes
       include ActiveModel::Validations
+      include FHIRSerializable
 
       COVERAGE_TYPES = %w[
         medicare_a medicare_b medicare_d medicaid private_insurance
@@ -123,7 +124,7 @@ module Lakeraven
           status: status,
           beneficiary: { reference: "Patient/#{patient_dfn}" },
           payor: [ payor_fhir_reference ],
-          period: build_period,
+          period: build_period(start_date: start_date, end_date: end_date),
           class: build_class_array,
           order: order
         }.compact
@@ -196,21 +197,17 @@ module Lakeraven
         end
       end
 
-      def build_period
-        return nil unless start_date || end_date
-
-        p = {}
-        p[:start] = start_date.iso8601 if start_date
-        p[:end] = end_date.iso8601 if end_date
-        p
-      end
-
       def build_class_array
         classes = []
-        classes << { type: { coding: [ { code: "group" } ] }, value: group_id } if group_id
+        if group_id
+          classes << {
+            type: build_codeable_concept(system: nil, code: "group", display: nil),
+            value: group_id
+          }
+        end
         if plan_name.present? || subscriber_id.present?
           classes << {
-            type: { coding: [ { code: "plan" } ] },
+            type: build_codeable_concept(system: nil, code: "plan", display: nil),
             value: subscriber_id || plan_name,
             name: plan_name
           }.compact

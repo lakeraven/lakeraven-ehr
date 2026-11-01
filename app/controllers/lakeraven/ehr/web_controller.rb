@@ -156,7 +156,7 @@ module Lakeraven
         return if capability?(name)
 
         note_audit_denial("browser access refused: lacks #{name}")
-        head :forbidden
+        render "lakeraven/ehr/shared/forbidden", formats: :html, status: :forbidden
       end
     end
   end

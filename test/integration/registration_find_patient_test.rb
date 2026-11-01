@@ -4,6 +4,7 @@ require "test_helper"
 
 # rpms-ux S-REG-01: the front desk finds the patient before registering.
 class RegistrationFindPatientTest < ActionDispatch::IntegrationTest
+  include IhsFeatureAvailabilityTestHelper
   # Looked up when a test runs, not when the file loads.
   def match(**attrs) = Lakeraven::EHR::PatientLookupGateway::Match.new(**attrs)
 
@@ -26,6 +27,19 @@ class RegistrationFindPatientTest < ActionDispatch::IntegrationTest
   ensure
     gateway.singleton_class.alias_method(:find, :__find)
     gateway.singleton_class.remove_method(:__find)
+  end
+
+  # AG is IHS-only (#647): a backend without bprm_registration has no
+  # registration screens, and nothing is asked of it.
+  test "registration is not offered on a backend without bprm_registration" do
+    sign_in("registration_menu")
+    with_restricted_backend do
+      before = RpmsRpc.client.received_calls.length
+      get "/lakeraven-ehr/registration/patients"
+
+      assert_response :not_found
+      assert_no_rpc_calls_since(before)
+    end
   end
 
   test "a user without a registration or scheduling key is refused" do

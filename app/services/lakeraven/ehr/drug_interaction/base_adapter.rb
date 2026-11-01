@@ -4,6 +4,12 @@ module Lakeraven
   module EHR
     module DrugInteraction
       class BaseAdapter
+        # Symbol naming this adapter (:local, :mock, or a host-registered backend).
+        # DrugInteractionService records it as the result's decision source.
+        def backend
+          raise NotImplementedError, "#{self.class}#backend"
+        end
+
         # Check drug-drug interactions for a set of medications.
         # Returns Array<InteractionAlert>
         def check_interactions(medications)

@@ -113,8 +113,9 @@ Feature: Drug Interaction Checking (ONC § 170.315(a)(4))
   Scenario: Adapter failure handled gracefully
     Given the drug interaction adapter is unavailable
     When I check drug interactions for prescribing "aspirin" with RxNorm "1191" to patient "1"
-    Then the interaction check should indicate an error
-    And the error message should mention "error"
+    Then the interaction check should be incomplete
+    And the interaction check should not be safe
+    And the interaction alert list should be empty
 
   Scenario: RPMS mode should produce non-degraded decision metadata
     Given the interaction adapter mode is "rpms"
