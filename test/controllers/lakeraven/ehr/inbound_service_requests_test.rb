@@ -681,6 +681,90 @@ module Lakeraven
         assert_nil event.entity_identifier
       end
 
+      test "create with patient query param audits ServiceRequest id not Patient compartment" do
+        query_patient = "4242"
+
+        assert_difference -> { AuditEvent.count }, 1 do
+          post "#{CREATE_PATH}?patient=#{query_patient}",
+               params: valid_service_request_json(identifier_value: "REF-AUDIT-PATIENT-QUERY"),
+               headers: @headers.merge("Content-Type" => "application/fhir+json")
+        end
+
+        assert_response :created
+        response_id = JSON.parse(response.body)["id"]
+        event = AuditEvent.recent.first
+
+        assert_equal "ServiceRequest", event.entity_type
+        assert_equal response_id, event.entity_identifier
+        refute_includes audit_event_text_columns(event), query_patient
+      end
+
+      test "create with id query param audits assigned public_id not the query id" do
+        query_id = "fake-sr-1"
+
+        assert_difference -> { AuditEvent.count }, 1 do
+          post "#{CREATE_PATH}?id=#{query_id}",
+               params: valid_service_request_json(identifier_value: "REF-AUDIT-QUERY-ID"),
+               headers: @headers.merge("Content-Type" => "application/fhir+json")
+        end
+
+        assert_response :created
+        response_id = JSON.parse(response.body)["id"]
+        event = AuditEvent.recent.first
+
+        assert_equal response_id, event.entity_identifier
+        refute_equal query_id, event.entity_identifier
+      end
+
+      test "idempotent replay audit entity_identifier names the stored referral public_id" do
+        payload = valid_service_request(identifier_value: "REF-AUDIT-REPLAY-ID")
+
+        assert_difference -> { AuditEvent.count }, 1 do
+          post_service_request(payload)
+        end
+        assert_response :created
+        public_id = JSON.parse(response.body)["id"]
+
+        assert_difference -> { AuditEvent.count }, 1 do
+          assert_no_inbound_change do
+            post_service_request(payload)
+          end
+        end
+        assert_response :ok
+
+        replay_event = AuditEvent.recent.first
+        assert_equal public_id, replay_event.entity_identifier
+      end
+
+      test "validation refusal with patient query param audits ServiceRequest without entity_identifier" do
+        query_patient = "4242"
+
+        assert_difference -> { AuditEvent.count }, 1 do
+          assert_no_inbound_change do
+            post "#{CREATE_PATH}?patient=#{query_patient}",
+                 params: valid_service_request_json(resource_type: "Patient", identifier_value: "REF-AUDIT-REFUSED"),
+                 headers: @headers.merge("Content-Type" => "application/fhir+json")
+          end
+        end
+
+        assert_response :unprocessable_content
+        event = AuditEvent.recent.first
+        assert_equal "ServiceRequest", event.entity_type
+        assert_nil event.entity_identifier
+      end
+
+      test "non-finite JSON number in body returns 422 without storing" do
+        json = valid_service_request_json(identifier_value: "REF-NON-FINITE-QTY")
+        json = json.sub(/\}\z/, ',"quantityQuantity":{"value":1e400}}')
+
+        assert_no_inbound_change do
+          post_service_request(json)
+        end
+
+        assert_response :unprocessable_content
+        assert_equal "OperationOutcome", JSON.parse(response.body)["resourceType"]
+      end
+
       test "Transfer-Encoding returns 411 and stores nothing" do
         assert_no_inbound_change do
           post CREATE_PATH,
