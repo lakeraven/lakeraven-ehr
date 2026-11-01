@@ -8,7 +8,7 @@ The engine is mounted at a host-chosen path. The examples below use `/lakeraven-
 
 `POST /lakeraven-ehr/ServiceRequest`
 
-`Content-Type: application/fhir+json`
+`Content-Type` must be `application/fhir+json` or `application/json`. Any other media type is **415** with an OperationOutcome, and nothing is stored.
 
 The body is one ServiceRequest resource. A Bundle is not accepted.
 
@@ -16,14 +16,14 @@ Authenticate with a SMART backend-services token (`client_credentials` at the to
 
 ## Scope
 
-The token must grant ServiceRequest create from a `system/` scope:
+The token must be a pure system token. ServiceRequest create must come from a `system/` scope, and the token must carry no `patient/` scope and no `user/` scope:
 
 - `system/ServiceRequest.c`, or
 - `system/ServiceRequest.write` (SMART v1 `.write` includes create)
 
-`system/*.c`, `system/*.write`, and `system/*.*` also grant it.
+`system/*.c`, `system/*.write`, and `system/*.*` also grant it, when no `patient/` or `user/` scope is present.
 
-The token must not also carry any `patient/` scope. `user/` and `patient/` ServiceRequest write are refused with 403, as is a system write token mixed with a patient scope. A system token has no RPMS session, and a patient scope would bind the call to one patient this queue does not match yet.
+`user/` and `patient/` ServiceRequest write are refused with 403. A system write token mixed with any `patient/` or `user/` scope is refused with 403. A system token has no RPMS session, and a patient or user scope would bind the call to a person this queue does not match yet.
 
 ## Required elements
 
@@ -34,7 +34,7 @@ The token must not also carry any `patient/` scope. `user/` and `patient/` Servi
 | `intent` | a FHIR R4 RequestIntent code (`proposal`, `plan`, `directive`, `order`, `original-order`, `reflex-order`, `filler-order`, `instance-order`, `option`) |
 | `identifier` | one or more entries, each with `system` and `value` |
 | `subject.identifier` | `system` and `value` (a reference alone is not enough) |
-| `code` | `coding` (non-empty) or `text` |
+| `code` | a non-blank `text`, or at least one `coding` entry that is an object with a non-blank `code` |
 
 Any other element on the ServiceRequest is stored as submitted. The client's top-level `id` and `meta` are discarded. The response `id` is the queue's id, a UUID.
 
@@ -45,28 +45,39 @@ Any other element on the ServiceRequest is stored as submitted. The client's top
 Uniqueness is per OAuth client (the token's application) and per `identifier.system` + `identifier.value`.
 
 - No stored referral for this client owns any of those identifiers: **201 Created**. The body is the stored ServiceRequest, including the new `id`.
-- Every matched identifier belongs to the same stored referral: **200 OK** with that original resource. A changed body does not update the stored record. There is no update in this slice. A new identifier sent alongside one that already belongs to that referral is not added.
+- Every matched identifier belongs to the same stored referral, and `subject.identifier` (`system` and `value`) matches the stored patient identifier: **200 OK** with that original resource. A changed body does not update the stored record. There is no update in this slice. A new identifier sent alongside one that already belongs to that referral is not added.
 - The identifiers match two or more stored referrals for this client: **409 Conflict**. Nothing is written.
+- The identifiers match exactly one stored referral, but `subject.identifier` differs from the stored patient identifier: **409 Conflict**. Nothing is written.
 - The same identifier from a different OAuth client is a different referral.
 
-A concurrent duplicate insert is resolved the same way: the loser receives the winner's resource (200) when exactly one referral now matches, otherwise 409.
+A concurrent duplicate insert, including a deadlock, is resolved the same way. After the failed insert is rolled back, the identifiers are looked up once more. Exactly one referral with the same subject returns that resource (200); otherwise 409.
+
+## Capability
+
+ServiceRequest create belongs to the referrals capability (`prc_referrals`), with ServiceRequest search. A backend that does not provide referrals does not advertise create. `POST /ServiceRequest` from a token that would otherwise be accepted answers **404** with `issue.code` `not-supported`. A token that may not create (no system create permission, or any `patient/` or `user/` scope) is still **403**, including on a backend without referrals.
 
 ## Limits
 
-The raw body must be at most 1 MiB (1,048,576 bytes). A larger body is **413** and is not stored.
+- `Content-Length` greater than 1,048,576 (1 MiB) is **413**, and the body is not read.
+- A raw body larger than 1,048,576 bytes is **413** and is not stored. This still applies when `Content-Length` is absent or smaller than the body.
+- `identifier.value` and `subject.identifier.value` are at most 255 bytes (UTF-8).
+- `identifier.system` and `subject.identifier.system` are at most 1024 bytes (UTF-8).
+- Any string in the body, including an object key, that contains a NUL (`U+0000`) is **422** and is not stored. The diagnostic is the fixed text `ServiceRequest (string contains NUL)`. It does not include keys, indexes, or any submitted text.
 
 ## Errors
 
-All errors are a FHIR `OperationOutcome`. Validation diagnostics name the element path only (`ServiceRequest.status`, `ServiceRequest.identifier[0].system`). They do not repeat submitted values.
+All errors are a FHIR `OperationOutcome`. Validation diagnostics name the element path only (`ServiceRequest.status`, `ServiceRequest.identifier[0].system`). They do not repeat submitted values. A NUL is the exception: its diagnostic is always `ServiceRequest (string contains NUL)`, with no key or index.
 
 | HTTP | `issue.code` | When |
 |---|---|---|
 | 401 | `login` | missing, invalid, or expired token |
-| 403 | `forbidden` | the token cannot create ServiceRequest as `system/`, or it carries a `patient/` scope |
+| 403 | `forbidden` | the token's ServiceRequest create permission does not come from a `system/` scope, or the token carries a `patient/` or `user/` scope |
 | 400 | `invalid` or `structure` | the body is not a JSON object |
-| 413 | `too-costly` | the body is larger than 1 MiB |
-| 422 | `invalid` | a required element is missing or not in the value set above |
-| 409 | `conflict` | the identifiers match more than one stored referral for this client |
+| 404 | `not-supported` | this backend does not provide referrals |
+| 413 | `too-costly` | `Content-Length` or the raw body is larger than 1 MiB |
+| 415 | `not-supported` | `Content-Type` is not `application/fhir+json` or `application/json` |
+| 422 | `invalid` | a required element is missing, not in the value set above, too long, or contains a NUL |
+| 409 | `conflict` | the identifiers match more than one stored referral, or one referral whose subject identifier differs |
 
 ## Example
 

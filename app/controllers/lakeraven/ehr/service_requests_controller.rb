@@ -5,14 +5,20 @@ module Lakeraven
     class ServiceRequestsController < ApplicationController
       include PatientCompartment
 
-      # One megabyte. Checked on the raw body before it is parsed.
+      # One megabyte. Content-Length is checked before the body is read;
+      # the raw body is checked again after it is read.
       MAX_INTAKE_BYTES = 1_048_576
+
+      # application/json is accepted so a client that cannot send fhir+json
+      # can still post. Anything else is refused before the body is read.
+      ACCEPTED_INTAKE_MEDIA_TYPES = %w[application/fhir+json application/json].freeze
 
       compartment_bound :index, param: :patient, require_param: true
       # Create is not a compartment search. A system token has no RPMS
-      # connection (ADR 0011); only system/ ServiceRequest create is accepted,
-      # and any patient/ scope on that token is refused.
+      # connection (ADR 0011). The create permission must come from a system/
+      # scope, and the token must carry no patient/ and no user/ scope.
       before_action :authorize_system_intake!, only: :create
+      before_action :guard_intake_body!, only: :create
 
       def index
         dfn = patient_compartment_dfn
@@ -35,13 +41,44 @@ module Lakeraven
         authorize_system_intake! if action_name == "create"
       end
 
+      # Create is a FHIR write. A not-supported answer is an OperationOutcome,
+      # including when the client sends a browser Accept header.
+      def feature_unavailable_html?
+        return false if action_name == "create"
+
+        super
+      end
+
       def authorize_system_intake!
         return if performed?
-
-        allowed = scope_permits?(fhir_resource_type, write_permission, contexts: %w[system])
-        return if allowed && !patient_context_scope?
+        return if system_intake_permitted?
 
         render_forbidden("Insufficient scope for writing #{fhir_resource_type}")
+      end
+
+      def system_intake_permitted?
+        scope_permits?(fhir_resource_type, write_permission, contexts: %w[system]) &&
+          !patient_context_scope? && !user_context_scope?
+      end
+
+      # Media type, then Content-Length, before raw_post. A transfer-encoded
+      # body has no usable Content-Length; the bytesize check below still applies.
+      def guard_intake_body!
+        return if performed?
+        return refuse_intake_body(:unsupported_media_type, "not-supported") unless accepted_intake_media_type?
+        return if declared_content_length <= MAX_INTAKE_BYTES
+
+        refuse_intake_body(:content_too_large, "too-costly")
+      end
+
+      def accepted_intake_media_type?
+        ACCEPTED_INTAKE_MEDIA_TYPES.include?(request.media_type)
+      end
+
+      def declared_content_length
+        return 0 if request.has_header?(ActionDispatch::Request::TRANSFER_ENCODING)
+
+        request.content_length
       end
 
       def intake_resource
@@ -68,8 +105,8 @@ module Lakeraven
 
       def render_intake(result)
         case result.status
-        when :created then render_fhir(result.referral.to_fhir, status: :created)
-        when :replayed then render_fhir(result.referral.to_fhir, status: :ok)
+        when :created then render_fhir_egress(result.referral.to_fhir, status: :created)
+        when :replayed then render_fhir_egress(result.referral.to_fhir, status: :ok)
         when :conflict then render_intake_conflict
         when :invalid then render_invalid_intake(result)
         end

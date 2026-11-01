@@ -546,17 +546,33 @@ module Lakeraven
       end
 
       def direct_audit_identifier
+        source = audit_parameters
         if fhir_resource_type.to_s == "Patient"
-          params[:dfn] || params[:ien] || params[:id] || params[:_id]
+          source[:dfn] || source[:ien] || source[:id] || source[:_id]
         else
-          params[:id] || params[:ien] || params[:_id]
+          source[:id] || source[:ien] || source[:_id]
         end
       end
 
       # FHIR allows both `?patient=1` and `?patient=Patient/1`; the gateways
       # accept both (`extract_patient_dfn`), so the audit records both.
       def patient_search_param
-        params[:patient].to_s.delete_prefix("Patient/")
+        audit_parameters[:patient].to_s.delete_prefix("Patient/")
+      end
+
+      # `params` parses the body. An unparseable body raises ParseError, and
+      # this wrapper would then discard the response as an unrecorded 503.
+      # Path and query parameters still name the record; other errors propagate.
+      def audit_parameters
+        return @audit_parameters if defined?(@audit_parameters)
+
+        @audit_parameters = params
+      rescue ActionDispatch::Http::Parameters::ParseError
+        @audit_parameters = parameters_without_body
+      end
+
+      def parameters_without_body
+        ActionController::Parameters.new(request.query_parameters).merge(request.path_parameters)
       end
 
       # FHIR R4's "id" grammar. Anything outside it — a reference, markup,

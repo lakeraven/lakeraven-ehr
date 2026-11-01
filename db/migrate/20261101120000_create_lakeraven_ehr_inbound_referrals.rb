@@ -13,7 +13,7 @@ class CreateLakeravenEHRInboundReferrals < ActiveRecord::Migration[8.1]
       t.integer :oauth_application_id, null: false
       t.string :organization_id
       t.string :status, null: false, default: "received"
-      t.string :patient_identifier_system, null: false
+      t.string :patient_identifier_system, limit: 1024, null: false
       t.string :patient_identifier_value, null: false
       t.jsonb :resource, null: false
       t.timestamps
@@ -26,7 +26,7 @@ class CreateLakeravenEHRInboundReferrals < ActiveRecord::Migration[8.1]
                    foreign_key: { to_table: :lakeraven_ehr_inbound_referrals },
                    index: { name: "index_ehr_inbound_ref_identifiers_on_referral_id" }
       t.integer :oauth_application_id, null: false
-      t.string :system, null: false
+      t.string :system, limit: 1024, null: false
       t.string :value, null: false
       t.timestamps
     end

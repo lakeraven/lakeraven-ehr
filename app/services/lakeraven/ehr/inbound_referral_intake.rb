@@ -4,8 +4,8 @@ module Lakeraven
   module EHR
     # Validates a FHIR R4 ServiceRequest and stores it on the local intake
     # queue. Idempotent per OAuth client and Identifier: the same identifiers
-    # replay the original row, and identifiers that span two rows conflict.
-    # Nothing here calls RPMS.
+    # and the same subject replay the original row. Identifiers that span two
+    # rows, or one row with a different subject, conflict. Nothing here calls RPMS.
     class InboundReferralIntake
       Result = Data.define(:status, :referral, :diagnostics) do
         def self.created(referral) = new(status: :created, referral: referral, diagnostics: [])
@@ -20,6 +20,16 @@ module Lakeraven
         proposal plan directive order original-order reflex-order filler-order instance-order option
       ].freeze
       ACCEPTED_STATUSES = %w[draft active].freeze
+      # Bytes, not characters. The unique btree index on
+      # (oauth_application_id, system, value) holds about 2704 bytes, and
+      # UTF-8 can exceed that inside a character limit.
+      MAX_IDENTIFIER_VALUE_BYTES = 255
+      MAX_IDENTIFIER_SYSTEM_BYTES = 1024
+      NUL_BYTE = "\u0000"
+      # Fixed text only. A path would copy client keys and indexes into the
+      # OperationOutcome, and those are submitted text.
+      NUL_DIAGNOSTIC = "ServiceRequest (string contains NUL)"
+      private_constant :NUL_BYTE, :NUL_DIAGNOSTIC
 
       def self.call(resource, application)
         new(resource, application).call
@@ -35,7 +45,8 @@ module Lakeraven
         return Result.invalid(problems) if problems.any?
 
         persist
-      rescue ActiveRecord::RecordNotUnique
+      rescue ActiveRecord::RecordNotUnique, ActiveRecord::Deadlocked
+        # The savepoint already rolled back. One more lookup, outside it.
         replay_after_race
       end
 
@@ -51,18 +62,26 @@ module Lakeraven
       end
 
       def resolve
-        ids = matching_referral_ids
-        return Result.replayed(load_referral(ids.first)) if ids.one?
-        return Result.conflict if ids.many?
-
-        Result.created(insert_referral)
+        replay_or_conflict(matching_referral_ids) || Result.created(insert_referral)
       end
 
       def replay_after_race
-        ids = matching_referral_ids
-        return Result.replayed(load_referral(ids.first)) if ids.one?
+        replay_or_conflict(matching_referral_ids) || Result.conflict
+      end
 
-        Result.conflict
+      # One match with the same subject is a replay. Several matches, or one
+      # match whose subject differs, conflict. Nothing matches returns nil.
+      def replay_or_conflict(ids)
+        return Result.conflict if ids.many?
+        return unless ids.one?
+
+        referral = load_referral(ids.first)
+        same_subject?(referral) ? Result.replayed(referral) : Result.conflict
+      end
+
+      def same_subject?(referral)
+        referral.patient_identifier_system == subject_identifier["system"] &&
+          referral.patient_identifier_value == subject_identifier["value"]
       end
 
       def load_referral(id)
@@ -71,7 +90,8 @@ module Lakeraven
 
       def insert_referral
         referral = InboundReferral.create!(referral_attributes)
-        identifier_pairs.each { |system, value| insert_identifier(referral, system, value) }
+        # system, then value, so concurrent inserts lock the unique index in one order.
+        identifier_pairs.sort.each { |system, value| insert_identifier(referral, system, value) }
         referral
       end
 
@@ -135,7 +155,8 @@ module Lakeraven
           *element_problem("intent", REQUEST_INTENTS),
           *identifier_problems,
           *subject_problems,
-          *code_problems
+          *code_problems,
+          *nul_byte_problems
         ].compact
       end
 
@@ -158,7 +179,7 @@ module Lakeraven
         prefix = "ServiceRequest.identifier[#{index}]"
         return [ prefix ] unless entry.is_a?(Hash)
 
-        [ "#{prefix}.system", "#{prefix}.value" ].reject { |path| present_string?(entry[path.split(".").last]) }
+        bounded_identifier_problems(entry, prefix)
       end
 
       def subject_problems
@@ -168,22 +189,64 @@ module Lakeraven
         identifier = subject["identifier"]
         return [ "ServiceRequest.subject.identifier" ] unless identifier.is_a?(Hash)
 
-        problems = []
-        problems << "ServiceRequest.subject.identifier.system" unless present_string?(identifier["system"])
-        problems << "ServiceRequest.subject.identifier.value" unless present_string?(identifier["value"])
-        problems
+        bounded_identifier_problems(identifier, "ServiceRequest.subject.identifier")
+      end
+
+      def bounded_identifier_problems(entry, prefix)
+        [
+          *bounded_string_problem(entry["system"], "#{prefix}.system", MAX_IDENTIFIER_SYSTEM_BYTES),
+          *bounded_string_problem(entry["value"], "#{prefix}.value", MAX_IDENTIFIER_VALUE_BYTES)
+        ]
+      end
+
+      def bounded_string_problem(value, path, max_bytes)
+        return path unless present_string?(value)
+        return path if value.bytesize > max_bytes
+
+        nil
       end
 
       def code_problems
         code = resource["code"]
         return [ "ServiceRequest.code" ] unless code.is_a?(Hash)
-        return [] if present_string?(code["text"]) || code["coding"].is_a?(Array) && code["coding"].any?
+        return [] if present_string?(code["text"]) || usable_coding?(code["coding"])
 
         [ "ServiceRequest.code" ]
       end
 
+      def usable_coding?(coding)
+        coding.is_a?(Array) && coding.any? { |entry| coding_code?(entry) }
+      end
+
+      def coding_code?(entry)
+        entry.is_a?(Hash) && present_string?(entry["code"])
+      end
+
       def present_string?(value)
         value.is_a?(String) && !value.strip.empty?
+      end
+
+      def nul_byte_problems
+        return [] unless nul_byte_in?(resource)
+
+        [ NUL_DIAGNOSTIC ]
+      end
+
+      def nul_byte_in?(node)
+        case node
+        when String
+          node.include?(NUL_BYTE)
+        when Array
+          node.any? { |child| nul_byte_in?(child) }
+        when Hash
+          nul_byte_in_hash?(node)
+        else
+          false
+        end
+      end
+
+      def nul_byte_in_hash?(node)
+        node.any? { |key, child| key.to_s.include?(NUL_BYTE) || nul_byte_in?(child) }
       end
     end
   end
