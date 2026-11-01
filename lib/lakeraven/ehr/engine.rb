@@ -25,6 +25,11 @@ module Lakeraven
       # exception report. Filter the field names this engine actually uses for
       # credentials, in the HOST app's config, since that is where request
       # logging reads them from.
+      initializer "lakeraven-ehr.scrub_parse_errors" do |app|
+        require "lakeraven/ehr/scrub_parse_errors"
+        app.middleware.insert_after ActionDispatch::DebugExceptions, ScrubParseErrors
+      end
+
       initializer "lakeraven-ehr.filter_credentials" do |app|
         # `allergy` is the chart entry payload: allergen, comments, symptoms.
         app.config.filter_parameters += %i[username access_code verify_code allergy]
