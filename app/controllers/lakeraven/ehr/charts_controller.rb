@@ -113,6 +113,10 @@ module Lakeraven
         render_chart
       end
 
+      # The patient bar offers "Switch patient" to a credential that may read
+      # patients (rpms-ux S-CHT-01.9).
+      def patient_search_allowed? = can_read?("Patient")
+
       private
 
       # -- Identifier format (#467) ----------------------------------------------

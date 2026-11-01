@@ -27,7 +27,7 @@ class RegistrationPhiOutOfUrlsTest < ActionDispatch::IntegrationTest
   test "the search form posts, and a search by SSN never puts it in a URL" do
     sign_in
     get "/lakeraven-ehr/registration/patients"
-    form = css_select("form").find { |f| f.at_css("input[name='q']") }
+    form = css_select("main form").find { |f| f.at_css("input[name='q']") }
     assert_equal "post", form["method"]
     assert_equal "/lakeraven-ehr/registration/patients/search", form["action"]
 

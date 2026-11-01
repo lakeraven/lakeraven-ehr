@@ -9,8 +9,9 @@ module Lakeraven
     # requires the context this creates (ClinicianPatientContext).
     #
     # It runs on the same SMART token as the rest of the surface: opening a
-    # record is itself a clinical access, so a credential that may not read
-    # screenings may not open the record either.
+    # record is itself a clinical access, so it takes a read of the chart
+    # (Patient, as the patient bar opens it: rpms-ux S-CHT-01) or of the
+    # screenings. Each page the open leads to still checks its own scope.
     class PatientContextsController < WebController
       # Fail-closed audit comes from WebController's AuditableClinicalAccess
       # (#512): an open that cannot be recorded is not completed.
@@ -23,15 +24,16 @@ module Lakeraven
 
       def create
         open_patient_context!(params[:dfn])
-        # Fixed internal destination: never a caller-supplied return path, so
-        # this cannot be used as an open redirect.
-        redirect_to patient_screenings_path(params[:dfn])
+        # Fixed internal destinations: never a caller-supplied return path, so
+        # this cannot be used as an open redirect. The chart when the user may
+        # read it, otherwise the screenings, where this open began.
+        redirect_to(can_read?("Patient") ? patient_chart_path(params[:dfn]) : patient_screenings_path(params[:dfn]))
       end
 
       private
 
       def authorize_context_scope!
-        return true if can_read?(ScreeningsController::SCREENING_RESOURCE)
+        return true if can_read?("Patient") || can_read?(ScreeningsController::SCREENING_RESOURCE)
 
         render_forbidden("Insufficient scope to open this patient's record")
         false
