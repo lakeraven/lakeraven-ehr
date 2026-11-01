@@ -22,6 +22,9 @@ module Lakeraven
     # signs in again (SignInAgain). At capacity sign-in is refused; no signed-in
     # user is evicted to make room (evict_idle: false).
     #
+    # In lib/, not app/: a development code reload must not forget the broker
+    # or drop every signed-in user's connection.
+    #
     # The connections live in this process's memory, so the app runs as one
     # process (threads are fine): assert_single_process! refuses to boot
     # otherwise.

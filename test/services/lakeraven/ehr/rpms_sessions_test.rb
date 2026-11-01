@@ -6,6 +6,12 @@ require "test_helper"
 # server process: a request routed to a process that does not hold its user's
 # connection would sign them out (ADR 0011 §5).
 class RpmsSessionsTest < ActiveSupport::TestCase
+  test "the connections live outside the reloaded code, so a development reload keeps them" do
+    file = Lakeraven::EHR::RpmsSessions.method(:configure!).source_location.first
+
+    assert_empty Rails.autoloaders.main.dirs.select { |dir| file.start_with?("#{dir}/") }
+  end
+
   test "one process boots" do
     assert_nil Lakeraven::EHR::RpmsSessions.assert_single_process!(workers: 0)
     assert_nil Lakeraven::EHR::RpmsSessions.assert_single_process!(workers: 1)
