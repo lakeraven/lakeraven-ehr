@@ -634,6 +634,167 @@ module Lakeraven
         refute_includes text_columns, "REF-AUDIT-0001"
       end
 
+      test "audit entity_identifier is not taken from top-level JSON id on successful create" do
+        assert_difference -> { AuditEvent.count }, 1 do
+          post CREATE_PATH,
+               params: valid_service_request_json(client_submitted_id: "42", identifier_value: "REF-AUDIT-BODY-ID"),
+               headers: @headers.merge("Content-Type" => "application/json")
+        end
+
+        assert_response :created
+        event = AuditEvent.recent.first
+        assert_equal "ServiceRequest", event.entity_type
+        assert_nil event.entity_identifier
+      end
+
+      test "audit entity is not Patient and omits top-level JSON patient on successful create" do
+        body_patient = "777"
+        payload = valid_service_request(identifier_value: "REF-AUDIT-BODY-PATIENT")
+        payload["patient"] = body_patient
+
+        assert_difference -> { AuditEvent.count }, 1 do
+          post CREATE_PATH,
+               params: payload.to_json,
+               headers: @headers.merge("Content-Type" => "application/json")
+        end
+
+        assert_response :created
+        event = AuditEvent.recent.first
+        refute_equal "Patient", event.entity_type
+        refute_includes audit_event_text_columns(event), body_patient
+      end
+
+      test "form-urlencoded body returns 415 and audit entity is not Patient" do
+        assert_difference -> { AuditEvent.count }, 1 do
+          assert_no_inbound_change do
+            post CREATE_PATH,
+                 params: "patient=12345&id=99",
+                 headers: @headers.merge("Content-Type" => "application/x-www-form-urlencoded")
+          end
+        end
+
+        assert_response :unsupported_media_type
+        assert_equal "OperationOutcome", JSON.parse(response.body)["resourceType"]
+
+        event = AuditEvent.recent.first
+        refute_equal "Patient", event.entity_type
+        assert_nil event.entity_identifier
+      end
+
+      test "Transfer-Encoding chunked returns 411 without reading the body" do
+        probe = { read: false }
+        tracker = Module.new do
+          define_method(:raw_post) do
+            probe[:read] = true
+            super()
+          end
+
+          define_method(:body) do
+            probe[:read] = true
+            super()
+          end
+        end
+        ActionDispatch::Request.prepend(tracker)
+
+        begin
+          assert_no_inbound_change do
+            post CREATE_PATH,
+                 params: valid_service_request_json(identifier_value: "REF-TRANSFER-ENC"),
+                 headers: @headers.merge(
+                   "Content-Type" => "application/fhir+json",
+                   "Transfer-Encoding" => "chunked"
+                 )
+          end
+
+          assert_response :length_required
+          assert_equal "OperationOutcome", JSON.parse(response.body)["resourceType"]
+          refute probe[:read], "expected 411 before the request body is read"
+        ensure
+          tracker.class_eval do
+            remove_method :raw_post if method_defined?(:raw_post)
+            remove_method :body if method_defined?(:body)
+          end
+        end
+      end
+
+      test "invalid UTF-8 in code.text returns 400 OperationOutcome without storing" do
+        json = valid_service_request_json(
+          identifier_value: "REF-UTF8-CODE",
+          code: { "text" => "x" }
+        )
+        json = json.sub('"x"', "\"\xFF\"")
+
+        assert_no_inbound_change do
+          post CREATE_PATH, params: json.b, headers: @headers.merge("Content-Type" => "application/fhir+json")
+        end
+
+        assert_response :bad_request
+        assert_equal "OperationOutcome", JSON.parse(response.body)["resourceType"]
+      end
+
+      test "invalid UTF-8 in note text returns 400 OperationOutcome without storing" do
+        payload = valid_service_request(identifier_value: "REF-UTF8-NOTE")
+        payload["note"] = [ { "text" => "n" } ]
+        json = payload.to_json.sub('"n"', "\"\xFF\"")
+
+        assert_no_inbound_change do
+          post CREATE_PATH, params: json.b, headers: @headers.merge("Content-Type" => "application/fhir+json")
+        end
+
+        assert_response :bad_request
+        assert_equal "OperationOutcome", JSON.parse(response.body)["resourceType"]
+      end
+
+      test "more than 20 identifier entries returns 422 without storing" do
+        max_identifiers = 20
+        over_limit = max_identifiers + 1
+        identifiers = over_limit.times.map do |index|
+          { "system" => "#{REFERRAL_ID_SYSTEM}/count-#{index}", "value" => "REF-ID-COUNT-#{index}" }
+        end
+
+        assert_no_inbound_change do
+          post_service_request(valid_service_request(identifier: identifiers))
+        end
+
+        assert_response :unprocessable_content
+        assert_equal "OperationOutcome", JSON.parse(response.body)["resourceType"]
+      end
+
+      test "exactly 20 identifier entries returns 201" do
+        max_identifiers = 20
+        identifiers = max_identifiers.times.map do |index|
+          { "system" => "#{REFERRAL_ID_SYSTEM}/max-#{index}", "value" => "REF-ID-MAX-#{index}" }
+        end
+
+        assert_difference -> { inbound_referral_count }, 1 do
+          post_service_request(valid_service_request(identifier: identifiers))
+        end
+
+        assert_response :created
+      end
+
+      test "Deadlock on first insert is retried and returns 201 with one stored referral" do
+        attempts = 0
+        original_insert = Lakeraven::EHR::InboundReferralIntake.instance_method(:insert_referral)
+        Lakeraven::EHR::InboundReferralIntake.define_method(:insert_referral) do
+          attempts += 1
+          raise ActiveRecord::Deadlocked if attempts == 1
+
+          original_insert.bind(self).call
+        end
+
+        begin
+          assert_difference -> { inbound_referral_count }, 1 do
+            post_service_request(valid_service_request(identifier_value: "REF-DEADLOCK-0001"))
+          end
+
+          assert_response :created
+          assert_equal 2, attempts
+        ensure
+          Lakeraven::EHR::InboundReferralIntake.define_method(:insert_referral, original_insert)
+        end
+      end
+
       private
 
       def install_oauth_client!(scopes:, organization_id:)
@@ -752,6 +913,22 @@ module Lakeraven
           Lakeraven::EHR::InboundReferralIdentifier.delete_all
         end
         Lakeraven::EHR::InboundReferral.delete_all
+      end
+
+      def audit_event_text_columns(event)
+        [
+          event.agent_name,
+          event.agent_network_address,
+          event.agent_who_identifier,
+          event.agent_who_type,
+          event.entity_id,
+          event.entity_identifier,
+          event.entity_type,
+          event.facility_identifier,
+          event.outcome_desc,
+          event.rpms_session_id,
+          event.tenant_identifier
+        ].compact.join(" ")
       end
     end
   end
