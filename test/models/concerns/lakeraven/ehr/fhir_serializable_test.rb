@@ -5,18 +5,19 @@ require "test_helper"
 module Lakeraven
   module EHR
     class FHIRSerializableTest < ActiveSupport::TestCase
-      # Host class exposes private FHIRSerializable helpers for contract tests.
-      class HelperHost
-        include Lakeraven::EHR::FHIRSerializable
-
-        def call_build_identifier(**kwargs) = build_identifier(**kwargs)
-        def call_build_reference(resource_type, id) = build_reference(resource_type, id)
-        def call_build_codeable_concept(**kwargs) = build_codeable_concept(**kwargs)
-        def call_build_period(**kwargs) = build_period(**kwargs)
-      end
-
       setup do
-        @host = HelperHost.new
+        flunk "Lakeraven::EHR::FHIRSerializable is not defined" unless Lakeraven::EHR.const_defined?(:FHIRSerializable, false)
+
+        host_class = Class.new do
+          include Lakeraven::EHR.const_get(:FHIRSerializable, false)
+
+          def call_build_identifier(**kwargs) = build_identifier(**kwargs)
+          def call_build_reference(resource_type, id) = build_reference(resource_type, id)
+          def call_build_codeable_concept(**kwargs) = build_codeable_concept(**kwargs)
+          def call_build_period(**kwargs) = build_period(**kwargs)
+        end
+
+        @host = host_class.new
       end
 
       test "build_identifier returns system and stringified value" do
