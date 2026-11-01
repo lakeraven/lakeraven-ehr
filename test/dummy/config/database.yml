@@ -9,4 +9,4 @@ development:
 
 test:
   <<: *default
-  database: lakeraven_ehr_test
+  database: "<%= require Rails.root.join("lib/test_database_name").to_s; Lakeraven::EHR::TestDatabaseName.resolve(checkout_root: Rails.root.join("../..").to_s, env: ENV) %>"
