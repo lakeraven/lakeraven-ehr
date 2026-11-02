@@ -92,7 +92,7 @@ jobs:
           distribution: temurin
           java-version: "21"
       - name: Cache FHIR packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.fhir/packages
           key: fhir-packages-us-core-6.1.0-validator-${{ env.VALIDATOR_VERSION }}
