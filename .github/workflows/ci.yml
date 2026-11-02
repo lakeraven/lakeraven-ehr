@@ -108,7 +108,7 @@ jobs:
         run: US_CORE_VALIDATOR_JAR="$RUNNER_TEMP/validator_cli.jar" test/us_core/validate.rb tmp/us-core-samples
       - name: Keep the samples and the validator output
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: us-core-samples
           path: tmp/us-core-samples
