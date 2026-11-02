@@ -12,5 +12,3 @@
 /test/dummy/storage/*
 /test/dummy/public/assets/
 .env*
-Dockerfile
-.dockerignore
