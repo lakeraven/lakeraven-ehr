@@ -55,6 +55,22 @@ class RegistrationRegisterPatientTest < ActionDispatch::IntegrationTest
     assert_response :forbidden
   end
 
+  # Find tribe and Find community post this form to another path. The test environment
+  # leaves forgery protection off, so a refusal only a browser meets needs it turned on.
+  test "the tribe and community look-ups are accepted with forgery protection on" do
+    sign_in("registration_menu")
+    protection = ActionController::Base.allow_forgery_protection
+    ActionController::Base.allow_forgery_protection = true
+    get "/lakeraven-ehr/registration/patients/new"
+    token = css_select("#registration-form input[name='authenticity_token']").first["value"]
+
+    post "/lakeraven-ehr/registration/patients/new", params: { authenticity_token: token, registration: { name: "PROBE,ALPHA" } }
+
+    assert_response :success
+  ensure
+    ActionController::Base.allow_forgery_protection = protection
+  end
+
   test "S-REG-02.1 a new patient is registered and shows the health record number RPMS gave" do
     sign_in("registration_menu")
     with_register(registered(990_057)) do |calls|
