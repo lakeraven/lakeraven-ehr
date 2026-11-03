@@ -125,6 +125,13 @@
           contacts: @contacts,
           can_edit: can_edit %>
   <% end %>
+
+  <% unless @languages.nil? %>
+    <%= render "lakeraven/ehr/registration/languages/section",
+          dfn: params[:dfn],
+          languages: @languages,
+          can_edit: can_edit %>
+  <% end %>
 <% end %>
 
 <p class="mt-6">

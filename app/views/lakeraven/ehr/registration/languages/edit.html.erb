@@ -1,0 +1,123 @@
+<% page_title "Record the languages", @patient[:name], "Registration" %>
+<% name_of = ->(ien) { @names[ien.to_i].to_s.titleize } %>
+<% find_url = registration_edit_patient_languages_path(@dfn) %>
+
+<%= page_header "Record the languages",
+      [ @patient[:name],
+        "Saving adds a new dated entry. Earlier entries are kept." ] %>
+
+<%= flash_alert id: "languages-alert" %>
+
+<%= form_errors @entry,
+      "The languages were not saved.",
+      id: "languages-errors" %>
+
+<% if @confirm_preferred %>
+  <%= alert_box :notice,
+        "The preferred language is not the primary language or one of the other languages.",
+        "Check it, then save again to keep it.",
+        id: "preferred-warning" %>
+<% end %>
+
+<%= form_with scope: :languages,
+      url: registration_patient_languages_path(@dfn),
+      method: :post,
+      local: true,
+      id: "languages-form",
+      class: "card flex flex-col gap-4" do |f| %>
+  <% @names.each do |ien, name| %>
+    <%= hidden_field_tag "language_names[#{ien}]", name %>
+  <% end %>
+
+  <%# PRIMARY LANGUAGE, 9000001.86 .02. %>
+  <%= lookup_field f,
+        :primary_ien,
+        legend: "Primary language (spoken at home)",
+        search: :primary_search,
+        search_label: "Language starts with",
+        find_label: "Find primary language",
+        find_url: find_url,
+        choices: @found[:primary_search].map { |row| [ row[:ien], row[:name].titleize, { primary: row[:ien] } ] },
+        selected: @entry.primary_ien,
+        chosen_text: ("Primary language: #{name_of.(@entry.primary_ien)}." if @entry.primary_ien),
+        error: @entry.errors[:primary_ien].first %>
+
+  <%# OTHER LANGUAGE SPOKEN, 9000001.8605. %>
+  <fieldset
+    class="choice-list<%= " form-field--error" if @entry.errors[:others].any? %>"
+    id="other-languages"
+  >
+    <legend>Other languages (optional)</legend>
+    <% if @entry.errors[:others].any? %>
+      <p class="form-field__error">Other languages <%= @entry.errors[:others].first %>.</p>
+    <% end %>
+    <%= render "lakeraven/ehr/shared/lookup_search",
+          search: :other_search,
+          search_label: "Language starts with",
+          find_label: "Find other language",
+          find_url: find_url,
+          find_method: :post %>
+    <% chosen = @entry.others %>
+    <% candidates = chosen + @found[:other_search].map { |row| row[:ien] }.reject { |ien| chosen.include?(ien) } %>
+    <%= hidden_field_tag "languages[others][]", "" %>
+    <% candidates.each do |ien| %>
+      <label
+        class="choice"
+        data-other="<%= ien %>"
+      >
+        <%= check_box_tag "languages[others][]",
+              ien,
+              chosen.include?(ien),
+              id: "languages_others_#{ien}" %>
+        <%= name_of.(ien) %>
+      </label>
+    <% end %>
+    <% if candidates.empty? %>
+      <p class="hint">None. Find a language to add one.</p>
+    <% end %>
+  </fieldset>
+
+  <%# PREFERRED LANGUAGE, 9000001.86 .04. %>
+  <% preferred_choices = (@found[:preferred_search].presence&.map { |row| row[:ien] } ||
+                          [ @entry.primary_ien, *@entry.others ].compact.uniq) %>
+  <%= lookup_field f,
+        :preferred_ien,
+        legend: "Preferred language (optional)",
+        search: :preferred_search,
+        search_label: "Language starts with",
+        find_label: "Find preferred language",
+        find_url: find_url,
+        choices: preferred_choices.map { |ien| [ ien, name_of.(ien), { preferred: ien } ] },
+        selected: @entry.preferred_ien,
+        hint: "Usually the primary language or one of the other languages." %>
+  <% if @confirm_preferred %>
+    <%= f.hidden_field :preferred_confirmed, value: "1" %>
+  <% end %>
+
+  <%# INTREPRETER REQUIRED, 9000001.86 .03. %>
+  <%= choice_list f,
+        :interpreter,
+        legend: "Interpreter needed",
+        choices: Lakeraven::EHR::LanguageEntry::INTERPRETER.map { |code, text| [ code, text, { interpreter: code } ] },
+        selected: @entry.interpreter,
+        inline: true,
+        hint: "Needed when the primary language is not English.",
+        error: @entry.errors[:interpreter].first %>
+
+  <%# ENGLISH PROFICIENCY, 9000001.86 .06. %>
+  <%= choice_list f,
+        :proficiency,
+        legend: "How well the patient speaks English",
+        choices: Lakeraven::EHR::LanguageEntry::PROFICIENCY.map { |code, text| [ code, text, { proficiency: code } ] },
+        selected: @entry.proficiency,
+        inline: true,
+        hint: "Needed when the patient speaks English.",
+        error: @entry.errors[:proficiency].first %>
+
+  <%= f.submit "Save the languages",
+        class: "button-primary self-start" %>
+<% end %>
+
+<p class="mt-6">
+  <%= link_to "Back to the patient", registration_patient_path(@dfn, anchor: "languages-section") %>
+</p>
