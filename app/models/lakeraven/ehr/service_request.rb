@@ -5,6 +5,7 @@ module Lakeraven
     class ServiceRequest
       include ActiveModel::Model
       include ActiveModel::Attributes
+      include FHIRSerializable
 
       attribute :ien, :integer
       attribute :patient_dfn, :integer
@@ -33,6 +34,7 @@ module Lakeraven
       attribute :appointment_on, :date
       attribute :completed_on, :date
       attribute :notes, :string
+      attribute :authored_on, :date
 
       class RecordNotFound < StandardError; end
 
@@ -84,6 +86,38 @@ module Lakeraven
 
       def self.for_patient(dfn)
         gateway.for_patient(dfn)
+      end
+
+      # STATUS OF REFERRAL (#90001 .15): A ACTIVE, A1 APPROVED, C1
+      # CLOSED-COMPLETED, X CLOSED-NOT COMPLETED. The search reply may carry
+      # the code or its name, so both are read.
+      # An RCIS REFERRAL (#90001) row, whatever its purpose.
+      RCIS_REFERRAL = "rcis"
+      # SNOMED CT 3457005 "Patient referral (procedure)": what every RCIS
+      # referral is. US Core requires a code (1..1); the referral's purpose,
+      # when RPMS has one, is its text.
+      PATIENT_REFERRAL = { system: "http://snomed.info/sct", code: "3457005", display: "Patient referral" }.freeze
+
+      RCIS_STATUS = {
+        "A" => "active", "ACTIVE" => "active", "A1" => "active", "APPROVED" => "active",
+        "C1" => "completed", "CLOSED-COMPLETED" => "completed",
+        "X" => "cancelled", "CLOSED-NOT COMPLETED" => "cancelled"
+      }.freeze
+
+      # A row of RpmsRpc::Referral.for_patient (BMC SEARCH REFERRAL). Only
+      # what has a FHIR element is kept: the row's HRN, patient name and
+      # eligibility fields are not part of a ServiceRequest.
+      def self.from_rpms_row(row, patient_dfn:)
+        new(
+          ien: row[:ien].to_s.presence,
+          patient_dfn: patient_dfn.to_s,
+          identifier: row[:referral_number].presence,
+          status: RCIS_STATUS.fetch(row[:status].to_s.strip.upcase, "draft"),
+          service_requested: row[:purpose].presence,
+          referral_type: RCIS_REFERRAL,
+          performer_name: row[:facility].presence,
+          authored_on: row[:date]
+        )
       end
 
       def self.create(attributes = {})
@@ -173,8 +207,9 @@ module Lakeraven
           status: map_status_to_fhir,
           intent: "order",
           priority: map_urgency_to_fhir_priority,
-          code: service_requested.present? ? { text: service_requested } : nil,
-          subject: patient_dfn ? { reference: "Patient/#{patient_dfn}" } : nil,
+          code: build_code,
+          subject: patient_dfn ? build_reference("Patient", patient_dfn) : nil,
+          authoredOn: authored_on&.iso8601,
           reasonCode: reason_for_referral.present? ? [ { text: reason_for_referral } ] : nil
         }.compact
       end
@@ -193,6 +228,14 @@ module Lakeraven
         }.compact
       end
 
+      def build_code
+        if referral_type == RCIS_REFERRAL
+          { coding: [ PATIENT_REFERRAL ], text: service_requested.presence }.compact
+        elsif service_requested.present?
+          { text: service_requested }
+        end
+      end
+
       def map_status_to_fhir
         if completed? then "completed"
         elsif cancelled? then "cancelled"
@@ -208,8 +251,14 @@ module Lakeraven
 
       def build_fhir_identifiers
         ids = []
-        ids << { use: "official", system: "http://ihs.gov/rpms/consult-id", value: ien.to_s } if ien.present?
-        ids << { use: "usual", system: "http://ihs.gov/rpms/service-request-identifier", value: identifier } if identifier.present?
+        if ien.present?
+          ids << { use: "official" }.merge(build_identifier(system: "http://ihs.gov/rpms/consult-id", value: ien))
+        end
+        if identifier.present?
+          ids << { use: "usual" }.merge(
+            build_identifier(system: "http://ihs.gov/rpms/service-request-identifier", value: identifier)
+          )
+        end
         ids.presence
       end
     end

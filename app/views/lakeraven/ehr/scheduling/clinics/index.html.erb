@@ -1,0 +1,31 @@
+<% content_for :title, "Scheduling | Lakeraven EHR" %>
+
+<div class="page-header">
+  <h1>Scheduling</h1>
+  <p>
+    Choose a clinic to see its day and book into it.
+  </p>
+</div>
+
+<% if @resources.empty? %>
+  <p
+    id="no-resources"
+    class="hint"
+  >
+    No clinic resources are open to you.
+  </p>
+<% else %>
+  <ul
+    id="resources"
+    class="card flex flex-col gap-2"
+  >
+    <% @resources.each do |resource| %>
+      <li data-resource="<%= resource[:id] %>">
+        <%= link_to resource[:name], scheduling_clinic_path(resource[:id]) %>
+        <% if resource[:inactive] %>
+          <span class="hint">(inactive)</span>
+        <% end %>
+      </li>
+    <% end %>
+  </ul>
+<% end %>

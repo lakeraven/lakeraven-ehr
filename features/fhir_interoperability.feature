@@ -4,18 +4,18 @@ Feature: FHIR R4 Interoperability
   So that I can integrate with TEFCA, CommonWell, and other health information networks
 
   Background:
-    Given the following patients exist:
-      | dfn | first_name | last_name | dob        | sex | ssn         | tribal_enrollment |
-      | 1   | Alice      | Anderson  | 1980-05-15 | F   | 111-11-1111 | EXNH-12345        |
+    Given these RPMS demo patients:
+      | dfn | name             | ssn       | dob        | sex |
+      | 4   | DEMO,PATIENT ONE | 666010101 | 2001-01-01 | F   |
 
   Scenario: Retrieve patient as FHIR Patient resource
-    When I request patient "1" in FHIR format
+    When I request patient "4" in FHIR format
     Then I should receive a valid FHIR Patient resource
     And the FHIR resource should have:
       | resourceType | Patient    |
-      | id           | 1          |
+      | id           | 4          |
       | gender       | female     |
-      | birthDate    | 1980-05-15 |
+      | birthDate    | 2001-01-01 |
     And the FHIR Patient should have an identifier with system "urn:oid:2.16.840.1.113883.4.349"
 
   # DEFERRED (@unsourced): passed briefly on the tribal enrichment merged in
@@ -26,12 +26,12 @@ Feature: FHIR R4 Interoperability
     # seeding the field again.
   @unsourced
   Scenario: FHIR Patient includes tribal enrollment extension
-    When I request patient "1" in FHIR format
+    When I request patient "4" in FHIR format
     Then the FHIR Patient should have a tribal enrollment number in the identifiers
     And the tribal enrollment identifier should contain "EXNH-12345"
 
   Scenario: FHIR Patient supports US Core Profile requirements
-    When I request patient "1" in FHIR format
+    When I request patient "4" in FHIR format
     Then the FHIR Patient should conform to US Core Patient profile
     And the FHIR resource should have required fields:
       | identifier |
@@ -46,14 +46,14 @@ Feature: FHIR R4 Interoperability
     # Tracked: lakeraven-ehr#564 and rpms-rpc#294.
   @unsourced
   Scenario: FHIR Patient includes address and telecom
-    When I request patient "1" in FHIR format
+    When I request patient "4" in FHIR format
     Then the FHIR Patient should have an address with state "AK"
     And the FHIR Patient should have a telecom with value "907-555-1234"
 
   Scenario: FHIR Patient includes SSN identifier
-    When I request patient "1" in FHIR format
+    When I request patient "4" in FHIR format
     Then the FHIR Patient should have an identifier with system "http://hl7.org/fhir/sid/us-ssn"
-    And the SSN identifier value should be "111-11-1111"
+    And the SSN identifier value should be "666010101"
 
   Scenario: Round-trip FHIR serialization preserves data
     Given a patient with complete demographics
@@ -63,5 +63,5 @@ Feature: FHIR R4 Interoperability
     And the patient gender should match the original
 
   Scenario: FHIR content type is application/fhir+json
-    When I request patient "1" via the FHIR API
+    When I request patient "4" via the FHIR API
     Then the response content type should be "application/fhir+json"

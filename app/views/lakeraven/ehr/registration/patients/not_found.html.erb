@@ -1,0 +1,17 @@
+<% content_for :title, "No such patient | Lakeraven EHR" %>
+
+<div class="page-header">
+  <h1>No such patient</h1>
+</div>
+
+<p
+  id="no-such-patient"
+  class="hint"
+>
+  There is no patient with that identifier.
+  No record was opened.
+</p>
+
+<p class="mt-6">
+  <%= link_to "Back to search", registration_patients_path %>
+</p>

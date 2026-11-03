@@ -5,6 +5,7 @@ Given("the authentication service is available") do
 end
 
 When("I login as {string} with password {string}") do |username, password|
+  @signed_on_as_scenario_user = true
   @auth_result = @auth_service.authenticate(access_code: username, verify_code: password)
 
   if @auth_result.success?
@@ -32,6 +33,10 @@ Then("I should see an authentication error {string}") do |message|
   assert @error_message.to_s.include?(message),
     "Expected error message to include '#{message}' but got '#{@error_message}'"
 end
+
+# One process holds one broker identity (rpms-rpc#234): after a scenario signs
+# on as its own user, the live run's persona signs back on.
+After { LiveRpmsSession.sign_on! if LIVE_RPMS && @signed_on_as_scenario_user }
 
 # Role login shortcuts
 Given("I am logged in as a provider") do
@@ -97,8 +102,8 @@ Then("I should be able to process CHS claims") do
   assert @current_user.can_process_chs?, "Expected user to be able to process CHS claims"
 end
 
-Then("I should be able to manage consults") do
-  assert @current_user.can_manage_consults?, "Expected user to be able to manage consults"
+Then("I should not be able to manage consults") do
+  refute @current_user.can_manage_consults?, "Expected user not to be able to manage consults"
 end
 
 Then("I should not have a current user") do

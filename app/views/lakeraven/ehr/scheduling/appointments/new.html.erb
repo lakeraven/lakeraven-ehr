@@ -1,0 +1,102 @@
+<% content_for :title, "Book | #{@resource[:name]} | Lakeraven EHR" %>
+
+<div class="page-header">
+  <h1>Book an appointment</h1>
+  <p>
+    <%= @resource[:name] %>, <%= @booking.start_time&.strftime("%b %-d, %Y at %H:%M") %>
+  </p>
+</div>
+
+<% if flash[:alert].present? %>
+  <div
+    class="alert alert--error"
+    role="alert"
+  >
+    <p><%= flash[:alert] %></p>
+  </div>
+<% end %>
+
+<% if @booking.errors.any? %>
+  <div
+    id="booking-errors"
+    class="alert alert--error"
+    role="alert"
+  >
+    <p>
+      The appointment was not booked.
+    </p>
+    <ul>
+      <% @booking.errors.full_messages.each do |message| %>
+        <li><%= message %></li>
+      <% end %>
+    </ul>
+  </div>
+<% end %>
+
+<%= form_with url: scheduling_new_clinic_appointment_path(@resource[:id]),
+      method: :get,
+      local: true,
+      id: "patient-search",
+      class: "flex items-end gap-2" do %>
+  <%= hidden_field_tag :start, @booking.start %>
+  <%= label_tag :q, "Patient name starts with" %>
+  <%= text_field_tag :q,
+        params[:q],
+        id: "q",
+        autocomplete: "off",
+        class: "rounded border border-slate-300 px-3 py-2" %>
+  <%= submit_tag "Find patient",
+        name: nil,
+        class: "min-h-9 bg-white px-3 py-2 ring-1 ring-slate-300 ring-inset" %>
+<% end %>
+
+<%= form_with scope: :booking,
+      url: scheduling_clinic_appointments_path(@resource[:id]),
+      method: :post,
+      local: true,
+      id: "booking-form",
+      class: "card mt-4 flex flex-col gap-4" do |f| %>
+  <%= f.hidden_field :start, value: @booking.start %>
+  <%= hidden_field_tag :q, params[:q] %>
+
+  <fieldset class="flex flex-col gap-2">
+    <legend>Patient</legend>
+    <% @patients.each do |patient| %>
+      <label data-patient="<%= patient[:dfn] %>">
+        <%= f.radio_button :patient_dfn,
+              patient[:dfn],
+              checked: @booking.patient_dfn == patient[:dfn] %>
+        <%= patient[:name] %>,
+        <%= patient[:hrn] ? "HRN #{patient[:hrn]}" : "no health record number" %>,
+        born <%= patient[:dob]&.strftime("%b %-d, %Y") %>
+      </label>
+    <% end %>
+    <% if @patients.empty? && @booking.patient_dfn %>
+      <%= f.hidden_field :patient_dfn, value: @booking.patient_dfn %>
+      <p class="hint">Patient chosen.</p>
+    <% elsif @patients.empty? %>
+      <p class="hint">Find the patient by name above.</p>
+    <% end %>
+  </fieldset>
+
+  <div class="flex flex-col gap-1">
+    <%= f.label :length, "Length (minutes)" %>
+    <%= f.number_field :length,
+          value: @booking.length,
+          min: 1,
+          step: @resource[:time_scale],
+          required: true,
+          class: "rounded border border-slate-300 px-3 py-2" %>
+  </div>
+
+  <div class="flex flex-col gap-1">
+    <%= f.label :note, "Note (optional)" %>
+    <%= f.text_field :note,
+          value: @booking.note,
+          maxlength: 150,
+          class: "rounded border border-slate-300 px-3 py-2" %>
+  </div>
+
+  <%= f.submit "Book",
+        class: "min-h-9 self-start bg-slate-900 px-4 py-2 text-white hover:bg-slate-700" %>
+<% end %>

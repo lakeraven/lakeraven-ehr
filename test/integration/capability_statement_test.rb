@@ -15,7 +15,7 @@ class CapabilityStatementTest < ActionDispatch::IntegrationTest
 
   # Show routes that always answer 404: routed, so a client gets a FHIR
   # not-found rather than a routing error, but no read by id behind them.
-  STUB_READS = %w[AllergyIntolerance Condition MedicationRequest Observation Consent].freeze
+  STUB_READS = %w[AllergyIntolerance Condition MedicationRequest Observation].freeze
 
   # Measure/$import is routed but has no standard OperationDefinition to
   # name, so it is not declared.
@@ -314,7 +314,7 @@ class CapabilityStatementTest < ActionDispatch::IntegrationTest
 
   def patient_compartment_types
     %w[AllergyIntolerance Condition MedicationRequest Observation Encounter ServiceRequest Immunization
-       Procedure Consent]
+       Procedure]
   end
 
   def search_params_for(type, resource)

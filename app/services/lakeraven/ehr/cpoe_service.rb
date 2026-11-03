@@ -32,7 +32,7 @@ module Lakeraven
           )
 
           interaction_result = DrugInteractionService.new.check(
-            active_medications: MedicationRequest.for_patient(patient_dfn),
+            active_medications: MedicationRequest.checked_for_patient(patient_dfn),
             proposed_medication: order,
             allergies: SupplementalClinicalResources.merged_allergy_intolerances_for_patient(patient_dfn)
           )
@@ -154,7 +154,11 @@ module Lakeraven
       end
 
       def has_interaction_alerts?
-        interaction_result&.interactions&.any? || false
+        interaction_check_incomplete? || interaction_alerts.any?
+      end
+
+      def interaction_check_incomplete?
+        interaction_result&.incomplete? || false
       end
 
       def interaction_alerts

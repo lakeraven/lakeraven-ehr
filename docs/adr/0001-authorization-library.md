@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted
+Accepted. Amended by ADR 0010 (2026-10-23): Pundit stays as the mechanism, but the key-to-capability mappings move out of rpms-rpc and into this engine.
+rpms-rpc now reports facts (which keys a user holds, which options they may run), and the host owns policy (rpms-rpc ADR 0010).
+The constraint marked below is superseded.
 
 ## Context
 
@@ -13,7 +15,7 @@ lakeraven-ehr needs an authorization layer to control what authenticated users c
 - **RPMS is the source of truth** for roles and security keys. The authorization library must consume externally-defined roles, not manage its own role storage.
 - **Rails engine architecture.** lakeraven-ehr is a mountable engine. The host app (a commercial SaaS template) handles authentication (Devise). Authorization must compose cleanly — the engine defines policies for its resources, the host app can override or extend them.
 - **Multiple engines.** corvid and rook are independent engines that need the same RPMS role/key data. Authorization logic must not couple engines to each other.
-- **rpms-rpc owns RPMS details.** RPMS key strings (`"PRCFA SUPERVISOR"`), user class numbers (`"4"` = nurse), and key-to-capability mappings belong in rpms-rpc, not in engine code.
+- **rpms-rpc owns RPMS details.** *(Superseded by ADR 0010: mappings now live in this engine.)* RPMS key strings (`"PRCFA SUPERVISOR"`), user class numbers (`"4"` = nurse), and key-to-capability mappings belong in rpms-rpc, not in engine code.
 
 ### Options considered
 

@@ -31,28 +31,41 @@ module Lakeraven
         "user" => %i[view_own_referrals]
       }.freeze
 
-      # Symbolic key => the SECURITY KEY name RPMS reports for a user. The host
-      # owns this table (rpms-rpc ADR 0010). rpms-rpc #337 narrowed the gem's
-      # SecurityKeys::REGISTRY to names that are SECURITY KEYs (#19.1) on the
-      # pinned build, which left only scheduling_admin of the names below. They
-      # are carried unchanged from the gem's earlier registry, so sign-on grants
-      # what it granted before the upgrade: a name no user holds grants nothing.
-      # Which of them are real keys, and the real keys that replace the rest, is
-      # lakeraven-ehr#578.
+      # Symbolic key => the SECURITY KEY (#19.1) name RPMS reports for a user.
+      # The host owns this table (ADR 0010). Every name is a key on the pinned
+      # build, checked by test/models/lakeraven/ehr/roles_key_names_test.rb
+      # against test/fixtures/security_keys/. The names follow the analyst's
+      # profiles (rpms-ux docs/product-cycle/profiles.json) and the persona users
+      # the build ships (rpms-ops SEEDPERS); the decision is #578.
+      #
+      # No key is decided yet for consults, eligibility verification or dental:
+      # those are open questions for the analyst, and until they are answered
+      # nobody holds those capabilities.
       KEY_NAMES = {
-        prc_supervisor: "PRCFA SUPERVISOR",
-        prc_tech: "PRCFA TECH",
-        prc_manager: "BPRC MANAGER",
-        chs_approve: "BGOZ CHS APPROVE",
-        chs_clerk: "BGOZ CHS CLERK",
-        consult_manager: "GMRC MGR",
-        eligibility_verify: "APCL VERIFY",
+        # Order entry: every clinician who works in the chart holds one.
+        orders_sign: "ORES",       # signs orders (physician, prescriber)
+        orders_release: "ORELSE",  # releases orders (nurse)
+        orders_enter: "OREMAS",    # enters orders for signature (clerk, medical assistant)
+
+        # Referred care (RCIS, BMC)
+        referrals_user: "BMCZMENU",
+        referrals_supervisor: "BMCZSUPERVISOR",
+        referrals_manager: "BMCZ MGR",
+
+        # Registration (AG): the keys BPRM gates its registration screens on.
+        registration_menu: "AGZMENU",
+        registration_manager: "AGZMGR",
+        registration_view_only: "AGZVIEWONLY",
+        registration_view_ssn: "AGZVIEWSSN",
+
+        # Scheduling (SD)
         scheduling_admin: "SD SUPERVISOR",
-        bh_provider: "BGMH PROVIDER",
-        bh_supervisor: "BGMH SUPERVISOR",
-        dental_provider: "DENTP PROVIDER",
-        dental_supervisor: "DENTP SUPERVISOR",
-        cprs_gui_chart: "OR CPRS GUI CHART"
+        scheduling_user: "SDZMENU",
+        scheduling_supervisor: "SDZSUP",
+
+        # Behavioral health (AMH)
+        behavioral_health_user: "AMHZMENU",
+        behavioral_health_manager: "AMHZMGR"
       }.freeze
 
       KEY_SYMBOLS = KEY_NAMES.invert.freeze
@@ -74,15 +87,16 @@ module Lakeraven
         end
 
         def can_approve_chs?(user)
-          has_any_key?(user, :prc_supervisor, :prc_manager)
+          has_any_key?(user, :referrals_supervisor, :referrals_manager)
         end
 
         def can_process_chs?(user)
-          has_any_key?(user, :prc_tech, :prc_supervisor)
+          has_any_key?(user, :referrals_user, :referrals_supervisor)
         end
 
-        def can_manage_consults?(user)
-          has_key?(user, :consult_manager)
+        # No key decided yet (#578; an open question for the analyst).
+        def can_manage_consults?(_user)
+          false
         end
 
         def capabilities_for(user)
@@ -100,14 +114,14 @@ module Lakeraven
           caps
         end
 
-        # Symbol equality on Array(security_keys). "prc_manager" does not
-        # satisfy :prc_manager.
+        # Symbol equality on Array(security_keys). "referrals_manager" does not
+        # satisfy :referrals_manager.
         def has_key?(user, key_symbol)
           Array(user.security_keys).include?(key_symbol)
         end
 
         # Round-trip the AV user_type through its class short code, then
-        # elevate :prc_supervisor or :prc_manager to "case_manager".
+        # elevate :referrals_supervisor or :referrals_manager to "case_manager".
         # A class the map does not know stays "user".
         def resolve_signon(user_type:, security_keys:)
           resolve(user_class: class_for(user_type), security_keys: security_keys)
@@ -124,12 +138,12 @@ module Lakeraven
           REVERSE_CLASS_MAP[role.to_s]
         end
 
-        # Call security_keys.include?(:prc_supervisor) ||
-        # security_keys.include?(:prc_manager) directly, with no Array()
+        # Call security_keys.include?(:referrals_supervisor) ||
+        # security_keys.include?(:referrals_manager) directly, with no Array()
         # wrap. Nil keys raise, so sign-on fails closed rather than granting
         # a role without key data, and a Hash checks its keys.
         def resolve(user_class:, security_keys:)
-          if security_keys.include?(:prc_supervisor) || security_keys.include?(:prc_manager)
+          if security_keys.include?(:referrals_supervisor) || security_keys.include?(:referrals_manager)
             "case_manager"
           else
             for_class(user_class)
@@ -140,8 +154,9 @@ module Lakeraven
           USER_CLASS_MAP[user_class.to_s] || "user"
         end
 
-        def can_verify_eligibility?(user)
-          has_key?(user, :eligibility_verify)
+        # No key decided yet (#578; an open question for the analyst).
+        def can_verify_eligibility?(_user)
+          false
         end
 
         def can_manage_scheduling?(user)
@@ -149,11 +164,12 @@ module Lakeraven
         end
 
         def can_access_behavioral_health?(user)
-          has_any_key?(user, :bh_provider, :bh_supervisor)
+          has_any_key?(user, :behavioral_health_user, :behavioral_health_manager)
         end
 
-        def can_access_dental?(user)
-          has_any_key?(user, :dental_provider, :dental_supervisor)
+        # No key decided yet (#578; an open question for the analyst).
+        def can_access_dental?(_user)
+          false
         end
       end
     end

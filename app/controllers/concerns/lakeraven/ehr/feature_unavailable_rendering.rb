@@ -44,6 +44,9 @@ module Lakeraven
       def render_feature_unavailable(error)
         if feature_unavailable_html?
           render html: feature_unavailable_document(error.message).html_safe, status: :not_found
+          # The JSON branch records this from render_operation_outcome. The
+          # HTML branch has to write the same denial or the audit row is missing.
+          note_audit_denial("fhir operation refused: not-supported (HTTP #{response.status})")
         else
           render_operation_outcome(status: :not_found, severity: "error", code: "not-supported",
             diagnostics: error.message)
@@ -82,8 +85,15 @@ module Lakeraven
       # a range it cannot serve (application/xml) never decides, and each
       # type takes the quality of its most specific matching range, so an
       # explicit application/fhir+json;q=0.1 is not overridden by */*;q=1.
+      # An explicit application/fhir+json entry sets that JSON quality.
+      # application/json and application/json+fhir stand in for it only when
+      # the header has no explicit application/fhir+json entry; FHIR JSON's
+      # quality is then the max of the highest alias quality and the quality
+      # its most specific wildcard gives it (application/*, else */*).
+      # Order in the header does not matter.
       HTML_TYPE = "text/html"
       FHIR_JSON_TYPE = "application/fhir+json"
+      FHIR_JSON_ALIASES = %w[application/json application/json+fhir].freeze
 
       # A quality value per RFC 9110: 0 to 1 with at most three decimals.
       QUALITY = /\A(?:0(?:\.\d{0,3})?|1(?:\.0{0,3})?)\z/
@@ -91,7 +101,8 @@ module Lakeraven
       # HTML wins only when it outranks FHIR JSON, or ties with it and is the
       # more specific match (so `text/html, */*` is HTML, a lone `*/*` and two
       # equally named types stay FHIR JSON). A header with any malformed q value
-      # is unusable and falls to the FHIR JSON default.
+      # is unusable and falls to the FHIR JSON default, including a q parameter
+      # with whitespace before `=` (`text/html;q =0`).
       def text_html_preferred?(header)
         ranges = accept_qualities(header)
         return false unless ranges
@@ -117,16 +128,66 @@ module Lakeraven
 
       # { "type/subtype" => q }, or nil when any q is malformed.
       def accept_qualities(header)
-        header.split(",").each_with_object({}) do |part, qualities|
+        entries = parsed_accept_entries(header)
+        return nil unless entries
+
+        explicit_fhir_json = entries.any? { |type, _quality| type.casecmp?(FHIR_JSON_TYPE) }
+        qualities = entries.each_with_object({}) do |(type, quality), ranges|
+          record_accept_quality(ranges, type, quality, explicit_fhir_json: explicit_fhir_json)
+        end
+        record_fhir_json_alias(qualities) unless explicit_fhir_json
+        qualities
+      end
+
+      def parsed_accept_entries(header)
+        header.split(",").filter_map do |part|
           type, *params = part.split(";").map(&:strip)
-          next if type.empty?
+          # An empty list element splits to no type (RFC 9110 §5.6.1).
+          next if type.nil? || type.empty?
+
+          return nil if params.any? { |param| q_parameter_with_space_before_equals?(param) }
 
           q_param = params.find { |param| param.downcase.start_with?("q=") }
           q = q_param ? q_param.split("=", 2).last.to_s.strip : "1"
           return nil unless q.match?(QUALITY)
 
-          qualities[type.downcase] = q.to_f
+          [ type, q.to_f ]
         end
+      end
+
+      # `q =0` is not a quality value: the name and `=` have to be adjacent.
+      def q_parameter_with_space_before_equals?(param)
+        name, value = param.split("=", 2)
+        !value.nil? && name.strip.casecmp?("q") && name != name.strip
+      end
+
+      # Explicit application/fhir+json wins on its own, including when an
+      # alias appears earlier or later in the header. Aliases are recorded
+      # only in its absence, and the highest of each alias is kept.
+      def record_accept_quality(qualities, type, quality, explicit_fhir_json:)
+        type = type.downcase
+        if type == FHIR_JSON_TYPE
+          qualities[type] = [ qualities[type], quality ].compact.max
+        elsif FHIR_JSON_ALIASES.include?(type)
+          return if explicit_fhir_json
+
+          qualities[type] = [ qualities[type], quality ].compact.max
+        else
+          qualities[type] = quality
+        end
+      end
+
+      # The alias becomes the application/fhir+json quality only when it is
+      # at least what the most specific wildcard gives that type. A higher
+      # wildcard is left in place, so effective_quality still reads it.
+      def record_fhir_json_alias(qualities)
+        alias_q = FHIR_JSON_ALIASES.filter_map { |name| qualities[name] }.max
+        return if alias_q.nil?
+
+        wild_q = qualities["application/*"] || qualities["*/*"]
+        return if wild_q && alias_q < wild_q
+
+        qualities[FHIR_JSON_TYPE] = alias_q
       end
 
       # Runs from ApplicationController after the token checks and before the
@@ -139,13 +200,18 @@ module Lakeraven
       # refused the same way here, so only a caller who would be let in learns
       # that the capability is missing. Authorization is not repeated: the
       # controller's own checks run through authorize_before_unavailable!.
+      # Render here, inside the action, rather than re-raising for rescue_from.
+      # The audit wrapper records the row before rescue_from runs, so a denial
+      # note written only in the renderer would miss the row. Rendering in this
+      # callback leaves the note on the response the audit then records, and a
+      # rendered before_action halts the chain the same way the raise did.
       def ensure_backend_supports_interaction!
         interaction = FHIR_ACTION_INTERACTIONS[action_name]
         capability = BackendRegistry.capability_for_fhir_interaction(fhir_resource_type, interaction)
         CapabilityGuard.ensure!(capability) if capability
-      rescue FeatureUnavailable
+      rescue FeatureUnavailable => error
         authorize_before_unavailable!
-        raise unless performed?
+        render_feature_unavailable(error) unless performed?
       end
 
       # The authorization a controller declares beyond the token and scope

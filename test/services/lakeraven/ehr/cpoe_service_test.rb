@@ -6,14 +6,14 @@ module Lakeraven
   module EHR
     class CpoeServiceTest < ActiveSupport::TestCase
       setup do
-        @_orig_med_for_patient = MedicationRequest.method(:for_patient)
+        @_orig_rpms_client = RpmsRpc.configuration.client
+        RpmsRpc.mock!(&BASELINE_MOCK_SEEDS)
         @_orig_allergy_for_patient = AllergyIntolerance.method(:for_patient)
-        mock_no_medications("12345")
         mock_no_allergies("12345")
       end
 
       teardown do
-        MedicationRequest.define_singleton_method(:for_patient, @_orig_med_for_patient)
+        RpmsRpc.configure { |c| c.client = @_orig_rpms_client }
         AllergyIntolerance.define_singleton_method(:for_patient, @_orig_allergy_for_patient)
       end
 
@@ -41,8 +41,8 @@ module Lakeraven
       end
 
       test "medication order triggers interaction check" do
-        mock_active_medications("12345", [
-          { drug_name: "Warfarin 5mg", rxnorm_code: "11289", status: "active" }
+        seed_active_medications("12345", [
+          { drug_name: "WARFARIN 5MG TAB", status: "ACTIVE" }
         ])
 
         result = CpoeService.create_medication_order(
@@ -54,6 +54,27 @@ module Lakeraven
         assert result.success?
         assert result.has_interaction_alerts?
         assert_equal "draft", result.order.status
+      end
+
+      test "medication interaction check weighs active and held orders, not discontinued ones (#680)" do
+        seed_active_medications("12345", [
+          { drug_name: "WARFARIN 5MG TAB", status: "ACTIVE" },
+          { drug_name: "METHOTREXATE 2.5MG TAB", status: "DISCONTINUED" },
+          { drug_name: "LITHIUM CARBONATE 300MG CAP", status: "HOLD" }
+        ])
+
+        result = CpoeService.create_medication_order(
+          patient_dfn: "12345",
+          provider_duz: "789",
+          medication: "Ibuprofen 400mg"
+        )
+
+        checked = result.interaction_result
+        refute checked.incomplete?, checked.incomplete_reason
+        drugs = checked.interactions.flat_map { |i| [ i.drug_a, i.drug_b ] }
+        assert_includes drugs, "WARFARIN 5MG TAB"
+        assert_includes drugs, "LITHIUM CARBONATE 300MG CAP"
+        refute_includes drugs, "METHOTREXATE 2.5MG TAB"
       end
 
       test "medication order with no interactions has empty alerts" do
@@ -249,22 +270,14 @@ module Lakeraven
 
       private
 
-      def mock_active_medications(dfn, meds)
-        med_objects = meds.map do |m|
-          MedicationRequest.new(
-            medication_display: m[:drug_name],
-            medication_code: m[:rxnorm_code],
-            status: m[:status],
-            patient_dfn: dfn
-          )
+      # The patient's orders as ORWPS ACTIVE wire, read back through the
+      # gateway and the rpms-rpc parser: order id, drug, expiration, refills,
+      # CPRS order number, the RPMS status (piece 9), then the sig line.
+      def seed_active_medications(dfn, orders)
+        wire = orders.each_with_index.map do |order, i|
+          "~OP^#{4401 + i}R;O^#{order[:drug_name]}^^3271231^3^^^#{120345 + i}^#{order[:status]}\n\\ Sig: TAKE AS DIRECTED"
         end
-        MedicationRequest.define_singleton_method(:for_patient) do |patient_dfn, **_opts|
-          patient_dfn.to_s == dfn ? med_objects : []
-        end
-      end
-
-      def mock_no_medications(dfn)
-        mock_active_medications(dfn, [])
+        RpmsRpc.client.seed_text(:medication_active, dfn.to_s, wire.join("\n"))
       end
 
       def mock_no_allergies(dfn)

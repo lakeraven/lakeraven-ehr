@@ -1,0 +1,19 @@
+<% content_for :title, "RPMS unavailable | Lakeraven EHR" %>
+
+<div
+  id="rpms-unavailable"
+  class="alert alert--error"
+  role="alert"
+>
+  <% if @rpms_refusal %>
+    <p>
+      RPMS refused this request: <%= @rpms_refusal %>
+    </p>
+  <% else %>
+    <p>
+      RPMS did not answer.
+      Nothing was read or changed.
+      Try again in a moment.
+    </p>
+  <% end %>
+</div>

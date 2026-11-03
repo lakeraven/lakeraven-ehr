@@ -128,14 +128,6 @@ module Lakeraven
                                                       target: "Practitioner")
             }
           },
-          "Consent" => {
-            search: { "patient" => PATIENT_PARAM },
-            sort: {
-              "_id" => ID, "status" => STATUS,
-              "date" => Sort.new(paths: [ %i[dateTime] ], type: :date)
-            },
-            include: { "Consent:patient" => PATIENT }
-          },
           # Sorted in the database, not on these paths: see
           # AuditEventsController::SORT_COLUMNS.
           "AuditEvent" => {

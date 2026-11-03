@@ -38,7 +38,7 @@ module Lakeraven
       def clerk? = @user_type == "clerk"
 
       def case_manager?
-        @user_type == "case_manager" || Roles.has_key?(self, :prc_manager)
+        @user_type == "case_manager" || Roles.has_key?(self, :referrals_manager)
       end
     end
   end

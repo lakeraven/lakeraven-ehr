@@ -14,6 +14,7 @@ module Lakeraven
       def create
         session[:duz] = params[:duz].presence || "99996"
         session[:user_type] = params[:user_type].presence || "case_manager"
+        session[:signed_in_at] = Time.current.to_i
         session[:security_keys] = normalized_security_keys(params[:security_keys])
         # Tests exercising token-authenticated browser surfaces stash the
         # SMART token where the sign-on bridge does (#486): a browser token

@@ -22,7 +22,8 @@ module Lakeraven
           value,
           :ok,
           verified_absence: absence_verified?(value),
-          dropped_count: dropped_count_of(value)
+          dropped_count: dropped_count_of(value),
+          conflict: value.is_a?(AllergyIntoleranceReading) && value.conflict
         )
       rescue StandardError => e
         # Class only. The message from a supplemental provider includes the
@@ -40,11 +41,12 @@ module Lakeraven
         }
       end
 
-      def initialize(records, status, verified_absence: false, dropped_count: 0)
+      def initialize(records, status, verified_absence: false, dropped_count: 0, conflict: false)
         @records = records
         @status = status
         @verified_absence = verified_absence
         @dropped_count = dropped_count.to_i
+        @conflict = conflict == true
       end
 
       def ok?
@@ -62,7 +64,8 @@ module Lakeraven
           source_count: records.length,
           filtered_names: filtered_names,
           verified_absence: verified_absence?,
-          dropped_count: dropped_count
+          dropped_count: dropped_count,
+          conflict: @conflict
         )
       end
 

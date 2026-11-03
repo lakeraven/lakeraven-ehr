@@ -51,8 +51,17 @@ module Lakeraven
         "39156-5" => "http://hl7.org/fhir/us/core/StructureDefinition/us-core-bmi"
       }.freeze
 
-      # Map RPMS vital type strings to LOINC codes and UCUM units
+      # Map ORQQVI VITALS type strings to LOINC codes and UCUM units.
+      # On RPMS (DUZ("AG")="I") VITAL^ORQQVI answers from MSR^ORQQVI, which
+      # reads V MEASUREMENT and names each type by its IHS MEASUREMENT TYPE
+      # (#9999999.07) code: TMP, PU, RS, O2. Elsewhere the same routine reads
+      # GMRV and answers VistA's T, P, R, POX. Both are real replies of the
+      # one RPC, so both are mapped.
       VITAL_TYPE_MAP = {
+        "TMP"   => { code: "8310-5",  display: "Body Temperature",    unit: "[degF]" },
+        "PU"    => { code: "8867-4",  display: "Heart Rate",          unit: "/min" },
+        "RS"    => { code: "9279-1",  display: "Respiratory Rate",    unit: "/min" },
+        "O2"    => { code: "2708-6",  display: "Oxygen Saturation",   unit: "%" },
         "BP"    => { code: "85354-9", display: "Blood Pressure",      unit: "mm[Hg]" },
         "P"     => { code: "8867-4",  display: "Heart Rate",          unit: "/min" },
         "T"     => { code: "8310-5",  display: "Body Temperature",    unit: "[degF]" },

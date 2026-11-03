@@ -1,0 +1,84 @@
+<% content_for :title, "Cancel | #{@resource[:name]} | Lakeraven EHR" %>
+
+<div class="page-header">
+  <h1>Cancel an appointment</h1>
+  <p>
+    <%= @appointment[:patient_name] %>, <%= @resource[:name] %>, <%= @appointment[:start_time].strftime("%b %-d, %Y at %H:%M") %>
+  </p>
+</div>
+
+<% if flash[:alert].present? %>
+  <div
+    class="alert alert--error"
+    role="alert"
+  >
+    <p><%= flash[:alert] %></p>
+  </div>
+<% end %>
+
+<% if @cancellation.errors.any? %>
+  <div
+    id="cancellation-errors"
+    class="alert alert--error"
+    role="alert"
+  >
+    <p>
+      The appointment was not cancelled.
+    </p>
+    <ul>
+      <% @cancellation.errors.full_messages.each do |message| %>
+        <li><%= message %></li>
+      <% end %>
+    </ul>
+  </div>
+<% end %>
+
+<%= form_with scope: :cancellation,
+      url: scheduling_cancel_clinic_appointment_path(@resource[:id], @appointment[:id]),
+      method: :post,
+      local: true,
+      id: "cancellation-form",
+      class: "card flex flex-col gap-4" do |f| %>
+  <%= hidden_field_tag :date, @date.iso8601 %>
+
+  <fieldset class="flex gap-4">
+    <legend>Who cancelled</legend>
+    <% Lakeraven::EHR::AppointmentCancellation::WHOM.each do |code, label| %>
+      <label>
+        <%= f.radio_button :whom,
+              code,
+              checked: @cancellation.whom == code %>
+        <%= label.capitalize %>
+      </label>
+    <% end %>
+    <%= submit_tag "Show reasons",
+          name: nil,
+          formaction: scheduling_cancel_clinic_appointment_path(@resource[:id], @appointment[:id]),
+          formmethod: :get,
+          formnovalidate: true,
+          class: "min-h-9 bg-white px-3 py-2 ring-1 ring-slate-300 ring-inset" %>
+  </fieldset>
+
+  <div class="flex flex-col gap-1">
+    <%= f.label :reason_ien, "Reason" %>
+    <%= f.select :reason_ien,
+          options_for_select(@reasons.map { |r| [ r[:name], r[:ien] ] }, @cancellation.reason_ien),
+          { include_blank: "Choose a reason" },
+          class: "rounded border border-slate-300 px-3 py-2" %>
+  </div>
+
+  <div class="flex flex-col gap-1">
+    <%= f.label :remarks, "Remarks (optional, 3 to 160 characters)" %>
+    <%= f.text_field :remarks,
+          value: @cancellation.remarks,
+          maxlength: 160,
+          class: "rounded border border-slate-300 px-3 py-2" %>
+  </div>
+
+  <%= f.submit "Cancel the appointment",
+        class: "min-h-9 self-start bg-slate-900 px-4 py-2 text-white hover:bg-slate-700" %>
+<% end %>
+
+<p class="mt-6">
+  <%= link_to "Back to the clinic's day", scheduling_clinic_path(@resource[:id], date: @date.iso8601) %>
+</p>

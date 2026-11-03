@@ -1,12 +1,8 @@
 # frozen_string_literal: true
 
 # Patient Search Steps — lakeraven-ehr
-# Data comes from RpmsRpc.mock! seeds in test_helper.rb
 
-Given("the following patients are seeded:") do |_table|
-  # Data is pre-seeded via RpmsRpc.mock! in test_helper.rb.
-  # The table documents what's available; no runtime action needed.
-end
+# Patients come from "these RPMS demo patients:" (rpms_demo_patient_steps.rb).
 
 When("I search for patients with name {string}") do |name|
   @search_results = Lakeraven::EHR::Patient.search(name)
@@ -71,10 +67,9 @@ Then("the patient should be nil") do
   assert_nil @current_patient
 end
 
-Given("patient {int} has referrals seeded") do |dfn|
-  mock = RpmsRpc.client
-  mock.seed_collection(:referral_search, [
-    { ien: 1, patient_dfn: dfn, status: "PENDING", type: "CONSULT",
-      date: Date.current, provider: "MARTINEZ,SARAH" }
-  ])
+# The pinned build has no demo referral, and the engine cannot file one yet:
+# ServiceRequestGateway.create calls a removed path (lakeraven-ehr#521). A
+# referral seeded into the mock alone would be data RPMS does not have.
+Given("patient {int} has referrals seeded") do |_dfn|
+  pending "no demo referral on the pinned build; filing one needs lakeraven-ehr#521"
 end

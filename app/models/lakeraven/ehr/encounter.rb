@@ -6,6 +6,7 @@ module Lakeraven
       include ActiveModel::Model
       include ActiveModel::Attributes
       include ActiveModel::Validations
+      include FHIRSerializable
 
       VALID_STATUSES = %w[planned arrived triaged in-progress onleave finished cancelled entered-in-error unknown].freeze
       VALID_CLASS_CODES = %w[AMB EMER FLD HH IMP ACUTE NONAC OBSENC PRENC SS VR].freeze
@@ -24,6 +25,8 @@ module Lakeraven
       }.freeze
 
       attribute :ien, :integer
+      # A stable id for a row with no IEN (an appointment), never random.
+      attribute :source_id, :string
       attribute :status, :string
       attribute :class_code, :string
       attribute :period_start, :datetime
@@ -57,6 +60,33 @@ module Lakeraven
       def self.for_patient(dfn)
         gateway.for_patient(dfn)
       end
+
+      # A row of RpmsRpc::Encounter.for_patient, which is ORWPT APPTLST: an
+      # APPOINTMENT (APPTTIME^LOCIEN^LOCNAME^EXTSTATUS), not a visit. It has
+      # no IEN, so its id is built from the patient, clinic and time.
+      def self.from_rpms_row(row, patient_dfn:)
+        start = row[:datetime]
+        new(
+          source_id: [ "appt", patient_dfn, row[:location_ien], start&.strftime("%Y%m%d%H%M") ].compact.join("-"),
+          status: appointment_status(row[:status], start),
+          class_code: "AMB",
+          period_start: start,
+          patient_identifier: patient_dfn.to_s,
+          patient_dfn: patient_dfn.to_s,
+          location_ien: row[:location_ien]
+        )
+      end
+
+      def self.appointment_status(text, start)
+        status = text.to_s.upcase
+        return "cancelled" if status.include?("CANCEL") || status.include?("NO-SHOW") || status.include?("NO SHOW")
+        return "finished" if status.include?("CHECKED OUT")
+        return "arrived" if status.include?("CHECKED IN")
+        return "planned" if start && start > Time.current
+
+        "unknown"
+      end
+      private_class_method :appointment_status
 
       # -- Display helpers ---------------------------------------------------
 
@@ -122,26 +152,26 @@ module Lakeraven
           class: { system: ACT_CODE_SYSTEM, code: class_code, display: class_display }
         }
 
-        resource[:id] = ien.to_s if ien
-        resource[:period] = build_period if period_start || period_end
+        resource[:id] = (ien || source_id).to_s if ien || source_id
+        resource[:period] = build_period(start_date: period_start, end_date: period_end) if period_start || period_end
         # Omit `coding` (never emit "code": null) when only display text exists.
         resource[:type] = [ { text: type_display, coding: type_code ? [ { code: type_code } ] : nil }.compact ] if type_display
         resource[:reasonCode] = [ { text: reason_display, coding: reason_code ? [ { code: reason_code } ] : nil }.compact ] if reason_display
-        resource[:subject] = { reference: "Patient/#{patient_identifier}" } if patient_identifier
+        resource[:subject] = build_reference("Patient", patient_identifier) if patient_identifier
         if practitioner_identifier
-          resource[:participant] = [ { individual: { reference: "Practitioner/#{practitioner_identifier}" } } ]
+          resource[:participant] = [ { individual: build_reference("Practitioner", practitioner_identifier) } ]
         elsif participant_practitioner_iens.is_a?(Array) && participant_practitioner_iens.any?
           resource[:participant] = participant_practitioner_iens.map do |ien|
-            { individual: { reference: "Practitioner/rpms-practitioner-#{ien}" } }
+            { individual: build_reference("Practitioner", "rpms-practitioner-#{ien}") }
           end
         end
 
         if location_ien
-          resource[:location] = [ { location: { reference: "Location/rpms-location-#{location_ien}" } } ]
+          resource[:location] = [ { location: build_reference("Location", "rpms-location-#{location_ien}") } ]
         end
 
         if service_provider_organization_ien
-          resource[:serviceProvider] = { reference: "Organization/rpms-organization-#{service_provider_organization_ien}" }
+          resource[:serviceProvider] = build_reference("Organization", "rpms-organization-#{service_provider_organization_ien}")
         end
 
         resource
@@ -172,15 +202,6 @@ module Lakeraven
       end
 
       def to_param = ien.to_s
-
-      private
-
-      def build_period
-        p = {}
-        p[:start] = period_start.iso8601 if period_start
-        p[:end] = period_end.iso8601 if period_end
-        p
-      end
     end
   end
 end

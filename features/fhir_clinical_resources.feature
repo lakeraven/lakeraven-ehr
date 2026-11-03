@@ -3,9 +3,15 @@ Feature: FHIR Clinical Resource API
   I need to access patient clinical data via FHIR R4 endpoints
   So that I can meet ONC § 170.315(g)(10) requirements for patient data API access
 
+  # DFN 4 is the demo patient of the pinned RPMS build with the most clinical
+  # data (an allergy, problems and vitals). The table is checked against RPMS
+  # on a live run and seeded into the mock otherwise.
   Background:
-    Given I am authenticated with SMART-on-FHIR
-    And patient "1" has clinical data in the system
+    Given I am authenticated with SMART-on-FHIR for patient "4"
+    And these RPMS demo patients:
+      | dfn | name             | ssn       | dob        | sex |
+      | 4   | DEMO,PATIENT ONE | 666010101 | 2001-01-01 | F   |
+    And patient "4" has clinical data in the system
 
   # ===========================================================================
   # AllergyIntolerance
@@ -13,7 +19,7 @@ Feature: FHIR Clinical Resource API
 
   Scenario: Search AllergyIntolerance by patient returns FHIR Bundle
     When I request GET "/lakeraven-ehr/AllergyIntolerance" with params:
-      | patient | 1 |
+      | patient | 4 |
     Then the response status should be 200
     And the response should be valid FHIR JSON
     And the response should be a FHIR Bundle
@@ -35,7 +41,7 @@ Feature: FHIR Clinical Resource API
 
   Scenario: Search Condition by patient returns FHIR Bundle
     When I request GET "/lakeraven-ehr/Condition" with params:
-      | patient | 1 |
+      | patient | 4 |
     Then the response status should be 200
     And the response should be valid FHIR JSON
     And the response should be a FHIR Bundle
@@ -43,7 +49,7 @@ Feature: FHIR Clinical Resource API
 
   Scenario: Condition supports category filter
     When I request GET "/lakeraven-ehr/Condition" with params:
-      | patient  | 1                 |
+      | patient  | 4                 |
       | category | problem-list-item |
     Then the response status should be 200
     And the response should be a FHIR Bundle
@@ -64,7 +70,7 @@ Feature: FHIR Clinical Resource API
 
   Scenario: Search MedicationRequest by patient returns FHIR Bundle
     When I request GET "/lakeraven-ehr/MedicationRequest" with params:
-      | patient | 1 |
+      | patient | 4 |
     Then the response status should be 200
     And the response should be valid FHIR JSON
     And the response should be a FHIR Bundle
@@ -72,7 +78,7 @@ Feature: FHIR Clinical Resource API
 
   Scenario: MedicationRequest supports status filter
     When I request GET "/lakeraven-ehr/MedicationRequest" with params:
-      | patient | 1      |
+      | patient | 4      |
       | status  | active |
     Then the response status should be 200
     And the response should be a FHIR Bundle
@@ -93,7 +99,7 @@ Feature: FHIR Clinical Resource API
 
   Scenario: Search Observation by patient returns FHIR Bundle
     When I request GET "/lakeraven-ehr/Observation" with params:
-      | patient | 1 |
+      | patient | 4 |
     Then the response status should be 200
     And the response should be valid FHIR JSON
     And the response should be a FHIR Bundle
@@ -101,14 +107,14 @@ Feature: FHIR Clinical Resource API
 
   Scenario: Observation supports category filter for vital-signs
     When I request GET "/lakeraven-ehr/Observation" with params:
-      | patient  | 1           |
+      | patient  | 4           |
       | category | vital-signs |
     Then the response status should be 200
     And the response should be a FHIR Bundle
 
   Scenario: Observation supports category filter for laboratory
     When I request GET "/lakeraven-ehr/Observation" with params:
-      | patient  | 1          |
+      | patient  | 4          |
       | category | laboratory |
     Then the response status should be 200
     And the response should be a FHIR Bundle
@@ -129,12 +135,12 @@ Feature: FHIR Clinical Resource API
 
   Scenario: Clinical resource endpoints return FHIR JSON content type
     When I request GET "/lakeraven-ehr/AllergyIntolerance" with params:
-      | patient | 1 |
+      | patient | 4 |
     Then the response status should be 200
     And the response content type should include "application/fhir+json"
 
   Scenario: Clinical resource endpoints accept Patient/ prefix in patient param
     When I request GET "/lakeraven-ehr/AllergyIntolerance" with params:
-      | patient | Patient/1 |
+      | patient | Patient/4 |
     Then the response status should be 200
     And the response should be a FHIR Bundle

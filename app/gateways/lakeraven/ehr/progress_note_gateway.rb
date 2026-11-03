@@ -29,16 +29,18 @@ module Lakeraven
         via.fetch_text(note_ien.to_s)
       end
 
-      def self.authorize(note_ien, user_duz, via: default_provider)
+      # TIU AUTHORIZATION, TIU LOCK RECORD and TIU UNLOCK RECORD act as the
+      # signed-on user (CANDO^TIUSRVA, LOCK^TIUSRVP), so none takes a user.
+      def self.authorize(note_ien, action: ::RpmsRpc::ProgressNote::EDIT_RECORD, via: default_provider)
         return false if via.nil?
 
-        via.authorize(note_ien.to_s, user_duz.to_s)
+        via.authorize(note_ien.to_s, action: action)
       end
 
-      def self.lock(note_ien, user_duz, via: default_provider)
+      def self.lock(note_ien, via: default_provider)
         return false if via.nil?
 
-        via.lock(note_ien.to_s, user_duz.to_s)
+        via.lock(note_ien.to_s)
       end
 
       def self.update_text(note_ien, text, via: default_provider)
@@ -47,10 +49,10 @@ module Lakeraven
         via.update_text(note_ien.to_s, text)
       end
 
-      def self.unlock(note_ien, user_duz, via: default_provider)
+      def self.unlock(note_ien, via: default_provider)
         return false if via.nil?
 
-        via.unlock(note_ien.to_s, user_duz.to_s)
+        via.unlock(note_ien.to_s)
       end
 
       def self.default_provider

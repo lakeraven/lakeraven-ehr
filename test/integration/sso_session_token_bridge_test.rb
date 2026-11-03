@@ -13,7 +13,7 @@ require "test_helper"
 # Binding, scope derivation, revocation, throttling and audit identity are
 # exercised in sso_session_token_bridge_security_test.rb.
 class SsoSessionTokenBridgeTest < ActionDispatch::IntegrationTest
-  # 304 RODRIGUEZ,LINDA holds OR CPRS GUI CHART, so she can open a chart.
+  # 304 RODRIGUEZ,LINDA holds ORELSE, an order-entry key, so she can open a chart.
   # 303 CLERK,TEST holds no security keys, so she cannot.
   KEYED_USER = { username: "lindarodriguez", password: "test123" }.freeze
   KEYLESS_USER = { username: "testclerk", password: "test123" }.freeze
@@ -55,6 +55,21 @@ class SsoSessionTokenBridgeTest < ActionDispatch::IntegrationTest
     assert_response :unauthorized
   end
 
+  # held_keys answers nil when RPMS could not be asked (#578). The sign-on is
+  # refused as unavailable, with no session, rather than going ahead as a user
+  # who holds no keys.
+  test "a key read RPMS cannot answer refuses the sign-on and establishes no session" do
+    RpmsRpc::Authentication.define_singleton_method(:held_keys) { |_names| nil }
+
+    post "/lakeraven-ehr/login", params: KEYED_USER
+
+    assert_response :service_unavailable
+    assert_nil session[:duz]
+    assert_nil session[:smart_token]
+  ensure
+    RpmsRpc::Authentication.singleton_class.send(:remove_method, :held_keys)
+  end
+
   test "the rejection reaches RPMS rather than short-circuiting" do
     before = RpmsRpc.client.received_calls.length
 
@@ -64,7 +79,7 @@ class SsoSessionTokenBridgeTest < ActionDispatch::IntegrationTest
     assert_includes issued, "XUS AV CODE"
   end
 
-  test "a clinician with no security keys signs in but is authorized for nothing" do
+  test "a user RPMS gives neither the chart option nor a key signs in but is authorized for nothing" do
     post "/lakeraven-ehr/login", params: KEYLESS_USER
     assert_response :redirect
     assert_equal "303", session[:duz]

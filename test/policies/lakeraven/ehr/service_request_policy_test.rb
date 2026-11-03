@@ -48,15 +48,15 @@ module Lakeraven
         refute policy.create?  # create_referrals is not in case_manager role
       end
 
-      test "user with prc_supervisor key can approve" do
-        user = build_user(role: "clerk", security_keys: [ :prc_supervisor ])
+      test "user with referrals_supervisor key can approve" do
+        user = build_user(role: "clerk", security_keys: [ :referrals_supervisor ])
         policy = ServiceRequestPolicy.new(user, nil)
 
         assert policy.approve?
         assert policy.deny?
       end
 
-      test "user without prc_supervisor key cannot approve" do
+      test "user without referrals_supervisor key cannot approve" do
         user = build_user(role: "clerk")
         policy = ServiceRequestPolicy.new(user, nil)
 

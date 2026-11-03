@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_15_000001) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_30_000000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -45,6 +45,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_15_000001) do
     t.string "facility_identifier"
     t.string "outcome", null: false
     t.text "outcome_desc"
+    t.string "rpms_session_id"
     t.string "tenant_identifier"
     t.datetime "updated_at", null: false
     t.index [ "created_at" ], name: "index_lakeraven_ehr_audit_events_on_created_at"
@@ -180,6 +181,13 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_15_000001) do
     t.index [ "clinician_duz" ], name: "index_lakeraven_ehr_reconciliation_sessions_on_clinician_duz"
     t.index [ "patient_dfn" ], name: "index_lakeraven_ehr_reconciliation_sessions_on_patient_dfn"
     t.index [ "status" ], name: "index_lakeraven_ehr_reconciliation_sessions_on_status"
+  end
+
+  create_table "lakeraven_ehr_registration_reviews", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "duz", null: false
+    t.string "review_id", null: false
+    t.index [ "review_id" ], name: "index_lakeraven_ehr_registration_reviews_on_review_id", unique: true
   end
 
   create_table "lakeraven_ehr_screening_responses", force: :cascade do |t|

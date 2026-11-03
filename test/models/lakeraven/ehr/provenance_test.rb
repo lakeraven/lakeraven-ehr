@@ -238,6 +238,22 @@ module Lakeraven
         )
         assert_nil p.to_fhir[:entity]
       end
+
+      test "to_fhir carries the resource id, so a bundle entry is addressable" do
+        p = Provenance.new(
+          fhir_id: "prov-1", target_type: "Patient", target_id: "1",
+          agent_who_type: "Practitioner", agent_who_id: "101"
+        )
+        assert_equal "prov-1", p.to_fhir[:id]
+      end
+
+      test "to_fhir omits id when none is set" do
+        p = Provenance.new(
+          target_type: "Patient", target_id: "1",
+          agent_who_type: "Practitioner", agent_who_id: "101"
+        )
+        assert_not p.to_fhir.key?(:id)
+      end
     end
   end
 end

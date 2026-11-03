@@ -71,6 +71,13 @@
     .achip .rx .sev-severe{color:var(--danger);font-weight:700}
     .achip .rx .sev-moderate{color:var(--warn);font-weight:700}
     .achip .rx .sev-mild{color:#1d4ed8;font-weight:700}
+    .flash.notice{color:var(--ok);background:var(--ok-bg);border:1px solid #a7f3d0;
+      border-radius:10px;padding:10px 14px;margin:0 0 12px;font-weight:600}
+    .allergy-actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:10px 0 0}
+    .allergy-actions form{margin:0}
+    .allergy-actions a,.allergy-actions button{background:#fff;color:var(--brand);
+      border:1px solid var(--line);border-radius:8px;padding:7px 12px;font-weight:700;
+      font-size:13px;text-decoration:none;cursor:pointer}
 
     /* Grid + cards */
     .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px}
@@ -122,6 +129,10 @@
 </head>
 <body>
   <div class="wrap">
+    <% if flash[:notice].present? %>
+      <p class="flash notice" role="status"><%= flash[:notice] %></p>
+    <% end %>
+
     <div class="topbar">
       <div class="brand">
         <span class="dot"></span>
@@ -162,6 +173,11 @@
         <div class="head"><%= @allergy_list_status.text %></div>
       </div>
     <% end %>
+
+    <div class="allergy-actions">
+      <%= link_to "Record an allergy", new_patient_allergy_path(@patient.dfn) %>
+      <%= button_to "No known allergies", patient_no_known_allergies_path(@patient.dfn), method: :post %>
+    </div>
 
     <div class="grid">
       <%# ---- Problem list ---- %>

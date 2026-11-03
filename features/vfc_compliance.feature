@@ -4,8 +4,8 @@ Feature: VFC compliance
   So that I comply with federal VFC program requirements
 
   Scenario: VFC-eligible patient receives VFC vaccine successfully
-    Given patient "1" has VFC eligibility code "V04"
-    When I check VFC eligibility for patient "1"
+    Given patient "4" has VFC eligibility code "V04"
+    When I check VFC eligibility for patient "4"
     Then the patient should be VFC eligible
 
   Scenario: Non-eligible patient blocked from VFC vaccine

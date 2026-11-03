@@ -43,8 +43,7 @@ module Lakeraven
         "lakeraven/ehr/allergy_intolerances#show",
         "lakeraven/ehr/conditions#show",
         "lakeraven/ehr/medication_requests#show",
-        "lakeraven/ehr/observations#show",
-        "lakeraven/ehr/consents#show"
+        "lakeraven/ehr/observations#show"
       ].freeze
 
       # Non-disclosing or out-of-scope controller actions that are explicitly allowed to bypass the seam.
@@ -59,10 +58,30 @@ module Lakeraven
         "lakeraven/ehr/demo_visits#summary",  # Dev-gated demo UI
         "lakeraven/ehr/screenings#create",    # Session-authenticated clinician UI (entry, not disclosure)
         "lakeraven/ehr/screenings#new",       # Session-authenticated clinician UI (entry, not disclosure)
+        "lakeraven/ehr/allergies#new",              # Session-authenticated clinician entry/write surface (#644); discloses no stored clinical data
+        "lakeraven/ehr/allergies#create",            # Session-authenticated clinician entry/write surface (#644); discloses no stored clinical data
+        "lakeraven/ehr/allergies#no_known_allergies", # Session-authenticated clinician entry/write surface (#644); discloses no stored clinical data
         "lakeraven/ehr/sessions#new",         # Web UI login
         "lakeraven/ehr/sessions#create",      # Web UI login
         "lakeraven/ehr/sessions#destroy",     # Web UI logout
         "lakeraven/ehr/dashboards#show",      # Web UI dashboard; banner patient/allergy via filter_fhir_for_egress
+        "lakeraven/ehr/chart_searches#show",   # Patient bar: my recent patients' name, DOB, sex, HRN; no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/chart_searches#create", # Patient bar search: name, DOB, sex, HRN as registration's lookup; revisit with Part 2 (#494)
+        "lakeraven/ehr/registration/patients#index", # Front-desk lookup: registration demographics (name, HRN, DOB, status), no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/registration/patients#show",  # Registration demographics (name, HRN, DOB, sex), no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/registration/patients#new",     # Registration entry form (S-REG-02), not disclosure
+        "lakeraven/ehr/registration/patients#create",  # Registration entry; possible matches show registration demographics only; revisit with Part 2 (#494)
+        "lakeraven/ehr/registration/patients#confirm", # Registration entry after review; as #create
+        "lakeraven/ehr/scheduling/clinics#index",     # Scheduling: clinic resources, no patient data
+        "lakeraven/ehr/scheduling/clinics#show",      # A clinic day: appointment times and patient names, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/scheduling/open_times#index",  # Open times in a clinic's blocks: times only, no patient data
+        "lakeraven/ehr/scheduling/patient_appointments#index", # One patient's appointments: clinics, times, statuses, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/scheduling/appointments#new",   # Booking form: patient name, HRN, date of birth, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/scheduling/appointments#create", # Booking entry, not disclosure
+        "lakeraven/ehr/scheduling/cancellations#new",    # Cancel form: patient name and time, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/scheduling/cancellations#create", # Cancellation entry, not disclosure
+        "lakeraven/ehr/scheduling/checkins#new",         # Check-in form: patient name and time, provider names, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/scheduling/checkins#create",      # Check-in entry, not disclosure
         "lakeraven/ehr/test_sessions#create", # Test only
         "lakeraven/ehr/smart_configuration#show", # Discovery
         "lakeraven/ehr/smart_launch#show",    # Discovery
@@ -89,7 +108,6 @@ module Lakeraven
       WIRED_ACTIONS = [
         "lakeraven/ehr/patients#index",
         "lakeraven/ehr/patients#show",
-        "lakeraven/ehr/patients#create",
         "lakeraven/ehr/charts#show",
         "lakeraven/ehr/screenings#index",
         "lakeraven/ehr/screenings#show",
@@ -103,7 +121,6 @@ module Lakeraven
         "lakeraven/ehr/procedures#index",
         "lakeraven/ehr/coverage_eligibility_requests#create",
         "lakeraven/ehr/measure_reports#index",
-        "lakeraven/ehr/consents#index",
         "lakeraven/ehr/audit_events#index",
         "lakeraven/ehr/audit_events#show",
         "lakeraven/ehr/export_files#show"
@@ -326,7 +343,7 @@ module Lakeraven
           get "/lakeraven-ehr/patients/1", headers: @headers
         end
         assert_response :service_unavailable
-        refute_includes response.body, "120/80"
+        refute_includes response.body, "117/81"
       end
 
       test "HTML chart fails closed if filter returns hash without resourceType" do
@@ -334,7 +351,7 @@ module Lakeraven
           get "/lakeraven-ehr/patients/1", headers: @headers
         end
         assert_response :service_unavailable
-        refute_includes response.body, "120/80"
+        refute_includes response.body, "117/81"
       end
 
             test "HTML chart retains RPMS text for appointments, missing vitals, and units" do
@@ -416,14 +433,13 @@ module Lakeraven
       end
 
       # Table-driven tests for each wired endpoint that can be successfully invoked with seeded data.
-      # Note: Many /:id show routes (like Consent/:id, AllergyIntolerance/:id) are omitted here because
+      # Note: Many /:id show routes (like AllergyIntolerance/:id) are omitted here because
       # we do not have seeded data for those specific resource IDs. We use the nearest real path
       # (the index search route) to verify the seam is wired for that controller, rather than inventing IDs that return 404.
       WIRED_ENDPOINTS = [
         { path: "/lakeraven-ehr/Patient", method: :get, params: { name: "Anderson" } },
         { path: "/lakeraven-ehr/Patient/1", method: :get },
         # POST /Patient requires an RPC response to register a patient, which isn't seeded data
-        { path: "/lakeraven-ehr/Patient", method: :post, params: { resourceType: "Patient", name: [ { family: "Test" } ], gender: "female", birthDate: "1985-06-15", identifier: [ { system: "http://hl7.org/fhir/sid/us-ssn", value: "111-11-1111" } ] }.to_json, content_type: "application/fhir+json", needs_registration_stub: true },
         { path: "/lakeraven-ehr/AllergyIntolerance", method: :get, params: { patient: "1" } },
         { path: "/lakeraven-ehr/Condition", method: :get, params: { patient: "1" } },
         { path: "/lakeraven-ehr/MedicationRequest", method: :get, params: { patient: "1" } },
@@ -434,7 +450,6 @@ module Lakeraven
         { path: "/lakeraven-ehr/Procedure", method: :get, params: { patient: "1" } },
         { path: "/lakeraven-ehr/CoverageEligibilityRequest", method: :post, params: { patient_dfn: "1", coverage_type: "medicaid" } },
         { path: "/lakeraven-ehr/MeasureReport", method: :get, params: { patient: "1" } },
-        { path: "/lakeraven-ehr/Consent", method: :get, params: { patient: "1" } },
         { path: "/lakeraven-ehr/AuditEvent", method: :get },
         { name: "AuditEvent show", dynamic_path: -> { "/lakeraven-ehr/AuditEvent/#{@audit_event.id}" }, method: :get },
         { name: "exports file show", dynamic_path: -> { @export_file_path }, method: :get },
@@ -558,8 +573,7 @@ module Lakeraven
         [ "/lakeraven-ehr/AllergyIntolerance/1", { patient: "1" } ],
         [ "/lakeraven-ehr/Condition/1", { patient: "1" } ],
         [ "/lakeraven-ehr/MedicationRequest/1", { patient: "1" } ],
-        [ "/lakeraven-ehr/Observation/1", { patient: "1" } ],
-        [ "/lakeraven-ehr/Consent/1", { patient: "1" } ]
+        [ "/lakeraven-ehr/Observation/1", { patient: "1" } ]
       ].each do |path, params|
         test "stubbed action for #{path} does not serve data and fails if implemented without wiring" do
           begin
@@ -577,7 +591,7 @@ module Lakeraven
         # 1. Verify it appears with the real filter
         get "/lakeraven-ehr/patients/1", headers: @headers
         assert_response :success
-        assert_includes response.body, "120/80"
+        assert_includes response.body, "117/81"
 
         # 2. Mock filter to return an empty bundle and verify it's gone
         calls = 0
@@ -590,7 +604,7 @@ module Lakeraven
 
         assert_response :success
         assert_operator calls, :>=, 1, "HTML chart must invoke Part2EgressFilter"
-        refute_includes response.body, "120/80", "Expected clinical content to be removed when filter returns empty bundle"
+        refute_includes response.body, "117/81", "Expected clinical content to be removed when filter returns empty bundle"
       end
 
       test "HTML chart fails closed if seam returns nil" do
@@ -599,7 +613,7 @@ module Lakeraven
         end
 
         assert_response :service_unavailable
-        refute_includes response.body, "120/80"
+        refute_includes response.body, "117/81"
       end
 
       test "screenings never invent a score when filter removes the score Observation" do
@@ -709,11 +723,7 @@ module Lakeraven
           }
 
           if is_html
-            if endpoint[:needs_registration_stub]
-              with_registration_success(&call_proc)
-            else
-              call_proc.call
-            end
+            call_proc.call
             assert_response :success
             assert_includes response.body, "Mild", "Expected seeded data (mild) to appear before filtering"
 
@@ -722,11 +732,7 @@ module Lakeraven
               calls += 1
               { "resourceType" => "Bundle", "type" => "searchset", "entry" => [] }
             }) do
-              if endpoint[:needs_registration_stub]
-                with_registration_success(&call_proc)
-              else
-                call_proc.call
-              end
+              call_proc.call
             end
 
             assert_response :success, "Expected successful response but got #{response.status}. Body: #{response.body}"
@@ -743,11 +749,7 @@ module Lakeraven
                 marker
               end
             }) do
-              if endpoint[:needs_registration_stub]
-                with_registration_success(&call_proc)
-              else
-                call_proc.call
-              end
+              call_proc.call
             end
 
             assert_response :success, "Expected successful response but got #{response.status}. Body: #{response.body}"
@@ -774,46 +776,22 @@ module Lakeraven
 
             instance_exec(&endpoint[:setup]) if endpoint[:setup]
             path = endpoint[:dynamic_path] ? instance_exec(&endpoint[:dynamic_path]) : endpoint[:path]
-            if endpoint[:needs_registration_stub]
-              with_registration_success(&call_proc)
-            else
-              call_proc.call
-            end
+            call_proc.call
           end
 
-          if endpoint[:method] == :post && endpoint[:needs_registration_stub]
-            assert_response :created
-            assert_not_nil response.headers["Location"], "Expected Location header on refused POST representation"
+          assert_response :service_unavailable
+          if test_name == "exports file show"
+            refute_includes response.body, "resourceType"
+          else
             body = JSON.parse(response.body)
             assert_equal "OperationOutcome", body["resourceType"]
-            refute_includes response.body, "Test" # the name from the request
-            refute_includes response.body, "111-11-1111"
-          else
-            assert_response :service_unavailable
-            if test_name == "exports file show"
-              refute_includes response.body, "resourceType"
-            else
-              body = JSON.parse(response.body)
-              assert_equal "OperationOutcome", body["resourceType"]
-              refute body.key?("entry")
-              refute_includes response.body, "Anderson"
-            end
+            refute body.key?("entry")
+            refute_includes response.body, "Anderson"
           end
         end
       end
 
       private
-
-      # Minitest 6 no longer ships minitest/mock; swap the method the same way
-      # stub_egress_filter does.
-      def with_registration_success
-        gateway = RegistrationGateway.singleton_class
-        original = gateway.instance_method(:register)
-        gateway.define_method(:register) { |*, **| { success: true, dfn: 123 } }
-        yield
-      ensure
-        gateway.define_method(:register, original)
-      end
 
       # session_auth rows (screenings) authenticate through the browser session
       # their setup opens; the class's system bearer token would replace it.

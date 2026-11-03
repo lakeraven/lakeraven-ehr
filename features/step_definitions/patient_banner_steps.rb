@@ -144,13 +144,6 @@ Then("the banner shows the empty state directing to chart search") do
   assert_empty_banner!
 end
 
-Then("the banner shows {string} with a link to chart search") do |text|
-  banner = assert_patient_banner!
-  assert_includes banner.text, text
-  link = banner.css("a").find { |a| a.text.match?(/chart search/i) }
-  assert link, "Expected chart search link"
-end
-
 Then("no clinical screen renders patient data") do
   body = html_response_body
   refute_includes body, "Alice Anderson"
@@ -161,5 +154,5 @@ Then("no patient data is rendered") do
   assert_nil patient_banner_node
   body = html_response_body
   refute_includes body, "Alice Anderson"
-  refute_includes body, "No patient selected"
+  refute_includes body, "Find patient"
 end

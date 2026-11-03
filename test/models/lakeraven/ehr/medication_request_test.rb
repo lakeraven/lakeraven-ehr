@@ -210,7 +210,8 @@ module Lakeraven
       end
 
       # Builder: MedicationRequest.from_rpms_row(row, patient_dfn:) — read path maps gateway Hashes to models;
-      # for_patient must keep returning those Hashes for charts, CDS, CPOE, and export callers.
+      # for_patient must keep returning those Hashes for the chart, FHIR search and export; CPOE
+      # and decision support read checked_for_patient, which maps them (#680).
       test "from_rpms_row maps gateway active-medication row to US Core MedicationRequest serialization" do
         original_client = RpmsRpc.configuration.client
         RpmsRpc.mock! do |m|

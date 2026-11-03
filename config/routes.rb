@@ -5,12 +5,16 @@ Lakeraven::EHR::Engine.routes.draw do
   # dev-only synthetic-demo bypass lives in ChartsController#demo_bypass?.
   # Content-negotiated: HTML for browsers, FHIR R4 Bundle for `.json`
   # (or Accept: application/fhir+json / ?_format=json). The `.:format`
-  # segment is optional so `patients/1` and `patients/1.json` both resolve;
-  # dfn is constrained to digits so the extension isn't swallowed.
+  # segment is optional so `patients/1` and `patients/1.json` both resolve.
+  # dfn is not limited to digits (#467): a malformed identifier has to reach
+  # ChartsController's format gate. The segment still excludes "." (and the
+  # other route separators) so the extension is not swallowed — `patients/1.json`
+  # is dfn "1" with format json. Sibling patient routes keep their digit
+  # constraints.
   # RESTful path: the chart is the human-facing representation of a patient,
   # so it lives at /patients/:dfn (the FHIR API keeps /Patient per convention;
   # that resource also owns the patient_path helper, hence :patient_chart).
-  get "patients/:dfn(.:format)", to: "charts#show", as: :patient_chart, constraints: { dfn: /\d+/ }
+  get "patients/:dfn(.:format)", to: "charts#show", as: :patient_chart, constraints: { dfn: %r{[^/.?]+} }
   # Demo-only clickable walk-in visit (the UI counterpart of
   # features/encounter/demo_visit.feature). Gated to dev + CHART_DEMO_OPEN +
   # SPIKE_MOCK_RPC in the controller; 404s everywhere else.
@@ -43,6 +47,15 @@ Lakeraven::EHR::Engine.routes.draw do
   get  "patients/:dfn/screenings/new", to: "screenings#new",    as: :new_patient_screening, constraints: { dfn: /\d+/ }
   get  "patients/:dfn/screenings/:id", to: "screenings#show",   as: :patient_screening, constraints: { dfn: /\d+/, id: /\d+/ }
 
+  # Chart allergy entry (#644). Writes are POST only — there is no GET
+  # that records an allergy or no-known-allergies.
+  get  "patients/:dfn/allergies/new", to: "allergies#new", as: :new_patient_allergy,
+    constraints: { dfn: /\d+/ }
+  post "patients/:dfn/allergies", to: "allergies#create", as: :patient_allergies,
+    constraints: { dfn: /\d+/ }
+  post "patients/:dfn/allergies/no_known_allergies", to: "allergies#no_known_allergies",
+    as: :patient_no_known_allergies, constraints: { dfn: /\d+/ }
+
   # FHIR CapabilityStatement (#574). Every FHIR type routed below is declared
   # in FHIR::CapabilityStatement, and a route with no controller action
   # behind it is not routed: Medication, DiagnosticReport and CarePlan were,
@@ -52,7 +65,8 @@ Lakeraven::EHR::Engine.routes.draw do
   # Doorkeeper models (Application, AccessToken) are used directly;
   # routes are NOT mounted here because the engine provides its own
   # BackendServicesController for OAuth token issuance.
-  resources :patients, path: "Patient", only: %i[index show create], param: :dfn
+  # No create: registration is AG's, on the front desk's screens (#542).
+  resources :patients, path: "Patient", only: %i[index show], param: :dfn
   resources :practitioners, path: "Practitioner", only: %i[index show], param: :ien
   resources :allergy_intolerances, path: "AllergyIntolerance", only: %i[index show]
   resources :conditions, path: "Condition", only: %i[index show]
@@ -67,7 +81,6 @@ Lakeraven::EHR::Engine.routes.draw do
   resources :coverage_eligibility_requests, path: "CoverageEligibilityRequest", only: %i[create]
   resources :measures, path: "Measure", only: %i[index]
   resources :measure_reports, path: "MeasureReport", only: %i[index]
-  resources :consents, path: "Consent", only: %i[index show]
   resources :audit_events, path: "AuditEvent", only: %i[index show]
   resources :value_sets, path: "ValueSet", only: %i[index show] do
     member do
@@ -106,6 +119,40 @@ Lakeraven::EHR::Engine.routes.draw do
   post "login" => "sessions#create"
   delete "logout" => "sessions#destroy", as: :logout
   get "dashboard" => "dashboards#show", as: :dashboard
+
+  # The patient bar's search and recent patients (rpms-ux S-CHT-01). A search
+  # names a patient, so it is posted, never carried in a URL (#722).
+  get "chart_search", to: "chart_searches#show", as: :chart_search
+  post "chart_search", to: "chart_searches#create"
+
+  # The front desk finds a patient (rpms-ux S-REG-01) and registers a new one (S-REG-02).
+  namespace :registration do
+    get "patients", to: "patients#index", as: :patients
+    # A search names a patient (an SSN, a name, a date of birth), so it is posted,
+    # never carried in a URL, browser history or a log line (#722).
+    post "patients/search", to: "patients#index", as: :search_patients
+    get "patients/new", to: "patients#new", as: :new_patient
+    # The tribe and community look-ups post the form back, with its demographics (#722).
+    post "patients/new", to: "patients#new"
+    post "patients", to: "patients#create"
+    post "patients/confirm", to: "patients#confirm", as: :confirm_patient
+    get "patients/:dfn", to: "patients#show", as: :patient, constraints: { dfn: /\d+/ }
+  end
+
+  # Scheduling (rpms-ux W02): a clinic resource's day, booking into it (S-SCH-01)
+  # cancelling (S-SCH-02) and checking in (S-SCH-03).
+  namespace :scheduling do
+    get "/", to: "clinics#index", as: :home
+    get "clinics/:id", to: "clinics#show", as: :clinic, constraints: { id: /\d+/ }
+    get "clinics/:id/open_times", to: "open_times#index", as: :clinic_open_times, constraints: { id: /\d+/ }
+    get "patients/:dfn/appointments", to: "patient_appointments#index", as: :patient_appointments, constraints: { dfn: /\d+/ }
+    get "clinics/:resource_id/appointments/new", to: "appointments#new", as: :new_clinic_appointment, constraints: { resource_id: /\d+/ }
+    post "clinics/:resource_id/appointments", to: "appointments#create", as: :clinic_appointments, constraints: { resource_id: /\d+/ }
+    get "clinics/:resource_id/appointments/:appointment_id/cancel", to: "cancellations#new", as: :cancel_clinic_appointment, constraints: { resource_id: /\d+/, appointment_id: /\d+/ }
+    post "clinics/:resource_id/appointments/:appointment_id/cancel", to: "cancellations#create", constraints: { resource_id: /\d+/, appointment_id: /\d+/ }
+    get "clinics/:resource_id/appointments/:appointment_id/checkin", to: "checkins#new", as: :checkin_clinic_appointment, constraints: { resource_id: /\d+/, appointment_id: /\d+/ }
+    post "clinics/:resource_id/appointments/:appointment_id/checkin", to: "checkins#create", constraints: { resource_id: /\d+/, appointment_id: /\d+/ }
+  end
 
   # Test-only: seed the browser session (DUZ, user type, security keys, and
   # the session-bound SMART token) without the RPMS sign-on flow. The

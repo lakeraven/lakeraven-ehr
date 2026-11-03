@@ -7,16 +7,20 @@ module GlobalStoreIsolation
   # BASELINE_MOCK_SEEDS is defined in test/test_helper.rb; the proc looks it
   # up when reset! runs, after that constant exists.
   STORE_RESETS = [
+    -> { Lakeraven::EHR::AssertionReplayGuard.reset! },
     -> { Lakeraven::EHR::ProvenanceStore.reset_instance! },
     -> { Lakeraven::EHR::ExportsController.reset_store! },
     -> { Lakeraven::EHR::LoginThrottle.reset! },
     -> { Lakeraven::EHR::RateLimit.reset! },
+    # The per-user RPMS connection pool (#585), once the engine has one.
+    -> { Lakeraven::EHR::RpmsSessions.reset! if defined?(Lakeraven::EHR::RpmsSessions) },
     -> { Lakeraven::EHR::ClinicalDecisionSupportService.rule_overrides.clear },
     -> { Lakeraven::EHR::EncounterStore.reset_instance! },
     -> { Lakeraven::EHR::MedicationStore.reset_instance! },
     -> { Lakeraven::EHR::CarePlanStore.reset_instance! },
     -> { Lakeraven::EHR::DiagnosticReportStore.reset_instance! },
-    -> { RpmsRpc.mock!(&BASELINE_MOCK_SEEDS) }
+    -> { RpmsRpc.mock!(&BASELINE_MOCK_SEEDS) unless LIVE_RPMS },
+    -> { Lakeraven::EHR::DrugInteraction::AdapterFactory.reset_registrations! }
   ].freeze
 
   def self.reset!

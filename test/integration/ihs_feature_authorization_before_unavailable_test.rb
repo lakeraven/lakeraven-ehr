@@ -9,7 +9,7 @@ require "test_helper"
 #
 # Panel finding (#659): the capability guard ran before the authorization
 # callbacks a controller declares (the patient-compartment binding on
-# Immunization and ServiceRequest, the write-scope check on Patient create),
+# Immunization and ServiceRequest),
 # so a refusal on an available backend turned into a 404 on a restricted one.
 class IhsFeatureAuthorizationBeforeUnavailableTest < ActionDispatch::IntegrationTest
   include BrokerStubbing
@@ -111,58 +111,7 @@ class IhsFeatureAuthorizationBeforeUnavailableTest < ActionDispatch::Integration
     end
   end
 
-  # Patient create: the write-scope check
-  test "POST Patient with only a patient-level write scope is a 403 on an available backend" do
-    post "/lakeraven-ehr/Patient", params: registration_json,
-      headers: patient_bound_headers("patient/Patient.write", resource_owner_id: OWN_DFN, content_type: true)
-    assert_response :forbidden
-  end
-
-  test "POST Patient with only a patient-level write scope is the same 403 on a restricted backend, not a 404" do
-    fake = FakeBroker.new.on(Lakeraven::EHR::RegistrationGateway::REGISTER_RPC, "1^12345^")
-    with_restricted_backend(client: fake) do
-      post "/lakeraven-ehr/Patient", params: registration_json,
-        headers: patient_bound_headers("patient/Patient.write", resource_owner_id: OWN_DFN, content_type: true)
-      assert_response :forbidden
-      refute_match(/not available|not-supported/i, response.body)
-      assert_empty fake.calls
-    end
-  end
-
-  test "POST Patient with a system write scope is the not-supported 404 on a restricted backend" do
-    fake = FakeBroker.new.on(Lakeraven::EHR::RegistrationGateway::REGISTER_RPC, "1^12345^")
-    with_restricted_backend(client: fake) do
-      post "/lakeraven-ehr/Patient", params: registration_json,
-        headers: bearer_headers("system/Patient.write", content_type: true, accept: "application/fhir+json")
-      assert_fhir_feature_unavailable(response, capability: :bprm_registration)
-      assert_empty fake.calls
-    end
-  end
-
-  test "POST Patient with a user write scope is the not-supported 404 on a restricted backend" do
-    fake = FakeBroker.new.on(Lakeraven::EHR::RegistrationGateway::REGISTER_RPC, "1^12345^")
-    with_restricted_backend(client: fake) do
-      post "/lakeraven-ehr/Patient", params: registration_json,
-        headers: bearer_headers("user/Patient.write", content_type: true, accept: "application/fhir+json")
-      assert_fhir_feature_unavailable(response, capability: :bprm_registration)
-      assert_empty fake.calls
-    end
-  end
-
-  test "POST Patient with no token is a 401 on a restricted backend" do
-    with_restricted_backend do
-      post "/lakeraven-ehr/Patient", params: registration_json, headers: { "Content-Type" => "application/fhir+json" }
-      assert_response :unauthorized
-      refute_match(/not available|not-supported/i, response.body)
-    end
-  end
-
   private
-
-  def registration_json
-    { resourceType: "Patient", name: [ { family: "RESTRICTED", given: [ "SYNTH" ] } ],
-      gender: "female", birthDate: "1985-06-15" }.to_json
-  end
 
   def patient_bound_headers(scopes, resource_owner_id:, accept: nil, content_type: false)
     bearer_headers(scopes, resource_owner_id: resource_owner_id, accept: accept, content_type: content_type)

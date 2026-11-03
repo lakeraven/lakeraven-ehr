@@ -48,7 +48,7 @@ module Lakeraven
         assert_response :ok
 
         ids = JSON.parse(response.body)["entry"].map { |entry| entry.dig("resource", "id") }
-        assert_includes ids, "1001"
+        assert_includes ids, "8"
       end
 
       test "returns FHIR JSON content type" do

@@ -128,17 +128,12 @@ module PatientBannerTestHelper
   end
 
   def assert_banner_sticky_stylesheet!
-    css_path = Lakeraven::EHR::Engine.root.join(
-      "app/assets/stylesheets/lakeraven/ehr/application.css"
-    )
-    css = File.read(css_path)
     banner = patient_banner_node
     inline_sticky = banner["style"].to_s.match?(/position:\s*sticky/i)
-    class_sticky = banner["class"].to_s.match?(/sticky/i)
-    sheet_sticky = css.match?(/#patient-banner[^{]*\{[^}]*position:\s*sticky/i)
+    class_sticky = banner["class"].to_s.split.include?("sticky")
 
-    assert inline_sticky || class_sticky || sheet_sticky,
-           "Expected #patient-banner to be sticky via class, inline style, or application.css"
+    assert inline_sticky || class_sticky,
+           "Expected #patient-banner to be sticky via the Tailwind class or an inline style"
   end
 
   def assert_banner_demographics!(name:, mrn:, dob:, age:, sex:)
@@ -160,10 +155,11 @@ module PatientBannerTestHelper
 
   def assert_empty_banner!
     banner = assert_patient_banner!
-    assert_includes banner.text, "No patient selected"
-    link = banner.css("a").find { |a| a.text.match?(/chart search/i) }
-    assert link, "Expected a chart search link in the empty banner"
-    assert link["href"].present?, "Chart search link must have an href"
+    # No patient open: the bar is the patient search (rpms-ux S-CHT-01.7), posted.
+    form = banner.at_css("form#patient-search")
+    assert form, "Expected the patient search in the empty banner"
+    assert_equal "post", form["method"]
+    assert form.at_css("input[name='q']"), "Expected a search field in the empty banner"
   end
 
   def submit_clear_patient_context!
@@ -288,7 +284,7 @@ module PatientBannerTestHelper
     refute_includes banner.text, "Penicillin"
     refute_includes banner.text, "Shellfish"
     refute_match(/MRN\s*\/\s*DFN/i, banner.text)
-    refute_includes banner.text, "No patient selected"
+    assert_nil banner.at_css("form#patient-search"), "patient mode shows the patient, not the search"
     clear = banner.css("button, input[type=submit]").find { |n| n.text.match?(/clear patient context/i) }
     assert clear, "Expected Clear patient context control in banner"
   end

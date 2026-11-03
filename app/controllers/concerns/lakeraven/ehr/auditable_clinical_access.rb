@@ -150,6 +150,7 @@ module Lakeraven
           entity_identifier: entity_identifier_value,
           **agent,
           agent_network_address: request.remote_ip,
+          rpms_session_id: audit_rpms_session_id,
           tenant_identifier: tenant,
           facility_identifier: facility
         )
@@ -299,6 +300,20 @@ module Lakeraven
       # resolved must NOT be filed under the shared browser application — every
       # clinician would look identical, which is the defect #486 fixes. It is
       # recorded as unattributed instead.
+      # The RPMS session the request ran under: the CIA session id sign-on
+      # returned, kept in the browser session (docs/identity-passthrough.md).
+      # Only when the audited clinician IS that session's user, so a row never
+      # names one user with another's RPMS session. Nil for API clients and
+      # the anonymous.
+      def audit_rpms_session_id
+        return nil unless respond_to?(:session, true) && session.respond_to?(:[])
+
+        duz = resolved_clinician_duz
+        session[:rpms_session_id].presence if duz.present? && session[:duz].to_s == duz.to_s
+      rescue StandardError
+        nil
+      end
+
       def audit_agent_attributes
         duz = resolved_clinician_duz
         if duz.present?

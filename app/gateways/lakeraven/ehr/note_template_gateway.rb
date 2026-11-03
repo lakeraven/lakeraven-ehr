@@ -19,16 +19,21 @@ module Lakeraven
         via.items(template_ien.to_s)
       end
 
-      def self.boilerplate(template_ien, dfn:, visit_ien:, via: default_provider)
+      # The template's UNEXPANDED boilerplate. GETBOIL^TIUSRVT takes the
+      # template alone; expanding |FIELD| objects is text's job.
+      def self.boilerplate(template_ien, via: default_provider)
         return nil if via.nil?
 
-        via.boilerplate(template_ien.to_s, dfn: dfn.to_s, visit_ien: visit_ien.to_s)
+        via.boilerplate(template_ien.to_s)
       end
 
-      def self.text(template_ien, via: default_provider)
+      # Boilerplate lines expanded for a patient (and visit): the server
+      # resolves |FIELD| objects. GETTEXT^TIUSRVT takes the lines, not a
+      # template IEN.
+      def self.text(lines, dfn:, visit_string: "", via: default_provider)
         return nil if via.nil?
 
-        via.text(template_ien.to_s)
+        via.text(Array(lines), dfn: dfn.to_s, visit_string: visit_string.to_s)
       end
 
       def self.access_level(template_ien, user_duz, via: default_provider)
