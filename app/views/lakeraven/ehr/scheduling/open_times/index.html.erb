@@ -19,7 +19,7 @@
           class: "rounded border border-slate-300 px-3 py-2" %>
   </div>
   <div class="flex flex-col gap-1">
-    <%= label_tag :to, "To" %>
+    <%= label_tag :to, "To (#{Lakeraven::EHR::Scheduling::OpenTimesController::MAX_DAYS} days at most)" %>
     <%= date_field_tag :to,
           @to,
           class: "rounded border border-slate-300 px-3 py-2" %>
@@ -46,7 +46,7 @@
   </div>
   <%= submit_tag "Search",
         name: nil,
-        class: "min-h-9 bg-white px-3 py-2 ring-1 ring-slate-300 ring-inset" %>
+        class: "min-h-9 bg-white px-3 py-2 text-slate-900 ring-1 ring-slate-300 ring-inset hover:bg-slate-50" %>
 <% end %>
 
 <div id="open-times">

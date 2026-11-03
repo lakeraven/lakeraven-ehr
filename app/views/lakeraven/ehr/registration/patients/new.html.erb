@@ -105,7 +105,7 @@
             formaction: registration_new_patient_path,
             formmethod: :post,
             formnovalidate: true,
-            class: "min-h-9 bg-white px-3 py-2 ring-1 ring-slate-300 ring-inset" %>
+            class: "min-h-9 bg-white px-3 py-2 text-slate-900 ring-1 ring-slate-300 ring-inset hover:bg-slate-50" %>
     </div>
     <% @tribes.each do |tribe| %>
       <label data-tribe="<%= tribe[:ien] %>">
@@ -134,7 +134,7 @@
             formaction: registration_new_patient_path,
             formmethod: :post,
             formnovalidate: true,
-            class: "min-h-9 bg-white px-3 py-2 ring-1 ring-slate-300 ring-inset" %>
+            class: "min-h-9 bg-white px-3 py-2 text-slate-900 ring-1 ring-slate-300 ring-inset hover:bg-slate-50" %>
     </div>
     <% @communities.each do |community| %>
       <label data-community="<%= community[:ien] %>">
