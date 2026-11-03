@@ -115,6 +115,63 @@ module ConsentWriteTestHelper
       png_chunk("IEND", "")
   end
 
+  PAD_WIDTH = 600
+  PAD_HEIGHT = 180
+
+  def self.png_from_scanlines(width:, height:, color_type:, rows:)
+    header = [ width, height, 8, color_type, 0, 0, 0 ].pack("NNCCCCC")
+    PNG_MAGIC + png_chunk("IHDR", header) +
+      png_chunk("IDAT", Zlib::Deflate.deflate(rows)) +
+      png_chunk("IEND", "")
+  end
+
+  # Solid opaque white on an RGBA pad — no contrast with the page background.
+  def self.blank_opaque_white_rgba_pad_png
+    w, h = PAD_WIDTH, PAD_HEIGHT
+    rows = (("\x00".b) + ("\xFF\xFF\xFF\xFF".b * w)) * h
+    png_from_scanlines(width: w, height: h, color_type: 6, rows: rows)
+  end
+
+  # Grey+alpha solid opaque white (gray 255, alpha 255) — blank ink on white.
+  def self.blank_opaque_white_graya_pad_png
+    w, h = PAD_WIDTH, PAD_HEIGHT
+    rows = (("\x00".b) + ("\xFF\xFF".b * w)) * h
+    png_from_scanlines(width: w, height: h, color_type: 4, rows: rows)
+  end
+
+  # Near-white (#FEFEFE) fully opaque strokes on transparent paper.
+  def self.near_white_ink_on_transparent_pad_png
+    w, h = PAD_WIDTH, PAD_HEIGHT
+    rows = (+"").b
+    h.times do |y|
+      rows << "\x00".b
+      w.times do |x|
+        rows << ((y == 90 && x < 300) ? "\xFE\xFE\xFE\xFF".b : "\x00\x00\x00\x00".b)
+      end
+    end
+    png_from_scanlines(width: w, height: h, color_type: 6, rows: rows)
+  end
+
+  def self.dark_stroke_on_white_pad_png
+    inked_png_bytes(width: PAD_WIDTH, height: PAD_HEIGHT) do |x, y|
+      y == 90 && x.between?(50, 250) ? [ 0, 0, 0, 255 ] : [ 255, 255, 255, 255 ]
+    end
+  end
+
+  def self.max_pad_dimension_signature_png(width: 1800, height: 600)
+    inked_png_bytes(width: width, height: height) do |x, y|
+      y == height / 2 && x.between?(50, 250) ? [ 0, 0, 0, 255 ] : [ 0, 0, 0, 0 ]
+    end
+  end
+
+  def self.overwide_pad_signature_png
+    max_pad_dimension_signature_png(width: 1801, height: 600)
+  end
+
+  def self.overtall_pad_signature_png
+    max_pad_dimension_signature_png(width: 600, height: 601)
+  end
+
   TINY_PNG = visible_stroke_png.freeze
 
   def magic_bytes_only_png
@@ -143,6 +200,81 @@ module ConsentWriteTestHelper
 
   def near_white_rgb_signature_png
     ConsentWriteTestHelper.near_white_rgb_signature_png
+  end
+
+  def blank_opaque_white_rgba_pad_png
+    ConsentWriteTestHelper.blank_opaque_white_rgba_pad_png
+  end
+
+  def blank_opaque_white_graya_pad_png
+    ConsentWriteTestHelper.blank_opaque_white_graya_pad_png
+  end
+
+  def near_white_ink_on_transparent_pad_png
+    ConsentWriteTestHelper.near_white_ink_on_transparent_pad_png
+  end
+
+  def dark_stroke_on_white_pad_png
+    ConsentWriteTestHelper.dark_stroke_on_white_pad_png
+  end
+
+  def max_pad_dimension_signature_png(**kwargs)
+    ConsentWriteTestHelper.max_pad_dimension_signature_png(**kwargs)
+  end
+
+  def overwide_pad_signature_png
+    ConsentWriteTestHelper.overwide_pad_signature_png
+  end
+
+  def overtall_pad_signature_png
+    ConsentWriteTestHelper.overtall_pad_signature_png
+  end
+
+  def with_second_handover_reaching_lock_write
+    Lakeraven::EHR::ConsentsController.class_eval do
+      alias_method :__consent_skip_locked_redirect, :redirect_when_consent_kiosk_locked
+      def redirect_when_consent_kiosk_locked; end
+    end
+    yield
+  ensure
+    Lakeraven::EHR::ConsentsController.class_eval do
+      alias_method :redirect_when_consent_kiosk_locked, :__consent_skip_locked_redirect
+      remove_method :__consent_skip_locked_redirect
+    end
+  end
+
+  def with_racing_kiosk_sign_loser
+    Lakeraven::EHR::ConsentKioskController.class_eval do
+      alias_method :__orig_stored_handover_signature, :stored_handover_signature
+      def stored_handover_signature
+        @signed_consent = nil
+      end
+    end
+    yield
+  ensure
+    Lakeraven::EHR::ConsentKioskController.class_eval do
+      alias_method :stored_handover_signature, :__orig_stored_handover_signature
+      remove_method :__orig_stored_handover_signature
+    end
+  end
+
+  def count_decode_signature_data_url_calls
+    calls = 0
+    singleton = Lakeraven::EHR::SignedConsent.singleton_class
+    original = singleton.instance_method(:decode_signature_data_url)
+    Lakeraven::EHR::SignedConsent.define_singleton_method(:decode_signature_data_url) do |value|
+      calls += 1
+      original.bind_call(Lakeraven::EHR::SignedConsent, value)
+    end
+    yield calls
+  ensure
+    singleton.send(:remove_method, :decode_signature_data_url)
+    singleton.send(:define_method, :decode_signature_data_url, original)
+  end
+
+  def login_throttle_failures_for(access_code)
+    key = Lakeraven::EHR::LoginThrottle.send(:key, access_code)
+    Lakeraven::EHR::LoginThrottle.send(:attempts)[key]&.length.to_i
   end
 
   # Setup opens the kiosk first; clear server lock + session hint so POST handover
