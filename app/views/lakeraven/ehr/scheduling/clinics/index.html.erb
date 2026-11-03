@@ -21,7 +21,7 @@
   >
     <% @resources.each do |resource| %>
       <li data-resource="<%= resource[:id] %>">
-        <%= link_to resource[:name], scheduling_clinic_path(resource[:id]) %>
+        <%= link_to resource[:name], scheduling_clinic_week_path(resource[:id]) %>
         <% if resource[:inactive] %>
           <span class="hint">(inactive)</span>
         <% end %>
