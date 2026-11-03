@@ -142,6 +142,13 @@ Lakeraven::EHR::Engine.routes.draw do
     patch "patients/:dfn/demographics", to: "demographics#update", as: :patient_demographics, constraints: { dfn: /\d+/ }
     get "patients/:dfn/address/edit", to: "addresses#edit", as: :edit_patient_address, constraints: { dfn: /\d+/ }
     patch "patients/:dfn/address", to: "addresses#update", as: :patient_address, constraints: { dfn: /\d+/ }
+    # The patient's Medicaid, Medicare and private insurance (S-REG-03). The
+    # state and insurer look-ups post the form back, so a member number never
+    # travels in a URL (#722).
+    get "patients/:dfn/coverage", to: "coverages#index", as: :patient_coverage, constraints: { dfn: /\d+/ }
+    get "patients/:dfn/coverage/new", to: "coverages#new", as: :new_patient_coverage, constraints: { dfn: /\d+/ }
+    post "patients/:dfn/coverage/new", to: "coverages#new", constraints: { dfn: /\d+/ }
+    post "patients/:dfn/coverage", to: "coverages#create", constraints: { dfn: /\d+/ }
   end
 
   # Scheduling (rpms-ux W02): a clinic resource's day, booking into it (S-SCH-01)
