@@ -80,6 +80,9 @@ module Lakeraven
         "lakeraven/ehr/registration/contacts#update",  # Saving a contact (S-REG-08), not disclosure
         "lakeraven/ehr/registration/languages#edit",   # The languages form (S-REG-10): registration demographics, no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/registration/languages#update", # Saving the languages (S-REG-10), not disclosure
+        "lakeraven/ehr/registration/other_names#index",   # Other names the patient has used (S-REG-12): registration demographics, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/registration/other_names#create",  # Adding an other name (S-REG-12), not disclosure
+        "lakeraven/ehr/registration/other_names#destroy", # Removing an other name (S-REG-12), not disclosure
         "lakeraven/ehr/registration/coverages#index",  # Payer, member number and dates for billing (S-REG-03), no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/registration/coverages#new",    # Coverage entry form (S-REG-03.1), not disclosure
         "lakeraven/ehr/registration/coverages#create", # Coverage entry (S-REG-03.1); answers with the form or a redirect

@@ -132,6 +132,13 @@
           languages: @languages,
           can_edit: can_edit %>
   <% end %>
+
+  <% if @other_names %>
+    <%= render "lakeraven/ehr/registration/other_names/section",
+          dfn: params[:dfn],
+          other_names: @other_names,
+          can_edit: can_edit %>
+  <% end %>
 <% end %>
 
 <p class="mt-6">
