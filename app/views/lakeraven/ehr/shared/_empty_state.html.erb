@@ -1,0 +1,15 @@
+<%# What a list shows when it is empty (ComponentsHelper#empty_state).
+    Locals: messages (Array of sentences), id (optional), action (HTML or nil). %>
+<div
+  <%= tag.attributes(id: local_assigns[:id]) %>
+  class="empty-state"
+>
+  <% Array(local_assigns[:messages]).each do |message| %>
+    <p><%= message %></p>
+  <% end %>
+  <% if local_assigns[:action].present? %>
+    <p class="empty-state__action">
+      <%= action %>
+    </p>
+  <% end %>
+</div>

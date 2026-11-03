@@ -155,6 +155,11 @@ Lakeraven::EHR::Engine.routes.draw do
     post "clinics/:resource_id/appointments/:appointment_id/cancel", to: "cancellations#create", constraints: { resource_id: /\d+/, appointment_id: /\d+/ }
     get "clinics/:resource_id/appointments/:appointment_id/checkin", to: "checkins#new", as: :checkin_clinic_appointment, constraints: { resource_id: /\d+/, appointment_id: /\d+/ }
     post "clinics/:resource_id/appointments/:appointment_id/checkin", to: "checkins#create", constraints: { resource_id: /\d+/, appointment_id: /\d+/ }
+    get "clinics/:resource_id/appointments/:appointment_id/reschedule", to: "reschedules#new", as: :reschedule_clinic_appointment, constraints: { resource_id: /\d+/, appointment_id: /\d+/ }
+    post "clinics/:resource_id/appointments/:appointment_id/reschedule", to: "reschedules#create", constraints: { resource_id: /\d+/, appointment_id: /\d+/ }
+    get "clinics/:resource_id/walk_ins/new", to: "walk_ins#new", as: :new_clinic_walk_in, constraints: { resource_id: /\d+/ }
+    post "clinics/:resource_id/walk_ins/find", to: "walk_ins#find", as: :find_clinic_walk_in, constraints: { resource_id: /\d+/ }
+    post "clinics/:resource_id/walk_ins", to: "walk_ins#create", as: :clinic_walk_ins, constraints: { resource_id: /\d+/ }
   end
 
   # Test-only: seed the browser session (DUZ, user type, security keys, and

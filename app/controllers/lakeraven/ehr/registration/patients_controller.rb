@@ -49,7 +49,11 @@ module Lakeraven
         def show
           @patient = RpmsRpc::Patient.brief_header(params[:dfn].to_i)
           @registered_hrn = flash[:registered_hrn]
-          render :not_found, status: :not_found unless @patient
+          return render :not_found, status: :not_found unless @patient
+
+          # AG's own edit checks run in its registration context, which RPMS
+          # gives registration users only, as for its lookup.
+          @checks = RegistrationChecksGateway.for(params[:dfn]) if capability?("registration.search")
         end
 
         # GET /registration/patients/new: the form, and the tribe and community

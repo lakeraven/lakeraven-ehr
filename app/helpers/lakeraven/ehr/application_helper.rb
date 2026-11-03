@@ -3,6 +3,9 @@
 module Lakeraven
   module EHR
     module ApplicationHelper
+      # The front desk's shared view pieces (docs/DESIGN-SYSTEM.md).
+      include ComponentsHelper
+
       def feature_available?(capability)
         BackendRegistry.current.provides?(capability)
       end

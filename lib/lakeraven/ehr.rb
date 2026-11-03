@@ -60,7 +60,14 @@ module Lakeraven
       # its SMART token is valid.
       attr_accessor :session_lifetime
 
+      # The name in the page header and at the end of every <title>. One
+      # setting, so the product's name in the chrome can change without
+      # touching a view; which name belongs there is still open (see
+      # docs/adr, "product name in the chrome").
+      attr_accessor :product_name
+
       def initialize
+        @product_name = "Lakeraven EHR"
         @session_idle_limit = 30.minutes
         @session_lifetime = 12.hours
         @tenant_resolver = ->(request) {
