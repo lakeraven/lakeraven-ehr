@@ -91,6 +91,7 @@ module Lakeraven
         "scheduled" => "status-badge--booked",
         "checked" => "status-badge--checked",
         "checked in" => "status-badge--checked",
+        "checked-out" => "status-badge--checked-out",
         "no-show" => "status-badge--no-show",
         "no show" => "status-badge--no-show",
         "cancelled" => "status-badge--cancelled",

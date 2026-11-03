@@ -21,6 +21,7 @@ module Lakeraven
       def appointment_status(appointment)
         if appointment[:cancelled] then [ "cancelled", "Cancelled" ]
         elsif appointment[:no_show] then [ "no-show", "No-show" ]
+        elsif appointment[:checkout_time] then [ "checked-out", "Checked out #{appointment[:checkout_time].strftime('%H:%M')}" ]
         elsif appointment[:checkin_time] then [ "checked", "Checked in #{appointment[:checkin_time].strftime('%H:%M')}" ]
         else [ "booked", "Booked" ]
         end
