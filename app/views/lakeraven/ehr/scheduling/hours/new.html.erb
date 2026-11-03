@@ -1,0 +1,151 @@
+<% content_for :title, "Hours | #{@resource[:name]} | Lakeraven EHR" %>
+
+<div class="page-header">
+  <h1>Set the clinic's hours</h1>
+  <p>
+    <%= @resource[:name] %>
+  </p>
+</div>
+
+<p>
+  Each chosen day in the range gets one block of these hours.
+  A day that already has hours is replaced.
+  Days not chosen keep their hours.
+</p>
+
+<% if flash[:alert].present? %>
+  <div
+    class="alert alert--error"
+    role="alert"
+  >
+    <p><%= flash[:alert] %></p>
+  </div>
+<% end %>
+
+<% if @result&.status == :conflict %>
+  <div
+    id="hours-conflicts"
+    class="alert alert--error"
+    role="alert"
+  >
+    <p>
+      The hours were not changed.
+      These appointments would be outside them.
+      Move or cancel them first, or choose hours that cover them.
+    </p>
+    <ul>
+      <% @result.conflicts.each do |appointment| %>
+        <li data-appointment="<%= appointment[:id] %>">
+          <%= appointment[:start_time].strftime("%a %b %-d, %Y at %H:%M") %>, <%= appointment[:patient_name] %>
+        </li>
+      <% end %>
+    </ul>
+  </div>
+<% end %>
+
+<% if @result && @result.days_set.any? && !@result.set? %>
+  <div
+    id="hours-partial"
+    class="alert alert--notice"
+    role="status"
+  >
+    <p>
+      Hours were set through <%= @result.days_set.last.strftime("%b %-d, %Y") %> before the change stopped.
+    </p>
+  </div>
+<% end %>
+
+<% if @hours.errors.any? %>
+  <div
+    id="hours-errors"
+    class="alert alert--error"
+    role="alert"
+  >
+    <p>
+      The hours were not set.
+    </p>
+    <ul>
+      <% @hours.errors.full_messages.each do |message| %>
+        <li><%= message %></li>
+      <% end %>
+    </ul>
+  </div>
+<% end %>
+
+<%= form_with scope: :hours,
+      url: scheduling_clinic_hours_path(@resource[:id]),
+      method: :post,
+      local: true,
+      id: "hours-form",
+      class: "card flex flex-col gap-4" do |f| %>
+  <fieldset class="flex flex-wrap gap-3">
+    <legend>Days</legend>
+    <% Lakeraven::EHR::ClinicHours::WEEKDAYS.each do |number, name| %>
+      <label class="flex items-center gap-1">
+        <%= check_box_tag "hours[weekdays][]",
+              number,
+              @hours.weekdays.include?(number),
+              id: "hours_weekday_#{number}" %>
+        <%= name %>
+      </label>
+    <% end %>
+  </fieldset>
+
+  <div class="flex flex-wrap gap-4">
+    <div class="flex flex-col gap-1">
+      <%= f.label :opens, "Opens" %>
+      <%= f.time_field :opens,
+            value: @hours.opens,
+            required: true,
+            class: "rounded border border-slate-300 px-3 py-2" %>
+    </div>
+    <div class="flex flex-col gap-1">
+      <%= f.label :closes, "Closes" %>
+      <%= f.time_field :closes,
+            value: @hours.closes,
+            required: true,
+            class: "rounded border border-slate-300 px-3 py-2" %>
+    </div>
+    <div class="flex flex-col gap-1">
+      <%= f.label :slots, "Appointments per time" %>
+      <%= f.number_field :slots,
+            value: @hours.slots,
+            min: 1,
+            required: true,
+            class: "rounded border border-slate-300 px-3 py-2" %>
+    </div>
+    <div class="flex flex-col gap-1">
+      <%= f.label :access_type_id, "Access type" %>
+      <%= f.select :access_type_id,
+            options_for_select(@access_types.map { |t| [ t[:name], t[:id] ] }, @hours.access_type_id),
+            { include_blank: "Choose an access type" },
+            required: true,
+            class: "rounded border border-slate-300 px-3 py-2" %>
+    </div>
+  </div>
+
+  <div class="flex flex-wrap gap-4">
+    <div class="flex flex-col gap-1">
+      <%= f.label :first_date, "From" %>
+      <%= f.date_field :first_date,
+            value: @hours.first_date,
+            required: true,
+            class: "rounded border border-slate-300 px-3 py-2" %>
+    </div>
+    <div class="flex flex-col gap-1">
+      <%= f.label :last_date, "Through" %>
+      <%= f.date_field :last_date,
+            value: @hours.last_date,
+            required: true,
+            class: "rounded border border-slate-300 px-3 py-2" %>
+    </div>
+  </div>
+
+  <%= f.submit "Set hours",
+        class: "min-h-9 bg-slate-900 px-3 py-2 text-white" %>
+<% end %>
+
+<p>
+  <%= link_to "Back to the clinic",
+        scheduling_clinic_path(@resource[:id]) %>
+</p>

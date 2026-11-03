@@ -59,6 +59,14 @@
         id: "find-open-time" %>
 </p>
 
+<% if can_set_hours?(@resource) %>
+  <p>
+    <%= link_to "Set the clinic's hours",
+          scheduling_new_clinic_hours_path(@resource[:id]),
+          id: "set-hours" %>
+  </p>
+<% end %>
+
 <h2>Booked</h2>
 <% if @appointments.empty? %>
   <p class="hint">No appointments.</p>
