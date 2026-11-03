@@ -149,6 +149,13 @@ Lakeraven::EHR::Engine.routes.draw do
       post "contacts/:kind/edit", to: "contacts#edit"
       post "contacts/:kind", to: "contacts#update", as: :patient_contact
     end
+    # The patient's Medicaid, Medicare and private insurance (S-REG-03). The
+    # state and insurer look-ups post the form back, so a member number never
+    # travels in a URL (#722).
+    get "patients/:dfn/coverage", to: "coverages#index", as: :patient_coverage, constraints: { dfn: /\d+/ }
+    get "patients/:dfn/coverage/new", to: "coverages#new", as: :new_patient_coverage, constraints: { dfn: /\d+/ }
+    post "patients/:dfn/coverage/new", to: "coverages#new", constraints: { dfn: /\d+/ }
+    post "patients/:dfn/coverage", to: "coverages#create", constraints: { dfn: /\d+/ }
   end
 
   # Scheduling (rpms-ux W02): a clinic resource's day, booking into it (S-SCH-01)
