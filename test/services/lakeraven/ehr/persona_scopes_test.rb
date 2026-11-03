@@ -31,10 +31,25 @@ module Lakeraven
         CHART.each { |scope| refute_includes scopes, scope }
       end
 
+      def scope_writes?(scope)
+        suffix = scope.split(".").last
+        suffix == "c" || suffix.match?(/[ud]/)
+      end
+
       test "the chart option reads and writes nothing else" do
         chart_only = SessionScopePolicy.scopes_for(security_keys: [], options: [ "CIAV VUECENTRIC" ])
-        refute chart_only.any? { |scope| scope.match?(/\.c|\.u|\.d/) }, chart_only.inspect
+        refute chart_only.any? { |scope| scope_writes?(scope) && !scope.start_with?("user/Consent.") },
+               chart_only.inspect
         refute_includes chart_only, "user/ServiceRequest.rs"
+      end
+
+      test "the chart option grants in-clinic consent read and create" do
+        chart_only = SessionScopePolicy.scopes_for(security_keys: [], options: [ "CIAV VUECENTRIC" ])
+        assert_includes chart_only, "user/Consent.rs"
+        assert_includes chart_only, "user/Consent.c"
+        refute chart_only.any? do |scope|
+          scope.start_with?("user/Consent.") && scope.split(".").last.match?(/[ud]/)
+        end
       end
 
       test "the physician reads referrals; only an RCIS supervisor or manager writes them" do
