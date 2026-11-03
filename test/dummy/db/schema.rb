@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_30_000000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_01_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -73,7 +73,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_30_000000) do
     t.string "selected_cpt_code"
     t.datetime "updated_at", null: false
     t.index [ "patient_dfn", "encounter_ien" ], name: "index_lakeraven_ehr_bh_visit_codings_on_patient_encounter", unique: true
-    t.check_constraint "(encounter_kind::text = 'psychiatric_diagnostic_evaluation'::text AND NOT cpt_code::text IS DISTINCT FROM '90791'::text AND (selected_cpt_code IS NULL OR selected_cpt_code::text = '90791'::text) AND (duration_minutes IS NULL OR duration_minutes >= 0) OR encounter_kind::text = 'individual_psychotherapy'::text AND duration_minutes IS NOT NULL AND duration_minutes > 0 AND (selected_cpt_code IS NULL OR (selected_cpt_code::text = ANY (ARRAY['90832'::character varying, '90834'::character varying, '90837'::character varying]::text[]))) AND (duration_minutes < 16 AND cpt_code IS NULL OR duration_minutes >= 16 AND duration_minutes <= 37 AND ((selected_cpt_code IS NULL OR selected_cpt_code::text = '90832'::text) AND NOT cpt_code::text IS DISTINCT FROM '90832'::text OR selected_cpt_code IS NOT NULL AND selected_cpt_code::text <> '90832'::text AND cpt_code IS NULL) OR duration_minutes >= 38 AND duration_minutes <= 52 AND ((selected_cpt_code IS NULL OR selected_cpt_code::text = '90834'::text) AND NOT cpt_code::text IS DISTINCT FROM '90834'::text OR selected_cpt_code IS NOT NULL AND selected_cpt_code::text <> '90834'::text AND cpt_code IS NULL) OR duration_minutes >= 53 AND ((selected_cpt_code IS NULL OR selected_cpt_code::text = '90837'::text) AND NOT cpt_code::text IS DISTINCT FROM '90837'::text OR selected_cpt_code IS NOT NULL AND selected_cpt_code::text <> '90837'::text AND cpt_code IS NULL))) IS TRUE", name: "bh_visit_coding_duration_and_cpt_consistent"
+    t.check_constraint "(encounter_kind::text = 'psychiatric_diagnostic_evaluation'::text AND NOT cpt_code::text IS DISTINCT FROM '90791'::text AND (selected_cpt_code IS NULL OR selected_cpt_code::text = '90791'::text) AND (duration_minutes IS NULL OR duration_minutes >= 0) OR encounter_kind::text = 'individual_psychotherapy'::text AND duration_minutes IS NOT NULL AND duration_minutes > 0 AND (selected_cpt_code IS NULL OR (selected_cpt_code::text = ANY (ARRAY['90832'::character varying::text, '90834'::character varying::text, '90837'::character varying::text]))) AND (duration_minutes < 16 AND cpt_code IS NULL OR duration_minutes >= 16 AND duration_minutes <= 37 AND ((selected_cpt_code IS NULL OR selected_cpt_code::text = '90832'::text) AND NOT cpt_code::text IS DISTINCT FROM '90832'::text OR selected_cpt_code IS NOT NULL AND selected_cpt_code::text <> '90832'::text AND cpt_code IS NULL) OR duration_minutes >= 38 AND duration_minutes <= 52 AND ((selected_cpt_code IS NULL OR selected_cpt_code::text = '90834'::text) AND NOT cpt_code::text IS DISTINCT FROM '90834'::text OR selected_cpt_code IS NOT NULL AND selected_cpt_code::text <> '90834'::text AND cpt_code IS NULL) OR duration_minutes >= 53 AND ((selected_cpt_code IS NULL OR selected_cpt_code::text = '90837'::text) AND NOT cpt_code::text IS DISTINCT FROM '90837'::text OR selected_cpt_code IS NOT NULL AND selected_cpt_code::text <> '90837'::text AND cpt_code IS NULL))) IS TRUE", name: "bh_visit_coding_duration_and_cpt_consistent"
   end
 
   create_table "lakeraven_ehr_bh_program_configurations", force: :cascade do |t|
@@ -121,6 +121,31 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_30_000000) do
     t.index [ "accessed_by" ], name: "index_lakeraven_ehr_emergency_accesses_on_accessed_by"
     t.index [ "expires_at" ], name: "index_lakeraven_ehr_emergency_accesses_on_expires_at"
     t.index [ "patient_dfn" ], name: "index_lakeraven_ehr_emergency_accesses_on_patient_dfn"
+  end
+
+  create_table "lakeraven_ehr_inbound_referral_identifiers", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.bigint "inbound_referral_id", null: false
+    t.integer "oauth_application_id", null: false
+    t.string "system", limit: 1024, null: false
+    t.datetime "updated_at", null: false
+    t.string "value", null: false
+    t.index [ "inbound_referral_id" ], name: "index_ehr_inbound_ref_identifiers_on_referral_id"
+    t.index [ "oauth_application_id", "system", "value" ], name: "index_ehr_inbound_ref_ids_on_app_system_value", unique: true
+  end
+
+  create_table "lakeraven_ehr_inbound_referrals", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.integer "oauth_application_id", null: false
+    t.string "organization_id"
+    t.string "patient_identifier_system", limit: 1024, null: false
+    t.string "patient_identifier_value", null: false
+    t.string "public_id", null: false
+    t.jsonb "resource", null: false
+    t.string "status", default: "received", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "oauth_application_id" ], name: "index_lakeraven_ehr_inbound_referrals_on_oauth_application_id"
+    t.index [ "public_id" ], name: "index_lakeraven_ehr_inbound_referrals_on_public_id", unique: true
   end
 
   create_table "lakeraven_ehr_launch_contexts", force: :cascade do |t|
@@ -226,8 +251,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_30_000000) do
 
   create_table "lakeraven_ehr_treatment_plan_progress_reviews", force: :cascade do |t|
     t.datetime "created_at", null: false
-    t.date "reviewed_on", null: false
     t.string "reviewed_by_duz", null: false
+    t.date "reviewed_on", null: false
     t.bigint "treatment_plan_id", null: false
     t.datetime "updated_at", null: false
     t.index [ "treatment_plan_id" ], name: "index_ehr_tp_progress_reviews_on_plan"
@@ -296,6 +321,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_30_000000) do
     t.index [ "uid" ], name: "index_oauth_applications_on_uid", unique: true
   end
 
+  add_foreign_key "lakeraven_ehr_inbound_referral_identifiers", "lakeraven_ehr_inbound_referrals", column: "inbound_referral_id"
   add_foreign_key "lakeraven_ehr_reconciliation_items", "lakeraven_ehr_reconciliation_sessions", column: "reconciliation_session_id"
   add_foreign_key "lakeraven_ehr_treatment_plan_concurrences", "lakeraven_ehr_treatment_plans", column: "treatment_plan_id"
   add_foreign_key "lakeraven_ehr_treatment_plan_progress_reviews", "lakeraven_ehr_treatment_plans", column: "treatment_plan_id"

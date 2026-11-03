@@ -55,6 +55,26 @@ module Lakeraven
         assert_equal "Unknown", event.agent_who_type
         assert_nil event.agent_who_identifier
       end
+
+      test "JSON write body id is not recorded as audit entity_identifier" do
+        teardown_smart_auth
+        setup_smart_auth(scopes: "system/*.read system/*.write")
+        AuditEvent.delete_all
+
+        assert_difference -> { AuditEvent.count }, 1 do
+          post "/lakeraven-ehr/CoverageEligibilityRequest",
+               params: {
+                 patient_dfn: "1",
+                 coverage_type: "medicaid",
+                 id: "4242"
+               }.to_json,
+               headers: @headers.merge("Content-Type" => "application/json")
+        end
+
+        assert_response :ok
+        event = AuditEvent.recent.first
+        refute_equal "4242", event.entity_identifier
+      end
     end
   end
 end

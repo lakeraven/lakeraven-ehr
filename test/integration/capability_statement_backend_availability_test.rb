@@ -29,7 +29,7 @@ module Lakeraven
       PINNED_DEFAULT_INTERACTIONS = {
         "Patient" => %w[read search-type],
         "Practitioner" => %w[read search-type],
-        "ServiceRequest" => %w[search-type],
+        "ServiceRequest" => %w[search-type create],
         "Immunization" => %w[search-type]
       }.freeze
 
@@ -198,7 +198,7 @@ module Lakeraven
         load_metadata_interactions!
         load_scopes_supported!
 
-        assert_includes @scopes_supported, "system/ServiceRequest.s"
+        assert_includes @scopes_supported, "system/ServiceRequest.cs"
         assert_includes @scopes_supported, "system/Immunization.s"
         assert_includes @scopes_supported, "system/Patient.rs"
       end
