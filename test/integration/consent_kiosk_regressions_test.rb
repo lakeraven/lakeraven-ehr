@@ -37,10 +37,10 @@ class ConsentKioskRegressionsTest < ActionDispatch::IntegrationTest
   %w[magic-bytes-only transparent corrupt].each do |label|
     define_method("test_rejects_#{label.tr("-", "_")}_signature_over_HTTP") do
       bytes = case label
-              when "magic-bytes-only" then magic_bytes_only_png
-              when "transparent" then fully_transparent_signature_png
-              else corrupt_truncated_png
-              end
+      when "magic-bytes-only" then magic_bytes_only_png
+      when "transparent" then fully_transparent_signature_png
+      else corrupt_truncated_png
+      end
 
       assert_no_difference -> { Lakeraven::EHR::SignedConsent.count } do
         post_kiosk_signature(signature: signature_data_url(bytes))
