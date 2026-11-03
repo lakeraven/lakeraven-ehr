@@ -144,7 +144,10 @@ Lakeraven::EHR::Engine.routes.draw do
   namespace :scheduling do
     get "/", to: "clinics#index", as: :home
     get "clinics/:id", to: "clinics#show", as: :clinic, constraints: { id: /\d+/ }
+    get "clinics/:id/week", to: "clinics#week", as: :clinic_week, constraints: { id: /\d+/ }
     get "clinics/:id/open_times", to: "open_times#index", as: :clinic_open_times, constraints: { id: /\d+/ }
+    get "clinics/:resource_id/hours/new", to: "hours#new", as: :new_clinic_hours, constraints: { resource_id: /\d+/ }
+    post "clinics/:resource_id/hours", to: "hours#create", as: :clinic_hours, constraints: { resource_id: /\d+/ }
     get "patients/:dfn/appointments", to: "patient_appointments#index", as: :patient_appointments, constraints: { dfn: /\d+/ }
     get "clinics/:resource_id/appointments/new", to: "appointments#new", as: :new_clinic_appointment, constraints: { resource_id: /\d+/ }
     post "clinics/:resource_id/appointments", to: "appointments#create", as: :clinic_appointments, constraints: { resource_id: /\d+/ }
@@ -152,6 +155,11 @@ Lakeraven::EHR::Engine.routes.draw do
     post "clinics/:resource_id/appointments/:appointment_id/cancel", to: "cancellations#create", constraints: { resource_id: /\d+/, appointment_id: /\d+/ }
     get "clinics/:resource_id/appointments/:appointment_id/checkin", to: "checkins#new", as: :checkin_clinic_appointment, constraints: { resource_id: /\d+/, appointment_id: /\d+/ }
     post "clinics/:resource_id/appointments/:appointment_id/checkin", to: "checkins#create", constraints: { resource_id: /\d+/, appointment_id: /\d+/ }
+    get "clinics/:resource_id/appointments/:appointment_id/reschedule", to: "reschedules#new", as: :reschedule_clinic_appointment, constraints: { resource_id: /\d+/, appointment_id: /\d+/ }
+    post "clinics/:resource_id/appointments/:appointment_id/reschedule", to: "reschedules#create", constraints: { resource_id: /\d+/, appointment_id: /\d+/ }
+    get "clinics/:resource_id/walk_ins/new", to: "walk_ins#new", as: :new_clinic_walk_in, constraints: { resource_id: /\d+/ }
+    post "clinics/:resource_id/walk_ins/find", to: "walk_ins#find", as: :find_clinic_walk_in, constraints: { resource_id: /\d+/ }
+    post "clinics/:resource_id/walk_ins", to: "walk_ins#create", as: :clinic_walk_ins, constraints: { resource_id: /\d+/ }
   end
 
   # Test-only: seed the browser session (DUZ, user type, security keys, and

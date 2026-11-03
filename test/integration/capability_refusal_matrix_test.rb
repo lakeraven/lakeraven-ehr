@@ -19,14 +19,22 @@ class CapabilityRefusalMatrixTest < ActionDispatch::IntegrationTest
     "GET /registration/patients/:dfn" => "registration.view",
     "GET /scheduling" => "scheduling.open",
     "GET /scheduling/clinics/:id" => "scheduling.open",
+    "GET /scheduling/clinics/:id/week" => "scheduling.open",
     "GET /scheduling/clinics/:id/open_times" => "scheduling.open",
+    "GET /scheduling/clinics/:resource_id/hours/new" => "scheduling.open",
+    "POST /scheduling/clinics/:resource_id/hours" => "scheduling.open",
     "GET /scheduling/patients/:dfn/appointments" => "scheduling.open",
     "GET /scheduling/clinics/:resource_id/appointments/new" => "scheduling.open",
     "POST /scheduling/clinics/:resource_id/appointments" => "scheduling.open",
     "GET /scheduling/clinics/:resource_id/appointments/:appointment_id/cancel" => "scheduling.open",
     "POST /scheduling/clinics/:resource_id/appointments/:appointment_id/cancel" => "scheduling.open",
     "GET /scheduling/clinics/:resource_id/appointments/:appointment_id/checkin" => "scheduling.open",
-    "POST /scheduling/clinics/:resource_id/appointments/:appointment_id/checkin" => "scheduling.open"
+    "POST /scheduling/clinics/:resource_id/appointments/:appointment_id/checkin" => "scheduling.open",
+    "GET /scheduling/clinics/:resource_id/appointments/:appointment_id/reschedule" => "scheduling.open",
+    "POST /scheduling/clinics/:resource_id/appointments/:appointment_id/reschedule" => "scheduling.open",
+    "GET /scheduling/clinics/:resource_id/walk_ins/new" => "scheduling.open",
+    "POST /scheduling/clinics/:resource_id/walk_ins/find" => "scheduling.open",
+    "POST /scheduling/clinics/:resource_id/walk_ins" => "scheduling.open"
   }.freeze
 
   def engine_routes

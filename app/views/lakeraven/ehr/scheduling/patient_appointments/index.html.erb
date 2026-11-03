@@ -1,11 +1,7 @@
-<% content_for :title, "Appointments | #{@patient[:name]} | Scheduling | Lakeraven EHR" %>
+<% page_title "Appointments | #{@patient[:name]} | Scheduling" %>
 
-<div class="page-header">
-  <h1>Appointments for <%= @patient[:name] %></h1>
-  <p>
-    Health record number <%= @patient[:mrn].presence || "not on file" %>.
-  </p>
-</div>
+<%= page_header "Appointments for #{@patient[:name]}",
+      "Health record number #{@patient[:mrn].presence || "not on file"}." %>
 
 <nav
   id="appointment-filter"
@@ -20,11 +16,14 @@
 </nav>
 
 <% if @appointments.empty? %>
-  <p id="no-appointments">
-    No appointments.
-  </p>
+  <%= empty_state "No appointments.",
+        id: "no-appointments" %>
 <% else %>
-  <table id="patient-appointments">
+  <table
+    id="patient-appointments"
+    class="data-table"
+  >
+    <caption class="sr-only">Appointments for <%= @patient[:name] %></caption>
     <thead>
       <tr>
         <th scope="col">When</th>
@@ -52,7 +51,7 @@
             <% end %>
           </td>
           <td><%= appointment[:type] %></td>
-          <td><%= appointment[:status] %></td>
+          <td><%= status_badge appointment[:status], appointment[:status] %></td>
           <td><%= appointment[:made_by] %><%= ", #{appointment[:made_at].strftime('%b %-d, %Y')}" if appointment[:made_at] %></td>
           <td><%= appointment[:note] %></td>
         </tr>

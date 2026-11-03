@@ -1,0 +1,149 @@
+<% page_title "Week | #{@resource[:name]} | Scheduling" %>
+<% week = @week %>
+<% dates = week.dates %>
+<% bookable = can_book?(@resource) %>
+
+<%= page_header @resource[:name],
+      "Week of #{week.monday.strftime("%b %-d, %Y")}" %>
+
+<% if @notice.present? %>
+  <%= alert_box :notice, @notice, id: "notice" %>
+<% end %>
+
+<nav
+  aria-label="Weeks"
+  class="flex flex-wrap items-end gap-3"
+>
+  <%= link_to "Previous week",
+        scheduling_clinic_week_path(@resource[:id], date: (week.monday - 7).iso8601),
+        id: "previous-week",
+        class: "button-secondary no-underline" %>
+  <%= link_to "This week",
+        scheduling_clinic_week_path(@resource[:id], date: Date.today.iso8601),
+        id: "this-week",
+        class: "button-secondary no-underline" %>
+  <%= link_to "Next week",
+        scheduling_clinic_week_path(@resource[:id], date: (week.monday + 7).iso8601),
+        id: "next-week",
+        class: "button-secondary no-underline" %>
+  <%= form_with url: scheduling_clinic_week_path(@resource[:id]),
+        method: :get,
+        local: true,
+        class: "flex items-end gap-2" do %>
+    <%= form_field :date, "Week of" do |aria| %>
+      <%= date_field_tag :date,
+            week.monday,
+            id: "date",
+            aria: aria %>
+    <% end %>
+    <%= submit_tag "Show",
+          name: nil,
+          class: "button-secondary" %>
+  <% end %>
+</nav>
+
+<p class="flex flex-wrap gap-4">
+  <%= link_to "Find an open time",
+        scheduling_clinic_open_times_path(@resource[:id], from: [ week.monday, Date.today ].max.iso8601),
+        id: "find-open-time" %>
+  <% if can_set_hours?(@resource) %>
+    <%= link_to "Set the clinic's hours",
+          scheduling_new_clinic_hours_path(@resource[:id]),
+          id: "set-hours" %>
+  <% end %>
+</p>
+
+<p class="hint">
+  Shaded times are the clinic's hours.
+  A number is the places left at that time; choose it to book.
+  Each appointment shows its patient and status; choose it to check in or cancel.
+</p>
+
+<div class="overflow-x-auto">
+  <table
+    id="week"
+    class="min-w-[44rem] table-fixed border-collapse text-sm"
+  >
+    <caption class="sr-only">
+      <%= @resource[:name] %>, week of <%= week.monday.strftime("%B %-d, %Y") %>: times down, days across
+    </caption>
+    <thead>
+      <tr>
+        <th
+          scope="col"
+          class="sticky left-0 w-16 bg-white"
+        >
+          <span class="sr-only">Time</span>
+        </th>
+        <% dates.each do |date| %>
+          <th
+            scope="col"
+            data-date="<%= date.iso8601 %>"
+            class="<%= date == Date.today ? 'bg-blue-50' : '' %>"
+          >
+            <%= link_to scheduling_clinic_path(@resource[:id], date: date.iso8601),
+                  class: "block" do %>
+              <span class="block font-semibold"><%= date.strftime("%a") %></span>
+              <span class="block font-normal"><%= date.strftime("%b %-d") %></span>
+            <% end %>
+            <% if (reason = week.closed(date)) %>
+              <span
+                class="mt-1 block text-xs font-normal text-slate-700"
+                data-closed="<%= reason %>"
+              >
+                <%= closed_reason(reason) %>
+              </span>
+            <% end %>
+          </th>
+        <% end %>
+      </tr>
+    </thead>
+    <tbody>
+      <% week.steps.each do |step| %>
+        <% time = format("%02d:%02d", *step) %>
+        <tr data-time="<%= time %>">
+          <th
+            scope="row"
+            class="sticky left-0 bg-white align-top font-normal tabular-nums text-slate-700"
+          >
+            <%= time %>
+          </th>
+          <% dates.each do |date| %>
+            <% cell = week.cell(date, step) %>
+            <td
+              data-date="<%= date.iso8601 %>"
+              data-open="<%= cell.open %>"
+              class="h-10 align-top <%= cell.in_hours? ? 'bg-sky-50' : '' %>"
+            >
+              <% cell.appointments.each do |appointment| %>
+                <% status_key, status = appointment_status(appointment) %>
+                <% minutes = ((appointment[:end_time] - appointment[:start_time]) / 60).round if appointment[:end_time] %>
+                <%= link_to scheduling_clinic_path(@resource[:id], date: date.iso8601, anchor: "appointment-#{appointment[:id]}"),
+                      data: { appointment: appointment[:id], status: status_key },
+                      class: "mb-1 block rounded border-l-4 px-2 py-1 text-left no-underline #{status_key == 'checked' ? 'border-emerald-700 bg-emerald-50 text-emerald-950' : status_key == 'no-show' ? 'border-amber-700 bg-amber-50 text-amber-950' : 'border-blue-700 bg-white text-slate-900'}",
+                      aria: { label: "#{appointment[:start_time].strftime('%H:%M')}, #{minutes} minutes, #{appointment[:patient_name]}, #{status}" } do %>
+                  <span class="block font-semibold"><%= appointment[:patient_name] %></span>
+                  <span class="block text-xs"><%= appointment[:start_time].strftime("%H:%M") %><%= ", #{minutes} min" if minutes %> · <%= status %></span>
+                <% end %>
+              <% end %>
+              <% if cell.in_hours? %>
+                <% if cell.full? %>
+                  <span class="text-xs text-slate-700">Full</span>
+                <% elsif bookable %>
+                  <%= link_to scheduling_new_clinic_appointment_path(@resource[:id], start: cell.at.strftime("%Y-%m-%dT%H:%M")),
+                        data: { book: true },
+                        class: "text-xs",
+                        aria: { label: "Book #{date.strftime('%A %b %-d')} at #{time}, #{cell.open} #{cell.open == 1 ? 'place' : 'places'} left" } do %>
+                    <%= cell.open %> open
+                  <% end %>
+                <% else %>
+                  <span class="text-xs text-slate-700"><%= cell.open %> open</span>
+                <% end %>
+              <% end %>
+            </td>
+          <% end %>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+</div>

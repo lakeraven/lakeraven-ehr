@@ -1,37 +1,13 @@
-<% content_for :title, "Book | #{@resource[:name]} | Lakeraven EHR" %>
+<% page_title "Book", @resource[:name] %>
 
-<div class="page-header">
-  <h1>Book an appointment</h1>
-  <p>
-    <%= @resource[:name] %>, <%= @booking.start_time&.strftime("%b %-d, %Y at %H:%M") %>
-  </p>
-</div>
+<%= page_header "Book an appointment",
+      "#{@resource[:name]}, #{@booking.start_time&.strftime("%b %-d, %Y at %H:%M")}" %>
 
-<% if flash[:alert].present? %>
-  <div
-    class="alert alert--error"
-    role="alert"
-  >
-    <p><%= flash[:alert] %></p>
-  </div>
-<% end %>
+<%= flash_alert %>
 
-<% if @booking.errors.any? %>
-  <div
-    id="booking-errors"
-    class="alert alert--error"
-    role="alert"
-  >
-    <p>
-      The appointment was not booked.
-    </p>
-    <ul>
-      <% @booking.errors.full_messages.each do |message| %>
-        <li><%= message %></li>
-      <% end %>
-    </ul>
-  </div>
-<% end %>
+<%= form_errors @booking,
+      "The appointment was not booked.",
+      id: "booking-errors" %>
 
 <%= form_with url: scheduling_new_clinic_appointment_path(@resource[:id]),
       method: :get,
@@ -39,15 +15,16 @@
       id: "patient-search",
       class: "flex items-end gap-2" do %>
   <%= hidden_field_tag :start, @booking.start %>
-  <%= label_tag :q, "Patient name starts with" %>
-  <%= text_field_tag :q,
-        params[:q],
-        id: "q",
-        autocomplete: "off",
-        class: "rounded border border-slate-300 px-3 py-2" %>
+  <%= form_field :q, "Patient name starts with" do |aria| %>
+    <%= text_field_tag :q,
+          params[:q],
+          id: "q",
+          autocomplete: "off",
+          aria: aria %>
+  <% end %>
   <%= submit_tag "Find patient",
         name: nil,
-        class: "min-h-9 bg-white px-3 py-2 ring-1 ring-slate-300 ring-inset" %>
+        class: "button-secondary" %>
 <% end %>
 
 <%= form_with scope: :booking,
@@ -59,44 +36,40 @@
   <%= f.hidden_field :start, value: @booking.start %>
   <%= hidden_field_tag :q, params[:q] %>
 
-  <fieldset class="flex flex-col gap-2">
-    <legend>Patient</legend>
-    <% @patients.each do |patient| %>
-      <label data-patient="<%= patient[:dfn] %>">
-        <%= f.radio_button :patient_dfn,
-              patient[:dfn],
-              checked: @booking.patient_dfn == patient[:dfn] %>
-        <%= patient[:name] %>,
-        <%= patient[:hrn] ? "HRN #{patient[:hrn]}" : "no health record number" %>,
-        born <%= patient[:dob]&.strftime("%b %-d, %Y") %>
-      </label>
-    <% end %>
-    <% if @patients.empty? && @booking.patient_dfn %>
-      <%= f.hidden_field :patient_dfn, value: @booking.patient_dfn %>
-      <p class="hint">Patient chosen.</p>
-    <% elsif @patients.empty? %>
-      <p class="hint">Find the patient by name above.</p>
-    <% end %>
-  </fieldset>
+  <%= choice_list f,
+        :patient_dfn,
+        legend: "Patient",
+        choices: @patients.map { |patient|
+          [ patient[:dfn],
+            "#{patient[:name]}, #{patient[:hrn] ? "HRN #{patient[:hrn]}" : "no health record number"}, born #{patient[:dob]&.strftime("%b %-d, %Y")}",
+            { patient: patient[:dfn] } ]
+        },
+        selected: @booking.patient_dfn do %>
+    <%= render "lakeraven/ehr/shared/lookup_chosen",
+          form: f,
+          attribute: :patient_dfn,
+          selected: @booking.patient_dfn,
+          any_choices: @patients.any?,
+          chosen_text: "Patient chosen.",
+          empty_text: "Find the patient by name above." %>
+  <% end %>
 
-  <div class="flex flex-col gap-1">
-    <%= f.label :length, "Length (minutes)" %>
+  <%= form_field :length, "Length (minutes)", form: f do |aria| %>
     <%= f.number_field :length,
           value: @booking.length,
-          min: 1,
+          min: @resource[:time_scale],
           step: @resource[:time_scale],
           required: true,
-          class: "rounded border border-slate-300 px-3 py-2" %>
-  </div>
+          aria: aria %>
+  <% end %>
 
-  <div class="flex flex-col gap-1">
-    <%= f.label :note, "Note (optional)" %>
+  <%= form_field :note, "Note (optional)", form: f do |aria| %>
     <%= f.text_field :note,
           value: @booking.note,
           maxlength: 150,
-          class: "rounded border border-slate-300 px-3 py-2" %>
-  </div>
+          aria: aria %>
+  <% end %>
 
   <%= f.submit "Book",
-        class: "min-h-9 self-start bg-slate-900 px-4 py-2 text-white hover:bg-slate-700" %>
+        class: "button-primary self-start" %>
 <% end %>

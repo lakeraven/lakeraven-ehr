@@ -74,6 +74,7 @@ module Lakeraven
         "lakeraven/ehr/registration/patients#confirm", # Registration entry after review; as #create
         "lakeraven/ehr/scheduling/clinics#index",     # Scheduling: clinic resources, no patient data
         "lakeraven/ehr/scheduling/clinics#show",      # A clinic day: appointment times and patient names, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/scheduling/clinics#week",      # A clinic week: the same as the day, over seven days; revisit with Part 2 (#494)
         "lakeraven/ehr/scheduling/open_times#index",  # Open times in a clinic's blocks: times only, no patient data
         "lakeraven/ehr/scheduling/patient_appointments#index", # One patient's appointments: clinics, times, statuses, no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/scheduling/appointments#new",   # Booking form: patient name, HRN, date of birth, no clinical record; revisit with Part 2 (#494)
@@ -82,6 +83,13 @@ module Lakeraven
         "lakeraven/ehr/scheduling/cancellations#create", # Cancellation entry, not disclosure
         "lakeraven/ehr/scheduling/checkins#new",         # Check-in form: patient name and time, provider names, no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/scheduling/checkins#create",      # Check-in entry, not disclosure
+        "lakeraven/ehr/scheduling/reschedules#new",      # Move form: patient name, time, open times, reasons, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/scheduling/reschedules#create",   # Move entry, not disclosure
+        "lakeraven/ehr/scheduling/walk_ins#new",         # Walk-in form: no patient until searched
+        "lakeraven/ehr/scheduling/walk_ins#find",        # Walk-in searches: patient name, HRN, date of birth, provider names, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/scheduling/walk_ins#create",      # Walk-in entry, not disclosure
+        "lakeraven/ehr/scheduling/hours#new",            # Clinic hours form: access types, no patient data
+        "lakeraven/ehr/scheduling/hours#create",         # Hours entry; a refusal names an appointment time and patient name, no clinical record
         "lakeraven/ehr/test_sessions#create", # Test only
         "lakeraven/ehr/smart_configuration#show", # Discovery
         "lakeraven/ehr/smart_launch#show",    # Discovery

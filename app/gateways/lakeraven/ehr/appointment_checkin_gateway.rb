@@ -29,16 +29,17 @@ module Lakeraven
         setup.nil? || setup[:visit_provider_required].to_s.upcase != "NO"
       end
 
-      # reread: returns the appointment as RPMS now has it.
-      def self.check_in(appointment_id, at:, provider_ien:, reread:, via: ::RpmsRpc::Scheduling)
-        result = file(appointment_id, at: at, provider_ien: provider_ien, via: via)
+      # reread: returns the appointment as RPMS now has it. clinic_code: the
+      # CLINIC STOP code, for a clinic that uses several (S-SCH-03.5, 06.3).
+      def self.check_in(appointment_id, at:, provider_ien:, reread:, clinic_code: nil, via: ::RpmsRpc::Scheduling)
+        result = file(appointment_id, at: at, provider_ien: provider_ien, clinic_code: clinic_code, via: via)
         return result if result.checked_in? || !filed?(reread)
 
         Result.new(status: :checked_in, message: result.message.presence || "RPMS did not confirm the visit.")
       end
 
-      def self.file(appointment_id, at:, provider_ien:, via:)
-        reply = via.checkin_appointment(appointment_id, checkin_time: at, provider: provider_ien)
+      def self.file(appointment_id, at:, provider_ien:, clinic_code:, via:)
+        reply = via.checkin_appointment(appointment_id, checkin_time: at, provider: provider_ien, **{ clinic_code: clinic_code }.compact)
         return Result.new(status: :unknown, message: nil) if reply.nil?
         return Result.new(status: :checked_in, message: nil) if reply[:success]
 

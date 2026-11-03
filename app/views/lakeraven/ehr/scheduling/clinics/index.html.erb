@@ -1,19 +1,12 @@
-<% content_for :title, "Scheduling | Lakeraven EHR" %>
+<% page_title "Scheduling" %>
 
-<div class="page-header">
-  <h1>Scheduling</h1>
-  <p>
-    Choose a clinic to see its day and book into it.
-  </p>
-</div>
+<%= page_header "Scheduling",
+      "Choose a clinic to see its day and book into it." %>
 
 <% if @resources.empty? %>
-  <p
-    id="no-resources"
-    class="hint"
-  >
-    No clinic resources are open to you.
-  </p>
+  <%= empty_state "No clinic resources are open to you.",
+        "Your site manager can give you access to a clinic.",
+        id: "no-resources" %>
 <% else %>
   <ul
     id="resources"
@@ -21,7 +14,7 @@
   >
     <% @resources.each do |resource| %>
       <li data-resource="<%= resource[:id] %>">
-        <%= link_to resource[:name], scheduling_clinic_path(resource[:id]) %>
+        <%= link_to resource[:name], scheduling_clinic_week_path(resource[:id]) %>
         <% if resource[:inactive] %>
           <span class="hint">(inactive)</span>
         <% end %>
