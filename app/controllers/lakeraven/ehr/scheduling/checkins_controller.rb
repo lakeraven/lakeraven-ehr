@@ -9,9 +9,12 @@ module Lakeraven
       # provider at a clinic that requires one, so the appointment's state, the
       # day and the provider are checked here first.
       class CheckinsController < BaseController
+        include SchedulingAppointmentChange
+
         before_action :load_resource!
         before_action :require_booking_right!
-        before_action :load_appointment!
+        before_action :load_appointment!, except: :undo
+        before_action :load_checked_in_appointment!, only: :undo
 
         # GET /scheduling/clinics/:resource_id/appointments/:appointment_id/checkin?date=&provider_search=
         def new
@@ -41,6 +44,18 @@ module Lakeraven
           end
         end
 
+        # POST /scheduling/clinics/:resource_id/appointments/:appointment_id/checkin/undo
+        #
+        # S-SCH-03.9, through BSDX CHECKIN APPOINTMENT with "@" as the time. It
+        # answers success for an appointment that was never checked in, so only a
+        # checked-in one, not yet checked out, gets here. It leaves the visit the
+        # check-in made, so the scheduler is told.
+        def undo
+          result = AppointmentVisitGateway.undo_checkin(@appointment, reread: -> { reread_appointment })
+          report(result, done: [ "Undid the check-in of #{patient_at}. The appointment is booked again.",
+                                 ("A visit made at check-in stays in RPMS." if creates_visit?) ].compact.join(" "))
+        end
+
         private
 
         # Whether the patient's coverage is in force today (rpms-ux S-REG-03.2),
@@ -65,12 +80,6 @@ module Lakeraven
           text.empty? ? [] : PractitionerGateway.search(text, key: "PROVIDER").first(15)
         end
 
-        def require_booking_right!
-          return if can_book?(@resource)
-
-          render plain: "You cannot change appointments on #{@resource[:name]}", status: :forbidden
-        end
-
         def load_appointment!
           @date = parse_date(params[:date])
           @appointment = AppointmentBookingGateway.appointment(@resource, params[:appointment_id], @date)
@@ -78,6 +87,28 @@ module Lakeraven
 
           why = not_checkable_because(@appointment)
           render(plain: "This appointment #{why}.", status: :conflict) if why
+        end
+
+        def load_checked_in_appointment!
+          @date = parse_date(params[:date])
+          @appointment = reread_appointment
+          return render(plain: "No such appointment on #{@resource[:name]} that day", status: :not_found) unless @appointment
+
+          refuse_with(not_undoable_because(@appointment))
+        end
+
+        def not_undoable_because(appointment)
+          return "is cancelled" if appointment[:cancelled]
+          return "is checked out; undo the check-out first" if appointment[:checkout_time]
+
+          "is not checked in" unless appointment[:checkin_time]
+        end
+
+        def creates_visit?
+          setup = Array(::RpmsRpc::Scheduling.clinic_setup).find { |c| c[:location_ien].to_i == @resource[:hospital_location_id].to_i }
+          setup&.dig(:create_visit).to_s.upcase == "YES"
+        rescue ::RpmsRpc::Error, IOError, SystemCallError
+          false
         end
 
         def not_checkable_because(appointment)
