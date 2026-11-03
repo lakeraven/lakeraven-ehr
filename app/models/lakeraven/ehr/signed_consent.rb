@@ -81,14 +81,14 @@ module Lakeraven
         decoded = attributes.delete(:decoded_signature)
         token = attributes[:handover_token].presence
         found = existing_for_handover(token)
-        return found if found
+        return found.mark_already_stored! if found
 
         without_statement_log { insert_signature!(attributes, decoded) }
       rescue ActiveRecord::RecordNotUnique, ActiveRecord::RecordInvalid
         recovered = existing_for_handover(token)
         raise if recovered.nil?
 
-        recovered
+        recovered.mark_already_stored!
       end
 
       def self.existing_for_handover(token)
@@ -120,6 +120,17 @@ module Lakeraven
           runner = proc { logger.silence(&inner) }
         end
         runner.call
+      end
+
+      # A racing second post of this handover found the row already stored.
+      # The kiosk audits that as a read, not as another consent create.
+      def already_stored?
+        @already_stored == true
+      end
+
+      def mark_already_stored!
+        @already_stored = true
+        self
       end
 
       def readonly?

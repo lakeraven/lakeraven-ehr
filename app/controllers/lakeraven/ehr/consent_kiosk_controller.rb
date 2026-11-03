@@ -25,14 +25,14 @@ module Lakeraven
       end
 
       def create
+        return refuse_repeated_signature! if signature_refusals_exhausted?
         return reject_signature! if @template.nil?
         return render_stored_signature! if stored_handover_signature
 
         parsed = SignedConsent.decode_signature_data_url(params[:signature])
         return reject_signature! unless parsed
 
-        @signed_consent = SignedConsent.record_signature!(signature_attributes(parsed))
-        render :handed_back
+        store_posted_signature!(parsed)
       rescue ActiveRecord::RecordInvalid
         reject_signature!
       end
@@ -131,9 +131,66 @@ module Lakeraven
       end
 
       def reject_signature!
+        return render_refusal_uncounted unless count_signature_refusal
+
         @signature_rejected = true
         @signed_consent = nil
         render :show, status: :unprocessable_entity
+      end
+
+      # Checked before the PNG is decoded. Ten refusals on this handover
+      # close the post; a cookie cannot reset a count that lives on the lock.
+      def signature_refusals_exhausted?
+        lock = active_kiosk_lock
+        return false if lock.nil?
+
+        lock.refused_signatures_exhausted?
+      rescue StandardError => error
+        Rails.logger.error("[consent-kiosk] signature refusal count could not be read: #{error.class}")
+        @signature_refusal_count_unreadable = true
+        true
+      end
+
+      def count_signature_refusal
+        lock = active_kiosk_lock
+        return true if lock.nil?
+
+        lock.increment!(:refused_signature_count)
+        true
+      rescue StandardError => error
+        Rails.logger.error("[consent-kiosk] signature refusal was not counted: #{error.class}")
+        false
+      end
+
+      def refuse_repeated_signature!
+        note_audit_denial(repeated_signature_reason)
+        render plain: repeated_signature_reason, status: repeated_signature_status
+      end
+
+      def repeated_signature_reason
+        if @signature_refusal_count_unreadable
+          "The count of refused signatures could not be read, so this signature was refused."
+        else
+          "Too many refused signatures for this handover."
+        end
+      end
+
+      def repeated_signature_status
+        @signature_refusal_count_unreadable ? :service_unavailable : :too_many_requests
+      end
+
+      def render_refusal_uncounted
+        note_audit_denial("consent signature refused: the refusal count could not be stored")
+        render plain: "The refused signature could not be counted, so another signature was refused.",
+               status: :service_unavailable
+      end
+
+      # A racing second post gets the row already stored for this handover.
+      # Audit that as a read, the same as a resubmit of a stored signature.
+      def store_posted_signature!(parsed)
+        @signed_consent = SignedConsent.record_signature!(signature_attributes(parsed))
+        @consent_audit_action = "R" if @signed_consent.already_stored?
+        render :handed_back
       end
 
       def signature_attributes(parsed)
@@ -178,13 +235,18 @@ module Lakeraven
         nil
       end
 
+      # Who signed on is checked before verify-must-change. Another person's
+      # must-change code is a failed unlock. The same person's must-change
+      # is still refused, and is not counted as a bad code.
       def refused_unlock?(result)
         return render_unlock_unavailable if result.nil?
+        unless same_clinician?(result)
+          record_unlock_failure
+          return true
+        end
         return render_verify_must_change if verify_must_change?(result)
-        return false if same_clinician?(result)
 
-        record_unlock_failure
-        true
+        false
       end
 
       def render_unlock_unavailable

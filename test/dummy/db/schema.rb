@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_03_153000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_03_170000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -139,6 +139,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_03_153000) do
     t.string "credential_key", null: false
     t.string "handover_token", null: false
     t.string "patient_dfn", null: false
+    t.integer "refused_signature_count", default: 0, null: false
     t.string "template_key", null: false
     t.integer "template_version", null: false
     t.datetime "updated_at", null: false

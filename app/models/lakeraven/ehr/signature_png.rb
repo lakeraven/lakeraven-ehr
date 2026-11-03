@@ -13,14 +13,16 @@ module Lakeraven
     # into a memory spike, and a larger claimed bitmap is refused outright.
     class SignaturePng
       MAGIC = "\x89PNG\r\n\x1A\n".b
-      # The tablet canvas is 600×180. A denser capture can be a few times that.
-      # Anything wider than 2400 or taller than 1200 is refused before inflate.
-      MAX_WIDTH = 2400
-      MAX_HEIGHT = 1200
+      # The tablet canvas is 600×180. A denser capture may be up to 1800×600.
+      # Anything larger is refused before inflate.
+      MAX_WIDTH = 1800
+      MAX_HEIGHT = 600
       MAX_DECODED_BYTES = 12 * 1024 * 1024
       MIN_VISIBLE_PIXELS = 20
       VISIBLE_ALPHA = 128
-      CHANNEL_CONTRAST = 64
+      # Rec. 601 luma has to sit at least this far below white (255). A
+      # near-white stroke on a white page is not ink.
+      LUMINANCE_FROM_WHITE = 64
       SAMPLES = { 0 => 1, 2 => 3, 4 => 2, 6 => 4 }.freeze
       KNOWN_CRITICAL = %w[IHDR PLTE IDAT IEND].freeze
 
@@ -185,11 +187,11 @@ module Lakeraven
         prior = nil
         offset = 0
         total = 0
-        @height.times do |y|
+        @height.times do
           row, offset = decode_row(raw, offset, prior)
           return nil unless row
 
-          total += visible_in(row, y)
+          total += visible_in(row)
           prior = row
         end
         total
@@ -275,45 +277,54 @@ module Lakeraven
         up_left
       end
 
-      def visible_in(row, y)
-        return visible_alpha(row) if alpha_channel?
+      # Ink is the same for every colour type: covered (alpha at least 128,
+      # or no alpha channel) and darker than white by the luma threshold.
+      # Opaque white, and near-white on transparent paper, are not a stroke.
+      def visible_in(row)
+        count = 0
+        index = 0
+        while index + @samples <= row.bytesize
+          count += 1 if ink_at?(row, index)
+          index += @samples
+        end
+        count
+      end
 
-        visible_opaque(row, y)
+      def ink_at?(row, index)
+        return false unless covered?(row, index)
+
+        red, green, blue = channels_at(row, index)
+        luminance_from_white(red, green, blue) >= LUMINANCE_FROM_WHITE
+      end
+
+      def covered?(row, index)
+        return true unless alpha_channel?
+
+        row.getbyte(index + @samples - 1) >= VISIBLE_ALPHA
       end
 
       def alpha_channel?
         @color_type == 4 || @color_type == 6
       end
 
-      # A stroke on transparent paper. Alpha below 128 is not a visible mark,
-      # so an all-alpha-1 image is refused.
-      def visible_alpha(row)
-        count = 0
-        index = @samples - 1
-        while index < row.bytesize
-          count += 1 if row.getbyte(index) >= VISIBLE_ALPHA
-          index += @samples
-        end
-        count
+      def channels_at(row, index)
+        return gray_channels(row.getbyte(index)) if grayscale?
+
+        [ row.getbyte(index), row.getbyte(index + 1), row.getbyte(index + 2) ]
       end
 
-      # Opaque pixels must differ from the corner colour by a channel step of
-      # at least 64. One near-white byte on a white field is not a stroke.
-      def visible_opaque(row, y)
-        @background = row.byteslice(0, @samples) if y.zero?
-        count = 0
-        index = 0
-        while index + @samples <= row.bytesize
-          count += 1 if contrasts_background?(row, index)
-          index += @samples
-        end
-        count
+      def grayscale?
+        @color_type == 0 || @color_type == 4
       end
 
-      def contrasts_background?(row, index)
-        @samples.times.any? do |channel|
-          (row.getbyte(index + channel) - @background.getbyte(channel)).abs >= CHANNEL_CONTRAST
-        end
+      def gray_channels(value)
+        [ value, value, value ]
+      end
+
+      # Rec. 601 luma, in integers. White is 255.
+      def luminance_from_white(red, green, blue)
+        luma = ((299 * red) + (587 * green) + (114 * blue)) / 1000
+        255 - luma
       end
     end
   end

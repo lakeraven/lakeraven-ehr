@@ -78,19 +78,39 @@ module Lakeraven
         false
       end
 
-      # The unique credential index is the race between two handovers. A
-      # savepoint keeps that violation from aborting the audit transaction,
-      # so the loser can still record why it was refused.
+      # Insert only. Updating a row that is already there would point the
+      # tablet at a different handover. The savepoint keeps a unique-index
+      # collision from aborting the audit transaction, so the loser can
+      # still record why it was refused.
       def save_kiosk_lock!(key, dfn, template_key, template_version, handover_token)
-        KioskLock.transaction(requires_new: true) do
-          record = KioskLock.find_or_initialize_by(credential_key: key)
-          record.update!(kiosk_lock_attributes(dfn, template_key, template_version, handover_token))
-        end
+        return false unless insert_kiosk_lock!(key, dfn, template_key, template_version, handover_token)
+
         reset_kiosk_lock_memo!
         true
-      rescue ActiveRecord::RecordNotUnique
-        Rails.logger.error("[consent-kiosk] lock was not stored: ActiveRecord::RecordNotUnique")
+      end
+
+      def insert_kiosk_lock!(key, dfn, template_key, template_version, handover_token)
+        KioskLock.transaction(requires_new: true) do
+          create_kiosk_lock_row!(key, dfn, template_key, template_version, handover_token)
+        end
+      rescue ActiveRecord::RecordNotUnique, ActiveRecord::RecordInvalid => error
+        Rails.logger.error("[consent-kiosk] lock was not stored: #{error.class}")
         false
+      end
+
+      def create_kiosk_lock_row!(key, dfn, template_key, template_version, handover_token)
+        held = KioskLock.find_or_initialize_by(credential_key: key)
+        if held.persisted?
+          Rails.logger.error("[consent-kiosk] lock was not stored: a lock row already exists")
+          return false
+        end
+
+        KioskLock.create!(kiosk_lock_row(key, dfn, template_key, template_version, handover_token))
+        true
+      end
+
+      def kiosk_lock_row(key, dfn, template_key, template_version, handover_token)
+        kiosk_lock_attributes(dfn, template_key, template_version, handover_token).merge(credential_key: key)
       end
 
       def kiosk_lock_attributes(dfn, template_key, template_version, handover_token)

@@ -10,6 +10,8 @@ module Lakeraven
       include ClinicianPatientContext
 
       CONSENT_RESOURCE = "Consent"
+      TEMPLATES_MISSING = "No consent templates are installed, so handover is unavailable. " \
+                          "Install them with bin/rails lakeraven_ehr:consent_templates:install."
 
       before_action :authenticate_smart_token!
       before_action :authorize_consent_scope!
@@ -25,11 +27,12 @@ module Lakeraven
 
       def new
         @templates = ConsentTemplate::KEYS.filter_map { |key| ConsentTemplate.current(key) }
+        @templates_missing_reason = TEMPLATES_MISSING if @templates.empty?
       end
 
       def handover
         template = ConsentTemplate.current(params[:template_key])
-        return render plain: "Unknown consent template", status: :not_found unless template
+        return render_missing_template if template.nil?
         return render_lock_refused unless lock_tablet!(template)
 
         redirect_to consent_kiosk_path
@@ -84,6 +87,11 @@ module Lakeraven
           dfn: @dfn, template_key: template.key, template_version: template.version,
           handover_token: SecureRandom.uuid
         )
+      end
+
+      def render_missing_template
+        reason = ConsentTemplate.none? ? TEMPLATES_MISSING : "Unknown consent template"
+        render plain: reason, status: :not_found
       end
 
       def render_lock_refused
