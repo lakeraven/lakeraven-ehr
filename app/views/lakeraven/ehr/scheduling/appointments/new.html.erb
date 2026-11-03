@@ -83,7 +83,7 @@
     <%= f.label :length, "Length (minutes)" %>
     <%= f.number_field :length,
           value: @booking.length,
-          min: 1,
+          min: @resource[:time_scale],
           step: @resource[:time_scale],
           required: true,
           class: "rounded border border-slate-300 px-3 py-2" %>
