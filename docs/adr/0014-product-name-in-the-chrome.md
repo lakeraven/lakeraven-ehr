@@ -33,7 +33,7 @@ Facts that bear on it:
 The header shows the facility the user signed on to (the division's INSTITUTION name, from RPMS at sign-on). The `<title>` ends with it too.
 
 - For: the most useful thing on a shared workstation after who is signed in. It comes from RPMS, so it's right per site with no configuration. It's the site's own name on its own screens.
-- Against: needs the division kept at sign-on (the sign-on reply's DUZ(2), or `XUS DIVISION GET`) and refreshed if division switching lands (#541). A user who may sign on to two divisions needs to see which one, which is a feature, not a cost. A long institution name needs truncation in the header.
+- Against: needs the division kept at sign-on (the sign-on reply's DUZ(2), or `XUS DIVISION GET`) and refreshed if division switching lands (`SiteGateway.select` refuses today; see #541). A user who may sign on to two divisions needs to see which one, which is a feature, not a cost. A long institution name needs truncation in the header.
 
 ### C. A neutral product name
 
@@ -71,7 +71,7 @@ Why: on a shared workstation the facility and the signed-in user matter most, an
 
 - Sign-on keeps the division (IEN and name) in the session, from RPMS's own answer. The header and `page_title` read it, falling back to `product_name`.
 - A test signs on as a persona and finds the division's name in the header and the title, and "Lakeraven" in neither.
-- Division switching (#541), when it lands, updates the session value, so the header follows.
+- Division switching (`SiteGateway.select`, which refuses today), when it lands, updates the session value, so the header follows.
 - Nothing changes until this is accepted: `product_name` stays "Lakeraven EHR".
 
 ## Not decided here
