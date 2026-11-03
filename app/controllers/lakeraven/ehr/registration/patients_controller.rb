@@ -56,6 +56,7 @@ module Lakeraven
           @checks = RegistrationChecksGateway.for(params[:dfn]) if capability?("registration.search")
 
           @record = registration_record
+          @contacts = profile_read { PatientProfileGateway.contacts(params[:dfn]) } if @record
         end
 
         # GET /registration/patients/new: the form, and the tribe and community
@@ -125,6 +126,15 @@ module Lakeraven
           PatientRecordGateway.find(params[:dfn].to_i)
         rescue RpmsRpc::Client::RpcError, RpmsRpc::Client::ConnectionError => e
           Rails.logger.error("[registration] patient record read failed: #{e.class}")
+          nil
+        end
+
+        # A section of the record (contacts, S-REG-08), or nil when RPMS does not
+        # answer: the rest of the page still shows.
+        def profile_read
+          yield
+        rescue RpmsRpc::Error => e
+          Rails.logger.error("[registration] profile read failed: #{e.class}")
           nil
         end
 
