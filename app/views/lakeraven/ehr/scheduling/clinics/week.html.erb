@@ -1,23 +1,13 @@
-<% content_for :title, "Week | #{@resource[:name]} | Scheduling | Lakeraven EHR" %>
+<% page_title "Week | #{@resource[:name]} | Scheduling" %>
 <% week = @week %>
 <% dates = week.dates %>
 <% bookable = can_book?(@resource) %>
 
-<div class="page-header">
-  <h1><%= @resource[:name] %></h1>
-  <p>
-    Week of <%= week.monday.strftime("%b %-d, %Y") %>
-  </p>
-</div>
+<%= page_header @resource[:name],
+      "Week of #{week.monday.strftime("%b %-d, %Y")}" %>
 
 <% if @notice.present? %>
-  <div
-    id="notice"
-    class="alert alert--notice"
-    role="status"
-  >
-    <p><%= @notice %></p>
-  </div>
+  <%= alert_box :notice, @notice, id: "notice" %>
 <% end %>
 
 <nav
@@ -27,29 +17,28 @@
   <%= link_to "Previous week",
         scheduling_clinic_week_path(@resource[:id], date: (week.monday - 7).iso8601),
         id: "previous-week",
-        class: "rounded px-3 py-2 ring-1 ring-slate-300 ring-inset hover:bg-slate-50" %>
+        class: "button-secondary no-underline" %>
   <%= link_to "This week",
         scheduling_clinic_week_path(@resource[:id], date: Date.today.iso8601),
         id: "this-week",
-        class: "rounded px-3 py-2 ring-1 ring-slate-300 ring-inset hover:bg-slate-50" %>
+        class: "button-secondary no-underline" %>
   <%= link_to "Next week",
         scheduling_clinic_week_path(@resource[:id], date: (week.monday + 7).iso8601),
         id: "next-week",
-        class: "rounded px-3 py-2 ring-1 ring-slate-300 ring-inset hover:bg-slate-50" %>
+        class: "button-secondary no-underline" %>
   <%= form_with url: scheduling_clinic_week_path(@resource[:id]),
         method: :get,
         local: true,
         class: "flex items-end gap-2" do %>
-    <div class="flex flex-col gap-1">
-      <%= label_tag :date, "Week of" %>
+    <%= form_field :date, "Week of" do |aria| %>
       <%= date_field_tag :date,
             week.monday,
             id: "date",
-            class: "rounded border border-slate-300 px-3 py-2" %>
-    </div>
+            aria: aria %>
+    <% end %>
     <%= submit_tag "Show",
           name: nil,
-          class: "min-h-9 bg-white px-3 py-2 text-slate-900 ring-1 ring-slate-300 ring-inset hover:bg-slate-50" %>
+          class: "button-secondary" %>
   <% end %>
 </nav>
 

@@ -1,67 +1,48 @@
-<% content_for :title, "Find a patient | Lakeraven EHR" %>
+<% page_title "Find a patient" %>
 
-<div class="page-header">
-  <h1>Find a patient</h1>
-  <p>
-    Search before registering, so nobody gets a second chart.
-  </p>
-</div>
+<%= page_header "Find a patient",
+      "Search before registering, so nobody gets a second chart." %>
 
 <%= form_with url: registration_search_patients_path,
       method: :post,
       local: true,
       class: "card flex flex-wrap items-end gap-4" do %>
-  <div class="flex flex-col gap-1">
-    <%= label_tag :q, "Name, health record number or SSN" %>
+  <%= form_field :q, "Name, health record number or SSN" do |aria| %>
     <%= text_field_tag :q,
           @query,
           id: "q",
           required: true,
           autocomplete: "off",
-          class: "rounded border border-slate-300 px-3 py-2" %>
-  </div>
-  <div class="flex flex-col gap-1">
-    <%= label_tag :dob, "Date of birth (optional)" %>
+          aria: aria %>
+  <% end %>
+  <%= form_field :dob, "Date of birth (optional)" do |aria| %>
     <%= date_field_tag :dob,
           @dob,
           id: "dob",
-          class: "rounded border border-slate-300 px-3 py-2" %>
-  </div>
+          aria: aria %>
+  <% end %>
   <%= submit_tag "Search",
         name: nil,
-        class: "min-h-9 bg-slate-900 px-4 py-2 text-white hover:bg-slate-700" %>
+        class: "button-primary" %>
 <% end %>
 
 <% if @lookup_failed %>
-  <div
-    class="alert alert--error"
-    role="alert"
-  >
-    <p>
-      The patient lookup did not answer, so these results are not complete.
-    </p>
-    <p>
-      Do not register a new patient until a search succeeds.
-    </p>
-  </div>
+  <%= alert_box :error,
+        "The patient lookup did not answer, so these results are not complete.",
+        "Do not register a new patient until a search succeeds." %>
 <% elsif @searched && @matches.empty? %>
-  <p
-    id="no-match"
-    class="hint"
-  >
-    No patient matches “<%= @query %>”<%= " born #{@dob.strftime('%b %-d, %Y')}" if @dob %>.
-  </p>
-  <% if capability?("patient.register") %>
-    <p class="mt-2">
+  <%= empty_state "No patient matches “#{@query}”#{" born #{@dob.strftime('%b %-d, %Y')}" if @dob}.",
+        id: "no-match" do %>
+    <% if capability?("patient.register") %>
       <%= link_to "Register a new patient",
             registration_new_patient_path(registration: { name: (@query if @query.include?(",")), dob: @dob&.iso8601 }),
             id: "register-new-patient" %>
-    </p>
+    <% end %>
   <% end %>
 <% elsif @matches.any? %>
   <table
     id="matches"
-    class="mt-6 w-full text-left"
+    class="data-table mt-6"
   >
     <caption class="sr-only">Patients matching “<%= @query %>”</caption>
     <thead>
@@ -81,7 +62,8 @@
           <td><%= match.hrn || "None at this facility" %></td>
           <td><%= match.dob&.strftime("%b %-d, %Y") %></td>
           <td data-status="<%= match.status.downcase %>">
-            <%= match.status %><%= " #{match.dod.strftime('%b %-d, %Y')}" if match.deceased? %>
+            <%= status_badge match.status.downcase,
+                  "#{match.status}#{" #{match.dod.strftime('%b %-d, %Y')}" if match.deceased?}" %>
           </td>
         </tr>
       <% end %>
