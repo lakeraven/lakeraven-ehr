@@ -72,6 +72,10 @@ module Lakeraven
         "lakeraven/ehr/registration/patients#new",     # Registration entry form (S-REG-02), not disclosure
         "lakeraven/ehr/registration/patients#create",  # Registration entry; possible matches show registration demographics only; revisit with Part 2 (#494)
         "lakeraven/ehr/registration/patients#confirm", # Registration entry after review; as #create
+        "lakeraven/ehr/registration/demographics#edit",   # Registration demographics form (S-REG-20), no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/registration/demographics#update", # Registration demographics edit; as #edit
+        "lakeraven/ehr/registration/addresses#edit",      # Address and phones form (S-REG-21), no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/registration/addresses#update",    # Address and phones edit; as #edit
         "lakeraven/ehr/scheduling/clinics#index",     # Scheduling: clinic resources, no patient data
         "lakeraven/ehr/scheduling/clinics#show",      # A clinic day: appointment times and patient names, no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/scheduling/clinics#week",      # A clinic week: the same as the day, over seven days; revisit with Part 2 (#494)

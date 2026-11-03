@@ -54,6 +54,8 @@ module Lakeraven
           # AG's own edit checks run in its registration context, which RPMS
           # gives registration users only, as for its lookup.
           @checks = RegistrationChecksGateway.for(params[:dfn]) if capability?("registration.search")
+
+          @record = registration_record
         end
 
         # GET /registration/patients/new: the form, and the tribe and community
@@ -113,6 +115,18 @@ module Lakeraven
         end
 
         private
+
+        # The full registration, read through AG (AGGRPC), which RPMS serves to
+        # registration users only: a scheduler sees the summary alone. A read RPMS
+        # does not answer leaves the summary, and says so in the view.
+        def registration_record
+          return nil unless capability?("registration.search")
+
+          PatientRecordGateway.find(params[:dfn].to_i)
+        rescue RpmsRpc::Client::RpcError, RpmsRpc::Client::ConnectionError => e
+          Rails.logger.error("[registration] patient record read failed: #{e.class}")
+          nil
+        end
 
         # Registration runs on AG, which only an IHS backend serves (#647).
         def require_bprm_registration!
