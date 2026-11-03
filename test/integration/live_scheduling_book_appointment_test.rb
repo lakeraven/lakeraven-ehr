@@ -57,7 +57,9 @@ class LiveSchedulingBookAppointmentTest < ActionDispatch::IntegrationTest
     clinic = css_select("#resources a").find { |a| a.text == "DEMO IHS CLINIC" }["href"].delete_suffix("/week")
     day = weekday_ahead
     get clinic, params: { date: day.iso8601 }
-    time = css_select("#open-times tr").select { |tr| tr["data-time"].to_s >= "11:00" && tr.at_css("td[data-open]")["data-open"].to_i.positive? }.sample["data-time"]
+    # A time MOUSE is not already booked at: earlier runs on the same container leave bookings.
+    mine = css_select("#appointments tr[data-patient=3]").map { |tr| tr.at_css("td").text[0, 5] }
+    time = css_select("#open-times tr").select { |tr| tr["data-time"].to_s >= "11:00" && !mine.include?(tr["data-time"]) && tr.at_css("td[data-open]")["data-open"].to_i.positive? }.sample["data-time"]
     open_before = css_select("#open-times tr[data-time='#{time}'] td[data-open]").first["data-open"].to_i
     post "#{clinic}/appointments", params: { booking: { patient_dfn: "3", start: "#{day.iso8601}T#{time}", length: "15", note: "" } }
     follow_redirect!

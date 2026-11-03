@@ -14,7 +14,7 @@ module Lakeraven
         before_action :require_bprm_scheduling!
         before_action :require_authentication
         before_action -> { require_capability!("scheduling.open") }
-        helper_method :can_book?, :can_set_hours?
+        helper_method :can_book?, :can_overbook?, :can_set_hours?
 
         private
 
@@ -39,6 +39,14 @@ module Lakeraven
           return true if supervisor?
 
           resource[:modify_appointments] && !kept_out?(resource)
+        end
+
+        # Offering an overbook on a full time (S-SCH-01.2): a user who may book
+        # there and holds SDZSUP or the overbook right on the resource. Whether
+        # this one is allowed (the daily maximum, the master right) is decided
+        # when it is booked (AppointmentBookingGateway.book_if_room).
+        def can_overbook?(resource)
+          can_book?(resource) && (supervisor? || resource[:overbook] == true)
         end
 
         # Setting a resource's hours (S-SCH-14): an active resource, and SDZSUP or
