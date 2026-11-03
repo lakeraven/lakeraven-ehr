@@ -209,6 +209,10 @@
   @apply bg-emerald-50 text-emerald-900 ring-emerald-200;
 }
 
+@utility status-badge--checked-out {
+  @apply bg-white text-emerald-900 ring-emerald-300;
+}
+
 @utility status-badge--no-show {
   @apply bg-amber-50 text-amber-900 ring-amber-200;
 }
