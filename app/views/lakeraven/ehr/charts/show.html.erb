@@ -176,6 +176,7 @@
 
     <div class="allergy-actions">
       <%= link_to "Record an allergy", new_patient_allergy_path(@patient.dfn) %>
+      <%= link_to "Consents", patient_consents_path(@patient.dfn) %>
       <%= button_to "No known allergies", patient_no_known_allergies_path(@patient.dfn), method: :post %>
     </div>
 

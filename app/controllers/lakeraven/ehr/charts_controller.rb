@@ -38,6 +38,9 @@ module Lakeraven
       helper ApplicationHelper
       # The chart reads RPMS on its signed-in user's own connection (ADR 0011).
       include RpmsUserScope
+      # This base is not WebController. The tablet lock has to live here too,
+      # or the chart stays reachable during a handover (#793).
+      include ConsentKioskLock
       include SmartAuthentication
       # FAIL-CLOSED audit, the same terms the clinician screening surface is
       # held to. The chart now carries scored screenings (#474), so it serves

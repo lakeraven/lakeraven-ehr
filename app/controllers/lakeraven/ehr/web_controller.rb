@@ -12,6 +12,9 @@ module Lakeraven
       include AuditableClinicalAccess
       include PatientBannerRendering
       include RpmsUserScope
+      # While a tablet handover is open, every other page on this base
+      # redirects to the kiosk before it renders (#793).
+      include ConsentKioskLock
 
       helper ApplicationHelper
       layout "lakeraven/ehr/application"

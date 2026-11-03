@@ -1,0 +1,179 @@
+# frozen_string_literal: true
+
+require "digest"
+
+module Lakeraven
+  module EHR
+    # One in-clinic signature, or a later revocation of one. Owner: this engine.
+    #
+    # RPMS cannot hold it. The row is the evidence of a tablet handover: the
+    # PNG the patient drew, the digest of the exact body they were shown, and
+    # the witness DUZ. A revocation is a new row. The signature is never updated.
+    class SignedConsent < ApplicationRecord
+      self.table_name = "lakeraven_ehr_signed_consents"
+
+      class NotRevocable < StandardError; end
+
+      KIND_SIGNATURE = "signature"
+      KIND_REVOCATION = "revocation"
+      KINDS = [ KIND_SIGNATURE, KIND_REVOCATION ].freeze
+      PNG_MAGIC = "\x89PNG\r\n\x1A\n".b.freeze
+      MAX_SIGNATURE_BYTES = 500.kilobytes
+      DATA_URL = %r{\Adata:image/png;base64,([A-Za-z0-9+/]+=*)\z}
+
+      belongs_to :consent_template, class_name: "Lakeraven::EHR::ConsentTemplate"
+
+      validates :patient_dfn, :template_key, :template_body_digest, :signed_at, :recorded_by_duz, presence: true
+      validates :template_version, presence: true, numericality: { only_integer: true }
+      validates :kind, inclusion: { in: KINDS }
+      validates :handover_token, uniqueness: true, allow_nil: true
+      validate :snapshot_matches_template
+      validate :row_shape
+
+      scope :signatures, -> { where(kind: KIND_SIGNATURE) }
+
+      def self.signatures_for_patient(dfn)
+        signatures.where(patient_dfn: dfn.to_s).order(:id)
+      end
+
+      def self.digest_for(body)
+        Digest::SHA256.hexdigest(body.to_s)
+      end
+
+      # The canvas posts a PNG data URL. Stored bytes are the PNG itself.
+      # Blank, non-PNG, and oversize payloads are refused before a row exists.
+      def self.decode_signature_data_url(value)
+        text = value.to_s
+        return nil if text.blank?
+        return nil if text.bytesize > (MAX_SIGNATURE_BYTES * 4 / 3) + 64
+
+        encoded = DATA_URL.match(text)&.[](1)
+        return nil if encoded.blank? || (encoded.length % 4).nonzero?
+
+        bytes = Base64.strict_decode64(encoded).b
+        return nil if bytes.bytesize > MAX_SIGNATURE_BYTES
+        return nil unless bytes.start_with?(PNG_MAGIC)
+
+        bytes
+      rescue ArgumentError
+        nil
+      end
+
+      def self.record_signature!(attributes)
+        token = attributes[:handover_token].presence
+        existing = find_by(handover_token: token) if token
+        return existing if existing
+
+        without_statement_log { create!(attributes) }
+      rescue ActiveRecord::RecordNotUnique
+        raise if token.blank?
+
+        find_by!(handover_token: token)
+      end
+
+      # Statement text would contain the PNG and the typed name.
+      def self.without_statement_log
+        loggers = [ Rails.logger, ActiveRecord::Base.logger ].compact.uniq
+        loggers = loggers.select { |logger| logger.respond_to?(:silence) }
+        runner = proc { yield }
+        loggers.reverse_each do |logger|
+          inner = runner
+          runner = proc { logger.silence(&inner) }
+        end
+        runner.call
+      end
+
+      def readonly?
+        persisted?
+      end
+
+      def signature_png
+        self[:signature_png]&.b
+      end
+
+      def revoke!(by_duz:, reason:)
+        raise NotRevocable, "only a signature can be revoked" unless kind == KIND_SIGNATURE
+        raise NotRevocable, "already revoked" if self.class.exists?(kind: KIND_REVOCATION, revokes_id: id)
+
+        self.class.without_statement_log do
+          self.class.create!(
+            patient_dfn: patient_dfn,
+            consent_template: consent_template,
+            template_key: template_key,
+            template_version: template_version,
+            template_body_digest: template_body_digest,
+            signed_at: Time.current,
+            witness_duz: by_duz.to_s,
+            kind: KIND_REVOCATION,
+            recorded_by_duz: by_duz.to_s,
+            revokes_id: id,
+            revocation_reason: reason.to_s
+          )
+        end
+      rescue ActiveRecord::RecordNotUnique
+        raise NotRevocable, "already revoked"
+      end
+
+      def to_consent
+        Consent.new(
+          id: id&.to_s,
+          patient_dfn: patient_dfn,
+          scope: consent_template.consent_scope,
+          status: revoked? ? "revoked" : "active",
+          provision_type: "permit",
+          performer_ien: witness_duz,
+          date_time: signed_at.to_date
+        )
+      end
+
+      def revoked?
+        return false unless persisted? && kind == KIND_SIGNATURE
+
+        self.class.exists?(kind: KIND_REVOCATION, revokes_id: id)
+      end
+
+      private
+
+      def snapshot_matches_template
+        return if consent_template.nil?
+
+        if template_key != consent_template.key
+          errors.add(:template_key, "does not match the template")
+        end
+        if template_version != consent_template.version
+          errors.add(:template_version, "does not match the template")
+        end
+        return if template_body_digest.blank?
+
+        expected = self.class.digest_for(consent_template.body)
+        return if template_body_digest == expected
+
+        errors.add(:template_body_digest, "does not match the template body")
+      end
+
+      def row_shape
+        if kind == KIND_REVOCATION
+          errors.add(:revokes_id, "must name the consent being revoked") if revokes_id.blank?
+          errors.add(:revocation_reason, "must be present") if revocation_reason.blank?
+          errors.add(:signature_png, "must be empty on a revocation") if self[:signature_png].present?
+          return
+        end
+
+        errors.add(:witness_duz, "must be present") if witness_duz.blank?
+        errors.add(:revokes_id, "must be empty on a signature") if revokes_id.present?
+        errors.add(:revocation_reason, "must be empty on a signature") if revocation_reason.present?
+        validate_signature_png
+      end
+
+      def validate_signature_png
+        bytes = signature_png
+        if bytes.blank?
+          errors.add(:signature_png, "must be a PNG")
+          return
+        end
+        errors.add(:signature_png, "must be a PNG") unless bytes.start_with?(PNG_MAGIC)
+        errors.add(:signature_png, "is larger than 500 KB") if bytes.bytesize > MAX_SIGNATURE_BYTES
+      end
+    end
+  end
+end

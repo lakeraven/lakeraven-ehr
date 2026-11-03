@@ -56,6 +56,21 @@ Lakeraven::EHR::Engine.routes.draw do
   post "patients/:dfn/allergies/no_known_allergies", to: "allergies#no_known_allergies",
     as: :patient_no_known_allergies, constraints: { dfn: /\d+/ }
 
+  # In-clinic consent (#793). A signature is immutable, so there is no
+  # update or delete route. Revocation is a new row. `new` and `handover`
+  # are declared before any `:id` segment.
+  get  "patients/:dfn/consents", to: "consents#index", as: :patient_consents,
+    constraints: { dfn: /\d+/ }
+  get  "patients/:dfn/consents/new", to: "consents#new", as: :new_patient_consent,
+    constraints: { dfn: /\d+/ }
+  post "patients/:dfn/consents/handover", to: "consents#handover", as: :patient_consent_handover,
+    constraints: { dfn: /\d+/ }
+  post "patients/:dfn/consents/:id/revocation", to: "consents#revocation",
+    as: :patient_consent_revocation, constraints: { dfn: /\d+/, id: /\d+/ }
+  get  "consent_kiosk", to: "consent_kiosk#show", as: :consent_kiosk
+  post "consent_kiosk", to: "consent_kiosk#create"
+  post "consent_kiosk/unlock", to: "consent_kiosk#unlock", as: :consent_kiosk_unlock
+
   # FHIR CapabilityStatement (#574). Every FHIR type routed below is declared
   # in FHIR::CapabilityStatement, and a route with no controller action
   # behind it is not routed: Medication, DiagnosticReport and CarePlan were,
@@ -124,6 +139,9 @@ Lakeraven::EHR::Engine.routes.draw do
   # names a patient, so it is posted, never carried in a URL (#722).
   get "chart_search", to: "chart_searches#show", as: :chart_search
   post "chart_search", to: "chart_searches#create"
+  # The tablet lock covers this search path as well as chart_search. Same
+  # action, same gate: a POST, so the query is not carried in the URL.
+  post "patients/search", to: "chart_searches#create"
 
   # The front desk finds a patient (rpms-ux S-REG-01) and registers a new one (S-REG-02).
   namespace :registration do

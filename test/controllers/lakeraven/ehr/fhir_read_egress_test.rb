@@ -61,6 +61,17 @@ module Lakeraven
         "lakeraven/ehr/allergies#new",              # Session-authenticated clinician entry/write surface (#644); discloses no stored clinical data
         "lakeraven/ehr/allergies#create",            # Session-authenticated clinician entry/write surface (#644); discloses no stored clinical data
         "lakeraven/ehr/allergies#no_known_allergies", # Session-authenticated clinician entry/write surface (#644); discloses no stored clinical data
+        # In-clinic consent (#793). HTML for the chart and the locked tablet,
+        # not a FHIR read. The list shows title, version, and status. The
+        # kiosk shows the template plus the patient's name and date of birth.
+        # Signature bytes stay on the row.
+        "lakeraven/ehr/consents#index",
+        "lakeraven/ehr/consents#new",
+        "lakeraven/ehr/consents#handover",
+        "lakeraven/ehr/consents#revocation",
+        "lakeraven/ehr/consent_kiosk#show",
+        "lakeraven/ehr/consent_kiosk#create",
+        "lakeraven/ehr/consent_kiosk#unlock",
         "lakeraven/ehr/sessions#new",         # Web UI login
         "lakeraven/ehr/sessions#create",      # Web UI login
         "lakeraven/ehr/sessions#destroy",     # Web UI logout

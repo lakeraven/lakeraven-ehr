@@ -1,0 +1,25 @@
+<% content_for :title, "Consents" %>
+
+<div class="page-header">
+  <h1>Consents</h1>
+</div>
+
+<table>
+  <thead>
+    <tr>
+      <th>Consent</th>
+      <th>Version</th>
+      <th>Status</th>
+    </tr>
+  </thead>
+  <tbody>
+    <% @consents.each do |row| %>
+      <% consent = row.to_consent %>
+      <tr>
+        <td><%= row.consent_template.title %></td>
+        <td><%= row.template_version %></td>
+        <td><%= consent.status_display %></td>
+      </tr>
+    <% end %>
+  </tbody>
+</table>
