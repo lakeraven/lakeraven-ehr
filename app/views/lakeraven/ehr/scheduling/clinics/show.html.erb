@@ -83,15 +83,10 @@
           </td>
           <td data-status="<%= status_key %>"><%= status_badge status_key, status %></td>
           <td>
-            <% if status_key == "booked" && can_book?(@resource) %>
-              <% if appointment[:start_time].to_date == Date.today %>
-                <%= link_to "Check in",
-                      scheduling_checkin_clinic_appointment_path(@resource[:id], appointment[:id], date: @date.iso8601) %>
-              <% end %>
-              <%= link_to "Cancel",
-                    scheduling_cancel_clinic_appointment_path(@resource[:id], appointment[:id], date: @date.iso8601) %>
-              <%= render "booking_actions", resource: @resource, appointment: appointment, date: @date %>
-            <% end %>
+            <%= render "lakeraven/ehr/scheduling/appointments/actions",
+                  appointment: appointment,
+                  resource: @resource,
+                  date: @date %>
             <%= render "closed_actions", resource: @resource, appointment: appointment, date: @date, status_key: status_key %>
           </td>
         </tr>

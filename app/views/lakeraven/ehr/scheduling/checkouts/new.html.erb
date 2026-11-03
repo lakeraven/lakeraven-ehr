@@ -1,0 +1,38 @@
+<% page_title "Check out", @resource[:name] %>
+
+<%= page_header "Check out",
+      [ "#{@appointment[:patient_name]}, #{@resource[:name]}, #{@appointment[:start_time].strftime("%b %-d, %Y at %H:%M")}",
+        "Checked in at #{@appointment[:checkin_time].strftime("%H:%M")}." ] %>
+
+<%= flash_alert %>
+
+<%= form_errors @checkout,
+      "The patient was not checked out.",
+      id: "checkout-errors" %>
+
+<%= form_with scope: :checkout,
+      url: scheduling_checkout_clinic_appointment_path(@resource[:id], @appointment[:id]),
+      method: :post,
+      local: true,
+      id: "checkout-form",
+      class: "card flex flex-col gap-4" do |f| %>
+  <%= hidden_field_tag :date, @date.iso8601 %>
+
+  <%# HOSPITAL LOCATION (#44.003) field 303 CHECKED OUT. %>
+  <%= form_field :at,
+        "Checked out at",
+        form: f,
+        hint: "When the patient left." do |aria| %>
+    <%= f.datetime_local_field :at,
+          value: @checkout.at,
+          required: true,
+          aria: aria %>
+  <% end %>
+
+  <%= f.submit "Check out",
+        class: "button-primary self-start" %>
+<% end %>
+
+<p class="mt-6">
+  <%= link_to "Back to the clinic's day", scheduling_clinic_path(@resource[:id], date: @date.iso8601) %>
+</p>

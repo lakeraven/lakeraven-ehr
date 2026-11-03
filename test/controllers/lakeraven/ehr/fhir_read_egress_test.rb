@@ -78,6 +78,8 @@ module Lakeraven
         "lakeraven/ehr/registration/addresses#update",    # Address and phones edit; as #edit
         "lakeraven/ehr/registration/contacts#edit",    # The contact form (S-REG-08): registration demographics, no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/registration/contacts#update",  # Saving a contact (S-REG-08), not disclosure
+        "lakeraven/ehr/registration/languages#edit",   # The languages form (S-REG-10): registration demographics, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/registration/languages#update", # Saving the languages (S-REG-10), not disclosure
         "lakeraven/ehr/registration/coverages#index",  # Payer, member number and dates for billing (S-REG-03), no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/registration/coverages#new",    # Coverage entry form (S-REG-03.1), not disclosure
         "lakeraven/ehr/registration/coverages#create", # Coverage entry (S-REG-03.1); answers with the form or a redirect
@@ -101,6 +103,12 @@ module Lakeraven
         "lakeraven/ehr/scheduling/walk_ins#create",      # Walk-in entry, not disclosure
         "lakeraven/ehr/scheduling/appointment_details#new",    # Details form: patient name, time, note or remarks, no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/scheduling/appointment_details#create", # Details entry, not disclosure
+        "lakeraven/ehr/scheduling/checkins#undo",        # Undo check-in entry, not disclosure
+        "lakeraven/ehr/scheduling/checkouts#new",        # Check-out form: patient name and times, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/scheduling/checkouts#create",     # Check-out entry, not disclosure
+        "lakeraven/ehr/scheduling/checkouts#undo",       # Undo check-out entry, not disclosure
+        "lakeraven/ehr/scheduling/no_shows#create",      # No-show entry, not disclosure
+        "lakeraven/ehr/scheduling/no_shows#undo",        # Undo no-show entry, not disclosure
         "lakeraven/ehr/scheduling/hours#new",            # Clinic hours form: access types, no patient data
         "lakeraven/ehr/scheduling/hours#create",         # Hours entry; a refusal names an appointment time and patient name, no clinical record
         "lakeraven/ehr/test_sessions#create", # Test only

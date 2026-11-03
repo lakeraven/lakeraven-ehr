@@ -148,6 +148,10 @@ Lakeraven::EHR::Engine.routes.draw do
       get "contacts/:kind/edit", to: "contacts#edit", as: :edit_patient_contact
       post "contacts/:kind/edit", to: "contacts#edit"
       post "contacts/:kind", to: "contacts#update", as: :patient_contact
+      # The patient's languages (S-REG-10): each save a new dated entry.
+      get "languages/edit", to: "languages#edit", as: :edit_patient_languages
+      post "languages/edit", to: "languages#edit"
+      post "languages", to: "languages#update", as: :patient_languages
     end
     # The patient's Medicaid, Medicare and private insurance (S-REG-03). The
     # state and insurer look-ups post the form back, so a member number never
@@ -184,6 +188,15 @@ Lakeraven::EHR::Engine.routes.draw do
     get "clinics/:resource_id/walk_ins/new", to: "walk_ins#new", as: :new_clinic_walk_in, constraints: { resource_id: /\d+/ }
     post "clinics/:resource_id/walk_ins/find", to: "walk_ins#find", as: :find_clinic_walk_in, constraints: { resource_id: /\d+/ }
     post "clinics/:resource_id/walk_ins", to: "walk_ins#create", as: :clinic_walk_ins, constraints: { resource_id: /\d+/ }
+    # After check-in (S-SCH-03.9, S-SCH-07, S-SCH-08): undo it, check out and undo that, no-show and undo that.
+    scope "clinics/:resource_id/appointments/:appointment_id", constraints: { resource_id: /\d+/, appointment_id: /\d+/ } do
+      post "checkin/undo", to: "checkins#undo", as: :undo_checkin_clinic_appointment
+      get "checkout", to: "checkouts#new", as: :checkout_clinic_appointment
+      post "checkout", to: "checkouts#create"
+      post "checkout/undo", to: "checkouts#undo", as: :undo_checkout_clinic_appointment
+      post "no_show", to: "no_shows#create", as: :no_show_clinic_appointment
+      post "no_show/undo", to: "no_shows#undo", as: :undo_no_show_clinic_appointment
+    end
   end
 
   # Test-only: seed the browser session (DUZ, user type, security keys, and

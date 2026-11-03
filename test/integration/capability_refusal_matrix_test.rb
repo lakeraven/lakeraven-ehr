@@ -24,6 +24,9 @@ class CapabilityRefusalMatrixTest < ActionDispatch::IntegrationTest
     "GET /registration/patients/:dfn/contacts/:kind/edit" => "patient.register",
     "POST /registration/patients/:dfn/contacts/:kind/edit" => "patient.register",
     "POST /registration/patients/:dfn/contacts/:kind" => "patient.register",
+    "GET /registration/patients/:dfn/languages/edit" => "patient.register",
+    "POST /registration/patients/:dfn/languages/edit" => "patient.register",
+    "POST /registration/patients/:dfn/languages" => "patient.register",
     "GET /registration/patients/:dfn/coverage" => "registration.view",
     "GET /registration/patients/:dfn/coverage/new" => "patient.register",
     "POST /registration/patients/:dfn/coverage/new" => "patient.register",
@@ -49,7 +52,13 @@ class CapabilityRefusalMatrixTest < ActionDispatch::IntegrationTest
     "POST /scheduling/clinics/:resource_id/appointments/:appointment_id/details" => "scheduling.open",
     "GET /scheduling/clinics/:resource_id/walk_ins/new" => "scheduling.open",
     "POST /scheduling/clinics/:resource_id/walk_ins/find" => "scheduling.open",
-    "POST /scheduling/clinics/:resource_id/walk_ins" => "scheduling.open"
+    "POST /scheduling/clinics/:resource_id/walk_ins" => "scheduling.open",
+    "GET /scheduling/clinics/:resource_id/appointments/:appointment_id/checkout" => "scheduling.open",
+    "POST /scheduling/clinics/:resource_id/appointments/:appointment_id/checkout" => "scheduling.open",
+    "POST /scheduling/clinics/:resource_id/appointments/:appointment_id/checkout/undo" => "scheduling.open",
+    "POST /scheduling/clinics/:resource_id/appointments/:appointment_id/checkin/undo" => "scheduling.open",
+    "POST /scheduling/clinics/:resource_id/appointments/:appointment_id/no_show" => "scheduling.open",
+    "POST /scheduling/clinics/:resource_id/appointments/:appointment_id/no_show/undo" => "scheduling.open"
   }.freeze
 
   def engine_routes
