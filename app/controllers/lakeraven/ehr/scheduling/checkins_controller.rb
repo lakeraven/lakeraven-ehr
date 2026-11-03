@@ -20,12 +20,14 @@ module Lakeraven
         def new
           @checkin = build(at: Time.now.strftime("%Y-%m-%dT%H:%M"))
           @providers = providers
+          @coverage = coverage_standing
         end
 
         # POST /scheduling/clinics/:resource_id/appointments/:appointment_id/checkin
         def create
           @checkin = build(**checkin_params.symbolize_keys)
           @providers = providers
+          @coverage = coverage_standing
           return render(:new, status: :unprocessable_content) unless @checkin.valid?
 
           result = AppointmentCheckinGateway.check_in(
@@ -55,6 +57,14 @@ module Lakeraven
         end
 
         private
+
+        # Whether the patient's coverage is in force today (rpms-ux S-REG-03.2),
+        # so the clerk is warned before the visit is created. AG answers; a
+        # user without AG's registration menu cannot ask, and is told so.
+        def coverage_standing
+          dfn = @appointment[:patient_dfn]
+          dfn ? CoverageGateway.standing(dfn) : :unchecked
+        end
 
         def build(**attrs)
           checkin = AppointmentCheckin.new(attrs)
