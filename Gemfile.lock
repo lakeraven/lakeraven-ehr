@@ -1,7 +1,7 @@
 GIT
   remote: https://github.com/lakeraven/rpms-rpc.git
-  revision: f306a32a5cd05c9200fe6a02f3ab74623d728c39
-  ref: f306a32
+  revision: 9197bf5fe5b02d9d69b37f4870aedbec9bd39f24
+  ref: 9197bf5
   specs:
     rpms-rpc (0.4.0)
       bigdecimal (>= 3.1)

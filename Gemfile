@@ -7,7 +7,9 @@ gemspec
 if ENV["RPMS_RPC_PATH"]
   gem "rpms-rpc", path: ENV["RPMS_RPC_PATH"]
 else
-  # Pinned to rpms-rpc main f306a32: Scheduling.checkout_appointment, cancel_checkout and cancel_checkin, and
+  # Pinned to rpms-rpc main 9197bf5: PatientProfile reads and files the emergency contact, next of kin,
+  # languages and other names through AG's windows (rpms-rpc#580), and Registration.update files blood and
+  # tribe quantum and the enrollment number (rpms-rpc#582). Earlier, f306a32: Scheduling.checkout_appointment, cancel_checkout and cancel_checkin, and
   # SchedulingSetup.clinic_stops and clinic_stop (rpms-rpc#579). Earlier, a8da077: Patient.registration_record reads a registered patient through AG's
   # windows, and Patient.update takes name, religion and employer after AG's own checks (rpms-rpc#581).
   # Earlier, b51d455: Patient.brief_header reads CWAD on the caller's option, so an IRIS
@@ -42,7 +44,7 @@ else
   # (lakeraven-ehr#540), invented RPC names removed (#310/#311), typed errors for
   # a missing RPC (#370), the user class from ORWU USERINFO (#236). A fixed ref
   # rather than branch:main so the pin does not drift mid-merge.
-  gem "rpms-rpc", github: "lakeraven/rpms-rpc", ref: "f306a32"
+  gem "rpms-rpc", github: "lakeraven/rpms-rpc", ref: "9197bf5"
 end
 
 gem "puma"
