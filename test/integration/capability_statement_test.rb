@@ -52,14 +52,17 @@ class CapabilityStatementTest < ActionDispatch::IntegrationTest
     %w[Observation category] => lambda {
       refute_empty search_ids("Observation", patient: "1", category: "vital-signs")
       assert_empty search_ids("Observation", patient: "1", category: "laboratory")
-      assert_refused("Observation", patient: "1",
-                     category: "http://terminology.hl7.org/CodeSystem/observation-category|vital-signs")
+      refute_empty search_ids("Observation", patient: "1",
+                              category: "http://terminology.hl7.org/CodeSystem/observation-category|vital-signs")
+      assert_empty search_ids("Observation", patient: "1", category: "http://example.org/other|vital-signs")
     },
     %w[Observation code] => lambda {
       codes = search_resources("Observation", patient: "1", code: "8867-4,8310-5")
               .map { |r| r.dig("code", "coding", 0, "code") }
       assert_equal %w[8310-5 8867-4], codes.sort
-      assert_refused("Observation", patient: "1", code: "http://loinc.org|8867-4")
+      assert_equal %w[8867-4], search_resources("Observation", patient: "1", code: "http://loinc.org|8867-4")
+        .map { |r| r.dig("code", "coding", 0, "code") }
+      assert_empty search_ids("Observation", patient: "1", code: "http://snomed.info/sct|8867-4")
     },
     %w[AuditEvent patient] => lambda {
       mine = Lakeraven::EHR::AuditEvent.create!(event_type: "rest", action: "R", outcome: "0",
@@ -77,7 +80,9 @@ class CapabilityStatementTest < ActionDispatch::IntegrationTest
       WIRE
       assert_equal %w[1R-O], search_ids("MedicationRequest", patient: "1", status: "active")
       assert_equal %w[2R-O], search_ids("MedicationRequest", patient: "1", status: "stopped")
-      assert_refused("MedicationRequest", patient: "1", status: "http://hl7.org/fhir/CodeSystem/medicationrequest-status|active")
+      assert_equal %w[1R-O], search_ids("MedicationRequest", patient: "1",
+                                        status: "http://hl7.org/fhir/CodeSystem/medicationrequest-status|active")
+      assert_refused("MedicationRequest", patient: "1", status: "")
     },
     # US Core 6.1.0's mandatory MedicationRequest search is patient + intent
     # (Inferno (g)(10), single patient API).
