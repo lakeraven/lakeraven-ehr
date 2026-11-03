@@ -12,7 +12,6 @@ else
   # tribe quantum and the enrollment number (rpms-rpc#582). Earlier, f306a32: Scheduling.checkout_appointment, cancel_checkout and cancel_checkin, and
   # SchedulingSetup.clinic_stops and clinic_stop (rpms-rpc#579). Earlier, a8da077: Patient.registration_record reads a registered patient through AG's
   # windows, and Patient.update takes name, religion and employer after AG's own checks (rpms-rpc#581).
-  # Earlier, f5b9136: Registration.register takes hrn_source: (a temporary chart number, or a given one AG checks), rpms-rpc#577.
   # Earlier, b51d455: Patient.brief_header reads CWAD on the caller's option, so an IRIS
   # stack no longer refuses every patient header (rpms-rpc#576). Earlier, f5392af: Scheduling.add_availability
   # and cancel_availability_by_date set a clinic's hours as BSDX access blocks (rpms-rpc#574). Earlier, 24aaef5: PatientSelection.find finds a patient
