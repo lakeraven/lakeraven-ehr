@@ -34,6 +34,8 @@ class CapabilityRefusalMatrixTest < ActionDispatch::IntegrationTest
     "GET /scheduling/patients/:dfn/appointments" => "scheduling.open",
     "GET /scheduling/clinics/:resource_id/appointments/new" => "scheduling.open",
     "POST /scheduling/clinics/:resource_id/appointments" => "scheduling.open",
+    "GET /scheduling/clinics/:resource_id/registrations/new" => "patient.quick_register",
+    "POST /scheduling/clinics/:resource_id/registrations" => "patient.quick_register",
     "GET /scheduling/clinics/:resource_id/appointments/:appointment_id/cancel" => "scheduling.open",
     "POST /scheduling/clinics/:resource_id/appointments/:appointment_id/cancel" => "scheduling.open",
     "GET /scheduling/clinics/:resource_id/appointments/:appointment_id/checkin" => "scheduling.open",
