@@ -21,6 +21,8 @@ module Lakeraven
           length = params[:length].presence || @resource[:time_scale]
           @booking = AppointmentBooking.new(start: params[:start], length: length, patient_dfn: params.dig(:booking, :patient_dfn))
           @patients = AppointmentBookingGateway.patients(params[:q])
+          @quick_registered_hrn = flash[:quick_registered_hrn]
+          load_chosen
         end
 
         # POST /scheduling/clinics/:resource_id/appointments
@@ -58,6 +60,7 @@ module Lakeraven
 
         def render_new(status)
           @patients = AppointmentBookingGateway.patients(params[:q])
+          load_chosen
           render :new, status: status
         end
 
@@ -65,6 +68,16 @@ module Lakeraven
         # "Book as an overbook".
         def overbook_request
           { duz: session[:duz].to_i, supervisor: supervisor?, confirmed: params[:overbook] == "1" }
+        end
+
+        # The patient already chosen (just registered, or picked from possible
+        # matches), named so the scheduler sees who they are booking.
+        def load_chosen
+          return if @patients.any? || @booking.patient_dfn.blank?
+
+          @chosen = RpmsRpc::Patient.brief_header(@booking.patient_dfn.to_i)
+        rescue RpmsRpc::Client::RpcError
+          @chosen = nil
         end
 
         def booking_params
