@@ -40,6 +40,8 @@
         id: "find-open-time" %>
 </p>
 
+<%= render "walk_in_link", resource: @resource, date: @date %>
+
 <% if can_set_hours?(@resource) %>
   <p>
     <%= link_to "Set the clinic's hours",
