@@ -92,6 +92,7 @@
                     scheduling_cancel_clinic_appointment_path(@resource[:id], appointment[:id], date: @date.iso8601) %>
               <%= render "booking_actions", resource: @resource, appointment: appointment, date: @date %>
             <% end %>
+            <%= render "closed_actions", resource: @resource, appointment: appointment, date: @date, status_key: status_key %>
           </td>
         </tr>
       <% end %>
