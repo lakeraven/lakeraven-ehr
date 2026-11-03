@@ -1,0 +1,55 @@
+<%# What is missing or wrong on the registration (rpms-ux S-REG-23, S-REG-31):
+    AG's own edit checks (AGG PATIENT EDIT CHECK), by section, errors counted
+    apart from warnings. Locals: checks, a RegistrationChecksGateway::Result. %>
+<section
+  id="missing-items"
+  class="card mt-6"
+  aria-labelledby="missing-items-heading"
+>
+  <h2
+    id="missing-items-heading"
+    class="text-lg font-semibold"
+  >
+    Missing or out of date
+  </h2>
+
+  <% if !checks.available? %>
+    <%= empty_state "RPMS did not say what is missing on this registration.",
+          "Open the patient again to check.",
+          id: "missing-items-unavailable" %>
+  <% elsif checks.items.empty? %>
+    <%= empty_state "Nothing is missing.",
+          "The registration is complete.",
+          id: "missing-items-none" %>
+  <% else %>
+    <p
+      id="missing-items-counts"
+      class="hint"
+    >
+      <span data-count="errors"><%= checks.errors.size %></span>
+      <%= checks.errors.size == 1 ? "error" : "errors" %> to fix,
+      <span data-count="warnings"><%= checks.warnings.size %></span>
+      <%= checks.warnings.size == 1 ? "warning" : "warnings" %> to ask about.
+    </p>
+
+    <% checks.by_section.each do |section, items| %>
+      <h3
+        class="mt-4 font-semibold"
+        data-section="<%= section.parameterize %>"
+      >
+        <%= section %>
+      </h3>
+      <ul class="mt-1 flex flex-col gap-1">
+        <% items.sort_by { |item| item.error? ? 0 : 1 }.each do |item| %>
+          <li
+            data-check="<%= item.number %>"
+            data-kind="<%= item.kind %>"
+          >
+            <%= status_badge item.kind, item.error? ? "Error" : "Warning" %>
+            <%= item.message %>
+          </li>
+        <% end %>
+      </ul>
+    <% end %>
+  <% end %>
+</section>
