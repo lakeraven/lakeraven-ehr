@@ -1,0 +1,8 @@
+<%# A walk-in is booked and checked in today only (rpms-ux S-SCH-06; BPRM offers it for the current day). %>
+<% if date == Date.today && can_book?(resource) %>
+  <p>
+    <%= link_to "Book a walk-in",
+          scheduling_new_clinic_walk_in_path(resource[:id]),
+          id: "walk-in" %>
+  </p>
+<% end %>

@@ -116,20 +116,21 @@ module Lakeraven
       end
 
       # Books if the time still has room, read again under the lock; :full if not.
-      def self.book_if_room(booking, resource, via: ::RpmsRpc::Scheduling, setup: ::RpmsRpc::SchedulingSetup)
+      # access_type: "WALKIN" books a walk-in (S-SCH-06.1); nil a scheduled appointment.
+      def self.book_if_room(booking, resource, via: ::RpmsRpc::Scheduling, setup: ::RpmsRpc::SchedulingSetup, access_type: nil)
         date = booking.start_time.to_date
         lock_for(resource, date).synchronize do
           clinic_day, = day(resource, date, via: via, setup: setup)
           next Result.new(status: :full, appointment_id: nil, message: nil) unless clinic_day.room_for?(booking.start_time, booking.length)
 
-          book(booking, resource, via: via)
+          book(booking, resource, via: via, access_type: access_type)
         end
       end
 
-      def self.book(booking, resource, via: ::RpmsRpc::Scheduling)
+      def self.book(booking, resource, via: ::RpmsRpc::Scheduling, access_type: nil)
         reply = via.add_appointment(patient_dfn: booking.patient_dfn, resource: resource[:name],
                                     start_time: booking.start_time, end_time: booking.end_time,
-                                    length_minutes: booking.length, note: booking.note)
+                                    length_minutes: booking.length, note: booking.note, **{ access_type: access_type }.compact)
         return Result.new(status: :unknown, appointment_id: nil, message: nil) if reply.nil?
         return Result.new(status: :booked, appointment_id: reply[:appointment_id], message: nil) if reply[:success]
 

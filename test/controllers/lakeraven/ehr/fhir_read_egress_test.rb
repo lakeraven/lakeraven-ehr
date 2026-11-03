@@ -85,6 +85,9 @@ module Lakeraven
         "lakeraven/ehr/scheduling/checkins#create",      # Check-in entry, not disclosure
         "lakeraven/ehr/scheduling/reschedules#new",      # Move form: patient name, time, open times, reasons, no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/scheduling/reschedules#create",   # Move entry, not disclosure
+        "lakeraven/ehr/scheduling/walk_ins#new",         # Walk-in form: no patient until searched
+        "lakeraven/ehr/scheduling/walk_ins#find",        # Walk-in searches: patient name, HRN, date of birth, provider names, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/scheduling/walk_ins#create",      # Walk-in entry, not disclosure
         "lakeraven/ehr/scheduling/hours#new",            # Clinic hours form: access types, no patient data
         "lakeraven/ehr/scheduling/hours#create",         # Hours entry; a refusal names an appointment time and patient name, no clinical record
         "lakeraven/ehr/test_sessions#create", # Test only

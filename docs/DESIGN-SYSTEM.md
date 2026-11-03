@@ -136,7 +136,7 @@ The words carry the meaning; the colour only repeats it.
 <td data-status="<%= status_key %>"><%= status_badge status_key, status %></td>
 ```
 
-Keys with a colour: booked, scheduled, checked, checked in, no-show, cancelled, active, inactive, deceased. Any other key gets the plain badge; add a key to `STATUS_TONES` in the helper (classes are written out whole there so the Tailwind build keeps them).
+Keys with a colour: booked, scheduled, checked, checked in, no-show, cancelled, active, inactive, deceased, and for a registration item, error and warning. Any other key gets the plain badge; add a key to `STATUS_TONES` in the helper (classes are written out whole there so the Tailwind build keeps them).
 Locals: `key`, `label`, `tone`.
 
 ### empty_state
