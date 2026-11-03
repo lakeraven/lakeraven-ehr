@@ -13,6 +13,11 @@
 
 <%= patient_summary @patient, id: "registration" %>
 
+<% if @checks %>
+  <%= render "lakeraven/ehr/registration/patients/missing_items",
+        checks: @checks %>
+<% end %>
+
 <p class="mt-6">
   <% if capability?("scheduling.open") %>
     <%= link_to "Appointments",

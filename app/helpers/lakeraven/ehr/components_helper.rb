@@ -96,7 +96,9 @@ module Lakeraven
         "cancelled" => "status-badge--cancelled",
         "active" => "status-badge--active",
         "inactive" => "status-badge--inactive",
-        "deceased" => "status-badge--deceased"
+        "deceased" => "status-badge--deceased",
+        "error" => "status-badge--error",
+        "warning" => "status-badge--warning"
       }.freeze
 
       # A status in words, coloured by its key: status_badge("booked", "Booked").

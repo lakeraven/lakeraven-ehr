@@ -229,6 +229,15 @@
   @apply bg-slate-800 text-white ring-slate-800;
 }
 
+/* A registration item (S-REG-23): an error to fix, a warning to ask about. */
+@utility status-badge--error {
+  @apply bg-red-50 text-red-900 ring-red-200;
+}
+
+@utility status-badge--warning {
+  @apply bg-amber-50 text-amber-900 ring-amber-200;
+}
+
 @utility empty-state {
   @apply my-4 text-slate-600;
 }
