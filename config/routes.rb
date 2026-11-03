@@ -137,6 +137,11 @@ Lakeraven::EHR::Engine.routes.draw do
     post "patients", to: "patients#create"
     post "patients/confirm", to: "patients#confirm", as: :confirm_patient
     get "patients/:dfn", to: "patients#show", as: :patient, constraints: { dfn: /\d+/ }
+    # Keeping a registered patient current (S-REG-20, S-REG-21), a section at a time.
+    get "patients/:dfn/demographics/edit", to: "demographics#edit", as: :edit_patient_demographics, constraints: { dfn: /\d+/ }
+    patch "patients/:dfn/demographics", to: "demographics#update", as: :patient_demographics, constraints: { dfn: /\d+/ }
+    get "patients/:dfn/address/edit", to: "addresses#edit", as: :edit_patient_address, constraints: { dfn: /\d+/ }
+    patch "patients/:dfn/address", to: "addresses#update", as: :patient_address, constraints: { dfn: /\d+/ }
   end
 
   # Scheduling (rpms-ux W02): a clinic resource's day, booking into it (S-SCH-01)
