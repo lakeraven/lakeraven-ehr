@@ -14,7 +14,7 @@ module Lakeraven
         before_action :require_bprm_scheduling!
         before_action :require_authentication
         before_action -> { require_capability!("scheduling.open") }
-        helper_method :can_book?
+        helper_method :can_book?, :can_set_hours?
 
         private
 
@@ -39,6 +39,14 @@ module Lakeraven
           return true if supervisor?
 
           resource[:modify_appointments] && !kept_out?(resource)
+        end
+
+        # Setting a resource's hours (S-SCH-14): an active resource, and SDZSUP or
+        # the user's modify-schedule right on it in BSDX RESOURCE USER.
+        def can_set_hours?(resource)
+          return false if resource[:inactive]
+
+          supervisor? || resource[:modify_schedule] == true
         end
 
         # Whether the resource's clinic prohibits access and this user is not one

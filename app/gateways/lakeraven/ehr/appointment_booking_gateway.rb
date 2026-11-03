@@ -28,6 +28,9 @@ module Lakeraven
       # VueCentric user booking at the same moment, as stock RPMS does not.
       BOOKING_LOCKS = Array.new(64) { Mutex.new }.freeze
 
+      # The lock a resource's day is booked and its hours replaced under.
+      def self.lock_for(resource, date) = BOOKING_LOCKS[[ resource[:id], date ].hash % BOOKING_LOCKS.size]
+
       def self.resources(via: ::RpmsRpc::Scheduling)
         Array(via.resources)
       end
@@ -115,7 +118,7 @@ module Lakeraven
       # Books if the time still has room, read again under the lock; :full if not.
       def self.book_if_room(booking, resource, via: ::RpmsRpc::Scheduling, setup: ::RpmsRpc::SchedulingSetup)
         date = booking.start_time.to_date
-        BOOKING_LOCKS[[ resource[:id], date ].hash % BOOKING_LOCKS.size].synchronize do
+        lock_for(resource, date).synchronize do
           clinic_day, = day(resource, date, via: via, setup: setup)
           next Result.new(status: :full, appointment_id: nil, message: nil) unless clinic_day.room_for?(booking.start_time, booking.length)
 
