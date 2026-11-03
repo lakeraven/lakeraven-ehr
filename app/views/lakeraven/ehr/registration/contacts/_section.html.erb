@@ -1,0 +1,59 @@
+<%# The patient's emergency contact and next of kin (rpms-ux S-REG-08), a
+    section of the patient's registration page.
+    Locals: dfn, contacts (RpmsRpc::PatientProfile.contacts), can_edit. %>
+<section
+  id="contacts-section"
+  aria-labelledby="contacts-heading"
+  class="card mt-6"
+>
+  <h2 id="contacts-heading">Emergency contact and next of kin</h2>
+  <% Lakeraven::EHR::ContactEntry::KINDS.each do |kind, label| %>
+    <% contact = contacts.fetch(kind.to_sym, {}) %>
+    <div
+      id="contact-<%= kind.dasherize %>"
+      data-contact="<%= kind %>"
+      class="mt-4"
+    >
+      <div class="flex items-baseline justify-between gap-4">
+        <h3 class="font-semibold"><%= label %></h3>
+        <% if can_edit %>
+          <%= link_to "Edit #{label.downcase}",
+                registration_edit_patient_contact_path(dfn, kind),
+                id: "edit-#{kind.dasherize}" %>
+        <% end %>
+      </div>
+      <% if contact[:name].blank? %>
+        <p>
+          None on file.
+        </p>
+      <% else %>
+        <dl class="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-2">
+          <%# E-NAME / K-NAME OF PRIMARY NOK, PATIENT (2) .331 / .211. %>
+          <dt>Name</dt>
+          <dd data-field="name"><%= contact[:name] %></dd>
+          <%# EC / NOK RELATIONSHIP, IHS PATIENT (9000001) 3102 / 2802. %>
+          <dt>Relationship</dt>
+          <dd data-field="relationship"><%= contact.dig(:relationship, :name).to_s.titleize.presence || "Not recorded" %></dd>
+          <%# Address lines, city, state, zip: PATIENT (2) .333-.338 / .213-.218. %>
+          <dt>Address</dt>
+          <dd data-field="address">
+            <% lines = [ contact[:address_line1], contact[:address_line2],
+                         [ contact[:city], contact.dig(:state, :name).to_s.titleize.presence, contact[:zip] ].compact_blank.join(" ").presence ].compact_blank %>
+            <% if lines.empty? %>
+              Not recorded
+            <% else %>
+              <% lines.each do |line| %>
+                <span class="block"><%= line %></span>
+              <% end %>
+            <% end %>
+          </dd>
+          <%# PHONE NUMBER and WORK PHONE NUMBER, PATIENT (2) .339 / .219 and .33011 / .21011. %>
+          <dt>Phone</dt>
+          <dd data-field="phone"><%= contact[:phone].presence || "Not recorded" %></dd>
+          <dt>Work phone</dt>
+          <dd data-field="phone-work"><%= contact[:phone_work].presence || "Not recorded" %></dd>
+        </dl>
+      <% end %>
+    </div>
+  <% end %>
+</section>

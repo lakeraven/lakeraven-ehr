@@ -118,6 +118,13 @@
       <dd data-field="email"><%= @record[:email] || "None on file" %></dd>
     </dl>
   </section>
+
+  <% if @contacts %>
+    <%= render "lakeraven/ehr/registration/contacts/section",
+          dfn: params[:dfn],
+          contacts: @contacts,
+          can_edit: can_edit %>
+  <% end %>
 <% end %>
 
 <p class="mt-6">
