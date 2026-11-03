@@ -1,0 +1,53 @@
+<% page_title "Possible matches", @resource[:name] %>
+
+<%= page_header "The caller may already have a chart",
+      [ "Nothing has been saved.",
+        "RPMS found patients on file with the same name or the same date of birth as #{@registration.name}." ] %>
+
+<% if @candidates.empty? %>
+  <%= alert_box :error,
+        "RPMS found a possible match it could not describe, so it cannot be ruled out here.",
+        "Find the patient by name before registering, or ask the front desk.",
+        id: "unshowable-match" %>
+<% end %>
+
+<table
+  id="possible-matches"
+  class="data-table"
+>
+  <caption class="sr-only">Patients on file who may be <%= @registration.name %></caption>
+  <thead>
+    <tr>
+      <th scope="col">Name</th>
+      <th scope="col">Chart number</th>
+      <th scope="col">Date of birth</th>
+      <th scope="col">Sex</th>
+      <th scope="col"><span class="sr-only">Action</span></th>
+    </tr>
+  </thead>
+  <tbody>
+    <% @candidates.each do |candidate| %>
+      <tr data-dfn="<%= candidate[:dfn] %>">
+        <td><%= candidate[:name] %></td>
+        <td><%= candidate[:mrn].presence || "None at this facility" %></td>
+        <td><%= candidate[:dob]&.strftime("%b %-d, %Y") %></td>
+        <td><%= candidate[:sex] %></td>
+        <td>
+          <%= link_to "Book this patient",
+                booking_path(candidate[:dfn]),
+                data: { book: candidate[:dfn] } %>
+        </td>
+      </tr>
+    <% end %>
+  </tbody>
+</table>
+
+<p class="mt-6">
+  If one of them is the caller, book them instead of registering again.
+  If none is, ask the front desk to register the caller.
+</p>
+
+<p class="mt-4">
+  <%= link_to "Back to booking",
+        scheduling_new_clinic_appointment_path(@resource[:id], start: @start, length: @length) %>
+</p>
