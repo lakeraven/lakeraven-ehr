@@ -170,6 +170,9 @@ Lakeraven::EHR::Engine.routes.draw do
     get "patients/:dfn/appointments", to: "patient_appointments#index", as: :patient_appointments, constraints: { dfn: /\d+/ }
     get "clinics/:resource_id/appointments/new", to: "appointments#new", as: :new_clinic_appointment, constraints: { resource_id: /\d+/ }
     post "clinics/:resource_id/appointments", to: "appointments#create", as: :clinic_appointments, constraints: { resource_id: /\d+/ }
+    # Registering a caller with no chart while booking them (rpms-ux S-REG-05). Posted: the form names the caller (#722).
+    get "clinics/:resource_id/registrations/new", to: "quick_registrations#new", as: :new_clinic_registration, constraints: { resource_id: /\d+/ }
+    post "clinics/:resource_id/registrations", to: "quick_registrations#create", as: :clinic_registrations, constraints: { resource_id: /\d+/ }
     get "clinics/:resource_id/appointments/:appointment_id/cancel", to: "cancellations#new", as: :cancel_clinic_appointment, constraints: { resource_id: /\d+/, appointment_id: /\d+/ }
     post "clinics/:resource_id/appointments/:appointment_id/cancel", to: "cancellations#create", constraints: { resource_id: /\d+/, appointment_id: /\d+/ }
     get "clinics/:resource_id/appointments/:appointment_id/checkin", to: "checkins#new", as: :checkin_clinic_appointment, constraints: { resource_id: /\d+/, appointment_id: /\d+/ }

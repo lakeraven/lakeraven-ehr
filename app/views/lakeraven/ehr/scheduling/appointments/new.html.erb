@@ -5,6 +5,14 @@
 
 <%= flash_alert %>
 
+<% if @quick_registered_hrn.present? %>
+  <%= alert_box :notice,
+        "Registered#{" #{@chosen[:name]}" if @chosen}.",
+        "Chart number #{@quick_registered_hrn}.",
+        "Book them now; the front desk completes the registration when they arrive.",
+        id: "quick-registered" %>
+<% end %>
+
 <%= form_errors @booking,
       "The appointment was not booked.",
       id: "booking-errors" %>
@@ -25,6 +33,18 @@
   <%= submit_tag "Find patient",
         name: nil,
         class: "button-secondary" %>
+<% end %>
+
+<% if params[:q].present? && @patients.empty? && capability?("patient.quick_register") %>
+  <p
+    id="no-patient-found"
+    class="mt-2"
+  >
+    No patient's name starts with that.
+    <%= link_to "Register a caller who has no chart",
+          scheduling_new_clinic_registration_path(@resource[:id], start: @booking.start, length: @booking.length),
+          id: "quick-register-link" %>
+  </p>
 <% end %>
 
 <%= form_with scope: :booking,
@@ -50,7 +70,7 @@
           attribute: :patient_dfn,
           selected: @booking.patient_dfn,
           any_choices: @patients.any?,
-          chosen_text: "Patient chosen.",
+          chosen_text: @chosen ? "Patient chosen: #{@chosen[:name]}, chart number #{@chosen[:mrn].presence || "none"}." : "Patient chosen.",
           empty_text: "Find the patient by name above." %>
   <% end %>
 
