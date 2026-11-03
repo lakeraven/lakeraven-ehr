@@ -8,7 +8,6 @@ module Lakeraven
     class ConsentsController < WebController
       include BrowserSmartAuthentication
       include ClinicianPatientContext
-      include ConsentRequestParameters
 
       CONSENT_RESOURCE = "Consent"
 
@@ -21,6 +20,7 @@ module Lakeraven
 
       def index
         @consents = SignedConsent.signatures_for_patient(@dfn).includes(:consent_template)
+        @revocations_by_signature_id = revocations_for(@consents)
       end
 
       def new
@@ -28,18 +28,10 @@ module Lakeraven
       end
 
       def handover
-        template = ConsentTemplate.current(consent_request_param(:template_key))
-        unless template
-          render plain: "Unknown consent template", status: :not_found
-          return
-        end
+        template = ConsentTemplate.current(params[:template_key])
+        return render plain: "Unknown consent template", status: :not_found unless template
+        return render_lock_refused unless lock_tablet!(template)
 
-        store_consent_kiosk_lock!(
-          dfn: @dfn,
-          template_key: template.key,
-          template_version: template.version,
-          handover_token: SecureRandom.uuid
-        )
         redirect_to consent_kiosk_path
       end
 
@@ -50,7 +42,7 @@ module Lakeraven
           return
         end
 
-        @signed_consent = signature.revoke!(by_duz: current_duz, reason: consent_request_param(:reason))
+        @signed_consent = signature.revoke!(by_duz: current_duz, reason: params[:reason])
         redirect_to patient_consents_path(@dfn)
       rescue SignedConsent::NotRevocable, ActiveRecord::RecordInvalid
         render plain: "This consent was not revoked.", status: :unprocessable_entity
@@ -85,6 +77,25 @@ module Lakeraven
 
       def load_patient
         @dfn = Patient.canonical_dfn(params[:dfn]) || params[:dfn]
+      end
+
+      def lock_tablet!(template)
+        store_consent_kiosk_lock!(
+          dfn: @dfn, template_key: template.key, template_version: template.version,
+          handover_token: SecureRandom.uuid
+        )
+      end
+
+      def render_lock_refused
+        render plain: "The tablet could not be locked to this sign-on, so the handover was refused.",
+               status: :unprocessable_entity
+      end
+
+      def revocations_for(consents)
+        ids = consents.map(&:id)
+        return {} if ids.empty?
+
+        SignedConsent.where(kind: SignedConsent::KIND_REVOCATION, revokes_id: ids).index_by(&:revokes_id)
       end
 
       # Handover is an execute: it changes no consent row, it locks the tablet.

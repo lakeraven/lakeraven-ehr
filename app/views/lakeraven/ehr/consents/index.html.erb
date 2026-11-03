@@ -10,15 +10,32 @@
       <th>Consent</th>
       <th>Version</th>
       <th>Status</th>
+      <th>Signed</th>
+      <th>Witness</th>
+      <th>Revocation</th>
     </tr>
   </thead>
   <tbody>
     <% @consents.each do |row| %>
       <% consent = row.to_consent %>
+      <% revocation = @revocations_by_signature_id[row.id] %>
       <tr>
         <td><%= row.consent_template.title %></td>
         <td><%= row.template_version %></td>
         <td><%= consent.status_display %></td>
+        <td><%= row.signed_at.strftime("%b %-d, %Y") %></td>
+        <td><%= row.witness_duz %></td>
+        <td>
+          <% if revocation %>
+            <%= revocation.revocation_reason %>
+          <% else %>
+                <%= form_with url: patient_consent_revocation_path(@dfn, row), method: :post do %>
+                  <label for="revocation_reason_<%= row.id %>">Reason</label>
+                  <input type="text" name="reason" id="revocation_reason_<%= row.id %>" required>
+                  <button type="submit">Revoke</button>
+                <% end %>
+          <% end %>
+        </td>
       </tr>
     <% end %>
   </tbody>

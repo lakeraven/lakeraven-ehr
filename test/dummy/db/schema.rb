@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_03_000000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_03_153000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -132,6 +132,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_03_000000) do
     t.index [ "accessed_by" ], name: "index_lakeraven_ehr_emergency_accesses_on_accessed_by"
     t.index [ "expires_at" ], name: "index_lakeraven_ehr_emergency_accesses_on_expires_at"
     t.index [ "patient_dfn" ], name: "index_lakeraven_ehr_emergency_accesses_on_patient_dfn"
+  end
+
+  create_table "lakeraven_ehr_kiosk_locks", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "credential_key", null: false
+    t.string "handover_token", null: false
+    t.string "patient_dfn", null: false
+    t.string "template_key", null: false
+    t.integer "template_version", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "credential_key" ], name: "index_lakeraven_ehr_kiosk_locks_credential_key", unique: true
+    t.index [ "handover_token" ], name: "index_lakeraven_ehr_kiosk_locks_handover_token", unique: true
   end
 
   create_table "lakeraven_ehr_launch_contexts", force: :cascade do |t|
@@ -261,8 +273,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_03_000000) do
 
   create_table "lakeraven_ehr_treatment_plan_progress_reviews", force: :cascade do |t|
     t.datetime "created_at", null: false
-    t.date "reviewed_on", null: false
     t.string "reviewed_by_duz", null: false
+    t.date "reviewed_on", null: false
     t.bigint "treatment_plan_id", null: false
     t.datetime "updated_at", null: false
     t.index [ "treatment_plan_id" ], name: "index_ehr_tp_progress_reviews_on_plan"
@@ -333,6 +345,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_03_000000) do
 
   add_foreign_key "lakeraven_ehr_reconciliation_items", "lakeraven_ehr_reconciliation_sessions", column: "reconciliation_session_id"
   add_foreign_key "lakeraven_ehr_signed_consents", "lakeraven_ehr_consent_templates", column: "consent_template_id"
+  add_foreign_key "lakeraven_ehr_signed_consents", "lakeraven_ehr_signed_consents", column: "revokes_id", name: "fk_lakeraven_ehr_signed_consents_revokes_id"
   add_foreign_key "lakeraven_ehr_treatment_plan_concurrences", "lakeraven_ehr_treatment_plans", column: "treatment_plan_id"
   add_foreign_key "lakeraven_ehr_treatment_plan_progress_reviews", "lakeraven_ehr_treatment_plans", column: "treatment_plan_id"
   add_foreign_key "oauth_access_grants", "oauth_applications", column: "application_id"

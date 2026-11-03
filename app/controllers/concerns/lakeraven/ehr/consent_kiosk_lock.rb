@@ -5,6 +5,12 @@ module Lakeraven
     # While a tablet handover is open, every other session page redirects to
     # the kiosk before it renders. The check lives on the browser bases so a
     # page added later is covered without its own before_action.
+    #
+    # The cookie is only a hint. The lock row is keyed by the Doorkeeper
+    # access token id behind session[:smart_token], which every copy of that
+    # session cookie shares. Include this concern BEFORE AuditableClinicalAccess
+    # so the audit wrapper is prepended afterwards and stays outside this
+    # redirect; a denial noted here is then recorded, with the staff DUZ.
     module ConsentKioskLock
       extend ActiveSupport::Concern
 
@@ -23,39 +29,159 @@ module Lakeraven
       end
 
       def consent_kiosk_lock
-        raw = session[SESSION_KEY]
-        return {} unless raw.is_a?(Hash)
+        record = active_kiosk_lock
+        return {} unless record
 
+        lock_payload(record)
+      end
+
+      def lock_payload(record)
         {
-          "dfn" => (raw["dfn"] || raw[:dfn]).to_s.presence,
-          "template_key" => (raw["template_key"] || raw[:template_key]).to_s.presence,
-          "template_version" => (raw["template_version"] || raw[:template_version]).to_i,
-          "handover_token" => (raw["handover_token"] || raw[:handover_token]).to_s.presence
+          "dfn" => record.patient_dfn.to_s.presence,
+          "template_key" => record.template_key.to_s.presence,
+          "template_version" => record.template_version.to_i,
+          "handover_token" => record.handover_token.to_s.presence
         }
-      rescue StandardError
-        {}
+      end
+
+      def active_kiosk_lock
+        return @active_kiosk_lock if defined?(@active_kiosk_lock)
+
+        @active_kiosk_lock = load_active_kiosk_lock
+      end
+
+      def load_active_kiosk_lock
+        key = kiosk_lock_credential_key
+        return nil if key.blank? || @kiosk_lock_unreadable
+
+        KioskLock.find_by(credential_key: key)
+      rescue StandardError => error
+        Rails.logger.error("[consent-kiosk] lock could not be read: #{error.class}")
+        @kiosk_lock_unreadable = true
+        nil
+      end
+
+      def kiosk_lock_unreadable?
+        active_kiosk_lock
+        @kiosk_lock_unreadable == true
       end
 
       def store_consent_kiosk_lock!(dfn:, template_key:, template_version:, handover_token:)
+        key = kiosk_lock_credential_key
+        return false if key.blank?
+
+        save_kiosk_lock!(key, dfn, template_key, template_version, handover_token)
+        remember_kiosk_lock_hint!(dfn, template_key, template_version, handover_token)
+        true
+      rescue ActiveRecord::ActiveRecordError => error
+        Rails.logger.error("[consent-kiosk] lock was not stored: #{error.class}")
+        false
+      end
+
+      def save_kiosk_lock!(key, dfn, template_key, template_version, handover_token)
+        record = KioskLock.find_or_initialize_by(credential_key: key)
+        record.update!(
+          patient_dfn: dfn.to_s, template_key: template_key.to_s,
+          template_version: template_version.to_i, handover_token: handover_token.to_s
+        )
+        reset_kiosk_lock_memo!
+      end
+
+      def remember_kiosk_lock_hint!(dfn, template_key, template_version, handover_token)
         session[SESSION_KEY] = {
-          "dfn" => dfn.to_s,
-          "template_key" => template_key.to_s,
-          "template_version" => template_version.to_i,
-          "handover_token" => handover_token.to_s
+          "dfn" => dfn.to_s, "template_key" => template_key.to_s,
+          "template_version" => template_version.to_i, "handover_token" => handover_token.to_s
         }
       end
 
       def clear_consent_kiosk_lock!
+        released = release_consent_kiosk_lock!
         session.delete(SESSION_KEY)
+        released
+      end
+
+      # True when there was nothing to release, or the row is gone. False when
+      # the delete failed: the caller stays locked and says why.
+      def release_consent_kiosk_lock!
+        key = kiosk_lock_credential_key
+        return true if key.blank?
+
+        KioskLock.where(credential_key: key).delete_all
+        reset_kiosk_lock_memo!
+        true
+      rescue StandardError => error
+        Rails.logger.error("[consent-kiosk] lock could not be released: #{error.class}")
+        false
+      end
+
+      def reset_kiosk_lock_memo!
+        remove_instance_variable(:@active_kiosk_lock) if defined?(@active_kiosk_lock)
+      end
+
+      def kiosk_lock_credential_key
+        token = session_access_token
+        return nil if token.nil? || @kiosk_lock_unreadable
+
+        "doorkeeper-access-token-#{token.id}"
+      end
+
+      def session_access_token
+        return @session_access_token if defined?(@session_access_token)
+
+        @session_access_token = load_session_access_token
+      end
+
+      def load_session_access_token
+        raw = session_token_raw
+        return nil if raw.blank?
+
+        Doorkeeper::AccessToken.by_token(raw)
+      rescue StandardError => error
+        Rails.logger.error("[consent-kiosk] session credential could not be read: #{error.class}")
+        @kiosk_lock_unreadable = true
+        nil
+      end
+
+      def session_token_raw
+        session[:smart_token].presence
+      rescue StandardError
+        nil
       end
 
       def redirect_when_consent_kiosk_locked
+        return refuse_unreadable_kiosk_lock if kiosk_lock_unreadable?
         return unless consent_kiosk_locked?
-        # The patient still holds the tablet after signing. Only the kiosk
-        # itself and the staff unlock may render until the lock is cleared.
         return if consent_kiosk_request?
 
+        response.headers["Cache-Control"] = "no-store"
+        note_lock_denial!
         redirect_to consent_kiosk_path
+      end
+
+      def refuse_unreadable_kiosk_lock
+        response.headers["Cache-Control"] = "no-store"
+        note_audit_denial("consent kiosk lock could not be read; page refused") if respond_to?(:note_audit_denial, true)
+        render plain: "The consent lock could not be read, so this page was refused.", status: :service_unavailable
+      end
+
+      def note_lock_denial!
+        bind_session_token_for_audit!
+        return unless respond_to?(:note_audit_denial, true)
+
+        note_audit_denial("consent kiosk lock refused this page")
+      end
+
+      # ChartsController is not a session-authenticated surface, so the audit
+      # names a human only from the browser token. WebController already has
+      # session[:duz]; binding a token there would hide that DUZ on a mismatch.
+      def bind_session_token_for_audit!
+        return if respond_to?(:session_authenticated_surface?, true) && session_authenticated_surface?
+        return unless respond_to?(:current_token, true) && current_token.nil?
+
+        token = session_access_token
+        return unless token && respond_to?(:browser_sso_token?, true) && browser_sso_token?(token)
+
+        @current_token = token
       end
 
       def consent_kiosk_request?

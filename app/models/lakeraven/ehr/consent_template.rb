@@ -37,6 +37,8 @@ module Lakeraven
         }
       ].freeze
 
+      include ImmutablePersistedRow
+
       validates :key, presence: true
       validates :version, presence: true, uniqueness: { scope: :key }
       validates :title, :body, presence: true

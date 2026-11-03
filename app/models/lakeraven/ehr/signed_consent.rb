@@ -17,11 +17,14 @@ module Lakeraven
       KIND_SIGNATURE = "signature"
       KIND_REVOCATION = "revocation"
       KINDS = [ KIND_SIGNATURE, KIND_REVOCATION ].freeze
-      PNG_MAGIC = "\x89PNG\r\n\x1A\n".b.freeze
+      PNG_MAGIC = SignaturePng::MAGIC
       MAX_SIGNATURE_BYTES = 500.kilobytes
       DATA_URL = %r{\Adata:image/png;base64,([A-Za-z0-9+/]+=*)\z}
 
+      include ImmutablePersistedRow
+
       belongs_to :consent_template, class_name: "Lakeraven::EHR::ConsentTemplate"
+      validate :revocation_names_a_consent, if: -> { kind == KIND_REVOCATION }
 
       validates :patient_dfn, :template_key, :template_body_digest, :signed_at, :recorded_by_duz, presence: true
       validates :template_version, presence: true, numericality: { only_integer: true }
@@ -41,8 +44,17 @@ module Lakeraven
       end
 
       # The canvas posts a PNG data URL. Stored bytes are the PNG itself.
-      # Blank, non-PNG, and oversize payloads are refused before a row exists.
+      # Blank, non-PNG, undecodable, inkless, and oversize payloads are refused
+      # before a row exists.
       def self.decode_signature_data_url(value)
+        bytes = decode_data_url_bytes(value)
+        return nil unless bytes
+        return nil unless SignaturePng.acceptable?(bytes)
+
+        bytes
+      end
+
+      def self.decode_data_url_bytes(value)
         text = value.to_s
         return nil if text.blank?
         return nil if text.bytesize > (MAX_SIGNATURE_BYTES * 4 / 3) + 64
@@ -52,24 +64,39 @@ module Lakeraven
 
         bytes = Base64.strict_decode64(encoded).b
         return nil if bytes.bytesize > MAX_SIGNATURE_BYTES
-        return nil unless bytes.start_with?(PNG_MAGIC)
 
         bytes
       rescue ArgumentError
         nil
       end
+      private_class_method :decode_data_url_bytes
 
       def self.record_signature!(attributes)
         token = attributes[:handover_token].presence
-        existing = find_by(handover_token: token) if token
-        return existing if existing
+        found = existing_for_handover(token)
+        return found if found
 
-        without_statement_log { create!(attributes) }
-      rescue ActiveRecord::RecordNotUnique
-        raise if token.blank?
+        without_statement_log { insert_signature!(attributes) }
+      rescue ActiveRecord::RecordNotUnique, ActiveRecord::RecordInvalid
+        recovered = existing_for_handover(token)
+        raise if recovered.nil?
 
-        find_by!(handover_token: token)
+        recovered
       end
+
+      def self.existing_for_handover(token)
+        return nil if token.blank?
+
+        find_by(handover_token: token)
+      end
+      private_class_method :existing_for_handover
+
+      # The unique handover index is the race. A savepoint keeps that violation
+      # from aborting the audit transaction around the request.
+      def self.insert_signature!(attributes)
+        transaction(requires_new: true) { create!(attributes) }
+      end
+      private_class_method :insert_signature!
 
       # Statement text would contain the PNG and the typed name.
       def self.without_statement_log
@@ -93,23 +120,9 @@ module Lakeraven
 
       def revoke!(by_duz:, reason:)
         raise NotRevocable, "only a signature can be revoked" unless kind == KIND_SIGNATURE
-        raise NotRevocable, "already revoked" if self.class.exists?(kind: KIND_REVOCATION, revokes_id: id)
+        raise NotRevocable, "already revoked" if revocation_recorded?
 
-        self.class.without_statement_log do
-          self.class.create!(
-            patient_dfn: patient_dfn,
-            consent_template: consent_template,
-            template_key: template_key,
-            template_version: template_version,
-            template_body_digest: template_body_digest,
-            signed_at: Time.current,
-            witness_duz: by_duz.to_s,
-            kind: KIND_REVOCATION,
-            recorded_by_duz: by_duz.to_s,
-            revokes_id: id,
-            revocation_reason: reason.to_s
-          )
-        end
+        insert_revocation!(by_duz, reason)
       rescue ActiveRecord::RecordNotUnique
         raise NotRevocable, "already revoked"
       end
@@ -133,6 +146,29 @@ module Lakeraven
       end
 
       private
+
+      def revocation_recorded?
+        self.class.exists?(kind: KIND_REVOCATION, revokes_id: id)
+      end
+
+      # Same savepoint as a signature insert: the loser of a double revoke
+      # must still be able to write its audit row.
+      def insert_revocation!(by_duz, reason)
+        attrs = revocation_attributes(by_duz, reason)
+        self.class.without_statement_log do
+          self.class.transaction(requires_new: true) { self.class.create!(attrs) }
+        end
+      end
+
+      def revocation_attributes(by_duz, reason)
+        {
+          patient_dfn: patient_dfn, consent_template: consent_template,
+          template_key: template_key, template_version: template_version,
+          template_body_digest: template_body_digest, signed_at: Time.current,
+          witness_duz: by_duz.to_s, kind: KIND_REVOCATION, recorded_by_duz: by_duz.to_s,
+          revokes_id: id, revocation_reason: reason.to_s
+        }
+      end
 
       def snapshot_matches_template
         return if consent_template.nil?
@@ -171,8 +207,22 @@ module Lakeraven
           errors.add(:signature_png, "must be a PNG")
           return
         end
-        errors.add(:signature_png, "must be a PNG") unless bytes.start_with?(PNG_MAGIC)
-        errors.add(:signature_png, "is larger than 500 KB") if bytes.bytesize > MAX_SIGNATURE_BYTES
+        if bytes.bytesize > MAX_SIGNATURE_BYTES
+          errors.add(:signature_png, "is larger than 500 KB")
+          return
+        end
+        return if SignaturePng.acceptable?(bytes)
+
+        errors.add(:signature_png, "must be a PNG with ink")
+      end
+
+      # `exists?` is not used: a revocation race stubs that query. `pick` still
+      # sees whether the named row was stored. The foreign key is the backstop.
+      def revocation_names_a_consent
+        return if revokes_id.blank?
+        return if self.class.where(id: revokes_id).pick(:id)
+
+        errors.add(:revokes_id, "must reference an existing consent")
       end
     end
   end

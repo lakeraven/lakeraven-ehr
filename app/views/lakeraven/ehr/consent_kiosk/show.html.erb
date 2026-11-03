@@ -1,6 +1,8 @@
 <% content_for :title, @template&.title || "Consent" %>
 
-<% if @identity_unavailable %>
+<% if @template.nil? %>
+  <p role="alert">The consent template for this handover could not be read. Nothing was signed.</p>
+<% elsif @identity_unavailable %>
   <p>The patient's name and date of birth could not be read, so this consent cannot be signed.</p>
 <% else %>
   <h1><%= @template.title %></h1>
@@ -34,6 +36,7 @@
       if (!canvas || !field || !canvas.getContext) return;
       var context = canvas.getContext("2d");
       var drawing = false;
+      var inked = false;
 
       function point(event) {
         var rect = canvas.getBoundingClientRect();
@@ -57,6 +60,7 @@
         var at = point(event);
         context.lineTo(at.x, at.y);
         context.stroke();
+        inked = true;
         field.value = canvas.toDataURL("image/png");
         event.preventDefault();
       }
@@ -64,7 +68,7 @@
       function stop(event) {
         if (!drawing) return;
         drawing = false;
-        field.value = canvas.toDataURL("image/png");
+        if (inked) field.value = canvas.toDataURL("image/png");
         event.preventDefault();
       }
 
@@ -72,12 +76,6 @@
       canvas.addEventListener("pointermove", move);
       canvas.addEventListener("pointerup", stop);
       canvas.addEventListener("pointercancel", stop);
-      var form = field.form;
-      if (form) {
-        form.addEventListener("submit", function () {
-          if (!field.value) field.value = canvas.toDataURL("image/png");
-        });
-      }
     })();
   </script>
 <% end %>

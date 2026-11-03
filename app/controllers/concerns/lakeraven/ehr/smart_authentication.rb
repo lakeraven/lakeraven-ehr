@@ -361,6 +361,7 @@ module Lakeraven
       # equivalent — sign-out, idle expiry, a failed sign-on, a broker outage,
       # and a DIFFERENT human signing in at the same workstation.
       def revoke_session_smart_token!
+        release_consent_kiosk_lock! if respond_to?(:release_consent_kiosk_lock!, true)
         raw = session[:smart_token].presence
         if raw
           token = Doorkeeper::AccessToken.by_token(raw)

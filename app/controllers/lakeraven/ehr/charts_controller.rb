@@ -54,6 +54,7 @@ module Lakeraven
       # enforce_patient_context! (token compartment, not the session gate);
       # a GET still must not open a context.
       include ClinicianPatientContext
+      include PhiPageCache
 
       FHIR_CONTENT_TYPE = "application/fhir+json"
 

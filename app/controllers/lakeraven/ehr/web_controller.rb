@@ -9,12 +9,15 @@ module Lakeraven
       # covered on the day it is written, not on the day someone notices.
       # Pages that touch no patient data and name no user (the sign-in form)
       # need no row and are not refused one; see `audit_settled?`.
+      # Lock before the audit wrapper, so a locked redirect is inside the
+      # wrapper and the denial is recorded (#793). PhiPageCache is last so
+      # its no-store header is prepended outside that wrapper and survives
+      # a halted before_action.
+      include ConsentKioskLock
       include AuditableClinicalAccess
       include PatientBannerRendering
       include RpmsUserScope
-      # While a tablet handover is open, every other page on this base
-      # redirects to the kiosk before it renders (#793).
-      include ConsentKioskLock
+      include PhiPageCache
 
       helper ApplicationHelper
       layout "lakeraven/ehr/application"
@@ -126,6 +129,7 @@ module Lakeraven
       # sign-out, idle expiry, a failed sign-on, a broker outage, and a
       # different human signing in at this workstation.
       def terminate_session!
+        release_consent_kiosk_lock! if respond_to?(:release_consent_kiosk_lock!, true)
         revoke_session_token!
         RpmsSessions.release(session[:rpms_pool_key]) if RpmsSessions.enabled?
         reset_session
