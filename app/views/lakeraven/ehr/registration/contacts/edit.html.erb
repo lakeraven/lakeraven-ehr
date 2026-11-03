@@ -1,0 +1,106 @@
+<% label = Lakeraven::EHR::ContactEntry::KINDS[@kind] %>
+<% page_title label, @patient[:name], "Registration" %>
+
+<%= page_header label,
+      [ @patient[:name],
+        "A new name clears the old contact's address and phones. Enter the new person's." ] %>
+
+<%= flash_alert id: "contact-alert" %>
+
+<%= form_errors @contact,
+      "The #{label.downcase} was not saved.",
+      id: "contact-errors" %>
+
+<%= form_with scope: :contact,
+      url: registration_patient_contact_path(@dfn, @kind),
+      method: :post,
+      local: true,
+      id: "contact-form",
+      class: "card flex flex-col gap-4" do |f| %>
+  <%# E-NAME / K-NAME OF PRIMARY NOK, PATIENT (2) .331 / .211. %>
+  <%= form_field :name, "Name (LAST,FIRST MIDDLE)", form: f,
+        hint: "Leave every field empty to remove the #{label.downcase}.",
+        error: @contact.errors[:name].first do |aria| %>
+    <%= f.text_field :name,
+          value: @contact.name,
+          autocomplete: "off",
+          aria: aria %>
+  <% end %>
+
+  <%# EC / NOK RELATIONSHIP, PATIENT (9000001) 3102 / 2802, a RELATIONSHIP (9999999.36). %>
+  <%= f.hidden_field :relationship_name, value: @contact.relationship_name %>
+  <%= lookup_field f,
+        :relationship_ien,
+        legend: "Relationship to the patient (optional)",
+        search: :relationship_search,
+        search_label: "Relationship starts with",
+        find_label: "Find relationship",
+        find_url: registration_edit_patient_contact_path(@dfn, @kind),
+        choices: @relationships.map { |row| [ row[:ien], row[:name].titleize, { relationship: row[:ien] } ] },
+        selected: @contact.relationship_ien,
+        chosen_text: ("Relationship: #{@contact.relationship_name.to_s.titleize}." if @contact.relationship_name.present?),
+        error: @contact.errors[:relationship_ien].first %>
+
+  <%= form_field :address_line1, "Street address (optional)", form: f do |aria| %>
+    <%= f.text_field :address_line1,
+          value: @contact.address_line1,
+          autocomplete: "off",
+          aria: aria %>
+  <% end %>
+
+  <%= form_field :address_line2, "Address line 2 (optional)", form: f do |aria| %>
+    <%= f.text_field :address_line2,
+          value: @contact.address_line2,
+          autocomplete: "off",
+          aria: aria %>
+  <% end %>
+
+  <%= form_field :city, "City (optional)", form: f do |aria| %>
+    <%= f.text_field :city,
+          value: @contact.city,
+          autocomplete: "off",
+          aria: aria %>
+  <% end %>
+
+  <%# E-STATE / K-STATE, PATIENT (2) .337 / .217, a STATE (5). %>
+  <%= f.hidden_field :state_name, value: @contact.state_name %>
+  <%= lookup_field f,
+        :state_ien,
+        legend: "State (optional)",
+        search: :state_search,
+        search_label: "State starts with",
+        find_label: "Find state",
+        find_url: registration_edit_patient_contact_path(@dfn, @kind),
+        choices: @states.map { |row| [ row[:ien], row[:name].titleize, { state: row[:ien] } ] },
+        selected: @contact.state_ien,
+        chosen_text: ("State: #{@contact.state_name.to_s.titleize}." if @contact.state_name.present?) %>
+
+  <%= form_field :zip, "Zip code (optional)", form: f, error: @contact.errors[:zip].first do |aria| %>
+    <%= f.text_field :zip,
+          value: @contact.zip,
+          inputmode: "numeric",
+          autocomplete: "off",
+          aria: aria %>
+  <% end %>
+
+  <%= form_field :phone, "Phone (optional)", form: f, error: @contact.errors[:phone].first do |aria| %>
+    <%= f.telephone_field :phone,
+          value: @contact.phone,
+          autocomplete: "off",
+          aria: aria %>
+  <% end %>
+
+  <%= form_field :phone_work, "Work phone (optional)", form: f, error: @contact.errors[:phone_work].first do |aria| %>
+    <%= f.telephone_field :phone_work,
+          value: @contact.phone_work,
+          autocomplete: "off",
+          aria: aria %>
+  <% end %>
+
+  <%= f.submit "Save the #{label.downcase}",
+        class: "button-primary self-start" %>
+<% end %>
+
+<p class="mt-6">
+  <%= link_to "Back to contacts", registration_patient_contacts_path(@dfn) %>
+</p>

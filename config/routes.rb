@@ -137,6 +137,14 @@ Lakeraven::EHR::Engine.routes.draw do
     post "patients", to: "patients#create"
     post "patients/confirm", to: "patients#confirm", as: :confirm_patient
     get "patients/:dfn", to: "patients#show", as: :patient, constraints: { dfn: /\d+/ }
+    # Sections of a patient's registration (S-REG-08). A look-up posts the form
+    # back to edit, so what the clerk typed never rides in a URL (#722).
+    scope "patients/:dfn", constraints: { dfn: /\d+/ } do
+      get "contacts", to: "contacts#show", as: :patient_contacts
+      get "contacts/:kind/edit", to: "contacts#edit", as: :edit_patient_contact
+      post "contacts/:kind/edit", to: "contacts#edit"
+      post "contacts/:kind", to: "contacts#update", as: :patient_contact
+    end
   end
 
   # Scheduling (rpms-ux W02): a clinic resource's day, booking into it (S-SCH-01)

@@ -18,6 +18,17 @@
         checks: @checks %>
 <% end %>
 
+<%# Sections of the registration, each its own page until the record page holds them (S-REG-20/21). %>
+<nav
+  aria-label="Parts of the registration"
+  id="registration-sections"
+  class="mt-6"
+>
+  <ul class="flex gap-4">
+    <li><%= link_to "Contacts", registration_patient_contacts_path(params[:dfn]) %></li>
+  </ul>
+</nav>
+
 <p class="mt-6">
   <% if capability?("scheduling.open") %>
     <%= link_to "Appointments",

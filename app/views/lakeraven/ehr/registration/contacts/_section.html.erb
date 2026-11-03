@@ -1,0 +1,56 @@
+<%# The patient's emergency contact and next of kin (rpms-ux S-REG-08).
+    Locals: dfn, contacts (RpmsRpc::PatientProfile.contacts), can_edit.
+    A patient record page can render this as it is. %>
+<section
+  id="contacts-section"
+  aria-labelledby="contacts-heading"
+  class="flex flex-col gap-4"
+>
+  <h2
+    id="contacts-heading"
+    class="text-lg font-semibold"
+  >
+    Contacts
+  </h2>
+  <% Lakeraven::EHR::ContactEntry::KINDS.each do |kind, label| %>
+    <% contact = contacts.fetch(kind.to_sym, {}) %>
+    <div
+      id="contact-<%= kind.dasherize %>"
+      data-contact="<%= kind %>"
+      class="card"
+    >
+      <h3 class="font-semibold"><%= label %></h3>
+      <% if contact[:name].blank? %>
+        <p>
+          None on file.
+        </p>
+      <% else %>
+        <dl>
+          <%# E-NAME / K-NAME OF PRIMARY NOK, PATIENT (2) .331 / .211. %>
+          <dt>Name</dt>
+          <dd data-field="name"><%= contact[:name] %></dd>
+          <%# EC / NOK RELATIONSHIP, PATIENT (9000001) 3102 / 2802. %>
+          <dt>Relationship</dt>
+          <dd data-field="relationship"><%= contact.dig(:relationship, :name).to_s.titleize.presence || "Not recorded" %></dd>
+          <dt>Address</dt>
+          <dd data-field="address">
+            <%= safe_join([ contact[:address_line1], contact[:address_line2],
+                            [ contact[:city], contact.dig(:state, :name).to_s.titleize.presence, contact[:zip] ].compact_blank.join(" ") ].compact_blank,
+                          tag.br).presence || "Not recorded" %>
+          </dd>
+          <dt>Phone</dt>
+          <dd data-field="phone"><%= contact[:phone].presence || "Not recorded" %></dd>
+          <dt>Work phone</dt>
+          <dd data-field="phone-work"><%= contact[:phone_work].presence || "Not recorded" %></dd>
+        </dl>
+      <% end %>
+      <% if can_edit %>
+        <p>
+          <%= link_to "Change the #{label.downcase}",
+                registration_edit_patient_contact_path(dfn, kind),
+                id: "edit-#{kind.dasherize}" %>
+        </p>
+      <% end %>
+    </div>
+  <% end %>
+</section>

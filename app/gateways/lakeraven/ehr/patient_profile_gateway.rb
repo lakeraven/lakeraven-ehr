@@ -1,0 +1,97 @@
+# frozen_string_literal: true
+
+require "rpms_rpc/api/patient_profile"
+
+module Lakeraven
+  module EHR
+    # The parts of a registration beside the demographics: the emergency
+    # contact and next of kin (rpms-ux S-REG-08), the languages (S-REG-10) and
+    # the other names (S-REG-12). Everything goes through RpmsRpc::PatientProfile,
+    # which reads and files through AG's own windows and runs AG's own field
+    # checks (AGG WINDOW DATA VALIDATION) before it files.
+    #
+    # Reads raise the gem's errors (RpmsUnavailableRendering answers them).
+    # Writes answer a Result: an error mid-call is :unknown, because the write
+    # may already have filed.
+    class PatientProfileGateway
+      Result = Data.define(:status, :field, :message) do
+        def saved? = status == :saved
+        def unknown? = status == :unknown
+        def partial? = status == :partial
+      end
+
+      LOOKUP_LIMIT = 25
+
+      class << self
+        def contacts(dfn, via: ::RpmsRpc::PatientProfile)
+          via.contacts(dfn.to_i) || raise(::RpmsRpc::Client::ConnectionError, "no reply to the contacts read")
+        end
+
+        # changes: only the fields the clerk changed (see ContactEntry#changes_from).
+        def update_contact(dfn, kind, changes, via: ::RpmsRpc::PatientProfile)
+          result_for(via.update_contact(dfn.to_i, kind.to_sym, **changes))
+        rescue ::RpmsRpc::Error, IOError, SystemCallError => e
+          unknown(e)
+        end
+
+        def languages(dfn, via: ::RpmsRpc::PatientProfile)
+          via.languages(dfn.to_i) || raise(::RpmsRpc::Client::ConnectionError, "no reply to the languages read")
+        end
+
+        def record_languages(dfn, entry, via: ::RpmsRpc::PatientProfile)
+          result_for(via.record_languages(dfn.to_i, **entry.record_attrs))
+        rescue ::RpmsRpc::Error, IOError, SystemCallError => e
+          unknown(e)
+        end
+
+        def aliases(dfn, via: ::RpmsRpc::PatientProfile)
+          via.aliases(dfn.to_i) || raise(::RpmsRpc::Client::ConnectionError, "no reply to the other names read")
+        end
+
+        def add_alias(dfn, name, via: ::RpmsRpc::PatientProfile)
+          result_for(via.add_alias(dfn.to_i, name))
+        rescue ::RpmsRpc::Error, IOError, SystemCallError => e
+          unknown(e)
+        end
+
+        def remove_alias(dfn, ien, via: ::RpmsRpc::PatientProfile)
+          result_for(via.remove_alias(dfn.to_i, ien.to_i))
+        rescue ::RpmsRpc::Error, IOError, SystemCallError => e
+          unknown(e)
+        end
+
+        # Look-ups by the start of a name: relationships, states and languages.
+        def relationships(text, via: ::RpmsRpc::PatientProfile) = lookup(text) { |t| via.relationships(t) }
+        def states(text, via: ::RpmsRpc::PatientProfile) = lookup(text) { |t| via.states(t) }
+        def language_lookup(text, via: ::RpmsRpc::PatientProfile) = lookup(text) { |t| via.language_lookup(t) }
+
+        # LANGUAGE (#9999999.99) ENGLISH, which the language rules turn on.
+        def english_ien(via: ::RpmsRpc::PatientProfile)
+          Array(via.language_lookup("ENGLISH")).find { |row| row[:name] == "ENGLISH" }&.dig(:ien)
+        end
+
+        private
+
+        def lookup(text)
+          text = text.to_s.strip
+          return [] if text.empty?
+
+          Array(yield(text)).first(LOOKUP_LIMIT)
+        end
+
+        def result_for(reply)
+          return Result.new(status: :unknown, field: nil, message: nil) if reply.nil?
+          return Result.new(status: :saved, field: nil, message: nil) if reply[:success]
+
+          status = reply[:error] == :partial ? :partial : :refused
+          Result.new(status: status, field: reply[:field], message: reply[:message].to_s)
+        end
+
+        def unknown(error)
+          Rails.logger.error("[registration] profile write raised #{error.class}; the outcome is unknown")
+          Result.new(status: :unknown, field: nil, message: nil)
+        end
+      end
+    end
+  end
+end

@@ -1,0 +1,21 @@
+<% page_title "Contacts", @patient[:name], "Registration" %>
+
+<%= page_header @patient[:name],
+      "Emergency contact and next of kin." %>
+
+<%= flash_alert id: "contacts-alert" %>
+
+<% if flash[:notice].present? %>
+  <%= alert_box :notice, flash[:notice], id: "contacts-notice" %>
+<% end %>
+
+<%= patient_summary @patient, id: "registration" %>
+
+<%= render "lakeraven/ehr/registration/contacts/section",
+      dfn: @dfn,
+      contacts: @contacts,
+      can_edit: capability?("patient.register") %>
+
+<p class="mt-6">
+  <%= link_to "Back to the registration", registration_patient_path(@dfn) %>
+</p>
