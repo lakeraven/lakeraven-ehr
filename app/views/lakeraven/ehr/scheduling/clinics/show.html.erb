@@ -87,6 +87,7 @@
                   appointment: appointment,
                   resource: @resource,
                   date: @date %>
+            <%= render "closed_actions", resource: @resource, appointment: appointment, date: @date, status_key: status_key %>
           </td>
         </tr>
       <% end %>

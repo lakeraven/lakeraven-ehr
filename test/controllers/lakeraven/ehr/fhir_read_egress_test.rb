@@ -106,6 +106,8 @@ module Lakeraven
         "lakeraven/ehr/scheduling/walk_ins#new",         # Walk-in form: no patient until searched
         "lakeraven/ehr/scheduling/walk_ins#find",        # Walk-in searches: patient name, HRN, date of birth, provider names, no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/scheduling/walk_ins#create",      # Walk-in entry, not disclosure
+        "lakeraven/ehr/scheduling/appointment_details#new",    # Details form: patient name, time, note or remarks, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/scheduling/appointment_details#create", # Details entry, not disclosure
         "lakeraven/ehr/scheduling/checkins#undo",        # Undo check-in entry, not disclosure
         "lakeraven/ehr/scheduling/checkouts#new",        # Check-out form: patient name and times, no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/scheduling/checkouts#create",     # Check-out entry, not disclosure

@@ -214,7 +214,7 @@ class SchedulingVisitDayTest < ActionDispatch::IntegrationTest
     end
 
     actions = ->(id) { css_select("tr[data-appointment='#{id}'] [data-actions] a, tr[data-appointment='#{id}'] [data-actions] button").map { |e| e.text.strip } }
-    assert_equal [ "Check in", "No-show", "Cancel", "Move" ], actions.(1)
+    assert_equal [ "Check in", "No-show", "Cancel", "Move", "Change details" ], actions.(1)
     assert_equal [ "Check out", "Undo check-in" ], actions.(2)
     assert_equal [ "Undo check-out" ], actions.(3)
     assert_equal [ "Undo no-show" ], actions.(4)
