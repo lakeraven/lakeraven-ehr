@@ -142,6 +142,11 @@
 <% end %>
 
 <p class="mt-6">
+  <% if capability?("patient.register") %>
+    <%= link_to "Tribe and eligibility",
+          registration_edit_patient_eligibility_path(params[:dfn]),
+          id: "edit-eligibility" %>
+  <% end %>
   <%= link_to "Coverage",
         registration_patient_coverage_path(params[:dfn]),
         id: "patient-coverage-link" %>

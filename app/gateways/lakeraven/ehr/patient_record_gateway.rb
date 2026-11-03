@@ -2,6 +2,7 @@
 
 require "rpms_rpc/api/patient"
 require "rpms_rpc/api/registration"
+require "rpms_rpc/api/ddr_fileman"
 
 module Lakeraven
   module EHR
@@ -32,6 +33,18 @@ module Lakeraven
       # The choices for a pointer field, by name. Empty when RPMS lists nothing.
       def self.choices(attribute, via: ::RpmsRpc::Registration)
         Array(via.pick_list(attribute)).filter_map { |e| [ e[:name], e[:ien].to_s ] if e[:name].present? }
+      end
+
+      # CLASSIFICATION/BENEFICIARY (#9999999.25) entries, as [name, ien]
+      # choices (#9000001 1111 points there). Empty when RPMS lists nothing.
+      def self.classifications(via: ::RpmsRpc::DdrFileman)
+        listing = via.lister(file: "9999999.25", fields: "@;.01", flags: "IP", xref: "B", max: "100")
+        return [] if listing.nil? || listing[:error]
+
+        listing[:entries].filter_map do |entry|
+          name = Array(entry[:pieces]).first
+          [ name, entry[:ien].to_s ] if name.present?
+        end
       end
 
       # attrs: the RpmsRpc::Registration.update attributes to change.
