@@ -43,6 +43,43 @@ module Lakeraven
         refute SignedConsent.new(valid_attrs.merge(signature_png: "not-a-png")).valid?
       end
 
+      test "signature rejects PNG magic bytes only transparent blank and corrupt payloads" do
+        refute SignedConsent.new(valid_attrs.merge(signature_png: magic_bytes_only_png)).valid?
+        refute SignedConsent.new(valid_attrs.merge(signature_png: fully_transparent_signature_png)).valid?
+        refute SignedConsent.new(valid_attrs.merge(signature_png: corrupt_truncated_png)).valid?
+      end
+
+      test "signature accepts a PNG with at least one opaque pixel" do
+        row = SignedConsent.new(valid_attrs.merge(signature_png: TINY_PNG))
+        assert row.valid?, row.errors.full_messages.to_sentence
+      end
+
+      test "delete on a persisted signature raises ReadOnlyRecord and leaves the row" do
+        row = SignedConsent.create!(valid_attrs)
+        assert_raises(ActiveRecord::ReadOnlyRecord) { row.delete }
+        assert SignedConsent.exists?(row.id)
+      end
+
+      test "a revocation revokes_id must reference an existing signature row" do
+        signature = SignedConsent.create!(valid_attrs)
+        orphan = SignedConsent.new(
+          patient_dfn: DFN,
+          consent_template: @template,
+          template_key: @template.key,
+          template_version: @template.version,
+          template_body_digest: body_digest(@template.body),
+          signed_at: Time.current,
+          witness_duz: DUZ,
+          kind: "revocation",
+          recorded_by_duz: DUZ,
+          revokes_id: signature.id + 9_999,
+          revocation_reason: SYNTHETIC_REVOCATION_REASON
+        )
+
+        assert_raises(ActiveRecord::RecordInvalid, ActiveRecord::StatementInvalid) { orphan.save! }
+        assert_equal 0, SignedConsent.where(kind: KIND_REVOCATION, revokes_id: orphan.revokes_id).count
+      end
+
       test "signature rejects payloads over 500 KB" do
         huge = TINY_PNG + ("x" * (500.kilobytes + 1))
         refute SignedConsent.new(valid_attrs.merge(signature_png: huge)).valid?

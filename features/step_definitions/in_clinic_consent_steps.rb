@@ -143,7 +143,7 @@ When("the clinician attempts to edit the signed consent") do
   @digest_before_edit = row.template_body_digest
   @edit_attempt_failed = false
   begin
-    patch "#{ConsentWriteTestHelper::BASE}/#{row.id}", params: { authenticity_token: csrf_token }
+    banner_request(:patch, "#{ConsentWriteTestHelper::BASE}/#{row.id}", { authenticity_token: csrf_token })
     parse_last_response!
   rescue ActionController::RoutingError
     @edit_attempt_failed = true
@@ -159,8 +159,11 @@ end
 
 When("the clinician records a revocation with a synthetic reason") do
   row = Lakeraven::EHR::SignedConsent.signatures_for_patient(@dfn).first
-  post "#{ConsentWriteTestHelper::BASE}/#{row.id}/revocation",
-       params: { reason: ConsentWriteTestHelper::SYNTHETIC_REVOCATION_REASON, authenticity_token: csrf_token }
+  banner_request(:post, "#{ConsentWriteTestHelper::BASE}/#{row.id}/revocation",
+                 {
+                   reason: ConsentWriteTestHelper::SYNTHETIC_REVOCATION_REASON,
+                   authenticity_token: csrf_token
+                 })
   parse_last_response!
 end
 

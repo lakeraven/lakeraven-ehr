@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "zlib"
 require_relative "patient_banner_test_helper"
 
 # Shared helpers for in-clinic consent specification (#793).
@@ -25,11 +26,46 @@ module ConsentWriteTestHelper
   SYNTHETIC_SIGNER_NAME = "Testpatient, Alpha"
   SYNTHETIC_REVOCATION_REASON = "SYNTHETIC-REVOCATION-REASON-793"
 
-  # Valid 1×1 PNG (magic bytes and decodable payload).
-  TINY_PNG = Base64.decode64(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
-  ).freeze
   PNG_MAGIC = "\x89PNG\r\n\x1A\n".b.freeze
+
+  def self.png_chunk(type, data)
+    [ data.bytesize ].pack("N") + type + data + [ Zlib.crc32(type + data) ].pack("N")
+  end
+
+  def self.inked_png_bytes(width:, height:, &block)
+    block ||= proc { |_x, _y| [ 0, 0, 0, 255 ] }
+    raw = (+"").tap do |rows|
+      height.times do |y|
+        rows << "\x00"
+        width.times do |x|
+          rows << block.call(x, y).pack("C*")
+        end
+      end
+    end
+    header = [ width, height, 8, 6, 0, 0, 0 ].pack("NNCCCCC")
+    PNG_MAGIC + png_chunk("IHDR", header) +
+      png_chunk("IDAT", Zlib::Deflate.deflate(raw)) +
+      png_chunk("IEND", "")
+  end
+
+  def self.fully_transparent_png(width: 60, height: 20)
+    inked_png_bytes(width: width, height: height) { |_x, _y| [ 0, 0, 0, 0 ] }
+  end
+
+  # Valid 1×1 PNG with one opaque pixel (not a blank canvas).
+  TINY_PNG = inked_png_bytes(width: 1, height: 1).freeze
+
+  def magic_bytes_only_png
+    PNG_MAGIC
+  end
+
+  def corrupt_truncated_png
+    TINY_PNG.byteslice(0, 20)
+  end
+
+  def fully_transparent_signature_png
+    ConsentWriteTestHelper.fully_transparent_png
+  end
 
   WRITE_SCOPES = [
     "user/Patient.read",
@@ -87,7 +123,8 @@ module ConsentWriteTestHelper
   end
 
   def post_handover(template_key: TEMPLATE_BH)
-    post HANDOVER, params: { template_key: template_key, authenticity_token: csrf_token }
+    send(:banner_request, :post, HANDOVER,
+         { template_key: template_key, authenticity_token: csrf_token })
   end
 
   def post_kiosk_signature(extra = {})
@@ -96,12 +133,12 @@ module ConsentWriteTestHelper
       signer_name: SYNTHETIC_SIGNER_NAME,
       authenticity_token: csrf_token
     }.merge(extra)
-    post KIOSK, params: params
+    send(:banner_request, :post, KIOSK, params)
   end
 
   def post_kiosk_unlock(access_code:, verify_code:)
-    post KIOSK_UNLOCK,
-         params: { access_code: access_code, verify_code: verify_code, authenticity_token: csrf_token }
+    send(:banner_request, :post, KIOSK_UNLOCK,
+         { access_code: access_code, verify_code: verify_code, authenticity_token: csrf_token })
   end
 
   def open_kiosk_via_handover!(template_key: TEMPLATE_BH)
@@ -126,6 +163,49 @@ module ConsentWriteTestHelper
 
   def auth_failure_result(message = "Invalid access/verify code")
     Lakeraven::EHR::AuthenticationService::Result.new(success?: false, error: message, value: nil)
+  end
+
+  def auth_verify_must_change_result(duz: DUZ)
+    Lakeraven::EHR::AuthenticationService::Result.new(
+      success?: true,
+      error: nil,
+      value: {
+        duz: duz.to_s,
+        name: "SYNTHETIC,CLINICIAN",
+        user_type: "provider",
+        verify_needs_change: true,
+        security_keys: [],
+        options: []
+      }
+    )
+  end
+
+  def assert_cache_control_no_store!(message = nil)
+    cache = response.headers["Cache-Control"].to_s
+    assert_includes cache, "no-store", message || "expected Cache-Control to include no-store, got #{cache.inspect}"
+  end
+
+  def with_rpms_timed_read(seconds)
+    auth = RpmsRpc::Authentication.singleton_class
+    auth.alias_method(:__consent_timed_read, :timed_read)
+    RpmsRpc::Authentication.define_singleton_method(:timed_read) { |_duz| seconds }
+    yield
+  ensure
+    auth.alias_method(:timed_read, :__consent_timed_read)
+    auth.remove_method(:__consent_timed_read)
+  end
+
+  def with_demo_visits_gate_open
+    Lakeraven::EHR::DemoVisitsController.class_eval do
+      alias_method :__consent_real_require_demo_mode!, :require_demo_mode!
+      def require_demo_mode!; end
+    end
+    yield
+  ensure
+    Lakeraven::EHR::DemoVisitsController.class_eval do
+      alias_method :require_demo_mode!, :__consent_real_require_demo_mode!
+      remove_method :__consent_real_require_demo_mode!
+    end
   end
 
   def capture_rails_logs
