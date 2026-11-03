@@ -29,11 +29,18 @@ module Lakeraven
 
           result = AppointmentRescheduleGateway.move(
             @appointment, to_resource: @target, start_time: @reschedule.start_time, whom: @reschedule.whom,
-                          reason_ien: @reschedule.reason_ien, remark: @reschedule.remark(@target[:name])
+                          reason_ien: @reschedule.reason_ien, remark: @reschedule.remark(@target[:name]),
+                          overbook: { duz: session[:duz].to_i, supervisor: supervisor?, confirmed: params[:overbook] == "1" }
           )
+          if result.status == :overbook_offered
+            @offer_overbook = true
+            return render(:new, status: :conflict)
+          end
+
           if result.moved?
             flash[:notice] = "Moved #{@appointment[:patient_name]}'s appointment to #{@reschedule.start_time.strftime('%b %-d at %H:%M')} at #{@target[:name]}."
             flash[:booked_id] = result.appointment_id
+            flash[:alert] = result.message if result.message
             redirect_to scheduling_clinic_path(@target[:id], date: @on.iso8601)
           else
             flash.now[:alert] = alert_for(result)
@@ -49,13 +56,22 @@ module Lakeraven
           @targets = AppointmentBookingGateway.resources.select { |r| visible?(r) && can_book?(r) }
           @target = @targets.find { |r| r[:id] == @reschedule.resource_id }
           @length = AppointmentRescheduleGateway.length_of(@appointment)
+          @full = []
           @times = if @target
                      day, = AppointmentBookingGateway.day(@target, @on)
-                     day.open_times(@length)
+                     overbookable(day)
           else
                      []
           end
           @reasons = AppointmentCancellationGateway.reasons(@reschedule.whom)
+        end
+
+        # The open times at the original's length, and for a scheduler who may
+        # overbook there, the full times inside its blocks too (S-SCH-02.10).
+        def overbookable(day)
+          open = day.open_times(@length)
+          @full = can_overbook?(@target) ? day.times.select { |t| t.open.zero? }.map(&:at).uniq - open : []
+          (open + @full).sort
         end
 
         def valid_choices?

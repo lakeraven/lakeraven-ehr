@@ -200,4 +200,22 @@ class SchedulingRescheduleAppointmentTest < ActionDispatch::IntegrationTest
     assert_response :conflict
     assert_empty calls, "nothing is booked or cancelled"
   end
+
+  test "S-SCH-02.10 the overbook rules of S-SCH-01 apply: SDZSUP is offered a full time, and a confirmed move books it as an overbook first" do
+    post "/lakeraven-ehr/test_session", params: { duz: "208", user_type: "user", user_name: "PROFILE,SCHED", security_keys: "scheduling_user,scheduling_supervisor" }
+    full = { "DEMO IHS CLINIC" => [ original ], "DEMO PRIMARY CARE" => [ original(id: 30, start_time: at(10, day: NEXT), end_time: at(11, day: NEXT), patient_dfn: 9) ] }
+    with_rpms(listed: full) do
+      get path, params: { date: DAY.iso8601, to: "1", on: NEXT.iso8601, whom: "PC" }
+      assert_select "#reschedule-form label[data-time='10:15'][data-full='true']", text: /full: overbook/
+
+      post path, params: move_params
+      assert_response :conflict
+      assert_select "#overbook-offer"
+      assert_empty calls, "nothing filed before the scheduler confirms"
+
+      post path, params: move_params.merge(overbook: "1")
+      assert_redirected_to "/lakeraven-ehr/scheduling/clinics/1?date=2026-10-30"
+      assert_equal %i[add cancel], calls.map(&:first), "the overbook is booked before the original is cancelled"
+    end
+  end
 end
