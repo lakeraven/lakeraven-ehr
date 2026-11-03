@@ -54,6 +54,12 @@
 <% end %>
 
 <p>
+  <%= link_to "See the week",
+        scheduling_clinic_week_path(@resource[:id], date: @date.iso8601),
+        id: "week-view" %>
+</p>
+
+<p>
   <%= link_to "Find an open time",
         scheduling_clinic_open_times_path(@resource[:id], from: @date.iso8601),
         id: "find-open-time" %>
@@ -86,12 +92,9 @@
     </thead>
     <tbody>
       <% @appointments.sort_by { |a| a[:start_time] }.each do |appointment| %>
-        <% status = if appointment[:cancelled] then "Cancelled"
-                    elsif appointment[:no_show] then "No-show"
-                    elsif appointment[:checkin_time] then "Checked in #{appointment[:checkin_time].strftime('%H:%M')}"
-                    else "Booked"
-                    end %>
+        <% status_key, status = appointment_status(appointment) %>
         <tr
+          id="appointment-<%= appointment[:id] %>"
           data-patient="<%= appointment[:patient_dfn] %>"
           data-appointment="<%= appointment[:id] %>"
         >
@@ -101,9 +104,9 @@
                   scheduling_patient_appointments_path(appointment[:patient_dfn]),
                   data: { patient_appointments: true } %>
           </td>
-          <td data-status="<%= status.split.first.downcase %>"><%= status %></td>
+          <td data-status="<%= status_key %>"><%= status %></td>
           <td>
-            <% if status == "Booked" && can_book?(@resource) %>
+            <% if status_key == "booked" && can_book?(@resource) %>
               <% if appointment[:start_time].to_date == Date.today %>
                 <%= link_to "Check in",
                       scheduling_checkin_clinic_appointment_path(@resource[:id], appointment[:id], date: @date.iso8601) %>

@@ -19,6 +19,7 @@ class CapabilityRefusalMatrixTest < ActionDispatch::IntegrationTest
     "GET /registration/patients/:dfn" => "registration.view",
     "GET /scheduling" => "scheduling.open",
     "GET /scheduling/clinics/:id" => "scheduling.open",
+    "GET /scheduling/clinics/:id/week" => "scheduling.open",
     "GET /scheduling/clinics/:id/open_times" => "scheduling.open",
     "GET /scheduling/clinics/:resource_id/hours/new" => "scheduling.open",
     "POST /scheduling/clinics/:resource_id/hours" => "scheduling.open",
