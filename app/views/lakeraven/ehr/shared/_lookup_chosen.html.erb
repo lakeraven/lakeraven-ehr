@@ -1,0 +1,13 @@
+<%# What a lookup field shows under its search when no matches are listed
+    (ComponentsHelper#lookup_field). Locals: form, attribute, selected,
+    any_choices, chosen_text, empty_text. %>
+<% unless any_choices %>
+  <% if selected.present? %>
+    <%= form.hidden_field attribute, value: selected %>
+    <% if chosen_text.present? %>
+      <p class="hint"><%= chosen_text %></p>
+    <% end %>
+  <% elsif empty_text.present? %>
+    <p class="hint"><%= empty_text %></p>
+  <% end %>
+<% end %>

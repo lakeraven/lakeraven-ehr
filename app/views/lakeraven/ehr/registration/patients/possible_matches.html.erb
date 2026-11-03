@@ -1,18 +1,12 @@
-<% content_for :title, "Possible matches | Lakeraven EHR" %>
+<% page_title "Possible matches" %>
 
-<div class="page-header">
-  <h1>This patient may already have a chart</h1>
-  <p>
-    Nothing has been saved.
-  </p>
-  <p>
-    RPMS found patients on file with the same name or the same date of birth as <%= @registration.name %>.
-  </p>
-</div>
+<%= page_header "This patient may already have a chart",
+      [ "Nothing has been saved.",
+        "RPMS found patients on file with the same name or the same date of birth as #{@registration.name}." ] %>
 
 <table
   id="possible-matches"
-  class="w-full text-left"
+  class="data-table"
 >
   <caption class="sr-only">Patients on file who may be <%= @registration.name %></caption>
   <thead>
@@ -42,18 +36,10 @@
 </p>
 
 <% if @unshowable %>
-  <div
-    id="unshowable-match"
-    class="alert alert--error"
-    role="alert"
-  >
-    <p>
-      RPMS found a possible match it could not describe, so it cannot be ruled out here.
-    </p>
-    <p>
-      Search for the patient by name and date of birth before registering.
-    </p>
-  </div>
+  <%= alert_box :error,
+        "RPMS found a possible match it could not describe, so it cannot be ruled out here.",
+        "Search for the patient by name and date of birth before registering.",
+        id: "unshowable-match" %>
 <% else %>
 <%= form_with scope: :registration,
       url: registration_confirm_patient_path,
@@ -69,6 +55,6 @@
   <%= f.hidden_field :tribe_ien, value: @registration.tribe_ien %>
   <%= f.hidden_field :community_ien, value: @registration.community_ien %>
   <%= f.submit "None of these is the patient: register them",
-        class: "min-h-9 bg-white px-4 py-2 ring-1 ring-slate-300 ring-inset hover:bg-slate-50" %>
+        class: "button-secondary" %>
 <% end %>
 <% end %>

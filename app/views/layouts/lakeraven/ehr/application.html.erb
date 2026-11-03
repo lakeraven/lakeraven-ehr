@@ -1,9 +1,10 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <%# Views set a page-specific title via content_for; the engine name is the
-      fallback. A distinct title per page is a basic screen-reader affordance. %>
-  <title><%= content_for(:title).presence || "Lakeraven EHR" %></title>
+  <%# Views set a page-specific title with page_title; the product name
+      (Configuration#product_name) is the fallback.
+      A distinct title per page is a basic screen-reader affordance. %>
+  <title><%= content_for(:title).presence || product_name %></title>
   <meta
     name="viewport"
     content="width=device-width, initial-scale=1"
@@ -23,7 +24,7 @@
     whose session is open, and be able to end it. %>
 <header class="border-b border-slate-200 bg-white">
   <div class="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 px-4 py-3">
-    <%= link_to "Lakeraven EHR",
+    <%= link_to product_name,
           session[:duz].present? ? dashboard_path : login_path,
           class: "text-lg font-semibold text-slate-900 no-underline hover:text-slate-700" %>
 

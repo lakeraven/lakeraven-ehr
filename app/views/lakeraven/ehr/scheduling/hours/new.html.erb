@@ -1,11 +1,6 @@
-<% content_for :title, "Hours | #{@resource[:name]} | Lakeraven EHR" %>
+<% page_title "Hours | #{@resource[:name]}" %>
 
-<div class="page-header">
-  <h1>Set the clinic's hours</h1>
-  <p>
-    <%= @resource[:name] %>
-  </p>
-</div>
+<%= page_header "Set the clinic's hours", @resource[:name] %>
 
 <p>
   Each chosen day in the range gets one block of these hours.
@@ -13,26 +8,14 @@
   Days not chosen keep their hours.
 </p>
 
-<% if flash[:alert].present? %>
-  <div
-    class="alert alert--error"
-    role="alert"
-  >
-    <p><%= flash[:alert] %></p>
-  </div>
-<% end %>
+<%= flash_alert %>
 
 <% if @result&.status == :conflict %>
-  <div
-    id="hours-conflicts"
-    class="alert alert--error"
-    role="alert"
-  >
-    <p>
-      The hours were not changed.
-      These appointments would be outside them.
-      Move or cancel them first, or choose hours that cover them.
-    </p>
+  <%= alert_box :error,
+        "The hours were not changed.",
+        "These appointments would be outside them.",
+        "Move or cancel them first, or choose hours that cover them.",
+        id: "hours-conflicts" do %>
     <ul>
       <% @result.conflicts.each do |appointment| %>
         <li data-appointment="<%= appointment[:id] %>">
@@ -40,37 +23,18 @@
         </li>
       <% end %>
     </ul>
-  </div>
+  <% end %>
 <% end %>
 
 <% if @result && @result.days_set.any? && !@result.set? %>
-  <div
-    id="hours-partial"
-    class="alert alert--notice"
-    role="status"
-  >
-    <p>
-      Hours were set through <%= @result.days_set.last.strftime("%b %-d, %Y") %> before the change stopped.
-    </p>
-  </div>
+  <%= alert_box :notice,
+        "Hours were set through #{@result.days_set.last.strftime("%b %-d, %Y")} before the change stopped.",
+        id: "hours-partial" %>
 <% end %>
 
-<% if @hours.errors.any? %>
-  <div
-    id="hours-errors"
-    class="alert alert--error"
-    role="alert"
-  >
-    <p>
-      The hours were not set.
-    </p>
-    <ul>
-      <% @hours.errors.full_messages.each do |message| %>
-        <li><%= message %></li>
-      <% end %>
-    </ul>
-  </div>
-<% end %>
+<%= form_errors @hours,
+      "The hours were not set.",
+      id: "hours-errors" %>
 
 <%= form_with scope: :hours,
       url: scheduling_clinic_hours_path(@resource[:id]),
@@ -92,57 +56,51 @@
   </fieldset>
 
   <div class="flex flex-wrap gap-4">
-    <div class="flex flex-col gap-1">
-      <%= f.label :opens, "Opens" %>
+    <%= form_field :opens, "Opens", form: f do |aria| %>
       <%= f.time_field :opens,
             value: @hours.opens,
             required: true,
-            class: "rounded border border-slate-300 px-3 py-2" %>
-    </div>
-    <div class="flex flex-col gap-1">
-      <%= f.label :closes, "Closes" %>
+            aria: aria %>
+    <% end %>
+    <%= form_field :closes, "Closes", form: f do |aria| %>
       <%= f.time_field :closes,
             value: @hours.closes,
             required: true,
-            class: "rounded border border-slate-300 px-3 py-2" %>
-    </div>
-    <div class="flex flex-col gap-1">
-      <%= f.label :slots, "Appointments per time" %>
+            aria: aria %>
+    <% end %>
+    <%= form_field :slots, "Appointments per time", form: f do |aria| %>
       <%= f.number_field :slots,
             value: @hours.slots,
             min: 1,
             required: true,
-            class: "rounded border border-slate-300 px-3 py-2" %>
-    </div>
-    <div class="flex flex-col gap-1">
-      <%= f.label :access_type_id, "Access type" %>
+            aria: aria %>
+    <% end %>
+    <%= form_field :access_type_id, "Access type", form: f do |aria| %>
       <%= f.select :access_type_id,
             options_for_select(@access_types.map { |t| [ t[:name], t[:id] ] }, @hours.access_type_id),
             { include_blank: "Choose an access type" },
             required: true,
-            class: "rounded border border-slate-300 px-3 py-2" %>
-    </div>
+            aria: aria %>
+    <% end %>
   </div>
 
   <div class="flex flex-wrap gap-4">
-    <div class="flex flex-col gap-1">
-      <%= f.label :first_date, "From" %>
+    <%= form_field :first_date, "From", form: f do |aria| %>
       <%= f.date_field :first_date,
             value: @hours.first_date,
             required: true,
-            class: "rounded border border-slate-300 px-3 py-2" %>
-    </div>
-    <div class="flex flex-col gap-1">
-      <%= f.label :last_date, "Through" %>
+            aria: aria %>
+    <% end %>
+    <%= form_field :last_date, "Through", form: f do |aria| %>
       <%= f.date_field :last_date,
             value: @hours.last_date,
             required: true,
-            class: "rounded border border-slate-300 px-3 py-2" %>
-    </div>
+            aria: aria %>
+    <% end %>
   </div>
 
   <%= f.submit "Set hours",
-        class: "min-h-9 bg-slate-900 px-3 py-2 text-white" %>
+        class: "button-primary self-start" %>
 <% end %>
 
 <p>
