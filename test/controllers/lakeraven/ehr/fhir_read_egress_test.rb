@@ -76,6 +76,8 @@ module Lakeraven
         "lakeraven/ehr/registration/demographics#update", # Registration demographics edit; as #edit
         "lakeraven/ehr/registration/addresses#edit",      # Address and phones form (S-REG-21), no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/registration/addresses#update",    # Address and phones edit; as #edit
+        "lakeraven/ehr/registration/contacts#edit",    # The contact form (S-REG-08): registration demographics, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/registration/contacts#update",  # Saving a contact (S-REG-08), not disclosure
         "lakeraven/ehr/registration/coverages#index",  # Payer, member number and dates for billing (S-REG-03), no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/registration/coverages#new",    # Coverage entry form (S-REG-03.1), not disclosure
         "lakeraven/ehr/registration/coverages#create", # Coverage entry (S-REG-03.1); answers with the form or a redirect
