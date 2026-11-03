@@ -1,0 +1,22 @@
+<% page_title "Other names", @patient[:name], "Registration" %>
+
+<%= page_header @patient[:name],
+      "Other names the patient has used." %>
+
+<%= flash_alert id: "other-names-alert" %>
+
+<% if flash[:notice].present? %>
+  <%= alert_box :notice, flash[:notice], id: "other-names-notice" %>
+<% end %>
+
+<%= patient_summary @patient, id: "registration" %>
+
+<%= render "lakeraven/ehr/registration/other_names/manage",
+      dfn: @dfn,
+      other_names: @other_names,
+      other_name: @other_name,
+      can_edit: capability?("patient.register") %>
+
+<p class="mt-6">
+  <%= link_to "Back to the patient", registration_patient_path(@dfn, anchor: "other-names-section") %>
+</p>
