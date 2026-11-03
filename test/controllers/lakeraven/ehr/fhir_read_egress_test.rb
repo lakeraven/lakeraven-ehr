@@ -76,6 +76,8 @@ module Lakeraven
         "lakeraven/ehr/registration/demographics#update", # Registration demographics edit; as #edit
         "lakeraven/ehr/registration/addresses#edit",      # Address and phones form (S-REG-21), no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/registration/addresses#update",    # Address and phones edit; as #edit
+        "lakeraven/ehr/registration/contacts#edit",    # The contact form (S-REG-08): registration demographics, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/registration/contacts#update",  # Saving a contact (S-REG-08), not disclosure
         "lakeraven/ehr/scheduling/clinics#index",     # Scheduling: clinic resources, no patient data
         "lakeraven/ehr/scheduling/clinics#show",      # A clinic day: appointment times and patient names, no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/scheduling/clinics#week",      # A clinic week: the same as the day, over seven days; revisit with Part 2 (#494)

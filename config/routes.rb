@@ -142,6 +142,13 @@ Lakeraven::EHR::Engine.routes.draw do
     patch "patients/:dfn/demographics", to: "demographics#update", as: :patient_demographics, constraints: { dfn: /\d+/ }
     get "patients/:dfn/address/edit", to: "addresses#edit", as: :edit_patient_address, constraints: { dfn: /\d+/ }
     patch "patients/:dfn/address", to: "addresses#update", as: :patient_address, constraints: { dfn: /\d+/ }
+    # The emergency contact and next of kin (S-REG-08), shown on the patient's page. A look-up posts the form
+    # back to edit, so what the clerk typed never rides in a URL (#722).
+    scope "patients/:dfn", constraints: { dfn: /\d+/ } do
+      get "contacts/:kind/edit", to: "contacts#edit", as: :edit_patient_contact
+      post "contacts/:kind/edit", to: "contacts#edit"
+      post "contacts/:kind", to: "contacts#update", as: :patient_contact
+    end
   end
 
   # Scheduling (rpms-ux W02): a clinic resource's day, booking into it (S-SCH-01)
