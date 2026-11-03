@@ -17,6 +17,10 @@ class CapabilityRefusalMatrixTest < ActionDispatch::IntegrationTest
     "POST /registration/patients" => "patient.register",
     "POST /registration/patients/confirm" => "patient.register",
     "GET /registration/patients/:dfn" => "registration.view",
+    "GET /registration/patients/:dfn/demographics/edit" => "patient.register",
+    "PATCH /registration/patients/:dfn/demographics" => "patient.register",
+    "GET /registration/patients/:dfn/address/edit" => "patient.register",
+    "PATCH /registration/patients/:dfn/address" => "patient.register",
     "GET /scheduling" => "scheduling.open",
     "GET /scheduling/clinics/:id" => "scheduling.open",
     "GET /scheduling/clinics/:id/week" => "scheduling.open",
@@ -52,7 +56,7 @@ class CapabilityRefusalMatrixTest < ActionDispatch::IntegrationTest
   def request_route(route)
     verb, path = route.split(" ", 2)
     url = "/lakeraven-ehr#{path.gsub(/:\w+/, '3')}"
-    verb == "GET" ? get(url) : post(url)
+    public_send(verb.downcase, url)
   end
 
   test "every registration and scheduling route has a row" do

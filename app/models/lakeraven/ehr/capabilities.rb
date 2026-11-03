@@ -30,8 +30,9 @@ module Lakeraven
         # booking. BPRM: CanViewPatient.
         "registration.view" => rule(any: %i[registration_menu registration_manager registration_view_only
                                             scheduling_user scheduling_supervisor]),
-        # Register a new patient. BPRM: CanRegisterPatient, AGZMENU and not
-        # AGZVIEWONLY. AGZMGR also registers here, as it edits patients in BPRM.
+        # Register a new patient, and edit a registered one (S-REG-20, S-REG-21).
+        # BPRM gates both on one policy, CanEditPatients: AGZMENU or AGZMGR, and
+        # not AGZVIEWONLY.
         "patient.register" => rule(any: %i[registration_menu registration_manager], deny: %i[registration_view_only]),
         # Open scheduling: resources whose BSDX rights let the user see them.
         # BPRM: CanAccessScheduling.
