@@ -87,6 +87,7 @@ module Lakeraven
       end
 
       def render_lock_refused
+        note_audit_denial("consent handover refused: the tablet could not be locked")
         render plain: "The tablet could not be locked to this sign-on, so the handover was refused.",
                status: :unprocessable_entity
       end

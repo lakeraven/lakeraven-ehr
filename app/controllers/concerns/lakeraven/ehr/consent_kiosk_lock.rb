@@ -69,8 +69,8 @@ module Lakeraven
       def store_consent_kiosk_lock!(dfn:, template_key:, template_version:, handover_token:)
         key = kiosk_lock_credential_key
         return false if key.blank?
+        return false unless save_kiosk_lock!(key, dfn, template_key, template_version, handover_token)
 
-        save_kiosk_lock!(key, dfn, template_key, template_version, handover_token)
         remember_kiosk_lock_hint!(dfn, template_key, template_version, handover_token)
         true
       rescue ActiveRecord::ActiveRecordError => error
@@ -78,13 +78,26 @@ module Lakeraven
         false
       end
 
+      # The unique credential index is the race between two handovers. A
+      # savepoint keeps that violation from aborting the audit transaction,
+      # so the loser can still record why it was refused.
       def save_kiosk_lock!(key, dfn, template_key, template_version, handover_token)
-        record = KioskLock.find_or_initialize_by(credential_key: key)
-        record.update!(
+        KioskLock.transaction(requires_new: true) do
+          record = KioskLock.find_or_initialize_by(credential_key: key)
+          record.update!(kiosk_lock_attributes(dfn, template_key, template_version, handover_token))
+        end
+        reset_kiosk_lock_memo!
+        true
+      rescue ActiveRecord::RecordNotUnique
+        Rails.logger.error("[consent-kiosk] lock was not stored: ActiveRecord::RecordNotUnique")
+        false
+      end
+
+      def kiosk_lock_attributes(dfn, template_key, template_version, handover_token)
+        {
           patient_dfn: dfn.to_s, template_key: template_key.to_s,
           template_version: template_version.to_i, handover_token: handover_token.to_s
-        )
-        reset_kiosk_lock_memo!
+        }
       end
 
       def remember_kiosk_lock_hint!(dfn, template_key, template_version, handover_token)

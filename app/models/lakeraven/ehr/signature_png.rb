@@ -6,15 +6,25 @@ module Lakeraven
   module EHR
     # The PNG a browser canvas posts. Parsed here, not trusted from its magic
     # bytes: chunks, IHDR, a bounded inflate of IDAT, and unfiltered scanlines.
-    # A payload this cannot decode, or that has no ink, is refused.
+    # A payload this cannot decode, or that has no visible stroke, is refused.
+    #
+    # Dimensions are capped to a signature pad before inflate. Scanlines stay
+    # binary strings (getbyte); a Ruby array per byte would turn a legal pad
+    # into a memory spike, and a larger claimed bitmap is refused outright.
     class SignaturePng
       MAGIC = "\x89PNG\r\n\x1A\n".b
-      # A signature pad is a few hundred pixels on a side. Anything larger is
-      # refused before inflate so a claimed bitmap cannot expand into a bomb.
-      MAX_PIXELS = 2_000_000
+      # The tablet canvas is 600×180. A denser capture can be a few times that.
+      # Anything wider than 2400 or taller than 1200 is refused before inflate.
+      MAX_WIDTH = 2400
+      MAX_HEIGHT = 1200
       MAX_DECODED_BYTES = 12 * 1024 * 1024
+      MIN_VISIBLE_PIXELS = 20
+      VISIBLE_ALPHA = 128
+      CHANNEL_CONTRAST = 64
       SAMPLES = { 0 => 1, 2 => 3, 4 => 2, 6 => 4 }.freeze
       KNOWN_CRITICAL = %w[IHDR PLTE IDAT IEND].freeze
+
+      attr_reader :bytes
 
       def self.acceptable?(bytes)
         new(bytes).acceptable?
@@ -25,10 +35,20 @@ module Lakeraven
         @idat = +"".b
       end
 
+      # Memoized: validation reuses the object decode_signature_data_url built.
       def acceptable?
-        return false unless parsed?
+        return @acceptable if defined?(@acceptable)
 
-        inked?
+        @acceptable = parsed? && visible_stroke?
+      end
+
+      def same_bytes?(other)
+        candidate = other.to_s.b
+        @bytes.bytesize == candidate.bytesize && @bytes == candidate
+      end
+
+      def inspect
+        "#<#{self.class.name} #{@width}x#{@height}>"
       end
 
       private
@@ -39,8 +59,12 @@ module Lakeraven
         return false unless supported_header?
         return false if @idat.empty?
 
-        @rows = reconstruct(inflate_idat)
-        !@rows.nil?
+        @visible_pixels = count_visible_pixels(inflate_idat)
+        !@visible_pixels.nil?
+      end
+
+      def visible_stroke?
+        @visible_pixels.to_i >= MIN_VISIBLE_PIXELS
       end
 
       def read_chunks
@@ -113,7 +137,7 @@ module Lakeraven
       def supported_header?
         samples = SAMPLES[@color_type]
         return false unless samples && @bit_depth == 8
-        return false unless dimensions_allowed?(samples)
+        return false unless dimensions_allowed?
 
         @samples = samples
         @row_bytes = @width * samples
@@ -121,13 +145,10 @@ module Lakeraven
         @expected <= MAX_DECODED_BYTES
       end
 
-      def dimensions_allowed?(samples)
+      def dimensions_allowed?
         return false unless @width.positive? && @height.positive?
-        return false if @width > MAX_PIXELS || @height > MAX_PIXELS
-        return false if @width > (MAX_PIXELS / @height)
 
-        pixel_bytes = @width * @height * samples
-        pixel_bytes <= MAX_DECODED_BYTES
+        @width <= MAX_WIDTH && @height <= MAX_HEIGHT
       end
 
       def inflate_idat
@@ -144,85 +165,103 @@ module Lakeraven
 
       def bounded_inflate(inflater)
         output = +"".b
-        @idat.bytesize.times do |index|
-          output << inflater.inflate(@idat.byteslice(index, 1))
+        offset = 0
+        while offset < @idat.bytesize
+          piece = @idat.byteslice(offset, 4096)
+          offset += piece.bytesize
+          output << inflater.inflate(piece)
           return nil if output.bytesize > @expected
         end
         output << inflater.finish
+        return nil if output.bytesize > @expected
+
         output
       end
 
-      def reconstruct(raw)
+      # One row at a time. Only the previous scanline is kept, for the Up filters.
+      def count_visible_pixels(raw)
         return nil unless raw
 
-        rows = []
+        prior = nil
         offset = 0
-        @height.times do
-          row, offset = reconstruct_scanline(raw, offset, rows.last)
+        total = 0
+        @height.times do |y|
+          row, offset = decode_row(raw, offset, prior)
           return nil unless row
 
-          rows << row
+          total += visible_in(row, y)
+          prior = row
         end
-        rows
+        total
       end
 
-      def reconstruct_scanline(raw, offset, prior)
+      def decode_row(raw, offset, prior)
         return [ nil, offset ] if offset + 1 + @row_bytes > raw.bytesize
 
         filter = raw.getbyte(offset)
-        filtered = raw.byteslice(offset + 1, @row_bytes).bytes
-        [ unfilter(filter, filtered, prior), offset + 1 + @row_bytes ]
+        filtered = raw.byteslice(offset + 1, @row_bytes)
+        [ apply_filter(filter, filtered, prior), offset + 1 + @row_bytes ]
       end
 
-      def unfilter(filter, row, prior)
+      def apply_filter(filter, row, prior)
         case filter
         when 0 then row
-        when 1 then unfilter_sub(row)
-        when 2 then unfilter_up(row, prior)
-        when 3 then unfilter_average(row, prior)
-        when 4 then unfilter_paeth(row, prior)
+        when 1 then filter_sub(row)
+        when 2 then filter_up(row, prior)
+        when 3 then filter_average(row, prior)
+        when 4 then filter_paeth(row, prior)
         end
       end
 
-      def unfilter_sub(row)
-        built = []
-        row.each { |byte| built << ((byte + left(built, built.length)) & 0xff) }
-        built
-      end
-
-      def unfilter_up(row, prior)
-        row.each_with_index.map { |byte, index| (byte + above(prior, index)) & 0xff }
-      end
-
-      def unfilter_average(row, prior)
-        built = []
-        row.each_with_index do |byte, index|
-          average = (left(built, index) + above(prior, index)) / 2
-          built << ((byte + average) & 0xff)
+      def filter_sub(row)
+        out = row.dup
+        index = @samples
+        while index < out.bytesize
+          out.setbyte(index, (out.getbyte(index) + out.getbyte(index - @samples)) & 0xff)
+          index += 1
         end
-        built
+        out
       end
 
-      def unfilter_paeth(row, prior)
-        built = []
-        row.each_with_index do |byte, index|
-          built << ((byte + paeth(left(built, index), above(prior, index), above_left(prior, index))) & 0xff)
+      def filter_up(row, prior)
+        return row.dup unless prior
+
+        add_prior(row) { |index| prior.getbyte(index) }
+      end
+
+      def filter_average(row, prior)
+        out = row.dup
+        index = 0
+        while index < out.bytesize
+          left = index >= @samples ? out.getbyte(index - @samples) : 0
+          up = prior ? prior.getbyte(index) : 0
+          out.setbyte(index, (out.getbyte(index) + ((left + up) / 2)) & 0xff)
+          index += 1
         end
-        built
+        out
       end
 
-      def left(row, index)
-        index >= @samples ? row[index - @samples] : 0
+      def filter_paeth(row, prior)
+        out = row.dup
+        index = 0
+        while index < out.bytesize
+          left = index >= @samples ? out.getbyte(index - @samples) : 0
+          up = prior ? prior.getbyte(index) : 0
+          up_left = prior && index >= @samples ? prior.getbyte(index - @samples) : 0
+          out.setbyte(index, (out.getbyte(index) + paeth(left, up, up_left)) & 0xff)
+          index += 1
+        end
+        out
       end
 
-      def above(prior, index)
-        prior ? prior[index] : 0
-      end
-
-      def above_left(prior, index)
-        return 0 unless prior && index >= @samples
-
-        prior[index - @samples]
+      def add_prior(row)
+        out = row.dup
+        index = 0
+        while index < out.bytesize
+          out.setbyte(index, (out.getbyte(index) + yield(index)) & 0xff)
+          index += 1
+        end
+        out
       end
 
       def paeth(left_byte, up_byte, up_left)
@@ -236,42 +275,45 @@ module Lakeraven
         up_left
       end
 
-      def inked?
-        pixels = pixels_from(@rows)
-        return false if pixels.empty?
-        return inked_alpha?(pixels) if alpha_channel?
+      def visible_in(row, y)
+        return visible_alpha(row) if alpha_channel?
 
-        inked_opaque?(pixels, drop_alpha: false)
+        visible_opaque(row, y)
       end
 
       def alpha_channel?
         @color_type == 4 || @color_type == 6
       end
 
-      def pixels_from(rows)
-        rows.flat_map { |row| row.each_slice(@samples).to_a }
+      # A stroke on transparent paper. Alpha below 128 is not a visible mark,
+      # so an all-alpha-1 image is refused.
+      def visible_alpha(row)
+        count = 0
+        index = @samples - 1
+        while index < row.bytesize
+          count += 1 if row.getbyte(index) >= VISIBLE_ALPHA
+          index += @samples
+        end
+        count
       end
 
-      # Transparent paper with a stroke has both zero and non-zero alpha.
-      # A fully opaque image needs a pixel that is not the background. A
-      # one-pixel mark counts unless it is blank white.
-      def inked_alpha?(pixels)
-        return false if pixels.none? { |pixel| pixel.last.positive? }
-        return true if pixels.any? { |pixel| pixel.last < 255 }
-
-        inked_opaque?(pixels, drop_alpha: true)
+      # Opaque pixels must differ from the corner colour by a channel step of
+      # at least 64. One near-white byte on a white field is not a stroke.
+      def visible_opaque(row, y)
+        @background = row.byteslice(0, @samples) if y.zero?
+        count = 0
+        index = 0
+        while index + @samples <= row.bytesize
+          count += 1 if contrasts_background?(row, index)
+          index += @samples
+        end
+        count
       end
 
-      def inked_opaque?(pixels, drop_alpha:)
-        comparable = drop_alpha ? pixels.map { |pixel| pixel[0..-2] } : pixels
-        return !white?(comparable.first) if comparable.one?
-
-        background = comparable.first
-        comparable.any? { |pixel| pixel != background }
-      end
-
-      def white?(samples)
-        samples.all? { |sample| sample == 255 }
+      def contrasts_background?(row, index)
+        @samples.times.any? do |channel|
+          (row.getbyte(index + channel) - @background.getbyte(channel)).abs >= CHANNEL_CONTRAST
+        end
       end
     end
   end

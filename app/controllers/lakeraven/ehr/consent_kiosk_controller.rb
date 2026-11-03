@@ -13,9 +13,6 @@ module Lakeraven
       # The lock's job is to send every other page here. This page is the
       # destination, so it must not redirect to itself.
       skip_before_action :redirect_when_consent_kiosk_locked
-      # Before CSRF. An idle or revoked handover has to reach login; a stale
-      # authenticity token must not turn that into a 401 loop.
-      prepend_before_action :require_authentication
 
       before_action :authenticate_smart_token!
       before_action :require_clinician_credential!
@@ -23,16 +20,18 @@ module Lakeraven
       before_action :authorize_kiosk_scope!
       before_action :load_kiosk_form!, only: %i[show create]
 
-      def show; end
+      def show
+        render :handed_back if stored_handover_signature
+      end
 
       def create
         return reject_signature! if @template.nil?
-        return render :handed_back if stored_handover_signature
+        return render_stored_signature! if stored_handover_signature
 
-        png = SignedConsent.decode_signature_data_url(params[:signature])
-        return reject_signature! unless png
+        parsed = SignedConsent.decode_signature_data_url(params[:signature])
+        return reject_signature! unless parsed
 
-        @signed_consent = SignedConsent.record_signature!(signature_attributes(png))
+        @signed_consent = SignedConsent.record_signature!(signature_attributes(parsed))
         render :handed_back
       rescue ActiveRecord::RecordInvalid
         reject_signature!
@@ -137,16 +136,23 @@ module Lakeraven
         render :show, status: :unprocessable_entity
       end
 
-      def signature_attributes(png)
+      def signature_attributes(parsed)
         {
           patient_dfn: @locked_patient_dfn, consent_template: @template,
           template_key: @template.key, template_version: @template.version,
           template_body_digest: SignedConsent.digest_for(@template.body),
-          signer_name: params[:signer_name].to_s.presence, signature_png: png,
-          signed_at: Time.current, witness_duz: current_duz,
+          signer_name: params[:signer_name].to_s.presence, signature_png: parsed.bytes,
+          decoded_signature: parsed, signed_at: Time.current, witness_duz: current_duz,
           kind: SignedConsent::KIND_SIGNATURE, recorded_by_duz: current_duz,
           handover_token: @consent_lock["handover_token"]
         }
+      end
+
+      # A second post of a signature already stored for this handover reads
+      # the hand-back page. It must not be audited as another consent create.
+      def render_stored_signature!
+        @consent_audit_action = "R"
+        render :handed_back
       end
 
       def throttled_unlock?
@@ -242,6 +248,45 @@ module Lakeraven
         value[:client] || value["client"]
       end
 
+      # Session end has to be a refusal with a reason. The shared gate clears
+      # the session before the audit row is written, which would otherwise
+      # look like nothing worth recording.
+      def require_authentication
+        note_ending_kiosk_session!
+        super
+      end
+
+      def note_ending_kiosk_session!
+        reason = ending_kiosk_session_reason
+        note_audit_denial(reason) if reason
+      end
+
+      def ending_kiosk_session_reason
+        return nil if session[:duz].blank?
+        return "browser access refused: session timed out" if session_idle_expired? || session_lifetime_expired?
+        return "browser access refused: session ended" if session_token_revoked?
+        return "browser access refused: RPMS session ended" if rpms_connection_closed?
+
+        nil
+      end
+
+      # Unlock releases the tablet. It is an execute, not a consent create.
+      # A resubmit of a stored signature is a read.
+      def audit_action
+        return @consent_audit_action if @consent_audit_action
+        return "E" if action_name == "unlock"
+
+        super
+      end
+
+      def audit_outcome_desc
+        described = super
+        return described unless action_name == "unlock"
+        return described if described.to_s.match?(/unlock|kiosk|lock/i)
+
+        [ described, "kiosk unlock" ].compact.join("; ").presence
+      end
+
       def fhir_resource_type
         consent_audit_id ? CONSENT_RESOURCE : "Patient"
       end
@@ -253,6 +298,29 @@ module Lakeraven
       def consent_audit_id
         @signed_consent.id.to_s if @signed_consent&.persisted?
       end
+
+      # require_authentication has to sit after the audit around-callback
+      # (so a session ending is recorded) and before CSRF (so a stale token
+      # cannot turn that ending into a 401). Prepend puts it outside the
+      # wrapper; a normal before_action puts it after CSRF.
+      def self.place_session_authentication_inside_audit!
+        before_action :require_authentication
+        chain = _process_action_callbacks
+        ordered = chain.to_a
+        session_gate = ordered.find { |callback| callback.filter == :require_authentication }
+        audit_at = ordered.index { |callback| callback.filter == :audit_clinical_access }
+        unless session_gate && audit_at
+          raise "consent kiosk authentication could not be placed inside the audit wrapper"
+        end
+
+        chain.delete(session_gate)
+        chain.insert(audit_at + 1, session_gate)
+      end
+      private_class_method :place_session_authentication_inside_audit!
+      # Inside the audit wrapper, and before CSRF. Prepending would record
+      # nothing when the session ends; appending would let a stale token
+      # turn that ending into a 401 instead of a redirect to login.
+      place_session_authentication_inside_audit!
     end
   end
 end

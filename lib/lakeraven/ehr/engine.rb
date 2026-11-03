@@ -37,8 +37,9 @@ module Lakeraven
         app.config.filter_parameters += %i[username access_code verify_code allergy signature signer_name]
         # A patient's identity never reaches a log line (#722): the registration form,
         # any SSN, and the search's q and dob (matched exactly: a bare :q would also
-        # match every key containing a q).
-        app.config.filter_parameters += [ :registration, :ssn, /\Aq\z/, /\Adob\z/ ]
+        # match every key containing a q). The revocation form's reason is matched
+        # the same way, so a key that merely contains "reason" is left alone.
+        app.config.filter_parameters += [ :registration, :ssn, /\Aq\z/, /\Adob\z/, /\Areason\z/ ]
       end
 
       NO_RPMS_BACKEND = "[lakeraven-ehr] No RPMS backend configured: name a broker in " \

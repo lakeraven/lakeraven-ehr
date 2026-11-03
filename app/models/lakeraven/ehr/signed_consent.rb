@@ -23,6 +23,9 @@ module Lakeraven
 
       include ImmutablePersistedRow
 
+      # The PNG decode from this request, so validation does not inflate again.
+      attr_accessor :decoded_signature
+
       belongs_to :consent_template, class_name: "Lakeraven::EHR::ConsentTemplate"
       validate :revocation_names_a_consent, if: -> { kind == KIND_REVOCATION }
 
@@ -45,13 +48,16 @@ module Lakeraven
 
       # The canvas posts a PNG data URL. Stored bytes are the PNG itself.
       # Blank, non-PNG, undecodable, inkless, and oversize payloads are refused
-      # before a row exists.
+      # before a row exists. The returned parser is the one validation reuses,
+      # so a request inflates the bitmap once.
       def self.decode_signature_data_url(value)
         bytes = decode_data_url_bytes(value)
         return nil unless bytes
-        return nil unless SignaturePng.acceptable?(bytes)
 
-        bytes
+        parsed = SignaturePng.new(bytes)
+        return nil unless parsed.acceptable?
+
+        parsed
       end
 
       def self.decode_data_url_bytes(value)
@@ -72,11 +78,12 @@ module Lakeraven
       private_class_method :decode_data_url_bytes
 
       def self.record_signature!(attributes)
+        decoded = attributes.delete(:decoded_signature)
         token = attributes[:handover_token].presence
         found = existing_for_handover(token)
         return found if found
 
-        without_statement_log { insert_signature!(attributes) }
+        without_statement_log { insert_signature!(attributes, decoded) }
       rescue ActiveRecord::RecordNotUnique, ActiveRecord::RecordInvalid
         recovered = existing_for_handover(token)
         raise if recovered.nil?
@@ -93,8 +100,13 @@ module Lakeraven
 
       # The unique handover index is the race. A savepoint keeps that violation
       # from aborting the audit transaction around the request.
-      def self.insert_signature!(attributes)
-        transaction(requires_new: true) { create!(attributes) }
+      def self.insert_signature!(attributes, decoded = nil)
+        transaction(requires_new: true) do
+          row = new(attributes)
+          row.decoded_signature = decoded
+          row.save!
+          row
+        end
       end
       private_class_method :insert_signature!
 
@@ -211,9 +223,17 @@ module Lakeraven
           errors.add(:signature_png, "is larger than 500 KB")
           return
         end
-        return if SignaturePng.acceptable?(bytes)
+        return if acceptable_signature_png?(bytes)
 
         errors.add(:signature_png, "must be a PNG with ink")
+      end
+
+      def acceptable_signature_png?(bytes)
+        parsed = decoded_signature
+        parsed = nil unless parsed.respond_to?(:same_bytes?) && parsed.same_bytes?(bytes)
+        parsed ||= SignaturePng.new(bytes)
+        self.decoded_signature = parsed
+        parsed.acceptable?
       end
 
       # `exists?` is not used: a revocation race stubs that query. `pick` still
