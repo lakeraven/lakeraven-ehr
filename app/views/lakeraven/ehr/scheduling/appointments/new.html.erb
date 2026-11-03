@@ -5,6 +5,13 @@
 
 <%= flash_alert %>
 
+<% if @offer_overbook %>
+  <%= alert_box :notice,
+        "That time is full, or outside the clinic's open blocks.",
+        "You may book it as an overbook. It will count toward the clinic's overbooks for the day.",
+        id: "overbook-offer" %>
+<% end %>
+
 <% if @quick_registered_hrn.present? %>
   <%= alert_box :notice,
         "Registered#{" #{@chosen[:name]}" if @chosen}.",
@@ -90,6 +97,14 @@
           aria: aria %>
   <% end %>
 
-  <%= f.submit "Book",
-        class: "button-primary self-start" %>
+  <% if @offer_overbook %>
+    <%# OVERBOOK, PATIENT (#44.003) field 9, is set to O after the booking files. %>
+    <%= button_tag "Book as an overbook",
+          name: "overbook",
+          value: "1",
+          class: "button-primary self-start" %>
+  <% else %>
+    <%= f.submit "Book",
+          class: "button-primary self-start" %>
+  <% end %>
 <% end %>

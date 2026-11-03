@@ -117,15 +117,58 @@ module Lakeraven
 
       # Books if the time still has room, read again under the lock; :full if not.
       # access_type: "WALKIN" books a walk-in (S-SCH-06.1); nil a scheduled appointment.
-      def self.book_if_room(booking, resource, via: ::RpmsRpc::Scheduling, setup: ::RpmsRpc::SchedulingSetup, access_type: nil)
+      #
+      # overbook: who is booking, for a time with no room ({ duz:, supervisor:,
+      # confirmed: }), or nil to never overbook. When the overbook rules of
+      # S-SCH-01.9 to 01.11 let them (overbook_permitted?), the answer is
+      # :overbook_offered until they confirm; a confirmed overbook is booked
+      # and then marked OVERBOOK (#44.003 field 9), as BPRM marks it (#603).
+      def self.book_if_room(booking, resource, via: ::RpmsRpc::Scheduling, setup: ::RpmsRpc::SchedulingSetup, access_type: nil, overbook: nil)
         date = booking.start_time.to_date
         lock_for(resource, date).synchronize do
           clinic_day, = day(resource, date, via: via, setup: setup)
-          next Result.new(status: :full, appointment_id: nil, message: nil) unless clinic_day.room_for?(booking.start_time, booking.length)
+          next book(booking, resource, via: via, access_type: access_type) if clinic_day.room_for?(booking.start_time, booking.length)
+          next Result.new(status: :full, appointment_id: nil, message: nil) unless overbook && overbook_permitted?(clinic_day, booking, resource, overbook, via: via, setup: setup)
+          next Result.new(status: :overbook_offered, appointment_id: nil, message: nil) unless overbook[:confirmed]
 
-          book(booking, resource, via: via, access_type: access_type)
+          booked = book(booking, resource, via: via, access_type: access_type)
+          booked.booked? ? mark_overbook(booked, booking, resource, setup: setup) : booked
         end
       end
+
+      # The overbook rules (rpms-ux S-SCH-01.9 to 01.11), as the Windows
+      # scheduler and BPRM apply them. Never on a day the clinic takes no
+      # booking (a holiday, past its booking limit, inactive). SDZSUP or the
+      # master overbook right on the resource (BSDX RESOURCE USER .06) may
+      # overbook anywhere else, past the clinic's daily maximum and outside its
+      # blocks. The overbook right (.03) may overbook a full time inside an
+      # open block while BSDX OVERBOOK says the day is under the clinic's
+      # OVERBOOKS/DAY MAXIMUM (#44 field 1918). A read that fails refuses.
+      def self.overbook_permitted?(clinic_day, booking, resource, who, via:, setup:)
+        return false if clinic_day.closed
+        return true if who[:supervisor] || setup.master_overbook?(resource_id: resource[:id], duz: who[:duz])
+        return false unless resource[:overbook] && clinic_day.in_block?(booking.start_time, booking.length)
+
+        via.overbook_allowed(hospital_location_id: resource[:hospital_location_id], start_time: booking.start_time, resource_id: resource[:id])
+      rescue ::RpmsRpc::Error, IOError, SystemCallError => e
+        Rails.logger.error("[scheduling] overbook check raised #{e.class}; refused")
+        false
+      end
+      private_class_method :overbook_permitted?
+
+      # Marks a booked overbook. The booking stands either way; when RPMS does
+      # not mark it, the result says so, so the clerk knows the clinic's
+      # overbook count will miss it.
+      def self.mark_overbook(booked, booking, resource, setup:)
+        marked = setup.mark_overbook(hospital_location_id: resource[:hospital_location_id], start_time: booking.start_time, patient_dfn: booking.patient_dfn)
+        return booked.with(status: :booked) if marked&.dig(:success)
+
+        booked.with(message: "Booked, but RPMS did not mark it as an overbook (#{marked&.dig(:error).presence || 'no reply'}). The clinic's overbook count will miss it.")
+      rescue ::RpmsRpc::Error, IOError, SystemCallError => e
+        Rails.logger.error("[scheduling] overbook mark raised #{e.class}")
+        booked.with(message: "Booked, but RPMS did not confirm it is marked as an overbook. The clinic's overbook count may miss it.")
+      end
+      private_class_method :mark_overbook
 
       def self.book(booking, resource, via: ::RpmsRpc::Scheduling, access_type: nil)
         reply = via.add_appointment(patient_dfn: booking.patient_dfn, resource: resource[:name],

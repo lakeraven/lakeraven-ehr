@@ -174,4 +174,19 @@ class SchedulingWalkInTest < ActionDispatch::IntegrationTest
       assert_response :forbidden
     end
   end
+
+  test "S-SCH-06.2 the overbook rules of S-SCH-01 apply: SDZSUP may book a full current slot as an overbook walk-in" do
+    post "/lakeraven-ehr/test_session", params: { duz: "208", user_type: "user", user_name: "PROFILE,SCHED", security_keys: "scheduling_user,scheduling_supervisor" }
+    busy = { id: 9, start_time: slot_now, end_time: slot_now + 900, patient_dfn: 7, patient_name: "DUCK,DONALD", cancelled: false }
+    with_rpms(listed: [ busy ]) do
+      post path, params: walk_in_params
+      assert_response :conflict
+      assert_select "#overbook-offer"
+      assert_empty calls
+
+      post path, params: walk_in_params.merge(overbook: "1")
+      assert_response :redirect
+      assert_equal %i[add checkin], calls.map(&:first)
+    end
+  end
 end

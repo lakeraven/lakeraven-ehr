@@ -13,7 +13,10 @@ module SchedulingSetupStubs
       RpmsRpc::SchedulingSetup.singleton_class => {
         clinic_rules: ->(_id) { rules },
         holidays: ->(start_date:, end_date:) { holidays.select { |h| (start_date..end_date).cover?(h[:date]) } },
-        access_types: ->(*) { access_types }
+        access_types: ->(*) { access_types },
+        # No master overbook right, unless a test says so (S-SCH-01.9 to 01.11).
+        master_overbook?: ->(**) { false },
+        mark_overbook: ->(**) { { success: true } }
       }
     }
   end
