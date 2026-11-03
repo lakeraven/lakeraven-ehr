@@ -77,7 +77,7 @@ module Lakeraven
         )
 
         assert_raises(ActiveRecord::RecordInvalid, ActiveRecord::StatementInvalid) { orphan.save! }
-        assert_equal 0, SignedConsent.where(kind: KIND_REVOCATION, revokes_id: orphan.revokes_id).count
+        assert_equal 0, SignedConsent.where(kind: SignedConsent::KIND_REVOCATION, revokes_id: orphan.revokes_id).count
       end
 
       test "signature rejects payloads over 500 KB" do

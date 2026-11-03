@@ -55,6 +55,7 @@ class ConsentKioskRegressionsTest < ActionDispatch::IntegrationTest
     access = "SYNTHETIC.ACCESS"
     verify = "SYNTHETIC.VERIFY"
     hits = 0
+    hits_at_limit = nil
     service = Object.new
     service.define_singleton_method(:authenticate) do |**_kwargs|
       hits += 1
@@ -139,7 +140,7 @@ class ConsentKioskRegressionsTest < ActionDispatch::IntegrationTest
       refute_match(%r{consent_kiosk}, response.location.to_s)
 
       post "#{MOUNT}/login", params: { username: "testprovider", password: "test123" }
-      refute_redirected_to KIOSK
+      refute response.redirect? && URI(response.location).path == KIOSK
     end
   end
 
