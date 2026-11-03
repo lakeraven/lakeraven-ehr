@@ -6,10 +6,12 @@ module Lakeraven
       # Scheduling screens (rpms-ux W02). Opening scheduling takes the
       # scheduling.open capability (S-SCH-01.12). Changing appointments on a
       # resource takes the user's modify-appointments right on it (BSDX RESOURCE
-      # USER), unless they hold scheduling.supervise (S-SCH-01.13).
+      # USER), unless they hold scheduling.supervise (S-SCH-01.13). The screens
+      # run on BSDX, which only an IHS backend serves (bprm_scheduling, #647).
       class BaseController < WebController
         include RpmsUnavailableRendering
 
+        before_action :require_bprm_scheduling!
         before_action :require_authentication
         before_action -> { require_capability!("scheduling.open") }
         helper_method :can_book?
@@ -17,6 +19,13 @@ module Lakeraven
         private
 
         def supervisor? = capability?("scheduling.supervise")
+
+        def require_bprm_scheduling!
+          return if BackendRegistry.current.provides?(:bprm_scheduling)
+
+          note_audit_denial("browser access refused: backend lacks bprm_scheduling")
+          render plain: "Scheduling is not available on this backend.", status: :not_found
+        end
 
         # The resources this user may see: those whose BSDX rights name them, or
         # every one for a supervisor.

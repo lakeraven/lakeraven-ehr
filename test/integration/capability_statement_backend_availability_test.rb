@@ -27,7 +27,7 @@ module Lakeraven
         .map(&:first).uniq.freeze
 
       PINNED_DEFAULT_INTERACTIONS = {
-        "Patient" => %w[create read search-type],
+        "Patient" => %w[read search-type],
         "Practitioner" => %w[read search-type],
         "ServiceRequest" => %w[search-type],
         "Immunization" => %w[search-type]
@@ -200,7 +200,7 @@ module Lakeraven
 
         assert_includes @scopes_supported, "system/ServiceRequest.s"
         assert_includes @scopes_supported, "system/Immunization.s"
-        assert_includes @scopes_supported, "system/Patient.crs"
+        assert_includes @scopes_supported, "system/Patient.rs"
       end
 
       private

@@ -26,14 +26,11 @@ module Lakeraven
           @booking = AppointmentBooking.new(booking_params)
           return render_new(:unprocessable_content) unless @booking.valid?
 
-          day, = AppointmentBookingGateway.day(@resource, @booking.start_time.to_date)
-          unless day.room_for?(@booking.start_time, @booking.length)
+          result = AppointmentBookingGateway.book_if_room(@booking, @resource)
+          if result.status == :full
             flash.now[:alert] = "That time is full or outside the clinic's open hours. Choose another time."
-            return render_new(:conflict)
-          end
-
-          result = AppointmentBookingGateway.book(@booking, @resource)
-          if result.booked?
+            render_new(:conflict)
+          elsif result.booked?
             flash[:booked_id] = result.appointment_id
             redirect_to scheduling_clinic_path(@resource[:id], date: @booking.start_time.to_date.iso8601)
           elsif result.status == :unknown

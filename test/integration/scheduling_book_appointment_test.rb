@@ -6,6 +6,8 @@ require "test_helper"
 # in for at the gem boundary with the shapes a live rpms-ydb e9b78c8 build
 # answered: an 08:00-17:00 block of 4 slots on a 15-minute grid.
 class SchedulingBookAppointmentTest < ActionDispatch::IntegrationTest
+  include IhsFeatureAvailabilityTestHelper
+
   DAY = Date.new(2026, 10, 28)
 
   def at(hour, min = 0) = Time.new(DAY.year, DAY.month, DAY.day, hour, min)
@@ -50,6 +52,19 @@ class SchedulingBookAppointmentTest < ActionDispatch::IntegrationTest
 
   def book_params(**changes)
     { booking: { patient_dfn: "3", start: "2026-10-28T09:00", length: "20", note: "" }.merge(changes) }
+  end
+
+  # BSDX is IHS-only (#647): a backend without bprm_scheduling has no scheduling
+  # screens, and nothing is asked of it.
+  test "scheduling is not offered on a backend without bprm_scheduling" do
+    sign_in("scheduling_user")
+    with_restricted_backend do
+      before = RpmsRpc.client.received_calls.length
+      get "/lakeraven-ehr/scheduling"
+
+      assert_response :not_found
+      assert_no_rpc_calls_since(before)
+    end
   end
 
   test "S-SCH-01.12 without SDZMENU or SDZSUP, scheduling is closed" do

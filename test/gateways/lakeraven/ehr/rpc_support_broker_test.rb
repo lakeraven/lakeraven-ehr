@@ -61,12 +61,12 @@ module Lakeraven
         assert_equal({ success: false, status: 503, error: "RPMS is unavailable" }, result)
       end
 
-      test "a scheduling read goes to the configured client" do
-        fake = FakeBroker.new.on(SchedulingGateway::APPTLST_RPC, [])
+      test "a read goes to the configured client" do
+        fake = FakeBroker.new.on("ORWPT APPTLST", [])
 
-        use_broker(fake) { SchedulingGateway.patient_appointments(42) }
+        use_broker(fake) { RpcSupport.broker.call_rpc("ORWPT APPTLST", "42") }
 
-        assert_equal [ "42" ], fake.calls_for(SchedulingGateway::APPTLST_RPC).first&.dig(:params)
+        assert_equal [ "42" ], fake.calls_for("ORWPT APPTLST").first&.dig(:params)
       end
     end
   end

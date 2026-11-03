@@ -5,6 +5,7 @@ module Lakeraven
     class ServiceRequest
       include ActiveModel::Model
       include ActiveModel::Attributes
+      include FHIRSerializable
 
       attribute :ien, :integer
       attribute :patient_dfn, :integer
@@ -207,7 +208,7 @@ module Lakeraven
           intent: "order",
           priority: map_urgency_to_fhir_priority,
           code: build_code,
-          subject: patient_dfn ? { reference: "Patient/#{patient_dfn}" } : nil,
+          subject: patient_dfn ? build_reference("Patient", patient_dfn) : nil,
           authoredOn: authored_on&.iso8601,
           reasonCode: reason_for_referral.present? ? [ { text: reason_for_referral } ] : nil
         }.compact
@@ -250,8 +251,14 @@ module Lakeraven
 
       def build_fhir_identifiers
         ids = []
-        ids << { use: "official", system: "http://ihs.gov/rpms/consult-id", value: ien.to_s } if ien.present?
-        ids << { use: "usual", system: "http://ihs.gov/rpms/service-request-identifier", value: identifier } if identifier.present?
+        if ien.present?
+          ids << { use: "official" }.merge(build_identifier(system: "http://ihs.gov/rpms/consult-id", value: ien))
+        end
+        if identifier.present?
+          ids << { use: "usual" }.merge(
+            build_identifier(system: "http://ihs.gov/rpms/service-request-identifier", value: identifier)
+          )
+        end
         ids.presence
       end
     end
