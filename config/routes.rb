@@ -148,6 +148,10 @@ Lakeraven::EHR::Engine.routes.draw do
       get "contacts/:kind/edit", to: "contacts#edit", as: :edit_patient_contact
       post "contacts/:kind/edit", to: "contacts#edit"
       post "contacts/:kind", to: "contacts#update", as: :patient_contact
+      # The patient's languages (S-REG-10): each save a new dated entry.
+      get "languages/edit", to: "languages#edit", as: :edit_patient_languages
+      post "languages/edit", to: "languages#edit"
+      post "languages", to: "languages#update", as: :patient_languages
     end
     # The patient's Medicaid, Medicare and private insurance (S-REG-03). The
     # state and insurer look-ups post the form back, so a member number never
