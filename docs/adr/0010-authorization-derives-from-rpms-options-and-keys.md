@@ -99,6 +99,7 @@ Initial rows (each name verified as an option or key on the pinned build):
 | `patient.register` | any key `AGZMENU`, `AGZMGR`, denied by `AGZVIEWONLY` (BPRM: CanRegisterPatient, which takes `AGZMENU` only; `AGZMGR` edits patients there, so registers here) | `user/Patient.cu` |
 | `scheduling.open` | any key `SDZMENU`, `SDZSUP` (BPRM: CanAccessScheduling) | none |
 | `scheduling.supervise` | key `SDZSUP`: every resource, whatever its BSDX rights (BPRM: SchedulingSupervisor) | none |
+| `patient.quick_register` | key `SDZREGMENU`, denied by `AGZVIEWONLY`: register a caller with no chart while booking them, with a temporary chart number (option `BSDAM MINI REGISTRATION`; rpms-ux S-REG-05). RPMS also checks that the user may run AG's `AGGRPC` context | none |
 | `patient.ssn.view` | key `AGZVIEWSSN` | none: a field rule, not a resource |
 | `adt.move` | any key `DGZADT`, `DGZNUR`, `DGZSUP`, `DGZSYS` (BPRM: CanMovePatient) | `user/Encounter.cu` |
 | `patient.sensitive.open` | key `DG SENSITIVITY` | none: input to the sensitive-patient check (#613) |

@@ -39,7 +39,12 @@ module Lakeraven
         "scheduling.open" => rule(any: %i[scheduling_user scheduling_supervisor]),
         # Every resource of the facility, and booking on any of them, whatever
         # its BSDX rights say. BPRM: SchedulingSupervisor.
-        "scheduling.supervise" => rule(any: %i[scheduling_supervisor])
+        "scheduling.supervise" => rule(any: %i[scheduling_supervisor]),
+        # Register a caller with no chart while booking them: name, date of
+        # birth, sex and SSN, and a temporary chart number (rpms-ux S-REG-05).
+        # RPMS: option BSDAM MINI REGISTRATION, locked by SDZREGMENU. BPRM
+        # implies the same key for its mini-registration (ADR 0010).
+        "patient.quick_register" => rule(any: %i[scheduling_registration], deny: %i[registration_view_only])
       }.freeze
 
       NAMES = TABLE.keys.freeze
