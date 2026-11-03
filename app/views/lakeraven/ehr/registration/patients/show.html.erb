@@ -121,6 +121,9 @@
 <% end %>
 
 <p class="mt-6">
+  <%= link_to "Coverage",
+        registration_patient_coverage_path(params[:dfn]),
+        id: "patient-coverage-link" %>
   <% if capability?("scheduling.open") %>
     <%= link_to "Appointments",
           scheduling_patient_appointments_path(params[:dfn]),
