@@ -152,6 +152,10 @@ Lakeraven::EHR::Engine.routes.draw do
       get "languages/edit", to: "languages#edit", as: :edit_patient_languages
       post "languages/edit", to: "languages#edit"
       post "languages", to: "languages#update", as: :patient_languages
+      # The other names the patient has used (S-REG-12): ALIAS, PATIENT (2.01).
+      get "other_names", to: "other_names#index", as: :patient_other_names
+      post "other_names", to: "other_names#create"
+      post "other_names/:ien/remove", to: "other_names#destroy", as: :remove_patient_other_name, constraints: { ien: /\d+/ }
     end
     # The patient's Medicaid, Medicare and private insurance (S-REG-03). The
     # state and insurer look-ups post the form back, so a member number never
