@@ -52,8 +52,70 @@ module ConsentWriteTestHelper
     inked_png_bytes(width: width, height: height) { |_x, _y| [ 0, 0, 0, 0 ] }
   end
 
-  # Valid 1×1 PNG with one opaque pixel (not a blank canvas).
-  TINY_PNG = inked_png_bytes(width: 1, height: 1).freeze
+  def self.rgb_png_bytes(width:, height:, &block)
+    block ||= proc { |_x, _y| [ 255, 255, 255 ] }
+    raw = (+"").tap do |rows|
+      height.times do |y|
+        rows << "\x00"
+        width.times do |x|
+          rows << block.call(x, y).pack("C*")
+        end
+      end
+    end
+    header = [ width, height, 8, 2, 0, 0, 0 ].pack("NNCCCCC")
+    PNG_MAGIC + png_chunk("IHDR", header) +
+      png_chunk("IDAT", Zlib::Deflate.deflate(raw)) +
+      png_chunk("IEND", "")
+  end
+
+  # At least twenty inked pixels that contrast with a transparent background.
+  def self.visible_stroke_png(width: 50, height: 20)
+    inked_png_bytes(width: width, height: height) do |x, y|
+      x == y ? [ 0, 0, 0, 255 ] : [ 0, 0, 0, 0 ]
+    end
+  end
+
+  def self.pad_sized_visible_signature_png
+    inked_png_bytes(width: 600, height: 180) do |x, y|
+      y == 90 && x.between?(50, 250) ? [ 0, 0, 0, 255 ] : [ 255, 255, 255, 0 ]
+    end
+  end
+
+  # Small on the wire, large when decoded — one inked pixel on a 1414×1414 canvas.
+  def self.oversized_compressible_signature_png
+    w = h = 1414
+    raw = (+"").b
+    h.times do |y|
+      if y == 700
+        row = ("\x00".b * 2800) + "\x00\x00\x00\xFF".b + ("\x00".b * (w * 4 - 2804))
+        raw << "\x00".b << row
+      else
+        raw << "\x00".b << ("\x00".b * (w * 4))
+      end
+    end
+    header = [ w, h, 8, 6, 0, 0, 0 ].pack("NNCCCCC")
+    PNG_MAGIC + png_chunk("IHDR", header) +
+      png_chunk("IDAT", Zlib::Deflate.deflate(raw, 9)) +
+      png_chunk("IEND", "")
+  end
+
+  def self.invisible_alpha_one_signature_png(width: 60, height: 20)
+    inked_png_bytes(width: width, height: height) { |_x, _y| [ 0, 0, 0, 1 ] }
+  end
+
+  def self.near_white_rgb_signature_png(width: 50, height: 20)
+    raw = (+"").b
+    height.times do
+      raw << "\x00".b << ("\xFF\xFF\xFF".b * width)
+    end
+    raw.setbyte(1, 0xFE)
+    header = [ width, height, 8, 2, 0, 0, 0 ].pack("NNCCCCC")
+    PNG_MAGIC + png_chunk("IHDR", header) +
+      png_chunk("IDAT", Zlib::Deflate.deflate(raw)) +
+      png_chunk("IEND", "")
+  end
+
+  TINY_PNG = visible_stroke_png.freeze
 
   def magic_bytes_only_png
     PNG_MAGIC
@@ -65,6 +127,52 @@ module ConsentWriteTestHelper
 
   def fully_transparent_signature_png
     ConsentWriteTestHelper.fully_transparent_png
+  end
+
+  def pad_sized_visible_signature_png
+    ConsentWriteTestHelper.pad_sized_visible_signature_png
+  end
+
+  def oversized_compressible_signature_png
+    ConsentWriteTestHelper.oversized_compressible_signature_png
+  end
+
+  def invisible_alpha_one_signature_png
+    ConsentWriteTestHelper.invisible_alpha_one_signature_png
+  end
+
+  def near_white_rgb_signature_png
+    ConsentWriteTestHelper.near_white_rgb_signature_png
+  end
+
+  # Setup opens the kiosk first; clear server lock + session hint so POST handover
+  # reaches ConsentsController#handover instead of redirecting to the kiosk.
+  def reset_open_consent_kiosk_lock!
+    session.delete(Lakeraven::EHR::ConsentKioskLock::SESSION_KEY)
+    Lakeraven::EHR::KioskLock.delete_all
+  end
+
+  # Losing side of two concurrent handovers (see kiosk race probe): uniqueness
+  # validation misses the winner row, then INSERT hits the unique index inside
+  # the audit transaction.
+  def with_handover_race_loser
+    Lakeraven::EHR::KioskLock.define_singleton_method(:find_or_initialize_by) do |attrs|
+      Lakeraven::EHR::KioskLock.insert!({
+        credential_key: attrs[:credential_key],
+        patient_dfn: DFN,
+        template_key: TEMPLATE_BH,
+        template_version: 1,
+        handover_token: SecureRandom.uuid,
+        created_at: Time.current,
+        updated_at: Time.current
+      })
+      rec = Lakeraven::EHR::KioskLock.new(attrs)
+      rec.define_singleton_method(:valid?) { |*| true }
+      rec
+    end
+    yield
+  ensure
+    Lakeraven::EHR::KioskLock.singleton_class.send(:remove_method, :find_or_initialize_by)
   end
 
   WRITE_SCOPES = [
@@ -211,12 +319,16 @@ module ConsentWriteTestHelper
   def capture_rails_logs
     io = StringIO.new
     logger = ActiveSupport::Logger.new(io)
-    previous = Rails.logger
+    logger.level = Logger::DEBUG
+    previous_rails = Rails.logger
+    previous_ac = ActionController::Base.logger
     Rails.logger = logger
+    ActionController::Base.logger = logger
     yield
     io.string
   ensure
-    Rails.logger = previous
+    Rails.logger = previous_rails
+    ActionController::Base.logger = previous_ac
   end
 
   def assert_locked_redirect_to_kiosk!(message = nil)

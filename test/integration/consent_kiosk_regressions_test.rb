@@ -276,4 +276,145 @@ class ConsentKioskRegressionsTest < ActionDispatch::IntegrationTest
     assert_match SYNTHETIC_REVOCATION_REASON, response.body
     assert_select "form[action=?]", "#{BASE}/#{signature.id}/revocation", count: 0
   end
+
+  test "oversized decompressible signature PNG is refused with 422 and nothing stored" do
+    bytes = oversized_compressible_signature_png
+    assert bytes.bytesize < 500.kilobytes
+    assert_operator 1414, :>, 1200, "fixture height must exceed the pad limit under test"
+
+    assert_no_difference -> { Lakeraven::EHR::SignedConsent.count } do
+      post_kiosk_signature(signature: signature_data_url(bytes))
+    end
+
+    assert_response :unprocessable_entity
+    get CHART
+    assert_locked_redirect_to_kiosk!
+  end
+
+  test "pad-sized visible signature PNG is accepted" do
+    assert_difference -> { Lakeraven::EHR::SignedConsent.count }, +1 do
+      post_kiosk_signature(signature: signature_data_url(pad_sized_visible_signature_png))
+    end
+
+    assert_response :success
+  end
+
+  test "near-invisible signatures are refused over HTTP" do
+    [ invisible_alpha_one_signature_png, near_white_rgb_signature_png ].each do |bytes|
+      Lakeraven::EHR::SignedConsent.delete_all
+
+      assert_no_difference -> { Lakeraven::EHR::SignedConsent.count } do
+        post_kiosk_signature(signature: signature_data_url(bytes))
+      end
+
+      assert_response :unprocessable_entity, "expected invisible payload to be refused"
+    end
+  end
+
+  test "losing concurrent handover answers with reason not 503 and keeps its audit row" do
+    reset_open_consent_kiosk_lock!
+    Lakeraven::EHR::AuditEvent.delete_all
+
+    with_handover_race_loser { post_handover }
+
+    refute_equal 503, response.status, "handover race must not surface as 503"
+    assert_includes [ 422, 302 ], response.status
+    if response.redirect?
+      assert_equal KIOSK, URI.parse(response.location).path
+    else
+      assert_match(/refused|could not be locked/i, response.body)
+    end
+    assert_operator Lakeraven::EHR::AuditEvent.count, :>=, 1,
+                    "expected the refused handover to leave an audit row"
+  end
+
+  test "revocation reason never appears in the Rails log" do
+    post_kiosk_signature
+    with_authentication_stub(auth_success_result) do
+      post_kiosk_unlock(access_code: "SYNTHETIC.ACCESS", verify_code: "SYNTHETIC.VERIFY")
+    end
+    follow_redirect!
+    signature = Lakeraven::EHR::SignedConsent.order(:id).last
+
+    logs = capture_rails_logs do
+      post "#{BASE}/#{signature.id}/revocation",
+           params: { reason: SYNTHETIC_REVOCATION_REASON, authenticity_token: csrf_token }
+    end
+
+    assert_response :redirect
+    refute_includes logs, SYNTHETIC_REVOCATION_REASON
+  end
+
+  test "kiosk idle past session limit ends session with an audit row recording the refusal" do
+    Lakeraven::EHR::AuditEvent.delete_all
+    travel (Lakeraven::EHR.configuration.session_idle_limit.to_i + 60).seconds do
+      get KIOSK
+    end
+
+    assert_redirected_to "#{MOUNT}/login"
+    assert_operator Lakeraven::EHR::AuditEvent.count, :>=, 1,
+                    "expected idle timeout on kiosk to write an audit row"
+    event = Lakeraven::EHR::AuditEvent.order(:id).last
+    assert event.outcome_desc.to_s.match?(/refused|timeout|session/i) || event.outcome != "0",
+           "expected session end to be recorded as a refusal, got #{event.attributes.slice('outcome', 'outcome_desc').inspect}"
+  end
+
+  test "unauthenticated GET consent_kiosk is audited the same as dashboard" do
+    reset!
+    Lakeraven::EHR::AuditEvent.delete_all
+    get KIOSK
+    kiosk_rows = Lakeraven::EHR::AuditEvent.count
+
+    Lakeraven::EHR::AuditEvent.delete_all
+    get DASHBOARD
+    dashboard_rows = Lakeraven::EHR::AuditEvent.count
+
+    assert_equal dashboard_rows, kiosk_rows
+    assert_equal 1, kiosk_rows, "expected one audit row for unauthenticated kiosk access"
+    assert_equal "4", Lakeraven::EHR::AuditEvent.recent.first.outcome
+    assert_match(/not signed in/i, Lakeraven::EHR::AuditEvent.recent.first.outcome_desc.to_s)
+  end
+
+  test "successful unlock audit names staff DUZ and is not a consent create on Patient" do
+    post_kiosk_signature
+    Lakeraven::EHR::AuditEvent.delete_all
+
+    with_authentication_stub(auth_success_result) { post_kiosk_unlock(access_code: "a", verify_code: "b") }
+
+    assert_response :redirect
+    event = Lakeraven::EHR::AuditEvent.order(:id).last
+    assert_equal DUZ, event.agent_who_identifier
+    refute event.action == "C" && event.entity_type == "Patient",
+           "unlock must not look like a consent create on Patient (got action=#{event.action} type=#{event.entity_type})"
+    assert event.action != "C" || event.entity_type == "Consent",
+           "expected unlock to be distinguishable from signing; got action=#{event.action} entity=#{event.entity_type}"
+    assert event.outcome_desc.to_s.match?(/unlock|lock|kiosk/i) || event.action == "E",
+           "expected unlock outcome to name the kiosk unlock"
+  end
+
+  test "resubmit after a stored signature is not audited as a consent create" do
+    post_kiosk_signature
+    assert_response :success
+    Lakeraven::EHR::AuditEvent.delete_all
+
+    post_kiosk_signature
+
+    assert_response :success
+    create_events = Lakeraven::EHR::AuditEvent.where(action: "C", entity_type: "Consent")
+    assert_equal 0, create_events.count,
+                 "resubmit must not file another consent create; rows=#{Lakeraven::EHR::AuditEvent.pluck(:action, :entity_type, :outcome_desc).inspect}"
+    readish = Lakeraven::EHR::AuditEvent.where(action: "R")
+    assert_equal 1, readish.count, "resubmit should be a read/no-op in the audit trail"
+  end
+
+  test "GET kiosk after a successful sign shows hand-back not the signature form" do
+    post_kiosk_signature
+    assert_response :success
+
+    get KIOSK
+
+    assert_response :success
+    assert_match(/hand.*tablet back/i, response.body)
+    assert_select "form#consent-signature-form", count: 0
+  end
 end

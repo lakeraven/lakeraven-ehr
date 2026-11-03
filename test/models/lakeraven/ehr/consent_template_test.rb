@@ -80,6 +80,18 @@ module Lakeraven
         row.reload
         refute_equal "changed", row.title
       end
+
+      test "increment! and decrement! on a persisted template raise ReadOnlyRecord" do
+        ConsentTemplate.install_defaults!
+        row = ConsentTemplate.find_by!(key: "bh-treatment", version: 1)
+        version_before = row.version
+
+        assert_raises(ActiveRecord::ReadOnlyRecord) { row.increment!(:version) }
+        assert_raises(ActiveRecord::ReadOnlyRecord) { row.decrement!(:version) }
+
+        row.reload
+        assert_equal version_before, row.version
+      end
     end
   end
 end

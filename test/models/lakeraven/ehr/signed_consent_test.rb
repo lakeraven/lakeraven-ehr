@@ -49,8 +49,19 @@ module Lakeraven
         refute SignedConsent.new(valid_attrs.merge(signature_png: corrupt_truncated_png)).valid?
       end
 
-      test "signature accepts a PNG with at least one opaque pixel" do
-        row = SignedConsent.new(valid_attrs.merge(signature_png: TINY_PNG))
+      test "signature rejects near-invisible PNG payloads" do
+        refute SignedConsent.new(valid_attrs.merge(signature_png: invisible_alpha_one_signature_png)).valid?
+        refute SignedConsent.new(valid_attrs.merge(signature_png: near_white_rgb_signature_png)).valid?
+      end
+
+      test "signature rejects decoded dimensions above pad limits" do
+        refute SignedConsent.new(valid_attrs.merge(signature_png: oversized_compressible_signature_png)).valid?
+      end
+
+      test "signature accepts a visible stroke PNG and pad-sized ink" do
+        assert SignedConsent.new(valid_attrs.merge(signature_png: TINY_PNG)).valid?,
+               SignedConsent.new(valid_attrs.merge(signature_png: TINY_PNG)).errors.full_messages.to_sentence
+        row = SignedConsent.new(valid_attrs.merge(signature_png: pad_sized_visible_signature_png))
         assert row.valid?, row.errors.full_messages.to_sentence
       end
 
@@ -101,6 +112,29 @@ module Lakeraven
 
         row.reload
         assert_equal original_digest, row.template_body_digest
+      end
+
+      test "increment! and decrement! on a persisted signature raise ReadOnlyRecord" do
+        row = SignedConsent.create!(valid_attrs)
+        version_before = row.template_version
+
+        assert_raises(ActiveRecord::ReadOnlyRecord) { row.increment!(:template_version) }
+        assert_raises(ActiveRecord::ReadOnlyRecord) { row.decrement!(:template_version) }
+
+        row.reload
+        assert_equal version_before, row.template_version
+      end
+
+      test "update_counters on SignedConsent is refused" do
+        row = SignedConsent.create!(valid_attrs)
+        digest_before = row.template_body_digest
+
+        assert_raises(ActiveRecord::ReadOnlyRecord, ActiveRecord::ActiveRecordError) do
+          SignedConsent.update_counters(row.id, template_version: 1)
+        end
+
+        row.reload
+        assert_equal digest_before, row.template_body_digest
       end
 
       test "revoke! creates a new revocation row and leaves the signature unchanged" do
