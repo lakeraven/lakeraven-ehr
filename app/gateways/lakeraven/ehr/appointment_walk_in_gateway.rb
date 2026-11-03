@@ -24,10 +24,10 @@ module Lakeraven
 
       UNDO_REMARK = "Walk-in not checked in. Booking undone"
 
-      def self.book_and_check_in(walk_in, resource, provider_ien:, stop_ien:, via: ::RpmsRpc::Scheduling, setup: ::RpmsRpc::SchedulingSetup)
+      def self.book_and_check_in(walk_in, resource, provider_ien:, stop_ien:, overbook: nil, via: ::RpmsRpc::Scheduling, setup: ::RpmsRpc::SchedulingSetup)
         booking = AppointmentBooking.new(patient_dfn: walk_in.patient_dfn, start: slot_start(walk_in.time, resource).strftime("%Y-%m-%dT%H:%M"),
                                          length: resource[:time_scale])
-        booked = AppointmentBookingGateway.book_if_room(booking, resource, via: via, setup: setup, access_type: "WALKIN")
+        booked = AppointmentBookingGateway.book_if_room(booking, resource, via: via, setup: setup, access_type: "WALKIN", overbook: overbook)
         return Result.new(status: booked.status, appointment_id: nil, message: booked.message) unless booked.booked?
 
         id = booked.appointment_id
@@ -35,7 +35,7 @@ module Lakeraven
           id, at: walk_in.time, provider_ien: provider_ien, clinic_code: stop_ien, via: via,
               reread: -> { AppointmentBookingGateway.appointment(resource, id, walk_in.time.to_date, via: via) }
         )
-        return Result.new(status: :checked_in, appointment_id: id, message: checked.message) if checked.checked_in?
+        return Result.new(status: :checked_in, appointment_id: id, message: [ booked.message, visit_warning(checked.message) ].compact.join(" ").presence) if checked.checked_in?
 
         undo(id, checked, via: via)
       end
@@ -74,6 +74,11 @@ module Lakeraven
         floor = minutes - (minutes % scale)
         Time.new(time.year, time.month, time.day, floor / 60, floor % 60)
       end
+
+      def self.visit_warning(message)
+        "RPMS filed the check-in but reported: #{message} Check the visit." if message.present?
+      end
+      private_class_method :visit_warning
 
       def self.undo(id, refusal, via:)
         why = refusal.message.presence || "RPMS did not confirm it"

@@ -122,6 +122,10 @@
             <% if time.open.positive? && can_book?(@resource) %>
               <%= link_to "Book",
                     scheduling_new_clinic_appointment_path(@resource[:id], start: time.at.strftime("%Y-%m-%dT%H:%M")) %>
+            <% elsif can_overbook?(@resource) %>
+              <%= link_to "Overbook",
+                    scheduling_new_clinic_appointment_path(@resource[:id], start: time.at.strftime("%Y-%m-%dT%H:%M")),
+                    data: { overbook: true } %>
             <% end %>
           </td>
         </tr>
