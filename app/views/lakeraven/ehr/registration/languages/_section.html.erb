@@ -1,0 +1,44 @@
+<%# The patient's languages, from the latest dated entry (rpms-ux S-REG-10), a
+    section of the patient's registration page.
+    Locals: dfn, languages (RpmsRpc::PatientProfile.languages), can_edit. %>
+<section
+  id="languages-section"
+  aria-labelledby="languages-heading"
+  class="card mt-6"
+>
+  <div class="flex items-baseline justify-between gap-4">
+    <h2 id="languages-heading">Languages</h2>
+    <% if can_edit %>
+      <%= link_to "Record the languages",
+            registration_edit_patient_languages_path(dfn),
+            id: "edit-languages" %>
+    <% end %>
+  </div>
+  <% if languages.blank? %>
+    <p>
+      No languages on file.
+    </p>
+  <% else %>
+    <%# The newest LANGUAGES ENTRY DATE entry, IHS PATIENT (9000001.86). %>
+    <dl class="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-2">
+      <%# PRIMARY LANGUAGE .02. %>
+      <dt>Primary language</dt>
+      <dd data-field="primary"><%= languages.dig(:primary, :name).to_s.titleize %></dd>
+      <%# PREFERRED LANGUAGE .04. %>
+      <dt>Preferred language</dt>
+      <dd data-field="preferred"><%= languages.dig(:preferred, :name).to_s.titleize.presence || "Not recorded" %></dd>
+      <%# OTHER LANGUAGE SPOKEN .05. %>
+      <dt>Other languages</dt>
+      <dd data-field="others"><%= Array(languages[:others]).map { |other| other[:name].titleize }.join(", ").presence || "None" %></dd>
+      <%# ENGLISH PROFICIENCY .06. %>
+      <dt>Speaks English</dt>
+      <dd data-field="proficiency"><%= Lakeraven::EHR::LanguageEntry::PROFICIENCY[languages[:proficiency]] || "Not recorded" %></dd>
+      <%# INTREPRETER REQUIRED .03. %>
+      <dt>Interpreter needed</dt>
+      <dd data-field="interpreter"><%= Lakeraven::EHR::LanguageEntry::INTERPRETER[languages[:interpreter]] || "Not recorded" %></dd>
+      <%# LANGUAGES ENTRY DATE .01. %>
+      <dt>Recorded</dt>
+      <dd data-field="date"><%= languages[:date].to_s.titleize %></dd>
+    </dl>
+  <% end %>
+</section>
