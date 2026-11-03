@@ -344,6 +344,19 @@ module Lakeraven
           issued: Time.current
         )
       end
+
+      test "every factory mode builds a defined adapter (#706)" do
+        LabReconciliation::ReconciliationAdapterFactory::ADAPTERS.each_key do |mode|
+          assert_kind_of LabReconciliation::BaseAdapter, LabReconciliation::ReconciliationAdapterFactory.build(mode)
+        end
+      end
+
+      test "production's default adapter raises rather than reading as no orders (#706)" do
+        with_stub(Rails, :env, ActiveSupport::StringInquirer.new("production")) do
+          adapter = LabReconciliation::ReconciliationAdapterFactory.build
+          assert_raises(LabReconciliation::NotConfiguredAdapter::NotConfigured) { adapter.fetch_pending_orders("1") }
+        end
+      end
     end
   end
 end

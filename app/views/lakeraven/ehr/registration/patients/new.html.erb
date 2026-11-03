@@ -37,6 +37,7 @@
       url: registration_patients_path,
       method: :post,
       local: true,
+      authenticity_token: form_authenticity_token,
       id: "registration-form",
       class: "card flex flex-col gap-4" do |f| %>
   <%= hidden_field_tag :submission_id,
