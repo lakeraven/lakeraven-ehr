@@ -35,8 +35,8 @@ class ConsentKioskTest < ActionDispatch::IntegrationTest
     ActionController::Base.allow_forgery_protection = @forgery_was
     teardown_oauth!
     Lakeraven::EHR::AuditEvent.delete_all
-    SignedConsent.delete_all if defined?(Lakeraven::EHR::SignedConsent) && Lakeraven::EHR::SignedConsent.table_exists?
-    ConsentTemplate.delete_all if defined?(Lakeraven::EHR::ConsentTemplate) && Lakeraven::EHR::ConsentTemplate.table_exists?
+    Lakeraven::EHR::SignedConsent.delete_all if Lakeraven::EHR::SignedConsent.table_exists?
+    Lakeraven::EHR::ConsentTemplate.delete_all if Lakeraven::EHR::ConsentTemplate.table_exists?
     if @demo_original_client
       RpmsRpc.configure { |c| c.client = @demo_original_client }
       @demo_original_client = nil
@@ -128,6 +128,14 @@ class ConsentKioskTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "after a successful sign the consent list stays locked until unlock" do
+    post_kiosk_signature
+    assert_response :success
+
+    get BASE
+    assert_locked_redirect_to_kiosk!
+  end
+
   test "unlock succeeds only when re-auth returns the same DUZ" do
     post_kiosk_signature
     assert_response :success
@@ -154,7 +162,7 @@ class ConsentKioskTest < ActionDispatch::IntegrationTest
     end
     assert_includes [ 422, 302 ], response.status
     follow_redirect! if response.redirect?
-    assert_equal KIOSK, URI.parse(request.url).path if response.success?
+    assert_equal KIOSK, URI.parse(request.url).path if response.successful?
 
     get CHART
     assert_locked_redirect_to_kiosk!

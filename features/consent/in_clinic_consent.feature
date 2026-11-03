@@ -13,6 +13,7 @@ Feature: In-clinic consent on a locked patient tablet
     Given the clinician starts the "bh-treatment" consent handover
     When the patient signs the kiosk consent form
     Then a signed consent exists for the patient with template version witness and signature
+    And the clinician unlocks the kiosk with their access and verify codes
     And the chart consent list shows the consent as Active
 
   Scenario: The patient-facing screen exposes nothing else

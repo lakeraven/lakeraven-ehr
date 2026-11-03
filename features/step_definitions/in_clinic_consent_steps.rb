@@ -14,10 +14,9 @@ module InClinicConsentStepHelpers
   end
 
   def authentication_success_service
+    result = auth_success_result(duz: PatientBannerTestHelper::DUZ)
     service = Object.new
-    service.define_singleton_method(:authenticate) do |**_kwargs|
-      auth_success_result(duz: DUZ)
-    end
+    service.define_singleton_method(:authenticate) { |**_kwargs| result }
     service
   end
 end
@@ -56,14 +55,14 @@ Given("default consent templates are installed") do
 end
 
 Given("the clinician is signed in with consent write scopes for in-clinic signing") do
-  sign_in_clinician!(scopes: WRITE_SCOPES)
+  sign_in_clinician!(scopes: ConsentWriteTestHelper::WRITE_SCOPES)
   open_patient_context!(@dfn) if @dfn
   install_consent_templates!
   parse_last_response!
 end
 
 Given("the clinician starts the {string} consent handover") do |template_key|
-  sign_in_clinician!(scopes: WRITE_SCOPES) unless @clinician_token
+  sign_in_clinician!(scopes: ConsentWriteTestHelper::WRITE_SCOPES) unless @clinician_token
   open_patient_context!(@dfn) if @dfn
   post_handover(template_key: template_key)
   follow_redirect! if last_response.redirect?
@@ -71,9 +70,9 @@ Given("the clinician starts the {string} consent handover") do |template_key|
 end
 
 Given("the clinician opens the patient consent list") do
-  sign_in_clinician!(scopes: WRITE_SCOPES) unless @clinician_token
+  sign_in_clinician!(scopes: ConsentWriteTestHelper::WRITE_SCOPES) unless @clinician_token
   open_patient_context!(@dfn) if @dfn
-  get BASE
+  get ConsentWriteTestHelper::BASE
   parse_last_response!
   @consents_list_audit_before = Lakeraven::EHR::AuditEvent.count
 end
@@ -81,14 +80,14 @@ end
 When("the patient signs the kiosk consent form") do
   post_kiosk_signature
   parse_last_response!
-  @last_signature_bytes = TINY_PNG
-  @last_signer_name = SYNTHETIC_SIGNER_NAME
+  @last_signature_bytes = ConsentWriteTestHelper::TINY_PNG
+  @last_signer_name = ConsentWriteTestHelper::SYNTHETIC_SIGNER_NAME
 end
 
 When("the patient signs the kiosk consent form with typed name {string}") do |name|
   post_kiosk_signature(signer_name: name)
   parse_last_response!
-  @last_signature_bytes = TINY_PNG
+  @last_signature_bytes = ConsentWriteTestHelper::TINY_PNG
   @last_signer_name = name
 end
 
@@ -102,27 +101,27 @@ Then("a signed consent exists for the patient with template version witness and 
   rows = Lakeraven::EHR::SignedConsent.signatures_for_patient(@dfn)
   assert_equal 1, rows.size, "expected one signature row"
   row = rows.first
-  template = Lakeraven::EHR::ConsentTemplate.current(TEMPLATE_BH)
+  template = Lakeraven::EHR::ConsentTemplate.current(ConsentWriteTestHelper::TEMPLATE_BH)
   assert_equal template.version, row.template_version
   assert_equal template.key, row.template_key
-  assert_equal DUZ, row.witness_duz
-  assert row.signature_png.start_with?(PNG_MAGIC)
+  assert_equal PatientBannerTestHelper::DUZ, row.witness_duz
+  assert row.signature_png.start_with?(ConsentWriteTestHelper::PNG_MAGIC)
 end
 
 Then("the chart consent list shows the consent as Active") do
-  get BASE
+  get ConsentWriteTestHelper::BASE
   parse_last_response!
   assert_match(/Active/i, last_body)
 end
 
 Then("the chart consent list shows the consent as Revoked") do
-  get BASE
+  get ConsentWriteTestHelper::BASE
   parse_last_response!
   assert_match(/Revoked/i, last_body)
 end
 
 Then("the kiosk shows only the consent template and patient name and date of birth") do
-  template = Lakeraven::EHR::ConsentTemplate.current(TEMPLATE_BH)
+  template = Lakeraven::EHR::ConsentTemplate.current(ConsentWriteTestHelper::TEMPLATE_BH)
   assert_includes last_body, template.title
   assert_includes last_body, template.body
   assert_includes last_body, @patient_display_name
@@ -144,7 +143,7 @@ When("the clinician attempts to edit the signed consent") do
   @digest_before_edit = row.template_body_digest
   @edit_attempt_failed = false
   begin
-    patch "#{BASE}/#{row.id}", params: { authenticity_token: csrf_token }
+    patch "#{ConsentWriteTestHelper::BASE}/#{row.id}", params: { authenticity_token: csrf_token }
     parse_last_response!
   rescue ActionController::RoutingError
     @edit_attempt_failed = true
@@ -160,8 +159,8 @@ end
 
 When("the clinician records a revocation with a synthetic reason") do
   row = Lakeraven::EHR::SignedConsent.signatures_for_patient(@dfn).first
-  post "#{BASE}/#{row.id}/revocation",
-       params: { reason: SYNTHETIC_REVOCATION_REASON, authenticity_token: csrf_token }
+  post "#{ConsentWriteTestHelper::BASE}/#{row.id}/revocation",
+       params: { reason: ConsentWriteTestHelper::SYNTHETIC_REVOCATION_REASON, authenticity_token: csrf_token }
   parse_last_response!
 end
 
@@ -174,7 +173,7 @@ Then("audit events exist for consent list view kiosk view sign and revoke") do
 end
 
 Then("no audit event contains the signature image or typed signer name") do
-  encoded = Base64.strict_encode64(@last_signature_bytes || TINY_PNG)[0, 32]
+  encoded = Base64.strict_encode64(@last_signature_bytes || ConsentWriteTestHelper::TINY_PNG)[0, 32]
   Lakeraven::EHR::AuditEvent.find_each do |event|
     blob = [ event.entity_identifier, event.outcome_desc, event.agent_who_identifier ].compact.join(" ")
     refute_includes blob, encoded
@@ -184,5 +183,5 @@ end
 
 Then("the clinician returns to the patient consent list") do
   assert_match(/consent/i, last_body)
-  assert_equal BASE, URI.parse(last_response.request.url).path
+  assert_equal ConsentWriteTestHelper::BASE, URI.parse(last_request.url).path
 end

@@ -134,9 +134,8 @@ module Lakeraven
         digest_before = signature.template_body_digest
 
         %i[patch put delete].each do |verb|
-          assert_raises(ActionController::RoutingError) do
-            send(verb, "#{BASE}/#{signature.id}", params: { authenticity_token: csrf_token })
-          end
+          send(verb, "#{BASE}/#{signature.id}", params: { authenticity_token: csrf_token })
+          assert_response :not_found, "expected #{verb.upcase} #{BASE}/#{signature.id} to be unrouted"
         end
 
         signature.reload
