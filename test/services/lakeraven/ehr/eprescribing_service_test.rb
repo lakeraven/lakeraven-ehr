@@ -306,6 +306,22 @@ module Lakeraven
           []
         end
       end
+
+      test "every factory mode builds a defined adapter (#706)" do
+        Eprescribing::EprescribingAdapterFactory::ADAPTERS.each_key do |mode|
+          assert_kind_of Eprescribing::BaseAdapter, Eprescribing::EprescribingAdapterFactory.build(mode)
+        end
+      end
+
+      test "production's default adapter answers with a handled failure, and sends nothing (#706)" do
+        with_stub(Rails, :env, ActiveSupport::StringInquirer.new("production")) do
+          adapter = Eprescribing::EprescribingAdapterFactory.build
+          assert_equal :not_configured, adapter.mode
+          result = adapter.send_prescription(Object.new)
+          refute result.success?
+          assert_equal [ Eprescribing::NotConfiguredAdapter::MESSAGE ], result.errors
+        end
+      end
     end
   end
 end
