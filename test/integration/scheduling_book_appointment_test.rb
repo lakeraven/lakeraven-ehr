@@ -184,6 +184,17 @@ class SchedulingBookAppointmentTest < ActionDispatch::IntegrationTest
     assert_response :ok
     assert_select "#booking-form label[data-patient='3']", text: /MOUSE,MICKEY M,\s+HRN 1001,\s+born Feb 14, 1910/
   end
+
+  # A browser counts steps from the field's min: with min 1 and step 15 it took 16
+  # and refused 15. The lengths it accepts are the clinic's slot multiples.
+  test "the length field accepts the clinic's slot length and its multiples" do
+    sign_in("scheduling_user")
+    with_rpms do
+      get "/lakeraven-ehr/scheduling/clinics/2/appointments/new", params: { start: "2026-10-28T09:00" }
+    end
+
+    assert_select "input[name='booking[length]'][min='15'][step='15']"
+  end
 # #729: a clinic whose HOSPITAL LOCATION prohibits access (#44 field 2500).
 def prohibited(privileged: []) = { rules: { id: 3, prohibit_access: true, privileged_users: privileged } }
 
