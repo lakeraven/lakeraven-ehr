@@ -21,6 +21,7 @@ module Lakeraven
           @checkin = build(at: Time.now.strftime("%Y-%m-%dT%H:%M"))
           @providers = providers
           @coverage = coverage_standing
+          @stops = stops
         end
 
         # POST /scheduling/clinics/:resource_id/appointments/:appointment_id/checkin
@@ -28,10 +29,11 @@ module Lakeraven
           @checkin = build(**checkin_params.symbolize_keys)
           @providers = providers
           @coverage = coverage_standing
+          @stops = stops
           return render(:new, status: :unprocessable_content) unless @checkin.valid?
 
           result = AppointmentCheckinGateway.check_in(
-            @appointment[:id], at: @checkin.time, provider_ien: @checkin.provider_ien,
+            @appointment[:id], at: @checkin.time, provider_ien: @checkin.provider_ien, clinic_code: @checkin.stop_id,
             reread: -> { AppointmentBookingGateway.appointment(@resource, @appointment[:id], @date) }
           )
           if result.checked_in?
@@ -70,6 +72,7 @@ module Lakeraven
           checkin = AppointmentCheckin.new(attrs)
           checkin.appointment = @appointment
           checkin.provider_required = AppointmentCheckinGateway.provider_required?(@resource)
+          checkin.stop_required = AppointmentWalkInGateway.several_stops?(@resource)
           checkin
         end
 
@@ -119,8 +122,16 @@ module Lakeraven
           "is already checked in" if appointment[:checkin_time]
         end
 
+        # A clinic set to use several clinic stop codes names one at check-in
+        # (S-SCH-03.5): the active CLINIC STOPs, read as a walk-in's check-in reads them.
+        def stops
+          return [] unless @checkin.stop_required
+
+          AppointmentWalkInGateway.stops
+        end
+
         def checkin_params
-          params.fetch(:checkin, {}).permit(:at, :provider_ien).to_h
+          params.fetch(:checkin, {}).permit(:at, :provider_ien, :stop_id).to_h
         end
       end
     end

@@ -2,10 +2,10 @@
 
 require "test_helper"
 
-# Live (rpms-ux S-SCH-03.9, S-SCH-07, S-SCH-08): the scheduler persona
+# Live (rpms-ux S-SCH-03.5, 03.9, S-SCH-07, S-SCH-08): the scheduler persona
 # takes a patient through the day after booking on a real RPMS, and each step
 # is read back from FileMan: HOSPITAL LOCATION #44.003 for check-in and
-# check-out and PATIENT #2.98 for a no-show. It
+# check-out, PATIENT #2.98 for a no-show, VISIT #9000010 for the stop. It
 # WRITES, so it runs only against a throwaway container and only when asked
 # twice: LIVE_RPMS=1 (see test_helper.rb) and LIVE_RPMS_WRITES=1.
 #
@@ -84,6 +84,35 @@ class LiveSchedulingVisitDayTest < ActionDispatch::IntegrationTest
     assert_equal [ "", "" ], on_patient(start), "S-SCH-08.4: #2.98 no longer a no-show"
   end
 
+  test "S-SCH-03.5 at a clinic that uses several stops the check-in asks for one and the visit is filed under it" do
+    hloc = RpmsRpc::Scheduling.resources.find { |r| r[:name] == CLINIC }[:hospital_location_id]
+    before = setup_field(hloc, ".13")
+    own = RpmsRpc::SchedulingSetup.clinic_stop(hloc)
+    chosen = RpmsRpc::SchedulingSetup.clinic_stops.find { |s| s[:id] != own && s[:inactive_date].nil? }
+    today = Date.today
+
+    begin
+      file_setup(hloc, ".13" => "1")
+      row = book_today
+      path = "#{@clinic}/appointments/#{row['data-appointment']}/checkin"
+      get path, params: { date: today.iso8601, provider_search: "PROFILE" }
+      assert_select "#checkin-form select[name='checkin[stop_id]'] option[value='#{chosen[:id]}']"
+      provider = css_select("#checkin-form label[data-provider]").find { |l| l.text.upcase.include?("PROFILE,MD") }["data-provider"]
+
+      at = Time.now.strftime("%Y-%m-%dT%H:%M")
+      post path, params: { date: today.iso8601, checkin: { at: at, provider_ien: provider } }
+      assert_response :unprocessable_content, "no stop chosen"
+
+      post path, params: { date: today.iso8601, checkin: { at: at, provider_ien: provider, stop_id: chosen[:id] } }
+      assert_response :redirect
+      visit = newest_visit(hloc)
+      assert visit, "the check-in filed a visit at #{CLINIC}"
+      assert_equal chosen[:id].to_s, visit[2], "VISIT .08 CLINIC is the stop chosen, not the clinic's own (#{own})"
+    ensure
+      file_setup(hloc, ".13" => before.empty? ? "@" : before)
+    end
+  end
+
   private
 
   def fm(time) = RpmsRpc::FilemanDateParser.to_fileman(time.change(sec: 0)).sub(/0+\z/, "").chomp(".")
@@ -135,5 +164,29 @@ class LiveSchedulingVisitDayTest < ActionDispatch::IntegrationTest
   def on_patient(start)
     got = ciav { RpmsRpc::DdrFileman.gets_entry(file: "2.98", iens: "#{fm(start)},#{PATIENT},", fields: "3;14", flags: "I") }
     [ got.dig(:fields, "3", :internal).to_s, got.dig(:fields, "14", :internal).to_s ]
+  end
+
+  # The newest VISIT for MOUSE at the clinic: [.01, .05, .08, .22].
+  def newest_visit(hloc)
+    rows = []
+    from = nil
+    loop do
+      page = ciav { RpmsRpc::DdrFileman.lister(file: "9000010", fields: "@;.01I;.05I;.08I;.22I", flags: "IP", max: "200", xref: "#", from: from) }
+      rows.concat(page[:entries])
+      break unless page[:more]
+
+      from = page[:more][:value]
+    end
+    rows.select { |e| e[:pieces][1] == PATIENT.to_s && e[:pieces][3] == hloc.to_s }.max_by { |e| e[:ien].to_i }&.dig(:pieces)
+  end
+
+    def setup_field(hloc, field)
+      ciav { RpmsRpc::DdrFileman.gets_entry(file: "9009017.2", iens: "#{hloc},", fields: field, flags: "I") }.dig(:fields, field, :internal).to_s
+  end
+
+  def file_setup(hloc, values)
+    rows = values.map { |field, value| { file: "9009017.2", field: field, iens: "#{hloc},", value: value } }
+    got = ciav { RpmsRpc::DdrFileman.filer(mode: "EDIT", rows: rows) }
+    assert got && got[:success], "DDR FILER on #9009017.2 #{hloc}: #{got.inspect}"
   end
 end

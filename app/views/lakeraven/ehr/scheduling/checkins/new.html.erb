@@ -60,6 +60,20 @@
         selected: @checkin.provider_ien,
         chosen_text: "Provider chosen." %>
 
+  <% if @checkin.stop_required %>
+    <%# BSDX CHECKIN APPOINTMENT clinic code: a CLINIC STOP (#40.7), filed as the visit's .08. %>
+    <%= form_field :stop_id,
+          "Clinic stop",
+          form: f,
+          hint: "This clinic uses several stops. Choose the one the patient is here for." do |aria| %>
+      <%= f.select :stop_id,
+            @stops.map { |stop| [ "#{stop[:name]} (#{stop[:code]})", stop[:ien] ] },
+            { include_blank: "Choose a stop", selected: @checkin.stop_id },
+            required: true,
+            aria: aria %>
+    <% end %>
+  <% end %>
+
   <%= f.submit "Check in",
         class: "button-primary self-start" %>
 <% end %>

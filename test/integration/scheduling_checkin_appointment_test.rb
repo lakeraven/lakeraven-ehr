@@ -21,9 +21,9 @@ class SchedulingCheckinAppointmentTest < ActionDispatch::IntegrationTest
   def sign_in = post("/lakeraven-ehr/test_session", params: { duz: "208", user_type: "user", user_name: "PROFILE,SCHED", security_keys: "scheduling_user" })
 
   # after_checkin: the day as RPMS lists it once a check-in has been sent.
-  def with_rpms(listed: [ appointment ], after_checkin: listed, provider_required: "YES", checkin: ->(*) { { success: true } })
+  def with_rpms(listed: [ appointment ], after_checkin: listed, provider_required: "YES", several_stops: "NO", checkin: ->(*) { { success: true } })
     log = (@checkins ||= [])
-    setup = [ { location_ien: 3, location: "DEMO IHS CLINIC", visit_provider_required: provider_required } ]
+    setup = [ { location_ien: 3, location: "DEMO IHS CLINIC", visit_provider_required: provider_required, multiple_clinic_codes: several_stops } ]
     stubs = {
       RpmsRpc::Scheduling.singleton_class => {
         resources: ->(*) { [ RESOURCE ] },
@@ -39,6 +39,13 @@ class SchedulingCheckinAppointmentTest < ActionDispatch::IntegrationTest
         end
       }
     }.merge(scheduling_setup_stubs)
+    # CLINIC STOP (#40.7) as DDR LISTER lists it: IEN, then .01 NAME, 1 CODE, 2 INACTIVE DATE.
+    stubs[RpmsRpc::DdrFileman.singleton_class] = {
+      lister: lambda do |**|
+        { entries: [ { ien: "28", pieces: [ "FAMILY PRACTICE", "28", "" ] }, { ien: "31", pieces: [ "ORTHOPEDIC", "31", "" ] },
+                     { ien: "2", pieces: [ "CARDIOLOGY", "02", "3200101" ] } ] }
+      end
+    }
     stubs.each { |klass, methods| methods.each_key { |m| klass.alias_method(:"__#{m}", m) } }
     stubs.each { |klass, methods| methods.each { |m, body| klass.define_method(m, &body) } }
     yield
@@ -158,5 +165,32 @@ class SchedulingCheckinAppointmentTest < ActionDispatch::IntegrationTest
     end
 
     assert_response :redirect
+  end
+  test "S-SCH-03.5 a clinic that uses several stops asks which one, refuses a check-in without one, and files the one chosen" do
+    sign_in
+    with_rpms(several_stops: "YES") do
+      get path, params: { date: today.iso8601 }
+      assert_select "#checkin-form select[name='checkin[stop_id]'] option", text: "ORTHOPEDIC (31)"
+      assert_select "#checkin-form select[name='checkin[stop_id]'] option", text: "CARDIOLOGY (02)", count: 0
+
+      post path, params: checkin_params
+      assert_response :unprocessable_content
+      assert_select "#checkin-errors li", text: /Stop is required: this clinic uses several stops/
+      assert_empty checkins
+
+      post path, params: checkin_params(stop_id: "31")
+      assert_response :redirect
+    end
+    assert_equal 31, checkins.sole[:clinic_code]
+  end
+
+  test "S-SCH-03.5 a clinic with one stop asks for none, and RPMS files its own" do
+    sign_in
+    with_rpms do
+      get path, params: { date: today.iso8601 }
+      assert_select "select[name='checkin[stop_id]']", count: 0
+      post path, params: checkin_params
+    end
+    assert_nil checkins.sole[:clinic_code]
   end
 end
