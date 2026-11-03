@@ -52,8 +52,6 @@ module Lakeraven
           type: "reference",
           documentation: "Required: Patient/<id> or <id>. A token bound to a patient may name only that patient."
         )
-        # Observation and its token parameters compare the code alone.
-        CODE_ONLY = "The code alone: a system|code value is refused with a 400 OperationOutcome."
         TOKEN_FORMS = "A value is code, system|code, |code or system|; comma-separated values match any of them."
 
         # Sorts and includes: only what the resource the server builds
@@ -115,10 +113,10 @@ module Lakeraven
           "MedicationRequest" => {
             search: {
               "patient" => PATIENT_PARAM,
-              "status" => Param.new(
-                type: "token",
-                documentation: "Comma-separated status codes, any of which matches, mapped from the RPMS " \
-                               "order status. A system|code value is refused with a 400 OperationOutcome."
+              "status" => Token.new(
+                documentation: "medicationrequest-status, mapped from the RPMS order status. #{TOKEN_FORMS}",
+                paths: [ %i[status] ],
+                system: "http://hl7.org/fhir/CodeSystem/medicationrequest-status"
               ),
               "intent" => Token.new(
                 documentation: "medicationrequest-intent. RPMS orders are order. #{TOKEN_FORMS}",
@@ -135,8 +133,11 @@ module Lakeraven
           "Observation" => {
             search: {
               "patient" => PATIENT_PARAM,
-              "category" => Param.new(type: "token", documentation: "A category code, such as vital-signs. #{CODE_ONLY}"),
-              "code" => Param.new(type: "token", documentation: "Comma-separated codes, any of which matches. #{CODE_ONLY}")
+              "category" => Token.new(
+                documentation: "observation-category, such as vital-signs. #{TOKEN_FORMS}",
+                paths: [ [ :category, :* ] ]
+              ),
+              "code" => Token.new(documentation: "LOINC code. #{TOKEN_FORMS}", paths: [ %i[code] ])
             },
             sort: {
               "_id" => ID, "status" => STATUS,

@@ -86,17 +86,12 @@ module Lakeraven
         assert_equal({ "2R-O" => "stopped", "3R-O" => "on-hold" }, statuses_by_id(status: "stopped,on-hold"))
       end
 
-      test "status search refuses a system|code value with a 400" do
+      test "status search matches a system|code value in the medicationrequest-status system" do
         seed_three_orders
 
-        get "/lakeraven-ehr/MedicationRequest",
-          params: { patient: "1", status: "http://hl7.org/fhir/CodeSystem/medicationrequest-status|active" },
-          headers: @headers
-
-        assert_response :bad_request
-        body = JSON.parse(response.body)
-        assert_equal "OperationOutcome", body["resourceType"]
-        assert_includes body.dig("issue", 0, "diagnostics"), "status"
+        assert_equal({ "1R-O" => "active" },
+                     statuses_by_id(status: "http://hl7.org/fhir/CodeSystem/medicationrequest-status|active"))
+        assert_equal({}, statuses_by_id(status: "http://example.org/other|active"))
       end
 
       test "status search refuses an empty value with a 400" do
