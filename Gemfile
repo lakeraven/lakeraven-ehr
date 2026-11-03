@@ -7,7 +7,8 @@ gemspec
 if ENV["RPMS_RPC_PATH"]
   gem "rpms-rpc", path: ENV["RPMS_RPC_PATH"]
 else
-  # Pinned to rpms-rpc main b51d455: Patient.brief_header reads CWAD on the caller's option, so an IRIS
+  # Pinned to rpms-rpc main f5b9136: Registration.register takes hrn_source: (a temporary chart number, or a given
+  # one AG checks), rpms-rpc#577. Earlier, b51d455: Patient.brief_header reads CWAD on the caller's option, so an IRIS
   # stack no longer refuses every patient header (rpms-rpc#576). Earlier, f5392af: Scheduling.add_availability
   # and cancel_availability_by_date set a clinic's hours as BSDX access blocks (rpms-rpc#574). Earlier, 24aaef5: PatientSelection.find finds a patient
   # the way VueCentric's patient selection does (rpms-rpc#550). Earlier, 33f4c64: Practitioner.search can list only the holders of a key
@@ -39,7 +40,7 @@ else
   # (lakeraven-ehr#540), invented RPC names removed (#310/#311), typed errors for
   # a missing RPC (#370), the user class from ORWU USERINFO (#236). A fixed ref
   # rather than branch:main so the pin does not drift mid-merge.
-  gem "rpms-rpc", github: "lakeraven/rpms-rpc", ref: "b51d455"
+  gem "rpms-rpc", github: "lakeraven/rpms-rpc", ref: "f5b9136"
 end
 
 gem "puma"

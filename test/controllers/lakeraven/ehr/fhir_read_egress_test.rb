@@ -79,6 +79,8 @@ module Lakeraven
         "lakeraven/ehr/scheduling/patient_appointments#index", # One patient's appointments: clinics, times, statuses, no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/scheduling/appointments#new",   # Booking form: patient name, HRN, date of birth, no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/scheduling/appointments#create", # Booking entry, not disclosure
+        "lakeraven/ehr/scheduling/quick_registrations#new",    # Registering a caller from scheduling (S-REG-05): an entry form, not disclosure
+        "lakeraven/ehr/scheduling/quick_registrations#create", # Registration entry; possible matches show registration demographics only; revisit with Part 2 (#494)
         "lakeraven/ehr/scheduling/cancellations#new",    # Cancel form: patient name and time, no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/scheduling/cancellations#create", # Cancellation entry, not disclosure
         "lakeraven/ehr/scheduling/checkins#new",         # Check-in form: patient name and time, provider names, no clinical record; revisit with Part 2 (#494)
