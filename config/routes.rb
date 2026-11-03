@@ -157,6 +157,9 @@ Lakeraven::EHR::Engine.routes.draw do
       post "other_names", to: "other_names#create"
       post "other_names/:ien/remove", to: "other_names#destroy", as: :remove_patient_other_name, constraints: { ien: /\d+/ }
     end
+    # Tribe, blood quantum and eligibility (S-REG-07). Find tribe posts the form back (#722).
+    get "patients/:dfn/eligibility/edit", to: "eligibilities#edit", as: :edit_patient_eligibility, constraints: { dfn: /\d+/ }
+    patch "patients/:dfn/eligibility", to: "eligibilities#update", as: :patient_eligibility, constraints: { dfn: /\d+/ }
     # The patient's Medicaid, Medicare and private insurance (S-REG-03). The
     # state and insurer look-ups post the form back, so a member number never
     # travels in a URL (#722).
