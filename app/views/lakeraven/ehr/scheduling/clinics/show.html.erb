@@ -88,6 +88,7 @@
               <% end %>
               <%= link_to "Cancel",
                     scheduling_cancel_clinic_appointment_path(@resource[:id], appointment[:id], date: @date.iso8601) %>
+              <%= render "booking_actions", resource: @resource, appointment: appointment, date: @date %>
             <% end %>
           </td>
         </tr>
