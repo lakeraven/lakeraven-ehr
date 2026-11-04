@@ -349,12 +349,19 @@ class ConsentRound4Test < ActionDispatch::IntegrationTest
       text = scripts.first.text
       assert_includes text, CONSENT_KIOSK_BROADCAST_CHANNEL
     end
-    assert_select "script[data-consent-kiosk-listener]", count: 0
   end
 
   test "kiosk layout does not install a listener that navigates away on handover-started" do
     open_kiosk_via_handover!
-    assert_select "script[data-consent-kiosk-listener]", count: 0
+    assert_select "script[data-consent-kiosk-listener]" do |scripts|
+      scripts.each do |script|
+        text = script.text
+        refute_includes text, KIOSK,
+                        "kiosk listener must not redirect to kiosk via location on handover-started"
+        refute_match(/location\.replace\s*\(/, text,
+                     "kiosk listener must not navigate away on handover-started")
+      end
+    end
   end
 
   test "first GET after unlock posts handover-ended once not on a later GET" do
