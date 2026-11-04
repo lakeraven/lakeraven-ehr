@@ -30,7 +30,9 @@ module Lakeraven
       UNDO_REMARK = "Reschedule undone. The original appointment could not be cancelled"
 
       # original: the appointment as BSDX CREATE APPT SCHEDULE lists it.
-      def self.move(original, to_resource:, start_time:, whom:, reason_ien:, remark:,
+      # overbook: as AppointmentBookingGateway.book_if_room takes it; a full
+      # new time is then offered (:overbook_offered) or booked as an overbook.
+      def self.move(original, to_resource:, start_time:, whom:, reason_ien:, remark:, overbook: nil,
                     via: ::RpmsRpc::Scheduling, setup: ::RpmsRpc::SchedulingSetup)
         if start_time == original[:start_time]
           return Result.new(status: :refused, appointment_id: nil,
@@ -39,11 +41,11 @@ module Lakeraven
 
         booking = AppointmentBooking.new(patient_dfn: original[:patient_dfn], start: start_time.strftime("%Y-%m-%dT%H:%M"),
                                          length: length_of(original), note: carried_note(original[:note]))
-        booked = AppointmentBookingGateway.book_if_room(booking, to_resource, via: via, setup: setup)
+        booked = AppointmentBookingGateway.book_if_room(booking, to_resource, via: via, setup: setup, overbook: overbook)
         return Result.new(status: booked.status, appointment_id: nil, message: booked.message) unless booked.booked?
 
         cancelled = AppointmentCancellationGateway.cancel(original[:id], whom: whom, reason_ien: reason_ien, remarks: remark, via: via)
-        return Result.new(status: :moved, appointment_id: booked.appointment_id, message: nil) if cancelled.cancelled?
+        return Result.new(status: :moved, appointment_id: booked.appointment_id, message: booked.message) if cancelled.cancelled?
 
         undo(booked.appointment_id, cancelled, whom: whom, reason_ien: reason_ien, via: via)
       end

@@ -5,6 +5,13 @@
 
 <%= flash_alert id: "reschedule-alert" %>
 
+<% if @offer_overbook %>
+  <%= alert_box :notice,
+        "That time is full, or outside the clinic's open blocks.",
+        "You may move the appointment there as an overbook.",
+        id: "overbook-offer" %>
+<% end %>
+
 <%= form_errors @reschedule,
       "The appointment was not moved. It is still booked at its old time.",
       id: "reschedule-errors" %>
@@ -61,7 +68,7 @@
     <%= choice_list f,
           :start,
           legend: "New time at #{@target[:name]}, #{@on.strftime('%A, %b %-d')}",
-          choices: @times.map { |at| [ at.strftime("%Y-%m-%dT%H:%M"), at.strftime("%H:%M"), { time: at.strftime("%H:%M") } ] },
+          choices: @times.map { |at| [ at.strftime("%Y-%m-%dT%H:%M"), "#{at.strftime('%H:%M')}#{' (full: overbook)' if @full.include?(at)}", { time: at.strftime("%H:%M"), full: @full.include?(at) || nil }.compact ] },
           selected: @reschedule.start,
           inline: true %>
   <% end %>
@@ -85,8 +92,15 @@
           aria: aria %>
   <% end %>
 
-  <%= f.submit "Move the appointment",
-        class: "button-primary self-start" %>
+  <% if @offer_overbook %>
+    <%= button_tag "Move as an overbook",
+          name: "overbook",
+          value: "1",
+          class: "button-primary self-start" %>
+  <% else %>
+    <%= f.submit "Move the appointment",
+          class: "button-primary self-start" %>
+  <% end %>
 <% end %>
 
 <p class="mt-6">

@@ -52,14 +52,17 @@ class CapabilityStatementTest < ActionDispatch::IntegrationTest
     %w[Observation category] => lambda {
       refute_empty search_ids("Observation", patient: "1", category: "vital-signs")
       assert_empty search_ids("Observation", patient: "1", category: "laboratory")
-      assert_refused("Observation", patient: "1",
-                     category: "http://terminology.hl7.org/CodeSystem/observation-category|vital-signs")
+      refute_empty search_ids("Observation", patient: "1",
+                              category: "http://terminology.hl7.org/CodeSystem/observation-category|vital-signs")
+      assert_empty search_ids("Observation", patient: "1", category: "http://example.org/other|vital-signs")
     },
     %w[Observation code] => lambda {
       codes = search_resources("Observation", patient: "1", code: "8867-4,8310-5")
               .map { |r| r.dig("code", "coding", 0, "code") }
       assert_equal %w[8310-5 8867-4], codes.sort
-      assert_refused("Observation", patient: "1", code: "http://loinc.org|8867-4")
+      assert_equal %w[8867-4], search_resources("Observation", patient: "1", code: "http://loinc.org|8867-4")
+        .map { |r| r.dig("code", "coding", 0, "code") }
+      assert_empty search_ids("Observation", patient: "1", code: "http://snomed.info/sct|8867-4")
     },
     %w[AuditEvent patient] => lambda {
       mine = Lakeraven::EHR::AuditEvent.create!(event_type: "rest", action: "R", outcome: "0",
@@ -77,7 +80,53 @@ class CapabilityStatementTest < ActionDispatch::IntegrationTest
       WIRE
       assert_equal %w[1R-O], search_ids("MedicationRequest", patient: "1", status: "active")
       assert_equal %w[2R-O], search_ids("MedicationRequest", patient: "1", status: "stopped")
-      assert_refused("MedicationRequest", patient: "1", status: "http://hl7.org/fhir/CodeSystem/medicationrequest-status|active")
+      assert_equal %w[1R-O], search_ids("MedicationRequest", patient: "1",
+                                        status: "http://hl7.org/fhir/CodeSystem/medicationrequest-status|active")
+      assert_refused("MedicationRequest", patient: "1", status: "")
+    },
+    # US Core 6.1.0's mandatory MedicationRequest search is patient + intent
+    # (Inferno (g)(10), single patient API).
+    %w[MedicationRequest intent] => lambda {
+      RpmsRpc.client.seed_text(:medication_active, "1", "~OP^1R;O^LISINOPRIL 10MG TAB^^3271231^3^^^120001^ACTIVE\n")
+      assert_equal %w[1R-O], search_ids("MedicationRequest", patient: "1", intent: "order")
+      assert_equal %w[1R-O], search_ids("MedicationRequest", patient: "1", intent: "plan,order")
+      assert_equal %w[1R-O], search_ids("MedicationRequest", patient: "1",
+                                        intent: "http://hl7.org/fhir/CodeSystem/medicationrequest-intent|order")
+      assert_empty search_ids("MedicationRequest", patient: "1", intent: "plan")
+      assert_empty search_ids("MedicationRequest", patient: "1", intent: "http://example.org/other|order")
+      assert_refused("MedicationRequest", patient: "1", intent: "")
+    },
+    %w[Condition category] => lambda {
+      RpmsRpc.client.seed_keyed_collection(:problem_list, "1", [
+        { ien: 11, status: "A", icd_code: "E11.9", description: "Type 2 diabetes" }
+      ])
+      assert_equal %w[11], search_ids("Condition", patient: "1", category: "problem-list-item")
+      assert_equal %w[11], search_ids("Condition", patient: "1",
+                                      category: "http://terminology.hl7.org/CodeSystem/condition-category|problem-list-item")
+      assert_empty search_ids("Condition", patient: "1", category: "encounter-diagnosis")
+      assert_empty search_ids("Condition", patient: "1", category: "|problem-list-item")
+    },
+    %w[Condition clinical-status] => lambda {
+      RpmsRpc.client.seed_keyed_collection(:problem_list, "1", [
+        { ien: 11, status: "A", icd_code: "E11.9", description: "Type 2 diabetes" },
+        { ien: 12, status: "I", icd_code: "J45.909", description: "Asthma" }
+      ])
+      assert_equal %w[11], search_ids("Condition", patient: "1", "clinical-status": "active")
+      assert_equal %w[12], search_ids("Condition", patient: "1",
+                                      "clinical-status": "http://terminology.hl7.org/CodeSystem/condition-clinical|inactive")
+      assert_equal %w[11 12], search_ids("Condition", patient: "1", "clinical-status": "active,inactive").sort
+      assert_empty search_ids("Condition", patient: "1", "clinical-status": "resolved")
+      assert_equal %w[11], search_ids("Condition", patient: "1", category: "problem-list-item", "clinical-status": "active")
+    },
+    %w[AllergyIntolerance clinical-status] => lambda {
+      RpmsRpc.client.seed_keyed_collection(:allergy_list, "1", [
+        { allergen: "Penicillin", reaction: "Hives", severity: "moderate" }
+      ])
+      assert_equal 1, search_resources("AllergyIntolerance", patient: "1", "clinical-status": "active").length
+      assert_equal 1, search_resources("AllergyIntolerance", patient: "1",
+                                       "clinical-status": "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical|active").length
+      assert_empty search_resources("AllergyIntolerance", patient: "1", "clinical-status": "resolved")
+      assert_refused("AllergyIntolerance", patient: "1", "clinical-status": ",")
     }
   }.freeze
 

@@ -1,0 +1,131 @@
+<% page_title "Edit demographics", @record[:name], "Registration" %>
+
+<%= page_header "Edit demographics",
+      [ @record[:name],
+        "RPMS checks each change before it is saved." ] %>
+
+<%= flash_alert id: "demographics-alert" %>
+
+<%= form_errors @demographics,
+      "The demographics were not saved.",
+      id: "demographics-errors" %>
+
+<%= form_with scope: :demographics,
+      url: registration_patient_demographics_path(params[:dfn]),
+      method: :patch,
+      local: true,
+      id: "demographics-form",
+      class: "card flex flex-col gap-4" do |f| %>
+  <%# NAME, PATIENT (2) field .01. A spelling correction; a legal name change is its own step (S-REG-26). %>
+  <%= form_field :name,
+        "Name (LAST,FIRST MIDDLE)",
+        form: f,
+        hint: "Correct the spelling here. A change of legal name needs proof, and is recorded separately.",
+        error: @demographics.errors[:name].first do |aria| %>
+    <%= f.text_field :name,
+          value: @demographics.name,
+          required: true,
+          autocomplete: "off",
+          aria: aria %>
+  <% end %>
+
+  <div class="flex flex-wrap gap-4">
+    <%# DATE OF BIRTH, PATIENT (2) field .03. %>
+    <%= form_field :dob,
+          "Date of birth",
+          form: f,
+          error: @demographics.errors[:dob].first do |aria| %>
+      <%= f.date_field :dob,
+            value: @demographics.dob,
+            required: true,
+            aria: aria %>
+    <% end %>
+    <%# SEX, PATIENT (2) field .02. %>
+    <%= choice_list f,
+          :sex,
+          legend: "Sex",
+          choices: [ [ "F", "Female" ], [ "M", "Male" ] ],
+          selected: @demographics.sex,
+          inline: true,
+          error: @demographics.errors[:sex].first %>
+  </div>
+
+  <%# SOCIAL SECURITY NUMBER, PATIENT (2) field .09. The number on file is never sent to the form. %>
+  <%= form_field :ssn,
+        "New social security number (optional)",
+        form: f,
+        hint: "Leave empty to keep the number on file. RPMS refuses a number that is already another patient's.",
+        error: @demographics.errors[:ssn].first do |aria| %>
+    <%= f.text_field :ssn,
+          value: @demographics.ssn,
+          inputmode: "numeric",
+          autocomplete: "off",
+          aria: aria %>
+  <% end %>
+
+  <div class="flex flex-wrap gap-4">
+    <%# MARITAL STATUS, PATIENT (2) field .05. %>
+    <%= form_field :marital_status, "Marital status (optional)", form: f do |aria| %>
+      <%= f.select :marital_status,
+            options_for_select(@marital_statuses, @demographics.marital_status),
+            { include_blank: "Not recorded" },
+            aria: aria %>
+    <% end %>
+    <%# RELIGIOUS PREFERENCE, PATIENT (2) field .08. %>
+    <%= form_field :religion, "Religion (optional)", form: f do |aria| %>
+      <%= f.select :religion,
+            options_for_select(@religions, @demographics.religion),
+            { include_blank: "Not recorded" },
+            aria: aria %>
+    <% end %>
+  </div>
+
+  <div class="flex flex-wrap gap-4">
+    <%# PLACE OF BIRTH [CITY], PATIENT (2) field .092. %>
+    <%= form_field :birth_city,
+          "City of birth (optional)",
+          form: f,
+          error: @demographics.errors[:birth_city].first do |aria| %>
+      <%= f.text_field :birth_city,
+            value: @demographics.birth_city,
+            aria: aria %>
+    <% end %>
+    <%# PLACE OF BIRTH [STATE], PATIENT (2) field .093. %>
+    <%= form_field :birth_state, "State of birth (optional)", form: f do |aria| %>
+      <%= f.select :birth_state,
+            options_for_select(@states, @demographics.birth_state),
+            { include_blank: "Not recorded" },
+            aria: aria %>
+    <% end %>
+  </div>
+
+  <div class="flex flex-wrap gap-4">
+    <%# EMPLOYER, IHS PATIENT (9000001) field .19. %>
+    <%= form_field :employer, "Employer (optional)", form: f do |aria| %>
+      <%= f.select :employer,
+            options_for_select(@employers, @demographics.employer),
+            { include_blank: "None" },
+            aria: aria %>
+    <% end %>
+    <%# EMPLOYMENT STATUS, IHS PATIENT (9000001) field .21. %>
+    <%= form_field :employment_status,
+          "Employment status",
+          form: f,
+          hint: "Needed when there is an employer.",
+          error: @demographics.errors[:employment_status].first do |aria| %>
+      <%= f.select :employment_status,
+            options_for_select(Lakeraven::EHR::PatientDemographics::EMPLOYMENT_STATUSES.map { |code, label| [ label, code ] },
+                               @demographics.employment_status),
+            { include_blank: "Not recorded" },
+            aria: aria %>
+    <% end %>
+  </div>
+
+  <div class="flex gap-4">
+    <%= f.submit "Save demographics",
+          class: "button-primary self-start" %>
+    <%= link_to "Cancel",
+          registration_patient_path(params[:dfn]),
+          class: "button-secondary" %>
+  </div>
+<% end %>
