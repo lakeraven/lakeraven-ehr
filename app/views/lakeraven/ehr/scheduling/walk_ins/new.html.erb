@@ -6,6 +6,13 @@
 
 <%= flash_alert id: "walk-in-alert" %>
 
+<% if @offer_overbook %>
+  <%= alert_box :notice,
+        "The clinic has no place at this time.",
+        "You may book the walk-in as an overbook.",
+        id: "overbook-offer" %>
+<% end %>
+
 <%= form_errors @walk_in,
       "The walk-in was not booked.",
       id: "walk-in-errors" %>
@@ -64,8 +71,15 @@
     <% end %>
   <% end %>
 
-  <%= f.submit "Book and check in",
-        class: "button-primary self-start" %>
+  <% if @offer_overbook %>
+    <%= button_tag "Book as an overbook and check in",
+          name: "overbook",
+          value: "1",
+          class: "button-primary self-start" %>
+  <% else %>
+    <%= f.submit "Book and check in",
+          class: "button-primary self-start" %>
+  <% end %>
 <% end %>
 
 <p class="mt-6">

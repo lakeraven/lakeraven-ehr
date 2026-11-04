@@ -1,0 +1,93 @@
+<% page_title "Coverage | #{@patient[:name]} | Registration" %>
+
+<%= page_header "Coverage for #{@patient[:name]}",
+      ["Medicaid, Medicare and private insurance on file.",
+       "A visit is billed to coverage that is in force on the day of the visit."] do %>
+  <% if capability?("patient.register") && @policies %>
+    <%= link_to "Add Medicaid",
+          registration_new_patient_coverage_path(params[:dfn], kind: "medicaid"),
+          id: "add-medicaid",
+          class: "button-secondary" %>
+    <%= link_to "Add Medicare",
+          registration_new_patient_coverage_path(params[:dfn], kind: "medicare"),
+          id: "add-medicare",
+          class: "button-secondary" %>
+    <%= link_to "Add private insurance",
+          registration_new_patient_coverage_path(params[:dfn], kind: "private"),
+          id: "add-private",
+          class: "button-secondary" %>
+  <% end %>
+<% end %>
+
+<% if flash[:notice].present? %>
+  <%= alert_box :notice,
+        flash[:notice],
+        id: "coverage-saved" %>
+<% end %>
+
+<%= patient_summary @patient, id: "coverage-patient" %>
+
+<% if @refused %>
+  <%= alert_box :error,
+        "RPMS does not let you see this patient's coverage.",
+        "Coverage is read through Patient Registration; ask your site manager for the registration menu.",
+        id: "coverage-refused" %>
+<% elsif @policies.nil? %>
+  <%= alert_box :error,
+        "RPMS did not answer when asked for this patient's coverage.",
+        "Try again in a moment.",
+        id: "coverage-unavailable" %>
+<% elsif @policies.empty? %>
+  <%= empty_state "No Medicaid, Medicare or private insurance on file.",
+        id: "no-coverage" %>
+<% else %>
+  <table
+    id="coverage"
+    class="data-table mt-6"
+  >
+    <caption class="sr-only">Coverage for <%= @patient[:name] %></caption>
+    <thead>
+      <tr>
+        <th scope="col">Payer</th>
+        <th scope="col">Member number</th>
+        <th scope="col">Covered</th>
+        <th scope="col">Today</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% @policies.each do |policy| %>
+        <tr
+          data-kind="<%= policy.kind %>"
+          data-number="<%= policy.number %>"
+          data-active="<%= policy.active %>"
+        >
+          <td>
+            <%= policy.payer.presence || Lakeraven::EHR::CoverageGateway::KIND_LABELS[policy.kind] %>
+            <% if policy.detail %>
+              <span class="hint">(<%= policy.detail %>)</span>
+            <% end %>
+          </td>
+          <td><%= policy.number %></td>
+          <td>
+            <% policy.periods.each do |period| %>
+              <div data-period>
+                <%= period[:starts_on]&.strftime("%b %-d, %Y") || "No start date" %>
+                to
+                <%= period[:ends_on]&.strftime("%b %-d, %Y") || "no end date" %><%= " (#{period[:coverage]})" if period[:coverage].present? %>
+              </div>
+            <% end %>
+          </td>
+          <td>
+            <%# AG's own answer: MCDACT/MCRACT/PVTACT^AGGARVAL. %>
+            <%= status_badge (policy.active ? "active" : "inactive"),
+                  (policy.active ? "In force" : "Not in force") %>
+          </td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+<% end %>
+
+<p class="mt-6">
+  <%= link_to "Back to #{@patient[:name]}", registration_patient_path(params[:dfn]) %>
+</p>

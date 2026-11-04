@@ -3,3 +3,7 @@
       scheduling_reschedule_clinic_appointment_path(resource[:id], appointment[:id], date: date.iso8601),
       data: { action_name: "move" },
       aria: { label: "Move #{appointment[:patient_name]}'s appointment at #{appointment[:start_time].strftime('%H:%M')}" } %>
+<%= link_to "Change details",
+      scheduling_appointment_details_path(resource[:id], appointment[:id], date: date.iso8601),
+      data: { action_name: "details" },
+      aria: { label: "Change the details of #{appointment[:patient_name]}'s appointment at #{appointment[:start_time].strftime('%H:%M')}" } %>

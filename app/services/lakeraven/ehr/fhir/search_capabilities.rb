@@ -34,6 +34,14 @@ module Lakeraven
         # this server does with it.
         Param = Data.define(:type, :documentation)
 
+        # A token search parameter FHIRSearchBundle#apply_token_searches filters
+        # on: where its value sits in the served resource. `paths` reach a
+        # CodeableConcept, or a `code` element whose CodeSystem is `system`.
+        Token = Data.define(:documentation, :paths, :system) do
+          def initialize(documentation:, paths:, system: nil) = super
+          def type = "token"
+        end
+
         ID = Sort.new(paths: [ %i[id] ], type: :string)
         NAME = Sort.new(paths: [ [ :name, 0, :family ], [ :name, 0, :given, 0 ] ], type: :string)
         STATUS = Sort.new(paths: [ %i[status] ], type: :string)
@@ -44,8 +52,7 @@ module Lakeraven
           type: "reference",
           documentation: "Required: Patient/<id> or <id>. A token bound to a patient may name only that patient."
         )
-        # Observation and its token parameters compare the code alone.
-        CODE_ONLY = "The code alone: a system|code value is refused with a 400 OperationOutcome."
+        TOKEN_FORMS = "A value is code, system|code, |code or system|; comma-separated values match any of them."
 
         # Sorts and includes: only what the resource the server builds
         # actually carries. Encounter, ServiceRequest and Procedure have none:
@@ -78,22 +85,43 @@ module Lakeraven
             sort: { "_id" => ID, "name" => NAME }
           },
           "AllergyIntolerance" => {
-            search: { "patient" => PATIENT_PARAM },
+            search: {
+              "patient" => PATIENT_PARAM,
+              "clinical-status" => Token.new(
+                documentation: "allergyintolerance-clinical: active, inactive or resolved. #{TOKEN_FORMS}",
+                paths: [ %i[clinicalStatus] ]
+              )
+            },
             sort: { "_id" => ID },
             include: { "AllergyIntolerance:patient" => PATIENT }
           },
           "Condition" => {
-            search: { "patient" => PATIENT_PARAM },
+            search: {
+              "patient" => PATIENT_PARAM,
+              "category" => Token.new(
+                documentation: "condition-category. RPMS problems are problem-list-item. #{TOKEN_FORMS}",
+                paths: [ [ :category, :* ] ]
+              ),
+              "clinical-status" => Token.new(
+                documentation: "condition-clinical: active or inactive, as RPMS records the problem. #{TOKEN_FORMS}",
+                paths: [ %i[clinicalStatus] ]
+              )
+            },
             sort: { "_id" => ID },
             include: { "Condition:patient" => SUBJECT, "Condition:subject" => SUBJECT }
           },
           "MedicationRequest" => {
             search: {
               "patient" => PATIENT_PARAM,
-              "status" => Param.new(
-                type: "token",
-                documentation: "Comma-separated status codes, any of which matches, mapped from the RPMS " \
-                               "order status. A system|code value is refused with a 400 OperationOutcome."
+              "status" => Token.new(
+                documentation: "medicationrequest-status, mapped from the RPMS order status. #{TOKEN_FORMS}",
+                paths: [ %i[status] ],
+                system: "http://hl7.org/fhir/CodeSystem/medicationrequest-status"
+              ),
+              "intent" => Token.new(
+                documentation: "medicationrequest-intent. RPMS orders are order. #{TOKEN_FORMS}",
+                paths: [ %i[intent] ],
+                system: "http://hl7.org/fhir/CodeSystem/medicationrequest-intent"
               )
             },
             sort: { "_id" => ID, "status" => STATUS },
@@ -105,8 +133,11 @@ module Lakeraven
           "Observation" => {
             search: {
               "patient" => PATIENT_PARAM,
-              "category" => Param.new(type: "token", documentation: "A category code, such as vital-signs. #{CODE_ONLY}"),
-              "code" => Param.new(type: "token", documentation: "Comma-separated codes, any of which matches. #{CODE_ONLY}")
+              "category" => Token.new(
+                documentation: "observation-category, such as vital-signs. #{TOKEN_FORMS}",
+                paths: [ [ :category, :* ] ]
+              ),
+              "code" => Token.new(documentation: "LOINC code. #{TOKEN_FORMS}", paths: [ %i[code] ])
             },
             sort: {
               "_id" => ID, "status" => STATUS,
@@ -162,6 +193,11 @@ module Lakeraven
 
         def self.search_params_for(type)
           RESOURCES.dig(type, :search) || {}
+        end
+
+        # The type's token parameters FHIRSearchBundle filters generically.
+        def self.token_params_for(type)
+          search_params_for(type).select { |_, param| param.is_a?(Token) }
         end
 
         def self.revincludes_for(type)

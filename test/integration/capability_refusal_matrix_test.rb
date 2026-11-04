@@ -17,6 +17,25 @@ class CapabilityRefusalMatrixTest < ActionDispatch::IntegrationTest
     "POST /registration/patients" => "patient.register",
     "POST /registration/patients/confirm" => "patient.register",
     "GET /registration/patients/:dfn" => "registration.view",
+    "GET /registration/patients/:dfn/demographics/edit" => "patient.register",
+    "PATCH /registration/patients/:dfn/demographics" => "patient.register",
+    "GET /registration/patients/:dfn/address/edit" => "patient.register",
+    "PATCH /registration/patients/:dfn/address" => "patient.register",
+    "GET /registration/patients/:dfn/contacts/:kind/edit" => "patient.register",
+    "POST /registration/patients/:dfn/contacts/:kind/edit" => "patient.register",
+    "POST /registration/patients/:dfn/contacts/:kind" => "patient.register",
+    "GET /registration/patients/:dfn/languages/edit" => "patient.register",
+    "POST /registration/patients/:dfn/languages/edit" => "patient.register",
+    "POST /registration/patients/:dfn/languages" => "patient.register",
+    "GET /registration/patients/:dfn/other_names" => "registration.view",
+    "POST /registration/patients/:dfn/other_names" => "patient.register",
+    "POST /registration/patients/:dfn/other_names/:ien/remove" => "patient.register",
+    "GET /registration/patients/:dfn/eligibility/edit" => "patient.register",
+    "PATCH /registration/patients/:dfn/eligibility" => "patient.register",
+    "GET /registration/patients/:dfn/coverage" => "registration.view",
+    "GET /registration/patients/:dfn/coverage/new" => "patient.register",
+    "POST /registration/patients/:dfn/coverage/new" => "patient.register",
+    "POST /registration/patients/:dfn/coverage" => "patient.register",
     "GET /scheduling" => "scheduling.open",
     "GET /scheduling/clinics/:id" => "scheduling.open",
     "GET /scheduling/clinics/:id/week" => "scheduling.open",
@@ -26,15 +45,25 @@ class CapabilityRefusalMatrixTest < ActionDispatch::IntegrationTest
     "GET /scheduling/patients/:dfn/appointments" => "scheduling.open",
     "GET /scheduling/clinics/:resource_id/appointments/new" => "scheduling.open",
     "POST /scheduling/clinics/:resource_id/appointments" => "scheduling.open",
+    "GET /scheduling/clinics/:resource_id/registrations/new" => "patient.quick_register",
+    "POST /scheduling/clinics/:resource_id/registrations" => "patient.quick_register",
     "GET /scheduling/clinics/:resource_id/appointments/:appointment_id/cancel" => "scheduling.open",
     "POST /scheduling/clinics/:resource_id/appointments/:appointment_id/cancel" => "scheduling.open",
     "GET /scheduling/clinics/:resource_id/appointments/:appointment_id/checkin" => "scheduling.open",
     "POST /scheduling/clinics/:resource_id/appointments/:appointment_id/checkin" => "scheduling.open",
     "GET /scheduling/clinics/:resource_id/appointments/:appointment_id/reschedule" => "scheduling.open",
     "POST /scheduling/clinics/:resource_id/appointments/:appointment_id/reschedule" => "scheduling.open",
+    "GET /scheduling/clinics/:resource_id/appointments/:appointment_id/details" => "scheduling.open",
+    "POST /scheduling/clinics/:resource_id/appointments/:appointment_id/details" => "scheduling.open",
     "GET /scheduling/clinics/:resource_id/walk_ins/new" => "scheduling.open",
     "POST /scheduling/clinics/:resource_id/walk_ins/find" => "scheduling.open",
-    "POST /scheduling/clinics/:resource_id/walk_ins" => "scheduling.open"
+    "POST /scheduling/clinics/:resource_id/walk_ins" => "scheduling.open",
+    "GET /scheduling/clinics/:resource_id/appointments/:appointment_id/checkout" => "scheduling.open",
+    "POST /scheduling/clinics/:resource_id/appointments/:appointment_id/checkout" => "scheduling.open",
+    "POST /scheduling/clinics/:resource_id/appointments/:appointment_id/checkout/undo" => "scheduling.open",
+    "POST /scheduling/clinics/:resource_id/appointments/:appointment_id/checkin/undo" => "scheduling.open",
+    "POST /scheduling/clinics/:resource_id/appointments/:appointment_id/no_show" => "scheduling.open",
+    "POST /scheduling/clinics/:resource_id/appointments/:appointment_id/no_show/undo" => "scheduling.open"
   }.freeze
 
   def engine_routes
@@ -52,7 +81,7 @@ class CapabilityRefusalMatrixTest < ActionDispatch::IntegrationTest
   def request_route(route)
     verb, path = route.split(" ", 2)
     url = "/lakeraven-ehr#{path.gsub(/:\w+/, '3')}"
-    verb == "GET" ? get(url) : post(url)
+    public_send(verb.downcase, url)
   end
 
   test "every registration and scheduling route has a row" do

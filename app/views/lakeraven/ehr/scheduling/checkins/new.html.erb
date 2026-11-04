@@ -5,6 +5,30 @@
 
 <%= flash_alert %>
 
+<%# S-REG-03.2: coverage in force today, as AG answers (MCDACT/MCRACT/PVTACT^AGGARVAL). %>
+<% case @coverage %>
+<% when :lapsed %>
+  <%= alert_box :error,
+        "None of this patient's coverage is in force today.",
+        "Ask for a current Medicaid, Medicare or insurance card before the visit, so it can be billed.",
+        id: "coverage-lapsed" do %>
+    <% if capability?("registration.view") %>
+      <p>
+        <%= link_to "See the patient's coverage", registration_patient_coverage_path(@appointment[:patient_dfn]) %>
+      </p>
+    <% end %>
+  <% end %>
+<% when :none %>
+  <%= alert_box :notice,
+        "No Medicaid, Medicare or private insurance is on file for this patient.",
+        id: "coverage-none" %>
+<% when :unchecked %>
+  <%= alert_box :notice,
+        "Coverage was not checked: RPMS did not answer, or does not let you read it.",
+        "Coverage is read through Patient Registration.",
+        id: "coverage-unchecked" %>
+<% end %>
+
 <%= form_errors @checkin,
       "The patient was not checked in.",
       id: "checkin-errors" %>
@@ -35,6 +59,20 @@
         choices: @providers.map { |provider| [ provider.ien, provider.name, { provider: provider.ien } ] },
         selected: @checkin.provider_ien,
         chosen_text: "Provider chosen." %>
+
+  <% if @checkin.stop_required %>
+    <%# BSDX CHECKIN APPOINTMENT clinic code: a CLINIC STOP (#40.7), filed as the visit's .08. %>
+    <%= form_field :stop_id,
+          "Clinic stop",
+          form: f,
+          hint: "This clinic uses several stops. Choose the one the patient is here for." do |aria| %>
+      <%= f.select :stop_id,
+            @stops.map { |stop| [ "#{stop[:name]} (#{stop[:code]})", stop[:ien] ] },
+            { include_blank: "Choose a stop", selected: @checkin.stop_id },
+            required: true,
+            aria: aria %>
+    <% end %>
+  <% end %>
 
   <%= f.submit "Check in",
         class: "button-primary self-start" %>

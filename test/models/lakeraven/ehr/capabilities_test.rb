@@ -27,6 +27,13 @@ module Lakeraven
         refute Capabilities.allows?(%w[scheduling_user], "scheduling.supervise")
       end
 
+      test "S-REG-05.6 only the scheduling registration key registers from scheduling" do
+        assert Capabilities.allows?(%w[scheduling_user scheduling_registration], "patient.quick_register")
+        refute Capabilities.allows?(%w[scheduling_user], "patient.quick_register")
+        refute Capabilities.allows?(%w[scheduling_supervisor], "patient.quick_register")
+        refute Capabilities.allows?(%w[scheduling_registration registration_view_only], "patient.quick_register")
+      end
+
       test "no keys, unknown keys and programmer mode grant nothing" do
         assert_empty Capabilities.for([])
         assert_empty Capabilities.for(nil)

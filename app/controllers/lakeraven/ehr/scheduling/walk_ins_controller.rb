@@ -34,10 +34,16 @@ module Lakeraven
           load_lists
           return render(:new, status: :unprocessable_content) unless @walk_in.valid?
 
-          result = AppointmentWalkInGateway.book_and_check_in(@walk_in, @resource, provider_ien: @walk_in.provider_ien, stop_ien: @walk_in.stop_ien)
+          result = AppointmentWalkInGateway.book_and_check_in(@walk_in, @resource, provider_ien: @walk_in.provider_ien, stop_ien: @walk_in.stop_ien,
+                                                                                  overbook: { duz: session[:duz].to_i, supervisor: supervisor?, confirmed: params[:overbook] == "1" })
+          if result.status == :overbook_offered
+            @offer_overbook = true
+            return render(:new, status: :conflict)
+          end
+
           if result.checked_in?
             flash[:notice] = "Walk-in booked and checked in at #{@walk_in.time.strftime('%H:%M')}."
-            flash[:alert] = "RPMS filed the check-in but reported: #{result.message} Check the visit." if result.message
+            flash[:alert] = result.message if result.message
             flash[:booked_id] = result.appointment_id
             redirect_to scheduling_clinic_path(@resource[:id], date: Date.today.iso8601)
           else

@@ -79,6 +79,7 @@ module Lakeraven
         @fhir_sort = parse_fhir_sort
         @fhir_includes = parse_fhir_includes unless performed?
         validate_fhir_revincludes unless performed?
+        @fhir_token_searches = parse_fhir_token_searches unless performed?
       end
 
       # nil when the parameter is absent, :invalid when it is present and not
@@ -179,6 +180,7 @@ module Lakeraven
       # The whole match set in: sorted, one page of it out, and whatever
       # _include asks for after the page.
       def fhir_search_bundle(entries, type: "searchset")
+        entries = apply_token_searches(entries)
         page = fhir_page(fhir_sort(entries))
         matches = page.map { |entry| { resource: entry, search: { mode: "match" } } }
         paged_search_bundle(matches + fhir_include_entries(page), total: entries.length, type: type)
@@ -229,6 +231,68 @@ module Lakeraven
           "_offset" => offset.to_s
         )
         "#{request.base_url}#{request.path}?#{Rack::Utils.build_query(query)}"
+      end
+
+      # -- token search parameters ----------------------------------------------
+      #
+      # The type's FHIR::SearchCapabilities::Token parameters, matched against
+      # the resource as served, so a match is what the client reads in it. A
+      # value is code, system|code, |code (no system) or system| (any code in
+      # that system); a comma-separated list matches any of them. Several
+      # parameters combine with AND. An empty or repeated-as-array value is
+      # refused with a 400, like a bad _count.
+
+      # [[Token, [[system, code], ...]], ...] for the parameters present.
+      def parse_fhir_token_searches
+        FHIR::SearchCapabilities.token_params_for(fhir_resource_type).filter_map do |name, token|
+          next unless params.key?(name)
+
+          raw = params[name]
+          values = raw.is_a?(String) ? raw.split(",").map(&:strip) : []
+          if values.empty? || values.any? { |value| value.empty? || value == "|" }
+            return refuse_search_parameter(name, "a token: #{FHIR::SearchCapabilities::TOKEN_FORMS}")
+          end
+
+          [ token, values.map { |value| split_token(value) } ]
+        end
+      end
+
+      # [system, code]: nil where the value does not constrain it, and "" for
+      # the explicit "no system" of |code.
+      def split_token(value)
+        return [ nil, value ] unless value.include?("|")
+
+        system, code = value.split("|", 2)
+        [ system, code.presence ]
+      end
+
+      def apply_token_searches(entries)
+        searches = @fhir_token_searches || []
+        return entries if searches.empty?
+
+        entries.select do |resource|
+          searches.all? { |token, wanted| token_matches?(resource, token, wanted) }
+        end
+      end
+
+      def token_matches?(resource, token, wanted)
+        codings = token.paths.flat_map { |path| dig_fhir(resource, path) }.flat_map { |value| token_codings(value, token) }
+        wanted.any? do |system, code|
+          codings.any? do |(coding_system, coding_code)|
+            (code.nil? || coding_code == code) &&
+              (system.nil? || coding_system.to_s == system)
+          end
+        end
+      end
+
+      # A CodeableConcept's codings, or a code element read in its CodeSystem.
+      def token_codings(value, token)
+        case value
+        when String then [ [ token.system, value ] ]
+        when Hash
+          dig_fhir(value, [ :coding, :* ]).map { |coding| [ coding[:system] || coding["system"], coding[:code] || coding["code"] ] }
+        else []
+        end
       end
 
       # -- _sort --------------------------------------------------------------------

@@ -62,6 +62,7 @@ module Lakeraven
         scheduling_admin: "SD SUPERVISOR",
         scheduling_user: "SDZMENU",
         scheduling_supervisor: "SDZSUP",
+        scheduling_registration: "SDZREGMENU", # mini-registration from scheduling
 
         # Behavioral health (AMH)
         behavioral_health_user: "AMHZMENU",
