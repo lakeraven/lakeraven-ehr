@@ -11,9 +11,13 @@ module Lakeraven
       # Today's appointments in each clinic the user schedules for (rpms-ux
       # S-SCH-05.1, S-SCH-05.3), linking to that clinic's day. Shown to a user
       # who may open scheduling, on a backend that serves it (#647).
+      #
+      # The user's notifications (rpms-ux S-SGN-02.1), linking to their list.
+      # Shown to a user who may read the chart, as the list is (#874).
       def show
         @today = Date.today
         @clinic_counts = todays_clinic_counts if schedules?
+        @notification_count = notification_count if patient_search_allowed?
         @pending_referrals = pending_referral_count if works_referrals?
       end
 
@@ -51,6 +55,15 @@ module Lakeraven
         end
       rescue ::RpmsRpc::Error, IOError, SystemCallError => e
         Rails.logger.error("[dashboard] today's appointments raised #{e.class}")
+        :unread
+      end
+
+      # How many notifications RPMS holds for the user: the rows of the list
+      # the count links to. :unread when RPMS does not answer.
+      def notification_count
+        NotificationsGateway.inbox.size
+      rescue ::RpmsRpc::Error, IOError, SystemCallError => e
+        Rails.logger.error("[dashboard] notifications raised #{e.class}")
         :unread
       end
     end

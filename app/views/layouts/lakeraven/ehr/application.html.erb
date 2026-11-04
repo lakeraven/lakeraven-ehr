@@ -32,6 +32,9 @@
       <%# Each link shows only to a user its screen would let in (ADR 0010). %>
       <nav aria-label="Main"
            class="flex items-center gap-4 text-sm">
+        <% if patient_search_allowed? %>
+          <%= link_to "Notifications", notifications_path %>
+        <% end %>
         <% if capability?("registration.search") %>
           <%= link_to "Registration", registration_patients_path %>
         <% end %>

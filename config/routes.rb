@@ -136,6 +136,8 @@ Lakeraven::EHR::Engine.routes.draw do
   post "login" => "sessions#create"
   delete "logout" => "sessions#destroy", as: :logout
   get "dashboard" => "dashboards#show", as: :dashboard
+  # The signed-in user's RPMS notifications (rpms-ux S-SGN-02.1, #874).
+  get "notifications" => "notifications#index", as: :notifications
 
   # The referrals pending at the facility, for a user who works referrals (#873).
   get "referrals/pending", to: "pending_referrals#index", as: :pending_referrals
