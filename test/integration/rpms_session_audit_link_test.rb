@@ -24,15 +24,16 @@ class RpmsSessionAuditLinkTest < ActionDispatch::IntegrationTest
     def authenticate(_access_code, _verify_code, **caller)
       @callers << caller
       @session_uid = "405"
+      set_authenticated("77") # as CiaClient#authenticate does: held_keys binds a context and sends this DUZ
       { success: true, user: "PROVIDER,TEST", duz: 77, greeting: "PROVIDER,TEST signed on.  Good evening" }
     end
 
-    # ORWU USERINFO (class 3, provider), CIAVCXUS HASKEYS (no keys), ORWU HAS
+    # ORWU USERINFO (class 3, provider), ORWU NPHASKEY (no keys), ORWU HAS
     # OPTION ACCESS (CIAV VUECENTRIC only), framed as a CIA broker frames them.
     def call_rpc_raw(name, *params)
       body = case name
       when "ORWU USERINFO" then "77^PROVIDER,TEST^3^1^1^3^0^99999^20^1^1^5^DEMO.IHS.GOV^1^180"
-      when "CIAVCXUS HASKEYS" then params.first.to_s.split("^", -1).map { "0" }.join("^")
+      when "ORWU NPHASKEY" then "0"
       when "ORWU HAS OPTION ACCESS" then params.first == "CIAV VUECENTRIC" ? "1" : "0"
       else ""
       end

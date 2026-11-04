@@ -7,7 +7,7 @@ gemspec
 if ENV["RPMS_RPC_PATH"]
   gem "rpms-rpc", path: ENV["RPMS_RPC_PATH"]
 else
-  # Pinned to rpms-rpc main f0a255e: Scheduling.edit_appointment and variable_length?, SchedulingSetup.set_clinic_note
+  # Pinned to rpms-rpc main 5188b49: Registration.preferred_name and set_preferred_name (rpms-rpc#591), and held_keys asks ORWU NPHASKEY under CIAV VUECENTRIC, so a front-desk user signs on over CIA (rpms-rpc#556, #590). Earlier, f0a255e: Scheduling.edit_appointment and variable_length?, SchedulingSetup.set_clinic_note
   # and set_cancellation_remarks, to keep an appointment's details current (rpms-rpc#586). Earlier, 6f3f852: Scheduling.overbook_allowed (BSDX OVERBOOK), SchedulingSetup.master_overbook?
   # and mark_overbook (OVERBOOK, #44.003 field 9) for overbooking (rpms-rpc#584). Earlier, 9197bf5: PatientProfile reads and files the emergency contact, next of kin,
   # languages and other names through AG's windows (rpms-rpc#580), and Registration.update files blood and
@@ -46,7 +46,7 @@ else
   # (lakeraven-ehr#540), invented RPC names removed (#310/#311), typed errors for
   # a missing RPC (#370), the user class from ORWU USERINFO (#236). A fixed ref
   # rather than branch:main so the pin does not drift mid-merge.
-  gem "rpms-rpc", github: "lakeraven/rpms-rpc", ref: "f0a255e"
+  gem "rpms-rpc", github: "lakeraven/rpms-rpc", ref: "5188b49"
 end
 
 gem "puma"
