@@ -83,6 +83,8 @@ module Lakeraven
         "lakeraven/ehr/registration/other_names#index",   # Other names the patient has used (S-REG-12): registration demographics, no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/registration/other_names#create",  # Adding an other name (S-REG-12), not disclosure
         "lakeraven/ehr/registration/other_names#destroy", # Removing an other name (S-REG-12), not disclosure
+        "lakeraven/ehr/registration/preferred_names#edit",   # The name the patient goes by (S-REG-12.1): registration demographics, no clinical record
+        "lakeraven/ehr/registration/preferred_names#update", # Saving the preferred name (S-REG-12.1), not disclosure
         "lakeraven/ehr/registration/eligibilities#edit",   # Tribe and eligibility form (S-REG-07.1), registration data, no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/registration/eligibilities#update", # Tribe and eligibility edit; as #edit
         "lakeraven/ehr/registration/coverages#index",  # Payer, member number and dates for billing (S-REG-03), no clinical record; revisit with Part 2 (#494)

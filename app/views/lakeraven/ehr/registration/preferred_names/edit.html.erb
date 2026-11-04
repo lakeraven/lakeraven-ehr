@@ -1,0 +1,50 @@
+<% page_title "Preferred name", @patient[:name], "Registration" %>
+
+<%= page_header @patient[:name],
+      "The name the patient goes by." %>
+
+<%= flash_alert id: "preferred-name-alert" %>
+
+<%= patient_summary @patient, id: "registration" %>
+
+<section
+  id="preferred-name-form-section"
+  aria-labelledby="preferred-name-form-heading"
+  class="card mt-6 flex flex-col gap-4"
+>
+  <h2
+    id="preferred-name-form-heading"
+    class="text-lg font-semibold"
+  >
+    Preferred name
+  </h2>
+  <p class="hint">
+    The name the patient wants to be called, up to 30 characters.
+    A search by the family name and this name finds the patient.
+    Leave it blank to clear it.
+  </p>
+  <%= form_errors @entry,
+        "The preferred name was not saved.",
+        id: "preferred-name-errors" %>
+  <%= form_with scope: :preferred_name,
+        url: registration_patient_preferred_name_path(@dfn),
+        method: :post,
+        local: true,
+        id: "preferred-name-form",
+        class: "flex flex-col gap-4" do |f| %>
+    <%# PREFERRED NAME, IHS PATIENT (9000001) field 9001. %>
+    <%= form_field :name, "Preferred name", form: f, error: @entry.errors[:name].first do |aria| %>
+      <%= f.text_field :name,
+            value: @entry.name,
+            maxlength: Lakeraven::EHR::PreferredNameEntry::MAX_LENGTH,
+            autocomplete: "off",
+            aria: aria %>
+    <% end %>
+    <%= f.submit "Save the preferred name",
+          class: "button-primary self-start" %>
+  <% end %>
+</section>
+
+<p class="mt-6">
+  <%= link_to "Back to the patient", registration_patient_path(@dfn, anchor: "preferred-name-section") %>
+</p>
