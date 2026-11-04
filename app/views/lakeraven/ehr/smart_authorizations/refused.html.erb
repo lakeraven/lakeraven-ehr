@@ -14,6 +14,12 @@
       <% when :wrong_server %>
         The app asked for a different server's records.
         Start again from the app, and choose this server.
+      <% when :launch_ended %>
+        This launch has ended, or was started by someone else.
+        Start the app again from the patient's chart.
+      <% when :no_patient %>
+        RPMS has no record of that patient.
+        Start again from the app, and search for the patient.
       <% else %>
         There is no app request waiting for you.
         Start again from the app.

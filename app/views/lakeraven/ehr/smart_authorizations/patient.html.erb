@@ -1,0 +1,82 @@
+<% page_title "Choose a patient", @app.name %>
+
+<div class="mx-auto mt-8 max-w-2xl">
+  <div class="card">
+    <h1>Choose the patient for <%= @app.name %></h1>
+    <p class="text-sm text-slate-600">
+      The app will see only this patient's record, and only what your RPMS access allows.
+    </p>
+
+    <%= form_with url: smart_authorization_patient_path,
+          method: :post,
+          local: true,
+          id: "launch-patient-search",
+          role: "search",
+          class: "mt-4 flex flex-wrap items-center gap-2" do %>
+      <%= label_tag :launch_patient_q,
+            "Find a patient",
+            class: "sr-only" %>
+      <%= text_field_tag :q,
+            @query,
+            id: "launch_patient_q",
+            required: true,
+            autocomplete: "off",
+            placeholder: "Name, HRN, date of birth or last 4 of SSN",
+            class: "min-w-72 rounded border border-slate-300 px-3 py-2" %>
+      <%= submit_tag "Find patient",
+            name: nil %>
+    <% end %>
+
+    <% if @lookup_failed %>
+      <p
+        class="alert alert--error mt-4"
+        role="alert"
+      >
+        The patient lookup did not answer, so this list is not complete.
+        Try the search again.
+      </p>
+    <% elsif @query.present? && @matches.empty? %>
+      <p
+        id="no-match"
+        class="hint mt-4"
+      >
+        No patient matches “<%= @query %>”.
+      </p>
+    <% end %>
+
+    <% if @matches.present? %>
+      <table
+        id="matches"
+        class="mt-6 w-full text-left"
+      >
+        <caption class="text-left font-semibold">Patients matching “<%= @query %>”</caption>
+        <thead>
+          <tr>
+            <th scope="col">Name</th>
+            <th scope="col">Date of birth</th>
+            <th scope="col">Sex</th>
+            <th scope="col">Health record number</th>
+            <th scope="col"><span class="sr-only">Choose</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          <% @matches.each do |patient| %>
+            <tr data-dfn="<%= patient.dfn %>">
+              <td><%= patient.name %></td>
+              <td><%= patient.dob&.strftime("%b %-d, %Y") %></td>
+              <td><%= patient.sex %></td>
+              <td><%= patient.hrn || "None at this facility" %></td>
+              <td>
+                <%= button_to "Choose",
+                      smart_authorization_patient_path,
+                      method: :post,
+                      params: { dfn: patient.dfn },
+                      class: "underline" %>
+              </td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    <% end %>
+  </div>
+</div>

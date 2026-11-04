@@ -1,0 +1,24 @@
+<% page_title "Open in an app", @patient.name %>
+
+<%= page_header "Open #{@patient.name} in an app",
+      "The app opens in this window, asks you to approve what it can see, and sees only what your RPMS access allows." %>
+
+<% if @apps.any? %>
+  <ul
+    id="launch-apps"
+    class="card flex flex-col gap-2"
+  >
+    <% @apps.each do |app| %>
+      <li data-client-id="<%= app.uid %>">
+        <%= button_to "Open in #{app.name}",
+              smart_launch_path,
+              method: :post,
+              params: { client_id: app.uid, patient: @patient.dfn } %>
+      </li>
+    <% end %>
+  </ul>
+<% else %>
+  <%= empty_state "No app is registered to open from here.",
+        "Your site manager registers apps.",
+        id: "no-launch-apps" %>
+<% end %>

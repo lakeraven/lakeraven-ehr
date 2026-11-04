@@ -101,9 +101,14 @@ Lakeraven::EHR::Engine.routes.draw do
       format: false, file_name: %r{[^/]+}
   end
 
-  # SMART discovery + EHR Launch
+  # SMART discovery + EHR Launch. smart/launch is the EHR side: a signed-in
+  # user opens a patient in a registered app, which is sent to the app's
+  # launch URI with `iss` and `launch` (#839). smart/style is the
+  # smart_style_url a launched token response names.
   get ".well-known/smart-configuration", to: "smart_configuration#show"
-  get "smart/launch", to: "smart_launch#show"
+  get "smart/launch", to: "smart_launch#show", as: :smart_launch
+  post "smart/launch", to: "smart_launch#create"
+  get "smart/style", to: "smart_styles#show", as: :smart_style, defaults: { format: :json }
 
   # SMART App Launch authorization code flow (#839). The user signs in with
   # their own RPMS codes and approves; GET and POST are both served.
@@ -111,6 +116,8 @@ Lakeraven::EHR::Engine.routes.draw do
   post "oauth/authorize", to: "smart_authorizations#new"
   get "oauth/authorize/approval", to: "smart_authorizations#show", as: :smart_authorization_approval
   post "oauth/authorize/approval", to: "smart_authorizations#decide"
+  get "oauth/authorize/patient", to: "smart_authorizations#patient", as: :smart_authorization_patient
+  post "oauth/authorize/patient", to: "smart_authorizations#choose_patient"
 
   # One token endpoint, two grants: the authorization code from a launch, and
   # Backend Services client_credentials (JWT auth) for everything else.

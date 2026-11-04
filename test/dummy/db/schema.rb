@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_03_000000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_03_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -125,6 +125,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_03_000000) do
 
   create_table "lakeraven_ehr_launch_contexts", force: :cascade do |t|
     t.datetime "created_at", null: false
+    t.string "duz"
     t.string "encounter_id"
     t.datetime "expires_at", null: false
     t.string "facility_identifier"
@@ -310,6 +311,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_03_000000) do
     t.boolean "confidential", default: true, null: false
     t.datetime "created_at", null: false
     t.string "jwks_uri"
+    t.text "launch_uri"
     t.string "name", null: false
     t.string "organization_id"
     t.text "redirect_uri", null: false

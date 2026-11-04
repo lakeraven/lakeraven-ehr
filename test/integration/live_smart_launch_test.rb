@@ -90,4 +90,38 @@ class LiveSmartLaunchTest < ActionDispatch::IntegrationTest
     api.get "#{BASE}/Patient/#{DFN}", headers: { "Authorization" => "Bearer #{access_token}" }
     api.assert_response :unauthorized
   end
+  test "a standalone launch/patient: PROFILE,MD finds and chooses the patient, and the token reads only that patient" do
+    @client.update!(scopes: "patient/*.rs launch/patient")
+    browser = open_session
+    browser.get "#{BASE}/oauth/authorize", params: {
+      response_type: "code", client_id: @client.uid, redirect_uri: REDIRECT,
+      scope: "launch/patient patient/Patient.rs", state: "live-state", aud: "http://www.example.com#{BASE}",
+      code_challenge: Base64.urlsafe_encode64(Digest::SHA256.digest(@verifier), padding: false),
+      code_challenge_method: "S256"
+    }
+    browser.post "#{BASE}/login", params: { username: "PMD123", password: "PMD123!!" }
+    browser.follow_redirect!
+    browser.assert_redirected_to "#{BASE}/oauth/authorize/patient"
+    browser.post "#{BASE}/oauth/authorize/patient", params: { q: "MOUSE" }
+    browser.assert_select "#matches tr[data-dfn='#{DFN}'] td", text: "MOUSE,MICKEY M"
+    browser.post "#{BASE}/oauth/authorize/patient", params: { dfn: DFN }
+    browser.follow_redirect!
+    browser.assert_select "#launch-patient[data-dfn='#{DFN}']"
+    browser.post "#{BASE}/oauth/authorize/approval", params: { decision: "approve" }
+    code = Rack::Utils.parse_query(URI.parse(browser.response.location).query).fetch("code")
+
+    api = open_session
+    api.post "#{BASE}/oauth/token",
+      params: { grant_type: "authorization_code", code: code, redirect_uri: REDIRECT, code_verifier: @verifier },
+      headers: { "Authorization" => ActionController::HttpAuthentication::Basic.encode_credentials(@client.uid, "live-example-secret") }
+    api.assert_response :ok
+    body = JSON.parse(api.response.body)
+    assert_equal DFN, body["patient"]
+    assert_equal "launch/patient patient/Patient.rs", body["scope"]
+
+    api.get "#{BASE}/Patient/#{DFN}", headers: { "Authorization" => "Bearer #{body["access_token"]}" }
+    api.assert_response :ok
+    api.get "#{BASE}/Patient/1", headers: { "Authorization" => "Bearer #{body["access_token"]}" }
+    api.assert_response :forbidden
+  end
 end

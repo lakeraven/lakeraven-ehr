@@ -123,12 +123,16 @@ module Lakeraven
         "lakeraven/ehr/scheduling/hours#create",         # Hours entry; a refusal names an appointment time and patient name, no clinical record
         "lakeraven/ehr/test_sessions#create", # Test only
         "lakeraven/ehr/smart_configuration#show", # Discovery
-        "lakeraven/ehr/smart_launch#show",    # Discovery
+        "lakeraven/ehr/smart_launch#show",    # EHR launch: lists registered apps for a patient named by name only
+        "lakeraven/ehr/smart_launch#create",  # EHR launch: mints a launch context, no clinical data
+        "lakeraven/ehr/smart_styles#show",    # SMART style: colours and type
         "lakeraven/ehr/capability_statements#show", # Discovery
         "lakeraven/ehr/backend_services#token", # Auth
         "lakeraven/ehr/smart_authorizations#new",    # Auth: checks an app's request, no clinical data
         "lakeraven/ehr/smart_authorizations#show",   # Auth: the approval screen, scopes in plain words
         "lakeraven/ehr/smart_authorizations#decide", # Auth: issues a code, no clinical data
+        "lakeraven/ehr/smart_authorizations#patient",        # Auth: the patient picker, empty until searched
+        "lakeraven/ehr/smart_authorizations#choose_patient", # Auth: patient search: name, HRN, date of birth, sex, no clinical record
         "lakeraven/ehr/smart_tokens#create",         # Auth
         "lakeraven/ehr/transitions_of_care#create", # Wired separately in #568
         "lakeraven/ehr/ccda_imports#create",  # Ingress
