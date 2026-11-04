@@ -8,9 +8,10 @@ require "test_helper"
 # against a throwaway container and only when asked twice: LIVE_RPMS=1 and
 # LIVE_RPMS_WRITES=1. Never point it at a shared stack.
 #
-# PROFILE,SCHED must hold SDZREGMENU and AG's AGGRPC context on the container,
-# which the build's persona does not (yet): a site gives both to a scheduler
-# who mini-registers.
+# PROFILE,SCHED holds SDZREGMENU and AG's AGGRPC context from the build's
+# persona seed (rpms-ops SEEDPERS, lakeraven/rpms-ops#1056): a scheduler
+# mini-registers. An image cut before that seed lacks both, and the first
+# assertion below says so.
 #
 #   LIVE_RPMS=1 LIVE_RPMS_WRITES=1 VISTA_BROKER=cia VISTA_RPC_HOST=127.0.0.1 VISTA_RPC_PORT=9110 \
 #   LIVE_RPMS_ACCESS=PSCH123 LIVE_RPMS_VERIFY='PSCH123!!' \
@@ -43,17 +44,20 @@ class LiveSchedulingQuickRegistrationTest < ActionDispatch::IntegrationTest
   test "S-REG-05.1 a caller with no chart is registered with a temporary chart number and booked at the time chosen" do
     clinic, start = open_time
     letters = Array.new(6) { ("A".."Z").to_a.sample }.join
+    # A date of birth of its own, so a rerun on the same container is not
+    # matched to the caller an earlier run registered.
+    dob = (Date.new(1940, 1, 1) + rand(25_000)).iso8601
     name = "ZZCALLER,#{letters}"
 
     get "#{clinic}/appointments/new", params: { start: start, q: name }
     link = css_select("#quick-register-link").first
-    assert link, "no offer to register: PROFILE,SCHED needs SDZREGMENU (and AGGRPC) on this container"
+    assert link, "no offer to register: PROFILE,SCHED lacks SDZREGMENU (and AGGRPC); the image predates the persona seed that grants them"
 
     get link["href"]
     assert_response :ok
     token = css_select("#quick-registration-form input[name='submission_id']").first["value"]
     post "#{clinic}/registrations", params: { start: start, length: "15", submission_id: token,
-                                              registration: { name: name, sex: "F", dob: "1985-03-04", ssn: "", no_ssn_reason: "N", chart_number: "" } }
+                                              registration: { name: name, sex: "F", dob: dob, ssn: "", no_ssn_reason: "N", chart_number: "" } }
 
     assert_response :redirect, css_select("[role=alert]").map(&:text).join(" ")
     dfn = response.location[/patient_dfn%5D=(\d+)/, 1]
