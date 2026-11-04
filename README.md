@@ -73,6 +73,8 @@ The connections live in the process's memory, so run one app process per instanc
 **A deployed stack.**
 Forward the stack's broker port to your machine (cloud-rpms runs its stacks behind SSM) and point `VISTA_RPC_HOST` and `VISTA_RPC_PORT` at the forwarded port.
 A YottaDB stack serves CIA on 9100; an IRIS stack serves XWB on 9100 and CIA on 9200.
+No UCI (namespace) setting is needed on either: the CIA client asks for the broker's own namespace.
+`RPMS_UCI` overrides that, only to run in another namespace.
 
 **Tests need no backend.**
 `bin/rails test` and `bundle exec cucumber` run against rpms-rpc's in-memory `MockClient`.

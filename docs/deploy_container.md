@@ -12,9 +12,10 @@ A deploy pins an immutable `sha-<short>` tag, never `main`.
 |---|---|---|
 | `SECRET_KEY_BASE` | yes | Rails secret; keep it in a secret store, one per instance |
 | `DATABASE_URL` | yes | PostgreSQL, e.g. `postgres://user:pass@host:5432/lakeraven_ehr_production?sslmode=require` |
-| `VISTA_BROKER` | yes | `cia` for a YottaDB stack (one broker, `{CIA}` on 9100); `xwb` for XWB |
+| `VISTA_BROKER` | yes | `cia` for an RPMS CIA broker (a YottaDB stack's 9100, an IRIS stack's 9200); `xwb` for XWB |
 | `VISTA_RPC_HOST` | yes | The RPMS server's private address |
 | `VISTA_RPC_PORT` | yes | 9100 on a YottaDB stack; 9200 for CIA on an IRIS stack |
+| `RPMS_UCI` | no | Unset on either engine: the CIA client asks for the broker's own namespace. Set it only to run in another namespace |
 | `RAILS_FORCE_SSL` | no | Unset: TLS, terminated in front of the app (a load balancer). Exactly `false` serves plain HTTP, only for an app reachable solely inside a private network; any other value keeps TLS |
 | `RAILS_LOG_LEVEL` | no | Default `info` |
 
