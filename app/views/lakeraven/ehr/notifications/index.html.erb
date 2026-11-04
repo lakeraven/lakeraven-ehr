@@ -2,7 +2,15 @@
 
 <%= page_header "Notifications",
       [ "Your notifications from RPMS, newest first.",
-        "Open a patient's chart from the notification about them." ] %>
+        "Open a patient's chart from the notification about them, forward a notification to a colleague, or remove one you are done with." ] %>
+
+<% if flash[:notice].present? %>
+  <%= alert_box :notice,
+        flash[:notice],
+        id: "notification-done" %>
+<% end %>
+
+<%= flash_alert id: "notification-alert" %>
 
 <% if @notifications.empty? %>
   <%= empty_state "You have no notifications.",
@@ -23,7 +31,7 @@
         <th scope="col">Priority</th>
         <th scope="col">Delivered</th>
         <th scope="col">From</th>
-        <th scope="col"><span class="sr-only">Open</span></th>
+        <th scope="col"><span class="sr-only">Actions</span></th>
       </tr>
     </thead>
     <tbody>
@@ -47,6 +55,25 @@
             <% if notification[:info_only] %>
               <span class="block text-sm text-slate-600">For information.</span>
             <% end %>
+            <% text = @texts[notification[:alert_id]] %>
+            <% if text == :unread %>
+              <span
+                class="block text-sm text-slate-600"
+                data-alert-text-unread
+              >
+                Its comment or details could not be read from RPMS.
+              </span>
+            <% elsif text.present? %>
+              <span
+                class="mt-1 block border-l-2 border-slate-300 pl-2 text-sm"
+                data-alert-text
+              >
+                <span class="sr-only">Comment or details:</span>
+                <% text.each_with_index do |line, i| %>
+                  <%= tag.br if i.positive? %><%= line %>
+                <% end %>
+              </span>
+            <% end %>
           </td>
           <td data-priority="<%= notification[:priority] %>">
             <%= notification[:priority].to_s.capitalize.presence || "Not set" %>
@@ -60,14 +87,31 @@
           </td>
           <td><%= notification[:sender] %></td>
           <td>
-            <% if notification[:patient_dfn] %>
-              <%= button_to patient_context_path(notification[:patient_dfn]),
-                    method: :post,
-                    class: "underline" do %>
-                Open chart
-                <span class="sr-only">for <%= notification[:patient_name] %></span>
+            <div class="flex flex-wrap items-center gap-3">
+              <% if notification[:patient_dfn] %>
+                <%= button_to patient_context_path(notification[:patient_dfn]),
+                      method: :post,
+                      class: "underline" do %>
+                  Open chart
+                  <span class="sr-only">for <%= notification[:patient_name] %></span>
+                <% end %>
               <% end %>
-            <% end %>
+              <%= link_to new_notification_forward_path(notification[:alert_id]),
+                    class: "underline",
+                    data: { forward: notification[:alert_id] } do %>
+                Forward
+                <span class="sr-only"><%= notification[:message] %></span>
+              <% end %>
+              <% if notification[:removable] %>
+                <%= button_to notification_path(notification[:alert_id]),
+                      method: :delete,
+                      class: "underline",
+                      form: { data: { remove: notification[:alert_id] } } do %>
+                  Remove
+                  <span class="sr-only"><%= notification[:message] %></span>
+                <% end %>
+              <% end %>
+            </div>
           </td>
         </tr>
       <% end %>

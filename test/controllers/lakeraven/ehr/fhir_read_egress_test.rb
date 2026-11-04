@@ -67,7 +67,11 @@ module Lakeraven
         "lakeraven/ehr/dashboards#show",      # Web UI dashboard; banner patient/allergy via filter_fhir_for_egress
         "lakeraven/ehr/chart_searches#show",   # Patient bar: my recent patients' name, DOB, sex, HRN; no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/chart_searches#create", # Patient bar search: name, DOB, sex, HRN as registration's lookup; revisit with Part 2 (#494)
-        "lakeraven/ehr/notifications#index",   # The user's RPMS notifications (S-SGN-02.1): patient name, HRN and the alert's text, which can name a result or an order; revisit with Part 2 (#494)
+        "lakeraven/ehr/notifications#index",   # The user's RPMS notifications (S-SGN-02.1): patient name, HRN, the alert's text and its comment or long text (BEHOXQ ALRMSG), which can name a result or an order; revisit with Part 2 (#494)
+        "lakeraven/ehr/notifications#destroy",          # Removing one of the user's notifications (S-SGN-02.2): a write, redirects to the list
+        "lakeraven/ehr/notification_forwards#new",      # Forwarding one (S-SGN-02.4): the notification's text and patient name, as the list shows them; revisit with Part 2 (#494)
+        "lakeraven/ehr/notification_forwards#find",     # The colleague search: users' names, and the notification as on #new
+        "lakeraven/ehr/notification_forwards#create",   # Forwarding it (S-SGN-02.4): a write, not disclosure
         "lakeraven/ehr/registration/patients#index", # Front-desk lookup: registration demographics (name, HRN, DOB, status), no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/registration/patients#show",  # Registration demographics (name, HRN, DOB, sex), no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/registration/patients#new",     # Registration entry form (S-REG-02), not disclosure

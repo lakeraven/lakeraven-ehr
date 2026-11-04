@@ -25,6 +25,31 @@ module Lakeraven
         call = RpmsRpc.client.received_calls.reverse.find { |c| c[:rpc] == "BEHOXQ ALRLIST" }
         assert_empty call[:params].to_a, "ALRLIST answers for the session's own user"
       end
+
+      # ORWU NEWPERS as the container answered PROFILE,MD's search for
+      # "PROFILE" on 2026-11-04: a page of the name index starting there, so
+      # it runs past the names that start with the text.
+      NEWPERS_PROFILE = [
+        "204^Profile,Ma^- MEDICAL ASSISTANT", "206^Profile,Md^- PHYSICIAN", "207^Profile,Reg^- PAT REG.",
+        "205^Profile,Rn^- NURSE", "208^Profile,Sched^- MEDICAL SCHEDULER", "200^Provider,Test"
+      ].freeze
+
+      test "recipients are the users whose names start with the text, without the user themself" do
+        RpmsRpc.client.seed_raw_lines(:user_management_user_list, "PROFILE", NEWPERS_PROFILE)
+
+        assert_equal %w[Profile,Ma Profile,Reg Profile,Rn Profile,Sched],
+          NotificationsGateway.recipients("Profile", except: "206").map { |r| r[:name] }, "not Provider,Test, past the text"
+        call = RpmsRpc.client.received_calls.reverse.find { |c| c[:rpc] == "ORWU NEWPERS" }
+        assert_equal [ "PROFILE", "1" ], call[:params].to_a, "searched as typed, upper case, forward"
+      ensure
+        RpmsRpc.client.seed_raw_lines(:user_management_user_list, "PROFILE", [])
+      end
+
+      test "a blank search asks RPMS nothing" do
+        RpmsRpc.client.received_calls.clear
+        assert_equal [], NotificationsGateway.recipients("  ")
+        assert_empty RpmsRpc.client.received_calls.select { |c| c[:rpc] == "ORWU NEWPERS" }
+      end
     end
   end
 end
