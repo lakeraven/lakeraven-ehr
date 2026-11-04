@@ -11,6 +11,9 @@
   <main class="mx-auto max-w-3xl px-4 py-6">
     <%= yield %>
   </main>
-  <%= render "lakeraven/ehr/shared/consent_kiosk_channel", announce: "handover-started" %>
+  <%= render "lakeraven/ehr/shared/consent_kiosk_channel",
+        announce: "handover-started",
+        blank: true,
+        handover_token: (@consent_lock || {})["handover_token"] %>
 </body>
 </html>
