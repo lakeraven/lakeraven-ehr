@@ -22,6 +22,14 @@ module Lakeraven
       def refused_signatures_exhausted?
         refused_signature_count.to_i >= MAX_REFUSED_SIGNATURES
       end
+
+      # One conditional update, so two posts cannot both pass the cap. Zero
+      # rows means this handover is already at the cap; the caller must not
+      # decode. A refusal after a successful claim must not increment again.
+      def claim_signature_attempt!
+        updated = self.class.where(id: id).where("refused_signature_count < ?", MAX_REFUSED_SIGNATURES)
+        updated.update_all("refused_signature_count = refused_signature_count + 1").positive?
+      end
     end
   end
 end

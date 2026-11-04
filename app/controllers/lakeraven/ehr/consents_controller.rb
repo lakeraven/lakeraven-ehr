@@ -13,6 +13,10 @@ module Lakeraven
       TEMPLATES_MISSING = "No consent templates are installed, so handover is unavailable. " \
                           "Install them with bin/rails lakeraven_ehr:consent_templates:install."
 
+      # Idle expiry is the browser session's redirect to login, the same gate
+      # the rest of the HTML app uses. Without it the SMART check answers 401
+      # after it has already cleared the timed-out token.
+      before_action :require_authentication
       before_action :authenticate_smart_token!
       before_action :authorize_consent_scope!
       before_action :require_clinician_credential!, only: %i[handover revocation]
@@ -39,6 +43,9 @@ module Lakeraven
       end
 
       def revocation
+        require_capability!("consent.revoke")
+        return if performed?
+
         signature = SignedConsent.signatures_for_patient(@dfn).find_by(id: params[:id])
         unless signature
           render plain: "Consent not found", status: :not_found

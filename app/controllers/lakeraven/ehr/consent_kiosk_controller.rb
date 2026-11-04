@@ -28,13 +28,11 @@ module Lakeraven
         return refuse_repeated_signature! if signature_refusals_exhausted?
         return reject_signature! if @template.nil?
         return render_stored_signature! if stored_handover_signature
+        return refuse_repeated_signature! unless claimed_signature_attempt?
 
-        parsed = SignedConsent.decode_signature_data_url(params[:signature])
-        return reject_signature! unless parsed
-
-        store_posted_signature!(parsed)
+        store_decoded_signature!
       rescue ActiveRecord::RecordInvalid
-        reject_signature!
+        render_rejected_signature!
       end
 
       def unlock
@@ -133,9 +131,36 @@ module Lakeraven
       def reject_signature!
         return render_refusal_uncounted unless count_signature_refusal
 
+        render_rejected_signature!
+      end
+
+      def render_rejected_signature!
         @signature_rejected = true
         @signed_consent = nil
         render :show, status: :unprocessable_entity
+      end
+
+      # Claims one attempt before the PNG is decoded. A later refusal does not
+      # count again. Zero rows (already at the cap) is a 429; a store error
+      # stays closed (503) and does not decode.
+      def claimed_signature_attempt?
+        lock = active_kiosk_lock
+        return true if lock.nil?
+
+        lock.claim_signature_attempt!
+      rescue StandardError => error
+        Rails.logger.error("[consent-kiosk] signature refusal was not counted: #{error.class}")
+        @signature_refusal_count_unreadable = true
+        false
+      end
+
+      def store_decoded_signature!
+        return render_rejected_signature! unless SignedConsent.acceptable_text?(params[:signer_name])
+
+        parsed = SignedConsent.decode_signature_data_url(params[:signature])
+        return render_rejected_signature! unless parsed
+
+        store_posted_signature!(parsed)
       end
 
       # Checked before the PNG is decoded. Ten refusals on this handover
@@ -274,6 +299,7 @@ module Lakeraven
           return
         end
 
+        flash[:consent_handover_ended] = true
         redirect_to patient_consents_path(dfn)
       end
 

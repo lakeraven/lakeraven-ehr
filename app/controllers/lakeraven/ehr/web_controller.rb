@@ -13,6 +13,7 @@ module Lakeraven
       # wrapper and the denial is recorded (#793). PhiPageCache is last so
       # its no-store header is prepended outside that wrapper and survives
       # a halted before_action.
+      include SessionIdleLimit
       include ConsentKioskLock
       include AuditableClinicalAccess
       include PatientBannerRendering
@@ -73,27 +74,12 @@ module Lakeraven
         token.nil? || token.revoked? || token.expired?
       end
 
-      def session_idle_expired?
-        last_seen = session[:last_seen_at]
-        return false if last_seen.blank?
-
-        Time.current.to_i - last_seen.to_i > session_idle_limit
-      end
-
       # Whether the session has outlived the site's session_lifetime since
       # sign-on, however active it has been. A session with no sign-on time was
       # not made by sign-on, and ends.
       def session_lifetime_expired?
         signed_in = session[:signed_in_at]
         signed_in.blank? || Time.current.to_i - signed_in.to_i > Lakeraven::EHR.configuration.session_lifetime.to_i
-      end
-
-      # How long this session may sit idle: the site's limit, or the user's RPMS
-      # limit (their DTIME, read at sign-on) when that is shorter. RPMS may make
-      # it stricter, never looser.
-      def session_idle_limit
-        site = Lakeraven::EHR.configuration.session_idle_limit.to_i
-        [ session[:rpms_idle_seconds].presence&.to_i, site ].compact.min
       end
 
       def touch_session!

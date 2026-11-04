@@ -35,6 +35,7 @@ module Lakeraven
       validates :handover_token, uniqueness: true, allow_nil: true
       validate :snapshot_matches_template
       validate :row_shape
+      validate :text_fields_are_utf8
 
       scope :signatures, -> { where(kind: KIND_SIGNATURE) }
 
@@ -44,6 +45,17 @@ module Lakeraven
 
       def self.digest_for(body)
         Digest::SHA256.hexdigest(body.to_s)
+      end
+
+      # Signer name and revocation reason are stored as text. A NUL byte, or
+      # bytes that are not valid UTF-8, is refused before a row is written.
+      def self.acceptable_text?(value)
+        return true if value.nil?
+
+        text = value.to_s
+        return false unless text.encoding == Encoding::UTF_8 && text.valid_encoding?
+
+        !text.include?("\0")
       end
 
       # The canvas posts a PNG data URL. Stored bytes are the PNG itself.
@@ -191,6 +203,11 @@ module Lakeraven
           witness_duz: by_duz.to_s, kind: KIND_REVOCATION, recorded_by_duz: by_duz.to_s,
           revokes_id: id, revocation_reason: reason.to_s
         }
+      end
+
+      def text_fields_are_utf8
+        errors.add(:signer_name, "must be valid text") unless self.class.acceptable_text?(signer_name)
+        errors.add(:revocation_reason, "must be valid text") unless self.class.acceptable_text?(revocation_reason)
       end
 
       def snapshot_matches_template

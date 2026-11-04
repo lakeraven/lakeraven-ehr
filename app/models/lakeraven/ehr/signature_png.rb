@@ -8,6 +8,11 @@ module Lakeraven
     # bytes: chunks, IHDR, a bounded inflate of IDAT, and unfiltered scanlines.
     # A payload this cannot decode, or that has no visible stroke, is refused.
     #
+    # Only IHDR, IDAT, and IEND are accepted. Any other chunk, ancillary or
+    # not, is refused: what is stored must render exactly as the bitmap the
+    # ink rule checked. Palette colour types are already refused, so PLTE
+    # is not kept either.
+    #
     # Dimensions are capped to a signature pad before inflate. Scanlines stay
     # binary strings (getbyte); a Ruby array per byte would turn a legal pad
     # into a memory spike, and a larger claimed bitmap is refused outright.
@@ -24,7 +29,6 @@ module Lakeraven
       # near-white stroke on a white page is not ink.
       LUMINANCE_FROM_WHITE = 64
       SAMPLES = { 0 => 1, 2 => 3, 4 => 2, 6 => 4 }.freeze
-      KNOWN_CRITICAL = %w[IHDR PLTE IDAT IEND].freeze
 
       attr_reader :bytes
 
@@ -110,8 +114,7 @@ module Lakeraven
         when "IHDR" then read_ihdr_once(chunk[:data])
         when "IDAT" then @idat << chunk[:data]
         when "IEND" then @ended = true
-        when "tRNS" then false
-        else !critical_unknown?(chunk[:type])
+        else false
         end
       end
 
@@ -119,10 +122,6 @@ module Lakeraven
         return false if @width
 
         read_ihdr(data)
-      end
-
-      def critical_unknown?(type)
-        type[0] == type[0].upcase && !KNOWN_CRITICAL.include?(type)
       end
 
       def read_ihdr(data)

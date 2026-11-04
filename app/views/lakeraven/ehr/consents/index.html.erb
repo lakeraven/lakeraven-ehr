@@ -28,12 +28,12 @@
         <td>
           <% if revocation %>
             <%= revocation.revocation_reason %>
-          <% else %>
-                <%= form_with url: patient_consent_revocation_path(@dfn, row), method: :post do %>
-                  <label for="revocation_reason_<%= row.id %>">Reason</label>
-                  <input type="text" name="reason" id="revocation_reason_<%= row.id %>" required>
-                  <button type="submit">Revoke</button>
-                <% end %>
+          <% elsif capability?("consent.revoke") %>
+            <%= form_with url: patient_consent_revocation_path(@dfn, row), method: :post do %>
+              <label for="revocation_reason_<%= row.id %>">Reason</label>
+              <input type="text" name="reason" id="revocation_reason_<%= row.id %>" required>
+              <button type="submit">Revoke</button>
+            <% end %>
           <% end %>
         </td>
       </tr>

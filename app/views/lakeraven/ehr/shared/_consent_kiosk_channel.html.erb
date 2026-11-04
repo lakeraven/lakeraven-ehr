@@ -1,0 +1,29 @@
+<%# Other open tabs drop chart content when a handover starts or ends. %>
+<% channel = "lakeraven-ehr-consent-kiosk" %>
+<% event = local_assigns[:announce] %>
+<% if event %>
+<script data-consent-kiosk-announce="<%= event %>">
+(function () {
+  if (!("BroadcastChannel" in window)) return;
+  new BroadcastChannel("<%= channel %>").postMessage({ type: "<%= event %>" });
+})();
+</script>
+<% else %>
+<script data-consent-kiosk-listener>
+(function () {
+  if (!("BroadcastChannel" in window)) return;
+  var kioskPath = <%= raw json_escape(consent_kiosk_path.to_json) %>;
+  var channel = new BroadcastChannel("<%= channel %>");
+  channel.onmessage = function (message) {
+    var type = message.data && message.data.type;
+    if (type !== "handover-started" && type !== "handover-ended") return;
+    document.body.textContent = "";
+    if (type === "handover-started") {
+      location.replace(kioskPath);
+    } else {
+      location.reload();
+    }
+  };
+})();
+</script>
+<% end %>

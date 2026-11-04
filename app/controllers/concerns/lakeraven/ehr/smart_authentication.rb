@@ -8,6 +8,7 @@ module Lakeraven
   module EHR
     module SmartAuthentication
       extend ActiveSupport::Concern
+      include SessionIdleLimit
 
       # Doorkeeper application that owns every browser-session token. Tokens
       # minted for a browser are recognisable by it, which is what lets them be
@@ -344,16 +345,6 @@ module Lakeraven
         token
       rescue StandardError
         nil
-      end
-
-      def session_idle_expired?
-        last_seen = session[:last_seen_at]
-        return false if last_seen.blank?
-
-        # The site's idle limit (Configuration#session_idle_limit): without it a
-        # signed-in workstation stayed signed in for half a day of inactivity.
-        # The token's own expiry (session_lifetime) is the outer bound.
-        Time.current.to_i - last_seen.to_i > Lakeraven::EHR.configuration.session_idle_limit.to_i
       end
 
       # Revoke whatever SMART token this session carries, then clear it. Every
