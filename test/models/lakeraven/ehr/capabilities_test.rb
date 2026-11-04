@@ -14,7 +14,8 @@ module Lakeraven
       test "each demo persona holds exactly the capabilities of its keys" do
         assert_equal %w[registration.search registration.view patient.register], for_persona("PROFILE,REG")
         assert_equal %w[registration.view scheduling.open], for_persona("PROFILE,SCHED")
-        %w[PROFILE,MD PROFILE,RN PROFILE,MA].each { |clinician| assert_empty for_persona(clinician), clinician }
+        assert_equal %w[referrals.work], for_persona("PROFILE,MD"), "RCIS's menu key, BMCZMENU"
+        %w[PROFILE,RN PROFILE,MA].each { |clinician| assert_empty for_persona(clinician), clinician }
       end
 
       test "a deny key takes the capability away, as BPRM's AGZVIEWONLY does registering" do

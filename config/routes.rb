@@ -139,6 +139,9 @@ Lakeraven::EHR::Engine.routes.draw do
   # The signed-in user's RPMS notifications (rpms-ux S-SGN-02.1, #874).
   get "notifications" => "notifications#index", as: :notifications
 
+  # The referrals pending at the facility, for a user who works referrals (#873).
+  get "referrals/pending", to: "pending_referrals#index", as: :pending_referrals
+
   # The patient bar's search and recent patients (rpms-ux S-CHT-01). A search
   # names a patient, so it is posted, never carried in a URL (#722).
   get "chart_search", to: "chart_searches#show", as: :chart_search

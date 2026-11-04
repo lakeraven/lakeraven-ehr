@@ -74,7 +74,9 @@
   </section>
 <% end %>
 
-<% unless @clinic_counts || @notification_count %>
+<%= render "pending_referrals", pending: @pending_referrals if @pending_referrals %>
+
+<% unless @clinic_counts || @notification_count || @pending_referrals %>
   <%= empty_state "Nothing here counts work for you yet.",
         "Counts appear here as the screens for that work are added.",
         id: "no-counts" %>

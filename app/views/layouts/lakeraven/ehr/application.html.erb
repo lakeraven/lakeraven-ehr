@@ -41,6 +41,9 @@
         <% if capability?("scheduling.open") && feature_available?(:bprm_scheduling) %>
           <%= link_to "Scheduling", scheduling_home_path %>
         <% end %>
+        <% if capability?("referrals.work") && feature_available?(:prc_referrals) %>
+          <%= link_to "Referrals", pending_referrals_path %>
+        <% end %>
       </nav>
 
       <div class="flex items-center gap-4 text-sm">

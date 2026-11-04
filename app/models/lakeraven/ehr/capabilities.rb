@@ -44,7 +44,11 @@ module Lakeraven
         # birth, sex and SSN, and a temporary chart number (rpms-ux S-REG-05).
         # RPMS: option BSDAM MINI REGISTRATION, locked by SDZREGMENU. BPRM
         # implies the same key for its mini-registration (ADR 0010).
-        "patient.quick_register" => rule(any: %i[scheduling_registration], deny: %i[registration_view_only])
+        "patient.quick_register" => rule(any: %i[scheduling_registration], deny: %i[registration_view_only]),
+        # Work the facility's referrals: list the ones still pending across
+        # patients (#873). RPMS: RCIS's menu key BMCZMENU, or its supervisor
+        # and manager keys, the same keys Roles.can_process_chs? reads.
+        "referrals.work" => rule(any: %i[referrals_user referrals_supervisor referrals_manager])
       }.freeze
 
       NAMES = TABLE.keys.freeze
