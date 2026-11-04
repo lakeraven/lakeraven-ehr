@@ -18,6 +18,9 @@ class SchedulingWalkInTest < ActionDispatch::IntegrationTest
     { ien: 30, pieces: [ "RETIRED STOP", "99", "3200101" ] }
   ] }.freeze
 
+  # Midday, so the current slot fits inside today's 00:00-23:59 block whenever CI runs.
+  setup { travel_to Time.now.change(hour: 12) }
+
   def today = Date.today
   def now_param = Time.now.strftime("%Y-%m-%dT%H:%M")
 
