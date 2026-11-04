@@ -30,6 +30,7 @@ module Lakeraven
         return reject_missing_template! if @template.nil?
         return render_stored_signature! if stored_handover_signature
         return refuse_repeated_signature! unless claimed_signature_attempt?
+        return render_rejected_signature! unless posted_handover_token_matches?
 
         store_decoded_signature!
       rescue ActiveRecord::RecordInvalid
@@ -127,6 +128,24 @@ module Lakeraven
 
       def stored_handover_signature
         @signed_consent = SignedConsent.find_by(handover_token: @consent_lock["handover_token"])
+      end
+
+      # The hidden field is this handover. A missing or different token is a
+      # refused attempt: the claim above already counted it, and nothing is stored.
+      def posted_handover_token_matches?
+        posted = params[:handover_token]
+        expected = @consent_lock["handover_token"].to_s
+        return false unless posted.is_a?(String) && expected.present?
+
+        same_secret?(posted, expected)
+      end
+
+      def same_secret?(posted, expected)
+        posted_bytes = posted.b
+        expected_bytes = expected.b
+        return false unless posted_bytes.bytesize == expected_bytes.bytesize
+
+        ActiveSupport::SecurityUtils.secure_compare(posted_bytes, expected_bytes)
       end
 
       # Claim first, then refuse. A non-atomic increment can pass the cap

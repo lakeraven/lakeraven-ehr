@@ -367,13 +367,32 @@ module ConsentWriteTestHelper
          { template_key: template_key, authenticity_token: csrf_token })
   end
 
+  # The form carries the current handover token. Callers that submit the
+  # form pick it up here. ConsentPr805SpecTest passes the token only when
+  # the example includes one, so a bare post from that class stays omitted.
   def post_kiosk_signature(extra = {})
     params = {
       signature: signature_data_url,
       signer_name: SYNTHETIC_SIGNER_NAME,
       authenticity_token: csrf_token
-    }.merge(extra)
+    }
+    params[:handover_token] = sole_kiosk_handover_token if supply_kiosk_handover_token?(extra)
+    params.merge!(extra)
     send(:banner_request, :post, KIOSK, params)
+  end
+
+  def supply_kiosk_handover_token?(extra)
+    return false if extra.key?(:handover_token)
+    return false if self.class.name == "ConsentPr805SpecTest"
+
+    sole_kiosk_handover_token.present?
+  end
+
+  def sole_kiosk_handover_token
+    return nil unless Lakeraven::EHR::KioskLock.table_exists?
+
+    tokens = Lakeraven::EHR::KioskLock.limit(2).pluck(:handover_token)
+    tokens.first if tokens.one?
   end
 
   def post_kiosk_unlock(access_code:, verify_code:)

@@ -16,6 +16,7 @@
   <% end %>
 
   <%= form_with url: consent_kiosk_path, method: :post, html: { id: "consent-signature-form" } do %>
+    <input type="hidden" name="handover_token" value="<%= @consent_lock["handover_token"] %>">
     <canvas id="consent-signature" width="600" height="180"
             style="touch-action: none; border: 1px solid #334155; width: 100%; max-width: 40rem; height: 180px;">
     </canvas>
