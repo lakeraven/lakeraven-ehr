@@ -138,6 +138,15 @@ Lakeraven::EHR::Engine.routes.draw do
   get "dashboard" => "dashboards#show", as: :dashboard
   # The signed-in user's RPMS notifications (rpms-ux S-SGN-02.1, #874).
   get "notifications" => "notifications#index", as: :notifications
+  # Remove one, or forward one to a colleague (rpms-ux S-SGN-02.2 to 02.4). An
+  # alert ID holds commas, semicolons and a dot ("OR,3,19;4;3261104.175206"),
+  # so the segment takes anything but a slash, and no format is read from it.
+  scope "notifications/:alert_id", constraints: { alert_id: %r{[^/]+} }, format: false do
+    delete "" => "notifications#destroy", as: :notification
+    get "forward" => "notification_forwards#new", as: :new_notification_forward
+    post "forward/find" => "notification_forwards#find", as: :find_notification_forward
+    post "forward" => "notification_forwards#create", as: :notification_forward
+  end
 
   # The referrals pending at the facility, for a user who works referrals (#873).
   get "referrals/pending", to: "pending_referrals#index", as: :pending_referrals

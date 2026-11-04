@@ -1,0 +1,87 @@
+<% page_title "Forward a notification" %>
+
+<%= page_header "Forward a notification",
+      [ "Send this notification to a colleague in RPMS, with a comment if you like.",
+        "It stays in your own list too." ] %>
+
+<%= flash_alert id: "forward-alert" %>
+
+<%= form_errors @forward,
+      "The notification was not forwarded.",
+      id: "forward-errors" %>
+
+<section
+  id="forward-notification"
+  class="card"
+  aria-label="The notification"
+  data-alert="<%= @notification[:alert_id] %>"
+>
+  <p><%= @notification[:message] %></p>
+  <p class="hint">
+    <%= @notification[:patient_name] ? "About #{@notification[:patient_name]}." : "About no patient." %>
+    <% if @notification[:sender] %>
+      From <%= @notification[:sender] %>.
+    <% end %>
+  </p>
+</section>
+
+<%# The search is a form of its own: a Find button that borrowed the forward
+    form's action would carry that form's CSRF token to another path, which
+    Rails' per-form tokens refuse. %>
+<%= form_with url: find_notification_forward_path(@notification[:alert_id]),
+      method: :post,
+      local: true,
+      id: "forward-search",
+      class: "card mt-4 lookup-search" do %>
+  <%= label_tag :recipient_search,
+        "Colleague's name starts with" %>
+  <%= text_field_tag :recipient_search,
+        params[:recipient_search],
+        autocomplete: "off",
+        required: true %>
+  <%= submit_tag "Find colleague",
+        name: nil,
+        class: "button-secondary" %>
+<% end %>
+
+<%= form_with scope: :forward,
+      url: notification_forward_path(@notification[:alert_id]),
+      method: :post,
+      local: true,
+      id: "forward-form",
+      class: "card mt-4 flex flex-col gap-4" do |f| %>
+  <%= hidden_field_tag :recipient_search,
+        params[:recipient_search] %>
+  <%= choice_list f,
+        :recipient_duz,
+        legend: "Forward to",
+        choices: @recipients.map { |r| [ r[:duz], r[:name], { recipient: r[:duz] } ] },
+        selected: @forward.recipient_duz,
+        hint: (if @recipients.any?
+                 "Choose your colleague."
+               elsif params[:recipient_search].present?
+                 "No one in RPMS has a name starting with that."
+               else
+                 "Find your colleague by last name first."
+               end),
+        error: @forward.errors.full_messages_for(:recipient_duz).first %>
+
+  <%= form_field :comment,
+        "Comment (optional)",
+        form: f,
+        hint: "Up to #{Lakeraven::EHR::NotificationForward::COMMENT_MAX} characters, without the ^ character.",
+        error: @forward.errors.full_messages_for(:comment).first do |aria| %>
+    <%= f.text_area :comment,
+          value: @forward.comment,
+          rows: 3,
+          maxlength: Lakeraven::EHR::NotificationForward::COMMENT_MAX,
+          aria: aria %>
+  <% end %>
+
+  <%= f.submit "Forward",
+        class: "button-primary self-start" %>
+<% end %>
+
+<p class="mt-6">
+  <%= link_to "Back to your notifications", notifications_path %>
+</p>
