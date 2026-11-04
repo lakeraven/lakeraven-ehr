@@ -10,9 +10,10 @@ module Lakeraven
     # token spread across addresses still trips, and one address spraying
     # tokens still trips. The IP limb's budget is max_requests. An access
     # code uses that same budget, so one code cannot be replayed across
-    # addresses once it is spent. A bearer keeps a floor of two: at a budget
-    # of one the IP limb already refuses the repeat, and that single hit must
-    # not spend the bucket of another client presenting the same token.
+    # addresses once it is spent. A bearer keeps a minimum of two: at a
+    # budget of one the IP limb already refuses the repeat, and that single
+    # hit must not spend the bucket of another client presenting the same
+    # token.
     #
     # The counters live in this process. A multi-process deployment must back
     # this with a shared cache — another Puma worker does not see these hits,
@@ -29,20 +30,33 @@ module Lakeraven
     # still has room, so the address stays spent. A key at or over its
     # limit is never evicted, so a spent code or token is not reopened.
     #
-    # A new identity needs a stored counter. At a full table the search is
-    # EVICT_TRIES samples of EVICT_SAMPLE keys. Expired keys in the sample
-    # are released first. The victim is the lightest under-limit identity
-    # in the sample, or, if the sample has none, the lightest under-limit
-    # hot IP. The search never takes a protected key of this request, a
-    # key at or over its limit, or a retained saturated IP. grant? evicts
-    # until both the new IP and the new identity fit, and only then stamps.
-    # If the identity still does not fit, grant? returns false and writes
-    # nothing for this request: no identity bucket, no IP stamp, and no
-    # new IP key. Evictions already performed stay. A request carrying an
-    # identity is granted only when that identity's counter is stored and
-    # stamped. A new IP with no new identity uses the same bounded search.
-    # Its only victim is the lightest under-limit hot IP. If that search
-    # cannot free a slot, the new IP is refused.
+    # Identity buckets and IP buckets each keep an eviction floor: a short
+    # list of timestamps. Evicting a live counter merges its stamps into
+    # that kind's floor as the pointwise maximum of the newest-first
+    # stamps, capped at the larger limit in play. The floor's live count
+    # is then an upper bound on every key of that kind the table has
+    # dropped, so the holder cannot start over at zero. A new bucket is
+    # seeded from its kind's live floor, and when that count is already at
+    # the slot's limit the newcomer is refused. An IP victim leaves the
+    # identity floor alone, so a fresh bearer still starts at zero when
+    # only addresses were evicted. Nothing evicted in the window leaves the
+    # floor empty. Expired keys are dropped and do not feed the floor.
+    # reset! and configure_for_test! clear both floors.
+    #
+    # Admission is a dry run. The bounded search chooses the distinct
+    # victims for every new slot without forgetting them: for a new
+    # identity, the lightest under-limit identity, else the lightest
+    # under-limit hot IP; for a new IP, the lightest under-limit hot IP.
+    # Victims are evicted, buckets are created from the floors, and the
+    # request is stamped only when those victims free enough room and
+    # every new slot passes the floor check. A refusal changes nothing.
+    # Expired keys may still be dropped during the search; they hold no
+    # live count and are not merged into a floor.
+    #
+    # audit_due? is true the first time a stored key is at its limit in
+    # the window, and the first time a request is refused because its
+    # identity cannot be stored. Capacity refusals share one marker per
+    # window, so junk identities cannot grow the audit map.
     class RateLimit
       DEFAULT_MAX_REQUESTS = 300
       DEFAULT_WINDOW = 1.minute
@@ -52,6 +66,8 @@ module Lakeraven
       EVICT_SAMPLE = 32
       EVICT_TRIES = 4
       AUDIT_DESCRIPTION = "request throttled"
+      # One shared audited-map entry for every capacity refusal in the window.
+      CAPACITY_AUDIT_KEY = "capacity"
 
       @mutex = Mutex.new
 
@@ -165,6 +181,8 @@ module Lakeraven
           @seq = 0
           @calls = 0
           @cursor = 0
+          @floors = nil
+          @floor_caps = nil
         end
 
         def current_window
@@ -182,22 +200,24 @@ module Lakeraven
           place!(slots, now)
         end
 
-        # Evict first. Stamp only when both the new IP and the new identity
-        # fit. An identity that still does not fit is refused with no write.
+        # Dry run: pick every victim, then evict and stamp only if the whole
+        # request fits. A refusal leaves buckets, hot keys, and counters as
+        # they were. Expired rows may already have been dropped.
         def place!(slots, now)
           ip_add = additions_for(slots, :ip)
           id_add = additions_for(slots, :id)
-          return false unless admit!(ip_add, id_add, slot_keys(slots), now)
+          return false unless admit!(ip_add, id_add, slots, now)
 
           slots.each { |slot| record_slot!(slot, now) }
           true
         end
 
-        def admit!(ip_add, id_add, protected, now)
-          carve_room!(ip_add, id_add, protected, now)
-          return false unless hot_fits?(ip_add.size)
-          return false unless total_fits?(ip_add, id_add)
+        def admit!(ip_add, id_add, slots, now)
+          victims = plan_victims(ip_add, id_add, slot_keys(slots), now, mutating: true)
+          return false unless room_with?(ip_add, id_add, victims)
+          return false unless floors_allow?(slots, victims, now)
 
+          victims.each { |key| evict!(key, now) }
           true
         end
 
@@ -229,7 +249,7 @@ module Lakeraven
         end
 
         # Access codes spend max_requests across addresses. Every other
-        # identity keeps a floor of two so one hit at a budget of one does
+        # identity keeps a minimum of two so one hit at a budget of one does
         # not exhaust a bearer shared by another address. A zero IP budget
         # still refuses before a hit is stored.
         def identity_limit_for(identity)
@@ -281,61 +301,68 @@ module Lakeraven
           key.start_with?("id:")
         end
 
-        # Bounded search. Expired keys in the sample go first. A new
-        # identity takes the lightest under-limit identity, else the
-        # lightest under-limit hot IP. No new identity takes a hot IP only.
-        # Writes nothing. Evictions already done are kept.
-        def carve_room!(ip_add, id_add, protected, now)
+        # Bounded search. Expired keys in the sample are dropped when this
+        # is the admitting pass. Victims are chosen and not forgotten here.
+        def plan_victims(ip_add, id_add, protected_keys, now, mutating:)
+          victims = []
           EVICT_TRIES.times do
-            return if both_fit?(ip_add, id_add)
+            break if room_with?(ip_add, id_add, victims)
 
             keys = sample_keys
-            release_expired!(keys, protected, now)
-            return if both_fit?(ip_add, id_add)
+            release_expired!(keys, protected_keys, now) if mutating
+            next if room_with?(ip_add, id_add, victims)
 
-            victim = victim_for(keys, protected, now, id_add.any?)
-            forget!(victim) if victim
+            victim = victim_for(keys, protected_keys + victims, now, id_add.any?, mutating: mutating)
+            victims << victim if victim && !victims.include?(victim)
           end
+          victims
         end
 
-        def victim_for(keys, protected, now, new_identity)
-          identity = lightest_key(keys, protected, now, :id) if new_identity
-          identity || lightest_key(keys, protected, now, :hot)
+        def victim_for(keys, protected_keys, now, new_identity, mutating:)
+          found = lightest_key(keys, protected_keys, now, :id, mutating) if new_identity
+          found || lightest_key(keys, protected_keys, now, :hot, mutating)
         end
 
-        def both_fit?(ip_add, id_add)
-          hot_fits?(ip_add.size) && total_fits?(ip_add, id_add)
-        end
-
-        def hot_fits?(needed)
-          hot.size + needed <= max_keys
-        end
-
-        def total_fits?(ip_add, id_add)
-          buckets.size + ip_add.size + id_add.size <= max_keys
+        def room_with?(ip_add, id_add, victims)
+          listed = victims.uniq.select { |key| buckets.key?(key) }
+          hot_freed = listed.count { |key| hot.key?(key) }
+          buckets.size - listed.size + ip_add.size + id_add.size <= max_keys &&
+            hot.size - hot_freed + ip_add.size <= max_keys
         end
 
         def release_expired!(keys, protected, now)
           keys.each { |key| fresh_count(key, now) unless protected.include?(key) }
         end
 
-        def lightest_key(keys, protected, now, kind)
+        def lightest_key(keys, protected_keys, now, kind, mutating)
           best = nil
           keys.each do |key|
-            rank = victim_rank(key, protected, now, kind)
+            rank = victim_rank(key, protected_keys, now, kind, mutating)
             best = rank if rank && (best.nil? || (rank <=> best).negative?)
           end
           best&.last
         end
 
-        def victim_rank(key, protected, now, kind)
-          return if skip_victim?(key, protected, kind)
+        def victim_rank(key, protected_keys, now, kind, mutating)
+          return if skip_victim?(key, protected_keys, kind)
 
-          count = fresh_count(key, now)
+          count = mutating ? fresh_count(key, now) : peek_count(key, now)
           entry = buckets[key]
           return if entry.nil? || count <= 0 || count >= entry[:limit]
 
           [ count, entry[:ord], key ]
+        end
+
+        # Count live stamps without pruning or deleting. audit_due? uses this
+        # so a capacity check cannot evict or stamp.
+        def peek_count(key, now)
+          entry = buckets[key]
+          return 0 unless entry
+
+          threshold = cutoff(now)
+          return entry[:stamps].size if entry[:stamps].empty? || entry[:stamps].first > threshold
+
+          entry[:stamps].count { |at| at > threshold }
         end
 
         def skip_victim?(key, protected, kind)
@@ -390,7 +417,7 @@ module Lakeraven
         end
 
         def write_stamp!(key, now, limit)
-          entry = (buckets[key] ||= new_entry(limit))
+          entry = buckets[key] || seed_bucket!(key, limit, now)
           remember_key!(key)
           entry[:limit] = limit
           entry[:stamps] << now
@@ -404,9 +431,19 @@ module Lakeraven
           order << key
         end
 
-        def new_entry(limit)
+        def seed_bucket!(key, limit, now)
+          buckets[key] = { stamps: live_floor(key_kind(key), now), limit: limit, ord: next_ord }
+        end
+
+        def next_ord
           @seq = @seq.to_i + 1
-          { stamps: [], limit: limit, ord: @seq }
+        end
+
+        # Live eviction only. Merges the counter into its kind's floor, then
+        # drops it. Expiry uses forget! and must not raise the floor.
+        def evict!(key, now)
+          merge_evicted_floor!(key, now)
+          forget!(key)
         end
 
         def forget!(key)
@@ -429,10 +466,41 @@ module Lakeraven
 
         def claim_audit!(identity, ip, now)
           pending = refusing_keys(identity, ip, now).reject { |key| audited_recently?(key, now) }
-          return false if pending.empty?
+          if pending.any?
+            pending.each { |key| audited[key] = now }
+            return true
+          end
 
-          pending.each { |key| audited[key] = now }
+          claim_capacity_audit!(identity, ip, now)
+        end
+
+        # One marker for the whole window, not one per junk identity.
+        def claim_capacity_audit!(identity, ip, now)
+          return false unless capacity_refusal?(identity, ip, now)
+          return false if audited_recently?(CAPACITY_AUDIT_KEY, now)
+
+          audited[CAPACITY_AUDIT_KEY] = now
           true
+        end
+
+        def capacity_refusal?(identity, ip, now)
+          slots = slots_for(identity, ip)
+          return false unless missing_identity?(slots)
+          return false if slots.any? { |slot| peek_count(slot[:key], now) >= slot[:limit] }
+
+          !admissible?(slots, now)
+        end
+
+        def missing_identity?(slots)
+          slot = slots.find { |item| identity_slot?(item) }
+          slot.present? && !buckets.key?(slot[:key])
+        end
+
+        def admissible?(slots, now)
+          ip_add = additions_for(slots, :ip)
+          id_add = additions_for(slots, :id)
+          victims = plan_victims(ip_add, id_add, slot_keys(slots), now, mutating: false)
+          room_with?(ip_add, id_add, victims) && floors_allow?(slots, victims, now)
         end
 
         def refusing_keys(identity, ip, now)
@@ -478,6 +546,97 @@ module Lakeraven
 
         def cutoff(now)
           now - current_window
+        end
+
+        def floors_allow?(slots, victims, now)
+          projected = project_floors(victims, now)
+          slots.all? { |slot| slot_within_floor?(slot, projected) }
+        end
+
+        def slot_within_floor?(slot, projected)
+          return true if buckets.key?(slot[:key])
+
+          projected.fetch(slot_kind(slot)).size < slot[:limit]
+        end
+
+        def project_floors(victims, now)
+          caps = floor_caps.dup
+          projected = { id: live_floor(:id, now), ip: live_floor(:ip, now) }
+          victims.each { |key| fold_projected_floor!(projected, caps, key, now) }
+          projected
+        end
+
+        def fold_projected_floor!(projected, caps, key, now)
+          entry = buckets[key]
+          return unless entry
+
+          kind = key_kind(key)
+          stamps = live_only(entry[:stamps], now)
+          return if stamps.empty?
+
+          projected[kind], caps[kind] = merged_floor(projected[kind], caps[kind], stamps, entry[:limit])
+        end
+
+        def merge_evicted_floor!(key, now)
+          entry = buckets[key]
+          return unless entry
+
+          prune_stamps!(entry[:stamps], now)
+          return if entry[:stamps].empty?
+
+          kind = key_kind(key)
+          floors[kind], floor_caps[kind] = merged_floor(
+            live_floor(kind, now), floor_caps[kind], entry[:stamps], entry[:limit]
+          )
+        end
+
+        # Newest-first pointwise max. Index 0 is the most recent stamp, so
+        # the merged list stays at least as new as either input and its live
+        # count upper-bounds both. Length is capped at the larger limit.
+        def merged_floor(floor, cap, stamps, limit)
+          newest = pointwise_max(floor.reverse, stamps.reverse)
+          new_cap = [ cap.to_i, limit.to_i ].max
+          [ newest.take(new_cap).reverse, new_cap ]
+        end
+
+        def pointwise_max(left, right)
+          length = [ left.size, right.size ].max
+          Array.new(length) { |index| later_stamp(left[index], right[index]) }
+        end
+
+        def later_stamp(left, right)
+          return right if left.nil?
+          return left if right.nil?
+
+          [ left, right ].max
+        end
+
+        def live_floor(kind, now)
+          prune_stamps!(floor_for(kind), now)
+          floor_for(kind).dup
+        end
+
+        def live_only(stamps, now)
+          threshold = cutoff(now)
+          return stamps if stamps.empty? || stamps.first > threshold
+
+          stamps.drop_while { |at| at <= threshold }
+        end
+
+        def floor_for(kind)
+          floors[kind] ||= []
+        end
+
+        def floors
+          @floors ||= { id: [], ip: [] }
+        end
+
+        def floor_caps
+          @floor_caps ||= { id: 0, ip: 0 }
+        end
+
+        def key_kind(key)
+          identity_key?(key) ? :id : :ip
         end
 
         def digest(value)
