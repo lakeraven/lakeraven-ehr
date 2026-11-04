@@ -149,6 +149,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_03_170000) do
 
   create_table "lakeraven_ehr_launch_contexts", force: :cascade do |t|
     t.datetime "created_at", null: false
+    t.string "duz"
     t.string "encounter_id"
     t.datetime "expires_at", null: false
     t.string "facility_identifier"
@@ -263,6 +264,31 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_03_170000) do
     t.check_constraint "kind::text = 'signature'::text AND revokes_id IS NULL AND witness_duz IS NOT NULL AND signature_png IS NOT NULL AND octet_length(signature_png) <= 512000 AND SUBSTRING(signature_png FROM 1 FOR 8) = decode('89504e470d0a1a0a'::text, 'hex'::text) AND revocation_reason IS NULL OR kind::text = 'revocation'::text AND revokes_id IS NOT NULL AND revocation_reason IS NOT NULL AND signature_png IS NULL AND handover_token IS NULL", name: "signed_consent_row_shape"
   end
 
+  create_table "lakeraven_ehr_smart_authorizations", force: :cascade do |t|
+    t.integer "access_token_id"
+    t.integer "application_id", null: false
+    t.string "code_challenge", null: false
+    t.string "code_digest", null: false
+    t.datetime "created_at", null: false
+    t.string "duz", null: false
+    t.string "encounter_id"
+    t.datetime "expires_at", null: false
+    t.boolean "need_patient_banner", default: false, null: false
+    t.string "patient_dfn"
+    t.datetime "redeemed_at"
+    t.text "redirect_uri", null: false
+    t.integer "rpms_idle_seconds"
+    t.string "rpms_session_id"
+    t.string "scopes", default: "", null: false
+    t.integer "session_token_id", null: false
+    t.datetime "updated_at", null: false
+    t.string "user_name"
+    t.index [ "access_token_id" ], name: "index_lakeraven_ehr_smart_authorizations_on_access_token_id", unique: true
+    t.index [ "application_id" ], name: "index_lakeraven_ehr_smart_authorizations_on_application_id"
+    t.index [ "code_digest" ], name: "index_lakeraven_ehr_smart_authorizations_on_code_digest", unique: true
+    t.index [ "session_token_id" ], name: "index_lakeraven_ehr_smart_authorizations_on_session_token_id"
+  end
+
   create_table "lakeraven_ehr_treatment_plan_concurrences", force: :cascade do |t|
     t.datetime "concurred_at", null: false
     t.datetime "created_at", null: false
@@ -333,6 +359,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_03_170000) do
     t.boolean "confidential", default: true, null: false
     t.datetime "created_at", null: false
     t.string "jwks_uri"
+    t.text "launch_uri"
     t.string "name", null: false
     t.string "organization_id"
     t.text "redirect_uri", null: false

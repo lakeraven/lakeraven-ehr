@@ -94,6 +94,11 @@ module Lakeraven
         "lakeraven/ehr/registration/other_names#index",   # Other names the patient has used (S-REG-12): registration demographics, no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/registration/other_names#create",  # Adding an other name (S-REG-12), not disclosure
         "lakeraven/ehr/registration/other_names#destroy", # Removing an other name (S-REG-12), not disclosure
+        "lakeraven/ehr/registration/preferred_names#edit",   # The name the patient goes by (S-REG-12.1): registration demographics, no clinical record
+        "lakeraven/ehr/registration/preferred_names#update", # Saving the preferred name (S-REG-12.1), not disclosure
+        "lakeraven/ehr/registration/applications#new",    # The form to record an application for coverage (S-REG-03.3): no clinical record
+        "lakeraven/ehr/registration/applications#create", # Recording an application (S-REG-03.3), not disclosure
+        "lakeraven/ehr/registration/applications#update", # Recording what happened to it (S-REG-03.4, 03.5), not disclosure
         "lakeraven/ehr/registration/eligibilities#edit",   # Tribe and eligibility form (S-REG-07.1), registration data, no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/registration/eligibilities#update", # Tribe and eligibility edit; as #edit
         "lakeraven/ehr/registration/coverages#index",  # Payer, member number and dates for billing (S-REG-03), no clinical record; revisit with Part 2 (#494)
@@ -129,9 +134,17 @@ module Lakeraven
         "lakeraven/ehr/scheduling/hours#create",         # Hours entry; a refusal names an appointment time and patient name, no clinical record
         "lakeraven/ehr/test_sessions#create", # Test only
         "lakeraven/ehr/smart_configuration#show", # Discovery
-        "lakeraven/ehr/smart_launch#show",    # Discovery
+        "lakeraven/ehr/smart_launch#show",    # EHR launch: lists registered apps for a patient named by name only
+        "lakeraven/ehr/smart_launch#create",  # EHR launch: mints a launch context, no clinical data
+        "lakeraven/ehr/smart_styles#show",    # SMART style: colours and type
         "lakeraven/ehr/capability_statements#show", # Discovery
         "lakeraven/ehr/backend_services#token", # Auth
+        "lakeraven/ehr/smart_authorizations#new",    # Auth: checks an app's request, no clinical data
+        "lakeraven/ehr/smart_authorizations#show",   # Auth: the approval screen, scopes in plain words
+        "lakeraven/ehr/smart_authorizations#decide", # Auth: issues a code, no clinical data
+        "lakeraven/ehr/smart_authorizations#patient",        # Auth: the patient picker, empty until searched
+        "lakeraven/ehr/smart_authorizations#choose_patient", # Auth: patient search: name, HRN, date of birth, sex, no clinical record
+        "lakeraven/ehr/smart_tokens#create",         # Auth
         "lakeraven/ehr/transitions_of_care#create", # Wired separately in #568
         "lakeraven/ehr/ccda_imports#create",  # Ingress
         "lakeraven/ehr/exports#create",       # Status/kickoff, no clinical data

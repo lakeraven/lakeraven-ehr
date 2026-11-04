@@ -4,25 +4,55 @@
   <p role="alert"><%= flash[:alert] %></p>
 <% end %>
 
-<div class="page-header">
-  <h1>Dashboard</h1>
-  <p>Care team overview and pending work</p>
-</div>
+<%= page_header "Dashboard",
+      "Your work for today, counted from RPMS." %>
 
-<div class="summary-counts">
-  <div class="summary-count">
-    <span class="summary-count__number"><%= @active_cases_count %></span>
-    <span class="summary-count__label"><span class="sr-only">Number of </span>Active Cases</span>
-  </div>
-  <div class="summary-count">
-    <span class="summary-count__number"><%= @my_tasks_count %></span>
-    <span class="summary-count__label"><span class="sr-only">Number of </span>My Tasks</span>
-  </div>
-  <%# PRC referrals are IHS-only (#647). %>
-  <% if feature_available?(:prc_referrals) %>
-    <div class="summary-count">
-      <span class="summary-count__number"><%= @pending_referrals_count %></span>
-      <span class="summary-count__label"><span class="sr-only">Number of </span>Pending Referrals</span>
-    </div>
-  <% end %>
-</div>
+<% if @clinic_counts == :unread %>
+  <%= alert_box :error,
+        "Today's appointments could not be read from RPMS.",
+        "Open a clinic's day from Scheduling, or try again in a moment.",
+        id: "clinic-counts-unread" %>
+<% elsif @clinic_counts %>
+  <section aria-labelledby="todays-appointments">
+    <h2 id="todays-appointments">Today's appointments</h2>
+    <% if @clinic_counts.empty? %>
+      <%= empty_state "No clinic resources are open to you.",
+            "Your site manager can give you access to a clinic.",
+            id: "no-clinics" %>
+    <% else %>
+      <table
+        id="clinic-counts"
+        class="data-table"
+      >
+        <caption class="sr-only">
+          Appointments today, <%= @today.strftime("%A, %b %-d, %Y") %>, in each of your clinics.
+          Cancelled appointments and no-shows are not counted.
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col">Clinic</th>
+            <th scope="col">Appointments</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% @clinic_counts.each do |row| %>
+            <tr data-resource="<%= row[:resource][:id] %>">
+              <th scope="row"><%= row[:resource][:name] %></th>
+              <td data-count="<%= row[:count] %>">
+                <%= link_to scheduling_clinic_path(row[:resource][:id], date: @today.iso8601),
+                      class: "font-semibold tabular-nums" do %>
+                  <%= row[:count] %>
+                  <span class="sr-only"><%= "appointment".pluralize(row[:count]) %> today at <%= row[:resource][:name] %></span>
+                <% end %>
+              </td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    <% end %>
+  </section>
+<% else %>
+  <%= empty_state "Nothing here counts work for you yet.",
+        "Counts appear here as the screens for that work are added.",
+        id: "no-counts" %>
+<% end %>

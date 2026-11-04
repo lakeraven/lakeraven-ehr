@@ -24,6 +24,7 @@ module Lakeraven
         # GET /registration/patients/:dfn/coverage
         def index
           @policies = CoverageGateway.on_file(params[:dfn])
+          @applications = applications_read
           render :index, status: :service_unavailable if @policies.nil?
         rescue RpmsRpc::Client::RpcRefusedError
           @refused = true
@@ -67,6 +68,15 @@ module Lakeraven
 
           note_audit_denial("browser access refused: backend lacks bprm_registration")
           render plain: "Registration is not available on this backend.", status: :not_found
+        end
+
+        # The patient's applications (S-REG-03.3), or nil when RPMS did not answer:
+        # the page still shows the coverage.
+        def applications_read
+          PatientApplicationGateway.for_patient(params[:dfn])
+        rescue RpmsRpc::Error => e
+          Rails.logger.error("[registration] applications read failed: #{e.class}")
+          nil
         end
 
         def load_patient!

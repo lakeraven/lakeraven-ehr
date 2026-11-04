@@ -23,6 +23,9 @@ module Lakeraven
       # nothing from a 400.
       before_action :validate_fhir_paging!, if: :fhir_search?
       before_action :validate_fhir_sort_and_include!, if: :fhir_search?
+      # A launched token reads RPMS on its user's own connection (#844, ADR
+      # 0011), after every check above has passed. Any other token has none.
+      around_action :run_on_launched_users_connection
 
       # Actions that DISCLOSE clinical data even though they are shaped as
       # writes — generating a C-CDA, running a bulk export, requesting an
@@ -52,6 +55,30 @@ module Lakeraven
       end
 
       private
+
+      # The request runs inside the approving user's RPMS connection
+      # (RpmsSessions.with_user), so every RPC it makes runs as that user. Using
+      # the token counts as the user's activity and keeps the connection open
+      # for their idle limit; it never extends the session past its lifetime,
+      # because the token itself expires first (SmartAuthorization).
+      # authenticate_smart_token! has already refused a token whose session or
+      # connection is gone; one that went in between answers 401.
+      def run_on_launched_users_connection(&action)
+        authorization = launched_authorization
+        return action.call unless authorization && RpmsSessions.enabled?
+
+        RpmsSessions.touch(authorization.pool_key, idle_for: launched_idle_limit(authorization))
+        RpmsSessions.with_user(authorization.pool_key, &action)
+      rescue RpmsSessions::SignInAgain, RpmsRpc::SessionPool::PoolExhaustedError
+        current_token.revoke unless current_token.revoked?
+        render_unauthorized("Invalid or revoked token")
+      end
+
+      # The user's RPMS idle limit when shorter than the site's (WebController).
+      def launched_idle_limit(authorization)
+        site = Lakeraven::EHR.configuration.session_idle_limit.to_i
+        [ authorization.rpms_idle_seconds, site ].compact.min
+      end
 
       # Write scope for the operation, read scope for EVERY type it discloses.
       def authorize_disclosing_write!(disclosed_types)

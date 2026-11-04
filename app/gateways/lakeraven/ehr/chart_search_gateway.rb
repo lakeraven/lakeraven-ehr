@@ -34,6 +34,10 @@ module Lakeraven
                   .filter_map { |dfn| match(dfn, header: header) }
       end
 
+      # One patient, by DFN, for a screen that names who it is about (a SMART
+      # launch's patient). Nil when RPMS knows no such patient.
+      def self.one(dfn, header: ::RpmsRpc::Patient) = match(dfn, header: header)
+
       def self.match(dfn, header:)
         found = header.brief_header(dfn.to_i)
         return unless found

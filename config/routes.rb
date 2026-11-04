@@ -116,11 +116,28 @@ Lakeraven::EHR::Engine.routes.draw do
       format: false, file_name: %r{[^/]+}
   end
 
-  # SMART discovery + EHR Launch
+  # SMART discovery + EHR Launch. smart/launch is the EHR side: a signed-in
+  # user opens a patient in a registered app, which is sent to the app's
+  # launch URI with `iss` and `launch` (#839). smart/style is the
+  # smart_style_url a launched token response names.
   get ".well-known/smart-configuration", to: "smart_configuration#show"
-  get "smart/launch", to: "smart_launch#show"
+  get "smart/launch", to: "smart_launch#show", as: :smart_launch
+  post "smart/launch", to: "smart_launch#create"
+  get "smart/style", to: "smart_styles#show", as: :smart_style, defaults: { format: :json }
 
-  # Backend Services JWT auth
+  # SMART App Launch authorization code flow (#839). The user signs in with
+  # their own RPMS codes and approves; GET and POST are both served.
+  get "oauth/authorize", to: "smart_authorizations#new", as: :smart_authorization
+  post "oauth/authorize", to: "smart_authorizations#new"
+  get "oauth/authorize/approval", to: "smart_authorizations#show", as: :smart_authorization_approval
+  post "oauth/authorize/approval", to: "smart_authorizations#decide"
+  get "oauth/authorize/patient", to: "smart_authorizations#patient", as: :smart_authorization_patient
+  post "oauth/authorize/patient", to: "smart_authorizations#choose_patient"
+
+  # One token endpoint, two grants: the authorization code from a launch, and
+  # Backend Services client_credentials (JWT auth) for everything else.
+  post "oauth/token", to: "smart_tokens#create",
+    constraints: ->(req) { req.request_parameters["grant_type"] == "authorization_code" }
   post "oauth/token", to: "backend_services#token"
 
   # Measure $import
@@ -170,6 +187,9 @@ Lakeraven::EHR::Engine.routes.draw do
       get "languages/edit", to: "languages#edit", as: :edit_patient_languages
       post "languages/edit", to: "languages#edit"
       post "languages", to: "languages#update", as: :patient_languages
+      # The name the patient goes by (S-REG-12.1): PREFERRED NAME, IHS PATIENT (9000001) 9001.
+      get "preferred_name/edit", to: "preferred_names#edit", as: :edit_patient_preferred_name
+      post "preferred_name", to: "preferred_names#update", as: :patient_preferred_name
       # The other names the patient has used (S-REG-12): ALIAS, PATIENT (2.01).
       get "other_names", to: "other_names#index", as: :patient_other_names
       post "other_names", to: "other_names#create"
@@ -182,6 +202,11 @@ Lakeraven::EHR::Engine.routes.draw do
     # state and insurer look-ups post the form back, so a member number never
     # travels in a URL (#722).
     get "patients/:dfn/coverage", to: "coverages#index", as: :patient_coverage, constraints: { dfn: /\d+/ }
+    # The patient's applications for coverage (S-REG-03.3 to 03.5): PATIENT APPLICATIONS (9000045).
+    get "patients/:dfn/applications/new", to: "applications#new", as: :new_patient_application, constraints: { dfn: /\d+/ }
+    post "patients/:dfn/applications", to: "applications#create", as: :patient_applications, constraints: { dfn: /\d+/ }
+    post "patients/:dfn/applications/:ien/status", to: "applications#update", as: :patient_application_status,
+                                                    constraints: { dfn: /\d+/, ien: /\d+/ }
     get "patients/:dfn/coverage/new", to: "coverages#new", as: :new_patient_coverage, constraints: { dfn: /\d+/ }
     post "patients/:dfn/coverage/new", to: "coverages#new", constraints: { dfn: /\d+/ }
     post "patients/:dfn/coverage", to: "coverages#create", constraints: { dfn: /\d+/ }
