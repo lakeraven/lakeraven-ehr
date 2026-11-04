@@ -65,7 +65,7 @@ class RateLimitIdentityFailClosedTest < ActiveSupport::TestCase
     mod.reset! if mod.respond_to?(:reset!)
   end
 
-  test "a bearer spread across many fresh IPs after a large light IP fill grants at most max_requests and at least one" do
+  test "a bearer spread across many fresh IPs after a large light IP fill grants exactly max_requests times" do
     mod = rate_limit_module!
     max_requests = 3
     mod.configure_for_test!(max_requests: max_requests, window: 10.minutes, max_keys: 200)
@@ -75,14 +75,15 @@ class RateLimitIdentityFailClosedTest < ActiveSupport::TestCase
              "light IP bucket #{i + 1} must be granted (#498 H1)"
     end
 
-    grants = 60.times.count do |i|
+    results = 60.times.map do |i|
       mod.permit?(identity: "bearer:fail-closed-large", ip: "203.0.113.#{i + 1}")
     end
 
-    assert_operator grants, :<=, max_requests,
-                    "identity must not exceed max_requests when the table is full (#498 H1); grants=#{grants}"
-    assert_operator grants, :>=, 1,
-                    "reserved identity headroom must allow at least one grant (#498 H1); grants=#{grants}"
+    grants = results.count(true)
+    assert_equal max_requests, grants,
+                 "identity must grant exactly max_requests when the table is full (#498 H1); grants=#{grants}"
+    assert_equal [ true, true, true ], results.first(3),
+                 "first #{max_requests} bearer probes must grant (#498 H1)"
   ensure
     mod.reset! if mod.respond_to?(:reset!)
   end
@@ -95,6 +96,13 @@ class RateLimitIdentityFailClosedTest < ActiveSupport::TestCase
     refute mod.permit?(identity: "bearer:newcomer", ip: newcomer_ip),
            "new identity must be refused when it cannot be stored (#498 H1)"
     assert_equal before, mod.bucket_count, "refusal must not grow stored buckets (#498 H1)"
+
+    assert mod.audit_due?(identity: "bearer:newcomer", ip: newcomer_ip),
+           "capacity refusal must be auditable the first time (#498 capacity audit)"
+    refute mod.audit_due?(identity: "bearer:newcomer", ip: newcomer_ip),
+           "capacity audit must fire at most once per key per window (#498 capacity audit)"
+    refute mod.audit_due?(identity: "bearer:newcomer-2", ip: newcomer_ip),
+           "a different newcomer must not grow the audit table on the same IP (#498 capacity audit)"
 
     5.times do
       refute mod.permit?(identity: "bearer:newcomer", ip: newcomer_ip),
@@ -168,7 +176,7 @@ class RateLimitIdentityFailClosedHttpTest < ActionDispatch::IntegrationTest
     end
 
     spec = sample_request_for_route_key("lakeraven/ehr/patients#index")
-    headers = { "Authorization" => "Bearer fail-closed-http-probe" }
+    headers = mint_fail_closed_http_probe_headers
     statuses = 30.times.map do |i|
       issue_integration_request!(
         verb: spec[:verb],
@@ -180,13 +188,62 @@ class RateLimitIdentityFailClosedHttpTest < ActionDispatch::IntegrationTest
       response.status
     end
 
-    allowed = statuses.count { |status| status != 429 }
-    assert_operator allowed, :<=, max_requests,
-                     "HTTP layer must grant at most #{max_requests} non-429 responses (#498 H1); allowed=#{allowed}"
+    allowed_statuses = statuses.reject { |status| status == 429 }
+    assert_equal max_requests, allowed_statuses.size,
+                 "HTTP layer must grant exactly #{max_requests} non-429 responses (#498 H1); allowed=#{allowed_statuses.size}"
+    allowed_statuses.each do |status|
+      assert_equal 200, status,
+                   "allowed probes must succeed, not fail auth (#498 H1); statuses=#{statuses.inspect}"
+    end
     throttled = statuses.count(429)
-    assert_equal statuses.size - allowed, throttled,
+    assert_equal statuses.size - allowed_statuses.size, throttled,
                  "every throttled probe must return 429 (#498 H1); statuses=#{statuses.inspect}"
   ensure
     mod.reset! if mod.respond_to?(:reset!)
+  end
+
+  test "Patient search returns 429 and one throttle audit when identity storage is full" do
+    mod = rate_limit_module!
+    newcomer_ip = build_fail_closed_saturated_table!(mod)
+    spec = sample_request_for_route_key("lakeraven/ehr/patients#index")
+    headers = mint_capacity_probe_headers
+
+    Lakeraven::EHR::AuditEvent.delete_all
+    assert_difference -> { Lakeraven::EHR::AuditEvent.count }, 1 do
+      issue_integration_request!(
+        verb: spec[:verb],
+        path: spec[:path],
+        params: spec[:params],
+        headers: headers,
+        env: integration_request_env(remote_addr: newcomer_ip)
+      )
+      assert_response :too_many_requests,
+                       "capacity refusal must return 429 (#498 capacity audit); status=#{response.status}"
+    end
+    assert_throttle_audit_event!(pattern: /throttl/i)
+  ensure
+    mod.reset! if mod.respond_to?(:reset!)
+  end
+
+  def mint_fail_closed_http_probe_headers
+    app = Doorkeeper::Application.create!(
+      name: "rl-fc-http-#{SecureRandom.hex(3)}", redirect_uri: "https://example.test/cb",
+      scopes: "system/Patient.read system/*.read", confidential: true
+    )
+    token = Doorkeeper::AccessToken.create!(
+      application: app, scopes: "system/Patient.read system/*.read", expires_in: 3600
+    )
+    { "Authorization" => "Bearer #{token.plaintext_token || token.token}" }
+  end
+
+  def mint_capacity_probe_headers
+    app = Doorkeeper::Application.create!(
+      name: "rl-capacity-#{SecureRandom.hex(3)}", redirect_uri: "https://example.test/cb",
+      scopes: "system/Patient.read system/*.read", confidential: true
+    )
+    token = Doorkeeper::AccessToken.create!(
+      application: app, scopes: "system/Patient.read system/*.read", expires_in: 3600
+    )
+    { "Authorization" => "Bearer #{token.plaintext_token || token.token}" }
   end
 end

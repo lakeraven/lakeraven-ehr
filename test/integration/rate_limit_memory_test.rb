@@ -98,37 +98,75 @@ class RateLimitMemoryTest < ActionDispatch::IntegrationTest
 
   test "F1 evicting a saturated identity must not reopen its counter" do
     mod = rate_limit_module!
-    mod.configure_for_test!(max_requests: 1, window: 10.minutes, max_keys: 2)
+    max_keys = 6
+    mod.configure_for_test!(max_requests: 2, window: 10.minutes, max_keys: max_keys)
 
-    assert mod.permit?(identity: "access:victim", ip: "203.0.113.10")
+    2.times do
+      assert mod.permit?(identity: "access:victim", ip: "203.0.113.10"),
+             "access:victim must admit under its limit (#498 F1)"
+    end
     refute mod.permit?(identity: "access:victim", ip: "203.0.113.10"),
-           "identity must be saturated (#498 F1)"
+           "identity and its IP must be saturated (#498 F1)"
 
-    mod.permit?(identity: "access:other-b", ip: "203.0.113.11")
-    mod.permit?(identity: "access:other-c", ip: "203.0.113.12")
+    assert mod.permit?(identity: nil, ip: "203.0.113.111"),
+           "light IP must seed the table (#498 F1)"
+    assert mod.permit?(identity: nil, ip: "203.0.113.112"),
+           "light IP must seed the table (#498 F1)"
+    assert mod.permit?(identity: "bearer:f1", ip: "203.0.113.113"),
+           "light identity must seed the table (#498 F1)"
+    assert_equal max_keys, mod.bucket_count,
+                 "fixture must fill the table before pressure (#498 F1)"
+
+    pressure_results = 10.times.map do |i|
+      mod.permit?(identity: "bearer:p#{i}", ip: "198.51.100.#{100 + i}")
+    end
+    assert_operator mod.bucket_count, :<=, max_keys,
+                    "bucket_count must stay bounded during pressure (#498 F1)"
+    assert pressure_results.any?,
+           "pressure must grant at least once by evicting light keys, not saturated victim (#498 F1)"
+    assert_operator 10, :>, max_keys,
+                     "pressure must offer more distinct IPs than max_keys (#498 F1)"
 
     refute mod.permit?(identity: "access:victim", ip: "203.0.113.13"),
            "saturated identity must stay refused after eviction pressure (#498 F1)"
-    assert_operator mod.bucket_count, :<=, 2
   ensure
     mod.reset! if mod.respond_to?(:reset!)
   end
 
   test "F1 evicting a saturated IP must not reopen its counter" do
     mod = rate_limit_module!
-    mod.configure_for_test!(max_requests: 1, window: 10.minutes, max_keys: 2)
+    max_keys = 6
     saturated_ip = "198.51.100.60"
+    mod.configure_for_test!(max_requests: 2, window: 10.minutes, max_keys: max_keys)
 
-    assert mod.permit?(identity: "bearer:one", ip: saturated_ip)
-    refute mod.permit?(identity: "bearer:two", ip: saturated_ip),
+    2.times do
+      assert mod.permit?(identity: nil, ip: saturated_ip),
+             "IP must admit under its limit (#498 F1)"
+    end
+    refute mod.permit?(identity: nil, ip: saturated_ip),
            "IP must be saturated (#498 F1)"
 
-    mod.permit?(identity: "bearer:three", ip: "198.51.100.61")
-    mod.permit?(identity: "bearer:four", ip: "198.51.100.62")
+    %w[61 62 63 64 65].each do |octet|
+      assert mod.permit?(identity: nil, ip: "198.51.100.#{octet}"),
+             "light IP must seed the table (#498 F1)"
+    end
+    assert_equal max_keys, mod.bucket_count,
+                 "fixture must fill the table before pressure (#498 F1)"
 
-    refute mod.permit?(identity: "bearer:five", ip: saturated_ip),
+    pressure_results = 10.times.map do |i|
+      mod.permit?(identity: nil, ip: "203.0.113.#{100 + i}")
+    end
+    assert_operator mod.bucket_count, :<=, max_keys,
+                    "bucket_count must stay bounded during pressure (#498 F1)"
+    assert pressure_results.any?,
+           "pressure must grant at least once by evicting light keys, not the saturated IP (#498 F1)"
+    assert_operator 10, :>, max_keys,
+                     "pressure must offer more distinct IPs than max_keys (#498 F1)"
+
+    refute mod.permit?(identity: nil, ip: saturated_ip),
            "saturated IP must stay refused after eviction pressure (#498 F1)"
-    assert_operator mod.bucket_count, :<=, 2
+    refute mod.permit?(identity: "bearer:two", ip: saturated_ip),
+           "saturated IP must stay refused for a new identity after eviction pressure (#498 F1)"
   ensure
     mod.reset! if mod.respond_to?(:reset!)
   end
