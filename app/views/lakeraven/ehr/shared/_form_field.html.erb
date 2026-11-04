@@ -1,0 +1,26 @@
+<%# A label, its input, a hint and an error (ComponentsHelper#form_field).
+    Locals: field_id, label, input (HTML), hint, hint_id, error, error_id.
+    The input carries aria-describedby for the hint and error, so a screen
+    reader reads them with the field. %>
+<div
+  class="form-field<%= " form-field--error" if error.present? %>"
+>
+  <%= label_tag field_id, label %>
+  <% if hint.present? %>
+    <p
+      id="<%= hint_id %>"
+      class="hint"
+    >
+      <%= hint %>
+    </p>
+  <% end %>
+  <% if error.present? %>
+    <p
+      id="<%= error_id %>"
+      class="form-field__error"
+    >
+      <%= error %>
+    </p>
+  <% end %>
+  <%= input %>
+</div>

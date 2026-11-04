@@ -1,0 +1,101 @@
+<% page_title "Add #{@entry.noun} | #{@patient[:name]} | Registration" %>
+
+<%= page_header "Add #{@entry.noun}",
+      ["For #{@patient[:name]}.",
+       "Copy the numbers and dates from the patient's card."] %>
+
+<%= flash_alert id: "coverage-alert" %>
+
+<%= form_errors @entry,
+      "The #{@entry.noun} was not saved.",
+      id: "coverage-errors" %>
+
+<%= form_with scope: :coverage,
+      url: registration_patient_coverage_path(params[:dfn]),
+      method: :post,
+      local: true,
+      id: "coverage-form",
+      class: "card flex flex-col gap-4" do |f| %>
+  <%= f.hidden_field :kind,
+        value: @entry.kind %>
+
+  <% if @entry.kind == "private" %>
+    <%# INSURER, PRIVATE INSURANCE ELIGIBLE (9000006.11) .01. %>
+    <%= lookup_field f,
+          :insurer_ien,
+          legend: "Insurance company",
+          search: :insurer_search,
+          search_label: "Insurance company name starts with",
+          find_label: "Find insurance company",
+          find_url: registration_new_patient_coverage_path(params[:dfn]),
+          choices: @insurers.map { |insurer| [ insurer[:ien], [insurer[:name], insurer[:city], insurer[:state]].compact_blank.join(", "), { insurer: insurer[:ien] } ] },
+          selected: @entry.insurer_ien,
+          chosen_text: "Insurance company chosen.",
+          empty_text: "No insurance company on file starts with that." %>
+
+    <%# POLICY HOLDER (9000003.1) .01. %>
+    <%= form_field :policy_holder, "Policy holder (LAST,FIRST)", form: f, hint: "The person the policy is in the name of." do |aria| %>
+      <%= f.text_field :policy_holder,
+            value: @entry.policy_holder,
+            autocomplete: "off",
+            aria: aria %>
+    <% end %>
+  <% end %>
+
+  <%# MEDICAID NUMBER (9000004 .03), MEDICARE NUMBER (9000003 .03), MEMBER NUMBER (9000006.11 21). %>
+  <%= form_field :number,
+        (@entry.kind == "medicare" ? "Medicare number (MBI)" : "Member number"),
+        form: f do |aria| %>
+    <%= f.text_field :number,
+          value: @entry.number,
+          required: true,
+          autocomplete: "off",
+          aria: aria %>
+  <% end %>
+
+  <% if @entry.kind == "medicaid" %>
+    <%# STATE, MEDICAID ELIGIBLE (9000004) .04. %>
+    <%= lookup_field f,
+          :state_ien,
+          legend: "State that issued the number",
+          search: :state_search,
+          search_label: "State name starts with",
+          find_label: "Find state",
+          find_url: registration_new_patient_coverage_path(params[:dfn]),
+          choices: @states.map { |state| [ state[:ien], state[:name], { state: state[:ien] } ] },
+          selected: @entry.state_ien,
+          chosen_text: "State chosen." %>
+  <% end %>
+
+  <% if @entry.kind == "medicare" %>
+    <%# COVERAGE TYPE, MEDICARE ELIGIBILITY (9000003.11) .03. %>
+    <%= choice_list f,
+          :part,
+          legend: "Part",
+          choices: Lakeraven::EHR::CoverageEntry::MEDICARE_PARTS.map { |code, label| [ code, label, { part: code } ] },
+          selected: @entry.part,
+          inline: true %>
+  <% end %>
+
+  <%# ELIG. DATE and ELIG. END DATE of the eligibility row. %>
+  <div class="flex flex-wrap gap-4">
+    <%= form_field :starts_on, "Covered from", form: f do |aria| %>
+      <%= f.date_field :starts_on,
+            value: @entry.starts_on,
+            required: true,
+            aria: aria %>
+    <% end %>
+    <%= form_field :ends_on, "Through", form: f, hint: "Leave empty when the card shows no end date." do |aria| %>
+      <%= f.date_field :ends_on,
+            value: @entry.ends_on,
+            aria: aria %>
+    <% end %>
+  </div>
+
+  <%= f.submit "Save #{@entry.noun}",
+        class: "button-primary self-start" %>
+<% end %>
+
+<p class="mt-6">
+  <%= link_to "Back to coverage", registration_patient_coverage_path(params[:dfn]) %>
+</p>

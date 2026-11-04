@@ -61,6 +61,14 @@ module Lakeraven
         steps(start, finish).all? { |at| open_at(block, at).positive? }
       end
 
+      # Whether one open block holds all of the appointment, full or not: an
+      # overbook there needs the overbook right; outside every open block it
+      # needs the master overbook right (S-SCH-01.9, 01.10).
+      def in_block?(start, length)
+        finish = start + (length.to_i * 60)
+        blocks.any? { |b| b[:start_time] <= start && finish <= b[:end_time] }
+      end
+
       # The times an appointment of length minutes fits (room_for?), on the grid,
       # from the clinic's display start hour, optionally only before noon ("am")
       # or from noon ("pm"), and only in blocks of one access type: S-SCH-04.

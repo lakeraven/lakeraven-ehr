@@ -41,6 +41,20 @@ class EngineLayoutTest < ActionDispatch::IntegrationTest
     assert_select "main a[href='/lakeraven-ehr/dashboard']"
   end
 
+  # Which name belongs in the chrome is undecided (docs/adr, "product name in
+  # the chrome"), so it is one setting: the header and every <title> follow it.
+  test "the header and the page title take the product name from one setting" do
+    Lakeraven::EHR.configuration.product_name = "Front desk"
+    post "/lakeraven-ehr/test_session", params: { duz: "4", user_name: "REG,USER", security_keys: [ "registration_user" ] }
+    get "/lakeraven-ehr/dashboard"
+
+    assert_select "header a", text: "Front desk"
+    assert_select "header", text: /Lakeraven/, count: 0
+    assert_select "title", text: /\| Front desk\z/
+  ensure
+    Lakeraven::EHR.configuration.product_name = "Lakeraven EHR"
+  end
+
   test "the sign-in page offers no sign out" do
     get "/lakeraven-ehr/login"
     assert_response :success

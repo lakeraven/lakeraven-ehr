@@ -137,6 +137,36 @@ Lakeraven::EHR::Engine.routes.draw do
     post "patients", to: "patients#create"
     post "patients/confirm", to: "patients#confirm", as: :confirm_patient
     get "patients/:dfn", to: "patients#show", as: :patient, constraints: { dfn: /\d+/ }
+    # Keeping a registered patient current (S-REG-20, S-REG-21), a section at a time.
+    get "patients/:dfn/demographics/edit", to: "demographics#edit", as: :edit_patient_demographics, constraints: { dfn: /\d+/ }
+    patch "patients/:dfn/demographics", to: "demographics#update", as: :patient_demographics, constraints: { dfn: /\d+/ }
+    get "patients/:dfn/address/edit", to: "addresses#edit", as: :edit_patient_address, constraints: { dfn: /\d+/ }
+    patch "patients/:dfn/address", to: "addresses#update", as: :patient_address, constraints: { dfn: /\d+/ }
+    # The emergency contact and next of kin (S-REG-08), shown on the patient's page. A look-up posts the form
+    # back to edit, so what the clerk typed never rides in a URL (#722).
+    scope "patients/:dfn", constraints: { dfn: /\d+/ } do
+      get "contacts/:kind/edit", to: "contacts#edit", as: :edit_patient_contact
+      post "contacts/:kind/edit", to: "contacts#edit"
+      post "contacts/:kind", to: "contacts#update", as: :patient_contact
+      # The patient's languages (S-REG-10): each save a new dated entry.
+      get "languages/edit", to: "languages#edit", as: :edit_patient_languages
+      post "languages/edit", to: "languages#edit"
+      post "languages", to: "languages#update", as: :patient_languages
+      # The other names the patient has used (S-REG-12): ALIAS, PATIENT (2.01).
+      get "other_names", to: "other_names#index", as: :patient_other_names
+      post "other_names", to: "other_names#create"
+      post "other_names/:ien/remove", to: "other_names#destroy", as: :remove_patient_other_name, constraints: { ien: /\d+/ }
+    end
+    # Tribe, blood quantum and eligibility (S-REG-07). Find tribe posts the form back (#722).
+    get "patients/:dfn/eligibility/edit", to: "eligibilities#edit", as: :edit_patient_eligibility, constraints: { dfn: /\d+/ }
+    patch "patients/:dfn/eligibility", to: "eligibilities#update", as: :patient_eligibility, constraints: { dfn: /\d+/ }
+    # The patient's Medicaid, Medicare and private insurance (S-REG-03). The
+    # state and insurer look-ups post the form back, so a member number never
+    # travels in a URL (#722).
+    get "patients/:dfn/coverage", to: "coverages#index", as: :patient_coverage, constraints: { dfn: /\d+/ }
+    get "patients/:dfn/coverage/new", to: "coverages#new", as: :new_patient_coverage, constraints: { dfn: /\d+/ }
+    post "patients/:dfn/coverage/new", to: "coverages#new", constraints: { dfn: /\d+/ }
+    post "patients/:dfn/coverage", to: "coverages#create", constraints: { dfn: /\d+/ }
   end
 
   # Scheduling (rpms-ux W02): a clinic resource's day, booking into it (S-SCH-01)
@@ -151,10 +181,29 @@ Lakeraven::EHR::Engine.routes.draw do
     get "patients/:dfn/appointments", to: "patient_appointments#index", as: :patient_appointments, constraints: { dfn: /\d+/ }
     get "clinics/:resource_id/appointments/new", to: "appointments#new", as: :new_clinic_appointment, constraints: { resource_id: /\d+/ }
     post "clinics/:resource_id/appointments", to: "appointments#create", as: :clinic_appointments, constraints: { resource_id: /\d+/ }
+    # Registering a caller with no chart while booking them (rpms-ux S-REG-05). Posted: the form names the caller (#722).
+    get "clinics/:resource_id/registrations/new", to: "quick_registrations#new", as: :new_clinic_registration, constraints: { resource_id: /\d+/ }
+    post "clinics/:resource_id/registrations", to: "quick_registrations#create", as: :clinic_registrations, constraints: { resource_id: /\d+/ }
     get "clinics/:resource_id/appointments/:appointment_id/cancel", to: "cancellations#new", as: :cancel_clinic_appointment, constraints: { resource_id: /\d+/, appointment_id: /\d+/ }
     post "clinics/:resource_id/appointments/:appointment_id/cancel", to: "cancellations#create", constraints: { resource_id: /\d+/, appointment_id: /\d+/ }
     get "clinics/:resource_id/appointments/:appointment_id/checkin", to: "checkins#new", as: :checkin_clinic_appointment, constraints: { resource_id: /\d+/, appointment_id: /\d+/ }
     post "clinics/:resource_id/appointments/:appointment_id/checkin", to: "checkins#create", constraints: { resource_id: /\d+/, appointment_id: /\d+/ }
+    get "clinics/:resource_id/appointments/:appointment_id/reschedule", to: "reschedules#new", as: :reschedule_clinic_appointment, constraints: { resource_id: /\d+/, appointment_id: /\d+/ }
+    post "clinics/:resource_id/appointments/:appointment_id/reschedule", to: "reschedules#create", constraints: { resource_id: /\d+/, appointment_id: /\d+/ }
+    get "clinics/:resource_id/appointments/:appointment_id/details", to: "appointment_details#new", as: :appointment_details, constraints: { resource_id: /\d+/, appointment_id: /\d+/ }
+    post "clinics/:resource_id/appointments/:appointment_id/details", to: "appointment_details#create", constraints: { resource_id: /\d+/, appointment_id: /\d+/ }
+    get "clinics/:resource_id/walk_ins/new", to: "walk_ins#new", as: :new_clinic_walk_in, constraints: { resource_id: /\d+/ }
+    post "clinics/:resource_id/walk_ins/find", to: "walk_ins#find", as: :find_clinic_walk_in, constraints: { resource_id: /\d+/ }
+    post "clinics/:resource_id/walk_ins", to: "walk_ins#create", as: :clinic_walk_ins, constraints: { resource_id: /\d+/ }
+    # After check-in (S-SCH-03.9, S-SCH-07, S-SCH-08): undo it, check out and undo that, no-show and undo that.
+    scope "clinics/:resource_id/appointments/:appointment_id", constraints: { resource_id: /\d+/, appointment_id: /\d+/ } do
+      post "checkin/undo", to: "checkins#undo", as: :undo_checkin_clinic_appointment
+      get "checkout", to: "checkouts#new", as: :checkout_clinic_appointment
+      post "checkout", to: "checkouts#create"
+      post "checkout/undo", to: "checkouts#undo", as: :undo_checkout_clinic_appointment
+      post "no_show", to: "no_shows#create", as: :no_show_clinic_appointment
+      post "no_show/undo", to: "no_shows#undo", as: :undo_no_show_clinic_appointment
+    end
   end
 
   # Test-only: seed the browser session (DUZ, user type, security keys, and

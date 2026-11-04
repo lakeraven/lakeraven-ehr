@@ -72,6 +72,22 @@ module Lakeraven
         "lakeraven/ehr/registration/patients#new",     # Registration entry form (S-REG-02), not disclosure
         "lakeraven/ehr/registration/patients#create",  # Registration entry; possible matches show registration demographics only; revisit with Part 2 (#494)
         "lakeraven/ehr/registration/patients#confirm", # Registration entry after review; as #create
+        "lakeraven/ehr/registration/demographics#edit",   # Registration demographics form (S-REG-20), no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/registration/demographics#update", # Registration demographics edit; as #edit
+        "lakeraven/ehr/registration/addresses#edit",      # Address and phones form (S-REG-21), no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/registration/addresses#update",    # Address and phones edit; as #edit
+        "lakeraven/ehr/registration/contacts#edit",    # The contact form (S-REG-08): registration demographics, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/registration/contacts#update",  # Saving a contact (S-REG-08), not disclosure
+        "lakeraven/ehr/registration/languages#edit",   # The languages form (S-REG-10): registration demographics, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/registration/languages#update", # Saving the languages (S-REG-10), not disclosure
+        "lakeraven/ehr/registration/other_names#index",   # Other names the patient has used (S-REG-12): registration demographics, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/registration/other_names#create",  # Adding an other name (S-REG-12), not disclosure
+        "lakeraven/ehr/registration/other_names#destroy", # Removing an other name (S-REG-12), not disclosure
+        "lakeraven/ehr/registration/eligibilities#edit",   # Tribe and eligibility form (S-REG-07.1), registration data, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/registration/eligibilities#update", # Tribe and eligibility edit; as #edit
+        "lakeraven/ehr/registration/coverages#index",  # Payer, member number and dates for billing (S-REG-03), no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/registration/coverages#new",    # Coverage entry form (S-REG-03.1), not disclosure
+        "lakeraven/ehr/registration/coverages#create", # Coverage entry (S-REG-03.1); answers with the form or a redirect
         "lakeraven/ehr/scheduling/clinics#index",     # Scheduling: clinic resources, no patient data
         "lakeraven/ehr/scheduling/clinics#show",      # A clinic day: appointment times and patient names, no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/scheduling/clinics#week",      # A clinic week: the same as the day, over seven days; revisit with Part 2 (#494)
@@ -79,10 +95,25 @@ module Lakeraven
         "lakeraven/ehr/scheduling/patient_appointments#index", # One patient's appointments: clinics, times, statuses, no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/scheduling/appointments#new",   # Booking form: patient name, HRN, date of birth, no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/scheduling/appointments#create", # Booking entry, not disclosure
+        "lakeraven/ehr/scheduling/quick_registrations#new",    # Registering a caller from scheduling (S-REG-05): an entry form, not disclosure
+        "lakeraven/ehr/scheduling/quick_registrations#create", # Registration entry; possible matches show registration demographics only; revisit with Part 2 (#494)
         "lakeraven/ehr/scheduling/cancellations#new",    # Cancel form: patient name and time, no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/scheduling/cancellations#create", # Cancellation entry, not disclosure
         "lakeraven/ehr/scheduling/checkins#new",         # Check-in form: patient name and time, provider names, no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/scheduling/checkins#create",      # Check-in entry, not disclosure
+        "lakeraven/ehr/scheduling/reschedules#new",      # Move form: patient name, time, open times, reasons, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/scheduling/reschedules#create",   # Move entry, not disclosure
+        "lakeraven/ehr/scheduling/walk_ins#new",         # Walk-in form: no patient until searched
+        "lakeraven/ehr/scheduling/walk_ins#find",        # Walk-in searches: patient name, HRN, date of birth, provider names, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/scheduling/walk_ins#create",      # Walk-in entry, not disclosure
+        "lakeraven/ehr/scheduling/appointment_details#new",    # Details form: patient name, time, note or remarks, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/scheduling/appointment_details#create", # Details entry, not disclosure
+        "lakeraven/ehr/scheduling/checkins#undo",        # Undo check-in entry, not disclosure
+        "lakeraven/ehr/scheduling/checkouts#new",        # Check-out form: patient name and times, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/scheduling/checkouts#create",     # Check-out entry, not disclosure
+        "lakeraven/ehr/scheduling/checkouts#undo",       # Undo check-out entry, not disclosure
+        "lakeraven/ehr/scheduling/no_shows#create",      # No-show entry, not disclosure
+        "lakeraven/ehr/scheduling/no_shows#undo",        # Undo no-show entry, not disclosure
         "lakeraven/ehr/scheduling/hours#new",            # Clinic hours form: access types, no patient data
         "lakeraven/ehr/scheduling/hours#create",         # Hours entry; a refusal names an appointment time and patient name, no clinical record
         "lakeraven/ehr/test_sessions#create", # Test only

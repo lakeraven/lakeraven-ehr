@@ -1,0 +1,100 @@
+<% page_title "Edit address and phones", @record[:name], "Registration" %>
+
+<%= page_header "Edit address and phones",
+      [ @record[:name],
+        "RPMS checks each change before it is saved." ] %>
+
+<%= flash_alert id: "address-alert" %>
+
+<%= form_errors @address,
+      "The address and phones were not saved.",
+      id: "address-errors" %>
+
+<%= form_with scope: :address,
+      url: registration_patient_address_path(params[:dfn]),
+      method: :patch,
+      local: true,
+      id: "address-form",
+      class: "card flex flex-col gap-4" do |f| %>
+  <fieldset class="flex flex-col gap-4">
+    <legend>Mailing address</legend>
+    <%# STREET ADDRESS [LINE 1], [LINE 2], [LINE 3]: PATIENT (2) fields .111, .112, .113. %>
+    <% [ [ :address_line1, "Street address" ],
+         [ :address_line2, "Street address, line 2 (optional)" ],
+         [ :address_line3, "Street address, line 3 (optional)" ] ].each do |field, label| %>
+      <%= form_field field,
+            label,
+            form: f,
+            error: @address.errors[field].first do |aria| %>
+        <%= f.text_field field,
+              value: @address.public_send(field),
+              autocomplete: "off",
+              aria: aria %>
+      <% end %>
+    <% end %>
+    <div class="flex flex-wrap gap-4">
+      <%# CITY, PATIENT (2) field .114. %>
+      <%= form_field :city,
+            "City",
+            form: f,
+            error: @address.errors[:city].first do |aria| %>
+        <%= f.text_field :city,
+              value: @address.city,
+              autocomplete: "off",
+              aria: aria %>
+      <% end %>
+      <%# STATE, PATIENT (2) field .115. %>
+      <%= form_field :state, "State", form: f do |aria| %>
+        <%= f.select :state,
+              options_for_select(@states, @address.state),
+              { include_blank: "Choose a state" },
+              aria: aria %>
+      <% end %>
+      <%# ZIP CODE, PATIENT (2) field .116 (ZIP+4 .1112), filed by AG's PTZP^AGGUL2. %>
+      <%= form_field :zip,
+            "Zip code",
+            form: f,
+            hint: "5 or 9 digits.",
+            error: @address.errors[:zip].first do |aria| %>
+        <%= f.text_field :zip,
+              value: @address.zip,
+              inputmode: "numeric",
+              autocomplete: "off",
+              aria: aria %>
+      <% end %>
+    </div>
+  </fieldset>
+
+  <fieldset class="flex flex-wrap gap-4">
+    <legend>Phones and email</legend>
+    <%# PHONE NUMBER [RESIDENCE], [WORK]: PATIENT (2) .131, .132. OTHER PHONE, CURRENT EMAIL ADDRESS: IHS PATIENT (9000001) 1801, 1802. %>
+    <% [ [ :phone_home, "Home phone (optional)", :telephone_field ],
+         [ :phone_work, "Work phone (optional)", :telephone_field ],
+         [ :phone_other, "Other phone (optional)", :telephone_field ],
+         [ :email, "Email (optional)", :email_field ] ].each do |field, label, input| %>
+      <%= form_field field,
+            label,
+            form: f,
+            error: @address.errors[field].first do |aria| %>
+        <%= f.public_send input,
+              field,
+              value: @address.public_send(field),
+              autocomplete: "off",
+              aria: aria %>
+      <% end %>
+    <% end %>
+  </fieldset>
+
+  <p>
+    The cell phone is not changed here.
+    RPMS's registration package keeps no cell phone field to edit.
+  </p>
+
+  <div class="flex gap-4">
+    <%= f.submit "Save address and phones",
+          class: "button-primary self-start" %>
+    <%= link_to "Cancel",
+          registration_patient_path(params[:dfn]),
+          class: "button-secondary" %>
+  </div>
+<% end %>

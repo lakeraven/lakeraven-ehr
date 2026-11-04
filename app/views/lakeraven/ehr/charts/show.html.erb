@@ -14,7 +14,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Lakeraven EHR</title>
+  <title><%= product_name %></title>
   <style>
     :root{
       /* --muted/--line darkened for projector contrast (washed-out rooms) */
@@ -136,7 +136,7 @@
     <div class="topbar">
       <div class="brand">
         <span class="dot"></span>
-        <span>Lakeraven EHR<small>Patient Chart</small></span>
+        <span><%= product_name %><small>Patient Chart</small></span>
       </div>
       <a class="fhir-link" href="<%= fhir_url %>">View as FHIR &rarr;</a>
     </div>
@@ -351,7 +351,7 @@
     </div>
 
     <div class="footer">
-      Lakeraven EHR &middot; read-only demo chart &middot; synthetic data, no PHI.<br>
+      <%= product_name %> &middot; read-only demo chart &middot; synthetic data, no PHI.<br>
       The same URL returns a FHIR R4 Bundle: append <code>.json</code> or send <code>Accept: application/fhir+json</code>.
     </div>
   </div>

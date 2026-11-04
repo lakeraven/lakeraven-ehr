@@ -1,0 +1,60 @@
+<%# What a scheduler can do next with one appointment, by its state:
+    booked: check in (today), mark a no-show (once its time has passed), cancel, and
+      the booking's own actions (clinics/_booking_actions: move);
+    checked in: check out, undo the check-in;
+    checked out: undo the check-out;
+    no-show: undo the no-show.
+    Locals: appointment, resource, date. Rendered on the clinic's day; render it
+    wherever an appointment is shown with its actions. %>
+<% if can_book?(resource) && !appointment[:cancelled] %>
+  <% ids = [ resource[:id], appointment[:id] ] %>
+  <% on = { date: date.iso8601 } %>
+  <div
+    class="flex flex-wrap items-center gap-2"
+    data-actions="<%= appointment[:id] %>"
+  >
+    <% if appointment[:no_show] %>
+      <%= button_to "Undo no-show",
+            scheduling_undo_no_show_clinic_appointment_path(*ids),
+            params: on,
+            form: { data: { action_name: "undo-no-show" } },
+            class: "button-secondary",
+            "aria-label": "Undo the no-show of #{appointment[:patient_name]}" %>
+    <% elsif appointment[:checkout_time] %>
+      <%= button_to "Undo check-out",
+            scheduling_undo_checkout_clinic_appointment_path(*ids),
+            params: on,
+            form: { data: { action_name: "undo-checkout" } },
+            class: "button-secondary",
+            "aria-label": "Undo the check-out of #{appointment[:patient_name]}" %>
+    <% elsif appointment[:checkin_time] %>
+      <%= link_to "Check out",
+            scheduling_checkout_clinic_appointment_path(*ids, **on) %>
+      <%= button_to "Undo check-in",
+            scheduling_undo_checkin_clinic_appointment_path(*ids),
+            params: on,
+            form: { data: { action_name: "undo-checkin" } },
+            class: "button-secondary",
+            "aria-label": "Undo the check-in of #{appointment[:patient_name]}" %>
+    <% else %>
+      <% if appointment[:start_time].to_date == Date.today %>
+        <%= link_to "Check in",
+              scheduling_checkin_clinic_appointment_path(*ids, **on) %>
+      <% end %>
+      <% if appointment[:start_time] <= Time.now %>
+        <%= button_to "No-show",
+              scheduling_no_show_clinic_appointment_path(*ids),
+              params: on,
+              form: { data: { action_name: "no-show" } },
+              class: "button-secondary",
+              "aria-label": "Mark #{appointment[:patient_name]} a no-show" %>
+      <% end %>
+      <%= link_to "Cancel",
+            scheduling_cancel_clinic_appointment_path(*ids, **on) %>
+      <%= render "lakeraven/ehr/scheduling/clinics/booking_actions",
+            resource: resource,
+            appointment: appointment,
+            date: date %>
+    <% end %>
+  </div>
+<% end %>

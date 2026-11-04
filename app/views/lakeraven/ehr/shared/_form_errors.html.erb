@@ -1,0 +1,12 @@
+<%# A form object's errors under one sentence saying what was not done
+    (ComponentsHelper#form_errors).
+    Locals: record (has #errors), summary (String), id (optional). %>
+<% if record.errors.any? %>
+  <%= alert_box :error, summary, id: local_assigns[:id] do %>
+    <ul>
+      <% record.errors.full_messages.each do |message| %>
+        <li><%= message %></li>
+      <% end %>
+    </ul>
+  <% end %>
+<% end %>
