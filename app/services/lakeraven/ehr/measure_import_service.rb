@@ -241,14 +241,15 @@ module Lakeraven
 
       def safe_valueset_id(valueset_id)
         id = valueset_id.to_s
-        raise ArgumentError, "Invalid valueset_id format: #{id}" unless id.match?(/\A[A-Za-z0-9._-]+\z/)
+        raise ArgumentError, "Invalid valueset_id format: #{id}" unless Terminology::ValueSetId.safe?(id)
+
         id
       end
 
       def valueset_available?(valueset_id)
         safe_id = safe_valueset_id(valueset_id)
-        # Check both engine and additional paths
-        valueset_paths.any? { |path| File.exist?(path.join("#{safe_id}.json")) }
+        # Engine and additional directories. The file has to stay inside one.
+        valueset_paths.any? { |path| Terminology::ValueSetId.file_for(path, safe_id) }
       end
 
       def valueset_paths
