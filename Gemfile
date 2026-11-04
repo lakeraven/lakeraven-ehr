@@ -46,7 +46,7 @@ else
   # (lakeraven-ehr#540), invented RPC names removed (#310/#311), typed errors for
   # a missing RPC (#370), the user class from ORWU USERINFO (#236). A fixed ref
   # rather than branch:main so the pin does not drift mid-merge.
-  gem "rpms-rpc", github: "lakeraven/rpms-rpc", ref: "5188b49"
+  gem "rpms-rpc", github: "lakeraven/rpms-rpc", ref: "9b36248"
 end
 
 gem "puma"

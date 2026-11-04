@@ -1,0 +1,66 @@
+<% page_title "Record an application", @patient[:name], "Registration" %>
+
+<%= page_header "Record an application",
+      ["For #{@patient[:name]}.",
+       "Record it as soon as the patient applies: the day they applied sets how far back the coverage can reach."] %>
+
+<%= flash_alert id: "application-alert" %>
+
+<%= patient_summary @patient, id: "registration" %>
+
+<%= form_errors @entry,
+      "The application was not recorded.",
+      id: "application-errors" %>
+
+<% if @types.empty? %>
+  <%= alert_box :error,
+        "RPMS has no kinds of application set up, so an application cannot be recorded yet.",
+        "Ask your site manager to add them (Patient Registration, Edit/Enter Patient Application types).",
+        id: "no-application-types" %>
+<% else %>
+  <%= form_with scope: :application,
+        url: registration_patient_applications_path(@dfn),
+        method: :post,
+        local: true,
+        id: "application-form",
+        class: "card mt-6 flex flex-col gap-4" do |f| %>
+    <%# APPLICATION TYPE, PATIENT APPLICATIONS (9000045.11) .02, from PATIENT APPLICATION TYPES (9000048). %>
+    <%= form_field :type_ien, "Kind of application", form: f, error: @entry.errors[:type_ien].first do |aria| %>
+      <%= f.select :type_ien,
+            @types.map { |t| [ t[:name], t[:ien] ] },
+            { include_blank: "Choose one", selected: @entry.type_ien },
+            aria: aria %>
+    <% end %>
+    <%# DATE APPLICATION OBTAINED, 9000045.11 .01. %>
+    <%= form_field :applied_on, "Date the patient applied", form: f, error: @entry.errors[:applied_on].first do |aria| %>
+      <%= f.date_field :applied_on,
+            value: @entry.applied_on,
+            max: Date.current,
+            required: true,
+            aria: aria %>
+    <% end %>
+    <%# DATE APPLICATION SUBMITTED, 9000045.1101 .01. %>
+    <%= form_field :submitted_on, "Date it was sent", form: f, hint: "Leave blank if it has not been sent yet.", error: @entry.errors[:submitted_on].first do |aria| %>
+      <%= f.date_field :submitted_on,
+            value: @entry.submitted_on,
+            aria: aria %>
+    <% end %>
+    <%# APPLICATION SUBMITTED VIA, 9000045.1101 .02. %>
+    <%= form_field :submitted_via, "How it was sent", form: f, error: @entry.errors[:submitted_via].first do |aria| %>
+      <%= f.select :submitted_via,
+            Lakeraven::EHR::ApplicationEntry::SUBMITTED_VIA.invert,
+            { include_blank: "Not recorded", selected: @entry.submitted_via },
+            aria: aria %>
+    <% end %>
+    <p class="hint">
+      It is recorded as pending.
+      Record approved or denied on the coverage page when the answer comes.
+    </p>
+    <%= f.submit "Record the application",
+          class: "button-primary self-start" %>
+  <% end %>
+<% end %>
+
+<p class="mt-6">
+  <%= link_to "Back to coverage", registration_patient_coverage_path(@dfn, anchor: "applications-section") %>
+</p>

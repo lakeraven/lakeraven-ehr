@@ -88,6 +88,13 @@
   </table>
 <% end %>
 
+<% unless @refused %>
+  <%= render "lakeraven/ehr/registration/applications/section",
+        dfn: params[:dfn],
+        applications: @applications,
+        can_edit: capability?("patient.register") %>
+<% end %>
+
 <p class="mt-6">
   <%= link_to "Back to #{@patient[:name]}", registration_patient_path(params[:dfn]) %>
 </p>
