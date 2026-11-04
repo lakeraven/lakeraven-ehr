@@ -59,6 +59,8 @@ module Lakeraven
           @contacts = profile_read { PatientProfileGateway.contacts(params[:dfn]) } if @record
           @languages = profile_read { PatientProfileGateway.languages(params[:dfn]) } if @record
           @other_names = profile_read { PatientProfileGateway.aliases(params[:dfn]) } if @record
+          @preferred_name = profile_read { PatientProfileGateway.preferred_name(params[:dfn]) } if @record
+          @patient = @patient.merge(preferred_name: @preferred_name) if @preferred_name.present?
         end
 
         # GET /registration/patients/new: the form, and the tribe and community

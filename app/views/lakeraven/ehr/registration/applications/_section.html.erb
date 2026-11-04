@@ -1,0 +1,114 @@
+<%# The patient's applications for coverage (rpms-ux S-REG-03.3 to 03.5), a
+    section of the coverage page: PATIENT APPLICATIONS (9000045).
+    Locals: dfn, applications (RpmsRpc::PatientApplication.for_patient, or nil
+    when RPMS did not answer), can_edit. %>
+<section
+  id="applications-section"
+  aria-labelledby="applications-heading"
+  class="card mt-6 flex flex-col gap-4"
+>
+  <div class="flex items-baseline justify-between gap-4">
+    <h2 id="applications-heading">Applications for coverage</h2>
+    <% if can_edit && applications %>
+      <%= link_to "Record an application",
+            registration_new_patient_application_path(dfn),
+            id: "add-application" %>
+    <% end %>
+  </div>
+  <p class="hint">
+    When the patient applied for Medicaid or other coverage, and what happened.
+    The date the patient applied sets how far back the coverage can reach.
+  </p>
+  <% if applications.nil? %>
+    <%= alert_box :error,
+          "RPMS did not answer when asked for this patient's applications.",
+          "Try again in a moment.",
+          id: "applications-unavailable" %>
+  <% elsif applications.empty? %>
+    <%= empty_state "No applications on file.",
+          id: "no-applications" %>
+  <% else %>
+    <table
+      id="applications"
+      class="data-table"
+    >
+      <caption class="sr-only">Applications for coverage</caption>
+      <thead>
+        <tr>
+          <th scope="col">Application</th>
+          <th scope="col">Applied</th>
+          <th scope="col">Sent</th>
+          <th scope="col">Status</th>
+          <% if can_edit %>
+            <th scope="col">Record what happened</th>
+          <% end %>
+        </tr>
+      </thead>
+      <tbody>
+        <% applications.each do |app| %>
+          <% submission = app[:submissions].max_by { |s| [ s[:date], s[:ien] ] } %>
+          <% dated = submission && submission[:statuses].max_by { |s| [ s[:date], s[:ien] ] } %>
+          <tr
+            data-application="<%= app[:ien] %>"
+            data-status="<%= app[:status] %>"
+          >
+            <%# APPLICATION TYPE, 9000045.11 .02. %>
+            <td><%= app.dig(:type, :name) || "Type not recorded" %></td>
+            <%# DATE APPLICATION OBTAINED, 9000045.11 .01. %>
+            <td><%= app[:obtained].strftime("%b %-d, %Y") %></td>
+            <%# DATE APPLICATION SUBMITTED and SUBMITTED VIA, 9000045.1101 .01 and .02. %>
+            <td>
+              <% if submission %>
+                <%= submission[:date].strftime("%b %-d, %Y") %>
+                <% if submission[:via] %>
+                  <span class="hint">(<%= Lakeraven::EHR::ApplicationEntry::SUBMITTED_VIA[submission[:via]] %>)</span>
+                <% end %>
+              <% else %>
+                Not recorded
+              <% end %>
+            </td>
+            <%# OVERALL STATUS OF APPLICATION, 9000045.11 .04; its date from STATUS DATE, 9000045.110101. %>
+            <td>
+              <%= status_badge (app[:status] == "E" ? "error" : app[:status_name].to_s.downcase),
+                    Lakeraven::EHR::Registration::ApplicationsController::OUTCOMES[app[:status]] || app[:status_name].to_s.capitalize.presence || "Not recorded" %>
+              <% if dated && dated[:status] == app[:status] %>
+                <span class="hint">on <%= dated[:date].strftime("%b %-d, %Y") %></span>
+              <% end %>
+            </td>
+            <% if can_edit %>
+              <td>
+                <% if app[:status] == "E" %>
+                  <span class="hint">Kept on file; RPMS does not delete applications.</span>
+                <% else %>
+                  <%= form_with url: registration_patient_application_status_path(dfn, app[:ien]),
+                        method: :post,
+                        local: true,
+                        id: "application-status-#{app[:ien]}",
+                        class: "flex flex-wrap items-end gap-2" do |f| %>
+                    <div class="flex flex-col">
+                      <%= label_tag "status-#{app[:ien]}",
+                            "What happened" %>
+                      <%= select_tag :status,
+                            options_for_select(Lakeraven::EHR::Registration::ApplicationsController::OUTCOMES.except(app[:status]).invert),
+                            id: "status-#{app[:ien]}" %>
+                    </div>
+                    <div class="flex flex-col">
+                      <%= label_tag "status-on-#{app[:ien]}",
+                            "On" %>
+                      <%= date_field_tag :status_on,
+                            Date.current,
+                            max: Date.current,
+                            id: "status-on-#{app[:ien]}" %>
+                    </div>
+                    <%= f.submit "Save",
+                          class: "button-secondary" %>
+                  <% end %>
+                <% end %>
+              </td>
+            <% end %>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  <% end %>
+</section>

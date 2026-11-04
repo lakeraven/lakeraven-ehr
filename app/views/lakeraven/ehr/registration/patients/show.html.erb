@@ -133,6 +133,13 @@
           can_edit: can_edit %>
   <% end %>
 
+  <% unless @preferred_name.nil? %>
+    <%= render "lakeraven/ehr/registration/preferred_names/section",
+          dfn: params[:dfn],
+          preferred_name: @preferred_name,
+          can_edit: can_edit %>
+  <% end %>
+
   <% if @other_names %>
     <%= render "lakeraven/ehr/registration/other_names/section",
           dfn: params[:dfn],

@@ -162,6 +162,9 @@ Lakeraven::EHR::Engine.routes.draw do
       get "languages/edit", to: "languages#edit", as: :edit_patient_languages
       post "languages/edit", to: "languages#edit"
       post "languages", to: "languages#update", as: :patient_languages
+      # The name the patient goes by (S-REG-12.1): PREFERRED NAME, IHS PATIENT (9000001) 9001.
+      get "preferred_name/edit", to: "preferred_names#edit", as: :edit_patient_preferred_name
+      post "preferred_name", to: "preferred_names#update", as: :patient_preferred_name
       # The other names the patient has used (S-REG-12): ALIAS, PATIENT (2.01).
       get "other_names", to: "other_names#index", as: :patient_other_names
       post "other_names", to: "other_names#create"
@@ -174,6 +177,11 @@ Lakeraven::EHR::Engine.routes.draw do
     # state and insurer look-ups post the form back, so a member number never
     # travels in a URL (#722).
     get "patients/:dfn/coverage", to: "coverages#index", as: :patient_coverage, constraints: { dfn: /\d+/ }
+    # The patient's applications for coverage (S-REG-03.3 to 03.5): PATIENT APPLICATIONS (9000045).
+    get "patients/:dfn/applications/new", to: "applications#new", as: :new_patient_application, constraints: { dfn: /\d+/ }
+    post "patients/:dfn/applications", to: "applications#create", as: :patient_applications, constraints: { dfn: /\d+/ }
+    post "patients/:dfn/applications/:ien/status", to: "applications#update", as: :patient_application_status,
+                                                    constraints: { dfn: /\d+/, ien: /\d+/ }
     get "patients/:dfn/coverage/new", to: "coverages#new", as: :new_patient_coverage, constraints: { dfn: /\d+/ }
     post "patients/:dfn/coverage/new", to: "coverages#new", constraints: { dfn: /\d+/ }
     post "patients/:dfn/coverage", to: "coverages#create", constraints: { dfn: /\d+/ }
