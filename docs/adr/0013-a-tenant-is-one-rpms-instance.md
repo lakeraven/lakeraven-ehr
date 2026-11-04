@@ -1,6 +1,6 @@
 # ADR 0013: A tenant is exactly one RPMS instance, and an instance is never shared between tenants
 
-**Status:** Proposed. The compliance premise has not been reviewed by counsel and needs that review before this can be Accepted.
+**Status:** Accepted on 3 Nov 2026, by the owner's decision. The premise that an organization is one RPMS instance is settled by the owner (2 Nov 2026, on lakeraven-ehr#763). Counsel's written confirmation of it is go-live evidence that is still owed (lakeraven-ehr#763); it is not a precondition for building, and this ADR does not claim that counsel has reviewed the premise or interpret HIPAA.
 **Date:** 2026-10-29
 **Amends:** ADR 0007 (decision 1's "one instance may serve several entities", its rejection of "tenancy = the RPMS instance", the partitioning role of its division machinery, and its requirement that the model express a governance domain **narrower** than the covered entity; see Consequences) and, **if ADR 0008 lands** (it is open as #630), ADR 0008 (its "does not settle shared-instance tenants" and the trigger for its sequence step 4). This ADR decides nothing that depends on ADR 0008's text; see Merge order.
 **Builds on:** ADR 0010 (authorization derives from RPMS options and keys), ADR 0011 as amended (the request's client is a scope, not an argument; section 6, a system token runs as a named service account), ADR 0012 (the request context carries the tenant; see the note on rule 5 below), lakeraven-ehr#553.
@@ -183,7 +183,7 @@ ADR 0008 exists only on #630 (open, draft). ADR 0010 is on main (#662). ADR 0011
 - **Convert or enclose the roughly 146 sites** that resolve the client, and the leaks listed under decision 6e. The mechanism is decided; the conversion is implementation.
 - **Build the per-test harness** on `GlobalStoreIsolation` and `UserClient`, and confirm the process-declaration name (`LAKERAVEN_EHR_PROCESS=maintenance`, default serving) in the implementation issue.
 - **Write the deployment procedure** that keeps sandbox, retired and live instances apart (decision 3), and that tells the operator to declare the database tasks and the record command non-serving (decision 8), since the software cannot. Also check on a live build whether `DUZ(2)` is set on a service-account sign-on.
-- **Counsel.** The compliance premise, the breach classification, and how it interacts with 42 CFR Part 2 (ADR 0006).
+- **Counsel.** Written confirmation of the compliance premise, the breach classification, and how it interacts with 42 CFR Part 2 (ADR 0006), tracked in lakeraven-ehr#763. Owed before go-live, not before building; until it exists, no document should say counsel has reviewed this.
 - **rpms-rpc#293** (division detector) is still open; decision 5 relies on it.
 
 ## Not verified
