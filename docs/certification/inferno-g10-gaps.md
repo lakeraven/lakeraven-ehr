@@ -11,16 +11,17 @@ The runbook for running the kit is at the end.
 
 | Group | Met | Partial | Missing |
 |---|---|---|---|
-| 1 Standalone Patient App (full access) | 3 | 1 | 5 |
+| 1 Standalone Patient App (full access) | 4 | 3 | 2 |
 | 2 Standalone Patient App (limited access) | 0 | 0 | 2 |
-| 3 EHR Practitioner App | 0 | 0 | 4 |
+| 3 EHR Practitioner App | 1 | 3 | 0 |
 | 10 Single Patient API (US Core 6.1.0) | 0 | 12 | 8 |
 | Multi-Patient API (Bulk Data) | 3 | 1 | 4 |
-| 9 Additional authorization tests | 0 | 1 | 9 |
+| 9 Additional authorization tests | 7 | 1 | 2 |
 | 11 Visual inspection and attestation | 1 | 0 | 6 |
 
-The one blocker under everything: the FHIR API controllers have no RPMS connection for a bearer token, so on a live stack every read that reaches RPMS answers 503 (#844).
-After that, SMART authorization-code launch (#839) gates groups 1, 2, 3, 9 and 10, because the single-patient API runs on group 1's token.
+SMART authorization-code launch (#839) is served, and a launched token reads RPMS on its user's own connection (the user/patient half of #844).
+A `system/` token still has no RPMS connection, so the Bulk Data reads answer 503 until a service account is wired (#844, ADR 0011 §6).
+The launch rows below are marked met from the engine's own tests; Inferno has not run them yet.
 
 ## Gaps
 
@@ -33,13 +34,13 @@ Evidence is file:line on `main`; tests are named where they prove the behaviour.
 |---|---|---|---|
 | `.well-known/smart-configuration` served, unauthenticated, JSON | met | `config/routes.rb:105`; `test/controllers/lakeraven/ehr/smart_configuration_controller_test.rb` | |
 | `code_challenge_methods_supported` includes S256 | met | `app/services/lakeraven/ehr/smart_discovery.rb:47` | |
-| `authorization_endpoint`, authorization-code grant, confidential symmetric client, PKCE S256 | missing | no authorize route (`config/routes.rb:105-109`); `GRANT_TYPES = client_credentials` (`smart_discovery.rb:25`) | #839 |
-| Capabilities: `launch-standalone`, `context-standalone-patient`, `permission-patient`, `permission-offline`, `client-public`, `client-confidential-symmetric`, `sso-openid-connect`, `authorize-post` | missing | `smart_discovery.rb:29` lists `client-confidential-asymmetric permission-v1 permission-v2` only (correct: nothing else is served, #657) | #839 |
-| Scopes `launch/patient openid fhirUser offline_access` + `patient/X.rs` for 26 USCDI types granted, v2 syntax | partial | v2 scopes and v1 translation exist (`SmartScope`, #665); no `patient/` grant path and most types not served | #839, #848, #849 |
+| `authorization_endpoint`, authorization-code grant, confidential symmetric client, PKCE S256 | met | `smart_authorizations_controller.rb`, `smart_tokens_controller.rb`; `test/integration/smart_authorization_code_test.rb`, live `live_smart_launch_test.rb` | #839 |
+| Capabilities: `launch-standalone`, `context-standalone-patient`, `permission-patient`, `permission-offline`, `client-public`, `client-confidential-symmetric`, `sso-openid-connect`, `authorize-post` | partial | all advertised and served except `permission-offline` (#840) and `sso-openid-connect` (#841) (`smart_discovery.rb`) | #840, #841 |
+| Scopes `launch/patient openid fhirUser offline_access` + `patient/X.rs` for 26 USCDI types granted, v2 syntax | partial | `launch/patient` and `patient/` scopes granted within the user's RPMS access (`LaunchScopePolicy`); `openid fhirUser offline_access` not granted; most types not served | #840, #841, #848, #849 |
 | OpenID Connect: `openid-configuration`, JWKS, RS256 `id_token`, `fhirUser` resolves | missing | none routed | #841 |
 | Token refresh with and without `scope`; invalid refresh refused | missing | no refresh tokens (`BackendServicesController::TOKEN_LIFETIME` 5 min, no `refresh_token`) | #840 |
 | Request without a token gets 401 | met | `SmartAuthentication#authenticate_smart_token!`; `test/controllers/lakeraven/ehr/smart_auth_test.rb` | |
-| Unrestricted access: a patient search succeeds for every USCDI type | missing | 503 for bearer tokens (`application_controller.rb:104`); 14 types not routed | #844, #849 |
+| Unrestricted access: a patient search succeeds for every USCDI type | partial | a launched token reads on its user's connection; 14 types not routed | #849 |
 
 ### 2 Standalone Patient App, limited access
 
@@ -52,10 +53,10 @@ Evidence is file:line on `main`; tests are named where they prove the behaviour.
 
 | Requirement | State | Evidence | Issue |
 |---|---|---|---|
-| EHR launch from Inferno's launch URI to `authorize` (POST), `launch` scope | missing | `smart/launch` exists (`smart_launch_controller.rb`) but redirects to `oauth/authorize`, which is not routed; hardcodes `patient/*.rs` (`smart_launch_controller.rb:47`) | #839 |
-| Capabilities `launch-ehr`, `context-ehr-patient`, `context-ehr-encounter`, `context-banner`, `context-style`, `permission-user` | missing | not served, not advertised | #839 |
-| Token response `patient`, `encounter` (readable), `need_patient_banner`, `smart_style_url` | missing | `LaunchContext` model exists, no token response carries it; Encounter has no read | #839, #845 |
-| `user/X.rs` scopes, OIDC, refresh | missing | as group 1 | #839, #840, #841 |
+| EHR launch from Inferno's launch URI to `authorize` (POST), `launch` scope | met | `smart/launch` sends a signed-in user's patient to the app's registered launch URI; authorize takes GET and POST; `smart_launch_context_test.rb` | #839 |
+| Capabilities `launch-ehr`, `context-ehr-patient`, `context-ehr-encounter`, `context-banner`, `context-style`, `permission-user` | partial | all served and advertised except `context-ehr-encounter`: the Encounter cannot be read yet | #845 |
+| Token response `patient`, `encounter` (readable), `need_patient_banner`, `smart_style_url` | partial | all four in the token response (`smart_tokens_controller.rb`); the encounter is not readable | #845 |
+| `user/X.rs` scopes, OIDC, refresh | partial | `user/` scopes granted within the user's RPMS access; no OIDC or refresh | #840, #841 |
 
 ### 10 Single Patient API, US Core 6.1.0
 
@@ -99,15 +100,15 @@ Evidence is file:line on `main`; tests are named where they prove the behaviour.
 
 | Requirement | State | Evidence | Issue |
 |---|---|---|---|
-| 9.2 Public client standalone launch | missing | | #839 |
+| 9.2 Public client standalone launch | met | `smart_launch_client_types_test.rb` | #839 |
 | 9.3 Token revocation: revoked token and its refresh token refused | partial | revoked tokens are refused on reads (`smart_authentication.rb:42`); no way to revoke a patient's grant, no refresh token | #842, #840 |
-| 9.4 Invalid `aud` gets no code | missing | | #839 |
-| 9.6 Bad code and bad `client_id` refused at token endpoint | missing | | #839 |
-| 9.7 PKCE S256 required (no / blank / wrong / plain verifier refused) | missing | | #839 |
-| 9.9 EHR launch with patient scopes | missing | | #839 |
+| 9.4 Invalid `aud` gets no code | met | an error page, no redirect (`smart_authorization_code_test.rb`) | #839 |
+| 9.6 Bad code and bad `client_id` refused at token endpoint | met | `smart_authorization_code_test.rb` | #839 |
+| 9.7 PKCE S256 required (no / blank / wrong / plain verifier refused) | met | `smart_authorization_code_test.rb` | #839 |
+| 9.9 EHR launch with patient scopes | met | `smart_launch_context_test.rb` | #839 |
 | 9.11 Token introspection | missing | no `introspection_endpoint` | #842 |
-| 9.12 Asymmetric client launch | missing | the asymmetric assertion exists for Backend Services only | #839 |
-| 9.13 v1 scopes granted | missing (translation done) | v1 to v2 translation exists (#665); needs a launch | #839 |
+| 9.12 Asymmetric client launch | met | RS384 or ES384 assertion (`smart_launch_client_types_test.rb`) | #839 |
+| 9.13 v1 scopes granted | met | granted as v2 (`smart_authorization_code_test.rb`) | #839 |
 | 9.14, 9.15 Fine-grained and granular category scopes | missing | | #843 |
 
 ### 11 Visual inspection and attestation
@@ -170,17 +171,37 @@ Doorkeeper::Application.create!(
 - Select **RS384** in Inferno: the token endpoint accepts RS384 only.
 - `redirect_uri` is unused by Backend Services; the out-of-band value is what the engine's own tests register (`backend_services_controller_test.rb`).
 
-The confidential launch client (groups 1, 2, 3, 9) cannot be registered usefully until #839 serves an authorization endpoint.
-When it does, it will need, at least:
-- a confidential symmetric client (`client_id`, `client_secret`) with redirect URI `https://inferno.healthit.gov/suites/custom/smart/redirect` and launch URI `https://inferno.healthit.gov/suites/custom/smart/launch`;
-- a public client for 9.2 and an asymmetric client (JWKS `https://inferno.healthit.gov/suites/custom/smart_stu2/.well-known/jwks.json`) for 9.12.
+The launch clients (groups 1, 2, 3, 9) are Doorkeeper applications too. The registration decides how each authenticates (`LaunchClient`):
+
+```ruby
+redirect = "https://inferno.healthit.gov/suites/custom/smart/redirect"
+launch = "https://inferno.healthit.gov/suites/custom/smart/launch"
+scopes = "launch launch/patient patient/*.rs user/*.rs"
+
+# Confidential symmetric (groups 1, 2, 3): client_secret by Basic or in the body.
+Doorkeeper::Application.create!(name: "Inferno g10 launch", uid: "inferno-g10-launch", secret: "<a long random secret>",
+  redirect_uri: redirect, launch_uri: launch, scopes: scopes, confidential: true)
+
+# Public (9.2): client_id and PKCE alone.
+Doorkeeper::Application.create!(name: "Inferno g10 public", uid: "inferno-g10-public",
+  redirect_uri: redirect, launch_uri: launch, scopes: scopes, confidential: false)
+
+# Confidential asymmetric (9.12): a JWT signed with RS384 or ES384.
+Doorkeeper::Application.create!(name: "Inferno g10 asymmetric", uid: "inferno-g10-asymmetric",
+  redirect_uri: redirect, launch_uri: launch, scopes: scopes, confidential: true,
+  jwks_uri: "https://inferno.healthit.gov/suites/custom/smart_stu2/.well-known/jwks.json")
+```
+
+- The person running the kit signs in at authorize with their own RPMS access and verify codes, and approves. What the app gets is what it asked for, within its registration, within that person's RPMS access.
+- For the EHR launch (group 3), sign in to the engine, open `/lakeraven-ehr/smart/launch?patient=<DFN>`, and choose the Inferno app: it is sent to Inferno's launch URI with `iss` and `launch`.
+- A launched token lives an hour at most, and ends when that person signs out or their session times out: run the groups that need it without signing out.
 
 ### 3. The inputs Inferno asks for
 
 | Input | Value |
 |---|---|
 | FHIR endpoint (`url`) | `https://ehr.rpms.lakeraven.com/lakeraven-ehr` |
-| Standalone / EHR / public / asymmetric client: `client_id`, `client_secret`, requested scopes | from step 2 once #839 lands; Inferno pre-fills the default scopes |
+| Standalone / EHR / public / asymmetric client: `client_id`, `client_secret`, requested scopes | from step 2; Inferno pre-fills the default scopes |
 | `expected_resources` (limited access) | default `patient, condition, observation` |
 | `additional_patient_ids` | synthetic demo patients that together cover every must-support element |
 | `implantable_device_codes` | blank until Device is served |
@@ -193,6 +214,6 @@ When it does, it will need, at least:
 
 ### 4. What to expect today
 
-Discovery, `/metadata`, and the Backend Services token tests should pass.
-Every group that needs a launched token will stop at the authorization step (#839), and every data read on a bearer token will answer 503 until #844.
+Discovery, `/metadata`, the Backend Services token tests and the launch and authorization tests (groups 1, 3 and 9) should pass their authorization steps.
+OpenID Connect (#841), refresh (#840), introspection (#842) and the encounter read (#845) will fail where the kit asks for them, and Bulk Data reads answer 503 until a `system/` service account is wired (#844).
 Run the whole suite once anyway, unchanged, and keep the report (JSON export) as the baseline under #261 and #404.
