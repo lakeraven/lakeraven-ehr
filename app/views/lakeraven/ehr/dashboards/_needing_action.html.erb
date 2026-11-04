@@ -1,0 +1,22 @@
+<%# Today's appointments needing action in the user's clinics (#875), counted
+    from RPMS and linked to their list. Locals: needing, { window:, count: } or :unread. %>
+<% if needing == :unread %>
+  <%= alert_box :error,
+        "Appointments needing action could not be read from RPMS.",
+        "Open Scheduling to see the list, or try again in a moment.",
+        id: "needing-action-count-unread" %>
+<% else %>
+  <section aria-labelledby="needing-action-heading">
+    <h2 id="needing-action-heading">Appointments needing action</h2>
+    <p
+      id="needing-action-count"
+      data-count="<%= needing[:count] %>"
+    >
+      <%= link_to scheduling_needing_action_path,
+            class: "font-semibold tabular-nums" do %>
+        <%= needing[:count] %>
+        <span class="sr-only"><%= "appointment".pluralize(needing[:count]) %> today in your clinics past their time with no check-in, check-out, cancellation or no-show</span>
+      <% end %>
+    </p>
+  </section>
+<% end %>

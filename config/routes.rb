@@ -208,6 +208,8 @@ Lakeraven::EHR::Engine.routes.draw do
     get "/", to: "clinics#index", as: :home
     get "clinics/:id", to: "clinics#show", as: :clinic, constraints: { id: /\d+/ }
     get "clinics/:id/week", to: "clinics#week", as: :clinic_week, constraints: { id: /\d+/ }
+    # The appointments needing action in the scheduler's clinics (S-SCH-13.5, #875).
+    get "needing_action", to: "needing_action#index", as: :needing_action
     get "clinics/:id/open_times", to: "open_times#index", as: :clinic_open_times, constraints: { id: /\d+/ }
     get "clinics/:resource_id/hours/new", to: "hours#new", as: :new_clinic_hours, constraints: { resource_id: /\d+/ }
     post "clinics/:resource_id/hours", to: "hours#create", as: :clinic_hours, constraints: { resource_id: /\d+/ }

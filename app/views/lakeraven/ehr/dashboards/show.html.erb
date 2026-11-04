@@ -74,6 +74,8 @@
   </section>
 <% end %>
 
+<%= render "needing_action", needing: @needing_action if @needing_action %>
+
 <%= render "pending_referrals", pending: @pending_referrals if @pending_referrals %>
 
 <% unless @clinic_counts || @notification_count || @pending_referrals %>
