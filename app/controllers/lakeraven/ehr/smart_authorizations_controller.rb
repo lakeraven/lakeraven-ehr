@@ -12,6 +12,11 @@ module Lakeraven
     # then kept in the session while the user signs in and decides, so nothing
     # the app sent rides through the sign-in form or the approval form.
     #
+    # The launch's patient comes from an EHR launch's context (smart/launch,
+    # the `launch` parameter), or, for a standalone launch that asks for
+    # `launch/patient`, from the user choosing one with the chart's own patient
+    # search. patient/ scopes are granted only once there is a patient.
+    #
     # Errors that make the app or its redirect URI untrustworthy (an unknown
     # client, an unregistered redirect URI, a wrong `aud`) are shown here and
     # never sent back: a redirect would hand a code or an error to an address
@@ -21,10 +26,13 @@ module Lakeraven
       include SmartEndpoints
 
       PENDING = :smart_authorization_request
-      REQUEST_PARAMS = %w[response_type client_id redirect_uri scope state aud code_challenge code_challenge_method].freeze
+      REQUEST_PARAMS = %w[
+        response_type client_id redirect_uri scope state aud code_challenge code_challenge_method launch
+      ].freeze
+      DFN = /\A\d{1,18}\z/
 
-      before_action :require_authentication, only: %i[show decide]
-      before_action :load_pending, only: %i[show decide]
+      before_action :require_authentication, only: %i[show decide patient choose_patient]
+      before_action :load_pending, only: %i[show decide patient choose_patient]
 
       # An app's page posts here from another site, and a SameSite=Lax session
       # cookie does not ride a cross-site POST. Answering it would sign a
@@ -52,6 +60,11 @@ module Lakeraven
         if request_params["code_challenge"].blank? || request_params["code_challenge_method"] != "S256"
           return redirect_with_error(request_params, "invalid_request", "PKCE with code_challenge_method S256 is required.")
         end
+        # An EHR launch (smart/launch) names its context: one this server
+        # minted, for this app, not yet used or expired.
+        if request_params["launch"].present? && LaunchContext.resolve(request_params["launch"])&.oauth_application_uid != app.uid
+          return redirect_with_error(request_params, "invalid_request", "The launch is unknown or has expired.")
+        end
 
         end_stale_session!
         session[PENDING] = request_params
@@ -63,8 +76,32 @@ module Lakeraven
 
       # GET /oauth/authorize/approval: what the app asked for, in plain words.
       def show
+        return redirect_to(smart_authorization_patient_path) if patient_to_choose?
+
+        @patient = ChartSearchGateway.one(launch_patient_dfn) if launch_patient_dfn
         @scopes = granted_scopes
         render :show
+      rescue RpmsRpc::Client::RpcError, RpmsRpc::Client::ConnectionError => e
+        lookup_failed(e)
+      end
+
+      # GET /oauth/authorize/patient: a standalone launch asked for a patient
+      # (launch/patient), so the user chooses one, the way they find a chart.
+      def patient
+        @matches = []
+        render :patient
+      end
+
+      # POST /oauth/authorize/patient: a search (q), or the patient chosen
+      # (dfn). Posted, so what was typed never rides in a URL (#722).
+      def choose_patient
+        return choose(params[:dfn].to_s) if params[:dfn].present?
+
+        @query = params[:q].to_s.strip
+        @matches = @query.empty? ? [] : ChartSearchGateway.find(@query)
+        render :patient
+      rescue RpmsRpc::Client::RpcError, RpmsRpc::Client::ConnectionError => e
+        lookup_failed(e)
       end
 
       # POST /oauth/authorize/approval
@@ -87,8 +124,14 @@ module Lakeraven
           duz: session[:duz].to_s,
           user_name: session[:user_name],
           rpms_session_id: session[:rpms_session_id],
-          rpms_idle_seconds: session[:rpms_idle_seconds]
+          rpms_idle_seconds: session[:rpms_idle_seconds],
+          patient_dfn: launch_patient_dfn,
+          encounter_id: @launch_context&.encounter_id.presence,
+          # Apps open in their own window, never inside this one, so the app
+          # shows who the patient is.
+          need_patient_banner: launch_patient_dfn.present?
         )
+        @launch_context&.destroy # a launch is used once
         redirect_to redirect_uri_with(@pending["redirect_uri"], code: code, state: @pending["state"]), allow_other_host: true
       end
 
@@ -97,10 +140,19 @@ module Lakeraven
       def load_pending
         @pending = session[PENDING]
         @app = launch_client(@pending&.dig("client_id"))
-        return if @pending.present? && @app
+        unless @pending.present? && @app
+          session.delete(PENDING)
+          return render_refusal(:no_request)
+        end
+        return if @pending["launch"].blank?
+
+        # An EHR launch is the launching user's alone.
+        @launch_context = LaunchContext.resolve(@pending["launch"])
+        return if @launch_context && @launch_context.oauth_application_uid == @app.uid &&
+                  @launch_context.duz.to_s == session[:duz].to_s
 
         session.delete(PENDING)
-        render_refusal(:no_request)
+        render_refusal(:launch_ended)
       end
 
       # A client registered to launch (LaunchClient): public, or confidential
@@ -116,12 +168,59 @@ module Lakeraven
         aud.present? && aud.chomp("/") == smart_fhir_base_url
       end
 
+      # The patient the launch is about: the EHR launch's, or the one the user
+      # chose for a standalone launch.
+      def launch_patient_dfn
+        @launch_context&.patient_dfn.presence || @pending["patient_dfn"].presence
+      end
+
+      def requested_scopes = @pending["scope"].to_s.split
+
+      # A standalone launch asked for a patient, none is chosen yet, and the
+      # user can search patients at all (otherwise no patient/ scope is granted).
+      def patient_to_choose?
+        requested_scopes.include?("launch/patient") && launch_patient_dfn.blank? &&
+          SmartScope.permits?(session_token_scopes, "Patient", "s")
+      end
+
+      # The chosen patient, if RPMS knows them, becomes the launch's patient.
+      def choose(dfn)
+        chosen = ChartSearchGateway.one(dfn) if dfn.match?(DFN)
+        return render_refusal(:no_patient) unless chosen
+
+        session[PENDING] = @pending.merge("patient_dfn" => chosen.dfn.to_s)
+        redirect_to smart_authorization_approval_path
+      end
+
+      # Clinical scopes (LaunchScopePolicy): patient/ ones only once there is a
+      # patient. Then the launch scopes the app asked for and got: `launch`
+      # for an EHR launch, `launch/patient` for a launch with a patient.
       def granted_scopes
-        LaunchScopePolicy.new(
+        clinical = LaunchScopePolicy.new(
           requested: @pending["scope"],
           registered: @app.scopes.to_s,
-          user_scopes: Doorkeeper::AccessToken.by_token(session[:smart_token].to_s)&.scopes.to_s
+          user_scopes: session_token_scopes,
+          contexts: launch_patient_dfn ? %w[user patient] : %w[user]
         ).granted
+        return clinical if clinical.empty?
+
+        launch = []
+        launch << "launch" if @launch_context && requested_scopes.include?("launch")
+        launch << "launch/patient" if launch_patient_dfn && requested_scopes.include?("launch/patient")
+        launch + clinical
+      end
+
+      def session_token_scopes
+        Doorkeeper::AccessToken.by_token(session[:smart_token].to_s)&.scopes.to_s
+      end
+
+      def lookup_failed(error)
+        return end_session_for_closed_rpms! if rpms_connection_closed?
+
+        Rails.logger.error("[smart-authorize] patient lookup failed: #{error.class}")
+        @lookup_failed = true
+        @matches = []
+        render :patient, status: :service_unavailable
       end
 
       # A session that has idled out, outlived its lifetime, lost its token or

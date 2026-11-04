@@ -39,7 +39,7 @@ module Lakeraven
         return render_invalid_grant("code already used") unless authorization.redeem!
 
         token = authorization.issue_access_token!
-        render_token(token)
+        render_token(token, authorization)
       end
 
       private
@@ -93,14 +93,21 @@ module Lakeraven
         [ string_param(:client_id), string_param(:client_secret) ]
       end
 
-      def render_token(token)
+      # The token, and the launch context SMART asks for: the patient and
+      # encounter when the launch has them, whether the app should show a
+      # patient banner, and where this EHR's style is.
+      def render_token(token, authorization)
         no_store!
         render json: {
           access_token: token.plaintext_token || token.token,
           token_type: "Bearer",
           expires_in: token.expires_in,
-          scope: token.scopes.to_s
-        }, status: :ok
+          scope: token.scopes.to_s,
+          patient: authorization.patient_dfn.presence,
+          encounter: authorization.encounter_id.presence,
+          need_patient_banner: authorization.need_patient_banner,
+          smart_style_url: "#{smart_fhir_base_url}/smart/style"
+        }.compact, status: :ok
       end
 
       def string_param(name)

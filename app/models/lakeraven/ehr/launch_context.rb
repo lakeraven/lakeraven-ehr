@@ -9,6 +9,9 @@ module Lakeraven
     # a SMART app launch. The token endpoint calls LaunchContext.resolve
     # to look up the patient context and include it in the token response.
     #
+    # The user who launched (duz) is the only user who can authorize with it
+    # (SmartAuthorizationsController), and a context is used once.
+    #
     # Same pattern as Doorkeeper: engine owns the table + model,
     # host app wires it to their auth/session.
     class LaunchContext < ApplicationRecord
@@ -21,13 +24,14 @@ module Lakeraven
       validates :expires_at, presence: true
 
       # Mint a new launch context with a unique token.
-      def self.mint(oauth_application_uid:, patient_dfn: nil, encounter_id: nil, facility_identifier: nil, ttl: DEFAULT_TTL)
+      def self.mint(oauth_application_uid:, patient_dfn: nil, encounter_id: nil, facility_identifier: nil, duz: nil, ttl: DEFAULT_TTL)
         create!(
           launch_token: generate_token,
           oauth_application_uid: oauth_application_uid,
           patient_dfn: patient_dfn,
           encounter_id: encounter_id,
           facility_identifier: facility_identifier,
+          duz: duz,
           expires_at: Time.current + ttl
         )
       end
