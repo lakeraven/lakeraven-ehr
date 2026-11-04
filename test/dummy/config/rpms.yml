@@ -7,6 +7,11 @@
 #   host    the broker's host
 #   port    the broker's port
 #
+# There is no UCI (namespace) setting: the CIA client asks for an empty one, which
+# the broker reads as its own namespace, on a YottaDB or an IRIS stack alike
+# (rpms-rpc#572). RPMS_UCI in the environment overrides that, and is needed only
+# to run in a namespace other than the broker's own.
+#
 # Each value can come from the environment, as database.yml takes DATABASE_URL.
 # broker and host are quoted: a bare `on` or `null` would otherwise load as a boolean or nil.
 default: &default
