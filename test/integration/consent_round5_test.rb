@@ -175,7 +175,6 @@ class ConsentRound5Test < ActionDispatch::IntegrationTest
     assert_response :too_many_requests
     assert_equal Lakeraven::EHR::KioskLock::MAX_REFUSED_SIGNATURES, lock.reload.refused_signature_count
   end
-
 end
 
 module Lakeraven
