@@ -55,14 +55,14 @@ Given("default consent templates are installed") do
 end
 
 Given("the clinician is signed in with consent write scopes for in-clinic signing") do
-  sign_in_clinician!(scopes: ConsentWriteTestHelper::WRITE_SCOPES)
+  sign_in_clinician_for_consent!(scopes: ConsentWriteTestHelper::WRITE_SCOPES, security_keys: %w[orders_sign])
   open_patient_context!(@dfn) if @dfn
   install_consent_templates!
   parse_last_response!
 end
 
 Given("the clinician starts the {string} consent handover") do |template_key|
-  sign_in_clinician!(scopes: ConsentWriteTestHelper::WRITE_SCOPES) unless @clinician_token
+  sign_in_clinician_for_consent!(scopes: ConsentWriteTestHelper::WRITE_SCOPES, security_keys: %w[orders_sign]) unless @clinician_token
   open_patient_context!(@dfn) if @dfn
   post_handover(template_key: template_key)
   follow_redirect! if last_response.redirect?
@@ -70,7 +70,7 @@ Given("the clinician starts the {string} consent handover") do |template_key|
 end
 
 Given("the clinician opens the patient consent list") do
-  sign_in_clinician!(scopes: ConsentWriteTestHelper::WRITE_SCOPES) unless @clinician_token
+  sign_in_clinician_for_consent!(scopes: ConsentWriteTestHelper::WRITE_SCOPES, security_keys: %w[orders_sign]) unless @clinician_token
   open_patient_context!(@dfn) if @dfn
   get ConsentWriteTestHelper::BASE
   parse_last_response!
