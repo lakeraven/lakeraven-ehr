@@ -284,6 +284,14 @@ class ConsentRound4Test < ActionDispatch::IntegrationTest
       post "#{BASE}/#{signature.id}/revocation",
            params: { reason: SYNTHETIC_REVOCATION_REASON, authenticity_token: csrf_token }
     end
+    assert_locked_redirect_to_kiosk!
+
+    reset_open_consent_kiosk_lock!
+
+    assert_no_difference -> { Lakeraven::EHR::SignedConsent.where(kind: "revocation").count } do
+      post "#{BASE}/#{signature.id}/revocation",
+           params: { reason: SYNTHETIC_REVOCATION_REASON, authenticity_token: csrf_token }
+    end
 
     assert_response :forbidden
     assert_operator Lakeraven::EHR::AuditEvent.count, :>=, 1
