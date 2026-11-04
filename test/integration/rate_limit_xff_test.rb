@@ -248,6 +248,118 @@ class RateLimitXffTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "trust_forwarded_for defaults to true" do
+    assert_equal true, Lakeraven::EHR.configuration.trust_forwarded_for,
+                 "forwarded client IP trust must default on (#498 L1)"
+  end
+
+  test "trust_forwarded_for false ignores X-Forwarded-For entirely" do
+    with_trust_forwarded_for(false) do
+      request = ActionDispatch::TestRequest.create(
+        "REMOTE_ADDR" => "10.1.2.3",
+        "HTTP_X_FORWARDED_FOR" => "203.0.113.50"
+      )
+      assert_equal "10.1.2.3", Lakeraven::EHR::ClientIp.resolve(request),
+                   "direct-LAN deployments must key on REMOTE_ADDR when trust_forwarded_for is false (#498 L1)"
+    end
+  end
+
+  test "trust_forwarded_for false throttles a LAN client rotating X-Forwarded-For on the shared REMOTE_ADDR" do
+    limit = 2
+    remote = "10.1.2.3"
+
+    with_test_rate_limit(max_requests: limit) do
+      with_trust_forwarded_for(true) do
+        control_statuses = 5.times.map do |i|
+          post LOGIN,
+               params: { username: "xff-rotate-control-#{i}", password: "wrong" },
+               env: integration_request_env(
+                 remote_addr: remote,
+                 x_forwarded_for: "203.0.113.#{i + 1}"
+               )
+          response.status
+        end
+        refute_includes control_statuses, 429,
+                        "with default XFF trust, rotating headers must not throttle #{remote} (#498 L1); " \
+                        "saw #{control_statuses.inspect}"
+      end
+
+      Lakeraven::EHR::LoginThrottle.reset!
+      with_trust_forwarded_for(false) do
+        statuses = 5.times.map do |i|
+          post LOGIN,
+               params: { username: "xff-rotate-#{i}", password: "wrong" },
+               env: integration_request_env(
+                 remote_addr: remote,
+                 x_forwarded_for: "203.0.113.#{i + 1}"
+               )
+          response.status
+        end
+
+        assert_includes statuses[2..], 429,
+                        "without XFF trust, rotating spoof headers must not mint fresh IP buckets (#498 L1); " \
+                        "saw #{statuses.inspect}"
+      end
+    end
+  end
+
+  test "trust_forwarded_for true still resolves the X-Forwarded-For client behind a private REMOTE_ADDR" do
+    request = ActionDispatch::TestRequest.create(
+      "REMOTE_ADDR" => "10.1.2.3",
+      "HTTP_X_FORWARDED_FOR" => "203.0.113.50"
+    )
+    assert_equal "203.0.113.50", Lakeraven::EHR::ClientIp.resolve(request),
+                 "default behaviour must keep trusting X-Forwarded-For behind private REMOTE_ADDR (#498 L1)"
+  end
+
+  test "LoginThrottle with trust_forwarded_for false keys sign-in on REMOTE_ADDR not rotating X-Forwarded-For" do
+    attempts = Lakeraven::EHR::LoginThrottle::MAX_ATTEMPTS
+    remote = "10.1.2.3"
+
+    with_trust_forwarded_for(true) do
+      attempts.times do |i|
+        post LOGIN,
+             params: { username: "trust-control-#{i}", password: "wrong" },
+             env: integration_request_env(
+               remote_addr: remote,
+               x_forwarded_for: "203.0.113.#{i + 1}"
+             )
+      end
+
+      post LOGIN,
+           params: { username: "trust-control-over", password: "wrong" },
+           env: integration_request_env(
+             remote_addr: remote,
+             x_forwarded_for: "203.0.113.99"
+           )
+
+      refute_equal 429, response.status,
+                   "with default XFF trust, rotating headers must not lock out #{remote} (#498 L1)"
+    end
+
+    Lakeraven::EHR::LoginThrottle.reset!
+    with_trust_forwarded_for(false) do
+      attempts.times do |i|
+        post LOGIN,
+             params: { username: "trust-nobody-#{i}", password: "wrong" },
+             env: integration_request_env(
+               remote_addr: remote,
+               x_forwarded_for: "203.0.113.#{i + 1}"
+             )
+      end
+
+      post LOGIN,
+           params: { username: "trust-nobody-over", password: "wrong" },
+           env: integration_request_env(
+             remote_addr: remote,
+             x_forwarded_for: "203.0.113.99"
+           )
+
+      assert_response :too_many_requests,
+                       "LoginThrottle must ignore XFF when trust_forwarded_for is false (#498 L1)"
+    end
+  end
+
   test "LoginThrottle keys the IP limb on the client behind a trusted proxy" do
     trusted_proxy = "10.0.0.5"
     first_client = "203.0.113.7"
@@ -306,5 +418,16 @@ class RateLimitXffTest < ActionDispatch::IntegrationTest
 
   def rotating_spoof_xff_ip
     "198.18.#{SecureRandom.random_number(256)}.#{SecureRandom.random_number(256)}"
+  end
+
+  def with_trust_forwarded_for(value)
+    config = Lakeraven::EHR.configuration
+    original = config.trust_forwarded_for if config.respond_to?(:trust_forwarded_for)
+    config.trust_forwarded_for = value
+    yield
+  ensure
+    if config.respond_to?(:trust_forwarded_for=)
+      config.trust_forwarded_for = original
+    end
   end
 end

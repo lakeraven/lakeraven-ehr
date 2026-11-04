@@ -58,6 +58,15 @@ class RateLimitRouteConventionTest < ActiveSupport::TestCase
     assert_empty ghost,
       "controller rate_limit declarations must register throttled_route_keys (#498):\n#{ghost.join("\n")}"
   end
+
+  test "every throttled action has an engine route" do
+    throttled = throttled_route_keys
+    routes = engine_route_keys
+    missing = throttled - routes
+    assert_empty missing,
+                 "throttled_route_keys must name only actions that exist in the engine routes (#498):\n" \
+                 "#{missing.join("\n")}"
+  end
 end
 
 # lakeraven-ehr#498: throttled routes must actually refuse traffic, not merely register.

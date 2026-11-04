@@ -37,6 +37,29 @@ module RateLimitTestHelper
     lakeraven/ehr/exports
     lakeraven/ehr/export_files
     lakeraven/ehr/backend_services
+    lakeraven/ehr/allergies
+    lakeraven/ehr/chart_searches
+    lakeraven/ehr/registration/patients
+    lakeraven/ehr/registration/demographics
+    lakeraven/ehr/registration/addresses
+    lakeraven/ehr/registration/contacts
+    lakeraven/ehr/registration/languages
+    lakeraven/ehr/registration/other_names
+    lakeraven/ehr/registration/eligibilities
+    lakeraven/ehr/registration/coverages
+    lakeraven/ehr/scheduling/clinics
+    lakeraven/ehr/scheduling/open_times
+    lakeraven/ehr/scheduling/hours
+    lakeraven/ehr/scheduling/patient_appointments
+    lakeraven/ehr/scheduling/appointments
+    lakeraven/ehr/scheduling/quick_registrations
+    lakeraven/ehr/scheduling/cancellations
+    lakeraven/ehr/scheduling/checkins
+    lakeraven/ehr/scheduling/reschedules
+    lakeraven/ehr/scheduling/appointment_details
+    lakeraven/ehr/scheduling/walk_ins
+    lakeraven/ehr/scheduling/checkouts
+    lakeraven/ehr/scheduling/no_shows
   ].freeze
 
   NEVER_ALLOWLISTED_ROUTE_KEYS = %w[
@@ -175,6 +198,47 @@ module RateLimitTestHelper
     mod.key_count
   end
 
+  FAIL_CLOSED_NEWCOMER_IP = "198.51.100.50"
+
+  # Fills the rate-limit table to max_keys: nine saturated bearer pairs plus one nil-identity
+  # hit on FAIL_CLOSED_NEWCOMER_IP (1 of max_requests). Every stored identity bucket is at its
+  # limit, so a new identity on that IP can only be refused (fail-closed), not evict-in.
+  def build_fail_closed_saturated_table!(mod, max_requests: 2, max_keys: 19, window: 10.minutes)
+    mod.configure_for_test!(max_requests: max_requests, window: window, max_keys: max_keys)
+    (1..9).each do |n|
+      ip = "198.51.100.#{n}"
+      max_requests.times do
+        assert mod.permit?(identity: "bearer:full-#{n}", ip: ip),
+               "saturate bearer:full-#{n} on #{ip} (#498 H1)"
+      end
+    end
+    assert mod.permit?(identity: nil, ip: FAIL_CLOSED_NEWCOMER_IP),
+           "newcomer IP must sit at 1 of #{max_requests} before the probe (#498 H1)"
+    assert_equal max_keys, mod.bucket_count,
+                 "table must be full (#498 H1); bucket_count=#{mod.bucket_count}"
+    FAIL_CLOSED_NEWCOMER_IP
+  end
+
+  # Same capacity as build_fail_closed_saturated_table!, but bearer:full-9 has only one hit so it
+  # may be evicted when a new identity arrives on FAIL_CLOSED_NEWCOMER_IP.
+  def build_fail_closed_table_with_light_identity!(mod, max_requests: 2, max_keys: 19, window: 10.minutes)
+    mod.configure_for_test!(max_requests: max_requests, window: window, max_keys: max_keys)
+    (1..8).each do |n|
+      ip = "198.51.100.#{n}"
+      max_requests.times do
+        assert mod.permit?(identity: "bearer:full-#{n}", ip: ip),
+               "saturate bearer:full-#{n} on #{ip} (#498 H1)"
+      end
+    end
+    assert mod.permit?(identity: "bearer:full-9", ip: "198.51.100.9"),
+           "bearer:full-9 must stay under its identity limit (#498 H1)"
+    assert mod.permit?(identity: nil, ip: FAIL_CLOSED_NEWCOMER_IP),
+           "fill table to max_keys with newcomer IP at 1 of #{max_requests} (#498 H1)"
+    assert_equal max_keys, mod.bucket_count,
+                 "table must be full (#498 H1); bucket_count=#{mod.bucket_count}"
+    FAIL_CLOSED_NEWCOMER_IP
+  end
+
   def monotonic_seconds
     Process.clock_gettime(Process::CLOCK_MONOTONIC)
   end
@@ -241,8 +305,37 @@ module RateLimitTestHelper
       { file: "probe.ndjson" }
     when "lakeraven/ehr/screenings"
       { instrument: "phq-9" }
+    when "lakeraven/ehr/chart_searches"
+      { query: "probe" }
+    when %r{\Alakeraven/ehr/registration/}
+      registration_sample_params(action)
+    when %r{\Alakeraven/ehr/scheduling/}
+      scheduling_sample_params(controller, action)
+    when "lakeraven/ehr/allergies"
+      { dfn: "1" }
     else
       {}
+    end
+  end
+
+  def registration_sample_params(action)
+    case action
+    when "index", "create", "confirm", "new"
+      { dfn: "1", query: "probe" }
+    when "show", "edit", "update"
+      { dfn: "1" }
+    else
+      { dfn: "1" }
+    end
+  end
+
+  def scheduling_sample_params(controller, action)
+    base = { resource_id: "1", appointment_id: "1", dfn: "1", id: "1" }
+    case controller
+    when "lakeraven/ehr/scheduling/clinics"
+      action == "show" || action == "week" ? { id: "1" } : base
+    else
+      base
     end
   end
 
@@ -263,31 +356,36 @@ module RateLimitTestHelper
     end
   end
 
-  def rate_limit_macro_counts_by_controller
+  def rate_limit_controller_source_paths
     root = Lakeraven::EHR::Engine.root.join("app/controllers/lakeraven/ehr")
-    counts = Hash.new(0)
-    Dir.children(root).each do |entry|
-      next unless entry.end_with?("_controller.rb")
+    Dir.glob(root.join("**/*_controller.rb")).reject do |path|
+      base = File.basename(path)
+      base == "application_controller.rb" || base == "base_controller.rb"
+    end
+  end
 
-      path = root.join(entry)
+  def controller_path_for_source(path)
+    root = Lakeraven::EHR::Engine.root.join("app/controllers/lakeraven/ehr")
+    relative = Pathname.new(path).relative_path_from(root).to_s.delete_suffix(".rb")
+    "lakeraven/ehr/#{relative.delete_suffix("_controller")}"
+  end
+
+  def rate_limit_macro_counts_by_controller
+    counts = Hash.new(0)
+    rate_limit_controller_source_paths.each do |path|
       source = File.read(path)
-      controller_path = "lakeraven/ehr/#{entry.delete_suffix("_controller.rb")}"
-      counts[controller_path] = source.scan(/rate_limit\s+only:/).length
+      counts[controller_path_for_source(path)] = source.scan(/rate_limit\s+only:/).length
     end
     counts
   end
 
   def controllers_declaring_login_throttle
-    root = Lakeraven::EHR::Engine.root.join("app/controllers/lakeraven/ehr")
     found = []
-    Dir.children(root).each do |entry|
-      next unless entry.end_with?("_controller.rb")
-
-      path = root.join(entry)
+    rate_limit_controller_source_paths.each do |path|
       source = File.read(path)
       next unless source.match?(/rate_limit\s+only:.*login_throttle:\s*true/)
 
-      found << "lakeraven/ehr/#{entry.delete_suffix("_controller.rb")}"
+      found << controller_path_for_source(path)
     end
     found.sort
   end
@@ -331,9 +429,8 @@ module RateLimitTestHelper
   end
 
   def rate_limit_declarations_for(controller_path)
-    path = Lakeraven::EHR::Engine.root.join(
-      "app/controllers/lakeraven/ehr/#{controller_path.delete_prefix("lakeraven/ehr/")}_controller.rb"
-    )
+    relative = controller_path.delete_prefix("lakeraven/ehr/")
+    path = Lakeraven::EHR::Engine.root.join("app/controllers/lakeraven/ehr/#{relative}_controller.rb")
     return [] unless File.exist?(path)
 
     File.read(path).scan(/rate_limit\s+only:\s*([^,\n]+)/).flat_map do |capture|
