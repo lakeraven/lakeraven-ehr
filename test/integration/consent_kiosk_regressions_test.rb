@@ -145,6 +145,7 @@ class ConsentKioskRegressionsTest < ActionDispatch::IntegrationTest
   end
 
   test "losing concurrent revocation returns 422 with audit and stores no second revocation" do
+    refresh_clinician_security_keys!(%w[orders_sign])
     post_kiosk_signature
     with_authentication_stub(auth_success_result) do
       post_kiosk_unlock(access_code: "a", verify_code: "b")
@@ -255,6 +256,7 @@ class ConsentKioskRegressionsTest < ActionDispatch::IntegrationTest
   end
 
   test "consent list shows signed time witness active revocation form and revoked reason" do
+    refresh_clinician_security_keys!(%w[orders_sign])
     post_kiosk_signature
     with_authentication_stub(auth_success_result) do
       post_kiosk_unlock(access_code: "SYNTHETIC.ACCESS", verify_code: "SYNTHETIC.VERIFY")
@@ -329,6 +331,7 @@ class ConsentKioskRegressionsTest < ActionDispatch::IntegrationTest
   end
 
   test "revocation reason never appears in the Rails log" do
+    refresh_clinician_security_keys!(%w[orders_sign])
     post_kiosk_signature
     with_authentication_stub(auth_success_result) do
       post_kiosk_unlock(access_code: "SYNTHETIC.ACCESS", verify_code: "SYNTHETIC.VERIFY")

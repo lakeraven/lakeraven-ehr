@@ -474,4 +474,114 @@ module ConsentWriteTestHelper
   def demo_patient_dob_fragment
     "Jun 30, 1997"
   end
+
+  CONSENT_KIOSK_BROADCAST_CHANNEL = "lakeraven-ehr-consent-kiosk"
+
+  def self.read_png_chunk_at(bytes, pos)
+    length = bytes.byteslice(pos, 4).unpack1("N")
+    type = bytes.byteslice(pos + 4, 4)
+    data = bytes.byteslice(pos + 8, length)
+    { type: type, data: data, next: pos + 8 + length + 4 }
+  end
+
+  # Rebuild a pad-sized inked PNG with extra chunks (valid CRCs) for allow-list tests.
+  def self.inked_pad_png_with_extra_chunks(between_ihdr_and_idat: [], after_idat: [])
+    base = pad_sized_visible_signature_png
+    pos = PNG_MAGIC.bytesize
+    ihdr = read_png_chunk_at(base, pos)
+    pos = ihdr[:next]
+    idat = read_png_chunk_at(base, pos)
+    mid = between_ihdr_and_idat.map { |type, data| png_chunk(type, data) }.join
+    tail = after_idat.map { |type, data| png_chunk(type, data) }.join
+    PNG_MAGIC + png_chunk("IHDR", ihdr[:data]) + mid + png_chunk("IDAT", idat[:data]) + tail + png_chunk("IEND", "")
+  end
+
+  def inked_pad_png_with_extra_chunks(**kwargs)
+    ConsentWriteTestHelper.inked_pad_png_with_extra_chunks(**kwargs)
+  end
+
+  def apng_extra_blank_frame_pad_png
+    ac_tl = [ 2, 0 ].pack("NN")
+    fc_tl = [ 0, 600, 180, 0, 0, 600, 180, 1 ].pack("NNNNNNNN")
+    fd_at = [ 0 ].pack("N") + Zlib::Deflate.deflate("\x00" + ("\x00".b * (600 * 4)))
+    inked_pad_png_with_extra_chunks(
+      between_ihdr_and_idat: [ [ "acTL", ac_tl ] ],
+      after_idat: [ [ "fcTL", fc_tl ], [ "fdAT", fd_at ] ]
+    )
+  end
+
+  def gama_extreme_pad_png
+    inked_pad_png_with_extra_chunks(between_ihdr_and_idat: [ [ "gAMA", [ 2_000_000 ].pack("N") ] ])
+  end
+
+  def iccp_pad_png
+    icc = "SYNTH\x00\x00" + Zlib::Deflate.deflate("SYNTHETIC-ICC-793")
+    inked_pad_png_with_extra_chunks(between_ihdr_and_idat: [ [ "iCCP", icc.b ] ])
+  end
+
+  def text_pad_png
+    inked_pad_png_with_extra_chunks(between_ihdr_and_idat: [ [ "tEXt", "Comment\x00SYNTHETIC-PNG-TEXT-793" ] ])
+  end
+
+  def srgb_pad_png
+    inked_pad_png_with_extra_chunks(between_ihdr_and_idat: [ [ "sRGB", "\x01" ] ])
+  end
+
+  def invalid_utf8_signer_name
+    "\xFF\xFE".b.force_encoding(Encoding::UTF_8)
+  end
+
+  @stale_kiosk_lock_refusal_bypass = false
+
+  module KioskLockStaleRefusalStub
+    def refused_signatures_exhausted?
+      return false if ConsentWriteTestHelper.stale_kiosk_lock_refusal_bypass?
+
+      super
+    end
+  end
+
+  def self.stale_kiosk_lock_refusal_bypass?
+    @stale_kiosk_lock_refusal_bypass
+  end
+
+  def self.stale_kiosk_lock_refusal_bypass=(enabled)
+    @stale_kiosk_lock_refusal_bypass = enabled
+  end
+
+  Lakeraven::EHR::KioskLock.prepend(KioskLockStaleRefusalStub)
+
+  def sign_in_clinician_for_consent!(scopes: WRITE_SCOPES, duz: DUZ, security_keys: nil, rpms_idle_seconds: nil)
+    @clinician_token = clinician_token(scopes: scopes, duz: duz)
+    params = {
+      duz: duz, user_type: "provider",
+      smart_token: @clinician_token.plaintext_token || @clinician_token.token
+    }
+    params[:security_keys] = Array(security_keys).join(",") if security_keys.present?
+    params[:rpms_idle_seconds] = rpms_idle_seconds if rpms_idle_seconds
+    banner_request(:post, "#{MOUNT}/test_session", params)
+    @csrf_token = nil
+  end
+
+  def refresh_clinician_security_keys!(keys)
+    banner_request(
+      :post, "#{MOUNT}/test_session",
+      {
+        duz: DUZ, user_type: "provider",
+        smart_token: @clinician_token.plaintext_token || @clinician_token.token,
+        security_keys: Array(keys).join(",")
+      }
+    )
+  end
+
+  def kiosk_lock_row
+    Lakeraven::EHR::KioskLock.sole
+  end
+
+  def with_stale_kiosk_lock_refusal_check!
+    ConsentWriteTestHelper.stale_kiosk_lock_refusal_bypass = true
+    yield
+  ensure
+    ConsentWriteTestHelper.stale_kiosk_lock_refusal_bypass = false
+  end
 end

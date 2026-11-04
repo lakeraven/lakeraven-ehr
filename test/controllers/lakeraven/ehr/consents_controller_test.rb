@@ -92,6 +92,7 @@ module Lakeraven
       end
 
       test "POST revocation marks consent revoked on the list without changing the signature row" do
+        refresh_clinician_security_keys!(%w[orders_sign])
         signature = SignedConsent.create!(
           patient_dfn: DFN,
           consent_template: ConsentTemplate.current(TEMPLATE_BH),
