@@ -1,0 +1,26 @@
+<% page_title "Can't continue" %>
+
+<div class="mx-auto mt-8 max-w-lg">
+  <div class="card">
+    <h1>This app can't sign in here</h1>
+    <p id="refusal-reason">
+      <% case @reason %>
+      <% when :unknown_client %>
+        The app isn't registered with this server.
+        Ask the app's maker or your site manager to register it.
+      <% when :unregistered_redirect %>
+        The app asked to return to an address that isn't registered for it.
+        Ask the app's maker or your site manager to check its registration.
+      <% when :wrong_server %>
+        The app asked for a different server's records.
+        Start again from the app, and choose this server.
+      <% else %>
+        There is no app request waiting for you.
+        Start again from the app.
+      <% end %>
+    </p>
+    <p class="mt-4">
+      <%= link_to "Go to the dashboard", dashboard_path %>
+    </p>
+  </div>
+</div>
