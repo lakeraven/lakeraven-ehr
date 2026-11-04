@@ -152,6 +152,9 @@ Lakeraven::EHR::Engine.routes.draw do
       get "languages/edit", to: "languages#edit", as: :edit_patient_languages
       post "languages/edit", to: "languages#edit"
       post "languages", to: "languages#update", as: :patient_languages
+      # The name the patient goes by (S-REG-12.1): PREFERRED NAME, IHS PATIENT (9000001) 9001.
+      get "preferred_name/edit", to: "preferred_names#edit", as: :edit_patient_preferred_name
+      post "preferred_name", to: "preferred_names#update", as: :patient_preferred_name
       # The other names the patient has used (S-REG-12): ALIAS, PATIENT (2.01).
       get "other_names", to: "other_names#index", as: :patient_other_names
       post "other_names", to: "other_names#create"

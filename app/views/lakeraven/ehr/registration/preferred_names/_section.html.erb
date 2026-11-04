@@ -1,0 +1,24 @@
+<%# The name the patient goes by (rpms-ux S-REG-12.1), a section of the
+    patient's registration page: PREFERRED NAME, IHS PATIENT (9000001) field 9001.
+    Locals: dfn, preferred_name (a String, "" when none is on file), can_edit. %>
+<section
+  id="preferred-name-section"
+  aria-labelledby="preferred-name-heading"
+  class="card mt-6"
+>
+  <div class="flex items-baseline justify-between gap-4">
+    <h2 id="preferred-name-heading">Preferred name</h2>
+    <% if can_edit %>
+      <%= link_to "Change the preferred name",
+            registration_edit_patient_preferred_name_path(dfn),
+            id: "edit-preferred-name" %>
+    <% end %>
+  </div>
+  <% if preferred_name.blank? %>
+    <p data-field="preferred_name">
+      None on file.
+    </p>
+  <% else %>
+    <p data-field="preferred_name"><%= preferred_name %></p>
+  <% end %>
+</section>
