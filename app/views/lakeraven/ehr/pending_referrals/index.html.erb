@@ -1,0 +1,82 @@
+<% page_title "Pending referrals" %>
+
+<%= page_header "Pending referrals",
+      "Referrals at this facility that are active or approved and not yet closed, for every patient, read from RPMS." %>
+
+<%= form_with url: pending_referrals_path,
+      method: :get,
+      local: true,
+      id: "referral-window",
+      class: "card flex flex-wrap items-end gap-4" do %>
+  <%= form_field :from, "Initiated from", hint: "The last #{Lakeraven::EHR::PendingReferralWindow::MONTHS} months unless you choose other dates.", error: @window_error do |aria| %>
+    <%= date_field_tag :from,
+          @window&.begin || @from,
+          id: "from",
+          aria: aria %>
+  <% end %>
+  <%= form_field :to, "Initiated to" do |aria| %>
+    <%= date_field_tag :to,
+          @window&.end || @to,
+          id: "to",
+          aria: aria %>
+  <% end %>
+  <%= submit_tag "Show referrals",
+        name: nil,
+        class: "button-secondary" %>
+<% end %>
+
+<% if @referrals == :unread %>
+  <% if @refusal %>
+    <%= alert_box :error,
+          "RPMS refused to list the pending referrals: #{@refusal}",
+          id: "pending-referrals-unread" %>
+  <% else %>
+    <%= alert_box :error,
+          "Pending referrals could not be read from RPMS.",
+          "Try again in a moment, or choose fewer dates.",
+          id: "pending-referrals-unread" %>
+  <% end %>
+<% elsif @referrals&.empty? %>
+  <%= empty_state "No referrals initiated from #{@window.begin.strftime('%b %-d, %Y')} to #{@window.end.strftime('%b %-d, %Y')} are pending.",
+        id: "no-pending-referrals" %>
+<% elsif @referrals %>
+  <table
+    id="pending-referrals"
+    class="data-table mt-6"
+  >
+    <caption>
+      <%= pluralize(@referrals.size, "referral") %> pending, initiated from <%= @window.begin.strftime("%b %-d, %Y") %> to <%= @window.end.strftime("%b %-d, %Y") %>, oldest first.
+    </caption>
+    <thead>
+      <tr>
+        <th scope="col">Initiated</th>
+        <th scope="col">Patient</th>
+        <th scope="col">Status</th>
+        <th scope="col">Referral number</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% @referrals.each do |referral| %>
+        <tr
+          data-referral="<%= referral[:ien] %>"
+          data-patient="<%= referral[:patient_dfn] %>"
+        >
+          <td data-date="<%= referral[:date]&.iso8601 %>"><%= referral[:date]&.strftime("%b %-d, %Y") %></td>
+          <th scope="row">
+            <%= referral[:patient_name] %>
+            <% if referral[:patient_dfn].present? %>
+              <%= button_to patient_context_path(referral[:patient_dfn]),
+                    method: :post,
+                    form_class: "inline",
+                    class: "underline" do %>
+                Open chart<span class="sr-only"> for <%= referral[:patient_name] %></span>
+              <% end %>
+            <% end %>
+          </th>
+          <td data-status="<%= referral[:status].to_s.downcase %>"><%= status_badge referral[:status].to_s.downcase, referral[:status].to_s.capitalize %></td>
+          <td><%= referral[:referral_number].presence || "None on file" %></td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+<% end %>

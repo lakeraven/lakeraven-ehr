@@ -123,6 +123,7 @@ module Lakeraven
         "lakeraven/ehr/scheduling/no_shows#undo",        # Undo no-show entry, not disclosure
         "lakeraven/ehr/scheduling/hours#new",            # Clinic hours form: access types, no patient data
         "lakeraven/ehr/scheduling/hours#create",         # Hours entry; a refusal names an appointment time and patient name, no clinical record
+        "lakeraven/ehr/pending_referrals#index",         # Pending referrals (#873): date, patient name, status and number; no reason, diagnosis or referred-to; revisit with Part 2 (#494)
         "lakeraven/ehr/test_sessions#create", # Test only
         "lakeraven/ehr/smart_configuration#show", # Discovery
         "lakeraven/ehr/smart_launch#show",    # EHR launch: lists registered apps for a patient named by name only

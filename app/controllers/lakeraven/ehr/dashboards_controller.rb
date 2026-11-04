@@ -14,9 +14,26 @@ module Lakeraven
       def show
         @today = Date.today
         @clinic_counts = todays_clinic_counts if schedules?
+        @pending_referrals = pending_referral_count if works_referrals?
       end
 
       private
+
+      # The referrals pending at the facility in the list's default window
+      # (#873), for a user who works referrals, on a backend that serves RCIS.
+      def works_referrals?
+        BackendRegistry.current.provides?(:prc_referrals) && capability?("referrals.work")
+      end
+
+      # { window:, count: } for PendingReferralsController's default window,
+      # or :unread when RPMS does not answer: a failed read is never zero.
+      def pending_referral_count
+        window = PendingReferralWindow.default(@today)
+        { window: window, count: ServiceRequestGateway.pending(window).size }
+      rescue ::RpmsRpc::Error, IOError, SystemCallError => e
+        Rails.logger.error("[dashboard] pending referrals raised #{e.class}")
+        :unread
+      end
 
       def schedules?
         BackendRegistry.current.provides?(:bprm_scheduling) && capability?("scheduling.open")

@@ -51,7 +51,11 @@
       </table>
     <% end %>
   </section>
-<% else %>
+<% end %>
+
+<%= render "pending_referrals", pending: @pending_referrals if @pending_referrals %>
+
+<% if @clinic_counts.nil? && @pending_referrals.nil? %>
   <%= empty_state "Nothing here counts work for you yet.",
         "Counts appear here as the screens for that work are added.",
         id: "no-counts" %>

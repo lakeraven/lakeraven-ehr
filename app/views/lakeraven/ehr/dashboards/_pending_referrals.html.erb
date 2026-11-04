@@ -1,0 +1,38 @@
+<%# The facility's pending referrals (#873), counted from RPMS and linked to
+    their list. Locals: pending, { window:, count: } or :unread. %>
+<% if pending == :unread %>
+  <%= alert_box :error,
+        "Pending referrals could not be read from RPMS.",
+        "Open Referrals to see the list, or try again in a moment.",
+        id: "referral-counts-unread" %>
+<% else %>
+  <section aria-labelledby="pending-referrals-heading">
+    <h2 id="pending-referrals-heading">Pending referrals</h2>
+    <table
+      id="referral-counts"
+      class="data-table"
+    >
+      <caption class="sr-only">
+        Referrals pending at the facility, active or approved, initiated from <%= pending[:window].begin.strftime("%b %-d, %Y") %> to <%= pending[:window].end.strftime("%b %-d, %Y") %>.
+      </caption>
+      <thead>
+        <tr>
+          <th scope="col">Initiated</th>
+          <th scope="col">Pending</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th scope="row">In the last <%= Lakeraven::EHR::PendingReferralWindow::MONTHS %> months</th>
+          <td data-count="<%= pending[:count] %>">
+            <%= link_to pending_referrals_path,
+                  class: "font-semibold tabular-nums" do %>
+              <%= pending[:count] %>
+              <span class="sr-only"><%= "referral".pluralize(pending[:count]) %> pending, initiated in the last <%= Lakeraven::EHR::PendingReferralWindow::MONTHS %> months</span>
+            <% end %>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+<% end %>
