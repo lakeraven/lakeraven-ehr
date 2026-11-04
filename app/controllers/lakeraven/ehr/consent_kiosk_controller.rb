@@ -15,6 +15,10 @@ module Lakeraven
       # destination, so it must not redirect to itself.
       skip_before_action :redirect_when_consent_kiosk_locked
 
+      # Invalid UTF-8 in the typed name is a refusal of that field. The
+      # default UTF-8 parameter check would reject the body first.
+      param_encoding :create, :signer_name, Encoding::ASCII_8BIT
+
       before_action :authenticate_smart_token!
       before_action :require_clinician_credential!
       before_action :require_consent_lock!
@@ -26,14 +30,19 @@ module Lakeraven
       end
 
       def create
+        normalize_signer_name_encoding!
         return refuse_repeated_signature! if signature_refusals_exhausted?
         return reject_missing_template! if @template.nil?
+        # Token check (and its claim, on a mismatch) before any stored hand-back.
+        # A matching token is not claimed, so a correct post after signing still
+        # reaches that hand-back uncounted.
+        return reject_mismatched_handover_token! unless posted_handover_token_matches?
         return render_stored_signature! if stored_handover_signature
         return refuse_repeated_signature! unless claimed_signature_attempt?
-        return render_rejected_signature! unless posted_handover_token_matches?
 
         store_decoded_signature!
       rescue ActiveRecord::RecordInvalid
+        note_audit_denial("kiosk signature refused: signature could not be stored")
         render_rejected_signature!
       end
 
@@ -130,8 +139,8 @@ module Lakeraven
         @signed_consent = SignedConsent.find_by(handover_token: @consent_lock["handover_token"])
       end
 
-      # The hidden field is this handover. A missing or different token is a
-      # refused attempt: the claim above already counted it, and nothing is stored.
+      # The hidden field is this handover. Comparison only. A mismatch is
+      # claimed by the refusal below; a match claims nothing.
       def posted_handover_token_matches?
         posted = params[:handover_token]
         expected = @consent_lock["handover_token"].to_s
@@ -154,6 +163,16 @@ module Lakeraven
       def reject_missing_template!
         return refuse_repeated_signature! unless claimed_signature_attempt?
 
+        note_audit_denial("kiosk signature refused: consent template could not be read")
+        render_rejected_signature!
+      end
+
+      # A missing or different token never reads a stored hand-back. The claim
+      # counts the refusal. A matching token does not enter here.
+      def reject_mismatched_handover_token!
+        return refuse_repeated_signature! unless claimed_signature_attempt?
+
+        note_audit_denial("kiosk signature refused: handover token mismatch")
         render_rejected_signature!
       end
 
@@ -177,11 +196,27 @@ module Lakeraven
         false
       end
 
+      # Binary is allowed through so an invalid UTF-8 name can be refused here.
+      # A name that is valid UTF-8 is tagged as such before that check.
+      def normalize_signer_name_encoding!
+        name = params[:signer_name]
+        return unless name.is_a?(String)
+
+        utf8 = name.dup.force_encoding(Encoding::UTF_8)
+        params[:signer_name] = utf8 if utf8.valid_encoding?
+      end
+
       def store_decoded_signature!
-        return render_rejected_signature! unless SignedConsent.acceptable_text?(params[:signer_name])
+        unless SignedConsent.acceptable_text?(params[:signer_name])
+          note_audit_denial("kiosk signature refused: signer name is not valid text")
+          return render_rejected_signature!
+        end
 
         parsed = SignedConsent.decode_signature_data_url(params[:signature])
-        return render_rejected_signature! unless parsed
+        unless parsed
+          note_audit_denial("kiosk signature refused: signature image is not an acceptable PNG")
+          return render_rejected_signature!
+        end
 
         store_posted_signature!(parsed)
       end
@@ -245,6 +280,7 @@ module Lakeraven
 
       # A second post of a signature already stored for this handover reads
       # the hand-back page. It must not be audited as another consent create.
+      # Only a matching token arrives here, and that post was not claimed.
       def render_stored_signature!
         @consent_audit_action = "R"
         render :handed_back
