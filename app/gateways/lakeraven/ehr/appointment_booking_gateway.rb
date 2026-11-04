@@ -94,6 +94,14 @@ module Lakeraven
       end
       private_class_method :rules_for
 
+      # How many appointments each resource holds on date, by resource name, from
+      # one read across every resource: BSDX ALL APPOINTMENTS (APBLKALL^BSDX05).
+      # The routine counts walk-ins and leaves out cancelled and no-show
+      # appointments (STCOMM^BSDX05). A resource with none is not a key.
+      def self.booked_counts(date, via: ::RpmsRpc::Scheduling)
+        Array(via.all_appointments(start_date: date, end_date: date)).group_by { |a| a[:resource_name] }.transform_values(&:size)
+      end
+
       def self.appointment(resource, id, date, via: ::RpmsRpc::Scheduling)
         Array(via.appointments(resource: resource[:name], start_date: date, end_date: date)).find { |a| a[:id] == id.to_i }
       end

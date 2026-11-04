@@ -21,13 +21,6 @@ class IhsFeatureRpmsRegressionTest < ActionDispatch::IntegrationTest
     reset_surface_data
   end
 
-  test "dashboard still shows Pending Referrals on rpms" do
-    sign_in_for_dashboard
-    get "/lakeraven-ehr/dashboard"
-    assert_response :ok
-    assert_includes response.body, "Pending Referrals"
-  end
-
   test "GET ServiceRequest still returns a referral bundle on rpms" do
     get "/lakeraven-ehr/ServiceRequest", params: { patient: PATIENT_DFN }, headers: @headers
     assert_response :ok

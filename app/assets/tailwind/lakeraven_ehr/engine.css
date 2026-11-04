@@ -122,22 +122,6 @@
   @apply border-emerald-300 bg-emerald-50 text-emerald-900;
 }
 
-@utility summary-counts {
-  @apply grid gap-4 sm:grid-cols-3;
-}
-
-@utility summary-count {
-  @apply flex flex-col rounded-lg border border-slate-200 bg-white p-5 shadow-sm;
-}
-
-@utility summary-count__number {
-  @apply text-3xl font-semibold text-slate-900 tabular-nums;
-}
-
-@utility summary-count__label {
-  @apply mt-1 text-sm font-medium text-slate-600;
-}
-
 @utility hint {
   @apply mt-1 text-sm text-slate-600;
 }
