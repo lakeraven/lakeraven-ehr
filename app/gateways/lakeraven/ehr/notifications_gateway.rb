@@ -4,19 +4,18 @@ require "rpms_rpc/api/notifications"
 
 module Lakeraven
   module EHR
-    # Clinician alert inbox — fires at login and on patient open.
-    # Wraps RpmsRpc::Notifications. There is no mark-read: rpms-rpc #311
-    # removed it with BQI MARK ALERT READ, and these alerts carry no per-user
-    # read state to set.
+    # The signed-in user's notifications (alerts), read from RPMS as that
+    # user (rpms-ux S-SGN-02.1). Wraps RpmsRpc::Notifications.inbox, which
+    # sends BEHOXQ ALRLIST, the read behind VueCentric's Notifications tab:
+    # RPMS answers for the session's own user, so no user is passed.
+    #
+    # Read only. Removing or forwarding a notification needs a write the gem
+    # does not send yet (lakeraven/rpms-rpc#595).
     class NotificationsGateway
-      def self.inbox(user_duz, unread: nil, via: default_provider)
-        return [] if via.nil?
-
-        via.inbox(user_duz.to_s, unread: unread)
-      end
-
-      def self.default_provider
-        ::RpmsRpc::Notifications
+      # The user's notifications, newest first. A failed read raises the
+      # gem's error, so a caller never mistakes it for "none".
+      def self.inbox
+        ::RpmsRpc::Notifications.inbox.sort_by { |n| n[:delivered_at] || Time.at(0) }.reverse
       end
     end
   end

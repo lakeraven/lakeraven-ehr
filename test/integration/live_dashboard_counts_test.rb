@@ -56,13 +56,13 @@ class LiveDashboardCountsTest < ActionDispatch::IntegrationTest
     assert_select "#appointments tr[data-appointment='#{cancelled}'] td[data-status='cancelled']"
   end
 
-  test "a user who does not schedule sees no count, and none of the old made-up ones" do
+  test "a user who does not schedule sees no clinic count, and none of the old made-up ones" do
     post "/lakeraven-ehr/login", params: { username: "PMD123", password: "PMD123!!" }
     assert_response :redirect, "signed on as the provider"
     get "/lakeraven-ehr/dashboard"
     assert_response :ok
     assert_select "#clinic-counts", count: 0
-    assert_select "#no-counts"
+    assert_select "#notification-count", 1, "the provider's notifications are counted (#874, live_notifications_test.rb)"
     %w[Active\ Cases My\ Tasks Pending\ Referrals].each { |label| assert_not_includes response.body, label }
   end
 

@@ -1,0 +1,76 @@
+<% page_title "Notifications" %>
+
+<%= page_header "Notifications",
+      [ "Your notifications from RPMS, newest first.",
+        "Open a patient's chart from the notification about them." ] %>
+
+<% if @notifications.empty? %>
+  <%= empty_state "You have no notifications.",
+        "Results, unsigned orders and messages RPMS sends you are listed here.",
+        id: "no-notifications" %>
+<% else %>
+  <table
+    id="notifications"
+    class="data-table"
+  >
+    <caption class="sr-only">
+      Your <%= pluralize(@notifications.size, "notification") %>, newest first.
+    </caption>
+    <thead>
+      <tr>
+        <th scope="col">Patient</th>
+        <th scope="col">Notification</th>
+        <th scope="col">Priority</th>
+        <th scope="col">Delivered</th>
+        <th scope="col">From</th>
+        <th scope="col"><span class="sr-only">Open</span></th>
+      </tr>
+    </thead>
+    <tbody>
+      <% @notifications.each do |notification| %>
+        <tr
+          data-alert="<%= notification[:alert_id] %>"
+          data-dfn="<%= notification[:patient_dfn] %>"
+        >
+          <th scope="row">
+            <% if notification[:patient_name] %>
+              <%= notification[:patient_name] %>
+              <% if notification[:hrn] %>
+                <span class="block text-sm text-slate-600">HRN <%= notification[:hrn] %></span>
+              <% end %>
+            <% else %>
+              <span class="text-slate-600">No patient</span>
+            <% end %>
+          </th>
+          <td data-message>
+            <%= notification[:message] %>
+            <% if notification[:info_only] %>
+              <span class="block text-sm text-slate-600">For information.</span>
+            <% end %>
+          </td>
+          <td data-priority="<%= notification[:priority] %>">
+            <%= notification[:priority].to_s.capitalize.presence || "Not set" %>
+          </td>
+          <td>
+            <% if notification[:delivered_at] %>
+              <time datetime="<%= notification[:delivered_at].strftime("%Y-%m-%dT%H:%M") %>">
+                <%= notification[:delivered_at].strftime("%b %-d, %Y %H:%M") %>
+              </time>
+            <% end %>
+          </td>
+          <td><%= notification[:sender] %></td>
+          <td>
+            <% if notification[:patient_dfn] %>
+              <%= button_to patient_context_path(notification[:patient_dfn]),
+                    method: :post,
+                    class: "underline" do %>
+                Open chart
+                <span class="sr-only">for <%= notification[:patient_name] %></span>
+              <% end %>
+            <% end %>
+          </td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+<% end %>
