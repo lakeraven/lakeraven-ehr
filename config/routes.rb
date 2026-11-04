@@ -105,7 +105,17 @@ Lakeraven::EHR::Engine.routes.draw do
   get ".well-known/smart-configuration", to: "smart_configuration#show"
   get "smart/launch", to: "smart_launch#show"
 
-  # Backend Services JWT auth
+  # SMART App Launch authorization code flow (#839). The user signs in with
+  # their own RPMS codes and approves; GET and POST are both served.
+  get "oauth/authorize", to: "smart_authorizations#new", as: :smart_authorization
+  post "oauth/authorize", to: "smart_authorizations#new"
+  get "oauth/authorize/approval", to: "smart_authorizations#show", as: :smart_authorization_approval
+  post "oauth/authorize/approval", to: "smart_authorizations#decide"
+
+  # One token endpoint, two grants: the authorization code from a launch, and
+  # Backend Services client_credentials (JWT auth) for everything else.
+  post "oauth/token", to: "smart_tokens#create",
+    constraints: ->(req) { req.request_parameters["grant_type"] == "authorization_code" }
   post "oauth/token", to: "backend_services#token"
 
   # Measure $import

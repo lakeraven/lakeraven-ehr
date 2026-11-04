@@ -58,6 +58,15 @@ module Lakeraven
           return
         end
 
+        # A token from a SMART launch (#839, #844) lives only as long as the
+        # browser session its user approved it in, and that session's RPMS
+        # connection. Once either is gone the token is revoked here, so it
+        # never reads RPMS as anyone, and the app has to launch again.
+        unless launched_token_binding_holds?(token)
+          render_unauthorized("Invalid or revoked token")
+          return
+        end
+
         # THE LANDING CONTRACT (see also #491).
         #
         # A cookie rides cross-site requests, so a session-derived token can be
@@ -414,6 +423,9 @@ module Lakeraven
       # construction. A header/system token has no DUZ and gets nil: system
       # callers must not inherit a human's signature.
       def current_duz
+        # A launched token acts for the user who approved it: their DUZ, kept
+        # on the authorization, never read from the token's resource owner.
+        return launched_authorization.duz if launched_authorization
         return nil unless current_token && browser_sso_token?(current_token)
         # resource_owner_id carries the DUZ for a browser token and the patient
         # DFN for a patient-context token — two identifier namespaces in one
@@ -427,11 +439,29 @@ module Lakeraven
 
       # Display name of the signed-in clinician, for the audit trail.
       def current_user_name
+        return launched_authorization.user_name if launched_authorization
         return nil unless current_token && browser_sso_token?(current_token)
 
         session[:user_name].presence
       rescue StandardError
         nil
+      end
+
+      # The SMART launch the current token came from, or nil. Memoized per token.
+      def launched_authorization
+        return nil unless current_token
+        return @launched_authorization if defined?(@launched_authorization_for) && @launched_authorization_for == current_token.id
+
+        @launched_authorization_for = current_token.id
+        @launched_authorization = SmartAuthorization.for_access_token(current_token)
+      end
+
+      def launched_token_binding_holds?(token)
+        authorization = SmartAuthorization.for_access_token(token)
+        return true if authorization.nil? || authorization.binding_live?
+
+        token.revoke unless token.revoked?
+        false
       end
 
       def patient_context_scope?

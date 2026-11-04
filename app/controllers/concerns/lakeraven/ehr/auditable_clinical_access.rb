@@ -306,6 +306,8 @@ module Lakeraven
       # names one user with another's RPMS session. Nil for API clients and
       # the anonymous.
       def audit_rpms_session_id
+        launched = launched_clinician_authorization(audit_current_token)
+        return launched.rpms_session_id.presence if launched
         return nil unless respond_to?(:session, true) && session.respond_to?(:[])
 
         duz = resolved_clinician_duz
@@ -370,6 +372,11 @@ module Lakeraven
         session_duz = session_value(:duz)
 
         if token
+          # A SMART launch acts for the user who approved it (#839): that
+          # user, from the server-side authorization, never from a session.
+          launched = launched_clinician_authorization(token)
+          return launched.duz if launched
+
           if session_bound_browser_token?(token)
             human = current_duz_if_defined || session_duz
             return human if human.present?
@@ -401,6 +408,15 @@ module Lakeraven
       # everything else defaults to false.
       def session_authenticated_surface?
         false
+      end
+
+      # The SMART launch a token came from, when that token is this request's.
+      def launched_clinician_authorization(token)
+        return nil unless token && respond_to?(:launched_authorization, true) && token == audit_current_token
+
+        launched_authorization
+      rescue StandardError
+        nil
       end
 
       def current_duz_if_defined

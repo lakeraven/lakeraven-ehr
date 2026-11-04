@@ -121,6 +121,10 @@ module Lakeraven
         "lakeraven/ehr/smart_launch#show",    # Discovery
         "lakeraven/ehr/capability_statements#show", # Discovery
         "lakeraven/ehr/backend_services#token", # Auth
+        "lakeraven/ehr/smart_authorizations#new",    # Auth: checks an app's request, no clinical data
+        "lakeraven/ehr/smart_authorizations#show",   # Auth: the approval screen, scopes in plain words
+        "lakeraven/ehr/smart_authorizations#decide", # Auth: issues a code, no clinical data
+        "lakeraven/ehr/smart_tokens#create",         # Auth
         "lakeraven/ehr/transitions_of_care#create", # Wired separately in #568
         "lakeraven/ehr/ccda_imports#create",  # Ingress
         "lakeraven/ehr/exports#create",       # Status/kickoff, no clinical data
