@@ -11,6 +11,37 @@ class RateLimitIdentityFailClosedTest < ActiveSupport::TestCase
       Lakeraven::EHR::RateLimit.respond_to?(:reset!)
   end
 
+  test "one stored identity does not reopen H1 for a bearer spread across fresh IPs" do
+    mod = rate_limit_module!
+    max_requests = 3
+    mod.configure_for_test!(max_requests: max_requests, window: 10.minutes, max_keys: 20)
+
+    max_requests.times do
+      assert mod.permit?(identity: "bearer:seed", ip: "192.0.2.1"),
+             "seed identity must be granted (#498 H1)"
+    end
+
+    18.times do |i|
+      assert mod.permit?(identity: nil, ip: "198.51.100.#{i + 1}"),
+             "light IP bucket #{i + 1} must be granted (#498 H1)"
+    end
+    assert_equal 20, mod.bucket_count,
+                 "table must be full before victim bearer probes (#498 H1)"
+
+    results = 30.times.map do |i|
+      mod.permit?(identity: "bearer:victim", ip: "203.0.113.#{i + 1}")
+    end
+
+    assert_equal max_requests, results.count(true),
+                 "one stored identity must not reopen H1: expected exactly #{max_requests} grants, got #{results.count(true)} (#498 H1)"
+    assert_equal [ true, true, true ], results.first(3),
+                 "first #{max_requests} victim probes must grant (#498 H1)"
+    assert_operator mod.bucket_count, :<=, 20,
+                    "bucket count must stay within max_keys (#498 H1); bucket_count=#{mod.bucket_count}"
+  ensure
+    mod.reset! if mod.respond_to?(:reset!)
+  end
+
   test "a bearer from fresh IPs after the table fills with light IP buckets is granted exactly max_requests times" do
     mod = rate_limit_module!
     max_requests = 3
