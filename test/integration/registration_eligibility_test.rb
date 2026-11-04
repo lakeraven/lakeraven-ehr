@@ -7,6 +7,7 @@ require "test_helper"
 # (RpmsRpc::Patient.update). RPMS is stood in for at the gem boundary;
 # test/integration/live_registration_eligibility_test.rb runs it for real.
 class RegistrationEligibilityTest < ActionDispatch::IntegrationTest
+  include BrowserFormHelper
   DFN = 990_052
   RECORD = { dfn: DFN, name: "BRAVO,REESE", dob: Date.new(1948, 5, 19), sex: { internal: "M", external: "MALE" } }.freeze
   ENROLLMENT = { enrollment_number: "ZZ1", tribe_ien: 532, tribe_name: "KWETHLUK, ORGANIZED VILLAGE OF KWETHLUK",
@@ -107,6 +108,21 @@ class RegistrationEligibilityTest < ActionDispatch::IntegrationTest
       assert_response :forbidden
       patch path, params: { eligibility: form(blood_quantum: "3/4"), commit: "Save" }
       assert_response :forbidden
+      assert_empty updates
+    end
+  end
+
+  # #896: a browser sends the form's own token; the look-up must accept it.
+  test "Find tribe is accepted with forgery protection on, as in a browser" do
+    sign_in("registration_menu")
+    with_rpms do |updates|
+      with_forgery_protection do
+        get "#{path}/edit"
+        press "Find tribe", fill: { "tribe_search" => "KW" }
+      end
+
+      assert_response :ok
+      assert_select "label[data-tribe='532']"
       assert_empty updates
     end
   end

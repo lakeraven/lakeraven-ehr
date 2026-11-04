@@ -6,6 +6,7 @@ require "test_helper"
 # windows and runs AG's own field checks; these tests stand in for it at the
 # gem boundary and check what the screens send and show.
 class RegistrationContactsTest < ActionDispatch::IntegrationTest
+  include BrowserFormHelper
   include PatientProfileStubs
 
   # -- S-REG-08 ---------------------------------------------------------------
@@ -101,6 +102,20 @@ class RegistrationContactsTest < ActionDispatch::IntegrationTest
       assert_response :ok
       assert_select "label[data-relationship='22']", text: /Spouse/
       assert_select "input[name='contact[name]'][value='DOE,JANE']"
+    end
+  end
+
+  # #896: a browser sends the form's own token; the look-up must accept it.
+  test "Find relationship is accepted with forgery protection on, as in a browser" do
+    sign_in
+    with_profile(relationships: ->(text) { text == "SP" ? [ { ien: 22, name: "SPOUSE" } ] : [] }) do
+      with_forgery_protection do
+        get "#{BASE}/contacts/emergency/edit"
+        press "Find relationship", fill: { "relationship_search" => "SP" }
+      end
+
+      assert_response :ok
+      assert_select "label[data-relationship='22']", text: /Spouse/
     end
   end
 end
