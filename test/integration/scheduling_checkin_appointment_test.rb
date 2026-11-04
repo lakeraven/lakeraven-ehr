@@ -7,6 +7,7 @@ require "test_helper"
 # check-in and one with no provider where the clinic requires one, so those
 # rules are checked here and tested here.
 class SchedulingCheckinAppointmentTest < ActionDispatch::IntegrationTest
+  include BrowserFormHelper
   RESOURCE = { id: 2, name: "DEMO IHS CLINIC", inactive: false, time_scale: 15, hospital_location_id: 3,
                view: true, overbook: true, modify_schedule: true, modify_appointments: true }.freeze
 
@@ -192,5 +193,20 @@ class SchedulingCheckinAppointmentTest < ActionDispatch::IntegrationTest
       post path, params: checkin_params
     end
     assert_nil checkins.sole[:clinic_code]
+  end
+
+  # #896: a browser sends the form's own token; the look-up must accept it.
+  test "Find provider is accepted with forgery protection on, as in a browser" do
+    sign_in
+    with_rpms do
+      with_forgery_protection do
+        get path, params: { date: today.iso8601 }
+        press "Find provider", fill: { "provider_search" => "PROF" }
+      end
+    end
+
+    assert_response :ok
+    assert_select "#checkin-form label[data-provider='206']", text: /PROFILE,MD/
+    assert_empty checkins
   end
 end
