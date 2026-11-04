@@ -103,17 +103,9 @@ module Lakeraven
         render_refusal(:no_request)
       end
 
-      # A client registered to launch: has a redirect URI, and is not the
-      # engine's own browser-session application. This version serves
-      # confidential clients that authenticate with a client secret.
-      def launch_client(client_id)
-        return nil if client_id.blank? || client_id == SessionsController::BROWSER_SSO_APP_UID
-
-        app = Doorkeeper::Application.find_by(uid: client_id)
-        return nil unless app&.confidential? && app.jwks_uri.blank?
-
-        app
-      end
+      # A client registered to launch (LaunchClient): public, or confidential
+      # with a client secret or a published key set.
+      def launch_client(client_id) = LaunchClient.find(client_id)
 
       # Exact match against one of the registered redirect URIs.
       def redirect_registered?(app, redirect_uri)

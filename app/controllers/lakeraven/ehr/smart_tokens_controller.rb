@@ -17,6 +17,8 @@ module Lakeraven
     #     again elsewhere: the token would have no session to read RPMS on.
     # A used code presented again also revokes the token it bought.
     class SmartTokensController < ActionController::API
+      include SmartEndpoints
+
       UNIFORM_REFUSAL = "Client authentication failed"
 
       def create
@@ -42,16 +44,44 @@ module Lakeraven
 
       private
 
-      # A confidential client with a client secret: HTTP Basic, or client_id
-      # and client_secret in the body (RFC 6749 §2.3.1). Basic wins when sent.
+      # The launch client this request authenticates as, by the way its
+      # registration says it must (LaunchClient), or nil:
+      #   - asymmetric: a client_assertion JWT signed with a key from its
+      #     published JWKS (RS384 or ES384), the same checks as Backend
+      #     Services (ClientAssertion);
+      #   - symmetric: its client secret, by HTTP Basic or in the body
+      #     (RFC 6749 §2.3.1); Basic wins when sent;
+      #   - public: its client_id alone. PKCE is what proves it is the same
+      #     client that started the flow.
+      # A client presenting less than its registration requires is refused: a
+      # confidential client cannot pass as a public one by leaving its secret off.
       def authenticated_client
+        return asserted_client if params.key?(:client_assertion) || params.key?(:client_assertion_type)
+
         client_id, secret = client_credentials
-        return nil if client_id.blank? || secret.blank?
+        app = LaunchClient.find(client_id)
+        return nil unless app
 
-        app = Doorkeeper::Application.find_by(uid: client_id)
-        return nil unless app&.confidential? && app.jwks_uri.blank?
+        case LaunchClient.kind(app)
+        when :public then secret.blank? ? app : nil
+        when :symmetric then secret.present? && app.secret_matches?(secret) ? app : nil
+        end
+      end
 
-        app.secret_matches?(secret) ? app : nil
+      def asserted_client
+        return nil unless string_param(:client_assertion_type) == ClientAssertion::TYPE
+
+        assertion = string_param(:client_assertion)
+        app = ClientAssertion.claimed_client(assertion)
+        return nil unless app && LaunchClient.launch_client?(app) && LaunchClient.kind(app) == :asymmetric
+        return nil if string_param(:client_id).present? && string_param(:client_id) != app.uid
+
+        ClientAssertion.new(assertion, app: app, audience: smart_token_endpoint,
+          algorithms: LaunchClient::ASSERTION_ALGORITHMS).verify!
+        app
+      rescue ClientAssertion::Refused => e
+        Rails.logger.info("[smart_token] client assertion refused: #{e.message}")
+        nil
       end
 
       def client_credentials
