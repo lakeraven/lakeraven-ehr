@@ -36,11 +36,17 @@ module Lakeraven
         end
 
         # Files the changes through AG, then shows the record, or the form again
-        # with RPMS's reason when it refuses.
+        # with RPMS's reason when it refuses. A block files the changes its own
+        # way (the address keeps its history); by default, AG's update.
         def save(form, current, saved_notice)
-          result = PatientRecordGateway.update(dfn, form.changes_from(current))
+          changes = form.changes_from(current)
+          result = block_given? ? yield(changes) : PatientRecordGateway.update(dfn, changes)
           if result.saved?
             flash[:notice] = saved_notice
+            redirect_to registration_patient_path(dfn)
+          elsif result.partial?
+            # The change is saved and something RPMS keeps beside it is not: say both.
+            flash[:alert] = result.message
             redirect_to registration_patient_path(dfn)
           elsif result.outcome_unknown?
             flash.now[:alert] = "RPMS did not say whether the change was saved. Open the patient again to see what is on file before you change it again."

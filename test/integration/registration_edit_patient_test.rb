@@ -37,8 +37,14 @@ class RegistrationEditPatientTest < ActionDispatch::IntegrationTest
 
   # RPMS as the gem answers: the record, the contact read, the pick lists, and
   # the update, which answers from the script and records what it was sent.
-  def with_rpms(*update_replies, record: RECORD)
+  def with_rpms(*update_replies, record: RECORD, history: [])
     updates = []
+    stub(RpmsRpc::Registration, :address_history) { |_dfn| history }
+    # A change of address goes through change_address, which keeps the old one (S-REG-21.1).
+    stub(RpmsRpc::Registration, :change_address) do |dfn, moved_on:, **attrs|
+      updates << [ dfn, attrs.merge(moved_on: moved_on) ]
+      update_replies.shift
+    end
     stub(RpmsRpc::Patient, :brief_header) { |_dfn| HEADER }
     stub(RpmsRpc::Patient, :registration_record) { |dfn| dfn.to_i == DFN ? record : nil }
     stub(RpmsRpc::Patient, :contact) { |_dfn| CONTACT }
@@ -166,7 +172,67 @@ class RegistrationEditPatientTest < ActionDispatch::IntegrationTest
             params: { address: address(address_line1: "12 Example Rd", zip: "59001", phone_home: "406-555-0142") }
 
       assert_redirected_to "/lakeraven-ehr/registration/patients/#{DFN}"
-      assert_equal [ [ DFN, { address_line1: "12 EXAMPLE RD", zip: "59001", phone_home: "406-555-0142" } ] ], updates
+      assert_equal [ [ DFN, { address_line1: "12 EXAMPLE RD", zip: "59001", phone_home: "406-555-0142", moved_on: Date.current } ] ],
+                   updates
+    end
+  end
+
+  test "S-REG-21.1 a new address is sent with the date the patient moved, so RPMS keeps the old one" do
+    sign_in("registration_menu")
+    with_rpms(saved) do |updates|
+      get "/lakeraven-ehr/registration/patients/#{DFN}/address/edit"
+      assert_select "input[type=date][name='address[moved_on]'][value=?]", Date.current.iso8601
+
+      patch "/lakeraven-ehr/registration/patients/#{DFN}/address",
+            params: { address: address(city: "Elsewhere", moved_on: "2026-10-01") }
+
+      assert_redirected_to "/lakeraven-ehr/registration/patients/#{DFN}"
+      assert_equal [ [ DFN, { city: "ELSEWHERE", moved_on: Date.new(2026, 10, 1) } ] ], updates
+    end
+  end
+
+  test "S-REG-21.1 the patient page lists the previous addresses with the dates lived there" do
+    sign_in("registration_menu")
+    history = [ { ien: 2, changed_on: Date.new(2026, 11, 3), line1: "317 DUNEGRASS ST", line2: "", line3: "", city: "ANYWHERE",
+                  state: "MONTANA", zip: "59000", phone: "406-555-1031", lived_from: Date.new(2020, 1, 1),
+                  lived_to: Date.new(2026, 10, 1) } ]
+    with_rpms(history: history) do
+      get "/lakeraven-ehr/registration/patients/#{DFN}"
+
+      assert_select "#address-history tr[data-address-history='2']", text: /317 DUNEGRASS ST.*ANYWHERE MONTANA 59000/m
+      assert_select "#address-history [data-field='lived']", text: /Jan 1, 2020\s+to\s+Oct 1, 2026/
+    end
+  end
+
+  test "S-REG-21.1 with no previous address the page says so" do
+    sign_in("registration_menu")
+    with_rpms do
+      get "/lakeraven-ehr/registration/patients/#{DFN}"
+
+      assert_select "#no-address-history", text: /No previous addresses on file/
+    end
+  end
+
+  test "S-REG-21.7 a date moved in the future is refused before RPMS is asked" do
+    sign_in("registration_menu")
+    with_rpms do |updates|
+      patch "/lakeraven-ehr/registration/patients/#{DFN}/address",
+            params: { address: address(city: "Elsewhere", moved_on: (Date.current + 1).iso8601) }
+
+      assert_response :unprocessable_content
+      assert_select "#address-errors", text: /Date they moved cannot be in the future/
+      assert_empty updates
+    end
+  end
+
+  test "S-REG-21.1 when the address is saved and its history is not, the clerk is told both" do
+    sign_in("registration_menu")
+    partial = { success: false, error: :partial, message: "The address was saved, but the previous address was not kept: refused" }
+    with_rpms(partial) do
+      patch "/lakeraven-ehr/registration/patients/#{DFN}/address", params: { address: address(city: "Elsewhere") }
+
+      assert_redirected_to "/lakeraven-ehr/registration/patients/#{DFN}"
+      assert_equal partial[:message], flash[:alert]
     end
   end
 
