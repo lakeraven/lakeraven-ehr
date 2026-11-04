@@ -78,7 +78,7 @@ module Lakeraven
       private
 
       def authenticate(access_code:, verify_code:)
-        AuthenticationService.new.authenticate(access_code: access_code, verify_code: verify_code, client_ip: request.remote_ip)
+        AuthenticationService.new.authenticate(access_code: access_code, verify_code: verify_code, client_ip: client_ip)
       rescue RpmsRpc::Client::ConnectionError, RpmsRpc::NotConfiguredError, Errno::ECONNREFUSED,
              IOError, SocketError,
              # A broker that answers but refuses the sign-on RPCs themselves (a CIA-only

@@ -15,6 +15,8 @@ module Lakeraven
       class CoveragesController < WebController
         include RpmsUnavailableRendering
 
+        rate_limit only: %i[index new create]
+
         before_action :require_bprm_registration!
         before_action :require_authentication
         before_action -> { require_capability!("registration.view") }, only: :index

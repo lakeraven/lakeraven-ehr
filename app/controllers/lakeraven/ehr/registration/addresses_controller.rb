@@ -6,6 +6,8 @@ module Lakeraven
       # The front desk keeps a patient's address, phones and email current
       # (rpms-ux S-REG-21) through AG's Address window (RpmsRpc::Patient.update).
       class AddressesController < PatientEditsController
+        rate_limit only: %i[edit update]
+
         # GET /registration/patients/:dfn/address/edit
         def edit
           @address = PatientAddress.from_record(@record)

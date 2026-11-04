@@ -4,8 +4,9 @@ require "ipaddr"
 
 module Lakeraven
   module EHR
-    # Client address for RateLimit and for LoginThrottle (SessionsController
-    # passes the result into the account/IP pair).
+    # Client address for RateLimit, LoginThrottle, and any other reader of
+    # the client address (SessionsController passes it into the account/IP
+    # pair and into RPMS sign-on).
     #
     # Walks REMOTE_ADDR and X-Forwarded-For from the right — the hop closest
     # to this process first — and returns the first address that is not a
@@ -17,13 +18,23 @@ module Lakeraven
     # A process behind a proxy in those ranges therefore keys on the client
     # in X-Forwarded-For. config.action_dispatch.trusted_proxies replaces
     # that default when an operator needs a narrower or wider set.
-    # LoginThrottle sees the same address: SessionsController passes it in.
+    #
+    # trust_forwarded_for defaults to true. Set it false on a direct LAN,
+    # where clients reach the app with no reverse proxy: resolve then
+    # returns REMOTE_ADDR (or "unknown") and ignores X-Forwarded-For
+    # entirely, whatever trusted_proxies says.
     module ClientIp
       module_function
 
       def resolve(request)
         remote = header(request, "REMOTE_ADDR")
+        return present(remote) unless trust_forwarded_for?
+
         present(untrusted_hop(remote, forwarded_for(request), effective_proxies) || remote)
+      end
+
+      def trust_forwarded_for?
+        Lakeraven::EHR.configuration.trust_forwarded_for != false
       end
 
       # The raw operator list. Empty means "no explicit config", not "trust

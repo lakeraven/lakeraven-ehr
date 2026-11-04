@@ -5,6 +5,8 @@ module Lakeraven
     module Scheduling
       # The clinics a scheduler books into, and one clinic's day (S-SCH-01).
       class ClinicsController < BaseController
+        rate_limit only: %i[index show week]
+
         before_action :load_resource!, only: %i[show week]
 
         # GET /scheduling

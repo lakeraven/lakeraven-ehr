@@ -40,6 +40,8 @@ module Lakeraven
         clinician_required invalid_dfn frame_too_long
       ].freeze
 
+      rate_limit only: %i[new create no_known_allergies]
+
       before_action :authenticate_smart_token!
       before_action :authorize_allergy_scope!
       # Forgery protection runs before authentication and raises. A browser

@@ -10,6 +10,8 @@ module Lakeraven
       # second cancellation of a cancelled one and a reason of the wrong type.
       # So the appointment's state and the reason's type are checked here first.
       class CancellationsController < BaseController
+        rate_limit only: %i[new create]
+
         before_action :load_resource!
         before_action :require_booking_right!
         before_action :load_appointment!

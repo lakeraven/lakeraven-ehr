@@ -12,6 +12,8 @@ module Lakeraven
       class ContactsController < PatientSectionController
         EDIT_ACTIONS = %w[edit update].freeze
 
+        rate_limit only: %i[edit update]
+
         before_action :load_kind, only: %i[edit update]
 
         # GET or POST /registration/patients/:dfn/contacts/:kind/edit. A POST is a

@@ -13,6 +13,8 @@ module Lakeraven
         MAX_DAYS = 14
         PARTS = %w[am pm].freeze
 
+        rate_limit only: :index
+
         before_action :load_resource!
 
         # GET /scheduling/clinics/:id/open_times?from=&to=&length=&part=&access_type=

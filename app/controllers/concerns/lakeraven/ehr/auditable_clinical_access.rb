@@ -149,7 +149,7 @@ module Lakeraven
           entity_type: entity_type_value,
           entity_identifier: entity_identifier_value,
           **agent,
-          agent_network_address: request.remote_ip,
+          agent_network_address: ClientIp.resolve(request),
           rpms_session_id: audit_rpms_session_id,
           tenant_identifier: tenant,
           facility_identifier: facility
@@ -221,7 +221,7 @@ module Lakeraven
       # this wrapper.
       def publish_audit_context
         AuditContext.agent_resolver = -> { audit_agent_attributes }
-        AuditContext.network_address = request.remote_ip
+        AuditContext.network_address = ClientIp.resolve(request)
         AuditContext.tenant_identifier = audit_tenant_identifier
         AuditContext.facility_identifier = audit_facility_identifier
         AuditContext.inside_audited_request = true

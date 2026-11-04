@@ -9,6 +9,8 @@ module Lakeraven
       # or the user's modify-schedule right on it in BSDX RESOURCE USER, the
       # right Windows Scheduling asks for the same change.
       class HoursController < BaseController
+        rate_limit only: %i[new create]
+
         before_action :load_resource!
         before_action :require_schedule_right!
 

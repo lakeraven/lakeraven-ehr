@@ -25,12 +25,24 @@ module Lakeraven
     # SWEEP_EVERY calls, a bounded batch at a time; sweep_expired! walks
     # the rest. max_keys counts every stored bucket: IP, identity, and the
     # backend-services (client, IP) pair, which is stored as an identity.
-    # On a full table the victim is the lightest under-limit key in a
-    # bounded random sample. Expired keys in that sample are dropped. A
-    # key at or over its limit is never evicted, so a spent code or token
-    # is not reopened. If the sample has no IP victim, the new IP is
-    # refused. A saturated IP can be parked outside the hot table while
-    # that table still has room, so the address stays spent.
+    # A saturated IP can be parked outside the hot table while that table
+    # still has room, so the address stays spent. A key at or over its
+    # limit is never evicted, so a spent code or token is not reopened.
+    #
+    # A new identity needs a stored counter. At a full table the search is
+    # EVICT_TRIES samples of EVICT_SAMPLE keys. Expired keys in the sample
+    # are released first. The victim is the lightest under-limit identity
+    # in the sample, or, if the sample has none, the lightest under-limit
+    # hot IP. The search never takes a protected key of this request, a
+    # key at or over its limit, or a retained saturated IP. grant? evicts
+    # until both the new IP and the new identity fit, and only then stamps.
+    # If the identity still does not fit, grant? returns false and writes
+    # nothing for this request: no identity bucket, no IP stamp, and no
+    # new IP key. Evictions already performed stay. A request carrying an
+    # identity is granted only when that identity's counter is stored and
+    # stamped. A new IP with no new identity uses the same bounded search.
+    # Its only victim is the lightest under-limit hot IP. If that search
+    # cannot free a slot, the new IP is refused.
     class RateLimit
       DEFAULT_MAX_REQUESTS = 300
       DEFAULT_WINDOW = 1.minute
@@ -167,13 +179,25 @@ module Lakeraven
           slots = slots_for(identity, ip)
           return refuse_slots!(slots, now) if over_limit?(slots, now)
 
+          place!(slots, now)
+        end
+
+        # Evict first. Stamp only when both the new IP and the new identity
+        # fit. An identity that still does not fit is refused with no write.
+        def place!(slots, now)
           ip_add = additions_for(slots, :ip)
           id_add = additions_for(slots, :id)
-          protected = slot_keys(slots)
-          return false unless hot_room!(ip_add, protected, now)
+          return false unless admit!(ip_add, id_add, slot_keys(slots), now)
 
-          kept = keep_identities!(id_add, ip_add, protected, now)
-          record_kept!(slots, kept, now)
+          slots.each { |slot| record_slot!(slot, now) }
+          true
+        end
+
+        def admit!(ip_add, id_add, protected, now)
+          carve_room!(ip_add, id_add, protected, now)
+          return false unless hot_fits?(ip_add.size)
+          return false unless total_fits?(ip_add, id_add)
+
           true
         end
 
@@ -257,57 +281,34 @@ module Lakeraven
           key.start_with?("id:")
         end
 
-        # Hot IP slots only. One bounded sample per try: drop expired keys in
-        # that sample, otherwise the lightest live hot key under its limit.
-        # No qualifying victim refuses the new IP.
-        def hot_room!(ip_add, protected, now)
-          needed = ip_add.size
+        # Bounded search. Expired keys in the sample go first. A new
+        # identity takes the lightest under-limit identity, else the
+        # lightest under-limit hot IP. No new identity takes a hot IP only.
+        # Writes nothing. Evictions already done are kept.
+        def carve_room!(ip_add, id_add, protected, now)
           EVICT_TRIES.times do
-            return true if hot_fits?(needed)
+            return if both_fit?(ip_add, id_add)
 
             keys = sample_keys
             release_expired!(keys, protected, now)
-            return true if hot_fits?(needed)
+            return if both_fit?(ip_add, id_add)
 
-            victim = lightest_key(keys, protected, now, :hot)
-            return false unless victim
-
-            forget!(victim)
+            victim = victim_for(keys, protected, now, id_add.any?)
+            forget!(victim) if victim
           end
-          hot_fits?(needed)
+        end
+
+        def victim_for(keys, protected, now, new_identity)
+          identity = lightest_key(keys, protected, now, :id) if new_identity
+          identity || lightest_key(keys, protected, now, :hot)
+        end
+
+        def both_fit?(ip_add, id_add)
+          hot_fits?(ip_add.size) && total_fits?(ip_add, id_add)
         end
 
         def hot_fits?(needed)
           hot.size + needed <= max_keys
-        end
-
-        # Identity buckets share max_keys with IP buckets. Evict an under-limit
-        # identity from the sample. If the sample has none, the new identity
-        # is not stored; a new IP that already fit in the hot table is still
-        # recorded so a parked saturated address does not reopen.
-        def keep_identities!(id_add, ip_add, protected, now)
-          pending = id_add.dup
-          EVICT_TRIES.times do
-            return pending if total_fits?(ip_add, pending)
-
-            keys = sample_keys
-            release_expired!(keys, protected, now)
-            return pending if total_fits?(ip_add, pending)
-
-            victim = lightest_key(keys, protected, now, :id)
-            if victim
-              forget!(victim)
-            else
-              pending.pop
-              return pending
-            end
-          end
-          trim_identities!(pending, ip_add)
-        end
-
-        def trim_identities!(pending, ip_add)
-          pending.pop while pending.any? && !total_fits?(ip_add, pending)
-          pending
         end
 
         def total_fits?(ip_add, id_add)
@@ -369,18 +370,6 @@ module Lakeraven
         def saturated_entry?(key, now)
           entry = buckets[key]
           entry && fresh_count(key, now) >= entry[:limit]
-        end
-
-        def record_kept!(slots, kept_ids, now)
-          allowed = kept_ids.each_with_object({}) { |key, map| map[key] = true }
-          slots.each { |slot| record_slot!(slot, now) if keep_slot?(slot, allowed) }
-        end
-
-        def keep_slot?(slot, allowed)
-          return true unless identity_slot?(slot)
-          return true if buckets.key?(slot[:key])
-
-          allowed[slot[:key]]
         end
 
         def record_slot!(slot, now)
@@ -519,18 +508,20 @@ module Lakeraven
           end
         end
 
+        # Nested controllers live under app/controllers/lakeraven/ehr/**.
+        # controller_path already includes that subdirectory.
         def shipped_controller?(klass)
-          Engine.root.join("app/controllers/#{klass.controller_path}_controller.rb").file?
+          root = Engine.root.join("app/controllers")
+          root.join("#{klass.controller_path}_controller.rb").file?
         rescue StandardError
           false
         end
 
         def load_controller_declarations!
-          dir = Engine.root.join("app/controllers/lakeraven/ehr").to_s
-          Dir.children(dir).each do |entry|
-            next unless entry.end_with?("_controller.rb")
-
-            EHR.const_get(entry.delete_suffix(".rb").camelize)
+          root = Engine.root.join("app/controllers/lakeraven/ehr")
+          Dir.glob(root.join("**/*_controller.rb")).each do |file|
+            relative = Pathname.new(file).relative_path_from(root).sub_ext("").to_s
+            EHR.const_get(relative.camelize)
           end
         end
       end

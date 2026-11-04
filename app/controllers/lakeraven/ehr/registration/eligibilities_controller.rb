@@ -10,6 +10,8 @@ module Lakeraven
       # (RpmsRpc::Patient.update), and reads them back with
       # RpmsRpc::Tribal.enrollment.
       class EligibilitiesController < PatientEditsController
+        rate_limit only: %i[edit update]
+
         # GET /registration/patients/:dfn/eligibility/edit
         def edit
           @eligibility = PatientEligibility.from_enrollment(enrollment)

@@ -17,6 +17,8 @@ module Lakeraven
       class QuickRegistrationsController < BaseController
         SUBMISSION_ID = Registration::PatientsController::SUBMISSION_ID
 
+        rate_limit only: %i[new create]
+
         before_action :require_bprm_registration!
         before_action -> { require_capability!("patient.quick_register") }
         before_action :load_resource!

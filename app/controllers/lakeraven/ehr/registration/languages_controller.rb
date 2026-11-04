@@ -9,6 +9,8 @@ module Lakeraven
       class LanguagesController < PatientSectionController
         EDIT_ACTIONS = %w[edit update].freeze
 
+        rate_limit only: %i[edit update]
+
         # GET or POST /registration/patients/:dfn/languages/edit. A POST is a
         # language look-up, and carries what the clerk has chosen so far.
         def edit

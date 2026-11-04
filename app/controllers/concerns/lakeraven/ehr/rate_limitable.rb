@@ -12,6 +12,11 @@ module Lakeraven
     # de-duplicates before_actions by name, so one callback checks the
     # per-class action set instead of installing a filter per declaration.
     #
+    # The check is prepended onto the controller, ahead of the callback
+    # chain. A subclass `prepend_before_action` (registration and scheduling
+    # gates, forgery protection) cannot run first and answer 401 or 404
+    # before the 429.
+    #
     # `login_throttle: true` marks sessions#create, which LoginThrottle also
     # guards. The flag does not skip this limiter — that action is enforced
     # by both. Rails' own `rate_limit` takes one `by:` key and reads
@@ -19,6 +24,16 @@ module Lakeraven
     # live on Lakeraven::EHR::RateLimit.
     module RateLimitable
       extend ActiveSupport::Concern
+
+      # Runs before ActionController's callback chain, so every controller
+      # that declares `rate_limit` throttles before its own prepended
+      # callbacks and before callbacks inherited from a base.
+      module RateLimitGate
+        def process_action(...)
+          enforce_rate_limit!
+          super unless performed?
+        end
+      end
 
       FHIR_THROTTLE_TYPE = "application/fhir+json"
       # Prefix of the HMAC-SHA256 hex digest. Fixed length so a row never
@@ -52,7 +67,7 @@ module Lakeraven
           return if @rate_limit_enforcement_installed
 
           @rate_limit_enforcement_installed = true
-          prepend_before_action :enforce_rate_limit!
+          prepend RateLimitGate
         end
       end
 
