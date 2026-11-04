@@ -12,11 +12,15 @@ module Lakeraven
       # S-SCH-05.1, S-SCH-05.3), linking to that clinic's day. Shown to a user
       # who may open scheduling, on a backend that serves it (#647).
       #
+      # The appointments needing action today in those clinics (rpms-ux
+      # S-SCH-13.5, #875), linking to their list.
+      #
       # The user's notifications (rpms-ux S-SGN-02.1), linking to their list.
       # Shown to a user who may read the chart, as the list is (#874).
       def show
         @today = Date.today
         @clinic_counts = todays_clinic_counts if schedules?
+        @needing_action = needing_action_count if schedules?
         @notification_count = notification_count if patient_search_allowed?
         @pending_referrals = pending_referral_count if works_referrals?
       end
@@ -48,14 +52,31 @@ module Lakeraven
       # every one for a supervisor), or :unread when RPMS does not answer: a
       # failed read is said so, never shown as zero.
       def todays_clinic_counts
-        supervisor = capability?("scheduling.supervise")
         counts = AppointmentBookingGateway.booked_counts(@today)
-        AppointmentBookingGateway.resources.select { |r| r[:view] || supervisor }.map do |resource|
+        my_clinics.map do |resource|
           { resource: resource, count: counts.fetch(resource[:name], 0) }
         end
       rescue ::RpmsRpc::Error, IOError, SystemCallError => e
         Rails.logger.error("[dashboard] today's appointments raised #{e.class}")
         :unread
+      end
+
+      # { window:, count: } for the needing-action list's default window, today,
+      # or :unread when RPMS does not answer: a failed read is never zero.
+      def needing_action_count
+        window = NeedingActionWindow.default(@today)
+        { window: window, count: AppointmentBookingGateway.needing_action(my_clinics, window).size }
+      rescue ::RpmsRpc::Error, IOError, SystemCallError => e
+        Rails.logger.error("[dashboard] appointments needing action raised #{e.class}")
+        :unread
+      end
+
+      # The clinics scheduling offers this user, read once per request.
+      def my_clinics
+        @my_clinics ||= begin
+          supervisor = capability?("scheduling.supervise")
+          AppointmentBookingGateway.resources.select { |r| r[:view] || supervisor }
+        end
       end
 
       # How many notifications RPMS holds for the user: the rows of the list
