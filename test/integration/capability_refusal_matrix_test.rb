@@ -32,6 +32,8 @@ class CapabilityRefusalMatrixTest < ActionDispatch::IntegrationTest
     "POST /registration/patients/:dfn/other_names/:ien/remove" => "patient.register",
     "GET /registration/patients/:dfn/preferred_name/edit" => "patient.register",
     "POST /registration/patients/:dfn/preferred_name" => "patient.register",
+    "GET /registration/patients/:dfn/race_ethnicity/edit" => "patient.register",
+    "POST /registration/patients/:dfn/race_ethnicity" => "patient.register",
     "GET /registration/patients/:dfn/applications/new" => "patient.register",
     "POST /registration/patients/:dfn/applications" => "patient.register",
     "POST /registration/patients/:dfn/applications/:ien/status" => "patient.register",

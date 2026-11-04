@@ -172,6 +172,9 @@ Lakeraven::EHR::Engine.routes.draw do
       # The name the patient goes by (S-REG-12.1): PREFERRED NAME, IHS PATIENT (9000001) 9001.
       get "preferred_name/edit", to: "preferred_names#edit", as: :edit_patient_preferred_name
       post "preferred_name", to: "preferred_names#update", as: :patient_preferred_name
+      # Race and ethnicity with how each was collected (S-REG-20.2): PATIENT (2.02, 2.06).
+      get "race_ethnicity/edit", to: "race_ethnicities#edit", as: :edit_patient_race_ethnicity
+      post "race_ethnicity", to: "race_ethnicities#update", as: :patient_race_ethnicity
       # The other names the patient has used (S-REG-12): ALIAS, PATIENT (2.01).
       get "other_names", to: "other_names#index", as: :patient_other_names
       post "other_names", to: "other_names#create"

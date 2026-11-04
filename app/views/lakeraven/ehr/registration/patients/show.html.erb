@@ -119,6 +119,9 @@
     </dl>
   </section>
 
+  <%= render "lakeraven/ehr/registration/addresses/history",
+        history: @address_history %>
+
   <% if @contacts %>
     <%= render "lakeraven/ehr/registration/contacts/section",
           dfn: params[:dfn],
@@ -137,6 +140,13 @@
     <%= render "lakeraven/ehr/registration/preferred_names/section",
           dfn: params[:dfn],
           preferred_name: @preferred_name,
+          can_edit: can_edit %>
+  <% end %>
+
+  <% unless @race_ethnicity.nil? %>
+    <%= render "lakeraven/ehr/registration/race_ethnicities/section",
+          dfn: params[:dfn],
+          race_ethnicity: @race_ethnicity,
           can_edit: can_edit %>
   <% end %>
 
