@@ -8,15 +8,14 @@ module Lakeraven
     class ConsentsController < WebController
       include BrowserSmartAuthentication
       include ClinicianPatientContext
+      # Before CSRF and the SMART check, and inside the audit wrapper, so a
+      # timed-out staff session redirects to login and names that DUZ.
+      include AuditedSessionEnd
 
       CONSENT_RESOURCE = "Consent"
       TEMPLATES_MISSING = "No consent templates are installed, so handover is unavailable. " \
                           "Install them with bin/rails lakeraven_ehr:consent_templates:install."
 
-      # Idle expiry is the browser session's redirect to login, the same gate
-      # the rest of the HTML app uses. Without it the SMART check answers 401
-      # after it has already cleared the timed-out token.
-      before_action :require_authentication
       before_action :authenticate_smart_token!
       before_action :authorize_consent_scope!
       before_action :require_clinician_credential!, only: %i[handover revocation]

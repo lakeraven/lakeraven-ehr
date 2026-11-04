@@ -6,6 +6,7 @@ module Lakeraven
     # date of birth. Staff return by signing on again as the same DUZ.
     class ConsentKioskController < WebController
       include BrowserSmartAuthentication
+      include AuditedSessionEnd
 
       CONSENT_RESOURCE = "Consent"
       layout "lakeraven/ehr/kiosk"
@@ -26,7 +27,7 @@ module Lakeraven
 
       def create
         return refuse_repeated_signature! if signature_refusals_exhausted?
-        return reject_signature! if @template.nil?
+        return reject_missing_template! if @template.nil?
         return render_stored_signature! if stored_handover_signature
         return refuse_repeated_signature! unless claimed_signature_attempt?
 
@@ -128,8 +129,11 @@ module Lakeraven
         @signed_consent = SignedConsent.find_by(handover_token: @consent_lock["handover_token"])
       end
 
-      def reject_signature!
-        return render_refusal_uncounted unless count_signature_refusal
+      # Claim first, then refuse. A non-atomic increment can pass the cap
+      # when the in-memory exhaustion check is stale. At the cap this is a
+      # 429; a claim that cannot be stored stays closed (503).
+      def reject_missing_template!
+        return refuse_repeated_signature! unless claimed_signature_attempt?
 
         render_rejected_signature!
       end
@@ -176,17 +180,6 @@ module Lakeraven
         true
       end
 
-      def count_signature_refusal
-        lock = active_kiosk_lock
-        return true if lock.nil?
-
-        lock.increment!(:refused_signature_count)
-        true
-      rescue StandardError => error
-        Rails.logger.error("[consent-kiosk] signature refusal was not counted: #{error.class}")
-        false
-      end
-
       def refuse_repeated_signature!
         note_audit_denial(repeated_signature_reason)
         render plain: repeated_signature_reason, status: repeated_signature_status
@@ -204,12 +197,6 @@ module Lakeraven
         @signature_refusal_count_unreadable ? :service_unavailable : :too_many_requests
       end
 
-      def render_refusal_uncounted
-        note_audit_denial("consent signature refused: the refusal count could not be stored")
-        render plain: "The refused signature could not be counted, so another signature was refused.",
-               status: :service_unavailable
-      end
-
       # A racing second post gets the row already stored for this handover.
       # Audit that as a read, the same as a resubmit of a stored signature.
       def store_posted_signature!(parsed)
@@ -223,11 +210,18 @@ module Lakeraven
           patient_dfn: @locked_patient_dfn, consent_template: @template,
           template_key: @template.key, template_version: @template.version,
           template_body_digest: SignedConsent.digest_for(@template.body),
-          signer_name: params[:signer_name].to_s.presence, signature_png: parsed.bytes,
+          signer_name: signer_name_to_store, signature_png: parsed.bytes,
           decoded_signature: parsed, signed_at: Time.current, witness_duz: current_duz,
           kind: SignedConsent::KIND_SIGNATURE, recorded_by_duz: current_duz,
           handover_token: @consent_lock["handover_token"]
         }
+      end
+
+      # Blank becomes nil. A non-string is not coerced: the check already
+      # refused it, and to_s would store inspect text.
+      def signer_name_to_store
+        name = params[:signer_name]
+        name.presence if name.is_a?(String)
       end
 
       # A second post of a signature already stored for this handover reads
@@ -336,28 +330,6 @@ module Lakeraven
         value[:client] || value["client"]
       end
 
-      # Session end has to be a refusal with a reason. The shared gate clears
-      # the session before the audit row is written, which would otherwise
-      # look like nothing worth recording.
-      def require_authentication
-        note_ending_kiosk_session!
-        super
-      end
-
-      def note_ending_kiosk_session!
-        reason = ending_kiosk_session_reason
-        note_audit_denial(reason) if reason
-      end
-
-      def ending_kiosk_session_reason
-        return nil if session[:duz].blank?
-        return "browser access refused: session timed out" if session_idle_expired? || session_lifetime_expired?
-        return "browser access refused: session ended" if session_token_revoked?
-        return "browser access refused: RPMS session ended" if rpms_connection_closed?
-
-        nil
-      end
-
       # Unlock releases the tablet. It is an execute, not a consent create.
       # A resubmit of a stored signature is a read.
       def audit_action
@@ -386,29 +358,6 @@ module Lakeraven
       def consent_audit_id
         @signed_consent.id.to_s if @signed_consent&.persisted?
       end
-
-      # require_authentication has to sit after the audit around-callback
-      # (so a session ending is recorded) and before CSRF (so a stale token
-      # cannot turn that ending into a 401). Prepend puts it outside the
-      # wrapper; a normal before_action puts it after CSRF.
-      def self.place_session_authentication_inside_audit!
-        before_action :require_authentication
-        chain = _process_action_callbacks
-        ordered = chain.to_a
-        session_gate = ordered.find { |callback| callback.filter == :require_authentication }
-        audit_at = ordered.index { |callback| callback.filter == :audit_clinical_access }
-        unless session_gate && audit_at
-          raise "consent kiosk authentication could not be placed inside the audit wrapper"
-        end
-
-        chain.delete(session_gate)
-        chain.insert(audit_at + 1, session_gate)
-      end
-      private_class_method :place_session_authentication_inside_audit!
-      # Inside the audit wrapper, and before CSRF. Prepending would record
-      # nothing when the session ends; appending would let a stale token
-      # turn that ending into a 401 instead of a redirect to login.
-      place_session_authentication_inside_audit!
     end
   end
 end

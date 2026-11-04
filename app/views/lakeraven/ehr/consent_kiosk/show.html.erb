@@ -29,7 +29,7 @@
     <button type="submit">Sign</button>
   <% end %>
 
-  <script>
+  <%= javascript_tag nonce: true do %>
     (function () {
       var canvas = document.getElementById("consent-signature");
       var field = document.getElementById("consent-signature-field");
@@ -77,7 +77,7 @@
       canvas.addEventListener("pointerup", stop);
       canvas.addEventListener("pointercancel", stop);
     })();
-  </script>
+  <% end %>
 <% end %>
 
 <%= render "unlock_form" %>

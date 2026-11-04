@@ -47,15 +47,16 @@ module Lakeraven
         Digest::SHA256.hexdigest(body.to_s)
       end
 
-      # Signer name and revocation reason are stored as text. A NUL byte, or
-      # bytes that are not valid UTF-8, is refused before a row is written.
+      # Signer name and revocation reason are stored as text. Nil is allowed.
+      # Anything else must already be a UTF-8 String with no NUL. A non-string
+      # is refused: Array#to_s and Hash#to_s are inspect text, which escapes a
+      # NUL and would pass a check of the coerced value.
       def self.acceptable_text?(value)
         return true if value.nil?
+        return false unless value.is_a?(String)
+        return false unless value.encoding == Encoding::UTF_8 && value.valid_encoding?
 
-        text = value.to_s
-        return false unless text.encoding == Encoding::UTF_8 && text.valid_encoding?
-
-        !text.include?("\0")
+        !value.include?("\0")
       end
 
       # The canvas posts a PNG data URL. Stored bytes are the PNG itself.
@@ -201,13 +202,19 @@ module Lakeraven
           template_key: template_key, template_version: template_version,
           template_body_digest: template_body_digest, signed_at: Time.current,
           witness_duz: by_duz.to_s, kind: KIND_REVOCATION, recorded_by_duz: by_duz.to_s,
-          revokes_id: id, revocation_reason: reason.to_s
+          revokes_id: id, revocation_reason: reason
         }
       end
 
+      # The column casts with to_s before the attribute reader. Validation has
+      # to see the assigned value, or an array's inspect text hides a NUL.
       def text_fields_are_utf8
-        errors.add(:signer_name, "must be valid text") unless self.class.acceptable_text?(signer_name)
-        errors.add(:revocation_reason, "must be valid text") unless self.class.acceptable_text?(revocation_reason)
+        errors.add(:signer_name, "must be valid text") unless self.class.acceptable_text?(given_text(:signer_name))
+        errors.add(:revocation_reason, "must be valid text") unless self.class.acceptable_text?(given_text(:revocation_reason))
+      end
+
+      def given_text(attribute)
+        public_send(:"#{attribute}_before_type_cast")
       end
 
       def snapshot_matches_template

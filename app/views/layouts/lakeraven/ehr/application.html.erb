@@ -62,9 +62,10 @@
   <%= yield %>
 </main>
 
-<%= render "lakeraven/ehr/shared/consent_kiosk_channel" %>
 <% if flash[:consent_handover_ended] %>
-  <%= render "lakeraven/ehr/shared/consent_kiosk_channel", announce: "handover-ended" %>
+  <%= render "lakeraven/ehr/shared/consent_kiosk_channel", announce: "handover-ended", listen: true %>
+<% else %>
+  <%= render "lakeraven/ehr/shared/consent_kiosk_channel" %>
 <% end %>
 </body>
 </html>
