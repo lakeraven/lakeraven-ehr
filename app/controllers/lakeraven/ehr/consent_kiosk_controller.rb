@@ -15,10 +15,6 @@ module Lakeraven
       # destination, so it must not redirect to itself.
       skip_before_action :redirect_when_consent_kiosk_locked
 
-      # Invalid UTF-8 in the typed name is a refusal of that field. The
-      # default UTF-8 parameter check would reject the body first.
-      param_encoding :create, :signer_name, Encoding::ASCII_8BIT
-
       before_action :authenticate_smart_token!
       before_action :require_clinician_credential!
       before_action :require_consent_lock!
@@ -30,7 +26,6 @@ module Lakeraven
       end
 
       def create
-        normalize_signer_name_encoding!
         return refuse_repeated_signature! if signature_refusals_exhausted?
         return reject_missing_template! if @template.nil?
         # Token check (and its claim, on a mismatch) before any stored hand-back.
@@ -194,16 +189,6 @@ module Lakeraven
         Rails.logger.error("[consent-kiosk] signature refusal was not counted: #{error.class}")
         @signature_refusal_count_unreadable = true
         false
-      end
-
-      # Binary is allowed through so an invalid UTF-8 name can be refused here.
-      # A name that is valid UTF-8 is tagged as such before that check.
-      def normalize_signer_name_encoding!
-        name = params[:signer_name]
-        return unless name.is_a?(String)
-
-        utf8 = name.dup.force_encoding(Encoding::UTF_8)
-        params[:signer_name] = utf8 if utf8.valid_encoding?
       end
 
       def store_decoded_signature!
