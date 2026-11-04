@@ -2,58 +2,28 @@
 
 require "test_helper"
 
-# Tests for NotificationsGateway — clinician alert inbox.
-# Wraps RpmsRpc::Notifications (lakeraven/rpms-rpc#74).
+# NotificationsGateway reads the signed-in user's alerts through the gem's
+# BEHOXQ ALRLIST read (rpms-ux S-SGN-02.1), on the rows a rpms-ydb e9b78c8
+# container answered on 2026-11-04 (test/integration/notifications_test.rb).
 module Lakeraven
   module EHR
     class NotificationsGatewayTest < ActiveSupport::TestCase
-      class FakeNotificationsAPI
-        attr_reader :calls
+      CAPTURED = [
+        "1^0^^  ^Staff meeting moved to 3 PM.^3261104.175352^MANAGER,SYSTEM^0^BEHOXQ^BEHOXQ,PROBE;4;3261104.175352^0^PRI=1^INF=0",
+        "2^1^MOUSE,MICKEY M    (1001)^  ^Unscheduled visit.^3261104.174742^POSTMASTER^3^OR.19^OR,3,19;.5;3261104.174742^1^",
+        "2^1^MOUSE,MICKEY M    (1001)^  ^Unscheduled visit (probe).^3261104.175206^MANAGER,SYSTEM^3^OR.19^OR,3,19;4;3261104.175206^1^"
+      ].freeze
 
-        def initialize(returns: {})
-          @returns = returns
-          @calls = []
-        end
+      setup { RpmsRpc.client.seed_raw_lines(:notifications_inbox, "", CAPTURED) }
+      teardown { RpmsRpc.client.seed_raw_lines(:notifications_inbox, "", []) }
 
-        def inbox(user_duz, unread: nil)
-          @calls << { method: :inbox, args: [ user_duz ], unread: unread }
-          @returns[:inbox] || []
-        end
-      end
+      test "inbox lists the user's alerts newest first, asking RPMS for no user" do
+        alerts = NotificationsGateway.inbox
 
-      # --- via: nil ---
-
-      test "inbox returns empty when no provider is available" do
-        assert_equal [], NotificationsGateway.inbox("301", via: nil)
-      end
-
-      # --- delegation ---
-
-      test "inbox delegates with duz coerced and unread filter passed through" do
-        items = [ { ien: 1, message: "Lab result ready" } ]
-        fake = FakeNotificationsAPI.new(returns: { inbox: items })
-
-        result = NotificationsGateway.inbox(301, unread: true, via: fake)
-
-        assert_equal items, result
-        assert_equal [ "301" ], fake.calls.first[:args]
-        assert_equal true, fake.calls.first[:unread]
-      end
-
-      test "inbox defaults unread to nil when omitted" do
-        fake = FakeNotificationsAPI.new(returns: { inbox: [] })
-
-        NotificationsGateway.inbox("301", via: fake)
-
-        assert_nil fake.calls.first[:unread]
-      end
-
-      # --- default_provider ---
-
-      test "default_provider resolves to RpmsRpc::Notifications when the gem ships it" do
-        provider = NotificationsGateway.default_provider
-        refute_nil provider, "expected RpmsRpc::Notifications to be loaded via the gateway's guarded require"
-        assert_equal "RpmsRpc::Notifications", provider.name
+        assert_equal [ "BEHOXQ,PROBE;4;3261104.175352", "OR,3,19;4;3261104.175206", "OR,3,19;.5;3261104.174742" ],
+          alerts.map { |a| a[:alert_id] }
+        call = RpmsRpc.client.received_calls.reverse.find { |c| c[:rpc] == "BEHOXQ ALRLIST" }
+        assert_empty call[:params].to_a, "ALRLIST answers for the session's own user"
       end
     end
   end

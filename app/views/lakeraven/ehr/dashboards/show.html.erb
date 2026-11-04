@@ -7,6 +7,27 @@
 <%= page_header "Dashboard",
       "Your work for today, counted from RPMS." %>
 
+<% if @notification_count == :unread %>
+  <%= alert_box :error,
+        "Your notifications could not be read from RPMS.",
+        "Try again in a moment.",
+        id: "notification-count-unread" %>
+<% elsif @notification_count %>
+  <section aria-labelledby="notifications-heading">
+    <h2 id="notifications-heading">Notifications</h2>
+    <p
+      id="notification-count"
+      data-count="<%= @notification_count %>"
+    >
+      <%= link_to notifications_path,
+            class: "font-semibold tabular-nums" do %>
+        <%= @notification_count %>
+        <span class="sr-only"><%= "notification".pluralize(@notification_count) %> for you in RPMS</span>
+      <% end %>
+    </p>
+  </section>
+<% end %>
+
 <% if @clinic_counts == :unread %>
   <%= alert_box :error,
         "Today's appointments could not be read from RPMS.",
@@ -51,7 +72,9 @@
       </table>
     <% end %>
   </section>
-<% else %>
+<% end %>
+
+<% unless @clinic_counts || @notification_count %>
   <%= empty_state "Nothing here counts work for you yet.",
         "Counts appear here as the screens for that work are added.",
         id: "no-counts" %>
