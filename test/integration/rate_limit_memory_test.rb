@@ -73,22 +73,25 @@ class RateLimitMemoryTest < ActionDispatch::IntegrationTest
   test "F1 flooding many client IPs drives key_count to max_keys" do
     mod = rate_limit_module!
     assert_respond_to mod, :key_count, "Lakeraven::EHR::RateLimit must expose .key_count (#498)"
+    assert_respond_to mod, :bucket_count, "Lakeraven::EHR::RateLimit must expose .bucket_count (#498)"
     assert configure_for_test_accepts_max_keys?(mod),
            "#{RateLimitTestHelper::RATE_LIMIT_CONSTANT} must accept max_keys: in configure_for_test! (#498)"
     max_keys = 8
     mod.configure_for_test!(max_requests: 5, window: 10.minutes, max_keys: max_keys)
 
     200.times do |attempt|
-      break if mod.key_count >= max_keys
+      break if mod.bucket_count >= max_keys
 
       ip = "203.0.113.#{attempt % 250}"
       get "/lakeraven-ehr/Patient/1", headers: mint_token,
           env: integration_request_env(remote_addr: ip)
     end
 
-    assert_equal max_keys, mod.key_count,
-                 "key_count must reach max_keys from many distinct client IPs (#498 F1); " \
-                 "saw #{mod.key_count}"
+    assert_equal max_keys, mod.bucket_count,
+                 "stored buckets must reach max_keys from many distinct client IPs (#498 F1); " \
+                 "saw bucket_count=#{mod.bucket_count}"
+    assert_operator mod.key_count, :<=, max_keys,
+                    "IP-only key_count must not exceed max_keys (#498 F1); saw #{mod.key_count}"
   ensure
     mod.reset! if mod.respond_to?(:reset!)
   end
@@ -101,11 +104,12 @@ class RateLimitMemoryTest < ActionDispatch::IntegrationTest
     refute mod.permit?(identity: "access:victim", ip: "203.0.113.10"),
            "identity must be saturated (#498 F1)"
 
-    assert mod.permit?(identity: "access:other-b", ip: "203.0.113.11")
-    assert mod.permit?(identity: "access:other-c", ip: "203.0.113.12")
+    mod.permit?(identity: "access:other-b", ip: "203.0.113.11")
+    mod.permit?(identity: "access:other-c", ip: "203.0.113.12")
 
     refute mod.permit?(identity: "access:victim", ip: "203.0.113.13"),
            "saturated identity must stay refused after eviction pressure (#498 F1)"
+    assert_operator mod.bucket_count, :<=, 2
   ensure
     mod.reset! if mod.respond_to?(:reset!)
   end
@@ -119,11 +123,12 @@ class RateLimitMemoryTest < ActionDispatch::IntegrationTest
     refute mod.permit?(identity: "bearer:two", ip: saturated_ip),
            "IP must be saturated (#498 F1)"
 
-    assert mod.permit?(identity: "bearer:three", ip: "198.51.100.61")
-    assert mod.permit?(identity: "bearer:four", ip: "198.51.100.62")
+    mod.permit?(identity: "bearer:three", ip: "198.51.100.61")
+    mod.permit?(identity: "bearer:four", ip: "198.51.100.62")
 
     refute mod.permit?(identity: "bearer:five", ip: saturated_ip),
            "saturated IP must stay refused after eviction pressure (#498 F1)"
+    assert_operator mod.bucket_count, :<=, 2
   ensure
     mod.reset! if mod.respond_to?(:reset!)
   end
@@ -147,17 +152,19 @@ class RateLimitMemoryTest < ActionDispatch::IntegrationTest
 
   test "F1 when every live key is saturated and the table is full new identities fail closed" do
     mod = rate_limit_module!
-    mod.configure_for_test!(max_requests: 1, window: 10.minutes, max_keys: 2)
+    max_keys = 3
+    mod.configure_for_test!(max_requests: 1, window: 10.minutes, max_keys: max_keys)
 
     assert mod.permit?(identity: "bearer:one", ip: "198.51.100.70")
-    assert mod.permit?(identity: "bearer:two", ip: "198.51.100.71")
-    assert_equal 2, mod.key_count
+    assert mod.permit?(identity: "bearer:one", ip: "198.51.100.71")
+    assert_equal max_keys, mod.bucket_count,
+                 "fixture must fill the table with saturated buckets (#498 F1)"
 
     refute mod.permit?(identity: "bearer:one", ip: "198.51.100.70"),
            "saturated pair must keep refusing (#498 F1)"
     refute mod.permit?(identity: "bearer:three", ip: "198.51.100.72"),
            "must fail closed when no evictable key exists (#498 F1)"
-    assert_operator mod.key_count, :<=, 2
+    assert_operator mod.bucket_count, :<=, max_keys
   ensure
     mod.reset! if mod.respond_to?(:reset!)
   end
