@@ -287,7 +287,7 @@ class CapabilityStatementTest < ActionDispatch::IntegrationTest
   test "the parameters common to every search are declared at rest level" do
     get METADATA
 
-    assert_equal %w[_count _offset _sort _include], rest["searchParam"].map { |param| param["name"] }
+    assert_equal %w[_count _offset _sort _include _elements], rest["searchParam"].map { |param| param["name"] }
   end
 
   test "the token endpoint is the one smart-configuration publishes, under the engine mount" do

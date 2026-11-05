@@ -33,7 +33,7 @@ module Lakeraven
         filtered = filter_fhir_for_egress(payload)
         return refuse_unfiltered_fhir_egress unless filtered
 
-        render json: filtered, status: status, content_type: fhir_egress_content_type
+        render json: fhir_subset_bundle(filtered), status: status, content_type: fhir_egress_content_type
       end
 
       # Same Bundle shape as ApplicationController#render_bundle: one page of

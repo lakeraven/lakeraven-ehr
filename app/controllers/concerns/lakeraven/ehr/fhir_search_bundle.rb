@@ -32,6 +32,11 @@ module Lakeraven
     # so. Includes go into the same Bundle as the matches, so
     # render_bundle_egress hands both to the Part 2 egress seam.
     #
+    # Elements (#254): `_elements` names the top-level elements a match should
+    # carry. id, meta and resourceType always stay, and meta gains the SUBSETTED
+    # tag. It runs after the Part 2 egress seam, so that seam reads the whole
+    # resource. Included rows stay whole.
+    #
     # A `_sort`, `_include` or `_revinclude` value this resource does not
     # declare is refused with a 400 OperationOutcome naming it, like a bad
     # `_count`. The controller follows a declared `_revinclude` itself
@@ -41,6 +46,12 @@ module Lakeraven
     # CapabilityStatement, and is what this enforces.
     module FHIRSearchBundle
       extend ActiveSupport::Concern
+
+      SUBSETTED_TAG = {
+        "system" => "http://terminology.hl7.org/CodeSystem/v3-ObservationValue",
+        "code" => "SUBSETTED"
+      }.freeze
+      ALWAYS_KEPT_ELEMENTS = %w[resourceType id meta].freeze
 
       DEFAULT_COUNT = FHIR::SearchCapabilities::DEFAULT_COUNT
       MAX_COUNT = FHIR::SearchCapabilities::MAX_COUNT
@@ -80,6 +91,7 @@ module Lakeraven
         @fhir_includes = parse_fhir_includes unless performed?
         validate_fhir_revincludes unless performed?
         @fhir_token_searches = parse_fhir_token_searches unless performed?
+        @fhir_elements = parse_fhir_elements unless performed?
       end
 
       # nil when the parameter is absent, :invalid when it is present and not
@@ -120,6 +132,19 @@ module Lakeraven
 
           inclusion
         end.uniq
+      end
+
+      # The top-level element names asked for. A dotted path, or anything else
+      # that is not an element name, is refused rather than ignored: the client
+      # would read a whole resource as the subset it asked for.
+      def parse_fhir_elements
+        return [] unless params.key?(:_elements)
+
+        raw = params[:_elements]
+        names = raw.is_a?(String) ? raw.split(",", -1).map(&:strip) : []
+        return names if names.any? && names.all? { |name| name.match?(/\A[a-zA-Z][a-zA-Z0-9]*\z/) }
+
+        refuse_search_parameter("_elements", "comma-separated top-level element names")
       end
 
       # Every _revinclude value declared for this resource. Like _include, a
@@ -231,6 +256,26 @@ module Lakeraven
           "_offset" => offset.to_s
         )
         "#{request.base_url}#{request.path}?#{Rack::Utils.build_query(query)}"
+      end
+
+      # -- _elements ----------------------------------------------------------------
+
+      # The Bundle after the egress seam, with each match cut down to the
+      # elements asked for. The seam can hand back string or symbol keys.
+      def fhir_subset_bundle(payload)
+        return payload if !fhir_search? || @fhir_elements.blank?
+
+        bundle = payload.deep_stringify_keys
+        bundle.merge("entry" => Array(bundle["entry"]).map { |entry| subset_fhir_entry(entry) })
+      end
+
+      def subset_fhir_entry(entry)
+        return entry unless entry.dig("search", "mode") == "match"
+
+        kept = entry["resource"].slice(*ALWAYS_KEPT_ELEMENTS, *@fhir_elements)
+        meta = kept.fetch("meta", {})
+        kept["meta"] = meta.merge("tag" => Array(meta["tag"]) + [ SUBSETTED_TAG ])
+        entry.merge("resource" => kept)
       end
 
       # -- token search parameters ----------------------------------------------
