@@ -51,9 +51,15 @@ module Lakeraven
         assert_empty scopes.grep(/\Auser\/QuestionnaireResponse\./)
       end
 
-      test "the chart option grants no write scope on any type" do
+      test "the chart option grants no write scope except in-clinic Consent create" do
         chart_only = SessionScopePolicy.scopes_for(security_keys: [], options: [ CHART_OPTION ])
-        assert_empty chart_only.grep(/\.c|\.u|\.d/)
+        write_scopes = chart_only.grep(/\.c|\.u|\.d/)
+        assert_equal [ "user/Consent.c" ], write_scopes,
+                     "chart option may create Consent for in-clinic consent (#805); no other create/update/delete"
+        assert_empty chart_only.grep(/\.u|\.d/),
+                     "chart option must not grant Consent or any other update/delete scope"
+        assert_empty chart_only.grep(/\Auser\/QuestionnaireResponse\./),
+                     "expected chart option to grant no QuestionnaireResponse scope"
       end
 
       test "absence of keys and options grants nothing" do

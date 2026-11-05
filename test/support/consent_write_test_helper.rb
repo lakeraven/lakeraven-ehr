@@ -283,7 +283,7 @@ module ConsentWriteTestHelper
   end
 
   def login_throttle_failures_for(access_code)
-    key = Lakeraven::EHR::LoginThrottle.send(:key, access_code)
+    key = Lakeraven::EHR::LoginThrottle.send(:account_key, access_code)
     Lakeraven::EHR::LoginThrottle.send(:attempts)[key]&.length.to_i
   end
 
