@@ -11,6 +11,11 @@ module Lakeraven
       CONSENT_RESOURCE = "Consent"
       layout "lakeraven/ehr/kiosk"
 
+      # Throttled like every credentialed route (#498), by the signed-in
+      # session and IP. The signature itself has its own atomic cap of ten
+      # refusals per handover; this bounds everything else on the page.
+      rate_limit only: %i[show create unlock]
+
       # The lock's job is to send every other page here. This page is the
       # destination, so it must not redirect to itself.
       skip_before_action :redirect_when_consent_kiosk_locked

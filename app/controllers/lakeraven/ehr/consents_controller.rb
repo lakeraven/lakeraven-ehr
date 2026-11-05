@@ -13,6 +13,9 @@ module Lakeraven
       include AuditedSessionEnd
 
       CONSENT_RESOURCE = "Consent"
+
+      # Throttled like every credentialed route (#498).
+      rate_limit only: %i[index new handover revocation]
       TEMPLATES_MISSING = "No consent templates are installed, so handover is unavailable. " \
                           "Install them with bin/rails lakeraven_ehr:consent_templates:install."
 
