@@ -8,6 +8,9 @@ module Lakeraven
       # keeps them in AG's PATIENT APPLICATIONS (9000045); nothing is deleted:
       # an application recorded by mistake is marked entered in error.
       class ApplicationsController < PatientSectionController
+        # Throttled like every credentialed route (#498).
+        rate_limit only: %i[new create update]
+
         EDIT_ACTIONS = %w[new create update].freeze
 
         # The outcomes the front desk records (9000045.11 .04), in its words.

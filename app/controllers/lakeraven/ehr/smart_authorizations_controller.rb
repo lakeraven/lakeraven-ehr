@@ -25,6 +25,10 @@ module Lakeraven
     class SmartAuthorizationsController < WebController
       include SmartEndpoints
 
+      # The approve screen and its patient picker sit behind sign-in; a code
+      # guesser reaches them through the same identity (#498).
+      rate_limit only: %i[show decide patient choose_patient new]
+
       PENDING = :smart_authorization_request
       REQUEST_PARAMS = %w[
         response_type client_id redirect_uri scope state aud code_challenge code_challenge_method launch

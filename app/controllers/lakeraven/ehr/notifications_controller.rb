@@ -13,6 +13,9 @@ module Lakeraven
     # VUECENTRIC, SessionScopePolicy), as the patient bar's search does.
     # Every RPC runs as the signed-on user, on their own connection.
     class NotificationsController < WebController
+      # Throttled like every credentialed route (#498).
+      rate_limit only: %i[index destroy]
+
       include RpmsUnavailableRendering
       include NotificationAccess
 

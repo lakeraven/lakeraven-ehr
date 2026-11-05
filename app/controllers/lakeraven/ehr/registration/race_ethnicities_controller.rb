@@ -9,6 +9,9 @@ module Lakeraven
       # the gem files them the way AG's own page 10 does, under AG's edit lock
       # (rpms-ops#1055).
       class RaceEthnicitiesController < PatientSectionController
+        # Throttled like every credentialed route (#498).
+        rate_limit only: %i[edit update]
+
         EDIT_ACTIONS = %w[edit update].freeze
 
         # GET /registration/patients/:dfn/race_ethnicity/edit

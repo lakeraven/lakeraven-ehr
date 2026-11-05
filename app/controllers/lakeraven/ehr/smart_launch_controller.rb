@@ -19,7 +19,7 @@ module Lakeraven
       include RateLimitable
 
       # client_id on this route is an oracle for registered apps (#498).
-      rate_limit only: :show
+      rate_limit only: %i[show create]
 
       DFN = /\A\d{1,18}\z/
 

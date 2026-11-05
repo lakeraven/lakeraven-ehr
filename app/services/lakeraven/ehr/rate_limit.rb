@@ -57,10 +57,12 @@ module Lakeraven
     #
     # audit_due? is true the first time a stored key is at its limit in
     # the window, and the first time permit? refuses because an identity
-    # cannot be stored. permit? records that capacity refusal; audit_due?
-    # reads the recorded reason instead of sampling victims again.
-    # Capacity refusals share one marker per window, so junk identities
-    # cannot grow the audit map.
+    # cannot be stored. permit? records that capacity refusal on the
+    # calling thread, under the digested bucket key, never the raw
+    # credential. audit_due? reads that marker and clears it. Another
+    # request cannot overwrite it, and junk identities cannot grow it:
+    # one marker per live thread, replaced in place. Capacity refusals
+    # share one audited-map entry per window.
     class RateLimit
       DEFAULT_MAX_REQUESTS = 300
       DEFAULT_WINDOW = 1.minute
@@ -72,6 +74,9 @@ module Lakeraven
       AUDIT_DESCRIPTION = "request throttled"
       # One shared audited-map entry for every capacity refusal in the window.
       CAPACITY_AUDIT_KEY = "capacity"
+      # Fiber-local slot for the capacity refusal this request just recorded.
+      # A digest of the bucket key, never the raw bearer or access code.
+      REFUSAL_THREAD_KEY = :lakeraven_ehr_rate_limit_refusal
 
       @mutex = Mutex.new
 
@@ -188,7 +193,7 @@ module Lakeraven
           @floors = nil
           @floor_caps = nil
           @pending_inheritance = nil
-          @refusal_reason = nil
+          clear_refusal_markers!
         end
 
         def current_window
@@ -203,35 +208,48 @@ module Lakeraven
           slots = slots_for(identity, ip)
           if over_limit?(slots, now)
             refuse_slots!(slots, now)
-            note_refusal!(identity, ip, now, capacity: false)
+            note_refusal!(slots, now, capacity: false)
             return false
           end
 
           admitted = place!(slots, now)
-          note_admission!(identity, ip, now, slots, admitted)
+          note_admission!(slots, now, admitted)
           admitted
         end
 
         # The capacity bit is the admission decision permit? just made.
-        # audit_due? reads it so a later sample cannot hide the refusal.
-        def note_admission!(identity, ip, now, slots, admitted)
+        # Kept on this thread so a later sample cannot hide the refusal.
+        def note_admission!(slots, now, admitted)
           if admitted
-            clear_refusal!(identity, ip)
+            clear_refusal_marker!
           else
-            note_refusal!(identity, ip, now, capacity: missing_identity?(slots))
+            note_refusal!(slots, now, capacity: missing_identity?(slots))
           end
         end
 
-        def note_refusal!(identity, ip, now, capacity:)
-          @refusal_reason = { identity: identity, ip: ip, at: now, capacity: capacity }
+        # Only a capacity refusal is remembered, and only as the digested
+        # bucket key. A grant or a rate refusal drops this thread's marker
+        # so a stale capacity bit cannot be audited later.
+        def note_refusal!(slots, now, capacity:)
+          return clear_refusal_marker! unless capacity
+
+          Thread.current[REFUSAL_THREAD_KEY] = {
+            key: refusal_key_for(slots), at: now
+          }
         end
 
-        def clear_refusal!(identity, ip)
-          reason = @refusal_reason
-          return unless reason
-          return unless reason[:identity] == identity && reason[:ip] == ip
+        def clear_refusal_marker!
+          Thread.current[REFUSAL_THREAD_KEY] = nil
+        end
 
-          @refusal_reason = nil
+        # reset! runs on one thread; drop every request's marker with it.
+        def clear_refusal_markers!
+          key = REFUSAL_THREAD_KEY
+          Thread.list.each { |thread| thread[key] = nil }
+        end
+
+        def refusal_key_for(slots)
+          slots.map { |slot| slot[:key] }.join(" ")
         end
 
         # Dry run: pick every victim, then evict and stamp only if the whole
@@ -601,9 +619,10 @@ module Lakeraven
           claim_capacity_audit!(identity, ip, now)
         end
 
-        # One marker for the whole window, not one per junk identity.
-        # The reason was stored by the permit? that refused; sampling again
-        # can find a different victim and skip the audit.
+        # One audited-map entry for the whole window, not one per junk
+        # identity. permit? stored the reason on this thread; sampling
+        # again can find a different victim and skip the audit. Reading
+        # the marker clears it.
         def claim_capacity_audit!(identity, ip, now)
           return false unless recorded_capacity_refusal?(identity, ip, now)
           return false if audited_recently?(CAPACITY_AUDIT_KEY, now)
@@ -613,11 +632,21 @@ module Lakeraven
         end
 
         def recorded_capacity_refusal?(identity, ip, now)
-          reason = @refusal_reason
-          return false unless reason&.fetch(:capacity, false)
-          return false unless reason[:identity] == identity && reason[:ip] == ip
+          marker = take_refusal_marker!(refusal_key_for(slots_for(identity, ip)))
+          return false unless marker
 
-          reason[:at] > cutoff(now)
+          marker[:at] > cutoff(now)
+        end
+
+        # Consume this thread's marker when the digested key matches.
+        # A read for a different identity leaves the marker in place.
+        def take_refusal_marker!(key)
+          marker = Thread.current[REFUSAL_THREAD_KEY]
+          return unless marker
+          return unless marker[:key] == key
+
+          clear_refusal_marker!
+          marker
         end
 
         def missing_identity?(slots)

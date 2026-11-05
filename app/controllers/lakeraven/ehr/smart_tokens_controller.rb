@@ -18,6 +18,10 @@ module Lakeraven
     # A used code presented again also revokes the token it bought.
     class SmartTokensController < ActionController::API
       include SmartEndpoints
+      include RateLimitable
+
+      # The token endpoint takes a client credential (#498).
+      rate_limit only: :create
 
       UNIFORM_REFUSAL = "Client authentication failed"
 

@@ -8,6 +8,9 @@ routes:
   - lakeraven/ehr/capability_statements#show
   - lakeraven/ehr/smart_configuration#show
 
+  # Fixed colour tokens for the SMART app frame: no patient data, no credential
+  - lakeraven/ehr/smart_styles#show
+
   # Login form (GET) and logout — POST login is throttled via LoginThrottle / RateLimit
   - lakeraven/ehr/sessions#new
   - lakeraven/ehr/sessions#destroy

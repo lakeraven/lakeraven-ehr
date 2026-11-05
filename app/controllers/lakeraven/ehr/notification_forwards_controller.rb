@@ -12,6 +12,9 @@ module Lakeraven
     # The search posts (find), as the other look-ups do (#722), and keeps what
     # was entered.
     class NotificationForwardsController < WebController
+      # Throttled like every credentialed route (#498).
+      rate_limit only: %i[new find create]
+
       include RpmsUnavailableRendering
       include NotificationAccess
 
