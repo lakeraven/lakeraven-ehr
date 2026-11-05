@@ -45,6 +45,11 @@ module Lakeraven
         # RPMS: option BSDAM MINI REGISTRATION, locked by SDZREGMENU. BPRM
         # implies the same key for its mini-registration (ADR 0010).
         "patient.quick_register" => rule(any: %i[scheduling_registration], deny: %i[registration_view_only]),
+        # Revoke an in-clinic consent. Physician (ORES) and nurse (ORELSE) may
+        # revoke; OREMAS (clerk/medical assistant), registration and scheduling
+        # keys may not. The registration clerk may still start a handover (the
+        # CIAV VUECENTRIC user/Consent.c scope is unchanged).
+        "consent.revoke" => rule(any: %i[orders_sign orders_release]),
         # Work the facility's referrals: list the ones still pending across
         # patients (#873). RPMS: RCIS's menu key BMCZMENU, or its supervisor
         # and manager keys, the same keys Roles.can_process_chs? reads.

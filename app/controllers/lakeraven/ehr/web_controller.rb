@@ -9,9 +9,16 @@ module Lakeraven
       # covered on the day it is written, not on the day someone notices.
       # Pages that touch no patient data and name no user (the sign-in form)
       # need no row and are not refused one; see `audit_settled?`.
+      # Lock before the audit wrapper, so a locked redirect is inside the
+      # wrapper and the denial is recorded (#793). PhiPageCache is last so
+      # its no-store header is prepended outside that wrapper and survives
+      # a halted before_action.
+      include SessionIdleLimit
+      include ConsentKioskLock
       include AuditableClinicalAccess
       include PatientBannerRendering
       include RpmsUserScope
+      include PhiPageCache
       include RateLimitable
 
       helper ApplicationHelper
@@ -68,27 +75,12 @@ module Lakeraven
         token.nil? || token.revoked? || token.expired?
       end
 
-      def session_idle_expired?
-        last_seen = session[:last_seen_at]
-        return false if last_seen.blank?
-
-        Time.current.to_i - last_seen.to_i > session_idle_limit
-      end
-
       # Whether the session has outlived the site's session_lifetime since
       # sign-on, however active it has been. A session with no sign-on time was
       # not made by sign-on, and ends.
       def session_lifetime_expired?
         signed_in = session[:signed_in_at]
         signed_in.blank? || Time.current.to_i - signed_in.to_i > Lakeraven::EHR.configuration.session_lifetime.to_i
-      end
-
-      # How long this session may sit idle: the site's limit, or the user's RPMS
-      # limit (their DTIME, read at sign-on) when that is shorter. RPMS may make
-      # it stricter, never looser.
-      def session_idle_limit
-        site = Lakeraven::EHR.configuration.session_idle_limit.to_i
-        [ session[:rpms_idle_seconds].presence&.to_i, site ].compact.min
       end
 
       def touch_session!
@@ -124,6 +116,7 @@ module Lakeraven
       # sign-out, idle expiry, a failed sign-on, a broker outage, and a
       # different human signing in at this workstation.
       def terminate_session!
+        release_consent_kiosk_lock! if respond_to?(:release_consent_kiosk_lock!, true)
         revoke_session_token!
         RpmsSessions.release(session[:rpms_pool_key]) if RpmsSessions.enabled?
         reset_session

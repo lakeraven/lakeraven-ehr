@@ -51,12 +51,21 @@ module Lakeraven
     # content.
     class SessionScopePolicy
       # Reading a chart: the read surface CIAV VUECENTRIC grants, and nothing
-      # that writes.
+      # that writes. In-clinic consent is not one of these types: its create
+      # grant is emitted as its own scope, below, so it is not folded into
+      # this read string.
       CHART_READ_TYPES = %w[
         Patient Practitioner Organization Location Encounter
         Observation Condition AllergyIntolerance MedicationRequest Medication
         Procedure Immunization DiagnosticReport CarePlan Provenance
       ].freeze
+
+      # In-clinic consent (#793). The chart option may read a signed consent
+      # and create one. It may not update or delete one. Create stays its own
+      # scope (`user/Consent.c`) because the builder emits one combined
+      # permission string per type, and combining these would be
+      # `user/Consent.rsc`.
+      CONSENT_TYPES = %w[Consent].freeze
 
       # QuestionnaireResponse: the PHQ-9/GAD-7 screening record, routed by
       # ScreeningsController. The behavioral health keys grant this list, read
@@ -72,7 +81,11 @@ module Lakeraven
       # option name => { read: [types], write: [types] }. These are the options
       # sign-on asks RPMS about.
       OPTION_SCOPES = {
-        "CIAV VUECENTRIC" => { read: CHART_READ_TYPES, write: [] }
+        "CIAV VUECENTRIC" => {
+          read: (CHART_READ_TYPES + CONSENT_TYPES).freeze,
+          write: [].freeze,
+          create: CONSENT_TYPES
+        }.freeze
       }.freeze
 
       # key symbol => { read: [types], write: [types] }
@@ -104,15 +117,20 @@ module Lakeraven
 
         # One SMART v2 scope per resource type: `rs` for a type the options and
         # keys let the user read, `cud` for one they let the user change, `cruds`
-        # for both (SmartScope). An option the table does not list grants nothing.
+        # for both (SmartScope). A `:create` grant is the exception: it is
+        # emitted as its own `c` scope and is not folded into that string.
+        # An option the table does not list grants nothing.
         def scopes_for(security_keys:, options: [])
           granted = Array(security_keys).filter_map { |k| KEY_SCOPES[k.to_sym] } +
                     Array(options).filter_map { |name| OPTION_SCOPES[name.to_s] }
 
           reads = granted.flat_map { |g| g[:read] }.to_set
           writes = granted.flat_map { |g| g[:write] }.to_set
+          creates = granted.flat_map { |g| g.fetch(:create, []) }.to_set
 
-          (reads | writes).map { |type| user_scope(type, reads.include?(type), writes.include?(type)) }.sort
+          combined = (reads | writes).map { |type| user_scope(type, reads.include?(type), writes.include?(type)) }
+          created = creates.map { |type| SmartScope.build("user", type, "c").to_s }
+          (combined + created).uniq.sort
         end
 
         # Every scope this policy can ever mint. Used to declare the browser

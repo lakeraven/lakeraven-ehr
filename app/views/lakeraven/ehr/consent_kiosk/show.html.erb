@@ -1,0 +1,84 @@
+<% content_for :title, @template&.title || "Consent" %>
+
+<% if @template.nil? %>
+  <p role="alert">The consent template for this handover could not be read. Nothing was signed.</p>
+<% elsif @identity_unavailable %>
+  <p>The patient's name and date of birth could not be read, so this consent cannot be signed.</p>
+<% else %>
+  <h1><%= @template.title %></h1>
+  <div class="consent-body"><%= @template.body %></div>
+
+  <p class="consent-patient-name"><%= @patient_name %></p>
+  <p class="consent-patient-dob"><%= @patient_dob %></p>
+
+  <% if @signature_rejected %>
+    <p role="alert">The signature was not accepted. Nothing was stored.</p>
+  <% end %>
+
+  <%= form_with url: consent_kiosk_path, method: :post, html: { id: "consent-signature-form" } do %>
+    <input type="hidden" name="handover_token" value="<%= @consent_lock["handover_token"] %>">
+    <canvas id="consent-signature" width="600" height="180"
+            style="touch-action: none; border: 1px solid #334155; width: 100%; max-width: 40rem; height: 180px;">
+    </canvas>
+    <input type="hidden" name="signature" id="consent-signature-field" value="">
+
+    <div>
+      <label for="signer_name">Typed name, optional</label>
+      <input type="text" name="signer_name" id="signer_name" autocomplete="off" value="">
+    </div>
+
+    <button type="submit">Sign</button>
+  <% end %>
+
+  <%= javascript_tag nonce: true do %>
+    (function () {
+      var canvas = document.getElementById("consent-signature");
+      var field = document.getElementById("consent-signature-field");
+      if (!canvas || !field || !canvas.getContext) return;
+      var context = canvas.getContext("2d");
+      var drawing = false;
+      var inked = false;
+
+      function point(event) {
+        var rect = canvas.getBoundingClientRect();
+        var source = event.touches ? event.touches[0] : event;
+        return {
+          x: (source.clientX - rect.left) * (canvas.width / rect.width),
+          y: (source.clientY - rect.top) * (canvas.height / rect.height)
+        };
+      }
+
+      function start(event) {
+        drawing = true;
+        var at = point(event);
+        context.beginPath();
+        context.moveTo(at.x, at.y);
+        event.preventDefault();
+      }
+
+      function move(event) {
+        if (!drawing) return;
+        var at = point(event);
+        context.lineTo(at.x, at.y);
+        context.stroke();
+        inked = true;
+        field.value = canvas.toDataURL("image/png");
+        event.preventDefault();
+      }
+
+      function stop(event) {
+        if (!drawing) return;
+        drawing = false;
+        if (inked) field.value = canvas.toDataURL("image/png");
+        event.preventDefault();
+      }
+
+      canvas.addEventListener("pointerdown", start);
+      canvas.addEventListener("pointermove", move);
+      canvas.addEventListener("pointerup", stop);
+      canvas.addEventListener("pointercancel", stop);
+    })();
+  <% end %>
+<% end %>
+
+<%= render "unlock_form" %>

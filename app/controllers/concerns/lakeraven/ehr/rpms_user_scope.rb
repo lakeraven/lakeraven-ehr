@@ -55,6 +55,7 @@ module Lakeraven
       # Release the connection, revoke the session's credential, and clear the
       # session. WebController's terminate_session! does all three.
       def end_rpms_session!
+        release_consent_kiosk_lock! if respond_to?(:release_consent_kiosk_lock!, true)
         return terminate_session! if respond_to?(:terminate_session!, true)
 
         RpmsSessions.release(session[:rpms_pool_key]) if RpmsSessions.enabled?

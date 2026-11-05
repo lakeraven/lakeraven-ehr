@@ -8,6 +8,12 @@ ActiveRecord::Migrator.migrations_paths = [ File.expand_path("../test/dummy/db/m
 ActiveRecord::Migrator.migrations_paths << File.expand_path("../db/migrate", __dir__)
 require "rails/test_help"
 
+# Integration TestResponse never picked up the success? alias LiveTestResponse
+# has. The consent specification calls response.success? for a non-2xx check.
+unless ActionDispatch::TestResponse.method_defined?(:success?)
+  ActionDispatch::TestResponse.alias_method :success?, :successful?
+end
+
 # Engine pages link the Tailwind build (tailwind.css), and a missing build is
 # a template error on any page that links it. `rails test:prepare` builds
 # it in an app, but an engine's test runner never calls test:prepare, so build

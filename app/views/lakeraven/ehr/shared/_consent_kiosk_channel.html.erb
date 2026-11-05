@@ -1,0 +1,48 @@
+<%# Other open tabs drop chart content when a handover starts or ends.
+    The kiosk blanks on handover-ended or a different handover-started,
+    and does not navigate. %>
+<% channel = "lakeraven-ehr-consent-kiosk" %>
+<% event = local_assigns[:announce].presence %>
+<% blank = local_assigns[:blank] %>
+<% listen = local_assigns.fetch(:listen) { event.nil? } || blank %>
+<% handover = local_assigns[:handover_token].to_s %>
+<% script_data = {} %>
+<% script_data[:consent_kiosk_announce] = event if event %>
+<% script_data[:consent_kiosk_listener] = "" if listen %>
+<%= javascript_tag nonce: true, data: script_data do %>
+(function () {
+  if (!("BroadcastChannel" in window)) return;
+<% if blank %>
+  var handover = <%= raw json_escape(handover.to_json) %>;
+  var channel = new BroadcastChannel("<%= channel %>");
+  channel.onmessage = function (message) {
+    var data = message.data || {};
+    var type = data.type;
+    if (type !== "handover-started" && type !== "handover-ended") return;
+    if (type === "handover-started" && data.handover === handover) return;
+    document.body.textContent = "";
+  };
+<% if event %>
+  channel.postMessage({ type: "<%= event %>", handover: handover });
+<% end %>
+<% elsif listen %>
+  var kioskPath = <%= raw json_escape(consent_kiosk_path.to_json) %>;
+  var channel = new BroadcastChannel("<%= channel %>");
+  channel.onmessage = function (message) {
+    var type = message.data && message.data.type;
+    if (type !== "handover-started" && type !== "handover-ended") return;
+    document.body.textContent = "";
+    if (type === "handover-started") {
+      location.replace(kioskPath);
+    } else {
+      location.reload();
+    }
+  };
+<% if event %>
+  channel.postMessage({ type: "<%= event %>" });
+<% end %>
+<% else %>
+  new BroadcastChannel("<%= channel %>").postMessage({ type: "<%= event %>" });
+<% end %>
+})();
+<% end %>

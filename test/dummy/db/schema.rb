@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_03_000001) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_03_170000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -85,6 +85,17 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_03_000001) do
     t.index [ "program_key" ], name: "index_ehr_bh_program_configs_on_program_key", unique: true
   end
 
+  create_table "lakeraven_ehr_consent_templates", force: :cascade do |t|
+    t.text "body", null: false
+    t.string "consent_scope", null: false
+    t.datetime "created_at", null: false
+    t.string "key", null: false
+    t.string "title", null: false
+    t.datetime "updated_at", null: false
+    t.integer "version", null: false
+    t.index [ "key", "version" ], name: "index_lakeraven_ehr_consent_templates_key_version", unique: true
+  end
+
   create_table "lakeraven_ehr_disclosures", force: :cascade do |t|
     t.string "authorization_method"
     t.string "consent_reference"
@@ -121,6 +132,19 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_03_000001) do
     t.index [ "accessed_by" ], name: "index_lakeraven_ehr_emergency_accesses_on_accessed_by"
     t.index [ "expires_at" ], name: "index_lakeraven_ehr_emergency_accesses_on_expires_at"
     t.index [ "patient_dfn" ], name: "index_lakeraven_ehr_emergency_accesses_on_patient_dfn"
+  end
+
+  create_table "lakeraven_ehr_kiosk_locks", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "credential_key", null: false
+    t.string "handover_token", null: false
+    t.string "patient_dfn", null: false
+    t.integer "refused_signature_count", default: 0, null: false
+    t.string "template_key", null: false
+    t.integer "template_version", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "credential_key" ], name: "index_lakeraven_ehr_kiosk_locks_credential_key", unique: true
+    t.index [ "handover_token" ], name: "index_lakeraven_ehr_kiosk_locks_handover_token", unique: true
   end
 
   create_table "lakeraven_ehr_launch_contexts", force: :cascade do |t|
@@ -216,6 +240,30 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_03_000001) do
     t.check_constraint "source::text <> 'clinician'::text OR administered_by IS NOT NULL", name: "screening_clinician_requires_administrator"
   end
 
+  create_table "lakeraven_ehr_signed_consents", force: :cascade do |t|
+    t.bigint "consent_template_id", null: false
+    t.datetime "created_at", null: false
+    t.string "handover_token"
+    t.string "kind", null: false
+    t.string "patient_dfn", null: false
+    t.string "recorded_by_duz", null: false
+    t.text "revocation_reason"
+    t.bigint "revokes_id"
+    t.binary "signature_png"
+    t.datetime "signed_at", null: false
+    t.string "signer_name"
+    t.string "template_body_digest", null: false
+    t.string "template_key", null: false
+    t.integer "template_version", null: false
+    t.datetime "updated_at", null: false
+    t.string "witness_duz"
+    t.index [ "consent_template_id" ], name: "index_lakeraven_ehr_signed_consents_on_consent_template_id"
+    t.index [ "handover_token" ], name: "index_lakeraven_ehr_signed_consents_handover_token", unique: true
+    t.index [ "patient_dfn", "kind" ], name: "index_lakeraven_ehr_signed_consents_patient_kind"
+    t.index [ "revokes_id" ], name: "index_lakeraven_ehr_signed_consents_revokes_id", unique: true
+    t.check_constraint "kind::text = 'signature'::text AND revokes_id IS NULL AND witness_duz IS NOT NULL AND signature_png IS NOT NULL AND octet_length(signature_png) <= 512000 AND SUBSTRING(signature_png FROM 1 FOR 8) = decode('89504e470d0a1a0a'::text, 'hex'::text) AND revocation_reason IS NULL OR kind::text = 'revocation'::text AND revokes_id IS NOT NULL AND revocation_reason IS NOT NULL AND signature_png IS NULL AND handover_token IS NULL", name: "signed_consent_row_shape"
+  end
+
   create_table "lakeraven_ehr_smart_authorizations", force: :cascade do |t|
     t.integer "access_token_id"
     t.integer "application_id", null: false
@@ -252,8 +300,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_03_000001) do
 
   create_table "lakeraven_ehr_treatment_plan_progress_reviews", force: :cascade do |t|
     t.datetime "created_at", null: false
-    t.date "reviewed_on", null: false
     t.string "reviewed_by_duz", null: false
+    t.date "reviewed_on", null: false
     t.bigint "treatment_plan_id", null: false
     t.datetime "updated_at", null: false
     t.index [ "treatment_plan_id" ], name: "index_ehr_tp_progress_reviews_on_plan"
@@ -324,6 +372,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_03_000001) do
   end
 
   add_foreign_key "lakeraven_ehr_reconciliation_items", "lakeraven_ehr_reconciliation_sessions", column: "reconciliation_session_id"
+  add_foreign_key "lakeraven_ehr_signed_consents", "lakeraven_ehr_consent_templates", column: "consent_template_id"
+  add_foreign_key "lakeraven_ehr_signed_consents", "lakeraven_ehr_signed_consents", column: "revokes_id", name: "fk_lakeraven_ehr_signed_consents_revokes_id"
   add_foreign_key "lakeraven_ehr_treatment_plan_concurrences", "lakeraven_ehr_treatment_plans", column: "treatment_plan_id"
   add_foreign_key "lakeraven_ehr_treatment_plan_progress_reviews", "lakeraven_ehr_treatment_plans", column: "treatment_plan_id"
   add_foreign_key "oauth_access_grants", "oauth_applications", column: "application_id"
