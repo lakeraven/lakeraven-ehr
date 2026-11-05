@@ -102,6 +102,29 @@ module Lakeraven
         Array(via.all_appointments(start_date: date, end_date: date)).group_by { |a| a[:resource_name] }.transform_values(&:size)
       end
 
+      # The appointments needing action on the resources over window, earliest
+      # first (#875, rpms-ux S-SCH-13.5): past their start time with no check-in,
+      # check-out, cancellation or no-show recorded on BSDX APPOINTMENT, the
+      # appointments RPMS's own Appointments Requiring Action report lists
+      # (BSDAMR2: no status, or NO ACTION TAKEN). BSDX ALL APPOINTMENTS names the
+      # resources with a past appointment not cancelled or a no-show, and only
+      # those resources' days are read (BSDX CREATE APPT SCHEDULE), each row
+      # with its resource as :clinic. now is the server's local time, as BSDX
+      # times are.
+      def self.needing_action(resources, window, now: Time.now, via: ::RpmsRpc::Scheduling)
+        booked = Array(via.all_appointments(start_date: window.begin, end_date: window.end))
+        names = booked.select { |a| a[:start_time] < now }.to_set { |a| a[:resource_name] }
+        resources.select { |r| names.include?(r[:name]) }.flat_map do |resource|
+          Array(via.appointments(resource: resource[:name], start_date: window.begin, end_date: window.end))
+            .select { |a| needs_action?(a, now) }.map { |a| a.merge(clinic: resource) }
+        end.sort_by { |a| a[:start_time] }
+      end
+
+      def self.needs_action?(appointment, now)
+        appointment[:start_time] < now && !appointment[:cancelled] && !appointment[:no_show] &&
+          appointment[:checkin_time].nil? && appointment[:checkout_time].nil?
+      end
+
       def self.appointment(resource, id, date, via: ::RpmsRpc::Scheduling)
         Array(via.appointments(resource: resource[:name], start_date: date, end_date: date)).find { |a| a[:id] == id.to_i }
       end

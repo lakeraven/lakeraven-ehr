@@ -151,6 +151,20 @@ Lakeraven::EHR::Engine.routes.draw do
   post "login" => "sessions#create"
   delete "logout" => "sessions#destroy", as: :logout
   get "dashboard" => "dashboards#show", as: :dashboard
+  # The signed-in user's RPMS notifications (rpms-ux S-SGN-02.1, #874).
+  get "notifications" => "notifications#index", as: :notifications
+  # Remove one, or forward one to a colleague (rpms-ux S-SGN-02.2 to 02.4). An
+  # alert ID holds commas, semicolons and a dot ("OR,3,19;4;3261104.175206"),
+  # so the segment takes anything but a slash, and no format is read from it.
+  scope "notifications/:alert_id", constraints: { alert_id: %r{[^/]+} }, format: false do
+    delete "" => "notifications#destroy", as: :notification
+    get "forward" => "notification_forwards#new", as: :new_notification_forward
+    post "forward/find" => "notification_forwards#find", as: :find_notification_forward
+    post "forward" => "notification_forwards#create", as: :notification_forward
+  end
+
+  # The referrals pending at the facility, for a user who works referrals (#873).
+  get "referrals/pending", to: "pending_referrals#index", as: :pending_referrals
 
   # The patient bar's search and recent patients (rpms-ux S-CHT-01). A search
   # names a patient, so it is posted, never carried in a URL (#722).
@@ -190,6 +204,9 @@ Lakeraven::EHR::Engine.routes.draw do
       # The name the patient goes by (S-REG-12.1): PREFERRED NAME, IHS PATIENT (9000001) 9001.
       get "preferred_name/edit", to: "preferred_names#edit", as: :edit_patient_preferred_name
       post "preferred_name", to: "preferred_names#update", as: :patient_preferred_name
+      # Race and ethnicity with how each was collected (S-REG-20.2): PATIENT (2.02, 2.06).
+      get "race_ethnicity/edit", to: "race_ethnicities#edit", as: :edit_patient_race_ethnicity
+      post "race_ethnicity", to: "race_ethnicities#update", as: :patient_race_ethnicity
       # The other names the patient has used (S-REG-12): ALIAS, PATIENT (2.01).
       get "other_names", to: "other_names#index", as: :patient_other_names
       post "other_names", to: "other_names#create"
@@ -218,6 +235,8 @@ Lakeraven::EHR::Engine.routes.draw do
     get "/", to: "clinics#index", as: :home
     get "clinics/:id", to: "clinics#show", as: :clinic, constraints: { id: /\d+/ }
     get "clinics/:id/week", to: "clinics#week", as: :clinic_week, constraints: { id: /\d+/ }
+    # The appointments needing action in the scheduler's clinics (S-SCH-13.5, #875).
+    get "needing_action", to: "needing_action#index", as: :needing_action
     get "clinics/:id/open_times", to: "open_times#index", as: :clinic_open_times, constraints: { id: /\d+/ }
     get "clinics/:resource_id/hours/new", to: "hours#new", as: :new_clinic_hours, constraints: { resource_id: /\d+/ }
     post "clinics/:resource_id/hours", to: "hours#create", as: :clinic_hours, constraints: { resource_id: /\d+/ }

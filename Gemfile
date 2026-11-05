@@ -7,7 +7,7 @@ gemspec
 if ENV["RPMS_RPC_PATH"]
   gem "rpms-rpc", path: ENV["RPMS_RPC_PATH"]
 else
-  # Pinned to rpms-rpc main 5188b49: Registration.preferred_name and set_preferred_name (rpms-rpc#591), and held_keys asks ORWU NPHASKEY under CIAV VUECENTRIC, so a front-desk user signs on over CIA (rpms-rpc#556, #590). Earlier, f0a255e: Scheduling.edit_appointment and variable_length?, SchedulingSetup.set_clinic_note
+  # Pinned to rpms-rpc main 1bb42ba: Notifications.remove, forward and message remove and forward a notification as VueCentric does (BEHOXQ ALRPP, BEHOXQ FORWARD, BEHOXQ ALRMSG; rpms-rpc#598). Earlier, 5b87c06: Notifications.inbox reads the signed-on user's alerts through BEHOXQ ALRLIST, each with its patient, as VueCentric's Notifications tab does (rpms-rpc#596; rpms-ux S-SGN-02.1). Earlier, 3464ad2: Referral.pending lists the open referrals across patients in a date window (BMC SEARCH REFERRAL; rpms-rpc#589). Earlier, 35572e7: Registration.change_address and address_history keep the old address, set_race_ethnicity and race_ethnicity file race and ethnicity, cell_phone reads it (rpms-rpc#594). Earlier, 9b36248; 5188b49: Registration.preferred_name and set_preferred_name (rpms-rpc#591), and held_keys asks ORWU NPHASKEY under CIAV VUECENTRIC, so a front-desk user signs on over CIA (rpms-rpc#556, #590). Earlier, f0a255e: Scheduling.edit_appointment and variable_length?, SchedulingSetup.set_clinic_note
   # and set_cancellation_remarks, to keep an appointment's details current (rpms-rpc#586). Earlier, 6f3f852: Scheduling.overbook_allowed (BSDX OVERBOOK), SchedulingSetup.master_overbook?
   # and mark_overbook (OVERBOOK, #44.003 field 9) for overbooking (rpms-rpc#584). Earlier, 9197bf5: PatientProfile reads and files the emergency contact, next of kin,
   # languages and other names through AG's windows (rpms-rpc#580), and Registration.update files blood and
@@ -46,7 +46,7 @@ else
   # (lakeraven-ehr#540), invented RPC names removed (#310/#311), typed errors for
   # a missing RPC (#370), the user class from ORWU USERINFO (#236). A fixed ref
   # rather than branch:main so the pin does not drift mid-merge.
-  gem "rpms-rpc", github: "lakeraven/rpms-rpc", ref: "9b36248"
+  gem "rpms-rpc", github: "lakeraven/rpms-rpc", ref: "1bb42ba"
 end
 
 gem "puma"

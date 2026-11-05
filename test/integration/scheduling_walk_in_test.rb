@@ -7,6 +7,7 @@ require "test_helper"
 # walk-in is BSDX ADD NEW APPOINTMENT with the access type "WALKIN" at the
 # current slot, then BSDX CHECKIN APPOINTMENT.
 class SchedulingWalkInTest < ActionDispatch::IntegrationTest
+  include BrowserFormHelper
   RESOURCE = { id: 2, name: "DEMO IHS CLINIC", inactive: false, time_scale: 15, hospital_location_id: 3,
                view: true, overbook: false, modify_schedule: true, modify_appointments: true }.freeze
   LOOK_ONLY = RESOURCE.merge(id: 5, name: "DEMO DENTAL", hospital_location_id: 9, modify_appointments: false).freeze
@@ -157,7 +158,7 @@ class SchedulingWalkInTest < ActionDispatch::IntegrationTest
 
     assert_response :ok
     assert_select "#walk-in-form label[data-patient='3']", text: /MOUSE,MICKEY M, health record number 1001/
-    assert_select "#walk-in-form input[type=submit][formaction='#{path}/find'][formmethod=post]", minimum: 1
+    assert_select "#walk-in-form button[type=submit][formaction='#{path}/find'][formmethod=post]", minimum: 1
     assert_empty calls
   end
 
@@ -188,5 +189,23 @@ class SchedulingWalkInTest < ActionDispatch::IntegrationTest
       assert_response :redirect
       assert_equal %i[add checkin], calls.map(&:first)
     end
+  end
+
+  # #896: a browser sends the form's own token; the look-ups must accept it.
+  test "Find patient and Find provider are accepted with forgery protection on, as in a browser" do
+    sign_in
+    with_rpms do
+      with_forgery_protection do
+        get "#{path}/new"
+        press "Find patient", fill: { "q" => "MOUSE" }
+        assert_response :ok
+        assert_select "#walk-in-form label[data-patient='3']"
+
+        press "Find provider", fill: { "provider_search" => "PROF" }
+        assert_response :ok
+        assert_select "#walk-in-form label[data-provider='206']"
+      end
+    end
+    assert_empty calls
   end
 end

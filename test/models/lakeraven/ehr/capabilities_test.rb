@@ -14,7 +14,7 @@ module Lakeraven
       test "each demo persona holds exactly the capabilities of its keys" do
         assert_equal %w[registration.search registration.view patient.register], for_persona("PROFILE,REG")
         assert_equal %w[registration.view scheduling.open], for_persona("PROFILE,SCHED")
-        assert_equal %w[consent.revoke], for_persona("PROFILE,MD")
+        assert_equal %w[consent.revoke referrals.work], for_persona("PROFILE,MD"), "RCIS's menu key, BMCZMENU, and the ORES key"
         assert_equal %w[consent.revoke], for_persona("PROFILE,RN")
         assert_empty for_persona("PROFILE,MA"), "PROFILE,MA"
       end

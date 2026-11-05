@@ -6,6 +6,7 @@ require "test_helper"
 # windows and runs AG's own field checks; these tests stand in for it at the
 # gem boundary and check what the screens send and show.
 class RegistrationLanguagesTest < ActionDispatch::IntegrationTest
+  include BrowserFormHelper
   include PatientProfileStubs
 
   # -- S-REG-10 ---------------------------------------------------------------
@@ -89,5 +90,20 @@ class RegistrationLanguagesTest < ActionDispatch::IntegrationTest
     assert_select "#languages-section [data-field='primary']", text: "Spanish"
     assert_select "#languages-section [data-field='others']", text: "English"
     assert_select "#languages-section [data-field='interpreter']", text: "Yes"
+  end
+
+  # #896: a browser sends the form's own token; the look-up must accept it.
+  test "Find primary language is accepted with forgery protection on, as in a browser" do
+    sign_in
+    with_profile do |calls|
+      with_forgery_protection do
+        get "#{BASE}/languages/edit"
+        press "Find primary language", fill: { "primary_search" => "ENGLISH" }
+      end
+
+      assert_response :ok
+      assert_includes sent(calls, :language_lookup).map { |call| call[1].first }, "ENGLISH"
+      assert_empty sent(calls, :record_languages)
+    end
   end
 end

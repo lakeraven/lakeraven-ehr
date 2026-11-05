@@ -60,6 +60,8 @@ module Lakeraven
           @languages = profile_read { PatientProfileGateway.languages(params[:dfn]) } if @record
           @other_names = profile_read { PatientProfileGateway.aliases(params[:dfn]) } if @record
           @preferred_name = profile_read { PatientProfileGateway.preferred_name(params[:dfn]) } if @record
+          @address_history = profile_read { PatientRecordGateway.address_history(params[:dfn]) } if @record
+          @race_ethnicity = profile_read { PatientProfileGateway.race_ethnicity(params[:dfn]) } if @record
           @patient = @patient.merge(preferred_name: @preferred_name) if @preferred_name.present?
         end
 

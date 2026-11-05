@@ -1,0 +1,84 @@
+<% page_title "Race and ethnicity", @patient[:name], "Registration" %>
+
+<%= page_header @patient[:name],
+      "Race and ethnicity, and how each was collected." %>
+
+<%= flash_alert id: "race-ethnicity-alert" %>
+
+<%= patient_summary @patient, id: "registration" %>
+
+<section
+  id="race-ethnicity-form-section"
+  aria-labelledby="race-ethnicity-form-heading"
+  class="card mt-6 flex flex-col gap-4"
+>
+  <h2
+    id="race-ethnicity-form-heading"
+    class="text-lg font-semibold"
+  >
+    Race and ethnicity
+  </h2>
+  <p class="hint">
+    Tick every race and ethnicity the patient gives, and say how you learned each one.
+    Declined to answer and unknown go alone.
+  </p>
+  <%= form_errors @entry,
+        "Race and ethnicity were not saved.",
+        id: "race-ethnicity-errors" %>
+  <% default_method = @methods.find { |m| m[:name] == "SELF IDENTIFICATION" }&.dig(:ien) %>
+  <%= form_with scope: :race_ethnicity,
+        url: registration_patient_race_ethnicity_path(@dfn),
+        method: :post,
+        local: true,
+        id: "race-ethnicity-form",
+        class: "flex flex-col gap-6" do |f| %>
+    <% { races: "Race", ethnicities: "Ethnicity" }.each do |kind, legend| %>
+      <%# RACE INFORMATION (2.02) and ETHNICITY INFORMATION (2.06): .01 the RACE (10) or ETHNICITY (10.2), .02 METHOD OF COLLECTION (10.3). %>
+      <fieldset
+        id="<%= kind %>-fieldset"
+        class="flex flex-col gap-2"
+        <% if @entry.errors[kind].any? %>aria-describedby="<%= kind %>-error"<% end %>
+      >
+        <legend><%= legend %></legend>
+        <% if @entry.errors[kind].any? %>
+          <p
+            id="<%= kind %>-error"
+            class="form-field__error"
+          >
+            <%= @entry.errors[kind].first %>
+          </p>
+        <% end %>
+        <% @options[kind].each do |option| %>
+          <% base = "race_ethnicity[#{kind}][#{option[:ien]}]" %>
+          <% id = "#{kind}-#{option[:ien]}" %>
+          <div class="flex flex-wrap items-center gap-4">
+            <label class="flex items-center gap-2 min-w-72">
+              <%= hidden_field_tag "#{base}[chosen]", "0", id: nil %>
+              <%= check_box_tag "#{base}[chosen]",
+                    "1",
+                    @entry.chosen?(kind, option[:ien]),
+                    id: "#{id}-chosen" %>
+              <%= option[:name].to_s.titleize %>
+            </label>
+            <label
+              for="<%= id %>-method"
+              class="sr-only"
+            >
+              How <%= option[:name].to_s.titleize %> was collected
+            </label>
+            <%= select_tag "#{base}[method]",
+                  options_for_select(@methods.map { |m| [ m[:name].to_s.capitalize, m[:ien] ] },
+                                     @entry.method_for(kind, option[:ien]) || default_method),
+                  id: "#{id}-method" %>
+          </div>
+        <% end %>
+      </fieldset>
+    <% end %>
+    <%= f.submit "Save race and ethnicity",
+          class: "button-primary self-start" %>
+  <% end %>
+</section>
+
+<p class="mt-6">
+  <%= link_to "Back to the patient", registration_patient_path(@dfn, anchor: "race-ethnicity-section") %>
+</p>

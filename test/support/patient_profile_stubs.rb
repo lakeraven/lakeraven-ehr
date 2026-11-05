@@ -18,7 +18,8 @@ module PatientProfileStubs
               phone: "555-555-0100", phone_work: "" }.freeze
 
   # The names answered by RpmsRpc::Registration rather than PatientProfile.
-  REGISTRATION_NAMES = %i[preferred_name set_preferred_name].freeze
+  REGISTRATION_NAMES = %i[preferred_name set_preferred_name race_ethnicity race_ethnicity_choices
+                          set_race_ethnicity address_history].freeze
 
   def sign_in(keys = "registration_menu")
     post "/lakeraven-ehr/test_session", params: { duz: "207", user_type: "user", user_name: "PROFILE,REG", security_keys: keys }
@@ -32,7 +33,8 @@ module PatientProfileStubs
     profile = RpmsRpc::PatientProfile
     defaults = { contacts: ->(*) { { emergency: CONTACT, next_of_kin: {} } }, relationships: ->(*) { [] }, states: ->(*) { [] },
                  language_lookup: ->(text) { text == "ENGLISH" ? [ { ien: ENGLISH, name: "ENGLISH" } ] : [] },
-                 languages: ->(*) { {} }, aliases: ->(*) { [] }, preferred_name: ->(*) { "" } }
+                 languages: ->(*) { {} }, aliases: ->(*) { [] }, preferred_name: ->(*) { "" },
+                 race_ethnicity: ->(*) { { races: [], ethnicities: [] } }, address_history: ->(*) { [] } }
     restores = defaults.merge(answers).map do |name, answer|
       target = REGISTRATION_NAMES.include?(name) ? RpmsRpc::Registration : profile
       restore = StubHelpers.send(:singleton_method_restore, target, name)

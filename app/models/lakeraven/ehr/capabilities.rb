@@ -49,7 +49,11 @@ module Lakeraven
         # revoke; OREMAS (clerk/medical assistant), registration and scheduling
         # keys may not. The registration clerk may still start a handover (the
         # CIAV VUECENTRIC user/Consent.c scope is unchanged).
-        "consent.revoke" => rule(any: %i[orders_sign orders_release])
+        "consent.revoke" => rule(any: %i[orders_sign orders_release]),
+        # Work the facility's referrals: list the ones still pending across
+        # patients (#873). RPMS: RCIS's menu key BMCZMENU, or its supervisor
+        # and manager keys, the same keys Roles.can_process_chs? reads.
+        "referrals.work" => rule(any: %i[referrals_user referrals_supervisor referrals_manager])
       }.freeze
 
       NAMES = TABLE.keys.freeze

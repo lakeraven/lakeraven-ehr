@@ -6,6 +6,7 @@ require "test_helper"
 # the gem boundary. Live on a built image BSDX CANCEL APPOINTMENT refuses only a
 # checked-in appointment, so the rest is checked here and tested here.
 class SchedulingCancelAppointmentTest < ActionDispatch::IntegrationTest
+  include BrowserFormHelper
   DAY = Date.new(2026, 10, 28)
 
   def at(hour, min = 0) = Time.new(DAY.year, DAY.month, DAY.day, hour, min)
@@ -137,5 +138,20 @@ class SchedulingCancelAppointmentTest < ActionDispatch::IntegrationTest
 
     assert_response :unprocessable_content
     assert_select "[role='alert']", text: /already checked in/
+  end
+
+  # #896: a browser sends the form's own token; Show reasons must accept it.
+  test "Show reasons is accepted with forgery protection on, as in a browser" do
+    sign_in
+    with_rpms do
+      with_forgery_protection do
+        get path, params: { date: "2026-10-28" }
+        press "Show reasons", fill: { "cancellation[whom]" => "C" }
+      end
+
+      assert_response :ok
+      assert_equal [ "CLINIC STAFFING", "OTHER" ], css_select("#cancellation-form select option").map(&:text).drop(1)
+    end
+    assert_empty cancels
   end
 end

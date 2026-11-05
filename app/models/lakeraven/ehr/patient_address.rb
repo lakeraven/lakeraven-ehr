@@ -17,7 +17,14 @@ module Lakeraven
       FIELDS = %i[address_line1 address_line2 address_line3 city state zip phone_home phone_work phone_other email].freeze
       EMAIL = /\A[^@\s]+@[^@\s]+\.[^@\s]+\z/
 
-      FIELDS.each { |field| attribute field, :string }
+FIELDS.each { |field| attribute field, :string }
+# The date the patient moved (S-REG-21.1): RPMS ends the old address on
+# it in PREVIOUS MAIL ADDRESSES and starts the new one from it. Today
+# unless the clerk says otherwise.
+attribute :moved_on, :date
+# The fields whose change keeps the old address (ADR^AGGUL1 copies these).
+HISTORY_FIELDS = %i[address_line1 address_line2 address_line3 city state zip phone_home].freeze
+EARLIEST_MOVE = Date.new(1871, 1, 1)
 
       validates :address_line1, length: { in: 3..35 }, allow_blank: true
       validates :address_line2, :address_line3, length: { in: 3..30 }, allow_blank: true
@@ -26,7 +33,12 @@ module Lakeraven
       validates :phone_home, :phone_work, length: { in: 4..20, message: "must be 4 to 20 characters" }, allow_blank: true
       validates :phone_other, length: { in: 4..60, message: "must be 4 to 60 characters" }, allow_blank: true
       validates :email, length: { in: 3..50 }, allow_blank: true
+      validate :moved_on_in_range
       validates :email, format: { with: EMAIL, message: "must look like name@example.com" }, allow_blank: true
+
+      def self.human_attribute_name(attribute, options = {})
+        attribute.to_s == "moved_on" ? "Date they moved" : super
+      end
 
       # The form, filled from the record PatientRecordGateway.find returns.
       def self.from_record(record)
@@ -36,6 +48,7 @@ module Lakeraven
       def initialize(attrs = {})
         super
         FIELDS.each { |field| public_send("#{field}=", public_send(field).to_s.strip.squeeze(" ").presence) }
+        self.moved_on ||= Date.current
         %i[address_line1 address_line2 address_line3 city zip].each do |field|
           public_send("#{field}=", public_send(field)&.upcase)
         end
@@ -47,6 +60,19 @@ module Lakeraven
         FIELDS.each_with_object({}) do |field, out|
           value = public_send(field).to_s
           out[field] = value unless value == current.public_send(field).to_s
+        end
+      end
+
+      # True when the change moves the patient, so RPMS keeps the old address.
+      def moves?(changes) = changes.keys.intersect?(HISTORY_FIELDS)
+
+      private
+
+      def moved_on_in_range
+        if moved_on > Date.current
+          errors.add(:moved_on, "cannot be in the future")
+        elsif moved_on < EARLIEST_MOVE
+          errors.add(:moved_on, "cannot be before 1871")
         end
       end
     end
