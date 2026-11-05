@@ -52,6 +52,37 @@ class ConsentPr805HeaderTokenTest < ActionDispatch::IntegrationTest
     assert_response :success
   end
 
+  test "kiosk GET with a different browser SSO bearer beside the session token is refused before credential check" do
+    alternate = clinician_token(scopes: WRITE_SCOPES, duz: DUZ)
+    refute_equal @clinician_token.id, alternate.id
+
+    headers = launched_bearer_headers(alternate)
+
+    get KIOSK, headers: headers
+    assert_response :unauthorized
+    refute_includes response.body, @template.title
+    refute_includes response.body, demo_patient_display_name
+    refute_includes response.body, demo_patient_dob_fragment
+    assert_match(/invalid or revoked token/i, response.body)
+  end
+
+  test "kiosk session credential requires authenticated token id to match session smart token" do
+    alternate = clinician_token(scopes: WRITE_SCOPES, duz: DUZ)
+    refute_equal @clinician_token.id, alternate.id
+
+    assert consent_kiosk_controller_for_credential_probe(current_token: alternate)
+             .send(:clinician_credential?),
+           "alternate browser SSO token must satisfy clinician_credential?"
+    refute consent_kiosk_controller_for_credential_probe(current_token: alternate)
+             .send(:kiosk_session_credential?),
+           "session_access_token id must match current_token id"
+
+    controller = consent_kiosk_controller_for_credential_probe(current_token: alternate)
+    refute controller.performed?, "controller must be unrendered before require_clinician_credential!"
+    refute controller.send(:require_clinician_credential!)
+    assert_equal 403, controller.response.status
+  end
+
   test "kiosk GET and POST with launched Bearer beside staff cookie are refused audited and leak nothing" do
     Lakeraven::EHR::SignedConsent.delete_all
     Lakeraven::EHR::AuditEvent.delete_all
@@ -86,6 +117,17 @@ class ConsentPr805HeaderTokenTest < ActionDispatch::IntegrationTest
   end
 
   private
+
+  def consent_kiosk_controller_for_credential_probe(current_token:)
+    Lakeraven::EHR::ConsentKioskController.new.tap do |controller|
+      request = ActionController::TestRequest.create(Lakeraven::EHR::ConsentKioskController)
+      request.session[:duz] = DUZ
+      request.session[:smart_token] = @clinician_token.plaintext_token || @clinician_token.token
+      controller.set_request!(request)
+      controller.set_response!(ActionController::Base.make_response!(request))
+      controller.instance_variable_set(:@current_token, current_token)
+    end
+  end
 
   def create_smart_launched_consent_token!(duz: DUZ, scopes: WRITE_SCOPES)
     app = Doorkeeper::Application.create!(

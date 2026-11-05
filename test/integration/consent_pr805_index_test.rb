@@ -67,6 +67,20 @@ class ConsentPr805IndexTest < ActionDispatch::IntegrationTest
     refute_includes response.body, "Start a consent"
   end
 
+  test "consent index status cell shows Revoked and Active from batched revocation rows" do
+    create_signature_row!(template_key: TEMPLATE_ROI)
+    revoked = create_signature_row!(template_key: TEMPLATE_BH)
+    revoked.revoke!(by_duz: DUZ, reason: SYNTHETIC_REVOCATION_REASON)
+
+    bh_title = Lakeraven::EHR::ConsentTemplate.current(TEMPLATE_BH).title
+    roi_title = Lakeraven::EHR::ConsentTemplate.current(TEMPLATE_ROI).title
+
+    get BASE
+    assert_response :ok
+    assert_consent_index_status_cell!(consent_title: bh_title, status: "Revoked")
+    assert_consent_index_status_cell!(consent_title: roi_title, status: "Active")
+  end
+
   test "consent index does not run per-row revocation EXISTS queries" do
     prepare_consent_rows!(count: 1)
     one_row_queries = revocation_lookup_queries_during do
@@ -87,6 +101,17 @@ class ConsentPr805IndexTest < ActionDispatch::IntegrationTest
   end
 
   private
+
+  def assert_consent_index_status_cell!(consent_title:, status:)
+    assert_select "tbody tr" do |rows|
+      row = rows.find { |tr| tr.at("td")&.text&.strip == consent_title }
+      assert row, "expected a list row for #{consent_title.inspect}"
+      status_cell = row.css("td")[2]
+      assert status_cell, "expected a Status cell on the row for #{consent_title.inspect}"
+      assert_equal status, status_cell.text.strip,
+                   "Status cell for #{consent_title.inspect}"
+    end
+  end
 
   def prepare_consent_rows!(count:)
     Lakeraven::EHR::SignedConsent.delete_all
