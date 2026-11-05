@@ -2,59 +2,79 @@
 
 module Lakeraven
   module EHR
-    # SMART EHR Launch controller
-    # ONC 170.315(g)(10)(iii) - Application registration and EHR launch
-    class SmartLaunchController < ActionController::API
+    # The EHR side of a SMART EHR launch (#839): a signed-in user opens a
+    # patient in a registered app. The engine mints a launch context (the
+    # patient, an encounter when one is given, the user) and sends the browser
+    # to the app's registered launch URI with `iss` (this FHIR server) and
+    # `launch` (the context). The app then sends the user to authorize with
+    # that `launch`, and only this user can authorize with it, once, within
+    # LaunchContext::DEFAULT_TTL.
+    #
+    # GET /smart/launch?patient=DFN lists the apps registered with a launch
+    # URI; POST launches one. Opening a patient takes the user's own Patient
+    # read (ADR 0010), as the chart does. A launch only ever goes to the
+    # launch URI the app registered.
+    class SmartLaunchController < WebController
       include SmartEndpoints
       include RateLimitable
 
       # client_id on this route is an oracle for registered apps (#498).
       rate_limit only: :show
 
+      DFN = /\A\d{1,18}\z/
+
+      before_action :require_authentication
+      before_action :require_patient_read!
+      before_action :load_patient
+
       def show
-        unless params[:launch].present? && params[:iss].present?
-          render json: { error: "invalid_request", error_description: "launch and iss parameters are required" },
-                 status: :bad_request
-          return
-        end
+        @apps = Doorkeeper::Application.where.not(launch_uri: [ nil, "" ]).order(:name)
+                                       .select { |app| LaunchClient.launch_client?(app) }
+      end
 
-        if params[:client_id].present?
-          app = Doorkeeper::Application.find_by(uid: params[:client_id])
-          if app
-            redirect_to build_authorize_url(app), allow_other_host: true
-            return
-          end
-        end
+      def create
+        app = LaunchClient.find(params[:client_id].to_s)
+        return head(:not_found) unless app && app.launch_uri.present?
 
-        render json: {
-          launch: params[:launch],
-          authorization_endpoint: authorization_endpoint,
-          token_endpoint: token_endpoint
-        }, status: :ok
+        context = LaunchContext.mint(
+          oauth_application_uid: app.uid,
+          patient_dfn: @dfn,
+          encounter_id: params[:encounter].to_s.presence&.then { |id| id if id.match?(DFN) },
+          duz: session[:duz].to_s
+        )
+        redirect_to launch_url(app, context), allow_other_host: true
       end
 
       private
 
-      def authorization_endpoint
-        "#{smart_base_url}oauth/authorize"
+      def require_patient_read!
+        return if SmartScope.permits?(session_token_scopes, "Patient", "r")
+
+        note_audit_denial("browser access refused: no Patient read")
+        render "lakeraven/ehr/shared/forbidden", formats: :html, status: :forbidden
       end
 
-      def token_endpoint
-        smart_token_endpoint
+      def load_patient
+        @dfn = params[:patient].to_s
+        return head(:not_found) unless @dfn.match?(DFN)
+
+        @patient = ChartSearchGateway.one(@dfn)
+        head(:not_found) unless @patient
       end
 
-      def build_authorize_url(app)
-        query = {
-          response_type: "code",
-          client_id: app.uid,
-          redirect_uri: app.redirect_uri,
-          scope: "launch patient/*.rs",
-          state: SecureRandom.hex(16),
-          launch: params[:launch],
-          aud: params[:iss]
-        }
-        "#{authorization_endpoint}?#{query.to_query}"
+      def launch_url(app, context)
+        uri = URI.parse(app.launch_uri)
+        query = URI.decode_www_form(uri.query.to_s) + [ [ "iss", smart_fhir_base_url ], [ "launch", context.launch_token ] ]
+        uri.query = URI.encode_www_form(query)
+        uri.to_s
       end
+
+      def session_token_scopes
+        Doorkeeper::AccessToken.by_token(session[:smart_token].to_s)&.scopes.to_s
+      end
+
+      def audit_action = "R"
+      def fhir_resource_type = "Patient"
     end
   end
 end

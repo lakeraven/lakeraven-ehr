@@ -1,7 +1,11 @@
 <% page_title "Scheduling" %>
 
 <%= page_header "Scheduling",
-      "Choose a clinic to see its day and book into it." %>
+      "Choose a clinic to see its day and book into it." do %>
+  <%= link_to "Appointments needing action",
+        scheduling_needing_action_path,
+        id: "needing-action-link" %>
+<% end %>
 
 <% if @resources.empty? %>
   <%= empty_state "No clinic resources are open to you.",

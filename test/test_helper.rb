@@ -23,6 +23,7 @@ require_relative "support/fake_gateway"
 require_relative "support/stub_helpers"
 require_relative "support/scheduling_setup_stubs"
 require_relative "support/registration_form_helper"
+require_relative "support/browser_form_helper"
 require_relative "support/patient_profile_stubs"
 require_relative "support/ihs_feature_availability_test_helper"
 require "rpms_rpc/mock_client"
@@ -179,7 +180,7 @@ BASELINE_MOCK_SEEDS = lambda do |m|
   m.seed_user("302", credentials: "testnurse;test123", name: "NURSE,TEST", role: :nurse)
   m.seed_user("303", credentials: "testclerk;test123", name: "CLERK,TEST", role: :clerk)
   m.seed_user("304", credentials: "lindarodriguez;test123", name: "RODRIGUEZ,LINDA", role: :case_manager)
-  # The SECURITY KEYs DUZ 304 holds, answered to CIAVCXUS HASKEYS once 304 signs on.
+  # The SECURITY KEYs DUZ 304 holds, answered to ORWU NPHASKEY for 304.
   m.seed_held_keys("304", [ "BMCZSUPERVISOR", "ORELSE" ])
   # Everyone RPMS signs on over CIA holds CIAV VUECENTRIC, the context the
   # sign-on binds to. This mock signs on over XWB, where a user can sign on

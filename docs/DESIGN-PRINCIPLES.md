@@ -93,9 +93,11 @@ Inferno has not been run against a deployed stack yet; `docs/certification/infer
   - DPoP (RFC 9449) for public clients when SMART launch is served.
 - Tokens carry capabilities and scopes, never raw RPMS key names (ADR 0010).
 
-**Today.** The browser session and the backend-services path follow this. SMART launch is not served, and since #665 it is no longer advertised.
+**Today.** The browser session and the backend-services path follow this.
+SMART App Launch is served (#839): authorization code with PKCE S256 required, public, client-secret and private_key_jwt clients, and short-lived opaque tokens bound to the approving user's session and RPMS connection.
+Tokens are not yet RFC 9068 JWTs, there are no refresh tokens (#840), and DPoP is not required, because the (g)(10) test kit does not send it.
 
-**Next.** Serve SMART authorization-code launch with PKCE, short-lived sender-constrained tokens, and refresh tokens bound to the client.
+**Next.** Refresh tokens bound to the client (#840), and sender-constrained tokens where clients support them.
 
 ## 6. Staff sign in with the organization's identity provider and phishing-resistant MFA
 

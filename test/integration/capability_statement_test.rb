@@ -302,13 +302,6 @@ class CapabilityStatementTest < ActionDispatch::IntegrationTest
     assert_equal "token", route[:action]
   end
 
-  test "the EHR launch response names the same token endpoint" do
-    token = metadata_token_endpoint
-    get "#{ENGINE}/smart/launch", params: { launch: "abc", iss: "https://ehr.example.test" }
-
-    assert_equal token, JSON.parse(response.body)["token_endpoint"]
-  end
-
   test "a configured token endpoint URL is the one every document publishes" do
     configured = "https://ehr.example.test/lakeraven-ehr/oauth/token"
     Lakeraven::EHR.configuration.token_endpoint_url = configured

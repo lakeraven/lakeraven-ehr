@@ -1,12 +1,13 @@
 # frozen_string_literal: true
 
 require "rpms_rpc/api/patient_profile"
+require "rpms_rpc/api/registration"
 
 module Lakeraven
   module EHR
     # The parts of a registration beside the demographics: the emergency
     # contact and next of kin (rpms-ux S-REG-08), the languages (S-REG-10) and
-    # the other names (S-REG-12). Everything goes through RpmsRpc::PatientProfile,
+    # the other names and the preferred name (S-REG-12), and race and ethnicity (S-REG-20.2). Everything goes through RpmsRpc::PatientProfile,
     # which reads and files through AG's own windows and runs AG's own field
     # checks (AGG WINDOW DATA VALIDATION) before it files.
     #
@@ -56,6 +57,33 @@ module Lakeraven
 
         def remove_alias(dfn, ien, via: ::RpmsRpc::PatientProfile)
           result_for(via.remove_alias(dfn.to_i, ien.to_i))
+        rescue ::RpmsRpc::Error, IOError, SystemCallError => e
+          unknown(e)
+        end
+
+        # The name the patient goes by (S-REG-12.1): "" when none is on file.
+        # RPMS has no registration call for it; RpmsRpc::Registration files it
+        # the way $$SETPREF^AUPNSOGI does, under AG's edit lock (rpms-ops#1059).
+        def preferred_name(dfn, via: ::RpmsRpc::Registration)
+          via.preferred_name(dfn.to_i)
+        end
+
+        def set_preferred_name(dfn, name, via: ::RpmsRpc::Registration)
+          result_for(via.set_preferred_name(dfn.to_i, name))
+        rescue ::RpmsRpc::Error, IOError, SystemCallError => e
+          unknown(e)
+        end
+
+        # The patient's races and ethnicities, each with how it was collected
+        # (S-REG-20.2), and the ones a clerk picks from. RPMS has no registration
+        # call for them; RpmsRpc::Registration files them the way AG's page 10
+        # does, under AG's edit lock (rpms-ops#1055).
+        def race_ethnicity(dfn, via: ::RpmsRpc::Registration) = via.race_ethnicity(dfn.to_i)
+        def race_ethnicity_choices(via: ::RpmsRpc::Registration) = via.race_ethnicity_choices
+
+        # races and ethnicities: [{ code:, method: }] (see RaceEthnicityEntry).
+        def set_race_ethnicity(dfn, races:, ethnicities:, via: ::RpmsRpc::Registration)
+          result_for(via.set_race_ethnicity(dfn.to_i, races: races, ethnicities: ethnicities))
         rescue ::RpmsRpc::Error, IOError, SystemCallError => e
           unknown(e)
         end

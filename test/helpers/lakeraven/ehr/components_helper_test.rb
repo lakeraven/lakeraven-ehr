@@ -103,7 +103,7 @@ class Lakeraven::EHR::ComponentsHelperTest < ActionView::TestCase
     @fragment = html
 
     assert_select "label.sr-only[for=provider_search]", text: "Provider name starts with"
-    assert_select "input[type=submit][value='Find provider'][formaction='/find'][formmethod=get][formnovalidate]"
+    assert_select "button[type=submit]:not([name])[formaction='/find'][formmethod=get][formnovalidate]", text: "Find provider"
     assert_select "input[type=hidden][name='checkin[provider_ien]'][value='206']"
     assert_select "p.hint", text: "Provider chosen."
   end

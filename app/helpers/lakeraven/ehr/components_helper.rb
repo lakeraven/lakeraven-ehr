@@ -83,6 +83,18 @@ module Lakeraven
         end
       end
 
+      # The token a Find that posts carries (#896). The form's own token is
+      # bound to the form's action and method (per-form CSRF tokens), so
+      # Rails refuses it at find_url. The session's token, which the page's
+      # csrf-token meta tag already carries, is good for any action. A GET
+      # changes nothing and needs none.
+      def lookup_find_token(find_method)
+        return unless protect_against_forgery?
+        return if find_method.to_s.casecmp?("get")
+
+        form_authenticity_token
+      end
+
       # A status's colour, by its key. Written out whole so the Tailwind build,
       # which reads this file, keeps each class. A key not here gets the
       # plain badge.

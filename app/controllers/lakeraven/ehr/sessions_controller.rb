@@ -27,6 +27,11 @@ module Lakeraven
       # fallback.
       def create
         access_code = params[:username].to_s
+        # An app's authorization request this sign-in is for (#839). Kept
+        # across the session resets below, so the user goes on to approve or
+        # deny it once signed in. It holds only what the app sent, and grants
+        # nothing until that user approves it (SmartAuthorizationsController).
+        pending_authorization = session[SmartAuthorizationsController::PENDING]
 
         # Whatever credential this browser is already carrying dies here,
         # before anything else happens. A sign-on at a workstation ends the
@@ -36,6 +41,8 @@ module Lakeraven
         # cannot reach. Clinician B signing in used to leave clinician A's
         # saved cookie working, audited as B.
         terminate_session!
+        # A failed attempt keeps it too, so the user can try again.
+        session[SmartAuthorizationsController::PENDING] = pending_authorization if pending_authorization.present?
 
         if LoginThrottle.throttled?(access_code, client_ip)
           # Refused BEFORE the credential is checked, and refused even when it
@@ -66,6 +73,11 @@ module Lakeraven
         LoginThrottle.clear_account(access_code)
         establish_session(provider)
         return render_at_capacity unless adopt_connection(provider)
+
+        if pending_authorization.present?
+          session[SmartAuthorizationsController::PENDING] = pending_authorization
+          return redirect_to smart_authorization_approval_path
+        end
 
         redirect_to dashboard_path
       end

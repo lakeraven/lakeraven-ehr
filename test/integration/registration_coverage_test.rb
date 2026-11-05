@@ -8,6 +8,7 @@ require "test_helper"
 # test/integration/live_registration_coverage_test.rb runs the same screens
 # against a real RPMS.
 class RegistrationCoverageTest < ActionDispatch::IntegrationTest
+  include BrowserFormHelper
   DFN = 990_049
   HEADER = { name: "ZEPHYR,QUINN", dob: Date.new(1983, 8, 18), sex: "F", mrn: "990049" }.freeze
 
@@ -195,5 +196,21 @@ class RegistrationCoverageTest < ActionDispatch::IntegrationTest
     assert_response :service_unavailable
     assert_select "#coverage-unavailable"
     assert_select "#no-coverage", 0
+  end
+
+  # #896: a browser sends the form's own token; the look-up must accept it.
+  test "Find state is accepted with forgery protection on, as in a browser" do
+    sign_in("registration_menu")
+    with_rpms(states: [ { ien: "48", name: "WASHINGTON" } ]) do
+      with_forgery_protection do
+        get "#{path}/new", params: { kind: "medicaid" }
+        press "Find state", fill: { "state_search" => "WASH", "coverage[number]" => "ZZ1" }
+      end
+    end
+
+    assert_response :ok
+    assert_select "label[data-state='48']", text: /WASHINGTON/
+    assert_select "input[name='coverage[number]'][value='ZZ1']"
+    assert_empty @writes
   end
 end

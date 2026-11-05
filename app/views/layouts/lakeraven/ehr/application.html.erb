@@ -32,11 +32,17 @@
       <%# Each link shows only to a user its screen would let in (ADR 0010). %>
       <nav aria-label="Main"
            class="flex items-center gap-4 text-sm">
+        <% if patient_search_allowed? %>
+          <%= link_to "Notifications", notifications_path %>
+        <% end %>
         <% if capability?("registration.search") %>
           <%= link_to "Registration", registration_patients_path %>
         <% end %>
         <% if capability?("scheduling.open") && feature_available?(:bprm_scheduling) %>
           <%= link_to "Scheduling", scheduling_home_path %>
+        <% end %>
+        <% if capability?("referrals.work") && feature_available?(:prc_referrals) %>
+          <%= link_to "Referrals", pending_referrals_path %>
         <% end %>
       </nav>
 

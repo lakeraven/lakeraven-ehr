@@ -20,6 +20,7 @@ module Lakeraven
         def saved? = status == :saved
         def refused? = status == :refused
         def outcome_unknown? = status == :unknown
+        def partial? = status == :partial
       end
 
       def self.find(dfn, via: ::RpmsRpc::Patient)
@@ -61,9 +62,30 @@ module Lakeraven
         Result.new(status: :unknown, field: nil, message: nil)
       end
 
+      # An address change that keeps the old address (S-REG-21.1): AG's
+      # Address window, then the replaced address into PREVIOUS MAIL ADDRESSES
+      # with the date the patient moved, under one AG edit lock
+      # (RpmsRpc::Registration.change_address, rpms-ops#1055). attrs as for update.
+      def self.change_address(dfn, attrs, moved_on:, via: ::RpmsRpc::Registration)
+        return Result.new(status: :saved, field: nil, message: nil) if attrs.empty?
+
+        result_for(via.change_address(dfn.to_i, moved_on: moved_on, **attrs))
+      rescue ArgumentError => e
+        Result.new(status: :refused, field: nil, message: e.message)
+      rescue ::RpmsRpc::Error, IOError, SystemCallError => e
+        Rails.logger.error("[registration] address change raised #{e.class}; the outcome is unknown")
+        Result.new(status: :unknown, field: nil, message: nil)
+      end
+
+      # The addresses the patient used to live at, newest first (S-REG-21.1).
+      # Raises the gem's errors when the list cannot be read.
+      def self.address_history(dfn, via: ::RpmsRpc::Registration) = via.address_history(dfn.to_i)
+
       def self.result_for(reply)
         return Result.new(status: :unknown, field: nil, message: nil) if reply.nil?
         return Result.new(status: :saved, field: nil, message: nil) if reply[:success]
+        # The address was filed and its history was not: RPMS's message says so.
+        return Result.new(status: :partial, field: nil, message: reply[:message].to_s) if reply[:error] == :partial
 
         field = reply[:field].is_a?(Symbol) ? reply[:field] : nil
         message = case reply[:error]

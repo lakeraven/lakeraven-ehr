@@ -17,8 +17,10 @@ module Lakeraven
         before_action :load_appointment!
 
         # GET /scheduling/clinics/:resource_id/appointments/:appointment_id/cancel?date=&whom=
+        # Show reasons sends the form itself, so who cancelled comes as cancellation[whom].
         def new
-          @cancellation = AppointmentCancellation.new(whom: params[:whom].presence || "PC")
+          whom = params[:whom].presence || params.dig(:cancellation, :whom).presence || "PC"
+          @cancellation = AppointmentCancellation.new(whom: whom)
           @reasons = AppointmentCancellationGateway.reasons(@cancellation.whom)
         end
 

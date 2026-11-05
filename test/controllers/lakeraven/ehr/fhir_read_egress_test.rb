@@ -67,6 +67,11 @@ module Lakeraven
         "lakeraven/ehr/dashboards#show",      # Web UI dashboard; banner patient/allergy via filter_fhir_for_egress
         "lakeraven/ehr/chart_searches#show",   # Patient bar: my recent patients' name, DOB, sex, HRN; no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/chart_searches#create", # Patient bar search: name, DOB, sex, HRN as registration's lookup; revisit with Part 2 (#494)
+        "lakeraven/ehr/notifications#index",   # The user's RPMS notifications (S-SGN-02.1): patient name, HRN, the alert's text and its comment or long text (BEHOXQ ALRMSG), which can name a result or an order; revisit with Part 2 (#494)
+        "lakeraven/ehr/notifications#destroy",          # Removing one of the user's notifications (S-SGN-02.2): a write, redirects to the list
+        "lakeraven/ehr/notification_forwards#new",      # Forwarding one (S-SGN-02.4): the notification's text and patient name, as the list shows them; revisit with Part 2 (#494)
+        "lakeraven/ehr/notification_forwards#find",     # The colleague search: users' names, and the notification as on #new
+        "lakeraven/ehr/notification_forwards#create",   # Forwarding it (S-SGN-02.4): a write, not disclosure
         "lakeraven/ehr/registration/patients#index", # Front-desk lookup: registration demographics (name, HRN, DOB, status), no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/registration/patients#show",  # Registration demographics (name, HRN, DOB, sex), no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/registration/patients#new",     # Registration entry form (S-REG-02), not disclosure
@@ -83,6 +88,13 @@ module Lakeraven
         "lakeraven/ehr/registration/other_names#index",   # Other names the patient has used (S-REG-12): registration demographics, no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/registration/other_names#create",  # Adding an other name (S-REG-12), not disclosure
         "lakeraven/ehr/registration/other_names#destroy", # Removing an other name (S-REG-12), not disclosure
+        "lakeraven/ehr/registration/preferred_names#edit",   # The name the patient goes by (S-REG-12.1): registration demographics, no clinical record
+        "lakeraven/ehr/registration/preferred_names#update", # Saving the preferred name (S-REG-12.1), not disclosure
+        "lakeraven/ehr/registration/race_ethnicities#edit",   # Race and ethnicity (S-REG-20.2): registration demographics, no clinical record
+        "lakeraven/ehr/registration/race_ethnicities#update", # Saving race and ethnicity (S-REG-20.2), not disclosure
+        "lakeraven/ehr/registration/applications#new",    # The form to record an application for coverage (S-REG-03.3): no clinical record
+        "lakeraven/ehr/registration/applications#create", # Recording an application (S-REG-03.3), not disclosure
+        "lakeraven/ehr/registration/applications#update", # Recording what happened to it (S-REG-03.4, 03.5), not disclosure
         "lakeraven/ehr/registration/eligibilities#edit",   # Tribe and eligibility form (S-REG-07.1), registration data, no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/registration/eligibilities#update", # Tribe and eligibility edit; as #edit
         "lakeraven/ehr/registration/coverages#index",  # Payer, member number and dates for billing (S-REG-03), no clinical record; revisit with Part 2 (#494)
@@ -93,6 +105,7 @@ module Lakeraven
         "lakeraven/ehr/scheduling/clinics#week",      # A clinic week: the same as the day, over seven days; revisit with Part 2 (#494)
         "lakeraven/ehr/scheduling/open_times#index",  # Open times in a clinic's blocks: times only, no patient data
         "lakeraven/ehr/scheduling/patient_appointments#index", # One patient's appointments: clinics, times, statuses, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/scheduling/needing_action#index", # Appointments needing action (#875): times, clinics and patient names, no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/scheduling/appointments#new",   # Booking form: patient name, HRN, date of birth, no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/scheduling/appointments#create", # Booking entry, not disclosure
         "lakeraven/ehr/scheduling/quick_registrations#new",    # Registering a caller from scheduling (S-REG-05): an entry form, not disclosure
@@ -116,11 +129,20 @@ module Lakeraven
         "lakeraven/ehr/scheduling/no_shows#undo",        # Undo no-show entry, not disclosure
         "lakeraven/ehr/scheduling/hours#new",            # Clinic hours form: access types, no patient data
         "lakeraven/ehr/scheduling/hours#create",         # Hours entry; a refusal names an appointment time and patient name, no clinical record
+        "lakeraven/ehr/pending_referrals#index",         # Pending referrals (#873): date, patient name, status and number; no reason, diagnosis or referred-to; revisit with Part 2 (#494)
         "lakeraven/ehr/test_sessions#create", # Test only
         "lakeraven/ehr/smart_configuration#show", # Discovery
-        "lakeraven/ehr/smart_launch#show",    # Discovery
+        "lakeraven/ehr/smart_launch#show",    # EHR launch: lists registered apps for a patient named by name only
+        "lakeraven/ehr/smart_launch#create",  # EHR launch: mints a launch context, no clinical data
+        "lakeraven/ehr/smart_styles#show",    # SMART style: colours and type
         "lakeraven/ehr/capability_statements#show", # Discovery
         "lakeraven/ehr/backend_services#token", # Auth
+        "lakeraven/ehr/smart_authorizations#new",    # Auth: checks an app's request, no clinical data
+        "lakeraven/ehr/smart_authorizations#show",   # Auth: the approval screen, scopes in plain words
+        "lakeraven/ehr/smart_authorizations#decide", # Auth: issues a code, no clinical data
+        "lakeraven/ehr/smart_authorizations#patient",        # Auth: the patient picker, empty until searched
+        "lakeraven/ehr/smart_authorizations#choose_patient", # Auth: patient search: name, HRN, date of birth, sex, no clinical record
+        "lakeraven/ehr/smart_tokens#create",         # Auth
         "lakeraven/ehr/transitions_of_care#create", # Wired separately in #568
         "lakeraven/ehr/ccda_imports#create",  # Ingress
         "lakeraven/ehr/exports#create",       # Status/kickoff, no clinical data

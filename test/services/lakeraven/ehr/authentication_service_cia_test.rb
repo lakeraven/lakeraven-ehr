@@ -34,6 +34,7 @@ class AuthenticationServiceCiaTest < ActiveSupport::TestCase
       raise RpmsRpc::Client::AuthenticationError, "CIA sign-on rejected" if @reject
 
       @session_uid = "405"
+      set_authenticated("77") # as CiaClient#authenticate does: held_keys binds a context and sends this DUZ
 
       { success: true, user: "PROVIDER,TEST", duz: 77, greeting: @greeting }
     end
@@ -48,8 +49,8 @@ class AuthenticationServiceCiaTest < ActiveSupport::TestCase
       raise RpmsRpc::Client::RpcError, "4 Access denied for remote procedure: #{name}" if @denied.include?(name)
 
       return USERINFO_REPLY if name == "ORWU USERINFO"
-      # CIAVCXUS HASKEYS: this user holds none of the names asked.
-      return "\x01\x00".b + params.first.to_s.split("^", -1).map { "0" }.join("^").b if name == "CIAVCXUS HASKEYS"
+      # ORWU NPHASKEY: this user holds none of the keys asked.
+      return "\x01\x00".b + "0".b if name == "ORWU NPHASKEY"
       # ORWU HAS OPTION ACCESS: a CIA sign-on binds to CIAV VUECENTRIC, so it holds that.
       return "\x01\x00".b + (params.first == "CIAV VUECENTRIC" ? "1" : "0").b if name == "ORWU HAS OPTION ACCESS"
 

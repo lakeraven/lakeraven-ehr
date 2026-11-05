@@ -34,16 +34,17 @@ class PerUserRpmsConnectionTest < ActionDispatch::IntegrationTest
 
       @duz, name = USERS.fetch(access_code)
       @session_uid = "4#{@duz}"
+      set_authenticated(@duz) # as CiaClient#authenticate does: held_keys binds a context and sends this DUZ
       { success: true, user: name, duz: @duz, greeting: "#{name} signed on.  Good evening" }
     end
 
-    # ORWU USERINFO (class 3), CIAVCXUS HASKEYS (SDZMENU only), ORWU HAS OPTION
+    # ORWU USERINFO (class 3), ORWU NPHASKEY (SDZMENU only), ORWU HAS OPTION
     # ACCESS (CIAV VUECENTRIC), ORWU USERINFO's DTIME, framed as a CIA broker does.
     def call_rpc_raw(name, *params)
       @rpcs << name
       body = case name
       when "ORWU USERINFO" then "#{@duz}^USER^3^1^1^3^0^99999^20^1^1^5^DEMO.IHS.GOV^1^180"
-      when "CIAVCXUS HASKEYS" then params.first.to_s.split("^", -1).map { |k| k == "SDZMENU" ? "1" : "0" }.join("^")
+      when "ORWU NPHASKEY" then params[1].to_s == "SDZMENU" ? "1" : "0"
       when "ORWU HAS OPTION ACCESS" then params.first == "CIAV VUECENTRIC" ? "1" : "0"
       else ""
       end
