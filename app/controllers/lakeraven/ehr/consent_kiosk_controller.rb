@@ -55,11 +55,19 @@ module Lakeraven
 
       private
 
+      # The lock is keyed by the browser SSO session token. A launched or
+      # header bearer has a different id, even when it names the same DUZ.
       def require_clinician_credential!
-        return true if current_duz.present?
+        return true if kiosk_session_credential?
 
         render_forbidden("The consent tablet requires a clinician sign-on")
         false
+      end
+
+      def kiosk_session_credential?
+        current_duz.present? &&
+          clinician_credential? &&
+          session_access_token&.id == current_token&.id
       end
 
       def require_consent_lock!

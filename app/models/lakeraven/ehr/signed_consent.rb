@@ -163,12 +163,14 @@ module Lakeraven
         raise NotRevocable, "already revoked"
       end
 
-      def to_consent
+      # `revoked:` skips the per-row exists? when the caller already knows.
+      # Omitted, the status is still read from a revocation row.
+      def to_consent(revoked: nil)
         Consent.new(
           id: id&.to_s,
           patient_dfn: patient_dfn,
           scope: consent_template.consent_scope,
-          status: revoked? ? "revoked" : "active",
+          status: consent_status(revoked),
           provision_type: "permit",
           performer_ien: witness_duz,
           date_time: signed_at.to_date
@@ -182,6 +184,11 @@ module Lakeraven
       end
 
       private
+
+      def consent_status(revoked)
+        known = revoked.nil? ? revoked? : revoked
+        known ? "revoked" : "active"
+      end
 
       def revocation_recorded?
         self.class.exists?(kind: KIND_REVOCATION, revokes_id: id)

@@ -2,6 +2,7 @@
 
 <div class="page-header">
   <h1>Consents</h1>
+  <%= link_to "Start a consent", new_patient_consent_path(@dfn) %>
 </div>
 
 <table>
@@ -17,7 +18,7 @@
   </thead>
   <tbody>
     <% @consents.each do |row| %>
-      <% consent = row.to_consent %>
+      <% consent = row.to_consent(revoked: @revocations_by_signature_id.key?(row.id)) %>
       <% revocation = @revocations_by_signature_id[row.id] %>
       <tr>
         <td><%= row.consent_template.title %></td>

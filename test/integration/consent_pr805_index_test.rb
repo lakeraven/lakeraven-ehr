@@ -68,22 +68,29 @@ class ConsentPr805IndexTest < ActionDispatch::IntegrationTest
   end
 
   test "consent index does not run per-row revocation EXISTS queries" do
-    one_row_queries = revocation_table_queries_during { create_and_list!(count: 1) }
-    four_row_queries = revocation_table_queries_during { create_and_list!(count: 4) }
+    prepare_consent_rows!(count: 1)
+    one_row_queries = revocation_lookup_queries_during do
+      get BASE
+      assert_response :ok
+    end
+
+    prepare_consent_rows!(count: 4)
+    four_row_queries = revocation_lookup_queries_during do
+      get BASE
+      assert_response :ok
+    end
 
     assert_operator one_row_queries, :<=, 1,
-                    "expected at most one revocation-table query for one consent, got #{one_row_queries}"
+                    "expected at most one revocation lookup query for one consent, got #{one_row_queries}"
     assert_equal one_row_queries, four_row_queries,
-                 "revocation-table query count must not grow with list rows (1 => #{one_row_queries}, 4 => #{four_row_queries})"
+                 "revocation lookup query count must not grow with list rows (1 => #{one_row_queries}, 4 => #{four_row_queries})"
   end
 
   private
 
-  def create_and_list!(count:)
+  def prepare_consent_rows!(count:)
     Lakeraven::EHR::SignedConsent.delete_all
     count.times { |i| create_signature_row!(template_key: i.even? ? TEMPLATE_BH : TEMPLATE_ROI) }
-    get BASE
-    assert_response :ok
   end
 
   def create_signature_row!(template_key:)
@@ -102,20 +109,26 @@ class ConsentPr805IndexTest < ActionDispatch::IntegrationTest
     )
   end
 
-  def revocation_table_queries_during
+  def revocation_lookup_queries_during
     table = Lakeraven::EHR::SignedConsent.table_name
     count = 0
     callback = lambda do |_name, _start, _finish, _id, payload|
-      sql = payload[:sql].to_s
-      next unless sql.include?(table)
-      next unless sql.match?(/revocation|revokes_id|EXISTS/i)
-
-      count += 1
+      count += 1 if revocation_lookup_sql?(payload[:sql].to_s, table)
     end
 
     ActiveSupport::Notifications.subscribed(callback, "sql.active_record") do
       yield
     end
     count
+  end
+
+  def revocation_lookup_sql?(sql, table)
+    normalized = sql.squish
+    return false unless normalized.match?(/\A(?:SELECT|WITH)\b/i)
+    return false unless normalized.include?(table)
+    return false unless normalized.match?(/\brevokes_id\b/i)
+
+    normalized.match?(/\bSELECT\s+1\s+AS\s+one\b/i) ||
+      normalized.match?(/\bWHERE\b.*\brevokes_id\b/mi)
   end
 end
