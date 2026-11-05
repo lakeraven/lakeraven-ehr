@@ -11,6 +11,8 @@ module Lakeraven
       class NoShowsController < BaseController
         include SchedulingAppointmentChange
 
+        rate_limit only: %i[create undo]
+
         before_action :load_resource!
         before_action :require_booking_right!
         before_action :load_appointment!

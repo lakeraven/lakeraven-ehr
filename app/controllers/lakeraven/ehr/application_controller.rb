@@ -5,6 +5,7 @@ module Lakeraven
     class ApplicationController < ActionController::API
       include SmartAuthentication
       include AuditableClinicalAccess
+      include RateLimitable
       include FHIRReadEgress
       include FHIRSearchBundle
       include FeatureUnavailableRendering

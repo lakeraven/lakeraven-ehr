@@ -9,6 +9,8 @@ module Lakeraven
       # its note and length. AppointmentRescheduleGateway does the two writes in
       # the order that keeps the original when the new time is refused.
       class ReschedulesController < BaseController
+        rate_limit only: %i[new create]
+
         before_action :load_resource!
         before_action :require_booking_right!
         before_action :load_appointment!

@@ -5,6 +5,8 @@ module Lakeraven
     class MedicationRequestsController < ApplicationController
       include PatientCompartment
 
+      rate_limit only: %i[index show]
+
       compartment_bound :index, param: :patient, require_param: true
 
       # status and intent are token parameters: FHIRSearchBundle filters the

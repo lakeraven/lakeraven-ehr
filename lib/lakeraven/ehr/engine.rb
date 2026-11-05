@@ -32,7 +32,7 @@ module Lakeraven
 
       initializer "lakeraven-ehr.filter_credentials" do |app|
         # `allergy` is the chart entry payload: allergen, comments, symptoms.
-        app.config.filter_parameters += %i[username access_code verify_code allergy]
+        app.config.filter_parameters += %i[username access_code verify_code allergy client_assertion]
         # A patient's identity never reaches a log line (#722): the registration form,
         # any SSN, and the search's q and dob (matched exactly: a bare :q would also
         # match every key containing a q).

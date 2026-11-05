@@ -66,8 +66,16 @@ module Lakeraven
       # docs/adr, "product name in the chrome").
       attr_accessor :product_name
 
+      # When true (the default), ClientIp trusts X-Forwarded-For from
+      # config.action_dispatch.trusted_proxies. A direct-LAN deployment,
+      # where clients reach the app with no reverse proxy, sets this to
+      # false so the client address is REMOTE_ADDR and a caller-supplied
+      # forwarded header cannot choose a rate-limit or login bucket.
+      attr_accessor :trust_forwarded_for
+
       def initialize
         @product_name = "Lakeraven EHR"
+        @trust_forwarded_for = true
         @session_idle_limit = 30.minutes
         @session_lifetime = 12.hours
         @tenant_resolver = ->(request) {

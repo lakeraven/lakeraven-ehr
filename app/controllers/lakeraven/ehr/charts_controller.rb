@@ -52,6 +52,10 @@ module Lakeraven
       # a GET still must not open a context.
       include ClinicianPatientContext
 
+      include RateLimitable
+
+      rate_limit only: :show
+
       FHIR_CONTENT_TYPE = "application/fhir+json"
 
       # VistA DFN width. Patient.canonical_dfn has no length cap; the chart

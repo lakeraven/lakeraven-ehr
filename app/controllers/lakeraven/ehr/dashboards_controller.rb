@@ -6,6 +6,8 @@ module Lakeraven
     # as this user and links to the page where that work is done (#812); a
     # count with no such page is not shown.
     class DashboardsController < WebController
+      rate_limit only: :show
+
       before_action :require_authentication
 
       # Today's appointments in each clinic the user schedules for (rpms-ux

@@ -10,6 +10,8 @@ module Lakeraven
       class PatientAppointmentsController < BaseController
         WHEN = %w[today past future].freeze
 
+        rate_limit only: :index
+
         # GET /scheduling/patients/:dfn/appointments?when=
         def index
           @dfn = params[:dfn].to_i

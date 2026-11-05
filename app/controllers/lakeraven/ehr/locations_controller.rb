@@ -3,6 +3,8 @@
 module Lakeraven
   module EHR
     class LocationsController < ApplicationController
+      rate_limit only: :show
+
       def show
         location = Location.find_by_ien(params[:ien])
 

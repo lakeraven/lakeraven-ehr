@@ -8,6 +8,9 @@ module Lakeraven
     # RPMS as the signed-on user (stock BMC SEARCH REFERRAL). Referrals are
     # RCIS, which only an IHS backend serves (prc_referrals, #647).
     class PendingReferralsController < WebController
+      # Throttled like every credentialed route (#498).
+      rate_limit only: :index
+
       before_action :require_prc_referrals!
       before_action :require_authentication
       before_action -> { require_capability!("referrals.work") }

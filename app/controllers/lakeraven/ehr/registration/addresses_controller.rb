@@ -9,6 +9,8 @@ module Lakeraven
       # RpmsRpc::Registration.change_address); phones and email alone go through
       # RpmsRpc::Patient.update.
       class AddressesController < PatientEditsController
+        rate_limit only: %i[edit update]
+
         # GET /registration/patients/:dfn/address/edit
         def edit
           @address = PatientAddress.from_record(@record)

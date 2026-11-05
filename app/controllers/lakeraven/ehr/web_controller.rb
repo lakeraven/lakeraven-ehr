@@ -12,6 +12,7 @@ module Lakeraven
       include AuditableClinicalAccess
       include PatientBannerRendering
       include RpmsUserScope
+      include RateLimitable
 
       helper ApplicationHelper
       layout "lakeraven/ehr/application"
