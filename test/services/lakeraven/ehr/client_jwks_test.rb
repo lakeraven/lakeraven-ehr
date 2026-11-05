@@ -41,6 +41,28 @@ module Lakeraven
         assert_empty dialed
       end
 
+      test "a JWKS with no Cache-Control is cached for the TTL" do
+        assert_equal 1, fetches_of_a_jwks_sent_with(nil)
+      end
+
+      test "a JWKS sent with no-store is fetched again every time" do
+        assert_equal 2, fetches_of_a_jwks_sent_with("no-store")
+      end
+
+      test "a JWKS sent with no-cache or max-age=0 is fetched again every time" do
+        assert_equal 2, fetches_of_a_jwks_sent_with("no-cache")
+        assert_equal 2, fetches_of_a_jwks_sent_with("public, max-age=0")
+      end
+
+      test "a short max-age ends the cached copy when it says" do
+        assert_equal 1, fetches_of_a_jwks_sent_with("max-age=60")
+        assert_equal 2, fetches_of_a_jwks_sent_with("max-age=60", after: 61.seconds)
+      end
+
+      test "a long max-age cannot stretch the cached copy past the TTL" do
+        assert_equal 2, fetches_of_a_jwks_sent_with("max-age=86400", after: ClientJwks::CACHE_TTL + 1.second)
+      end
+
       test "restoring the snapshotted resolver removes a scenario stub" do
         snapshot = ClientJwks.resolver
         fake = Object.new
@@ -53,6 +75,39 @@ module Lakeraven
       end
 
       private
+
+      # How many times the JWKS is dialed for two fetches, `after` apart.
+      def fetches_of_a_jwks_sent_with(cache_control, after: 0.seconds)
+        stub_resolver("client.example.test" => [ "203.0.113.10" ])
+        store = ActiveSupport::Cache::MemoryStore.new
+        response = Net::HTTPOK.new("1.1", "200", "OK")
+        response["Cache-Control"] = cache_control if cache_control
+        response.define_singleton_method(:body) { { keys: [ { kid: "one" } ] }.to_json }
+        dials = 0
+        pinned = ClientJwks.singleton_class
+        original = pinned.instance_method(:pinned_get)
+        pinned.define_method(:pinned_get) do |_uri, _address|
+          dials += 1
+          response
+        end
+
+        with_cache(store) do
+          assert ClientJwks.fetch("https://client.example.test/jwks.json")
+          travel(after) { assert ClientJwks.fetch("https://client.example.test/jwks.json") }
+        end
+        dials
+      ensure
+        pinned.define_method(:pinned_get, original)
+        pinned.send(:private, :pinned_get)
+      end
+
+      def with_cache(store)
+        previous = Rails.cache
+        Rails.cache = store
+        yield
+      ensure
+        Rails.cache = previous
+      end
 
       def stub_resolver(mapping)
         fake = Object.new
