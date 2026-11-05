@@ -231,6 +231,13 @@ module Lakeraven
               documentation: "Forward references listed in each resource's searchInclude, " \
                              "for the matches on this page. Any other value is refused with " \
                              "a 400 OperationOutcome."
+            },
+            {
+              name: "_elements",
+              type: "string",
+              documentation: "Comma-separated top-level elements each match should carry. " \
+                             "id and meta always stay, and meta gains the SUBSETTED tag. " \
+                             "Anything else, such as a dotted path, is refused with a 400 OperationOutcome."
             }
           ]
         end
