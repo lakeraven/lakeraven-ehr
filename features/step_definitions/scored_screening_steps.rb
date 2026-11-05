@@ -12,7 +12,7 @@
 SCREENING_PHQ9 = Lakeraven::EHR::ScreeningInstrument::PHQ9
 SCREENING_GAD7 = Lakeraven::EHR::ScreeningInstrument::GAD7
 SCREENING_MOUNT = "/lakeraven-ehr"
-SCREENING_SCOPES = "user/QuestionnaireResponse.read user/QuestionnaireResponse.write"
+SCREENING_SCOPES = Lakeraven::EHR::SessionScopePolicy.scope_string(security_keys: [ :behavioral_health_user ])
 
 module ScreeningStepHelpers
   def instrument_named(name)

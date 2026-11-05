@@ -649,14 +649,16 @@ class SsoSessionTokenBridgeSecurityTest < ActionDispatch::IntegrationTest
 
   # -- M: the C-CDA author must not be caller-supplied --------------------
 
-  test "the chart option grants Part 2-bearing resource types and the BH keys grant nothing" do
+  test "the chart option grants Part 2-bearing read types and BH keys grant QuestionnaireResponse only" do
     chart = Lakeraven::EHR::SessionScopePolicy.scopes_for(security_keys: [], options: [ "CIAV VUECENTRIC" ])
-    bh = Lakeraven::EHR::SessionScopePolicy.scopes_for(security_keys: [ :behavioral_health_user, :behavioral_health_manager ])
+    bh_user = Lakeraven::EHR::SessionScopePolicy.scopes_for(security_keys: [ :behavioral_health_user ])
+    bh_mgr = Lakeraven::EHR::SessionScopePolicy.scopes_for(security_keys: [ :behavioral_health_manager ])
 
     assert_includes chart, "user/Observation.rs", "PHQ-9 item 9 rides on Observation"
     assert_includes chart, "user/Condition.rs",   "substance-use diagnoses ride on Condition"
-    assert_empty bh, "the BH keys grant nothing today — see #494"
-    assert_empty Lakeraven::EHR::SessionScopePolicy::BEHAVIORAL_HEALTH_TYPES
+    assert_equal [ "user/QuestionnaireResponse.cruds" ], bh_user
+    assert_equal [ "user/QuestionnaireResponse.cruds" ], bh_mgr
+    assert_equal %w[QuestionnaireResponse], Lakeraven::EHR::SessionScopePolicy::BEHAVIORAL_HEALTH_TYPES
   end
 
   test "no option or key in the table grants Condition write" do
