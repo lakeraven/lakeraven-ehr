@@ -86,6 +86,7 @@ module Lakeraven
         validate_fhir_revincludes unless performed?
         @fhir_token_searches = parse_fhir_token_searches unless performed?
         @fhir_elements = parse_fhir_elements unless performed?
+        @fhir_date_searches = parse_fhir_date_searches unless performed?
       end
 
       # nil when the parameter is absent, :invalid when it is present and not
@@ -199,7 +200,7 @@ module Lakeraven
       # The whole match set in: sorted, one page of it out, and whatever
       # _include asks for after the page.
       def fhir_search_bundle(entries, type: "searchset")
-        entries = apply_token_searches(entries)
+        entries = apply_date_searches(apply_token_searches(entries))
         page = fhir_page(fhir_sort(entries))
         matches = page.map { |entry| { resource: entry, search: { mode: "match" } } }
         paged_search_bundle(matches + fhir_include_entries(page), total: entries.length, type: type)
@@ -311,6 +312,43 @@ module Lakeraven
         when Hash
           dig_fhir(value, [ :coding, :* ]).map { |coding| [ coding[:system] || coding["system"], coding[:code] || coding["code"] ] }
         else []
+        end
+      end
+
+      # -- date search parameters -----------------------------------------------
+      #
+      # The type's FHIR::SearchCapabilities::DateParam parameters, matched against
+      # the resource as served, like tokens. A comma-separated list matches any
+      # of its values, a repeated parameter must match every time (a range is
+      # date=ge2024&date=lt2025), and a resource with no date there matches
+      # nothing. A value that is not a date is refused with a 400.
+
+      # [[DateParam, [[DateSearch, ...], ...]], ...] for the parameters present.
+      def parse_fhir_date_searches
+        FHIR::SearchCapabilities.date_params_for(fhir_resource_type).filter_map do |name, date|
+          next unless raw_query.key?(name)
+
+          groups = Array(raw_query[name]).map do |value|
+            parsed = value.to_s.split(",", -1).map { |text| FHIR::DateSearch.parse(text.strip) }
+            return refuse_search_parameter(name, FHIR::DateSearch::FORMS) if parsed.empty? || parsed.any?(&:nil?)
+
+            parsed
+          end
+          [ date, groups ]
+        end
+      end
+
+      def apply_date_searches(entries)
+        searches = @fhir_date_searches || []
+        return entries if searches.empty?
+
+        entries.select { |resource| date_searches_match?(resource) }
+      end
+
+      def date_searches_match?(resource)
+        (@fhir_date_searches || []).all? do |date, groups|
+          served = date.paths.flat_map { |path| dig_fhir(resource, path) }.filter_map { |value| FHIR::DateSearch.served_range(value) }
+          served.any? { |range| groups.all? { |group| group.any? { |search| search.matches?(range) } } }
         end
       end
 
