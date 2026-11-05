@@ -7,7 +7,7 @@ require_relative "../dummy/lib/lakeraven_demo_seeds"
 module PatientBannerTestHelper
   MOUNT = "/lakeraven-ehr"
   DUZ = "99999"
-  SCREENING_SCOPES = "user/QuestionnaireResponse.read user/QuestionnaireResponse.write"
+  SCREENING_SCOPES = Lakeraven::EHR::SessionScopePolicy.scope_string(security_keys: [ :behavioral_health_user ])
   CHART_SCOPES = "system/*.read"
   BANNER_SCOPES = [
     "user/Patient.read",
