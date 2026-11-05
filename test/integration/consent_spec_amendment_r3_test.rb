@@ -75,15 +75,15 @@ class ConsentSpecAmendmentR3Test < ActionDispatch::IntegrationTest
       assert_response :unprocessable_entity
     end
 
-    decode_calls = nil
-    count_decode_signature_data_url_calls do |calls|
+    decode_tally = nil
+    count_decode_signature_data_url_calls do |tally|
       post_kiosk_signature(signature: signature_data_url(max_pad_dimension_signature_png(width: 1800, height: 600)))
-      decode_calls = calls
+      decode_tally = tally
     end
 
     assert_response :too_many_requests
     assert_match(/too many|refused|signature/i, response.body)
-    assert_equal 0, decode_calls, "429 must short-circuit before decode_signature_data_url runs"
+    assert_equal 0, decode_tally.count, "429 must short-circuit before decode_signature_data_url runs"
     get CHART
     assert_locked_redirect_to_kiosk!
   end

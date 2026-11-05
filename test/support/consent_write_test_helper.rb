@@ -258,15 +258,25 @@ module ConsentWriteTestHelper
     end
   end
 
+  DecodeSignatureCallCounter = Struct.new(:count) do
+    def initialize
+      super(0)
+    end
+
+    def increment!
+      self.count += 1
+    end
+  end
+
   def count_decode_signature_data_url_calls
-    calls = 0
+    tally = DecodeSignatureCallCounter.new
     singleton = Lakeraven::EHR::SignedConsent.singleton_class
     original = singleton.instance_method(:decode_signature_data_url)
     Lakeraven::EHR::SignedConsent.define_singleton_method(:decode_signature_data_url) do |value|
-      calls += 1
+      tally.increment!
       original.bind_call(Lakeraven::EHR::SignedConsent, value)
     end
-    yield calls
+    yield tally
   ensure
     singleton.send(:remove_method, :decode_signature_data_url)
     singleton.send(:define_method, :decode_signature_data_url, original)

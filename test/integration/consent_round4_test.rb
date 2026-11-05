@@ -52,16 +52,16 @@ class ConsentRound4Test < ActionDispatch::IntegrationTest
   test "kiosk signature POST with invalid UTF-8 signer_name is refused before decode with nothing stored" do
     open_kiosk_via_handover!
 
-    decode_calls = nil
-    count_decode_signature_data_url_calls do |calls|
+    decode_tally = nil
+    count_decode_signature_data_url_calls do |tally|
       assert_no_difference -> { Lakeraven::EHR::SignedConsent.count } do
         post_kiosk_signature(signer_name: invalid_utf8_signer_name)
       end
-      decode_calls = calls
+      decode_tally = tally
     end
 
     assert_includes [ 400, 422 ], response.status, "invalid UTF-8 form body may be refused by Rails or the kiosk"
-    assert_equal 0, decode_calls if response.status == 400
+    assert_equal 0, decode_tally.count if response.status == 400
     get CHART
     assert_locked_redirect_to_kiosk!
   end
@@ -94,16 +94,16 @@ class ConsentRound4Test < ActionDispatch::IntegrationTest
     lock = kiosk_lock_row
     lock.update_column(:refused_signature_count, Lakeraven::EHR::KioskLock::MAX_REFUSED_SIGNATURES)
 
-    decode_calls = nil
+    decode_tally = nil
     with_stale_kiosk_lock_refusal_check! do
-      count_decode_signature_data_url_calls do |calls|
+      count_decode_signature_data_url_calls do |tally|
         post_kiosk_signature(signature: signature_data_url(pad_sized_visible_signature_png))
-        decode_calls = calls
+        decode_tally = tally
       end
     end
 
     assert_response :too_many_requests
-    assert_equal 0, decode_calls
+    assert_equal 0, decode_tally.count
     assert_operator lock.reload.refused_signature_count, :<=, Lakeraven::EHR::KioskLock::MAX_REFUSED_SIGNATURES
   end
 
@@ -118,14 +118,14 @@ class ConsentRound4Test < ActionDispatch::IntegrationTest
     end
     assert_equal Lakeraven::EHR::KioskLock::MAX_REFUSED_SIGNATURES, lock.reload.refused_signature_count
 
-    decode_calls = nil
-    count_decode_signature_data_url_calls do |calls|
+    decode_tally = nil
+    count_decode_signature_data_url_calls do |tally|
       post_kiosk_signature(signature: signature_data_url(pad_sized_visible_signature_png))
-      decode_calls = calls
+      decode_tally = tally
     end
 
     assert_response :too_many_requests
-    assert_equal 0, decode_calls
+    assert_equal 0, decode_tally.count
     assert_equal Lakeraven::EHR::KioskLock::MAX_REFUSED_SIGNATURES, lock.reload.refused_signature_count
   end
 
@@ -140,16 +140,16 @@ class ConsentRound4Test < ActionDispatch::IntegrationTest
     assert_response :unprocessable_entity
     assert_equal Lakeraven::EHR::KioskLock::MAX_REFUSED_SIGNATURES, lock.reload.refused_signature_count
 
-    decode_calls = nil
+    decode_tally = nil
     with_stale_kiosk_lock_refusal_check! do
-      count_decode_signature_data_url_calls do |calls|
+      count_decode_signature_data_url_calls do |tally|
         post_kiosk_signature(signature: signature_data_url(pad_sized_visible_signature_png))
-        decode_calls = calls
+        decode_tally = tally
       end
     end
 
     assert_response :too_many_requests
-    assert_equal 0, decode_calls
+    assert_equal 0, decode_tally.count
     assert_equal Lakeraven::EHR::KioskLock::MAX_REFUSED_SIGNATURES, lock.reload.refused_signature_count
   end
 
