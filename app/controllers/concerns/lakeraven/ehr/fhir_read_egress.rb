@@ -27,6 +27,13 @@ module Lakeraven
       NDJSON_CONTENT_TYPE = "application/fhir+ndjson"
       private_constant :NDJSON_CONTENT_TYPE
 
+      SUBSETTED_TAG = {
+        "system" => "http://terminology.hl7.org/CodeSystem/v3-ObservationValue",
+        "code" => "SUBSETTED"
+      }.freeze
+      ALWAYS_KEPT_ELEMENTS = %w[resourceType id meta].freeze
+      private_constant :SUBSETTED_TAG, :ALWAYS_KEPT_ELEMENTS
+
       private
 
       def render_fhir_egress(payload, status: :ok)
@@ -40,6 +47,25 @@ module Lakeraven
       # the matches, built by FHIRSearchBundle.
       def render_bundle_egress(entries, type: "searchset")
         render_fhir_egress(fhir_search_bundle(entries, type: type))
+      end
+
+      # The Bundle after the seam, each match cut down to what _elements asked
+      # for (FHIRSearchBundle reads the parameter). The seam can hand back
+      # string or symbol keys.
+      def fhir_subset_bundle(payload)
+        return payload if @fhir_elements.blank?
+
+        bundle = payload.deep_stringify_keys
+        bundle.merge("entry" => Array(bundle["entry"]).map { |entry| subset_fhir_entry(entry) })
+      end
+
+      def subset_fhir_entry(entry)
+        return entry unless entry.dig("search", "mode") == "match"
+
+        kept = entry["resource"].slice(*ALWAYS_KEPT_ELEMENTS, *@fhir_elements)
+        meta = kept.fetch("meta", {})
+        kept["meta"] = meta.merge("tag" => Array(meta["tag"]) + [ SUBSETTED_TAG ])
+        entry.merge("resource" => kept)
       end
 
       def render_export_file_egress(file)

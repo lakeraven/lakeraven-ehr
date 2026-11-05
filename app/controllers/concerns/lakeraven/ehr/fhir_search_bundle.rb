@@ -47,12 +47,6 @@ module Lakeraven
     module FHIRSearchBundle
       extend ActiveSupport::Concern
 
-      SUBSETTED_TAG = {
-        "system" => "http://terminology.hl7.org/CodeSystem/v3-ObservationValue",
-        "code" => "SUBSETTED"
-      }.freeze
-      ALWAYS_KEPT_ELEMENTS = %w[resourceType id meta].freeze
-
       DEFAULT_COUNT = FHIR::SearchCapabilities::DEFAULT_COUNT
       MAX_COUNT = FHIR::SearchCapabilities::MAX_COUNT
 
@@ -256,26 +250,6 @@ module Lakeraven
           "_offset" => offset.to_s
         )
         "#{request.base_url}#{request.path}?#{Rack::Utils.build_query(query)}"
-      end
-
-      # -- _elements ----------------------------------------------------------------
-
-      # The Bundle after the egress seam, with each match cut down to the
-      # elements asked for. The seam can hand back string or symbol keys.
-      def fhir_subset_bundle(payload)
-        return payload if !fhir_search? || @fhir_elements.blank?
-
-        bundle = payload.deep_stringify_keys
-        bundle.merge("entry" => Array(bundle["entry"]).map { |entry| subset_fhir_entry(entry) })
-      end
-
-      def subset_fhir_entry(entry)
-        return entry unless entry.dig("search", "mode") == "match"
-
-        kept = entry["resource"].slice(*ALWAYS_KEPT_ELEMENTS, *@fhir_elements)
-        meta = kept.fetch("meta", {})
-        kept["meta"] = meta.merge("tag" => Array(meta["tag"]) + [ SUBSETTED_TAG ])
-        entry.merge("resource" => kept)
       end
 
       # -- token search parameters ----------------------------------------------
