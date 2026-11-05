@@ -19,6 +19,8 @@ module Lakeraven
         REVIEW_PURPOSE = :registration_review
         REVIEW_TTL = 15.minutes
 
+        rate_limit only: %i[index show new create confirm]
+
         before_action :require_bprm_registration!
         before_action :require_authentication
         # The search is AG's own lookup (AGG LOOKUP PATIENTS), which RPMS runs for

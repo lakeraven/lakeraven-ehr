@@ -11,6 +11,8 @@ module Lakeraven
       # The patient and provider searches post (find), so a name typed to find
       # a patient never lands in a URL or a log line (#722).
       class WalkInsController < BaseController
+        rate_limit only: %i[new find create]
+
         before_action :load_resource!
         before_action :require_booking_right!
 

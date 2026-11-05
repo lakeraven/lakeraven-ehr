@@ -8,6 +8,9 @@ module Lakeraven
       # call for it, so the gem files the field the way IHS's own API does
       # (rpms-ops#1059).
       class PreferredNamesController < PatientSectionController
+        # Throttled like every credentialed route (#498).
+        rate_limit only: %i[edit update]
+
         EDIT_ACTIONS = %w[edit update].freeze
 
         # GET /registration/patients/:dfn/preferred_name/edit

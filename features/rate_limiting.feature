@@ -1,4 +1,4 @@
-@security @pending
+@security
 Feature: Rate limiting on API and public endpoints
   As an operator of a clinic system reachable from the public internet
   I need authentication, token redemption, and search endpoints to be throttled
@@ -7,7 +7,7 @@ Feature: Rate limiting on API and public endpoints
   # Specification ahead of implementation (#498). The engine has no rate
   # limiting today. #471 introduces an unauthenticated public tokenized-link
   # surface; #401 makes the login form a real credential target for the first
-  # time. Steps are intentionally undefined rather than stubbed (#484).
+  # time.
 
   Background:
     Given the following patients exist:
@@ -39,13 +39,15 @@ Feature: Rate limiting on API and public endpoints
     Then the sign-in should succeed
 
   # ---------------------------------------------------------------------------
-  # Public tokenized links
+  # Public tokenized links — lakeraven-ehr#471 (not built)
   # ---------------------------------------------------------------------------
 
+  @pending
   Scenario: Token redemption is throttled by address
     When 30 unknown consent tokens are redeemed from one address
     Then the next token redemption from that address should be throttled
 
+  @pending
   Scenario: A throttled miss is indistinguishable from a throttled hit
     Given a valid consent token exists
     And the address has been throttled for token redemption
@@ -54,6 +56,7 @@ Feature: Rate limiting on API and public endpoints
     Then both responses should be identical
     And neither response should reveal whether the token existed
 
+  @pending
   Scenario: Token redemption failures are recorded for review
     When 30 unknown consent tokens are redeemed from one address
     Then an audit event should record the repeated token redemption failures

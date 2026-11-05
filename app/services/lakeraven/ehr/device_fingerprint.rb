@@ -40,7 +40,7 @@ module Lakeraven
       # @param sessions [Array<Hash>] session records with :duz, :device_fingerprint, :ip_address, :created_at
       def self.anomalous?(duz:, request:, sessions: [])
         fingerprint = generate(request)
-        ip = request.remote_ip
+        ip = client_address(request)
         cutoff = LOOKBACK_DAYS.days.ago
 
         device_known = sessions.any? do |s|
@@ -57,7 +57,16 @@ module Lakeraven
       def self.normalize(value)
         value.to_s.strip.downcase
       end
-      private_class_method :normalize
+
+      # Rack requests go through ClientIp so trust_forwarded_for applies.
+      # A caller that only exposes remote_ip (no header rack) keeps that
+      # address.
+      def self.client_address(request)
+        return ClientIp.resolve(request) if request.respond_to?(:get_header)
+
+        request.remote_ip
+      end
+      private_class_method :normalize, :client_address
     end
   end
 end

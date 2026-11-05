@@ -7,6 +7,8 @@ module Lakeraven
       # booked appointment's note, and its length at a clinic that allows
       # variable lengths; a cancelled or no-show appointment's remarks.
       class AppointmentDetailsController < BaseController
+        rate_limit only: %i[new create]
+
         before_action :load_resource!
         before_action :require_booking_right!
         before_action :load_appointment!

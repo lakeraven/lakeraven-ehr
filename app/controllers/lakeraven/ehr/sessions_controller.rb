@@ -15,6 +15,8 @@ module Lakeraven
       BROWSER_SSO_APP_UID = "lakeraven-ehr-browser-sso"
 
 
+      rate_limit only: :create, login_throttle: true
+
       def new
         # login form
       end
@@ -42,12 +44,12 @@ module Lakeraven
         # A failed attempt keeps it too, so the user can try again.
         session[SmartAuthorizationsController::PENDING] = pending_authorization if pending_authorization.present?
 
-        if LoginThrottle.throttled?(access_code, request.remote_ip)
+        if LoginThrottle.throttled?(access_code, client_ip)
           # Refused BEFORE the credential is checked, and refused even when it
           # is correct: RPMS's own three-strike lock keys on the broker client
           # IP — the app server — so an unthrottled login route lets one
           # attacker lock out every clinician at once.
-          return render_throttled
+          return render_throttled(access_code)
         end
 
         result = authenticate(access_code: access_code, verify_code: params[:password].to_s)
@@ -88,7 +90,7 @@ module Lakeraven
       private
 
       def authenticate(access_code:, verify_code:)
-        AuthenticationService.new.authenticate(access_code: access_code, verify_code: verify_code, client_ip: request.remote_ip)
+        AuthenticationService.new.authenticate(access_code: access_code, verify_code: verify_code, client_ip: client_ip)
       rescue RpmsRpc::Client::ConnectionError, RpmsRpc::NotConfiguredError, Errno::ECONNREFUSED,
              IOError, SocketError,
              # A broker that answers but refuses the sign-on RPCs themselves (a CIA-only
@@ -107,7 +109,7 @@ module Lakeraven
       # attacker's failed attempt leaves the previous clinician signed in on a
       # shared workstation, which is the situation this feature exists for.
       def render_rejected(access_code, _error)
-        LoginThrottle.record_failure(access_code, request.remote_ip)
+        LoginThrottle.record_failure(access_code, client_ip)
         # F6 (#512): a determined credential refusal says so on its audit row.
         note_audit_denial("browser sign-in refused: invalid credentials") if respond_to?(:note_audit_denial, true)
         # One message for every failure mode — no enumeration oracle.
@@ -115,8 +117,13 @@ module Lakeraven
         render :new, status: :unprocessable_entity
       end
 
-      def render_throttled
-        response.headers["Retry-After"] = LoginThrottle.retry_after.to_s
+      def client_ip
+        ClientIp.resolve(request)
+      end
+
+      def render_throttled(access_code)
+        note_audit_denial("sign-in throttled")
+        response.headers["Retry-After"] = LoginThrottle.retry_after(access_code).to_s
         flash.now[:alert] = "Too many sign-in attempts. Try again later."
         render :new, status: :too_many_requests
       end

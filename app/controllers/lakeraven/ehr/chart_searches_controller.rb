@@ -12,6 +12,8 @@ module Lakeraven
     class ChartSearchesController < WebController
       include RpmsUnavailableRendering
 
+      rate_limit only: %i[show create]
+
       before_action :require_authentication
       before_action :require_patient_read!
 

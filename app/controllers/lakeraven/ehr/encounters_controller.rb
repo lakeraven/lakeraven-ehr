@@ -5,6 +5,8 @@ module Lakeraven
     class EncountersController < ApplicationController
       include PatientCompartment
 
+      rate_limit only: :index
+
       compartment_bound :index, param: :patient, require_param: true
 
       def index

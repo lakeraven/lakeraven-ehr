@@ -19,6 +19,7 @@ module Lakeraven
       include PatientBannerRendering
       include RpmsUserScope
       include PhiPageCache
+      include RateLimitable
 
       helper ApplicationHelper
       layout "lakeraven/ehr/application"

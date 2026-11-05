@@ -13,6 +13,8 @@ module Lakeraven
       # overbook under the overbook rules (S-SCH-01.9 to 01.11), after the
       # scheduler confirms it, and is marked as one (#603).
       class AppointmentsController < BaseController
+        rate_limit only: %i[new create]
+
         before_action :load_resource!
         before_action :require_booking_right!
 

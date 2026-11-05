@@ -9,6 +9,8 @@ module Lakeraven
       class OtherNamesController < PatientSectionController
         EDIT_ACTIONS = %w[create destroy].freeze
 
+        rate_limit only: %i[index create destroy]
+
         # GET /registration/patients/:dfn/other_names
         def index
           @other_name = OtherNameEntry.new

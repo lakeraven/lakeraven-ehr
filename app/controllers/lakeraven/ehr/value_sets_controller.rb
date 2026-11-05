@@ -3,6 +3,8 @@
 module Lakeraven
   module EHR
     class ValueSetsController < ApplicationController
+      rate_limit only: %i[index show expand]
+
       def index
         service = TerminologyService.new
         valuesets = service.list_valuesets

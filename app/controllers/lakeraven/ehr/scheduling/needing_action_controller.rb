@@ -10,6 +10,9 @@ module Lakeraven
       # is checked in, cancelled or marked a no-show. The clinics are the ones
       # scheduling offers this user (BaseController#visible?).
       class NeedingActionController < BaseController
+        # Throttled like every credentialed route (#498).
+        rate_limit only: :index
+
         # GET /scheduling/needing_action?from=YYYY-MM-DD&to=YYYY-MM-DD
         def index
           @from = params[:from].to_s

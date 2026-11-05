@@ -3,6 +3,8 @@
 module Lakeraven
   module EHR
     class PractitionersController < ApplicationController
+      rate_limit only: %i[index show]
+
       def index
         practitioners = if params[:name].present?
                           Practitioner.search(params[:name])

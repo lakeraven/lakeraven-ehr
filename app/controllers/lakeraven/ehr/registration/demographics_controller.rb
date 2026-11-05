@@ -6,6 +6,8 @@ module Lakeraven
       # The front desk keeps a patient's demographics current (rpms-ux S-REG-20)
       # through AG's Personal Detail window (RpmsRpc::Patient.update).
       class DemographicsController < PatientEditsController
+        rate_limit only: %i[edit update]
+
         # GET /registration/patients/:dfn/demographics/edit
         def edit
           @demographics = PatientDemographics.from_record(@record)
