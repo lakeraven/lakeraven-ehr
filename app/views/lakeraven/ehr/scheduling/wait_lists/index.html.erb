@@ -1,0 +1,120 @@
+<% page_title "Wait list", @resource[:name] %>
+<% addition = Lakeraven::EHR::WaitListAddition %>
+
+<%= page_header "Wait list",
+      @resource[:name] do %>
+  <% if @list && !@list[:inactive] && can_book?(@resource) %>
+    <%= link_to "Add a patient",
+          scheduling_new_clinic_wait_list_path(@resource[:id]),
+          id: "add-to-wait-list" %>
+  <% end %>
+<% end %>
+
+<%= flash_alert id: "wait-list-alert" %>
+
+<% if flash[:notice].present? %>
+  <%= alert_box :notice,
+        flash[:notice],
+        id: "wait-list-notice" %>
+<% end %>
+
+<% if @list.nil? %>
+  <%= empty_state "This clinic has no wait list.",
+        "A site manager sets one up in RPMS.",
+        id: "no-wait-list" %>
+<% else %>
+  <% if @list[:inactive] %>
+    <%= alert_box :notice,
+          "This wait list is inactive, so no one can be added.",
+          id: "wait-list-inactive" %>
+  <% end %>
+
+  <%= form_with url: scheduling_clinic_wait_list_path(@resource[:id]),
+        method: :get,
+        local: true,
+        id: "wait-list-filters",
+        class: "card flex flex-wrap items-end gap-4" do %>
+    <%= form_field :from, "Recall from" do |aria| %>
+      <%= date_field_tag :from,
+            @from,
+            id: "from",
+            aria: aria %>
+    <% end %>
+    <%= form_field :to, "Recall to" do |aria| %>
+      <%= date_field_tag :to,
+            @to,
+            id: "to",
+            aria: aria %>
+    <% end %>
+    <%= form_field :open, "Show" do |aria| %>
+      <%= select_tag :open,
+            options_for_select([ [ "Open only", "1" ], [ "Open and closed", "0" ] ], @open_only ? "1" : "0"),
+            id: "open",
+            aria: aria %>
+    <% end %>
+    <%= submit_tag "Show the list",
+          name: nil,
+          class: "button-secondary" %>
+  <% end %>
+
+  <% if @entries.empty? %>
+    <%= empty_state "No one on this list matches.",
+          id: "no-wait-list-entries" %>
+  <% else %>
+    <table
+      id="wait-list"
+      class="data-table mt-6"
+    >
+      <caption><%= pluralize(@entries.size, "entry") %>, by recall date then priority.</caption>
+      <thead>
+        <tr>
+          <th scope="col">Recall</th>
+          <th scope="col">Patient</th>
+          <th scope="col">Priority</th>
+          <th scope="col">Reason</th>
+          <th scope="col">Provider</th>
+          <th scope="col">Added</th>
+          <th scope="col">Status</th>
+          <th scope="col"><span class="sr-only">Actions</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        <% @entries.each do |entry| %>
+          <tr
+            data-entry="<%= entry[:ien] %>"
+            data-patient="<%= entry[:patient_dfn] %>"
+            data-open="<%= entry[:open] %>"
+          >
+            <td><%= entry[:recall_on]&.strftime("%b %-d, %Y") %></td>
+            <th scope="row"><%= entry[:patient] %></th>
+            <td><%= addition::PRIORITIES[entry[:priority]] || "None" %></td>
+            <td><%= entry[:reason] %></td>
+            <td><%= entry[:provider].presence || "None" %></td>
+            <td><%= entry[:added_on]&.strftime("%b %-d, %Y") %></td>
+            <td>
+              <% if entry[:open] %>
+                Open
+              <% else %>
+                Closed <%= entry[:removed_on]&.strftime("%b %-d, %Y") %>: <%= entry[:resolution] %>
+              <% end %>
+            </td>
+            <td>
+              <% if can_book?(@resource) %>
+                <%= link_to "Edit",
+                      scheduling_edit_clinic_wait_list_path(@resource[:id], entry[:ien]) %>
+                <% if entry[:open] %>
+                  <%= link_to "Book",
+                        scheduling_clinic_wait_list_booking_path(@resource[:id], entry[:ien]),
+                        data: { book_entry: entry[:ien] } %>
+                  <%= link_to "Take off the list",
+                        scheduling_clinic_wait_list_removal_path(@resource[:id], entry[:ien]),
+                        data: { remove_entry: entry[:ien] } %>
+                <% end %>
+              <% end %>
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  <% end %>
+<% end %>

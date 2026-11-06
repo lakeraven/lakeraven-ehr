@@ -1,0 +1,36 @@
+<% page_title "Take off the wait list", @resource[:name] %>
+
+<%= page_header "Take off the wait list",
+      "#{@entry[:patient]}, #{@resource[:name]}" %>
+
+<%= flash_alert id: "wait-list-alert" %>
+
+<%= form_errors @removal,
+      "The entry stays open.",
+      id: "wait-list-errors" %>
+
+<%= form_with scope: :removal,
+      model: @removal,
+      url: scheduling_clinic_wait_list_removal_path(@resource[:id], @entry[:ien]),
+      method: :post,
+      local: true,
+      id: "removal-form",
+      class: "card flex flex-col gap-4" do |f| %>
+  <%# DATE REMOVED FROM LIST, 9009017.11 .07. %>
+  <%= form_field :removed_on, "Date removed", form: f, error: @removal.errors[:removed_on].first do |aria| %>
+    <%= f.date_field :removed_on,
+          value: @removal.removed_on,
+          aria: aria %>
+  <% end %>
+
+  <%# RESOLUTION, 9009017.11 .08. %>
+  <%= form_field :resolution_ien, "Resolution", form: f, error: @removal.errors[:resolution_ien].first do |aria| %>
+    <%= f.select :resolution_ien,
+          options_for_select(@resolutions.map { |r| [ r[:name].titleize, r[:ien] ] }, @removal.resolution_ien),
+          { include_blank: "Choose a resolution" },
+          aria: aria %>
+  <% end %>
+
+  <%= f.submit "Take off the list",
+        class: "button-primary self-start" %>
+<% end %>

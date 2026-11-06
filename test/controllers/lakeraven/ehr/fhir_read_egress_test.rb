@@ -94,6 +94,12 @@ module Lakeraven
         "lakeraven/ehr/registration/social_statuses#update", # Saving the answers (S-REG-31.3), not disclosure
         "lakeraven/ehr/registration/preferred_names#edit",   # The name the patient goes by (S-REG-12.1): registration demographics, no clinical record
         "lakeraven/ehr/registration/preferred_names#update", # Saving the preferred name (S-REG-12.1), not disclosure
+        "lakeraven/ehr/registration/other_tribes#index",   # A patient's other tribes (S-REG-07.2): registration data, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/registration/other_tribes#create",  # Adding an other tribe (S-REG-07.2), not disclosure
+        "lakeraven/ehr/registration/other_tribes#destroy", # Removing an other tribe (S-REG-07.2), not disclosure
+        "lakeraven/ehr/registration/eligibility_modifiers#index",   # The reasons behind an eligibility status (S-REG-07.3): registration data, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/registration/eligibility_modifiers#create",  # Adding a reason (S-REG-07.3), not disclosure
+        "lakeraven/ehr/registration/eligibility_modifiers#destroy", # Removing a reason (S-REG-07.3), not disclosure
         "lakeraven/ehr/registration/race_ethnicities#edit",   # Race and ethnicity (S-REG-20.2): registration demographics, no clinical record
         "lakeraven/ehr/registration/race_ethnicities#update", # Saving race and ethnicity (S-REG-20.2), not disclosure
         "lakeraven/ehr/registration/applications#new",    # The form to record an application for coverage (S-REG-03.3): no clinical record
@@ -108,6 +114,15 @@ module Lakeraven
         "lakeraven/ehr/scheduling/clinics#show",      # A clinic day: appointment times and patient names, no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/scheduling/clinics#week",      # A clinic week: the same as the day, over seven days; revisit with Part 2 (#494)
         "lakeraven/ehr/scheduling/open_times#index",  # Open times in a clinic's blocks: times only, no patient data
+        "lakeraven/ehr/scheduling/wait_lists#index",   # A clinic's wait list (S-SCH-10): patient names, reasons and recall dates, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/scheduling/wait_lists#new",     # Adding to the wait list (S-SCH-10), not disclosure
+        "lakeraven/ehr/scheduling/wait_lists#create",  # Adding to the wait list (S-SCH-10), not disclosure
+        "lakeraven/ehr/scheduling/wait_lists#edit",    # Changing an entry (S-SCH-10.4), not disclosure
+        "lakeraven/ehr/scheduling/wait_lists#update",  # Changing an entry (S-SCH-10.4), not disclosure
+        "lakeraven/ehr/scheduling/wait_lists#removal", # Taking an entry off (S-SCH-10.5), not disclosure
+        "lakeraven/ehr/scheduling/wait_lists#remove",  # Taking an entry off (S-SCH-10.5), not disclosure
+        "lakeraven/ehr/scheduling/wait_lists#booking", # Booking from the list (S-SCH-10.7), not disclosure
+        "lakeraven/ehr/scheduling/wait_lists#book",    # Booking from the list (S-SCH-10.7), not disclosure
         "lakeraven/ehr/scheduling/patient_appointments#index", # One patient's appointments: clinics, times, statuses, no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/scheduling/needing_action#index", # Appointments needing action (#875): times, clinics and patient names, no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/scheduling/appointment_lists#index", # The appointments across a scheduler's clinics (S-SCH-05.5): times, clinics and patient names, no clinical record; revisit with Part 2 (#494)
