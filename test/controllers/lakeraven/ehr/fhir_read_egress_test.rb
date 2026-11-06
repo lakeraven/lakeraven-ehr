@@ -108,6 +108,7 @@ module Lakeraven
         "lakeraven/ehr/scheduling/open_times#index",  # Open times in a clinic's blocks: times only, no patient data
         "lakeraven/ehr/scheduling/patient_appointments#index", # One patient's appointments: clinics, times, statuses, no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/scheduling/needing_action#index", # Appointments needing action (#875): times, clinics and patient names, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/scheduling/appointment_lists#index", # The appointments across a scheduler's clinics (S-SCH-05.5): times, clinics and patient names, no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/scheduling/appointments#new",   # Booking form: patient name, HRN, date of birth, no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/scheduling/appointments#create", # Booking entry, not disclosure
         "lakeraven/ehr/scheduling/quick_registrations#new",    # Registering a caller from scheduling (S-REG-05): an entry form, not disclosure
