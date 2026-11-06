@@ -208,6 +208,7 @@ module Lakeraven
           intent: "order",
           priority: map_urgency_to_fhir_priority,
           code: build_code,
+          category: (referral_type == RCIS_REFERRAL ? [ { coding: [ PATIENT_REFERRAL ] } ] : nil),
           subject: patient_dfn ? build_reference("Patient", patient_dfn) : nil,
           authoredOn: authored_on&.iso8601,
           reasonCode: reason_for_referral.present? ? [ { text: reason_for_referral } ] : nil

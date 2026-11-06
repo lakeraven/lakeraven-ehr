@@ -52,7 +52,7 @@ module Lakeraven
           "Patient" => { interactions: %w[read search-type], source: "RPMS, through rpms-rpc." },
           "Practitioner" => { interactions: %w[read search-type], source: "RPMS, through rpms-rpc." },
           "Organization" => { interactions: %w[read], source: "RPMS, through rpms-rpc." },
-          "Location" => { interactions: %w[read], source: "RPMS, through rpms-rpc." },
+          "Location" => { interactions: %w[read search-type], source: "RPMS, through rpms-rpc." },
           "AllergyIntolerance" => {
             interactions: %w[read search-type],
             source: "RPMS, through rpms-rpc, plus a deployment's supplemental allergy provider when one is configured."

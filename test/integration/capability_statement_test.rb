@@ -129,6 +129,37 @@ class CapabilityStatementTest < ActionDispatch::IntegrationTest
       assert_empty search_ids("MedicationRequest", patient: "1", intent: "http://example.org/other|order")
       assert_refused("MedicationRequest", patient: "1", intent: "")
     },
+    %w[Location name] => lambda {
+      with_stub(Lakeraven::EHR::LocationGateway, :search, [ { ien: 1, name: "CLINIC" } ]) do
+        assert_equal %w[1], search_ids("Location", name: "cli")
+      end
+      assert_refused("Location", name: "")
+    },
+    %w[Encounter _id] => lambda {
+      RpmsRpc.client.seed_keyed_collection(:encounter_visit_list, "1", [
+        { visit_string: "1;3260310.09;A;11", location: "Clinic", category: "AMBULATORY" },
+        { visit_string: "1;3260311.09;A;12", location: "Clinic", category: "AMBULATORY" }
+      ])
+      assert_equal %w[1-11], search_ids("Encounter", _id: "1-11")
+      assert_equal %w[1-12], search_ids("Encounter", _id: "1-12", patient: "1")
+      assert_empty search_ids("Encounter", _id: "3-11")
+      assert_empty search_ids("Encounter", _id: "not-an-id")
+    },
+    %w[ServiceRequest _id] => lambda {
+      RpmsRpc.client.seed_keyed_collection(:referral_search, "1", [ { ien: 11, status: "A", purpose: "Cardiology" } ])
+      assert_equal %w[1-11], search_ids("ServiceRequest", _id: "1-11")
+      assert_empty search_ids("ServiceRequest", _id: "1-12")
+    },
+    %w[ServiceRequest category] => lambda {
+      RpmsRpc.client.seed_keyed_collection(:referral_search, "1", [ { ien: 11, status: "A", purpose: "Cardiology" } ])
+      assert_equal %w[1-11], search_ids("ServiceRequest", patient: "1", category: "http://snomed.info/sct|3457005")
+      assert_empty search_ids("ServiceRequest", patient: "1", category: "108252007")
+    },
+    %w[ServiceRequest code] => lambda {
+      RpmsRpc.client.seed_keyed_collection(:referral_search, "1", [ { ien: 11, status: "A", purpose: "Cardiology" } ])
+      assert_equal %w[1-11], search_ids("ServiceRequest", patient: "1", code: "3457005")
+      assert_empty search_ids("ServiceRequest", patient: "1", code: "http://example.org/other|3457005")
+    },
     %w[Condition category] => lambda {
       RpmsRpc.client.seed_keyed_collection(:problem_list, "1", [
         { ien: 11, status: "A", icd_code: "E11.9", description: "Type 2 diabetes" }
@@ -454,7 +485,7 @@ class CapabilityStatementTest < ActionDispatch::IntegrationTest
   end
 
   def assert_search_works(type, resource)
-    search_resources(type, search_params_for(type, resource))
+    search_resources(type, type == "Location" ? { name: "CLINIC" } : search_params_for(type, resource))
   end
 
   # Reaching the handler is what the route table cannot show: an empty body

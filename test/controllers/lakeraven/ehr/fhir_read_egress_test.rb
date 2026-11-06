@@ -173,6 +173,7 @@ module Lakeraven
         "lakeraven/ehr/practitioners#index",  # Directory data
         "lakeraven/ehr/practitioners#show",   # Directory data
         "lakeraven/ehr/organizations#show",   # Directory data
+        "lakeraven/ehr/locations#index",      # Directory data
         "lakeraven/ehr/locations#show",       # Directory data
         "lakeraven/ehr/value_sets#index",     # Terminology
         "lakeraven/ehr/value_sets#show",      # Terminology

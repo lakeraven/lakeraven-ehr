@@ -82,6 +82,23 @@ class LiveFhirReadTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "an Encounter is found by _id alone" do
+    id = matches("Encounter", DFN).first.fetch("id")
+
+    get "#{ENGINE}/Encounter", params: { _id: id }, headers: @headers
+
+    assert_response :ok
+    assert_equal [ id ], JSON.parse(response.body).fetch("entry").map { |entry| entry.dig("resource", "id") }
+  end
+
+  test "a Location search finds a location by the start of its name, in any case" do
+    get "#{ENGINE}/Location", params: { name: "demo prim" }, headers: @headers
+
+    assert_response :ok
+    names = JSON.parse(response.body).fetch("entry").map { |entry| entry.dig("resource", "name") }
+    assert_includes names, "DEMO PRIMARY CARE"
+  end
+
   EMPTY.each do |type|
     test "#{type}: a search that finds nothing leaves nothing to read" do
       assert_empty matches(type, DFN)
