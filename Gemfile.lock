@@ -1,7 +1,7 @@
 GIT
   remote: https://github.com/lakeraven/rpms-rpc.git
-  revision: a00bd99936c6e08491530c46fa8bad4406dc6363
-  ref: a00bd99
+  revision: d834c5858cb6b94bfaf87c62d6696c5af2c9c5d8
+  ref: d834c58
   specs:
     rpms-rpc (0.4.0)
       bigdecimal (>= 3.1)
@@ -113,7 +113,7 @@ GEM
       xpath (~> 3.2)
     concurrent-ruby (1.3.8)
     connection_pool (3.0.2)
-    crass (1.0.7)
+    crass (1.0.8)
     csv (3.3.5)
     cucumber (10.2.0)
       base64 (~> 0.2)
