@@ -16,7 +16,9 @@ module SchedulingSetupStubs
         access_types: ->(*) { access_types },
         # No master overbook right, unless a test says so (S-SCH-01.9 to 01.11).
         master_overbook?: ->(**) { false },
-        mark_overbook: ->(**) { { success: true } }
+        mark_overbook: ->(**) { { success: true } },
+        overbook?: ->(**) { false },
+        cancelled_by: ->(**) { nil }
       }
     }
   end

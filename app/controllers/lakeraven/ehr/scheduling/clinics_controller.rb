@@ -17,7 +17,9 @@ module Lakeraven
         # GET /scheduling/clinics/:id?date=
         def show
           @date = parse_date(params[:date])
-          @day, @appointments = AppointmentBookingGateway.day(@resource, @date)
+          @day, listed = AppointmentBookingGateway.day(@resource, @date)
+          @appointments = AppointmentBookingGateway.marked(@resource, listed)
+          @access_type_names = AppointmentBookingGateway.access_type_names
           @booked_id = flash[:booked_id]
           @notice = flash[:notice]
         end
