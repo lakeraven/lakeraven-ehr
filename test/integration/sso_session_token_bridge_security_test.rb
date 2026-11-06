@@ -513,6 +513,23 @@ class SsoSessionTokenBridgeSecurityTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "a user RPMS refuses the context is sent to their site manager, with no strike against the account" do
+    refused = Lakeraven::EHR::AuthenticationService::Result.new(
+      success?: false, value: nil, error: Lakeraven::EHR::AuthenticationService::CONTEXT_REFUSED
+    )
+    refusing = Object.new
+    refusing.define_singleton_method(:authenticate) { |**| refused }
+
+    with_singleton(Lakeraven::EHR::AuthenticationService, :new, ->(*) { refusing }) do
+      (Lakeraven::EHR::LoginThrottle::MAX_ATTEMPTS + 1).times { sign_in }
+
+      assert_response :forbidden
+      assert_nil session[:duz]
+      assert_match "not set up for this application", response.body
+      assert_no_match(/Invalid username or password/, response.body)
+    end
+  end
+
   # -- M2: session timeout ---------------------------------------------------
 
   test "an idle session past the timeout is signed out" do
