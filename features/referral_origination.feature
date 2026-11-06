@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+@app
 Feature: Referral origination
   As a clinician
   I need to create a referral that flows to the PRC engine for authorization

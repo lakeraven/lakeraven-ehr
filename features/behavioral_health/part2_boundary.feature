@@ -7,10 +7,12 @@ Feature: 42 CFR Part 2 Boundaries (Issue #560)
     When I add a substance use diagnosis to the patient's problem list
     Then the diagnosis is NOT written to the shared RPMS files
 
+  @app
   Scenario: R3 - The system provides a specific consent slot for substance-use counseling
     When I check the available consent scopes
     Then there must be a specific scope for "substance-use counseling notes"
 
+  @live
   Scenario: R4 - Export paths call a Part 2 filter before returning data
     When a C-CDA is requested for the patient
     Then the data is passed through the Part 2 egress filter

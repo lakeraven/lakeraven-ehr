@@ -1,4 +1,4 @@
-@onc
+@onc @app
 Feature: Accounting of Disclosures (ONC § 170.315(d)(11))
   As a patient or privacy officer
   I need to track and review all disclosures of protected health information

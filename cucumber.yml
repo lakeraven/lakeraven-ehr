@@ -22,3 +22,7 @@ all: --publish-quiet
 # @mock_only scenarios check the test mock itself, so a live run has nothing
 # for them to check.
 live: LIVE_RPMS=1 --publish-quiet --tags "not @unsourced and not @mock_only"
+# App logic: what ordinary CI runs, on the mock. A new scenario lands here until
+# it is tagged @live. @live scenarios reach RPMS, so a pass only means something
+# on a real broker; @pending specifies work not built yet.
+app: --publish-quiet --tags "not @unsourced and not @live and not @pending"

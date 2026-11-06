@@ -1,4 +1,4 @@
-@onc
+@onc @app
 Feature: SMART EHR Launch
   As an ONC-certified EHR system
   The SMART EHR launch endpoint should follow the SMART App Launch Framework

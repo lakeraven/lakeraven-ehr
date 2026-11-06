@@ -13,11 +13,13 @@ Background:
     | 990001 | ALPHA,CASEY  | 666021001 | 1952-05-26 | F   |
     | 990027 | ANCHOR,JAMIE | 666281027 | 1962-06-11 | F   |
 
+  @live
   Scenario: Search for patient by name
     When I search for patients with name "ANCHOR"
     Then I should find 1 patient in the results
     And the patient results should include "ANCHOR,JAMIE"
 
+  @live
   Scenario: Search for patient by SSN
     When I search for patients with SSN "666-28-1027"
     Then I should find 1 patient in the results
@@ -38,20 +40,24 @@ Background:
       | SSN           | 111-11-1111 |
       | Service Area  | Anchorage   |
 
+  @pending
   Scenario: View patient with referrals
     Given patient 990001 has referrals seeded
     When I retrieve patient with DFN 990001
     And I view the patient's referrals
     Then I should see at least 1 referral
 
+  @live
   Scenario: Search with no results
     When I search for patients with name "Nonexistent"
     Then I should find 0 patients in the results
 
+  @live
   Scenario: Retrieve nonexistent patient
     When I retrieve patient with DFN 99999
     Then the patient should be nil
 
+  @live
   Scenario: Search returns multiple patients
     When I search for patients with name "ALPHA"
     Then I should find 2 patients in the results

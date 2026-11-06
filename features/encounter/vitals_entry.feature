@@ -1,3 +1,4 @@
+@app
 Feature: Enter a set of vitals on an open encounter
   As a clinical provider
   I need to record vital signs against the patient's open visit

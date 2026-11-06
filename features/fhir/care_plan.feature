@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+@app
 Feature: CarePlan FHIR resource
   As a healthcare system
   I need to represent patient care plans

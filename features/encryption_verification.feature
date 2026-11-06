@@ -1,3 +1,4 @@
+@app
 Feature: Encryption Verification
   As a HIPAA-compliant system
   Encryption at rest should be verifiable
