@@ -54,8 +54,8 @@ Evidence is file:line on `main`; tests are named where they prove the behaviour.
 | Requirement | State | Evidence | Issue |
 |---|---|---|---|
 | EHR launch from Inferno's launch URI to `authorize` (POST), `launch` scope | met | `smart/launch` sends a signed-in user's patient to the app's registered launch URI; authorize takes GET and POST; `smart_launch_context_test.rb` | #839 |
-| Capabilities `launch-ehr`, `context-ehr-patient`, `context-ehr-encounter`, `context-banner`, `context-style`, `permission-user` | partial | all served and advertised except `context-ehr-encounter`: the Encounter cannot be read yet | #845 |
-| Token response `patient`, `encounter` (readable), `need_patient_banner`, `smart_style_url` | partial | all four in the token response (`smart_tokens_controller.rb`); the encounter is not readable | #845 |
+| Capabilities `launch-ehr`, `context-ehr-patient`, `context-ehr-encounter`, `context-banner`, `context-style`, `permission-user` | partial | all served and advertised (`smart_discovery.rb`); a launch's `encounter` is a visit of its patient, read by id | #845 |
+| Token response `patient`, `encounter` (readable), `need_patient_banner`, `smart_style_url` | met | all four in the token response (`smart_tokens_controller.rb`) | #845 |
 | `user/X.rs` scopes, OIDC, refresh | partial | `user/` scopes granted within the user's RPMS access; no OIDC or refresh | #840, #841 |
 
 ### 10 Single Patient API, US Core 6.1.0
@@ -66,11 +66,11 @@ Evidence is file:line on `main`; tests are named where they prove the behaviour.
 | Patient: read; `_id`, `identifier`, `name`, `birthdate+name`, `gender+name` | partial | read and `_id`/`name`/`birthdate`/`gender` (`search_capabilities.rb:60-75`); `identifier` resolves SSN only and is undeclared | #846 |
 | AllergyIntolerance: `patient`, read | met | search and read (`PatientScopedRead`); `clinical-status` added in #852; `fhir_read_by_id_test.rb`, live `live_fhir_read_test.rb` | #845 |
 | Condition (problems/health concerns): `patient`, `patient+category`, read | met | `patient`, `category` and `clinical-status` (#852); read (`PatientScopedRead`) | #845 |
-| Condition encounter-diagnosis profile | missing | `Condition.from_rpms_row` sets `problem-list-item` only (`condition.rb:72`) | #848 |
+| Condition encounter-diagnosis profile | met | V POV rows (`Condition.from_pov_row`, `BGOVPOV RECENT`); live `live_fhir_read_test.rb` | #848 |
 | MedicationRequest: `patient+intent`, `patient+intent+status`, read; Medication by reference | met | `intent` (#852), `status`; read (`PatientScopedRead`); the medication is inline, so nothing references a Medication; the demo build has no order to read live | #845 |
 | Observation vital-signs profiles: `patient+category`, `patient+code`, `patient+category+date`, read | met | `category`, `code` and `date` with prefixes; read (`PatientScopedRead`) | #845 |
 | Observation lab, clinical-result, smoking status, screening-assessment, occupation, pregnancy, pediatric vitals | missing | Observation declares `us-core-vital-signs` only (`capability_statement.rb:41`) | #848 |
-| Encounter: `_id`, `patient`, `date+patient`, read | partial | `patient`, and `date` with prefixes; no `_id`; no read (`routes.rb:75`) | #845, #846 |
+| Encounter: `_id`, `patient`, `date+patient`, read | partial | RPMS visits as US Core Encounters, `patient`, `date` with prefixes, read; no `_id` | #846 |
 | Immunization, Procedure: `patient`, (`patient+date`), read | met | `patient` and `date` with prefixes; read (`PatientScopedRead`) | #845 |
 | ServiceRequest: `_id`, `patient`, `patient+category`, `patient+code`, `patient+category+authored`, read | partial | `patient` and `authored` with prefixes; read (`PatientScopedRead`); no `_id`, `category` or `code`; the demo build has no referral to read live | #846 |
 | Location `name`, `address`; Organization, Practitioner read | partial | reads served (`routes.rb:70,76-77`); Location has no search | #846 |
@@ -81,7 +81,7 @@ Evidence is file:line on `main`; tests are named where they prove the behaviour.
 | MedicationDispense, QuestionnaireResponse, RelatedPerson, Specimen, PractitionerRole | missing | not routed | #849, #367 |
 | `_revinclude=Provenance:target` on every profile search; Provenance read | missing | declared on Patient only (`search_capabilities.rb:74`); no Provenance route | #847 |
 | Must-support coverage across the test patients (USCDI v3 elements) | partial | CI validates the served types against US Core 6.1.0 (`.github/workflows/ci.yml` job "US Core 6.1.0 validation"), but validation is not must-support coverage | #360, #564 |
-| Reference resolution | partial | Patient, Practitioner, Organization, Location readable; Encounter, Medication not | #845, #849 |
+| Reference resolution | met | Patient, Practitioner, Organization, Location, Encounter readable; live `live_fhir_read_test.rb` | #845 |
 
 ### Multi-Patient API (Bulk Data 2.0.0)
 
@@ -193,7 +193,7 @@ Doorkeeper::Application.create!(name: "Inferno g10 asymmetric", uid: "inferno-g1
 ```
 
 - The person running the kit signs in at authorize with their own RPMS access and verify codes, and approves. What the app gets is what it asked for, within its registration, within that person's RPMS access.
-- For the EHR launch (group 3), sign in to the engine, open `/lakeraven-ehr/smart/launch?patient=<DFN>`, and choose the Inferno app: it is sent to Inferno's launch URI with `iss` and `launch`.
+- For the EHR launch (group 3), sign in to the engine, open `/lakeraven-ehr/smart/launch?patient=<DFN>&encounter=<visit IEN>`, and choose the Inferno app: it is sent to Inferno's launch URI with `iss` and `launch`.
 - A launched token lives an hour at most, and ends when that person signs out or their session times out: run the groups that need it without signing out.
 
 ### 3. The inputs Inferno asks for
@@ -215,5 +215,5 @@ Doorkeeper::Application.create!(name: "Inferno g10 asymmetric", uid: "inferno-g1
 ### 4. What to expect today
 
 Discovery, `/metadata`, the Backend Services token tests and the launch and authorization tests (groups 1, 3 and 9) should pass their authorization steps.
-OpenID Connect (#841), refresh (#840), introspection (#842) and the encounter read (#845) will fail where the kit asks for them, and Bulk Data reads answer 503 until a `system/` service account is wired (#844).
+OpenID Connect (#841), refresh (#840) and introspection (#842) will fail where the kit asks for them, and Bulk Data reads answer 503 until a `system/` service account is wired (#844).
 Run the whole suite once anyway, unchanged, and keep the report (JSON export) as the baseline under #261 and #404.

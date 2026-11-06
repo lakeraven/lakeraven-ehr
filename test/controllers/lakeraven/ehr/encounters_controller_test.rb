@@ -39,6 +39,25 @@ module Lakeraven
         end
       end
 
+      test "a visit is served as a finished US Core Encounter with what RPMS holds" do
+        get "/lakeraven-ehr/Encounter/1-71", headers: @headers
+
+        assert_response :ok
+        encounter = JSON.parse(response.body)
+        assert_equal "1-71", encounter["id"]
+        assert_equal "finished", encounter["status"]
+        assert_equal "AMB", encounter.dig("class", "code")
+        assert_equal "AMBULATORY", encounter.dig("type", 0, "text")
+        assert_equal "Location/1", encounter.dig("location", 0, "location", "reference")
+        assert_equal "Practitioner/101", encounter.dig("participant", 0, "individual", "reference")
+      end
+
+      test "a visit's service category sets its encounter class" do
+        get "/lakeraven-ehr/Encounter/1-70", headers: @headers
+
+        assert_equal "IMP", JSON.parse(response.body).dig("class", "code")
+      end
+
       test "returns FHIR JSON content type" do
         get "/lakeraven-ehr/Encounter", params: { patient: "1" }, headers: @headers
         assert_equal "application/fhir+json", response.media_type
@@ -164,9 +183,11 @@ module Lakeraven
       private
 
       def seed_encounters
-        RpmsRpc.client.seed_keyed_collection(:patient_appointments, "1", [
-          { datetime: Date.new(2026, 3, 10), location_ien: 1, location: "Primary Care Clinic", status: "KEPT" },
-          { datetime: Date.new(2026, 4, 15), location_ien: 1, location: "Primary Care Clinic", status: "SCHEDULED" }
+        RpmsRpc.client.seed_keyed_collection(:encounter_visit_list, "1", [
+          { visit_string: "1;3260310.09;A;71", location: "Primary Care Clinic", category: "AMBULATORY",
+            datetime: Time.new(2026, 3, 10, 9, 0, 0), provider_ien: 101, provider: "MARTINEZ,SARAH" },
+          { visit_string: "1;3260215.1;H;70", location: "Ward", category: "HOSPITALIZATION",
+            datetime: Time.new(2026, 2, 15, 10, 0, 0) }
         ])
       end
     end
