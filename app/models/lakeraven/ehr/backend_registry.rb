@@ -35,12 +35,14 @@ module Lakeraven
       # its show route.
       CAPABILITY_FHIR_INTERACTIONS = {
         prc_referrals: [
+          %w[ServiceRequest read],
           %w[ServiceRequest search-type]
         ].freeze,
         tribal_enrollment: [].freeze,
         bprm_registration: [].freeze,
         bprm_scheduling: [].freeze,
         ihs_immunization: [
+          %w[Immunization read],
           %w[Immunization search-type]
         ].freeze,
         pcc_screens: [].freeze

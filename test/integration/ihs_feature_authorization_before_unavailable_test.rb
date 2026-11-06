@@ -56,6 +56,25 @@ class IhsFeatureAuthorizationBeforeUnavailableTest < ActionDispatch::Integration
       assert_empty rpc_calls_since(before)
     end
 
+    test "GET #{type} by id in another patient's compartment is the same 403 on a restricted backend" do
+      before = RpmsRpc.client.received_calls.length
+      with_restricted_backend do
+        get "/lakeraven-ehr/#{type}/#{OTHER_DFN}-1",
+          headers: patient_bound_headers("patient/#{type}.read", resource_owner_id: OWN_DFN)
+        assert_response :forbidden
+      end
+      assert_empty rpc_calls_since(before)
+    end
+
+    test "GET #{type} by id is the not-supported 404 on a restricted backend (#{capability})" do
+      with_restricted_backend do
+        get "/lakeraven-ehr/#{type}/#{OWN_DFN}-1",
+          headers: patient_bound_headers("patient/#{type}.read", resource_owner_id: OWN_DFN)
+        assert_response :not_found
+        assert_match(/Not available on this system/, response.body)
+      end
+    end
+
     # (b) the same token naming its OWN compartment is let in, so it learns the capability is missing
     test "GET #{type} for the token's own compartment is the not-supported 404 on a restricted backend (#{capability})" do
       with_restricted_backend do

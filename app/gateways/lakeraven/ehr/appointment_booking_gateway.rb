@@ -121,6 +121,16 @@ module Lakeraven
         Array(via.all_appointments(start_date: date, end_date: date)).group_by { |a| a[:resource_name] }.transform_values(&:size)
       end
 
+      # Every appointment on the resources over dates, cancelled ones too, each
+      # with its clinic (S-SCH-05.5). One read per resource: BSDX ALL
+      # APPOINTMENTS leaves out what is cancelled or a no-show.
+      def self.listed(resources, dates, via: ::RpmsRpc::Scheduling)
+        resources.flat_map do |resource|
+          Array(via.appointments(resource: resource[:name], start_date: dates.begin, end_date: dates.end))
+            .map { |a| a.merge(clinic: resource.slice(:id, :name)) }
+        end
+      end
+
       # The appointments needing action on the resources over window, earliest
       # first (#875, rpms-ux S-SCH-13.5): past their start time with no check-in,
       # check-out, cancellation or no-show recorded on BSDX APPOINTMENT, the

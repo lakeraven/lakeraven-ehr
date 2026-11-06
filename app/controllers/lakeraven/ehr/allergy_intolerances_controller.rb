@@ -3,20 +3,12 @@
 module Lakeraven
   module EHR
     class AllergyIntolerancesController < ApplicationController
-      include PatientCompartment
+      include PatientScopedRead
 
-      rate_limit only: %i[index show]
+      private
 
-      compartment_bound :index, param: :patient, require_param: true
-
-      def index
-        dfn = patient_compartment_dfn
-        results = SupplementalClinicalResources.merged_allergy_intolerances_for_patient(dfn)
-        render_bundle_egress(results.map(&:to_fhir))
-      end
-
-      def show
-        render_not_found("AllergyIntolerance", params[:id])
+      def patient_resources(dfn)
+        SupplementalClinicalResources.merged_allergy_intolerances_for_patient(dfn).map(&:to_fhir)
       end
     end
   end

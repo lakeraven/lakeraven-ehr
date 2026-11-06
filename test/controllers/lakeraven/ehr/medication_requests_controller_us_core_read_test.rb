@@ -30,7 +30,7 @@ module Lakeraven
         assert lisinopril, "expected seeded Lisinopril order in the bundle"
 
         assert_equal "MedicationRequest", lisinopril["resourceType"]
-        assert_equal "1R-O", lisinopril["id"]
+        assert_equal "1-1R-O", lisinopril["id"]
         assert_equal "active", lisinopril["status"]
         assert_equal "order", lisinopril["intent"]
         assert_equal "Patient/1", lisinopril.dig("subject", "reference")
@@ -120,7 +120,7 @@ module Lakeraven
         assert_response :ok
         resource = JSON.parse(response.body)["entry"]
           .map { |e| e["resource"] }
-          .find { |r| r["id"] == "99R-O" }
+          .find { |r| r["id"] == "1-99R-O" }
         assert resource, "expected seeded medication with stop_date in the bundle"
 
         assert_equal "unknown", resource["status"]
