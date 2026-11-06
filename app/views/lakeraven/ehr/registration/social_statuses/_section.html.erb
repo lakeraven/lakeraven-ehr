@@ -1,0 +1,42 @@
+<%# The latest answers to the migrant, homeless and internet questions
+    (rpms-ux S-REG-11, S-REG-22.5, S-REG-31.3), a section of the patient's
+    registration page.
+    Locals: dfn, social_status (RpmsRpc::PatientProfile.social_status), can_edit. %>
+<% entry = Lakeraven::EHR::SocialStatusEntry %>
+<section
+  id="social-status-section"
+  aria-labelledby="social-status-heading"
+  class="card mt-6"
+>
+  <div class="flex items-baseline justify-between gap-4">
+    <h2 id="social-status-heading">Migrant, homeless and internet</h2>
+    <% if can_edit %>
+      <%= link_to "Answer the questions",
+            registration_edit_patient_social_status_path(dfn),
+            id: "edit-social-status" %>
+    <% end %>
+  </div>
+  <dl class="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-2">
+    <%# MIGRANT WORKER QUESTION DATE, 9000001.84. %>
+    <dt>Migrant worker</dt>
+    <dd data-field="migrant">
+      <%= [ entry::ANSWERS[social_status.dig(:migrant, :status)] || "Not asked",
+            entry::MIGRANT_TYPES[social_status.dig(:migrant, :type)],
+            social_status.dig(:migrant, :date) ].compact.join(", ") %>
+    </dd>
+    <%# HOMELESS STATUS QUESTION DATE, 9000001.85. %>
+    <dt>Homeless</dt>
+    <dd data-field="homeless">
+      <%= [ entry::ANSWERS[social_status.dig(:homeless, :status)] || "Not asked",
+            entry::HOMELESS_TYPES[social_status.dig(:homeless, :type)],
+            social_status.dig(:homeless, :date) ].compact.join(", ") %>
+    </dd>
+    <%# INTERNET ACCESS QUESTION DATE, 9000001.81. %>
+    <dt>Can use the internet</dt>
+    <dd data-field="internet">
+      <% access = social_status.dig(:internet, :access) %>
+      <%= [ access.nil? ? "Not asked" : entry::ANSWERS[access ? "Y" : "N"],
+            social_status.dig(:internet, :date) ].compact.join(", ") %>
+    </dd>
+  </dl>
+</section>
