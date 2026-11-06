@@ -178,7 +178,7 @@ module Lakeraven
       end
 
       def render_bundle(entries, type: "searchset")
-        render json: fhir_search_bundle(entries, type: type), status: :ok, content_type: FHIR_CONTENT_TYPE
+        render json: fhir_subset_bundle(fhir_search_bundle(entries, type: type)), status: :ok, content_type: FHIR_CONTENT_TYPE
       end
     end
   end

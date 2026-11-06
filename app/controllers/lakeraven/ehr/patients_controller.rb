@@ -89,7 +89,7 @@ module Lakeraven
           Patient.search(params[:name].to_s)
         end
         results = filter_by_name(results) if params[:name].present? && (params[:_id].present? || params[:identifier].present?)
-        results = filter_by_birthdate(results) if params.key?(:birthdate)
+        results = results.select { |patient| date_searches_match?(patient.to_fhir) } if params.key?(:birthdate)
         results = filter_by_gender(results) if params.key?(:gender)
         results
       end
@@ -106,36 +106,21 @@ module Lakeraven
         parts.length == 2 ? parts[1] : identifier
       end
 
-      def filter_by_birthdate(patients)
-        target = Date.iso8601(params[:birthdate])
-        patients.select { |p| p.dob == target }
-      end
-
       # Compared as served: PatientSerializer is what turns RPMS sex into a
       # FHIR gender, so a patient matches the gender its own resource shows.
       def filter_by_gender(patients)
         patients.select { |p| p.to_fhir[:gender] == params[:gender] }
       end
 
-      BIRTHDATE = /\A\d{4}-\d{2}-\d{2}\z/
       GENDERS = %w[male female other unknown].freeze
 
-      # A value these filters cannot apply is refused, not skipped: skipping
-      # it answers a search the client did not send. birthdate takes one day;
-      # the date prefixes (ge, lt, ...) and partial dates are not implemented.
+      # A value this filter cannot apply is refused, not skipped: skipping it
+      # answers a search the client did not send. birthdate is a date parameter
+      # (FHIRSearchBundle), refused there.
       def validate_patient_search_values!
-        if params.key?(:birthdate) && !valid_birthdate?(params[:birthdate])
-          return refuse_search_parameter("birthdate", "one day, YYYY-MM-DD")
-        end
         return unless params.key?(:gender) && GENDERS.exclude?(params[:gender])
 
         refuse_search_parameter("gender", "one of #{GENDERS.join(', ')}")
-      end
-
-      def valid_birthdate?(value)
-        value.is_a?(String) && value.match?(BIRTHDATE) && Date.iso8601(value)
-      rescue Date::Error
-        false
       end
     end
   end
