@@ -3,7 +3,7 @@ A web front end for RPMS.
 RPMS stays the system of record: this engine reads and writes through its RPC brokers and keeps no clinical data of its own.
 
 ## Usage
-How to use my plugin.
+App developers: the [FHIR API guide](docs/fhir-api.md) covers endpoints, app registration and search.
 
 ## Development
 
