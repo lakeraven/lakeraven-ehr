@@ -118,6 +118,7 @@ class USCoreSamplesExport < ActionDispatch::IntegrationTest
     case type
     when "Patient" then { _id: "1" }
     when "Practitioner" then { name: "MARTINEZ" }
+    when "Location" then { name: "CLINIC" }
     when "AuditEvent" then { patient: "Patient/1" }
     when "Measure", "MeasureReport", "ValueSet" then {}
     else { patient: "1" }

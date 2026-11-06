@@ -83,6 +83,39 @@ class FhirReadByIdTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "an _id search alone binds the compartment of the patient the id names" do
+    SEEDS["Encounter"].call
+    token = Doorkeeper::AccessToken.create!(
+      application: @oauth_app, scopes: "patient/Encounter.read", expires_in: 3600, resource_owner_id: 999
+    )
+    before = RpmsRpc.client.received_calls.length
+
+    get "#{ENGINE}/Encounter", params: { _id: "1-41" },
+      headers: { "Authorization" => "Bearer #{token.plaintext_token || token.token}" }
+
+    assert_response :forbidden
+    assert_equal before, RpmsRpc.client.received_calls.length
+  end
+
+  test "an _id search is on the patient's accounting of disclosures" do
+    SEEDS["Encounter"].call
+
+    get "#{ENGINE}/Encounter", params: { _id: "1-41" }, headers: @headers
+
+    assert_response :ok
+    audit = Lakeraven::EHR::AuditEvent.order(:id).last
+    assert_equal [ "Patient", "1" ], [ audit.entity_type, audit.entity_identifier ]
+  end
+
+  test "an _id search with another patient's parameter finds nothing" do
+    SEEDS["Encounter"].call
+
+    get "#{ENGINE}/Encounter", params: { _id: "1-41", patient: "3" }, headers: @headers
+
+    assert_response :ok
+    assert_empty JSON.parse(response.body).fetch("entry", [])
+  end
+
   test "an id that names no patient is a 404, not a refusal, and asks RPMS nothing" do
     %w[99999 abc 0-1 -1].each do |id|
       before = RpmsRpc.client.received_calls.length
