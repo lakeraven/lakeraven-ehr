@@ -76,8 +76,8 @@ class CapabilityStatementTest < ActionDispatch::IntegrationTest
     %w[Procedure date] => lambda {
       RpmsRpc.client.seed_keyed_collection(:procedure_list, "1", [ { ien: 7001, name: "Office visit", date: "03/10/2026",
                                                                      provider: "MARTINEZ,SARAH", status: "C" } ])
-      assert_equal %w[7001], search_ids("Procedure", patient: "1", date: "2026-03")
-      assert_equal %w[7001], search_ids("Procedure", patient: "1", date: "le2026-03-10")
+      assert_equal %w[1-7001], search_ids("Procedure", patient: "1", date: "2026-03")
+      assert_equal %w[1-7001], search_ids("Procedure", patient: "1", date: "le2026-03-10")
       assert_empty search_ids("Procedure", patient: "1", date: "gt2026-03-31")
     },
     %w[Encounter date] => lambda {
