@@ -36,7 +36,8 @@ module Lakeraven
           "Practitioner" => %w[us-core-practitioner],
           "Location" => %w[us-core-location],
           "AllergyIntolerance" => %w[us-core-allergyintolerance],
-          "Condition" => %w[us-core-condition-problems-health-concerns],
+          "Condition" => %w[us-core-condition-problems-health-concerns us-core-condition-encounter-diagnosis],
+          "Encounter" => %w[us-core-encounter],
           "MedicationRequest" => %w[us-core-medicationrequest],
           "Observation" => %w[us-core-vital-signs],
           "Immunization" => %w[us-core-immunization],
@@ -56,14 +57,17 @@ module Lakeraven
             interactions: %w[read search-type],
             source: "RPMS, through rpms-rpc, plus a deployment's supplemental allergy provider when one is configured."
           },
-          "Condition" => { interactions: %w[read search-type], source: "RPMS, through rpms-rpc." },
+          "Condition" => {
+            interactions: %w[read search-type],
+            source: "The RPMS problem list and the diagnoses on RPMS visits, through rpms-rpc."
+          },
           "MedicationRequest" => { interactions: %w[read search-type], source: "RPMS, through rpms-rpc." },
           "Observation" => {
             interactions: %w[read search-type],
             source: "Vital signs from RPMS, through rpms-rpc, plus a deployment's supplemental observation provider " \
                     "when one is configured."
           },
-          "Encounter" => { interactions: %w[search-type], source: "RPMS, through rpms-rpc." },
+          "Encounter" => { interactions: %w[read search-type], source: "RPMS visits, through rpms-rpc." },
           "ServiceRequest" => { interactions: %w[read search-type], source: "RPMS referrals, through rpms-rpc." },
           "Immunization" => { interactions: %w[read search-type], source: "RPMS, through rpms-rpc." },
           "Procedure" => { interactions: %w[read search-type], source: "RPMS, through rpms-rpc." },
