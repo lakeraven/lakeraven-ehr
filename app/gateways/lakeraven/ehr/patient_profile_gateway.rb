@@ -6,7 +6,8 @@ require "rpms_rpc/api/registration"
 module Lakeraven
   module EHR
     # The parts of a registration beside the demographics: the emergency
-    # contact and next of kin (rpms-ux S-REG-08), the languages (S-REG-10) and
+    # contact and next of kin (rpms-ux S-REG-08), the other tribes and eligibility
+    # modifiers (S-REG-07.2, S-REG-07.3), the languages (S-REG-10) and
     # the other names and the preferred name (S-REG-12), and race and ethnicity (S-REG-20.2). Everything goes through RpmsRpc::PatientProfile,
     # which reads and files through AG's own windows and runs AG's own field
     # checks (AGG WINDOW DATA VALIDATION) before it files.
@@ -68,6 +69,46 @@ module Lakeraven
 
         def remove_alias(dfn, ien, via: ::RpmsRpc::PatientProfile)
           result_for(via.remove_alias(dfn.to_i, ien.to_i))
+        rescue ::RpmsRpc::Error, IOError, SystemCallError => e
+          unknown(e)
+        end
+
+        # The patient's other tribes (S-REG-07.2).
+        def other_tribes(dfn, via: ::RpmsRpc::PatientProfile)
+          via.other_tribes(dfn.to_i) || raise(::RpmsRpc::Client::ConnectionError, "no reply to the other tribes read")
+        end
+
+        def add_other_tribe(dfn, entry, via: ::RpmsRpc::PatientProfile)
+          result_for(via.add_other_tribe(dfn.to_i, tribe: entry.tribe_ien, quantum: entry.quantum.to_s))
+        rescue ::RpmsRpc::Error, IOError, SystemCallError => e
+          unknown(e)
+        end
+
+        def remove_other_tribe(dfn, ien, via: ::RpmsRpc::PatientProfile)
+          result_for(via.remove_other_tribe(dfn.to_i, ien.to_i))
+        rescue ::RpmsRpc::Error, IOError, SystemCallError => e
+          unknown(e)
+        end
+
+        # The reasons behind the patient's eligibility status (S-REG-07.3). RPMS
+        # has no registration call for them; RpmsRpc::Registration files them the
+        # way ADDMOD^AGED11A does, under AG's edit lock.
+        def eligibility_modifiers(dfn, via: ::RpmsRpc::Registration)
+          via.eligibility_modifiers(dfn.to_i)
+        end
+
+        def eligibility_modifier_choices(status, via: ::RpmsRpc::Registration)
+          status.present? ? via.eligibility_modifier_choices(status) : []
+        end
+
+        def add_eligibility_modifier(dfn, modifier, via: ::RpmsRpc::Registration)
+          result_for(via.add_eligibility_modifier(dfn.to_i, modifier.to_i))
+        rescue ::RpmsRpc::Error, IOError, SystemCallError => e
+          unknown(e)
+        end
+
+        def remove_eligibility_modifier(dfn, modifier, via: ::RpmsRpc::Registration)
+          result_for(via.remove_eligibility_modifier(dfn.to_i, modifier.to_i))
         rescue ::RpmsRpc::Error, IOError, SystemCallError => e
           unknown(e)
         end
