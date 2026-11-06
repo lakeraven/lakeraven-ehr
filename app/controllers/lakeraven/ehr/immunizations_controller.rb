@@ -3,15 +3,12 @@
 module Lakeraven
   module EHR
     class ImmunizationsController < ApplicationController
-      include PatientCompartment
+      include PatientScopedRead
 
-      rate_limit only: :index
+      private
 
-      compartment_bound :index, param: :patient, require_param: true
-
-      def index
-        dfn = patient_compartment_dfn
-        render_bundle_egress(Immunization.for_patient(dfn).map(&:to_fhir))
+      def patient_resources(dfn)
+        Immunization.for_patient(dfn).map(&:to_fhir)
       end
     end
   end

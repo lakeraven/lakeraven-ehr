@@ -42,13 +42,13 @@ module Lakeraven
       end
 
       # ORQQVI VITALS piece 1 is the V MEASUREMENT IEN (:measurement_ien since
-      # rpms-rpc #188); a vital read from RPMS keeps it as its id.
-      test "a vital read from RPMS carries its V MEASUREMENT IEN as its id" do
+      # rpms-rpc #188); a vital read from RPMS keeps it in its id.
+      test "a vital read from RPMS carries its V MEASUREMENT IEN in its id" do
         get "/lakeraven-ehr/Observation", params: { patient: "1" }, headers: @headers
         assert_response :ok
 
         ids = JSON.parse(response.body)["entry"].map { |entry| entry.dig("resource", "id") }
-        assert_includes ids, "8"
+        assert_includes ids, "1-8"
       end
 
       test "returns FHIR JSON content type" do
