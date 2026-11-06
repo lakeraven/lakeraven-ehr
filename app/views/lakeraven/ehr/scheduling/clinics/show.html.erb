@@ -81,7 +81,12 @@
                   scheduling_patient_appointments_path(appointment[:patient_dfn]),
                   data: { patient_appointments: true } %>
           </td>
-          <td data-status="<%= status_key %>"><%= status_badge status_key, status %></td>
+          <td data-status="<%= status_key %>">
+            <%= status_badge status_key, status %>
+            <% if appointment[:overbook] %>
+              <span data-overbook="true"><%= status_badge "warning", "Overbook" %></span>
+            <% end %>
+          </td>
           <td>
             <%= render "lakeraven/ehr/scheduling/appointments/actions",
                   appointment: appointment,
@@ -89,6 +94,41 @@
                   date: @date %>
             <%= render "closed_actions", resource: @resource, appointment: appointment, date: @date, status_key: status_key %>
           </td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+<% end %>
+
+<h2>Hours</h2>
+<% if @day.closed %>
+  <%= alert_box :notice,
+        "#{closed_reason(@day.closed)}: the clinic takes no appointments this day.",
+        id: "day-closed" %>
+<% elsif @day.listed_blocks.empty? %>
+  <%= empty_state "The clinic has no hours this day.",
+        id: "no-hours" %>
+<% else %>
+  <table
+    id="blocks"
+    class="data-table"
+  >
+    <caption class="sr-only">Hours on <%= @resource[:name] %></caption>
+    <thead>
+      <tr>
+        <th scope="col">From</th>
+        <th scope="col">To</th>
+        <th scope="col">Access type</th>
+        <th scope="col">Slots</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% @day.listed_blocks.sort_by { |b| b[:start_time] }.each do |block| %>
+        <tr data-block="<%= block[:start_time].strftime("%H:%M") %>">
+          <td><%= block[:start_time].strftime("%H:%M") %></td>
+          <td><%= block[:end_time].strftime("%H:%M") %></td>
+          <td data-access-type="<%= block[:access_type_id] %>"><%= @access_type_names[block[:access_type_id]] || "Not named" %></td>
+          <td data-slots="<%= block[:slots] %>"><%= block[:slots] %></td>
         </tr>
       <% end %>
     </tbody>
