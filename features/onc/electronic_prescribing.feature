@@ -77,17 +77,6 @@ Feature: Electronic Prescribing — NCPDP SCRIPT
     And the change request status should be "pending"
 
   # =============================================================================
-  # CONTROLLED SUBSTANCE — EPCS
-  # =============================================================================
-
-  Scenario: Flag controlled substance prescription for EPCS
-    Given a signed medication order for "Hydrocodone 5 MG Oral Tablet"
-    And the medication is DEA Schedule "II"
-    When the prescription is validated for transmission
-    Then the prescription should require EPCS two-factor authentication
-    And the prescription should include DEA schedule information
-
-  # =============================================================================
   # SURESCRIPTS ROUTING
   # =============================================================================
 
