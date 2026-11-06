@@ -98,6 +98,7 @@ module Lakeraven
           ],
           text: "Cardiology consult"
         },
+        category: [ { coding: [ { system: "http://snomed.info/sct", code: "3457005", display: "Patient referral" } ] } ],
         subject: { reference: "Patient/100" },
         authoredOn: "2024-03-15",
         reasonCode: [ { text: "Chest pain" } ]
