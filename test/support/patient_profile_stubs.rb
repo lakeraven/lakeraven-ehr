@@ -23,7 +23,8 @@ module PatientProfileStubs
 
   # The names answered by RpmsRpc::Registration rather than PatientProfile.
   REGISTRATION_NAMES = %i[preferred_name set_preferred_name race_ethnicity race_ethnicity_choices
-                          set_race_ethnicity address_history].freeze
+                          set_race_ethnicity address_history eligibility_modifiers eligibility_modifier_choices
+                          add_eligibility_modifier remove_eligibility_modifier].freeze
 
   def sign_in(keys = "registration_menu")
     post "/lakeraven-ehr/test_session", params: { duz: "207", user_type: "user", user_name: "PROFILE,REG", security_keys: keys }
@@ -39,7 +40,8 @@ module PatientProfileStubs
                  language_lookup: ->(text) { text == "ENGLISH" ? [ { ien: ENGLISH, name: "ENGLISH" } ] : [] },
                  languages: ->(*) { {} }, aliases: ->(*) { [] }, preferred_name: ->(*) { "" },
                  social_status: ->(*) { SOCIAL_STATUS },
-                 race_ethnicity: ->(*) { { races: [], ethnicities: [] } }, address_history: ->(*) { [] } }
+                 race_ethnicity: ->(*) { { races: [], ethnicities: [] } }, address_history: ->(*) { [] },
+                 other_tribes: ->(*) { [] }, eligibility_modifiers: ->(*) { [] } }
     restores = defaults.merge(answers).map do |name, answer|
       target = REGISTRATION_NAMES.include?(name) ? RpmsRpc::Registration : profile
       restore = StubHelpers.send(:singleton_method_restore, target, name)
