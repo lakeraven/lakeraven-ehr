@@ -40,6 +40,12 @@
         id: "find-open-time" %>
 </p>
 
+<p>
+  <%= link_to "See the wait list",
+        scheduling_clinic_wait_list_path(@resource[:id]),
+        id: "wait-list-link" %>
+</p>
+
 <%= render "walk_in_link", resource: @resource, date: @date %>
 
 <% if can_set_hours?(@resource) %>
