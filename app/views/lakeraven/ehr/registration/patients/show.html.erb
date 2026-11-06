@@ -136,6 +136,13 @@
           can_edit: can_edit %>
   <% end %>
 
+  <% unless @social_status.nil? %>
+    <%= render "lakeraven/ehr/registration/social_statuses/section",
+          dfn: params[:dfn],
+          social_status: @social_status,
+          can_edit: can_edit %>
+  <% end %>
+
   <% unless @preferred_name.nil? %>
     <%= render "lakeraven/ehr/registration/preferred_names/section",
           dfn: params[:dfn],
@@ -147,6 +154,14 @@
     <%= render "lakeraven/ehr/registration/race_ethnicities/section",
           dfn: params[:dfn],
           race_ethnicity: @race_ethnicity,
+          can_edit: can_edit %>
+  <% end %>
+
+  <% if @other_tribes && @eligibility_modifiers %>
+    <%= render "lakeraven/ehr/registration/other_tribes/section",
+          dfn: params[:dfn],
+          other_tribes: @other_tribes,
+          modifiers: @eligibility_modifiers,
           can_edit: can_edit %>
   <% end %>
 

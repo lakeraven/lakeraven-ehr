@@ -1,3 +1,4 @@
+@app
 Feature: Encounter clinical visit model
   As a clinical application
   I need an Encounter model that stores visit data and

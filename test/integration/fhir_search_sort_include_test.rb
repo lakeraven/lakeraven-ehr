@@ -273,7 +273,7 @@ class FhirSearchSortIncludeTest < ActionDispatch::IntegrationTest
     sort = medication[:searchParam].find { |param| param[:name] == "_sort" }
     assert_includes sort[:documentation], "status"
     encounter = caps.resource_capabilities("Encounter")
-    assert_equal %w[patient date], encounter[:searchParam].map { |param| param[:name] }
+    assert_equal %w[_id patient date], encounter[:searchParam].map { |param| param[:name] }
     assert_nil encounter[:searchInclude]
   end
 

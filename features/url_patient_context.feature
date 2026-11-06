@@ -8,12 +8,14 @@ Feature: URL-derived patient context with self-clearing on invalid identifiers
     Given demo clinical seeds are loaded
     And the clinician is signed in for URL patient context
 
+  @live
   Scenario: Context is re-derived from the URL after refresh
     Given the clinician has the HTML chart for patient 1 open
     When the browser reloads the chart page
     Then patient 1 is the active patient context
     And the banner reflects patient 1
 
+  @live
   Scenario: Invalid patient identifier clears context
     Given the clinician has patient 1 open in session
     When the clinician follows a chart link for an invalid patient identifier
@@ -21,6 +23,7 @@ Feature: URL-derived patient context with self-clearing on invalid identifiers
     And the patient context is cleared
     And no partial patient data is rendered
 
+  @live
   Scenario: Backend failure clears rather than freezes context
     Given the clinician has patient 1 open in session
     And the chart patient lookup fails in the backend

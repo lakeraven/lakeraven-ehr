@@ -1,4 +1,4 @@
-@onc
+@onc @app
 Feature: Patient Record Amendments (ONC § 170.315(d)(4))
   As a patient or provider
   I need to request and process amendments to health records

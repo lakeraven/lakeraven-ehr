@@ -9,6 +9,7 @@ Feature: In-clinic consent on a locked patient tablet
     And patient "DEMOPATIENT,MARA" is the active patient context
     And the clinician is signed in with consent write scopes for in-clinic signing
 
+  @live
   Scenario: Patient signs a treatment consent on the clinic tablet
     Given the clinician starts the "bh-treatment" consent handover
     When the patient signs the kiosk consent form
@@ -16,6 +17,7 @@ Feature: In-clinic consent on a locked patient tablet
     And the clinician unlocks the kiosk with their access and verify codes
     And the chart consent list shows the consent as Active
 
+  @live
   Scenario: The patient-facing screen exposes nothing else
     Given the clinician starts the "bh-treatment" consent handover
     Then the kiosk shows only the consent template and patient name and date of birth
@@ -24,6 +26,7 @@ Feature: In-clinic consent on a locked patient tablet
     And the clinician unlocks the kiosk with their access and verify codes
     Then the clinician returns to the patient consent list
 
+  @live
   Scenario: A signed consent cannot be edited
     Given the clinician starts the "bh-treatment" consent handover
     And the patient signs the kiosk consent form
@@ -33,6 +36,7 @@ Feature: In-clinic consent on a locked patient tablet
     When the clinician records a revocation with a synthetic reason
     Then the chart consent list shows the consent as Revoked
 
+  @live
   Scenario: Every access is audited
     Given the clinician opens the patient consent list
     When the clinician starts the "telehealth" consent handover

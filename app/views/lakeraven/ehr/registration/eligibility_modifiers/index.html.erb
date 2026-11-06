@@ -1,0 +1,83 @@
+<% page_title "Eligibility reasons", @patient[:name], "Registration" %>
+
+<%= page_header @patient[:name],
+      "The reasons behind the patient's eligibility status." %>
+
+<%= flash_alert id: "eligibility-modifiers-alert" %>
+
+<% if flash[:notice].present? %>
+  <%= alert_box :notice,
+        flash[:notice],
+        id: "eligibility-modifiers-notice" %>
+<% end %>
+
+<section
+  id="eligibility-modifiers-manage"
+  aria-labelledby="eligibility-modifiers-heading"
+  class="card flex flex-col gap-4"
+>
+  <h2
+    id="eligibility-modifiers-heading"
+    class="text-lg font-semibold"
+  >
+    Eligibility reasons
+  </h2>
+  <% if @modifiers.empty? %>
+    <%= empty_state "No reasons on file.", id: "no-eligibility-modifiers" %>
+  <% else %>
+    <table
+      id="eligibility-modifiers"
+      class="data-table"
+    >
+      <caption class="sr-only">Eligibility reasons</caption>
+      <thead>
+        <tr>
+          <th scope="col">Reason</th>
+          <th scope="col"><span class="sr-only">Actions</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        <% @modifiers.each do |row| %>
+          <tr data-modifier="<%= row[:ien] %>">
+            <td><%= row[:name] %></td>
+            <td>
+              <%= button_to "Remove",
+                    registration_remove_patient_eligibility_modifier_path(@dfn, row[:ien]),
+                    method: :post,
+                    class: "button-secondary",
+                    aria: { label: "Remove #{row[:name]}" },
+                    form: { id: "remove-modifier-#{row[:ien]}" } %>
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  <% end %>
+
+  <% if @status.nil? %>
+    <%= empty_state "Record the eligibility status first.",
+          "The reasons offered depend on it.",
+          id: "no-eligibility-status" %>
+  <% else %>
+    <%= form_with url: registration_patient_eligibility_modifiers_path(@dfn),
+          method: :post,
+          local: true,
+          id: "eligibility-modifier-form",
+          class: "flex flex-col gap-4" do %>
+      <%= form_field :modifier_ien, "Add a reason" do |aria| %>
+        <%= select_tag :modifier_ien,
+              options_for_select(@choices.map { |row| [ row[:name], row[:ien] ] }),
+              include_blank: "Choose a reason",
+              id: "modifier_ien",
+              aria: aria %>
+      <% end %>
+      <%= submit_tag "Add the reason",
+            class: "button-primary self-start" %>
+    <% end %>
+  <% end %>
+</section>
+
+<p class="mt-6">
+  <%= link_to "Back to the patient",
+        registration_patient_path(@dfn) %>
+</p>

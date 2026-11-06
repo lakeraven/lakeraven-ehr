@@ -9,6 +9,11 @@ module Lakeraven
         RpmsRpc::Encounter.for_patient(dfn.to_s)
       end
 
+      # The patient's visits: what happened, where #for_patient is what was booked.
+      def self.visits(dfn)
+        RpmsRpc::Encounter.visits(dfn.to_s)
+      end
+
       # Open an active encounter — returns a hydrated context hash or nil if not found.
       # Delegates to RpmsRpc::Encounter.open (added in rpms-rpc#55).
       # Normalizes identifiers to strings to match the convention used by

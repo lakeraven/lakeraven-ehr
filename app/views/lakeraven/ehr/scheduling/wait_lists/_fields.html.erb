@@ -1,0 +1,39 @@
+<%# The fields of a wait list entry, new or edited.
+    Locals: f, addition, reasons, providers, find_url. %>
+<% model = Lakeraven::EHR::WaitListAddition %>
+
+<%# REASON ADDED TO LIST, 9009017.11 .09. %>
+<%= form_field :reason_ien, "Reason", form: f, error: addition.errors[:reason_ien].first do |aria| %>
+  <%= f.select :reason_ien,
+        options_for_select(reasons.map { |r| [ r[:name].titleize, r[:ien] ] }, addition.reason_ien),
+        { include_blank: "Choose a reason" },
+        aria: aria %>
+<% end %>
+
+<%# PRIORITY, 9009017.11 .02. %>
+<%= choice_list f,
+      :priority,
+      legend: "Priority (optional)",
+      choices: model::PRIORITIES.to_a,
+      selected: addition.priority,
+      inline: true %>
+
+<%# RECALL DATE, 9009017.11 .05. %>
+<%= form_field :recall_on, "Recall date", form: f, error: addition.errors[:recall_on].first do |aria| %>
+  <%= f.date_field :recall_on,
+        value: addition.recall_on,
+        aria: aria %>
+<% end %>
+
+<%# PROVIDER, 9009017.11 .06. %>
+<%= lookup_field f,
+      :provider_ien,
+      legend: "Provider (optional)",
+      search: :provider_search,
+      search_label: "Provider name starts with",
+      find_label: "Find provider",
+      find_url: find_url,
+      find_method: :get,
+      choices: providers.map { |provider| [ provider.ien, provider.name, { provider: provider.ien } ] },
+      selected: addition.provider_ien,
+      chosen_text: ("A provider is chosen." if addition.provider_ien) %>

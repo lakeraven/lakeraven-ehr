@@ -1,3 +1,4 @@
+@app
 Feature: Clinical Quality Measures (ONC § 170.315(c)(1-3))
   As a quality improvement coordinator
   I need to calculate clinical quality measures for patients and populations

@@ -80,6 +80,25 @@ module Lakeraven
         Array(setup.access_types).reject { |t| t[:inactive] || t[:prevent_access] }
       end
 
+      # The access types by id, for naming a block (S-SCH-05.2).
+      def self.access_type_names(setup: ::RpmsRpc::SchedulingSetup)
+        Array(setup.access_types).to_h { |t| [ t[:id], t[:name] ] }
+      end
+
+      # The day's appointments with what the BSDX reads leave out (S-SCH-05.3):
+      # :cancelled_by on a cancelled one, and :overbook on the others.
+      def self.marked(resource, appointments, setup: ::RpmsRpc::SchedulingSetup)
+        clinic = resource[:hospital_location_id]
+        appointments.map do |a|
+          where = { start_time: a[:start_time], patient_dfn: a[:patient_dfn] }
+          if a[:cancelled]
+            a.merge(cancelled_by: setup.cancelled_by(**where))
+          else
+            a.merge(overbook: clinic.present? && setup.overbook?(hospital_location_id: clinic, **where))
+          end
+        end
+      end
+
       # What RPMS says about the resource's clinic over from..to, read once for
       # the range (SchedulingSetup: the clinic's #44 rules, the holidays, the
       # access types that prevent access), as a function from a date to
@@ -100,6 +119,16 @@ module Lakeraven
       # appointments (STCOMM^BSDX05). A resource with none is not a key.
       def self.booked_counts(date, via: ::RpmsRpc::Scheduling)
         Array(via.all_appointments(start_date: date, end_date: date)).group_by { |a| a[:resource_name] }.transform_values(&:size)
+      end
+
+      # Every appointment on the resources over dates, cancelled ones too, each
+      # with its clinic (S-SCH-05.5). One read per resource: BSDX ALL
+      # APPOINTMENTS leaves out what is cancelled or a no-show.
+      def self.listed(resources, dates, via: ::RpmsRpc::Scheduling)
+        resources.flat_map do |resource|
+          Array(via.appointments(resource: resource[:name], start_date: dates.begin, end_date: dates.end))
+            .map { |a| a.merge(clinic: resource.slice(:id, :name)) }
+        end
       end
 
       # The appointments needing action on the resources over window, earliest
