@@ -76,7 +76,18 @@ class USCoreSamplesExport < ActionDispatch::IntegrationTest
   end
 
   def read_id(type)
-    type == "AuditEvent" ? @audit_event.id : READ_IDS.fetch(type, "1")
+    return @audit_event.id if type == "AuditEvent"
+    return READ_IDS.fetch(type) if READ_IDS.key?(type)
+    return "1" if %w[Patient Organization Location].include?(type)
+
+    first_match_id(type)
+  end
+
+  # A patient-scoped type's id comes from what its search serves.
+  def first_match_id(type)
+    get "#{ENGINE}/#{type}", params: search_params(type), headers: @headers
+    assert_response :ok, "search #{type}: #{response.body}"
+    JSON.parse(response.body).fetch("entry").first.dig("resource", "id")
   end
 
   def fetch(type, interaction, path, params = {})

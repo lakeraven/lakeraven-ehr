@@ -37,7 +37,7 @@ module Lakeraven
           entries = body.fetch("entry")
           assert entries.any?, "expected a non-empty Observation bundle"
           ids = entries.map { |e| e.dig("resource", "id") }
-          assert_includes ids, "supp-lab-hba1c"
+          assert_includes ids, "1-supp-lab-hba1c"
         end
       end
 
@@ -57,7 +57,7 @@ module Lakeraven
           assert entries.any?, "expected observations in bundle"
 
           vital_entry = entries.find { |e| e.dig("resource", "category", 0, "coding", 0, "code") == "vital-signs" }
-          lab_entry = entries.find { |e| e.dig("resource", "id") == "supp-lab-serialize" }
+          lab_entry = entries.find { |e| e.dig("resource", "id") == "1-supp-lab-serialize" }
           assert vital_entry, "expected at least one wire-sourced vital-signs observation"
           assert lab_entry, "expected supplemental laboratory observation in bundle"
 
@@ -159,7 +159,7 @@ module Lakeraven
           assert_response :ok
           entries = JSON.parse(response.body).fetch("entry")
           assert entries.any?, "expected allergy bundle entries"
-          resource = entries.map { |e| e["resource"] }.find { |r| r["id"] == "supp-allergy-coded" }
+          resource = entries.map { |e| e["resource"] }.find { |r| r["id"] == "1-supp-allergy-coded" }
           assert resource, "expected supplemental allergy in bundle"
           assert_equal "AllergyIntolerance", resource["resourceType"]
           assert_equal "Patient/#{REQUESTED_DFN}", resource.dig("patient", "reference")

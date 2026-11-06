@@ -46,6 +46,17 @@ module Lakeraven
           unknown(e)
         end
 
+        # The latest migrant, homeless and internet answers (S-REG-11, S-REG-31.3).
+        def social_status(dfn, via: ::RpmsRpc::PatientProfile)
+          via.social_status(dfn.to_i) || raise(::RpmsRpc::Client::ConnectionError, "no reply to the social status read")
+        end
+
+        def record_social_status(dfn, entry, via: ::RpmsRpc::PatientProfile)
+          result_for(via.record_social_status(dfn.to_i, **entry.record_attrs))
+        rescue ::RpmsRpc::Error, IOError, SystemCallError => e
+          unknown(e)
+        end
+
         def aliases(dfn, via: ::RpmsRpc::PatientProfile)
           via.aliases(dfn.to_i) || raise(::RpmsRpc::Client::ConnectionError, "no reply to the other names read")
         end

@@ -90,9 +90,9 @@ Lakeraven::EHR::Engine.routes.draw do
   resources :encounters, path: "Encounter", only: %i[index]
   resources :organizations, path: "Organization", only: %i[show], param: :ien
   resources :locations, path: "Location", only: %i[show], param: :ien
-  resources :service_requests, path: "ServiceRequest", only: %i[index]
-  resources :immunizations, path: "Immunization", only: %i[index]
-  resources :procedures, path: "Procedure", only: %i[index]
+  resources :service_requests, path: "ServiceRequest", only: %i[index show]
+  resources :immunizations, path: "Immunization", only: %i[index show]
+  resources :procedures, path: "Procedure", only: %i[index show]
   resources :coverage_eligibility_requests, path: "CoverageEligibilityRequest", only: %i[create]
   resources :measures, path: "Measure", only: %i[index]
   resources :measure_reports, path: "MeasureReport", only: %i[index]
@@ -197,6 +197,11 @@ Lakeraven::EHR::Engine.routes.draw do
       get "contacts/:kind/edit", to: "contacts#edit", as: :edit_patient_contact
       post "contacts/:kind/edit", to: "contacts#edit"
       post "contacts/:kind", to: "contacts#update", as: :patient_contact
+      # The migrant, homeless and internet questions (S-REG-11, S-REG-22.5, S-REG-31.3):
+      # each answer a new dated entry.
+      get "social_status/edit", to: "social_statuses#edit", as: :edit_patient_social_status
+      post "social_status", to: "social_statuses#update", as: :patient_social_status
+
       # The patient's languages (S-REG-10): each save a new dated entry.
       get "languages/edit", to: "languages#edit", as: :edit_patient_languages
       post "languages/edit", to: "languages#edit"
@@ -242,6 +247,8 @@ Lakeraven::EHR::Engine.routes.draw do
     get "/", to: "clinics#index", as: :home
     get "clinics/:id", to: "clinics#show", as: :clinic, constraints: { id: /\d+/ }
     get "clinics/:id/week", to: "clinics#week", as: :clinic_week, constraints: { id: /\d+/ }
+    # The appointments across the scheduler's clinics (S-SCH-05.5).
+    get "appointments", to: "appointment_lists#index", as: :appointment_list
     # The appointments needing action in the scheduler's clinics (S-SCH-13.5, #875).
     get "needing_action", to: "needing_action#index", as: :needing_action
     get "clinics/:id/open_times", to: "open_times#index", as: :clinic_open_times, constraints: { id: /\d+/ }
