@@ -17,6 +17,10 @@ module PatientProfileStubs
               address_line2: "", address_line3: "", city: "ANYTOWN", state: { ien: 48, name: "WASHINGTON" }, zip: "12345",
               phone: "555-555-0100", phone_work: "" }.freeze
 
+  # RpmsRpc::PatientProfile.social_status for a patient asked nothing yet.
+  SOCIAL_STATUS = { migrant: { status: nil, type: nil, date: nil }, homeless: { status: nil, type: nil, date: nil },
+                    internet: { access: nil, date: nil } }.freeze
+
   # The names answered by RpmsRpc::Registration rather than PatientProfile.
   REGISTRATION_NAMES = %i[preferred_name set_preferred_name race_ethnicity race_ethnicity_choices
                           set_race_ethnicity address_history].freeze
@@ -34,6 +38,7 @@ module PatientProfileStubs
     defaults = { contacts: ->(*) { { emergency: CONTACT, next_of_kin: {} } }, relationships: ->(*) { [] }, states: ->(*) { [] },
                  language_lookup: ->(text) { text == "ENGLISH" ? [ { ien: ENGLISH, name: "ENGLISH" } ] : [] },
                  languages: ->(*) { {} }, aliases: ->(*) { [] }, preferred_name: ->(*) { "" },
+                 social_status: ->(*) { SOCIAL_STATUS },
                  race_ethnicity: ->(*) { { races: [], ethnicities: [] } }, address_history: ->(*) { [] } }
     restores = defaults.merge(answers).map do |name, answer|
       target = REGISTRATION_NAMES.include?(name) ? RpmsRpc::Registration : profile
