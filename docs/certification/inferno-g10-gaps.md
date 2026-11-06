@@ -13,8 +13,8 @@ The runbook for running the kit is at the end.
 |---|---|---|---|
 | 1 Standalone Patient App (full access) | 4 | 3 | 2 |
 | 2 Standalone Patient App (limited access) | 0 | 0 | 2 |
-| 3 EHR Practitioner App | 1 | 3 | 0 |
-| 10 Single Patient API (US Core 6.1.0) | 0 | 12 | 8 |
+| 3 EHR Practitioner App | 2 | 2 | 0 |
+| 10 Single Patient API (US Core 6.1.0) | 9 | 4 | 7 |
 | Multi-Patient API (Bulk Data) | 3 | 1 | 4 |
 | 9 Additional authorization tests | 7 | 1 | 2 |
 | 11 Visual inspection and attestation | 1 | 0 | 6 |
@@ -70,10 +70,10 @@ Evidence is file:line on `main`; tests are named where they prove the behaviour.
 | MedicationRequest: `patient+intent`, `patient+intent+status`, read; Medication by reference | met | `intent` (#852), `status`; read (`PatientScopedRead`); the medication is inline, so nothing references a Medication; the demo build has no order to read live | #845 |
 | Observation vital-signs profiles: `patient+category`, `patient+code`, `patient+category+date`, read | met | `category`, `code` and `date` with prefixes; read (`PatientScopedRead`) | #845 |
 | Observation lab, clinical-result, smoking status, screening-assessment, occupation, pregnancy, pediatric vitals | missing | Observation declares `us-core-vital-signs` only (`capability_statement.rb:41`) | #848 |
-| Encounter: `_id`, `patient`, `date+patient`, read | partial | RPMS visits as US Core Encounters, `patient`, `date` with prefixes, read; no `_id` | #846 |
+| Encounter: `_id`, `patient`, `date+patient`, read | met | RPMS visits as US Core Encounters, `_id`, `patient`, `date` with prefixes, read; live `live_fhir_read_test.rb` | #846 |
 | Immunization, Procedure: `patient`, (`patient+date`), read | met | `patient` and `date` with prefixes; read (`PatientScopedRead`) | #845 |
-| ServiceRequest: `_id`, `patient`, `patient+category`, `patient+code`, `patient+category+authored`, read | partial | `patient` and `authored` with prefixes; read (`PatientScopedRead`); no `_id`, `category` or `code`; the demo build has no referral to read live | #846 |
-| Location `name`, `address`; Organization, Practitioner read | partial | reads served (`routes.rb:70,76-77`); Location has no search | #846 |
+| ServiceRequest: `_id`, `patient`, `patient+category`, `patient+code`, `patient+category+authored`, read | met | `_id`, `patient`, `category`, `code`, `authored` with prefixes, read (`PatientScopedRead`); the demo build has no referral to read live | #846 |
+| Location `name`, `address`; Organization, Practitioner read | partial | reads served; Location `name` (start of name, `DDR LISTER`), live `live_fhir_read_test.rb`; `#44` holds no address to search | #846 |
 | CarePlan, CareTeam, Goal | missing | models exist, not routed | #330, #334 |
 | Coverage | missing | not routed as FHIR Coverage | #239 |
 | Implantable Device | missing | not routed; RPMS UDI source unknown | #331, #334 |

@@ -8,6 +8,10 @@ module Lakeraven
       def self.find(ien)
         RpmsRpc::Location.find(ien)
       end
+
+      def self.search(name)
+        Array(RpmsRpc::Location.search(name))
+      end
     end
   end
 end
