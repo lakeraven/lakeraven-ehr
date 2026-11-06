@@ -59,6 +59,11 @@ module Lakeraven
           type: "reference",
           documentation: "Required: Patient/<id> or <id>. A token bound to a patient may name only that patient."
         )
+        ID_PARAM = Param.new(type: "token", documentation: "A record's id. Names its patient, so no patient parameter is needed.")
+        PATIENT_OR_ID_PARAM = Param.new(
+          type: "reference",
+          documentation: "Required without _id: Patient/<id> or <id>. A token bound to a patient may name only that patient."
+        )
         TOKEN_FORMS = "A value is code, system|code, |code or system|; comma-separated values match any of them."
         DATE_FORMS = "A prefix (eq, ne, gt, lt, ge, le, sa, eb) and a date of any precision; " \
                      "repeat the parameter for a range. Any other value is refused with a 400 OperationOutcome."
@@ -90,6 +95,9 @@ module Lakeraven
             search: { "name" => Param.new(type: "string", documentation: "Name, as the RPMS person lookup matches it.") },
             sort: { "_id" => ID, "name" => NAME }
           },
+          "Location" => {
+            search: { "name" => Param.new(type: "string", documentation: "Required: the start of the name, any case.") }
+          },
           "AllergyIntolerance" => {
             search: {
               "patient" => PATIENT_PARAM,
@@ -105,11 +113,11 @@ module Lakeraven
             search: {
               "patient" => PATIENT_PARAM,
               "category" => Token.new(
-                documentation: "condition-category. RPMS problems are problem-list-item. #{TOKEN_FORMS}",
+                documentation: "condition-category: problem-list-item for RPMS problems, encounter-diagnosis for visit diagnoses. #{TOKEN_FORMS}",
                 paths: [ [ :category, :* ] ]
               ),
               "clinical-status" => Token.new(
-                documentation: "condition-clinical: active or inactive, as RPMS records the problem. #{TOKEN_FORMS}",
+                documentation: "condition-clinical: active or inactive, as RPMS records a problem. A visit diagnosis carries none. #{TOKEN_FORMS}",
                 paths: [ %i[clinicalStatus] ]
               )
             },
@@ -135,13 +143,20 @@ module Lakeraven
           },
           "Encounter" => {
             search: {
-              "patient" => PATIENT_PARAM,
+              "_id" => ID_PARAM,
+              "patient" => PATIENT_OR_ID_PARAM,
               "date" => DateParam.new(documentation: "The encounter's period. #{DATE_FORMS}", paths: [ %i[period] ])
             }
           },
           "ServiceRequest" => {
             search: {
-              "patient" => PATIENT_PARAM,
+              "_id" => ID_PARAM,
+              "patient" => PATIENT_OR_ID_PARAM,
+              "category" => Token.new(
+                documentation: "An RCIS referral is SNOMED CT 3457005. #{TOKEN_FORMS}",
+                paths: [ [ :category, :* ] ]
+              ),
+              "code" => Token.new(documentation: "An RCIS referral is SNOMED CT 3457005. #{TOKEN_FORMS}", paths: [ %i[code] ]),
               "authored" => DateParam.new(documentation: "When it was authored. #{DATE_FORMS}", paths: [ %i[authoredOn] ])
             }
           },

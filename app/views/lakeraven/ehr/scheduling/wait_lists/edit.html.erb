@@ -1,0 +1,28 @@
+<% page_title "Edit the wait list entry", @resource[:name] %>
+
+<%= page_header "Edit the wait list entry",
+      "#{@entry[:patient]}, #{@resource[:name]}" %>
+
+<%= flash_alert id: "wait-list-alert" %>
+
+<%= form_errors @addition,
+      "The entry was not saved.",
+      id: "wait-list-errors" %>
+
+<%= form_with scope: :wait_list,
+      model: @addition,
+      url: scheduling_clinic_wait_list_entry_path(@resource[:id], @entry[:ien]),
+      method: :post,
+      local: true,
+      id: "wait-list-form",
+      class: "card flex flex-col gap-4" do |f| %>
+  <%= render "fields",
+        f: f,
+        addition: @addition,
+        reasons: @reasons,
+        providers: @providers,
+        find_url: scheduling_edit_clinic_wait_list_path(@resource[:id], @entry[:ien]) %>
+
+  <%= f.submit "Save the entry",
+        class: "button-primary self-start" %>
+<% end %>

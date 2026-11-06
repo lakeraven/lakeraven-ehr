@@ -251,7 +251,8 @@ class FhirSearchPagingTest < ActionDispatch::IntegrationTest
 
   FHIR_SEARCH_PATHS.each do |path|
     test "#{path} pages: a Bundle with self link, and a bad _count is a 400" do
-      get path, params: { patient: "1" }, headers: @headers
+      search = path.end_with?("/Location") ? { name: "CLINIC" } : { patient: "1" }
+      get path, params: search, headers: @headers
       assert_response :ok
       assert_equal "Bundle", bundle["resourceType"]
       assert_equal "20", query_of(link("self"))["_count"]

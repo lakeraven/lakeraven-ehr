@@ -1,3 +1,4 @@
+@app
 Feature: DocumentReference FHIR resource
   As a healthcare system
   I need to manage clinical documents as FHIR resources

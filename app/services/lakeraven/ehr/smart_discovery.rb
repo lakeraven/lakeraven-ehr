@@ -16,9 +16,7 @@ module Lakeraven
     #     (SmartAuthorizationsController, SmartTokensController).
     # Not claimed, because not served: OpenID Connect and fhirUser (#841),
     # refresh tokens and offline_access (#840), introspection and revocation
-    # endpoints (#842), and context-ehr-encounter, because the Encounter a
-    # launch names cannot be read yet (#845). context-standalone-encounter is
-    # not offered at all.
+    # endpoints (#842). context-standalone-encounter is not offered at all.
     #
     # scopes_supported (below) is the Backend Services set: it is optional,
     # and the launch scopes a user gets depend on their own RPMS access
@@ -41,7 +39,7 @@ module Lakeraven
       CAPABILITIES = %w[
         launch-standalone launch-ehr authorize-post
         client-public client-confidential-symmetric client-confidential-asymmetric
-        context-standalone-patient context-ehr-patient context-banner context-style
+        context-standalone-patient context-ehr-patient context-ehr-encounter context-banner context-style
         permission-patient permission-user permission-v1 permission-v2
       ].freeze
       READ_WILDCARD = "system/*.rs"

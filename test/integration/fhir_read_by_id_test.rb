@@ -18,6 +18,7 @@ class FhirReadByIdTest < ActionDispatch::IntegrationTest
     "MedicationRequest" => -> { RpmsRpc.client.seed_text(:medication_active, "1", "~OP^41R;O^METFORMIN 500MG TAB^^3271231^1^^^120041^ACTIVE\n") },
     "Observation" => -> { },
     "Immunization" => -> { RpmsRpc.client.seed_keyed_collection(:immunization_list, "1^I", [ { record_type: "I", ien: 41, vaccine_display: "Influenza" } ]) },
+    "Encounter" => -> { RpmsRpc.client.seed_keyed_collection(:encounter_visit_list, "1", [ { visit_string: "1;3260310.09;A;41", location: "Clinic", category: "AMBULATORY" } ]) },
     "Procedure" => -> { RpmsRpc.client.seed_keyed_collection(:procedure_list, "1", [ { ien: 41, name: "Office visit", date: Date.new(2026, 3, 10) } ]) },
     "ServiceRequest" => -> { RpmsRpc.client.seed_keyed_collection(:referral_search, "1", [ { ien: 41, status: "A", purpose: "Cardiology" } ]) }
   }.freeze
@@ -80,6 +81,39 @@ class FhirReadByIdTest < ActionDispatch::IntegrationTest
 
       assert_response :ok
     end
+  end
+
+  test "an _id search alone binds the compartment of the patient the id names" do
+    SEEDS["Encounter"].call
+    token = Doorkeeper::AccessToken.create!(
+      application: @oauth_app, scopes: "patient/Encounter.read", expires_in: 3600, resource_owner_id: 999
+    )
+    before = RpmsRpc.client.received_calls.length
+
+    get "#{ENGINE}/Encounter", params: { _id: "1-41" },
+      headers: { "Authorization" => "Bearer #{token.plaintext_token || token.token}" }
+
+    assert_response :forbidden
+    assert_equal before, RpmsRpc.client.received_calls.length
+  end
+
+  test "an _id search is on the patient's accounting of disclosures" do
+    SEEDS["Encounter"].call
+
+    get "#{ENGINE}/Encounter", params: { _id: "1-41" }, headers: @headers
+
+    assert_response :ok
+    audit = Lakeraven::EHR::AuditEvent.order(:id).last
+    assert_equal [ "Patient", "1" ], [ audit.entity_type, audit.entity_identifier ]
+  end
+
+  test "an _id search with another patient's parameter finds nothing" do
+    SEEDS["Encounter"].call
+
+    get "#{ENGINE}/Encounter", params: { _id: "1-41", patient: "3" }, headers: @headers
+
+    assert_response :ok
+    assert_empty JSON.parse(response.body).fetch("entry", [])
   end
 
   test "an id that names no patient is a 404, not a refusal, and asks RPMS nothing" do

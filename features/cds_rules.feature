@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+@app
 Feature: Clinical decision support rules
   As a healthcare system
   I need configurable CDS rules for conditions, demographics, and devices

@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+@app
 Feature: FHIR Bundle import for clinical reconciliation
   As a clinician
   I need to import clinical data from FHIR Bundles

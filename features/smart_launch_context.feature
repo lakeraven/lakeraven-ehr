@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+@app
 Feature: SMART launch context
   As a SMART-on-FHIR application
   I need launch context tokens to bind patient and encounter

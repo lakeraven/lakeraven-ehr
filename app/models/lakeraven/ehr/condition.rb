@@ -39,6 +39,7 @@ module Lakeraven
       attribute :severity, :string
       attribute :onset_datetime, :datetime
       attribute :recorded_date, :date
+      attribute :encounter_id, :string
 
       validates :patient_dfn, presence: true
       validates :display, presence: true
@@ -72,6 +73,32 @@ module Lakeraven
           category: "problem-list-item"
         )
       end
+
+      # A row of RpmsRpc::Pov.for_patient: a diagnosis made at a visit, which
+      # US Core serves as an encounter-diagnosis. A V POV IEN and a problem IEN
+      # are separate numberings, so the id says which this is. RPMS stores an
+      # ICD-10 category with a trailing dot ("I10."). A visit the visit list
+      # leaves out, a historical event with no clinic, cannot be read, so the
+      # diagnosis does not name it.
+      def self.from_pov_row(row, patient_dfn:, listed_visits:)
+        new(
+          ien: "pov-#{row[:ien]}",
+          patient_dfn: patient_dfn,
+          code: row[:icd_code].to_s.delete_suffix("."),
+          code_system: "icd10",
+          display: row[:icd_name],
+          category: "encounter-diagnosis",
+          recorded_date: pov_date(row[:visit_date]),
+          encounter_id: (FHIR::PatientScopedId.build(patient_dfn, row[:visit_ien]) if listed_visits.include?(row[:visit_ien].to_i))
+        )
+      end
+
+      def self.pov_date(text)
+        Date.strptime(text.to_s, "%m/%d/%Y")
+      rescue ArgumentError
+        nil
+      end
+      private_class_method :pov_date
 
       # Prefer a real IEN; otherwise a stable id (never random/urn:uuid) so a
       # Bundle entry's subject reference stays resolvable.
@@ -120,13 +147,19 @@ module Lakeraven
           clinicalStatus: build_clinical_status,
           code: build_code,
           category: category ? [ { coding: [ { system: CATEGORY_SYSTEM, code: category } ] } ] : nil,
-          severity: build_severity
+          severity: build_severity,
+          encounter: encounter_id ? { reference: "Encounter/#{encounter_id}" } : nil,
+          recordedDate: recorded_date&.iso8601
         }.compact
       end
 
       private
 
+      # A visit diagnosis has no clinical status in RPMS, and US Core's
+      # encounter-diagnosis does not require one, so it carries none.
       def build_clinical_status
+        return nil if clinical_status.blank? && category == "encounter-diagnosis"
+
         if clinical_status.present?
           {
             coding: [ {

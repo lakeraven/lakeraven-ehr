@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+@app
 Feature: Clinical alert aggregation
   As a healthcare provider
   I need to see clinical alerts aggregated from multiple sources

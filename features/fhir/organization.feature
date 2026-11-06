@@ -1,3 +1,4 @@
+@app
 Feature: Organization FHIR resource
   As a healthcare system
   I need to represent healthcare organizations
