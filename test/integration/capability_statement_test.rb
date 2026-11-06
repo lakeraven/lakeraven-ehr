@@ -13,10 +13,6 @@ class CapabilityStatementTest < ActionDispatch::IntegrationTest
   ENGINE = "/lakeraven-ehr"
   METADATA = "#{ENGINE}/metadata".freeze
 
-  # Show routes that always answer 404: routed, so a client gets a FHIR
-  # not-found rather than a routing error, but no read by id behind them.
-  STUB_READS = %w[AllergyIntolerance Condition MedicationRequest Observation].freeze
-
   # Measure/$import is routed but has no standard OperationDefinition to
   # name, so it is not declared.
   UNDECLARED_OPERATIONS = [ %w[Measure import] ].freeze
@@ -78,9 +74,9 @@ class CapabilityStatementTest < ActionDispatch::IntegrationTest
         ~OP^1R;O^LISINOPRIL 10MG TAB^^3271231^3^^^120001^ACTIVE
         ~OP^2R;O^METFORMIN 500MG TAB^^3271231^1^^^120002^DISCONTINUED
       WIRE
-      assert_equal %w[1R-O], search_ids("MedicationRequest", patient: "1", status: "active")
-      assert_equal %w[2R-O], search_ids("MedicationRequest", patient: "1", status: "stopped")
-      assert_equal %w[1R-O], search_ids("MedicationRequest", patient: "1",
+      assert_equal %w[1-1R-O], search_ids("MedicationRequest", patient: "1", status: "active")
+      assert_equal %w[1-2R-O], search_ids("MedicationRequest", patient: "1", status: "stopped")
+      assert_equal %w[1-1R-O], search_ids("MedicationRequest", patient: "1",
                                         status: "http://hl7.org/fhir/CodeSystem/medicationrequest-status|active")
       assert_refused("MedicationRequest", patient: "1", status: "")
     },
@@ -88,9 +84,9 @@ class CapabilityStatementTest < ActionDispatch::IntegrationTest
     # (Inferno (g)(10), single patient API).
     %w[MedicationRequest intent] => lambda {
       RpmsRpc.client.seed_text(:medication_active, "1", "~OP^1R;O^LISINOPRIL 10MG TAB^^3271231^3^^^120001^ACTIVE\n")
-      assert_equal %w[1R-O], search_ids("MedicationRequest", patient: "1", intent: "order")
-      assert_equal %w[1R-O], search_ids("MedicationRequest", patient: "1", intent: "plan,order")
-      assert_equal %w[1R-O], search_ids("MedicationRequest", patient: "1",
+      assert_equal %w[1-1R-O], search_ids("MedicationRequest", patient: "1", intent: "order")
+      assert_equal %w[1-1R-O], search_ids("MedicationRequest", patient: "1", intent: "plan,order")
+      assert_equal %w[1-1R-O], search_ids("MedicationRequest", patient: "1",
                                         intent: "http://hl7.org/fhir/CodeSystem/medicationrequest-intent|order")
       assert_empty search_ids("MedicationRequest", patient: "1", intent: "plan")
       assert_empty search_ids("MedicationRequest", patient: "1", intent: "http://example.org/other|order")
@@ -100,8 +96,8 @@ class CapabilityStatementTest < ActionDispatch::IntegrationTest
       RpmsRpc.client.seed_keyed_collection(:problem_list, "1", [
         { ien: 11, status: "A", icd_code: "E11.9", description: "Type 2 diabetes" }
       ])
-      assert_equal %w[11], search_ids("Condition", patient: "1", category: "problem-list-item")
-      assert_equal %w[11], search_ids("Condition", patient: "1",
+      assert_equal %w[1-11], search_ids("Condition", patient: "1", category: "problem-list-item")
+      assert_equal %w[1-11], search_ids("Condition", patient: "1",
                                       category: "http://terminology.hl7.org/CodeSystem/condition-category|problem-list-item")
       assert_empty search_ids("Condition", patient: "1", category: "encounter-diagnosis")
       assert_empty search_ids("Condition", patient: "1", category: "|problem-list-item")
@@ -111,12 +107,12 @@ class CapabilityStatementTest < ActionDispatch::IntegrationTest
         { ien: 11, status: "A", icd_code: "E11.9", description: "Type 2 diabetes" },
         { ien: 12, status: "I", icd_code: "J45.909", description: "Asthma" }
       ])
-      assert_equal %w[11], search_ids("Condition", patient: "1", "clinical-status": "active")
-      assert_equal %w[12], search_ids("Condition", patient: "1",
+      assert_equal %w[1-11], search_ids("Condition", patient: "1", "clinical-status": "active")
+      assert_equal %w[1-12], search_ids("Condition", patient: "1",
                                       "clinical-status": "http://terminology.hl7.org/CodeSystem/condition-clinical|inactive")
-      assert_equal %w[11 12], search_ids("Condition", patient: "1", "clinical-status": "active,inactive").sort
+      assert_equal %w[1-11 1-12], search_ids("Condition", patient: "1", "clinical-status": "active,inactive").sort
       assert_empty search_ids("Condition", patient: "1", "clinical-status": "resolved")
-      assert_equal %w[11], search_ids("Condition", patient: "1", category: "problem-list-item", "clinical-status": "active")
+      assert_equal %w[1-11], search_ids("Condition", patient: "1", category: "problem-list-item", "clinical-status": "active")
     },
     %w[AllergyIntolerance clinical-status] => lambda {
       RpmsRpc.client.seed_keyed_collection(:allergy_list, "1", [
@@ -140,6 +136,13 @@ class CapabilityStatementTest < ActionDispatch::IntegrationTest
     "Procedure" => [ :procedure_list, { ien: 7001, name: "Office visit", date: Date.new(2026, 3, 10),
                                         provider: "MARTINEZ,SARAH", status: "C" } ]
   }.freeze
+
+  READ_SEEDS = PATIENT_SEEDS.merge(
+    "AllergyIntolerance" => [ :allergy_list, { ien: 11, allergen: "Penicillin" } ],
+    "ServiceRequest" => [ :referral_search, { ien: 11, status: "A", purpose: "Cardiology" } ],
+    "Immunization" => [ :immunization_list, { record_type: "I", ien: 11, vaccine_display: "Influenza" } ]
+  ).freeze
+  READ_SEED_KEYS = { "Immunization" => "1^I" }.freeze
 
   setup do
     setup_smart_auth(scopes: "system/*.*")
@@ -185,12 +188,12 @@ class CapabilityStatementTest < ActionDispatch::IntegrationTest
     assert_equal routed.keys.sort, declared_resources.keys.sort
   end
 
-  test "the declared interactions are the routed ones, less the show stubs" do
+  test "the declared interactions are the routed ones" do
     get METADATA
 
     routed.each do |type, routes|
       expected = []
-      expected << "read" if routes.include?(:show) && STUB_READS.exclude?(type)
+      expected << "read" if routes.include?(:show)
       expected << "search-type" if routes.include?(:index)
       expected << "create" if routes.include?(:create)
       declared = declared_resources.fetch(type).fetch("interaction").map { |i| i["code"] }
@@ -219,15 +222,6 @@ class CapabilityStatementTest < ActionDispatch::IntegrationTest
       assert_read_works(type) if codes.include?("read")
       assert_search_works(type, resource) if codes.include?("search-type")
       assert_create_answers(type) if codes.include?("create")
-    end
-  end
-
-  test "a show stub answers 404, which is why it declares no read" do
-    STUB_READS.each do |type|
-      get "#{ENGINE}/#{type}/1", headers: @headers
-
-      assert_response :not_found
-      assert_equal "OperationOutcome", JSON.parse(response.body)["resourceType"], type
     end
   end
 
@@ -406,8 +400,19 @@ class CapabilityStatementTest < ActionDispatch::IntegrationTest
       Lakeraven::EHR::AuditEvent.create!(event_type: "rest", action: "R", outcome: "0",
                                          entity_type: "Patient", entity_identifier: "1").id
     when "ValueSet" then "capability-probe"
-    else "1"
+    when "Patient", "Organization", "Location" then "1"
+    else patient_scoped_read_probe_id(type)
     end
+  end
+
+  # A search hands back the id a read takes (FHIR::PatientScopedId).
+  def patient_scoped_read_probe_id(type)
+    collection, row = READ_SEEDS.fetch(type) { return search_ids(type, patient: "1").first }
+    case row
+    when String then RpmsRpc.client.seed_text(collection, "1", row)
+    else RpmsRpc.client.seed_keyed_collection(collection, READ_SEED_KEYS.fetch(type, "1"), [ row ])
+    end
+    search_ids(type, patient: "1").first
   end
 
   def assert_search_works(type, resource)

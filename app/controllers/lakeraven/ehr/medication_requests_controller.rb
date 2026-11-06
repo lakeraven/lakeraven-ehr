@@ -3,22 +3,15 @@
 module Lakeraven
   module EHR
     class MedicationRequestsController < ApplicationController
-      include PatientCompartment
-
-      rate_limit only: %i[index show]
-
-      compartment_bound :index, param: :patient, require_param: true
+      include PatientScopedRead
 
       # status and intent are token parameters: FHIRSearchBundle filters the
       # served resources on them (FHIR::SearchCapabilities), system included.
-      def index
-        dfn = patient_compartment_dfn
-        resources = MedicationRequest.for_patient(dfn).map { |r| MedicationRequest.from_rpms_row(r, patient_dfn: dfn) }
-        render_bundle_egress(resources.map(&:to_fhir))
-      end
 
-      def show
-        render_not_found("MedicationRequest", params[:id])
+      private
+
+      def patient_resources(dfn)
+        MedicationRequest.for_patient(dfn).map { |row| MedicationRequest.from_rpms_row(row, patient_dfn: dfn).to_fhir }
       end
     end
   end
