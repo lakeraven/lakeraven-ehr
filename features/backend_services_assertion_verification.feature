@@ -1,4 +1,4 @@
-@partner_auth
+@partner_auth @app
 Feature: SMART Backend Services auth for server-to-server FHIR clients
   As a FHIR server serving server-to-server clients (partner source-system profile, section 2)
   The token endpoint should issue tokens only for JWT assertions verified against

@@ -56,6 +56,7 @@ Feature: Computerized Provider Order Entry (CPOE)
   # LABORATORY ORDERS - § 170.315(a)(2)
   # =============================================================================
 
+  @app
   Scenario: Create a laboratory order
     When the provider creates a lab order:
       | field              | value                          |
@@ -66,6 +67,7 @@ Feature: Computerized Provider Order Entry (CPOE)
     Then the lab order should be created with status "draft"
     And the lab order category should be "laboratory"
 
+  @app
   Scenario: Create a stat lab order
     When the provider creates a lab order:
       | field              | value                          |
@@ -75,6 +77,7 @@ Feature: Computerized Provider Order Entry (CPOE)
       | clinical_reason    | Acute renal assessment         |
     Then the lab order should have priority "stat"
 
+  @app
   Scenario: Sign a lab order
     Given a draft lab order exists for "Complete Blood Count"
     When the provider signs the order
@@ -84,6 +87,7 @@ Feature: Computerized Provider Order Entry (CPOE)
   # IMAGING ORDERS - § 170.315(a)(3)
   # =============================================================================
 
+  @app
   Scenario: Create an imaging order
     When the provider creates an imaging order:
       | field              | value                          |
@@ -95,6 +99,7 @@ Feature: Computerized Provider Order Entry (CPOE)
     Then the imaging order should be created with status "draft"
     And the imaging order category should be "imaging"
 
+  @app
   Scenario: Sign an imaging order
     Given a draft imaging order exists for "Chest X-Ray"
     When the provider signs the order

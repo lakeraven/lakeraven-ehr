@@ -17,6 +17,7 @@ Feature: FHIR Clinical Resource API
   # AllergyIntolerance
   # ===========================================================================
 
+  @live
   Scenario: Search AllergyIntolerance by patient returns FHIR Bundle
     When I request GET "/lakeraven-ehr/AllergyIntolerance" with params:
       | patient | 4 |
@@ -25,11 +26,13 @@ Feature: FHIR Clinical Resource API
     And the response should be a FHIR Bundle
     And the Bundle should have type "searchset"
 
+  @live
   Scenario: AllergyIntolerance search without patient returns 400
     When I request GET "/lakeraven-ehr/AllergyIntolerance"
     Then the response status should be 400
     And the response resourceType should be "OperationOutcome"
 
+  @live
   Scenario: AllergyIntolerance show returns 404 for unknown ID
     When I request GET "/lakeraven-ehr/AllergyIntolerance/unknown-id"
     Then the response status should be 404
@@ -39,6 +42,7 @@ Feature: FHIR Clinical Resource API
   # Condition
   # ===========================================================================
 
+  @live
   Scenario: Search Condition by patient returns FHIR Bundle
     When I request GET "/lakeraven-ehr/Condition" with params:
       | patient | 4 |
@@ -47,6 +51,7 @@ Feature: FHIR Clinical Resource API
     And the response should be a FHIR Bundle
     And the Bundle should have type "searchset"
 
+  @live
   Scenario: Condition supports category filter
     When I request GET "/lakeraven-ehr/Condition" with params:
       | patient  | 4                 |
@@ -54,11 +59,13 @@ Feature: FHIR Clinical Resource API
     Then the response status should be 200
     And the response should be a FHIR Bundle
 
+  @live
   Scenario: Condition search without patient returns 400
     When I request GET "/lakeraven-ehr/Condition"
     Then the response status should be 400
     And the response resourceType should be "OperationOutcome"
 
+  @live
   Scenario: Condition show returns 404 for unknown ID
     When I request GET "/lakeraven-ehr/Condition/unknown-id"
     Then the response status should be 404
@@ -68,6 +75,7 @@ Feature: FHIR Clinical Resource API
   # MedicationRequest
   # ===========================================================================
 
+  @live
   Scenario: Search MedicationRequest by patient returns FHIR Bundle
     When I request GET "/lakeraven-ehr/MedicationRequest" with params:
       | patient | 4 |
@@ -76,6 +84,7 @@ Feature: FHIR Clinical Resource API
     And the response should be a FHIR Bundle
     And the Bundle should have type "searchset"
 
+  @live
   Scenario: MedicationRequest supports status filter
     When I request GET "/lakeraven-ehr/MedicationRequest" with params:
       | patient | 4      |
@@ -83,11 +92,13 @@ Feature: FHIR Clinical Resource API
     Then the response status should be 200
     And the response should be a FHIR Bundle
 
+  @live
   Scenario: MedicationRequest search without patient returns 400
     When I request GET "/lakeraven-ehr/MedicationRequest"
     Then the response status should be 400
     And the response resourceType should be "OperationOutcome"
 
+  @live
   Scenario: MedicationRequest show returns 404 for unknown ID
     When I request GET "/lakeraven-ehr/MedicationRequest/unknown-id"
     Then the response status should be 404
@@ -97,6 +108,7 @@ Feature: FHIR Clinical Resource API
   # Observation
   # ===========================================================================
 
+  @live
   Scenario: Search Observation by patient returns FHIR Bundle
     When I request GET "/lakeraven-ehr/Observation" with params:
       | patient | 4 |
@@ -105,6 +117,7 @@ Feature: FHIR Clinical Resource API
     And the response should be a FHIR Bundle
     And the Bundle should have type "searchset"
 
+  @live
   Scenario: Observation supports category filter for vital-signs
     When I request GET "/lakeraven-ehr/Observation" with params:
       | patient  | 4           |
@@ -112,6 +125,7 @@ Feature: FHIR Clinical Resource API
     Then the response status should be 200
     And the response should be a FHIR Bundle
 
+  @live
   Scenario: Observation supports category filter for laboratory
     When I request GET "/lakeraven-ehr/Observation" with params:
       | patient  | 4          |
@@ -119,11 +133,13 @@ Feature: FHIR Clinical Resource API
     Then the response status should be 200
     And the response should be a FHIR Bundle
 
+  @live
   Scenario: Observation search without patient returns 400
     When I request GET "/lakeraven-ehr/Observation"
     Then the response status should be 400
     And the response resourceType should be "OperationOutcome"
 
+  @live
   Scenario: Observation show returns 404 for unknown ID
     When I request GET "/lakeraven-ehr/Observation/unknown-id"
     Then the response status should be 404
@@ -133,12 +149,14 @@ Feature: FHIR Clinical Resource API
   # Content Negotiation (applies to all clinical resources)
   # ===========================================================================
 
+  @live
   Scenario: Clinical resource endpoints return FHIR JSON content type
     When I request GET "/lakeraven-ehr/AllergyIntolerance" with params:
       | patient | 4 |
     Then the response status should be 200
     And the response content type should include "application/fhir+json"
 
+  @live
   Scenario: Clinical resource endpoints accept Patient/ prefix in patient param
     When I request GET "/lakeraven-ehr/AllergyIntolerance" with params:
       | patient | Patient/4 |

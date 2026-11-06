@@ -13,6 +13,7 @@ Feature: Electronic Prescribing — NCPDP SCRIPT
   # NCPDP SCRIPT MESSAGE GENERATION
   # =============================================================================
 
+  @app
   Scenario: Generate a NewRx NCPDP SCRIPT message
     Given a signed medication order for "Lisinopril 10 MG Oral Tablet"
     When an NCPDP SCRIPT NewRx message is generated
@@ -22,6 +23,7 @@ Feature: Electronic Prescribing — NCPDP SCRIPT
     And the message should include patient information
     And the message should include medication details
 
+  @app
   Scenario: Generate a CancelRx NCPDP SCRIPT message
     Given a transmitted prescription with ID "erx-cancel-001"
     When an NCPDP SCRIPT CancelRx message is generated with reason "Patient allergy"
@@ -29,12 +31,14 @@ Feature: Electronic Prescribing — NCPDP SCRIPT
     And the message should have message type "CancelRx"
     And the message should include the cancellation reason
 
+  @app
   Scenario: Generate a RefillRequest NCPDP SCRIPT message
     Given a transmitted prescription with ID "erx-refill-001"
     When an NCPDP SCRIPT RxFill message is generated
     Then the message should be valid XML
     And the message should have message type "RxFill"
 
+  @app
   Scenario: Generate an RxChangeRequest NCPDP SCRIPT message
     Given a transmitted prescription with ID "erx-change-001"
     And a requested medication change to "Lisinopril 20 MG Oral Tablet"
@@ -47,6 +51,7 @@ Feature: Electronic Prescribing — NCPDP SCRIPT
   # REFILL AND CHANGE REQUEST WORKFLOWS
   # =============================================================================
 
+  @app
   Scenario: Process a pharmacy refill request
     Given a signed medication order for "Metformin 500 MG Oral Tablet"
     And the prescription has been transmitted
@@ -54,6 +59,7 @@ Feature: Electronic Prescribing — NCPDP SCRIPT
     Then the refill request should be recorded
     And the refill request status should be "pending"
 
+  @app
   Scenario: Approve a refill request
     Given a signed medication order for "Metformin 500 MG Oral Tablet"
     And the prescription has been transmitted
@@ -62,6 +68,7 @@ Feature: Electronic Prescribing — NCPDP SCRIPT
     Then the refill request status should be "approved"
     And an audit event should be recorded for the refill approval
 
+  @app
   Scenario: Process a pharmacy change request
     Given a signed medication order for "Lisinopril 10 MG Oral Tablet"
     And the prescription has been transmitted
@@ -84,6 +91,7 @@ Feature: Electronic Prescribing — NCPDP SCRIPT
   # SURESCRIPTS ROUTING
   # =============================================================================
 
+  @app
   Scenario: Route prescription through e-prescribing adapter
     Given a signed medication order for "Amoxicillin 500 MG Oral Capsule"
     When the prescription is transmitted via the e-prescribing adapter
@@ -94,6 +102,7 @@ Feature: Electronic Prescribing — NCPDP SCRIPT
   # PERFORMANCE
   # =============================================================================
 
+  @app
   Scenario: NCPDP SCRIPT message generation completes quickly
     Given a signed medication order for "Lisinopril 10 MG Oral Tablet"
     When an NCPDP SCRIPT NewRx message is generated with timing

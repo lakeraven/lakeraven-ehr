@@ -1,0 +1,823 @@
+scenario	category	name	mock	live_first_run	live_final	rpcs	note
+features/authentication.feature:110	a	User with BMCZSUPERVISOR key can approve CHS	passed	passed	passed		
+features/authentication.feature:114	a	User without BMCZSUPERVISOR key cannot approve CHS	passed	passed	passed		
+features/authentication.feature:118	a	User with BMCZMENU key can process CHS claims	passed	passed	passed		
+features/authentication.feature:124	a	No key grants consult management until one is decided	passed	passed	passed		
+features/authentication.feature:132	a	Unauthenticated user has no permissions	passed	passed	passed		
+features/authentication.feature:17	b	Provider logs in with valid access and verify codes	passed	passed	passed	CIAVCXUS VIMINFO,CIANBRPC DIVGET,XUS GET USER INFO,ORWU USERINFO,ORWU NPHASKEY,ORWU HAS OPTION ACCESS	
+features/authentication.feature:22	b	Nurse logs in with valid credentials	passed	passed	passed	CIAVCXUS VIMINFO,CIANBRPC DIVGET,XUS GET USER INFO,ORWU USERINFO,ORWU NPHASKEY,ORWU HAS OPTION ACCESS	
+features/authentication.feature:29	b	Registration clerk logs in with valid credentials	passed	passed	passed	CIAVCXUS VIMINFO,CIANBRPC DIVGET,XUS GET USER INFO,ORWU USERINFO,ORWU NPHASKEY,ORWU HAS OPTION ACCESS	
+features/authentication.feature:34	b	Scheduler logs in with valid credentials	passed	passed	passed	CIAVCXUS VIMINFO,CIANBRPC DIVGET,XUS GET USER INFO,ORWU USERINFO,ORWU NPHASKEY,ORWU HAS OPTION ACCESS	
+features/authentication.feature:39	b	Clerk logs in with valid credentials	passed	passed	passed	CIAVCXUS VIMINFO,CIANBRPC DIVGET,XUS GET USER INFO,ORWU USERINFO,ORWU NPHASKEY,ORWU HAS OPTION ACCESS	
+features/authentication.feature:48	b	Login fails with invalid access code	passed	passed	passed	CIAVCXUS VIMINFO,CIANBRPC DIVGET,XUS GET USER INFO,ORWU USERINFO,ORWU NPHASKEY,ORWU HAS OPTION ACCESS	
+features/authentication.feature:53	b	Login fails with a wrong verify code	passed	passed	passed	CIAVCXUS VIMINFO,CIANBRPC DIVGET,XUS GET USER INFO,ORWU USERINFO,ORWU NPHASKEY,ORWU HAS OPTION ACCESS	
+features/authentication.feature:58	b	Login fails with invalid verify code	passed	passed	passed	CIAVCXUS VIMINFO,CIANBRPC DIVGET,XUS GET USER INFO,ORWU USERINFO,ORWU NPHASKEY,ORWU HAS OPTION ACCESS	
+features/authentication.feature:67	a	User logs out successfully	passed	passed	passed		
+features/authentication.feature:76	a	Provider can view and create referrals	passed	passed	passed		
+features/authentication.feature:84	a	Nurse can view patients and referrals	passed	passed	passed		
+features/authentication.feature:91	a	Clerk has limited view permissions	passed	passed	passed		
+features/authentication.feature:98	a	Case manager can approve and manage referrals	passed	passed	passed		
+features/backend_services_assertion_verification.feature:103	a	An HMAC assertion keyed with the published RSA public key is rejected	passed	passed	passed		stubs non-RPMS ClientJwks.fetch
+features/backend_services_assertion_verification.feature:112	a	A plain-HTTP JWKS URL cannot be registered	passed	passed	passed		
+features/backend_services_assertion_verification.feature:115	a	A private-address JWKS URL cannot be registered	passed	passed	passed		
+features/backend_services_assertion_verification.feature:118	a	A loopback JWKS URL cannot be registered	passed	passed	passed		
+features/backend_services_assertion_verification.feature:122	a	A JWKS host that resolves to a private address is not fetched	passed	passed	passed		stubs non-RPMS Object.getaddresses
+features/backend_services_assertion_verification.feature:134	a	A carrier-grade NAT JWKS URL cannot be registered	passed	passed	passed		
+features/backend_services_assertion_verification.feature:137	a	A benchmarking-range JWKS URL cannot be registered	passed	passed	passed		
+features/backend_services_assertion_verification.feature:14	a	Token issued for a JWT assertion signed by the client's published JWKS key	passed	passed	passed		stubs non-RPMS ClientJwks.fetch
+features/backend_services_assertion_verification.feature:140	a	A multicast JWKS URL cannot be registered	passed	passed	passed		
+features/backend_services_assertion_verification.feature:144	a	A JWKS host that resolves to a carrier-grade NAT address is not fetched	passed	passed	passed		stubs non-RPMS Object.getaddresses
+features/backend_services_assertion_verification.feature:151	a	A JWKS host that resolves to a benchmarking-range address is not fetched	passed	passed	passed		stubs non-RPMS Object.getaddresses
+features/backend_services_assertion_verification.feature:158	a	A JWKS host that resolves to a multicast address is not fetched	passed	passed	passed		stubs non-RPMS Object.getaddresses
+features/backend_services_assertion_verification.feature:168	a	With a configured token endpoint URL, that audience is accepted	passed	passed	passed		stubs non-RPMS ClientJwks.fetch
+features/backend_services_assertion_verification.feature:175	a	With a configured token endpoint URL, the request-host audience is rejected	passed	passed	passed		stubs non-RPMS ClientJwks.fetch
+features/backend_services_assertion_verification.feature:184	a	A JWKS resolver stub does not leak into later scenarios	passed	passed	passed		
+features/backend_services_assertion_verification.feature:22	a	Assertion signed by a key outside the published JWKS is rejected	passed	passed	passed		stubs non-RPMS ClientJwks.fetch
+features/backend_services_assertion_verification.feature:28	a	Expired assertion is rejected	passed	passed	passed		stubs non-RPMS ClientJwks.fetch
+features/backend_services_assertion_verification.feature:34	a	Assertion with the wrong audience is rejected	passed	passed	passed		stubs non-RPMS ClientJwks.fetch
+features/backend_services_assertion_verification.feature:40	a	A replayed assertion is rejected	passed	passed	passed		stubs non-RPMS ClientJwks.fetch
+features/backend_services_assertion_verification.feature:48	a	Granted scopes never exceed the client's registration	passed	passed	passed		stubs non-RPMS ClientJwks.fetch
+features/backend_services_assertion_verification.feature:54	a	A request for only unregistered scopes is rejected	passed	passed	passed		stubs non-RPMS ClientJwks.fetch
+features/backend_services_assertion_verification.feature:60	a	A client registered without a JWKS cannot obtain a token	passed	passed	passed		
+features/backend_services_assertion_verification.feature:66	a	A client with no organization binding cannot obtain a system token	passed	passed	passed		stubs non-RPMS ClientJwks.fetch
+features/backend_services_assertion_verification.feature:79	a	An assertion with no exp claim is rejected	passed	passed	passed		stubs non-RPMS ClientJwks.fetch
+features/backend_services_assertion_verification.feature:85	a	An assertion expiring just past the five-minute cap is rejected	passed	passed	passed		stubs non-RPMS ClientJwks.fetch
+features/backend_services_assertion_verification.feature:91	a	An assertion with a six-minute lifetime is rejected	passed	passed	passed		stubs non-RPMS ClientJwks.fetch
+features/backend_services_assertion_verification.feature:97	a	An unsigned alg=none assertion is rejected	passed	passed	passed		stubs non-RPMS ClientJwks.fetch
+features/behavioral_health/part2_boundary.feature:10	a	R3 - The system provides a specific consent slot for substance-use counseling	passed	passed	passed		
+features/behavioral_health/part2_boundary.feature:14	b	R4 - Export paths call a Part 2 filter before returning data	passed	passed	passed	ORQQAL LIST	partly stubbed: Patient.find_by_dfn Part2EgressFilter.call
+features/behavioral_health/part2_boundary.feature:6	e	R1 - Substance use diagnoses are not written to shared RPMS problem list	passed	passed	passed		stubs RpmsRpc::Problem.add
+features/behavioral_health/psychotherapy_visit_coding.feature:16	a	The default code offered for a new behavioral-health episode is 90791	passed	passed	passed		
+features/behavioral_health/psychotherapy_visit_coding.feature:20	a	Psychiatric diagnostic evaluation does not require documented duration	passed	passed	passed		
+features/behavioral_health/psychotherapy_visit_coding.feature:33:26	a	Individual psychotherapy duration selects the CPT time band	passed	passed	passed		
+features/behavioral_health/psychotherapy_visit_coding.feature:34:26	a	Individual psychotherapy duration selects the CPT time band	passed	passed	passed		
+features/behavioral_health/psychotherapy_visit_coding.feature:35:26	a	Individual psychotherapy duration selects the CPT time band	passed	passed	passed		
+features/behavioral_health/psychotherapy_visit_coding.feature:36:26	a	Individual psychotherapy duration selects the CPT time band	passed	passed	passed		
+features/behavioral_health/psychotherapy_visit_coding.feature:37:26	a	Individual psychotherapy duration selects the CPT time band	passed	passed	passed		
+features/behavioral_health/psychotherapy_visit_coding.feature:46:39	a	Individual psychotherapy below minimum or invalid duration is not reportable	passed	passed	passed		
+features/behavioral_health/psychotherapy_visit_coding.feature:47:39	a	Individual psychotherapy below minimum or invalid duration is not reportable	passed	passed	passed		
+features/behavioral_health/psychotherapy_visit_coding.feature:48:39	a	Individual psychotherapy below minimum or invalid duration is not reportable	passed	passed	passed		
+features/behavioral_health/psychotherapy_visit_coding.feature:50	a	Missing duration on individual psychotherapy must not propose a code	passed	passed	passed		
+features/behavioral_health/psychotherapy_visit_coding.feature:56	a	A behavioral-health visit cannot be finalized until coding is resolved	passed	passed	passed		
+features/behavioral_health/psychotherapy_visit_coding.feature:62	a	Finalizing succeeds when psychotherapy coding is resolved	passed	passed	passed		
+features/behavioral_health/psychotherapy_visit_coding.feature:68	a	Duration outside the clinician-selected code band is rejected	passed	passed	passed		
+features/behavioral_health/psychotherapy_visit_coding.feature:76	a	Consistent clinician selection flows to billing as the selected code	passed	passed	passed		
+features/behavioral_health/psychotherapy_visit_coding.feature:82	a	Clinician-selected CPT outside the allowed psychotherapy set is refused	passed	passed	passed		
+features/behavioral_health/psychotherapy_visit_coding.feature:86	a	Psychiatric diagnostic evaluation code cannot be selected on individual psychotherapy	passed	passed	passed		
+features/behavioral_health/psychotherapy_visit_coding.feature:90	a	Individual psychotherapy requires duration even when a CPT code is selected	passed	passed	passed		
+features/behavioral_health/scored_screenings.feature:106	a	A screening can be scored without a clinician session	passed	passed	passed		
+features/behavioral_health/scored_screenings.feature:11	a	Administering a PHQ-9 in clinic	passed	passed	passed		
+features/behavioral_health/scored_screenings.feature:29	a	Administering a GAD-7 in clinic	passed	passed	passed		
+features/behavioral_health/scored_screenings.feature:42:36	a	PHQ-9 severity bands	passed	passed	passed		
+features/behavioral_health/scored_screenings.feature:43:36	a	PHQ-9 severity bands	passed	passed	passed		
+features/behavioral_health/scored_screenings.feature:44:36	a	PHQ-9 severity bands	passed	passed	passed		
+features/behavioral_health/scored_screenings.feature:45:36	a	PHQ-9 severity bands	passed	passed	passed		
+features/behavioral_health/scored_screenings.feature:46:36	a	PHQ-9 severity bands	passed	passed	passed		
+features/behavioral_health/scored_screenings.feature:47:36	a	PHQ-9 severity bands	passed	passed	passed		
+features/behavioral_health/scored_screenings.feature:48:36	a	PHQ-9 severity bands	passed	passed	passed		
+features/behavioral_health/scored_screenings.feature:49:36	a	PHQ-9 severity bands	passed	passed	passed		
+features/behavioral_health/scored_screenings.feature:50:36	a	PHQ-9 severity bands	passed	passed	passed		
+features/behavioral_health/scored_screenings.feature:51:36	a	PHQ-9 severity bands	passed	passed	passed		
+features/behavioral_health/scored_screenings.feature:59:53	a	GAD-7 severity bands	passed	passed	passed		
+features/behavioral_health/scored_screenings.feature:60:53	a	GAD-7 severity bands	passed	passed	passed		
+features/behavioral_health/scored_screenings.feature:61:53	a	GAD-7 severity bands	passed	passed	passed		
+features/behavioral_health/scored_screenings.feature:62:53	a	GAD-7 severity bands	passed	passed	passed		
+features/behavioral_health/scored_screenings.feature:63:53	a	GAD-7 severity bands	passed	passed	passed		
+features/behavioral_health/scored_screenings.feature:64:53	a	GAD-7 severity bands	passed	passed	passed		
+features/behavioral_health/scored_screenings.feature:65:53	a	GAD-7 severity bands	passed	passed	passed		
+features/behavioral_health/scored_screenings.feature:66:53	a	GAD-7 severity bands	passed	passed	passed		
+features/behavioral_health/scored_screenings.feature:68	a	PHQ-9 item 9 positive triggers a safety prompt	passed	passed	passed		
+features/behavioral_health/scored_screenings.feature:73	a	The safety prompt is displayed on the form before it can be submitted	failed	passed	passed		
+features/behavioral_health/scored_screenings.feature:79	a	Acknowledging the safety prompt records the screening	passed	passed	passed		
+features/behavioral_health/scored_screenings.feature:85	a	Item 9 answered "not at all" needs no safety prompt	passed	passed	passed		
+features/behavioral_health/scored_screenings.feature:90	a	Incomplete instrument is not scored	passed	passed	passed		
+features/behavioral_health/scored_screenings.feature:96	a	A screening trends on the chart over time	passed	passed	passed		
+features/behavioral_health/treatment_plan_review_dates.feature:20	a	Establishing a plan computes the first progress-review due date from configuration	passed	passed	passed		
+features/behavioral_health/treatment_plan_review_dates.feature:25	a	A program with a different progress-review interval uses its own cadence	passed	passed	passed		
+features/behavioral_health/treatment_plan_review_dates.feature:33	a	Completing a progress review records it and recomputes the next due date	passed	passed	passed		
+features/behavioral_health/treatment_plan_review_dates.feature:39	a	A plan due today is not overdue	passed	passed	passed		
+features/behavioral_health/treatment_plan_review_dates.feature:44	a	A plan due yesterday is overdue	passed	passed	passed		
+features/behavioral_health/treatment_plan_review_dates.feature:49	a	A late review moves the next due date forward from the review date	passed	passed	passed		
+features/behavioral_health/treatment_plan_review_dates.feature:56	a	Supervisor concurrence records who and when	passed	passed	passed		
+features/behavioral_health/treatment_plan_review_dates.feature:61	a	The designated provider cannot concur as their own supervisor	passed	passed	passed		
+features/behavioral_health/treatment_plan_review_dates.feature:66	a	Overdue progress reviews are queryable	passed	passed	passed		
+features/bh_access_clock.feature:100	f	A patient enrolled in two programs is measured against each	undefined	undefined	undefined		undefined
+features/bh_access_clock.feature:110	f	The program report shows intervals achieved, not only intervals set	undefined	undefined	undefined		undefined
+features/bh_access_clock.feature:30	f	The clock starts at first contact	undefined	undefined	undefined		undefined
+features/bh_access_clock.feature:34	f	The interval is counted in business days	undefined	undefined	undefined		undefined
+features/bh_access_clock.feature:39	f	An evaluation inside the interval closes the leg as met	undefined	undefined	undefined		undefined
+features/bh_access_clock.feature:44	f	An evaluation after the interval closes the leg as missed	undefined	undefined	undefined		undefined
+features/bh_access_clock.feature:50	f	An open leg past its due date shows as overdue without a completing event	undefined	undefined	undefined		undefined
+features/bh_access_clock.feature:60	f	The treatment plan clock starts at the initial evaluation	undefined	undefined	undefined		undefined
+features/bh_access_clock.feature:64	f	The review clock starts at the treatment plan	undefined	undefined	undefined		undefined
+features/bh_access_clock.feature:68	f	Completing a review restarts the review clock	undefined	undefined	undefined		undefined
+features/bh_access_clock.feature:77	f	Approaching and overdue states appear on the clinical worklist	undefined	undefined	undefined		undefined
+features/bh_access_clock.feature:81	f	Overdue cases are visible without running a report	undefined	undefined	undefined		undefined
+features/bh_access_clock.feature:86	f	The chart shows the open clock for the patient in context	undefined	undefined	undefined		undefined
+features/bh_access_clock.feature:95	f	A program with different intervals uses its own numbers	undefined	undefined	undefined		undefined
+features/breach_detection.feature:14	a	Duplicate incidents are deduplicated	passed	passed	passed		
+features/breach_detection.feature:20	a	Incident storm triggers per-type backoff	passed	passed	passed		
+features/breach_detection.feature:7	a	Repeated failed logins trigger security incident	passed	passed	passed		
+features/bulk_export_download_auth.feature:18	a	Download without authentication is rejected	passed	passed	passed		
+features/bulk_export_download_auth.feature:23	a	Status check without authentication is rejected	passed	passed	passed		
+features/bulk_export_download_auth.feature:28	a	Cancel without authentication is rejected	passed	passed	passed		
+features/bulk_export_download_auth.feature:33	a	Download with patient-only scope is forbidden	passed	passed	passed		
+features/bulk_export_download_auth.feature:38	a	Status check with valid system scope but wrong client is forbidden	passed	passed	passed		
+features/care_coordination_interoperability.feature:11	b	External system requests patient information	passed	passed	passed	ORWPT LIST ALL,ORWPT SELECT,ORWPT ID INFO	
+features/care_coordination_interoperability.feature:22	f	External system receives tribal affiliation and enrollment	failed	not-run	not-run		unsourced: real acceptance test for a read not built yet
+features/care_coordination_interoperability.feature:28	b	Sending service request to care navigation platform	passed	passed	passed	ORWPT LIST ALL,ORWPT SELECT,ORWPT ID INFO	
+features/care_coordination_interoperability.feature:37	b	Receiving care recommendations from external platform	passed	passed	passed	ORWPT LIST ALL,ORWPT SELECT,ORWPT ID INFO	
+features/care_coordination_interoperability.feature:45	b	Updating service request status from external system	passed	passed	passed	ORWPT LIST ALL,ORWPT SELECT,ORWPT ID INFO	
+features/care_coordination_interoperability.feature:52	b	Ensuring data privacy during external sharing	passed	passed	passed	ORWPT LIST ALL,ORWPT SELECT,ORWPT ID INFO	
+features/care_coordination_interoperability.feature:64	f	Tribal-specific information is protected during external sharing	failed	not-run	not-run		unsourced: real acceptance test for a read not built yet
+features/care_coordination_interoperability.feature:69	a	Handling external system outages gracefully	passed	passed	passed		
+features/cds_rules.feature:10	a	CDS rules are loaded from configuration	passed	passed	passed		
+features/cds_rules.feature:15	a	Find a rule by ID	passed	passed	passed		
+features/cds_rules.feature:20	a	Rules are enabled by default	passed	passed	passed		
+features/cds_rules.feature:24	a	Disable a CDS rule	passed	passed	passed		
+features/cds_rules.feature:28	a	Re-enable a disabled rule	passed	passed	passed		
+features/cds_rules.feature:33	a	Rule override records provider and timestamp	passed	passed	passed		
+features/cds_rules.feature:40	a	CdsResult with no alerts	passed	passed	passed		
+features/cds_rules.feature:45	a	CdsResult with alerts	passed	passed	passed		
+features/cds_rules.feature:53	a	CdsResult filters by category	passed	passed	passed		
+features/cds_rules.feature:62	a	CdsResult filters critical alerts	passed	passed	passed		
+features/cds_rules.feature:70	a	CdsResult summary describes alert counts	passed	passed	passed		
+features/cds_rules.feature:77	a	CdsResult to_h includes all fields	passed	passed	passed		
+features/cds_rules.feature:87	a	Override an alert with reason	passed	passed	passed		
+features/clinical_alerts.feature:105	a	Severity summary counts	passed	passed	passed		
+features/clinical_alerts.feature:118	a	Mixed reminders and allergies	passed	passed	passed		
+features/clinical_alerts.feature:17	a	Non-DUE reminders are filtered out	passed	passed	passed		
+features/clinical_alerts.feature:26	a	High priority reminder maps to high severity	passed	passed	passed		
+features/clinical_alerts.feature:33	a	Low priority reminder maps to low severity	passed	passed	passed		
+features/clinical_alerts.feature:40	a	Default reminder severity is moderate	passed	passed	passed		
+features/clinical_alerts.feature:47	a	Allergy alerts from active allergies	passed	passed	passed		
+features/clinical_alerts.feature:56	a	Severe allergy maps to high severity	passed	passed	passed		
+features/clinical_alerts.feature:63	a	Moderate allergy maps to moderate severity	passed	passed	passed		
+features/clinical_alerts.feature:70	a	Mild allergy maps to low severity	passed	passed	passed		
+features/clinical_alerts.feature:77	a	Criticality fallback when severity is nil	passed	passed	passed		
+features/clinical_alerts.feature:8	a	DUE reminders generate alerts	passed	passed	passed		
+features/clinical_alerts.feature:84	a	Criticality low fallback	passed	passed	passed		
+features/clinical_alerts.feature:91	a	Default severity is moderate when no severity or criticality	passed	passed	passed		
+features/clinical_alerts.feature:98	a	Drug interactions list is intentionally empty	passed	passed	passed		
+features/clinical_decision_support.feature:10	a	Display clinical reminders filtered to DUE status	passed	passed	passed		
+features/clinical_decision_support.feature:16	a	Display active allergy alerts with severity	passed	passed	passed		
+features/clinical_decision_support.feature:22	a	Background alerts do not call DrugInteractionService	passed	passed	passed		
+features/clinical_decision_support.feature:27	a	Severity summary aggregates all alert severities	passed	passed	passed		
+features/clinical_quality_measures.feature:12	a	Evaluate diabetes A1C measure for patient with controlled A1C	passed	passed	passed		
+features/clinical_quality_measures.feature:20	a	Evaluate diabetes A1C measure for patient with uncontrolled A1C	passed	passed	passed		
+features/clinical_quality_measures.feature:28	a	Patient without diabetes is not in initial population	passed	passed	passed		
+features/clinical_quality_measures.feature:35	a	Evaluate BMI screening measure for patient with BMI recorded	passed	passed	passed		
+features/clinical_quality_measures.feature:41	a	Evaluate depression screening for patient with screening completed	passed	passed	passed		
+features/clinical_quality_measures.feature:47	a	Query available measures via FHIR API	passed	passed	passed		
+features/clinical_quality_measures.feature:54	a	View individual MeasureReport with population counts	passed	passed	passed		
+features/clinical_quality_measures.feature:63	a	Population-level measure evaluation	passed	passed	passed		
+features/consent/in_clinic_consent.feature:12	b	Patient signs a treatment consent on the clinic tablet	passed	passed	passed	ORWPT SELECT,ORWPT ID INFO,ORQQPL LIST,ORWPS ACTIVE,ORQQAL LIST,ORQQVI VITALS	partly stubbed: Object.authenticate AuthenticationService.new
+features/consent/in_clinic_consent.feature:19	b	The patient-facing screen exposes nothing else	passed	passed	passed	ORWPT SELECT,ORWPT ID INFO,ORQQPL LIST,ORWPS ACTIVE,ORQQAL LIST,ORQQVI VITALS	partly stubbed: Object.authenticate AuthenticationService.new
+features/consent/in_clinic_consent.feature:27	b	A signed consent cannot be edited	passed	passed	passed	ORWPT SELECT,ORWPT ID INFO,ORQQPL LIST,ORWPS ACTIVE,ORQQAL LIST,ORQQVI VITALS	partly stubbed: Object.authenticate AuthenticationService.new
+features/consent/in_clinic_consent.feature:36	b	Every access is audited	passed	passed	passed	ORWPT SELECT,ORWPT ID INFO,ORQQPL LIST,ORWPS ACTIVE,ORQQAL LIST,ORQQVI VITALS	partly stubbed: Object.authenticate AuthenticationService.new
+features/custom_field_sets.feature:100	f	A site with no custom field sets renders the screen unchanged	undefined	undefined	undefined		undefined
+features/custom_field_sets.feature:109	f	Custom field definitions are captured in the site overlay	undefined	undefined	undefined		undefined
+features/custom_field_sets.feature:115	f	Rebuilding a site from its overlay restores its custom fields	undefined	undefined	undefined		undefined
+features/custom_field_sets.feature:125	f	Changing a definition is audited	undefined	undefined	undefined		undefined
+features/custom_field_sets.feature:26	f	An administrator defines a custom field set bound to a screen	undefined	undefined	undefined		undefined
+features/custom_field_sets.feature:35	f	A definition whose backing data dictionary does not exist is refused	undefined	undefined	undefined		undefined
+features/custom_field_sets.feature:41	f	A definition bound to an unknown screen is refused	undefined	undefined	undefined		undefined
+features/custom_field_sets.feature:45	f	A custom field may not shadow an engine field	undefined	undefined	undefined		undefined
+features/custom_field_sets.feature:53	f	Values are written to the site-owned file, not to engine tables	undefined	undefined	undefined		undefined
+features/custom_field_sets.feature:62	f	Saved values are readable back for the patient	undefined	undefined	undefined		undefined
+features/custom_field_sets.feature:67	f	A required custom field is enforced on save	undefined	undefined	undefined		undefined
+features/custom_field_sets.feature:73	f	A typed custom field rejects a value of the wrong type	undefined	undefined	undefined		undefined
+features/custom_field_sets.feature:82	f	A value exceeding the transport limit is refused, not truncated	undefined	undefined	undefined		undefined
+features/custom_field_sets.feature:93	f	The screen renders custom fields from metadata without a code change	undefined	undefined	undefined		undefined
+features/drug_interactions.feature:103	a	FHIR DetectedIssue generated for each interaction	passed	passed	passed		
+features/drug_interactions.feature:113	a	Adapter failure handled gracefully	passed	passed	passed		
+features/drug_interactions.feature:12	a	Detect high-severity drug-drug interaction	passed	passed	passed		
+features/drug_interactions.feature:120	a	RPMS mode should produce non-degraded decision metadata	passed	passed	passed		
+features/drug_interactions.feature:130	a	RPMS mode should return RPMS-sourced interaction alerts	passed	passed	passed		
+features/drug_interactions.feature:21	a	Detect moderate-severity interaction (warn, don't block)	passed	passed	passed		
+features/drug_interactions.feature:30	a	No interactions — safe to prescribe	passed	passed	passed		
+features/drug_interactions.feature:39	a	Drug-allergy interaction detected	passed	passed	passed		
+features/drug_interactions.feature:50	a	Cross-reactivity alert (penicillin to cephalosporin)	passed	passed	passed		
+features/drug_interactions.feature:62	a	Patient with no active medications	passed	passed	passed		
+features/drug_interactions.feature:68	a	Patient with no known allergies	passed	passed	passed		
+features/drug_interactions.feature:76	a	Multiple interactions for one proposed medication	passed	passed	passed		
+features/drug_interactions.feature:85	a	Batch check multiple proposed medications	passed	passed	passed		
+features/drug_interactions.feature:96	a	Unknown drug handled gracefully	passed	passed	passed		
+features/encounter/demo_visit.feature:7	a	Walk-in visit: vitals, POV, signed note, close	passed	passed	passed		
+features/encounter/note_entry.feature:11	a	Provider creates a progress note and writes its text	passed	passed	passed		
+features/encounter/note_entry.feature:22	a	Provider cannot create a note without a title	passed	passed	passed		
+features/encounter/note_entry.feature:26	a	Provider signs the note with a valid signature code	passed	passed	passed		
+features/encounter/note_entry.feature:32	a	Signing is rejected with an invalid signature code	passed	passed	passed		
+features/encounter/note_entry.feature:39	a	Provider cannot sign a note that was never created	passed	passed	passed		
+features/encounter/open.feature:16	e	Provider opens an active encounter and gets hydrated chart context	passed	passed	passed		stubs EncounterGateway.open PatientGateway.brief_header ObservationGateway.for_patient
+features/encounter/open.feature:29	e	Provider opens a non-existent encounter	passed	passed	passed		stubs EncounterGateway.open PatientGateway.brief_header ObservationGateway.for_patient
+features/encounter/open.feature:33	e	Provider without view-patients capability is denied	passed	passed	passed		stubs EncounterGateway.open PatientGateway.brief_header ObservationGateway.for_patient
+features/encounter/pov_entry.feature:10	a	Provider records a POV with diagnosis and narrative	passed	passed	passed		
+features/encounter/pov_entry.feature:15	a	Provider cannot record a POV without a diagnosis code	passed	passed	passed		
+features/encounter/pov_entry.feature:19	a	Provider cannot record a POV without an open visit	passed	passed	passed		
+features/encounter/pov_entry.feature:24	a	Gateway failure surfaces as an error, never a silent success	passed	passed	passed		
+features/encounter/vitals_entry.feature:10	a	Provider saves a complete vitals set	passed	passed	passed		
+features/encounter/vitals_entry.feature:20	a	Provider tries to save an empty vitals set	passed	passed	passed		
+features/encounter/vitals_entry.feature:24	a	Provider tries to save without a visit	passed	passed	passed		
+features/encounter_management.feature:10	a	Provider creates a walk-in ambulatory encounter	passed	passed	passed		
+features/encounter_management.feature:16	a	Provider creates a virtual encounter	passed	passed	passed		
+features/encounter_management.feature:21	a	Provider creates an emergency encounter	passed	passed	passed		
+features/encounter_management.feature:26	a	Encounter creation fails without required fields	passed	passed	passed		
+features/encounter_management.feature:34	a	Provider closes an encounter with diagnosis	passed	passed	passed		
+features/encounter_management.feature:40	a	Provider cannot close an already finished encounter	passed	passed	passed		
+features/encounter_management.feature:45	a	Provider cancels a planned encounter	passed	passed	passed		
+features/encounter_management.feature:54	a	Provider adds a participant to an encounter	passed	passed	passed		
+features/encounter_management.feature:64	a	Closed encounter serializes with reason and period	passed	passed	passed		
+features/encounter_model.feature:11	a	Create an encounter with core attributes	passed	passed	passed		
+features/encounter_model.feature:18	a	Status predicates	passed	passed	passed		
+features/encounter_model.feature:23	a	Class predicates	passed	passed	passed		
+features/encounter_model.feature:28	a	Encounter validates status and class_code	passed	passed	passed		
+features/encounter_model.feature:36	a	to_fhir emits a US Core Encounter resource	passed	passed	passed		
+features/encounter_model.feature:47	a	to_fhir includes type when present	passed	passed	passed		
+features/encounter_model.feature:52	a	to_fhir includes reason when present	passed	passed	passed		
+features/encounter_model.feature:57	a	to_fhir includes patient reference	passed	passed	passed		
+features/encounter_model.feature:62	a	to_fhir includes practitioner participant	passed	passed	passed		
+features/encounter_model.feature:71	a	from_fhir builds an Encounter from a FHIR resource	passed	passed	passed		
+features/encryption_verification.feature:13	a	Report indicates infrastructure attestation required	passed	passed	passed		
+features/encryption_verification.feature:6	a	Encryption verification reports application-observable status	passed	passed	passed		
+features/fhir/allergy_intolerance.feature:12	a	Medication allergy	passed	passed	passed		
+features/fhir/allergy_intolerance.feature:16	a	Food allergy	passed	passed	passed		
+features/fhir/allergy_intolerance.feature:20	a	Allergy matching key with code	passed	passed	passed		
+features/fhir/allergy_intolerance.feature:24	a	FHIR AllergyIntolerance includes resourceType	passed	passed	passed		
+features/fhir/allergy_intolerance.feature:29	a	FHIR AllergyIntolerance includes patient reference	passed	passed	passed		
+features/fhir/allergy_intolerance.feature:34	a	FHIR AllergyIntolerance includes allergen	passed	passed	passed		
+features/fhir/allergy_intolerance.feature:8	a	Active allergy	passed	passed	passed		
+features/fhir/audit_event.feature:101	a	Query event type	passed	passed	passed		
+features/fhir/audit_event.feature:105	a	User authentication event type	passed	passed	passed		
+features/fhir/audit_event.feature:109	a	Application event type	passed	passed	passed		
+features/fhir/audit_event.feature:113	a	FHIR AuditEvent includes outcome description	passed	passed	passed		
+features/fhir/audit_event.feature:118	a	FHIR AuditEvent agent includes network address	passed	passed	passed		
+features/fhir/audit_event.feature:123	a	FHIR AuditEvent with no agent omits agent array	passed	passed	passed		
+features/fhir/audit_event.feature:128	a	FHIR AuditEvent with no entity omits entity array	passed	passed	passed		
+features/fhir/audit_event.feature:13	a	Audit event with create action	passed	passed	passed		
+features/fhir/audit_event.feature:18	a	Audit event with update action	passed	passed	passed		
+features/fhir/audit_event.feature:22	a	Audit event with delete action	passed	passed	passed		
+features/fhir/audit_event.feature:26	a	Audit event with execute action	passed	passed	passed		
+features/fhir/audit_event.feature:30	a	Successful outcome	passed	passed	passed		
+features/fhir/audit_event.feature:35	a	Minor failure outcome	passed	passed	passed		
+features/fhir/audit_event.feature:39	a	Serious failure outcome	passed	passed	passed		
+features/fhir/audit_event.feature:43	a	Major failure outcome	passed	passed	passed		
+features/fhir/audit_event.feature:47	a	Event type display	passed	passed	passed		
+features/fhir/audit_event.feature:51	a	Security event type	passed	passed	passed		
+features/fhir/audit_event.feature:55	a	Entity presence check	passed	passed	passed		
+features/fhir/audit_event.feature:59	a	Audit event without entity identifier	passed	passed	passed		
+features/fhir/audit_event.feature:63	a	FHIR AuditEvent includes resourceType	passed	passed	passed		
+features/fhir/audit_event.feature:68	a	FHIR AuditEvent includes action	passed	passed	passed		
+features/fhir/audit_event.feature:73	a	FHIR AuditEvent includes outcome	passed	passed	passed		
+features/fhir/audit_event.feature:78	a	FHIR AuditEvent includes entity reference	passed	passed	passed		
+features/fhir/audit_event.feature:8	a	Audit event with read action	passed	passed	passed		
+features/fhir/audit_event.feature:83	a	FHIR AuditEvent includes agent	passed	passed	passed		
+features/fhir/audit_event.feature:88	a	FHIR AuditEvent type coding	passed	passed	passed		
+features/fhir/audit_event.feature:93	a	Export event type	passed	passed	passed		
+features/fhir/audit_event.feature:97	a	Import event type	passed	passed	passed		
+features/fhir/care_plan.feature:12	a	Care plan requires patient	passed	passed	passed		
+features/fhir/care_plan.feature:16	a	Care plan is active by default	passed	passed	passed		
+features/fhir/care_plan.feature:20	a	Care plan with category	passed	passed	passed		
+features/fhir/care_plan.feature:24	a	FHIR CarePlan includes resourceType	passed	passed	passed		
+features/fhir/care_plan.feature:29	a	FHIR CarePlan includes subject reference	passed	passed	passed		
+features/fhir/care_plan.feature:34	a	FHIR CarePlan includes status and intent	passed	passed	passed		
+features/fhir/care_plan.feature:40	a	FHIR CarePlan includes title	passed	passed	passed		
+features/fhir/care_plan.feature:8	a	Create a valid care plan	passed	passed	passed		
+features/fhir/care_team.feature:12	a	Care team requires patient	passed	passed	passed		
+features/fhir/care_team.feature:16	a	Care team with participants	passed	passed	passed		
+features/fhir/care_team.feature:21	a	FHIR CareTeam includes resourceType	passed	passed	passed		
+features/fhir/care_team.feature:26	a	FHIR CareTeam includes subject reference	passed	passed	passed		
+features/fhir/care_team.feature:31	a	FHIR CareTeam includes participants	passed	passed	passed		
+features/fhir/care_team.feature:37	a	FHIR CareTeam includes name	passed	passed	passed		
+features/fhir/care_team.feature:8	a	Create a valid care team	passed	passed	passed		
+features/fhir/communication.feature:12	a	Communication requires patient	passed	passed	passed		
+features/fhir/communication.feature:16	a	Communication requires sender	passed	passed	passed		
+features/fhir/communication.feature:20	a	Communication requires content	passed	passed	passed		
+features/fhir/communication.feature:24	a	Communication status helpers	passed	passed	passed		
+features/fhir/communication.feature:28	a	Communication priority helpers	passed	passed	passed		
+features/fhir/communication.feature:32	a	Communication category helpers	passed	passed	passed		
+features/fhir/communication.feature:36	a	Root message detection	passed	passed	passed		
+features/fhir/communication.feature:40	a	Reply detection	passed	passed	passed		
+features/fhir/communication.feature:44	a	FHIR Communication includes resourceType	passed	passed	passed		
+features/fhir/communication.feature:49	a	FHIR Communication includes subject	passed	passed	passed		
+features/fhir/communication.feature:54	a	FHIR Communication includes payload	passed	passed	passed		
+features/fhir/communication.feature:8	a	Create a valid communication	passed	passed	passed		
+features/fhir/condition.feature:12	a	Condition requires patient	passed	passed	passed		
+features/fhir/condition.feature:16	a	Condition requires display	passed	passed	passed		
+features/fhir/condition.feature:20	a	Active condition	passed	passed	passed		
+features/fhir/condition.feature:24	a	Resolved condition	passed	passed	passed		
+features/fhir/condition.feature:28	a	Problem list item	passed	passed	passed		
+features/fhir/condition.feature:32	a	Matching key with ICD code	passed	passed	passed		
+features/fhir/condition.feature:36	a	FHIR Condition includes resourceType	passed	passed	passed		
+features/fhir/condition.feature:41	a	FHIR Condition includes subject	passed	passed	passed		
+features/fhir/condition.feature:46	a	FHIR Condition includes code	passed	passed	passed		
+features/fhir/condition.feature:8	a	Create a valid condition	passed	passed	passed		
+features/fhir/consent.feature:10	a	Create a valid consent	passed	passed	passed		
+features/fhir/consent.feature:102	a	FHIR Consent includes scope coding	passed	passed	passed		
+features/fhir/consent.feature:107	a	FHIR Consent includes category	passed	passed	passed		
+features/fhir/consent.feature:112	a	FHIR Consent includes provision	passed	passed	passed		
+features/fhir/consent.feature:121	a	Active permit consent authorizes access	passed	passed	passed		
+features/fhir/consent.feature:125	a	Inactive consent does not authorize	passed	passed	passed		
+features/fhir/consent.feature:129	a	Deny consent does not authorize	passed	passed	passed		
+features/fhir/consent.feature:133	a	Consent allows specific permission	passed	passed	passed		
+features/fhir/consent.feature:138	a	Full access consent allows any permission	passed	passed	passed		
+features/fhir/consent.feature:14	a	Consent requires patient	passed	passed	passed		
+features/fhir/consent.feature:19	a	Consent requires scope	passed	passed	passed		
+features/fhir/consent.feature:28	a	Draft consent is not enforceable	passed	passed	passed		
+features/fhir/consent.feature:32	a	Active consent is enforceable	passed	passed	passed		
+features/fhir/consent.feature:36	a	Rejected consent is not enforceable	passed	passed	passed		
+features/fhir/consent.feature:40	a	Inactive consent is not enforceable	passed	passed	passed		
+features/fhir/consent.feature:48	a	Patient privacy scope display	passed	passed	passed		
+features/fhir/consent.feature:52	a	Treatment scope display	passed	passed	passed		
+features/fhir/consent.feature:56	a	Research scope display	passed	passed	passed		
+features/fhir/consent.feature:64	a	Permit provision authorizes access	passed	passed	passed		
+features/fhir/consent.feature:68	a	Deny provision blocks access	passed	passed	passed		
+features/fhir/consent.feature:76	a	Consent within validity period	passed	passed	passed		
+features/fhir/consent.feature:80	a	Consent before validity period starts	passed	passed	passed		
+features/fhir/consent.feature:84	a	Consent after validity period ends	passed	passed	passed		
+features/fhir/consent.feature:92	a	FHIR Consent serialization includes resourceType	passed	passed	passed		
+features/fhir/consent.feature:97	a	FHIR Consent includes patient reference	passed	passed	passed		
+features/fhir/coverage.feature:10	a	Create a valid Coverage	passed	passed	passed		
+features/fhir/coverage.feature:14	a	Coverage requires patient reference	passed	passed	passed		
+features/fhir/coverage.feature:19	a	Coverage requires coverage type	passed	passed	passed		
+features/fhir/coverage.feature:28	a	Active coverage within period	passed	passed	passed		
+features/fhir/coverage.feature:32	a	Expired coverage	passed	passed	passed		
+features/fhir/coverage.feature:36	a	Coverage with no end date is active	passed	passed	passed		
+features/fhir/coverage.feature:44	a	Medicare Part A coverage	passed	passed	passed		
+features/fhir/coverage.feature:48	a	Medicaid coverage	passed	passed	passed		
+features/fhir/coverage.feature:52	a	Private insurance coverage	passed	passed	passed		
+features/fhir/coverage.feature:60	a	FHIR Coverage includes resourceType	passed	passed	passed		
+features/fhir/coverage.feature:65	a	FHIR Coverage includes beneficiary reference	passed	passed	passed		
+features/fhir/coverage.feature:70	a	FHIR Coverage includes status	passed	passed	passed		
+features/fhir/coverage.feature:75	a	FHIR Coverage includes period	passed	passed	passed		
+features/fhir/diagnostic_report.feature:12	a	Diagnostic report requires patient	passed	passed	passed		
+features/fhir/diagnostic_report.feature:16	a	Diagnostic report requires code display	passed	passed	passed		
+features/fhir/diagnostic_report.feature:20	a	Lab diagnostic report	passed	passed	passed		
+features/fhir/diagnostic_report.feature:24	a	Radiology diagnostic report	passed	passed	passed		
+features/fhir/diagnostic_report.feature:28	a	FHIR DiagnosticReport includes resourceType	passed	passed	passed		
+features/fhir/diagnostic_report.feature:33	a	FHIR DiagnosticReport includes subject	passed	passed	passed		
+features/fhir/diagnostic_report.feature:38	a	FHIR DiagnosticReport includes status	passed	passed	passed		
+features/fhir/diagnostic_report.feature:43	a	FHIR DiagnosticReport includes category	passed	passed	passed		
+features/fhir/diagnostic_report.feature:8	a	Create a valid diagnostic report	passed	passed	passed		
+features/fhir/document_reference.feature:10	a	Create a valid document reference	passed	passed	passed		
+features/fhir/document_reference.feature:14	a	Document reference requires patient	passed	passed	passed		
+features/fhir/document_reference.feature:18	a	Document reference requires type	passed	passed	passed		
+features/fhir/document_reference.feature:26	a	Current document status	passed	passed	passed		
+features/fhir/document_reference.feature:30	a	Superseded document status	passed	passed	passed		
+features/fhir/document_reference.feature:34	a	Entered in error document status	passed	passed	passed		
+features/fhir/document_reference.feature:42	a	Clinical note document	passed	passed	passed		
+features/fhir/document_reference.feature:46	a	Discharge summary document	passed	passed	passed		
+features/fhir/document_reference.feature:54	a	Document with author	passed	passed	passed		
+features/fhir/document_reference.feature:58	a	Document with date	passed	passed	passed		
+features/fhir/document_reference.feature:66	a	FHIR DocumentReference includes resourceType	passed	passed	passed		
+features/fhir/document_reference.feature:71	a	FHIR DocumentReference includes subject reference	passed	passed	passed		
+features/fhir/document_reference.feature:76	a	FHIR DocumentReference includes type coding	passed	passed	passed		
+features/fhir/document_reference.feature:81	a	FHIR DocumentReference includes status	passed	passed	passed		
+features/fhir/document_reference.feature:86	a	FHIR DocumentReference includes category	passed	passed	passed		
+features/fhir/goal.feature:12	a	Goal requires patient	passed	passed	passed		
+features/fhir/goal.feature:16	a	Goal requires description	passed	passed	passed		
+features/fhir/goal.feature:20	a	Goal is active by default	passed	passed	passed		
+features/fhir/goal.feature:24	a	Goal with achievement status	passed	passed	passed		
+features/fhir/goal.feature:28	a	Goal with target date	passed	passed	passed		
+features/fhir/goal.feature:32	a	FHIR Goal includes resourceType	passed	passed	passed		
+features/fhir/goal.feature:37	a	FHIR Goal includes subject	passed	passed	passed		
+features/fhir/goal.feature:42	a	FHIR Goal includes lifecycle status	passed	passed	passed		
+features/fhir/goal.feature:47	a	FHIR Goal includes description	passed	passed	passed		
+features/fhir/goal.feature:8	a	Create a valid goal	passed	passed	passed		
+features/fhir/immunization.feature:12	a	Immunization requires patient	passed	passed	passed		
+features/fhir/immunization.feature:16	a	Immunization requires vaccine display	passed	passed	passed		
+features/fhir/immunization.feature:20	a	Completed immunization	passed	passed	passed		
+features/fhir/immunization.feature:24	a	Immunization with CVX code	passed	passed	passed		
+features/fhir/immunization.feature:28	a	Immunization with VFC eligibility	passed	passed	passed		
+features/fhir/immunization.feature:32	a	FHIR Immunization includes resourceType	passed	passed	passed		
+features/fhir/immunization.feature:37	a	FHIR Immunization includes patient reference	passed	passed	passed		
+features/fhir/immunization.feature:42	a	FHIR Immunization includes vaccine code	passed	passed	passed		
+features/fhir/immunization.feature:8	a	Create a valid immunization	passed	passed	passed		
+features/fhir/location.feature:10	a	Location requires name	passed	passed	passed		
+features/fhir/location.feature:14	a	Location includes abbreviation	passed	passed	passed		
+features/fhir/location.feature:18	a	FHIR Location includes resourceType	passed	passed	passed		
+features/fhir/location.feature:23	a	FHIR Location includes name	passed	passed	passed		
+features/fhir/location.feature:28	a	FHIR Location includes status	passed	passed	passed		
+features/fhir/location.feature:6	a	Create a valid location	passed	passed	passed		
+features/fhir/medication_request.feature:12	a	Medication request requires patient	passed	passed	passed		
+features/fhir/medication_request.feature:16	a	Medication request requires medication display	passed	passed	passed		
+features/fhir/medication_request.feature:20	a	Active medication request	passed	passed	passed		
+features/fhir/medication_request.feature:24	a	Medication matching key with RxNorm code	passed	passed	passed		
+features/fhir/medication_request.feature:28	a	Signed content hash	passed	passed	passed		
+features/fhir/medication_request.feature:32	a	FHIR MedicationRequest includes resourceType	passed	passed	passed		
+features/fhir/medication_request.feature:37	a	FHIR MedicationRequest includes subject	passed	passed	passed		
+features/fhir/medication_request.feature:42	a	FHIR MedicationRequest includes medication	passed	passed	passed		
+features/fhir/medication_request.feature:8	a	Create a valid medication request	passed	passed	passed		
+features/fhir/observation.feature:12	a	Laboratory observation	passed	passed	passed		
+features/fhir/observation.feature:16	a	SDOH observation	passed	passed	passed		
+features/fhir/observation.feature:20	a	Blood pressure observation	passed	passed	passed		
+features/fhir/observation.feature:25	a	FHIR Observation includes resourceType	passed	passed	passed		
+features/fhir/observation.feature:30	a	FHIR Observation includes subject	passed	passed	passed		
+features/fhir/observation.feature:35	a	FHIR Observation includes category	passed	passed	passed		
+features/fhir/observation.feature:40	a	Build observations from vital hashes	passed	passed	passed		
+features/fhir/observation.feature:8	a	Vital sign observation	passed	passed	passed		
+features/fhir/organization.feature:10	a	Organization requires name	passed	passed	passed		
+features/fhir/organization.feature:14	a	Organization includes station number	passed	passed	passed		
+features/fhir/organization.feature:18	a	FHIR Organization includes resourceType	passed	passed	passed		
+features/fhir/organization.feature:23	a	FHIR Organization includes name	passed	passed	passed		
+features/fhir/organization.feature:28	a	FHIR Organization includes identifiers	passed	passed	passed		
+features/fhir/organization.feature:6	a	Create a valid organization	passed	passed	passed		
+features/fhir/practitioner_role.feature:10	a	Practitioner role includes specialty	passed	passed	passed		
+features/fhir/practitioner_role.feature:14	a	Active practitioner role	passed	passed	passed		
+features/fhir/practitioner_role.feature:18	a	FHIR PractitionerRole includes resourceType	passed	passed	passed		
+features/fhir/practitioner_role.feature:23	a	FHIR PractitionerRole includes practitioner reference	passed	passed	passed		
+features/fhir/practitioner_role.feature:28	a	FHIR PractitionerRole includes specialty	passed	passed	passed		
+features/fhir/practitioner_role.feature:6	a	Create a valid practitioner role	passed	passed	passed		
+features/fhir/procedure.feature:12	a	Procedure requires patient	passed	passed	passed		
+features/fhir/procedure.feature:16	a	Procedure requires display	passed	passed	passed		
+features/fhir/procedure.feature:20	a	Procedure with CPT code	passed	passed	passed		
+features/fhir/procedure.feature:24	a	Completed procedure	passed	passed	passed		
+features/fhir/procedure.feature:28	a	FHIR Procedure includes resourceType	passed	passed	passed		
+features/fhir/procedure.feature:33	a	FHIR Procedure includes subject	passed	passed	passed		
+features/fhir/procedure.feature:38	a	FHIR Procedure includes code	passed	passed	passed		
+features/fhir/procedure.feature:43	a	FHIR Procedure includes performer	passed	passed	passed		
+features/fhir/procedure.feature:8	a	Create a valid procedure	passed	passed	passed		
+features/fhir/related_person.feature:10	a	Related person requires patient	passed	passed	passed		
+features/fhir/related_person.feature:14	a	Related person requires name	passed	passed	passed		
+features/fhir/related_person.feature:18	a	Parent relationship	passed	passed	passed		
+features/fhir/related_person.feature:22	a	Spouse relationship	passed	passed	passed		
+features/fhir/related_person.feature:26	a	Active related person	passed	passed	passed		
+features/fhir/related_person.feature:30	a	Inactive related person	passed	passed	passed		
+features/fhir/related_person.feature:34	a	Related person within period	passed	passed	passed		
+features/fhir/related_person.feature:38	a	Related person outside period	passed	passed	passed		
+features/fhir/related_person.feature:42	a	FHIR RelatedPerson includes resourceType	passed	passed	passed		
+features/fhir/related_person.feature:47	a	FHIR RelatedPerson includes patient reference	passed	passed	passed		
+features/fhir/related_person.feature:52	a	FHIR RelatedPerson includes relationship	passed	passed	passed		
+features/fhir/related_person.feature:57	a	FHIR RelatedPerson includes name	passed	passed	passed		
+features/fhir/related_person.feature:6	a	Create a valid related person	passed	passed	passed		
+features/fhir/service_request.feature:12	a	Service request requires patient	passed	passed	passed		
+features/fhir/service_request.feature:16	a	Service request requires service	passed	passed	passed		
+features/fhir/service_request.feature:20	a	Active service request	passed	passed	passed		
+features/fhir/service_request.feature:24	a	Completed service request	passed	passed	passed		
+features/fhir/service_request.feature:28	a	Urgent service request	passed	passed	passed		
+features/fhir/service_request.feature:32	a	Overdue service request	passed	passed	passed		
+features/fhir/service_request.feature:36	a	Priority levels	passed	passed	passed		
+features/fhir/service_request.feature:40	a	FHIR ServiceRequest includes resourceType	passed	passed	passed		
+features/fhir/service_request.feature:45	a	FHIR ServiceRequest includes subject	passed	passed	passed		
+features/fhir/service_request.feature:8	a	Create a valid service request	passed	passed	passed		
+features/fhir_bundle_import.feature:13	a	Import valid FHIR Bundle with conditions	passed	passed	passed		
+features/fhir_bundle_import.feature:18	a	Import valid FHIR Bundle with medications	passed	passed	passed		
+features/fhir_bundle_import.feature:23	a	Reject invalid JSON	passed	passed	passed		
+features/fhir_bundle_import.feature:29	a	Reject non-Bundle resource	passed	passed	passed		
+features/fhir_bundle_import.feature:35	a	Reject Bundle with wrong patient	passed	passed	passed		
+features/fhir_bundle_import.feature:41	a	Import Bundle with mixed resource types	passed	passed	passed		
+features/fhir_bundle_import.feature:8	a	Import valid FHIR Bundle with allergies	passed	passed	passed		
+features/fhir_clinical_resources.feature:100	b	Search Observation by patient returns FHIR Bundle	passed	passed	passed	ORWPT SELECT,ORWPT ID INFO,ORQQVI VITALS	
+features/fhir_clinical_resources.feature:108	b	Observation supports category filter for vital-signs	passed	passed	passed	ORWPT SELECT,ORWPT ID INFO,ORQQVI VITALS	
+features/fhir_clinical_resources.feature:115	b	Observation supports category filter for laboratory	passed	passed	passed	ORWPT SELECT,ORWPT ID INFO,ORQQVI VITALS	
+features/fhir_clinical_resources.feature:122	b	Observation search without patient returns 400	passed	passed	passed	ORWPT SELECT,ORWPT ID INFO	
+features/fhir_clinical_resources.feature:127	b	Observation show returns 404 for unknown ID	passed	passed	passed	ORWPT SELECT,ORWPT ID INFO	
+features/fhir_clinical_resources.feature:136	b	Clinical resource endpoints return FHIR JSON content type	passed	passed	passed	ORWPT SELECT,ORWPT ID INFO,ORQQAL LIST	
+features/fhir_clinical_resources.feature:142	b	Clinical resource endpoints accept Patient/ prefix in patient param	passed	passed	passed	ORWPT SELECT,ORWPT ID INFO,ORQQAL LIST	
+features/fhir_clinical_resources.feature:20	b	Search AllergyIntolerance by patient returns FHIR Bundle	passed	passed	passed	ORWPT SELECT,ORWPT ID INFO,ORQQAL LIST	
+features/fhir_clinical_resources.feature:28	b	AllergyIntolerance search without patient returns 400	passed	passed	passed	ORWPT SELECT,ORWPT ID INFO	
+features/fhir_clinical_resources.feature:33	b	AllergyIntolerance show returns 404 for unknown ID	passed	passed	passed	ORWPT SELECT,ORWPT ID INFO	
+features/fhir_clinical_resources.feature:42	b	Search Condition by patient returns FHIR Bundle	passed	passed	passed	ORWPT SELECT,ORWPT ID INFO,ORQQPL LIST	
+features/fhir_clinical_resources.feature:50	b	Condition supports category filter	passed	passed	passed	ORWPT SELECT,ORWPT ID INFO,ORQQPL LIST	
+features/fhir_clinical_resources.feature:57	b	Condition search without patient returns 400	passed	passed	passed	ORWPT SELECT,ORWPT ID INFO	
+features/fhir_clinical_resources.feature:62	b	Condition show returns 404 for unknown ID	passed	passed	passed	ORWPT SELECT,ORWPT ID INFO	
+features/fhir_clinical_resources.feature:71	b	Search MedicationRequest by patient returns FHIR Bundle	passed	passed	passed	ORWPT SELECT,ORWPT ID INFO,ORWPS ACTIVE	
+features/fhir_clinical_resources.feature:79	b	MedicationRequest supports status filter	passed	passed	passed	ORWPT SELECT,ORWPT ID INFO,ORWPS ACTIVE	
+features/fhir_clinical_resources.feature:86	b	MedicationRequest search without patient returns 400	passed	passed	passed	ORWPT SELECT,ORWPT ID INFO	
+features/fhir_clinical_resources.feature:91	b	MedicationRequest show returns 404 for unknown ID	passed	passed	passed	ORWPT SELECT,ORWPT ID INFO	
+features/fhir_interoperability.feature:11	b	Retrieve patient as FHIR Patient resource	passed	passed	passed	ORWPT SELECT,ORWPT ID INFO	
+features/fhir_interoperability.feature:28	f	FHIR Patient includes tribal enrollment extension	failed	not-run	not-run		unsourced: real acceptance test for a read not built yet
+features/fhir_interoperability.feature:33	b	FHIR Patient supports US Core Profile requirements	passed	passed	passed	ORWPT SELECT,ORWPT ID INFO	
+features/fhir_interoperability.feature:48	f	FHIR Patient includes address and telecom	failed	not-run	not-run		unsourced: real acceptance test for a read not built yet
+features/fhir_interoperability.feature:53	b	FHIR Patient includes SSN identifier	passed	passed	passed	ORWPT SELECT,ORWPT ID INFO	
+features/fhir_interoperability.feature:58	a	Round-trip FHIR serialization preserves data	passed	passed	passed		
+features/fhir_interoperability.feature:65	b	FHIR content type is application/fhir+json	passed	passed	passed	ORWPT SELECT,ORWPT ID INFO	
+features/fhir_smart_authentication.feature:14	b	Authenticated request with valid read scope returns data	passed	passed	passed	ORQQVI VITALS	
+features/fhir_smart_authentication.feature:21	a	Token with wrong resource scope is forbidden	passed	passed	passed		
+features/fhir_smart_authentication.feature:28	b	Wildcard patient scope grants read access	passed	passed	passed	ORQQAL LIST	
+features/fhir_smart_authentication.feature:35	b	System-scoped token can access clinical resources	passed	passed	passed	ORQQVI VITALS	
+features/fhir_smart_authentication.feature:42	b	User-scoped token can access clinical resources	passed	passed	passed	ORQQPL LIST	
+features/fhir_smart_authentication.feature:49	a	Unauthenticated show request is rejected	passed	passed	passed		
+features/fhir_smart_authentication.feature:54	b	Multiple scopes grant combined access	passed	passed	passed	ORQQPL LIST	
+features/fhir_smart_authentication.feature:9	a	Unauthenticated request to FHIR endpoint is rejected	passed	passed	passed		
+features/global_store_isolation.feature:11	a	The following scenario starts with clean stores	passed	passed	passed		
+features/global_store_isolation.feature:18	a	A scenario leaves a mock seed	passed	not-run	not-run		checks the test harness itself
+features/global_store_isolation.feature:22	a	The following scenario starts with the baseline mock	passed	not-run	not-run		checks the test harness itself
+features/global_store_isolation.feature:7	a	A scenario leaves process-global state	passed	passed	passed		
+features/job_orchestration.feature:13	a	Failed job creates failure audit event with sanitized error	passed	passed	passed		
+features/job_orchestration.feature:19	a	Job failure audit event does not contain PHI	passed	passed	passed		
+features/job_orchestration.feature:25	a	Clinical FHIR access creates read audit event	passed	passed	passed		
+features/job_orchestration.feature:33	a	Clinical FHIR access records network address	passed	passed	passed		
+features/job_orchestration.feature:6	a	Successful job creates audit event	passed	passed	passed		
+features/onc/accounting_of_disclosures.feature:16	a	Record a PHI disclosure to an external party	passed	passed	passed		
+features/onc/accounting_of_disclosures.feature:28	a	Disclosure requires patient, recipient, and purpose	passed	passed	passed		
+features/onc/accounting_of_disclosures.feature:36	a	Patient requests accounting of disclosures	passed	passed	passed		
+features/onc/accounting_of_disclosures.feature:47	a	Accounting of disclosures covers the past 6 years	passed	passed	passed		
+features/onc/accounting_of_disclosures.feature:58	a	Export disclosure report as structured data	passed	passed	passed		
+features/onc/accounting_of_disclosures.feature:71	a	Disclosure records cannot be modified	passed	passed	passed		
+features/onc/accounting_of_disclosures.feature:76	a	Disclosure records cannot be deleted	passed	passed	passed		
+features/onc/accounting_of_disclosures.feature:85	a	Disclosure recording completes within acceptable time	passed	passed	passed		
+features/onc/backend_services_auth.feature:16	a	POST /oauth/token with client_credentials but missing client_assertion returns 400	passed	passed	passed		
+features/onc/backend_services_auth.feature:21	a	POST /oauth/token with invalid JWT returns 401	passed	passed	passed		
+features/onc/backend_services_auth.feature:26	a	POST /oauth/token with a forged JWT signature returns 401	passed	passed	passed		stubs non-RPMS ClientJwks.fetch
+features/onc/backend_services_auth.feature:32	a	POST /oauth/token does not grant a scope the application is not registered for	passed	passed	passed		stubs non-RPMS ClientJwks.fetch
+features/onc/backend_services_auth.feature:37	a	an issued token cannot export beyond the application's registered scopes	passed	passed	passed		stubs non-RPMS ClientJwks.fetch
+features/onc/backend_services_auth.feature:9	a	POST /oauth/token with client_credentials and client_assertion returns access_token	passed	passed	passed		stubs non-RPMS ClientJwks.fetch
+features/onc/clinical_reconciliation.feature:16	b	Import clinical data from FHIR Bundle	passed	passed	passed	ORQQAL LIST	
+features/onc/clinical_reconciliation.feature:27	a	Import clinical data from C-CDA document	passed	passed	passed		
+features/onc/clinical_reconciliation.feature:37	e	Imported items are matched against existing data	passed	passed	passed		stubs AllergyIntolerance.for_patient
+features/onc/clinical_reconciliation.feature:48	a	Clinician accepts a reconciliation item	passed	passed	passed		
+features/onc/clinical_reconciliation.feature:54	a	Clinician rejects a reconciliation item	passed	passed	passed		
+features/onc/clinical_reconciliation.feature:63	a	Clinician accepts all items of a type	passed	passed	passed		
+features/onc/clinical_reconciliation.feature:72	a	Complete reconciliation after all decisions made	passed	passed	passed		
+features/onc/clinical_reconciliation.feature:78	a	Cannot complete reconciliation with undecided items	passed	passed	passed		
+features/onc/cpoe.feature:19	e	Create a medication order	passed	passed	passed		stubs MedicationRequest.for_patient AllergyIntolerance.for_patient
+features/onc/cpoe.feature:32	e	Medication order triggers interaction check	passed	passed	passed		stubs MedicationRequest.for_patient AllergyIntolerance.for_patient
+features/onc/cpoe.feature:38	e	Medication order with no interactions proceeds	passed	passed	passed		stubs MedicationRequest.for_patient AllergyIntolerance.for_patient
+features/onc/cpoe.feature:43	e	Sign a medication order	passed	passed	passed		stubs MedicationRequest.for_patient AllergyIntolerance.for_patient
+features/onc/cpoe.feature:49	e	Reject a medication order due to interactions	passed	passed	passed		stubs MedicationRequest.for_patient AllergyIntolerance.for_patient
+features/onc/cpoe.feature:59	a	Create a laboratory order	passed	passed	passed		
+features/onc/cpoe.feature:69	a	Create a stat lab order	passed	passed	passed		
+features/onc/cpoe.feature:78	a	Sign a lab order	passed	passed	passed		
+features/onc/cpoe.feature:87	a	Create an imaging order	passed	passed	passed		
+features/onc/cpoe.feature:98	a	Sign an imaging order	passed	passed	passed		
+features/onc/cpoe_audit_trail.feature:15	e	Medication order creation is audited	passed	passed	passed		stubs MedicationRequest.for_patient AllergyIntolerance.for_patient
+features/onc/cpoe_audit_trail.feature:21	a	Lab order creation is audited	passed	passed	passed		
+features/onc/cpoe_audit_trail.feature:29	a	Imaging order creation is audited	passed	passed	passed		
+features/onc/cpoe_audit_trail.feature:41	e	Signing a medication order is audited with content hash	passed	passed	passed		stubs MedicationRequest.for_patient AllergyIntolerance.for_patient
+features/onc/cpoe_audit_trail.feature:48	a	Signing a lab order is audited	passed	passed	passed		
+features/onc/cpoe_audit_trail.feature:57	e	Cancelling an order is audited with reason	passed	passed	passed		stubs MedicationRequest.for_patient AllergyIntolerance.for_patient
+features/onc/cpoe_audit_trail.feature:68	e	Full order lifecycle produces a queryable audit chain	passed	passed	passed		stubs MedicationRequest.for_patient AllergyIntolerance.for_patient
+features/onc/cqm_import_and_calculate.feature:17	a	Import a FHIR Measure resource	passed	passed	passed		
+features/onc/cqm_import_and_calculate.feature:28	a	Import multiple measures from a FHIR Bundle	passed	passed	passed		
+features/onc/cqm_import_and_calculate.feature:37	a	Import rejects invalid measure data	passed	passed	passed		
+features/onc/cqm_import_and_calculate.feature:45	a	Query data requirements for an imported measure	passed	passed	passed		
+features/onc/cqm_import_and_calculate.feature:55	a	Calculate a configured measure for a patient	passed	passed	passed		
+features/onc/cqm_import_and_calculate.feature:63	a	Calculate a configured measure for a population	passed	passed	passed		
+features/onc/cqm_import_and_calculate.feature:78	a	Import via FHIR API endpoint	passed	passed	passed		
+features/onc/cqm_import_and_calculate.feature:89	a	Measure import completes within acceptable time	passed	passed	passed		
+features/onc/cqm_record_and_export.feature:17	a	System documents supported clinical quality measures	passed	passed	passed		
+features/onc/cqm_record_and_export.feature:28	a	Record clinical quality data for a patient	passed	passed	passed		
+features/onc/cqm_record_and_export.feature:39	a	Export QRDA Category I for individual patient	passed	passed	passed		
+features/onc/cqm_record_and_export.feature:49	a	QRDA Category I includes observation data entries	passed	passed	passed		
+features/onc/cqm_record_and_export.feature:60	a	Export QRDA Category III for population	passed	passed	passed		
+features/onc/cqm_record_and_export.feature:76	a	Export CQM data as FHIR MeasureReport	passed	passed	passed		
+features/onc/cqm_record_and_export.feature:89	a	QRDA export completes within acceptable time	passed	passed	passed		
+features/onc/ehi_export.feature:16	b	Generate a complete EHI export for a patient	passed	passed	passed	ORQQPL LIST,ORQQVI VITALS	partly stubbed: Patient.find_by_dfn AllergyIntolerance.for_patient MedicationRequest.for_patient
+features/onc/ehi_export.feature:24	b	EHI export includes all FHIR resource types	passed	passed	passed	ORQQPL LIST,ORQQVI VITALS	partly stubbed: Patient.find_by_dfn AllergyIntolerance.for_patient MedicationRequest.for_patient
+features/onc/ehi_export.feature:37	b	EHI export includes audit logs for the patient	passed	passed	passed	ORQQPL LIST,ORQQVI VITALS	partly stubbed: Patient.find_by_dfn AllergyIntolerance.for_patient MedicationRequest.for_patient
+features/onc/ehi_export.feature:44	b	EHI export includes system configuration relevant to patient care	passed	passed	passed	ORQQPL LIST,ORQQVI VITALS	partly stubbed: Patient.find_by_dfn AllergyIntolerance.for_patient MedicationRequest.for_patient
+features/onc/ehi_export.feature:54	b	EHI export manifest documents contents and format	passed	passed	passed	ORQQPL LIST,ORQQVI VITALS	partly stubbed: Patient.find_by_dfn AllergyIntolerance.for_patient MedicationRequest.for_patient
+features/onc/ehi_export.feature:66	b	EHI export produces NDJSON for FHIR resources	passed	passed	passed	ORQQPL LIST,ORQQVI VITALS	partly stubbed: Patient.find_by_dfn AllergyIntolerance.for_patient MedicationRequest.for_patient
+features/onc/ehi_export.feature:72	b	EHI export produces CSV for audit logs	passed	passed	passed	ORQQPL LIST,ORQQVI VITALS	partly stubbed: Patient.find_by_dfn AllergyIntolerance.for_patient MedicationRequest.for_patient
+features/onc/ehi_export.feature:83	b	EHI export respects date range filter	passed	passed	passed	ORQQPL LIST,ORQQVI VITALS	partly stubbed: Patient.find_by_dfn AllergyIntolerance.for_patient MedicationRequest.for_patient
+features/onc/ehi_export.feature:92	b	EHI export completes within acceptable time	passed	passed	passed	ORQQPL LIST,ORQQVI VITALS	partly stubbed: Patient.find_by_dfn AllergyIntolerance.for_patient MedicationRequest.for_patient
+features/onc/electronic_case_reporting.feature:16	a	Detect a reportable condition from diagnosis	passed	passed	passed		
+features/onc/electronic_case_reporting.feature:22	a	Non-reportable condition is not flagged	passed	passed	passed		
+features/onc/electronic_case_reporting.feature:27	a	Reportable condition list includes NYS notifiable diseases	passed	passed	passed		
+features/onc/electronic_case_reporting.feature:39	a	Generate an eICR for a reportable condition	passed	passed	passed		
+features/onc/electronic_case_reporting.feature:49	a	eICR includes encounter information	passed	passed	passed		
+features/onc/electronic_case_reporting.feature:59	a	Process a reportability response	passed	passed	passed		
+features/onc/electronic_case_reporting.feature:65	a	Process a non-reportable response	passed	passed	passed		
+features/onc/electronic_case_reporting.feature:74	a	Transmit eICR to ECLRS	passed	passed	passed		
+features/onc/electronic_case_reporting.feature:87	a	eICR generation completes quickly	passed	passed	passed		
+features/onc/electronic_lab_reporting.feature:16	a	Detect a reportable lab result by LOINC code	passed	passed	passed		
+features/onc/electronic_lab_reporting.feature:22	a	Non-reportable lab result is not flagged	passed	passed	passed		
+features/onc/electronic_lab_reporting.feature:27	a	Reportable lab list includes NYS notifiable tests	passed	passed	passed		
+features/onc/electronic_lab_reporting.feature:39	a	Generate HL7 v2.5.1 ORU message for reportable lab	passed	passed	passed		
+features/onc/electronic_lab_reporting.feature:49	a	ORU message includes specimen information	passed	passed	passed		
+features/onc/electronic_lab_reporting.feature:59	a	Transmit reportable lab to ECLRS	passed	passed	passed		
+features/onc/electronic_lab_reporting.feature:72	a	Reportable lab includes SNOMED-coded organism	passed	passed	passed		
+features/onc/electronic_lab_reporting.feature:83	a	ORU message generation completes quickly	passed	passed	passed		
+features/onc/electronic_prescribing.feature:16	a	Generate a NewRx NCPDP SCRIPT message	passed	passed	passed		
+features/onc/electronic_prescribing.feature:25	a	Generate a CancelRx NCPDP SCRIPT message	passed	passed	passed		
+features/onc/electronic_prescribing.feature:32	a	Generate a RefillRequest NCPDP SCRIPT message	passed	passed	passed		
+features/onc/electronic_prescribing.feature:38	a	Generate an RxChangeRequest NCPDP SCRIPT message	passed	passed	passed		
+features/onc/electronic_prescribing.feature:50	a	Process a pharmacy refill request	passed	passed	passed		
+features/onc/electronic_prescribing.feature:57	a	Approve a refill request	passed	passed	passed		
+features/onc/electronic_prescribing.feature:65	a	Process a pharmacy change request	passed	passed	passed		
+features/onc/electronic_prescribing.feature:76	e	Flag controlled substance prescription for EPCS	passed	passed	passed		stubs MedicationRequest.dea_schedule
+features/onc/electronic_prescribing.feature:87	a	Route prescription through e-prescribing adapter	passed	passed	passed		
+features/onc/electronic_prescribing.feature:97	a	NCPDP SCRIPT message generation completes quickly	passed	passed	passed		
+features/onc/emergency_access.feature:16	a	Grant break-the-glass emergency access	passed	passed	passed		
+features/onc/emergency_access.feature:25	a	Emergency access requires a valid reason	passed	passed	passed		
+features/onc/emergency_access.feature:29	a	Emergency access requires patient and provider	passed	passed	passed		
+features/onc/emergency_access.feature:37	a	Check if provider has active emergency access	passed	passed	passed		
+features/onc/emergency_access.feature:42	a	Emergency access expires after the time window	passed	passed	passed		
+features/onc/emergency_access.feature:50	a	Supervisor reviews emergency access as appropriate	passed	passed	passed		
+features/onc/emergency_access.feature:56	a	Supervisor reviews emergency access as inappropriate	passed	passed	passed		
+features/onc/emergency_access.feature:63	a	Emergency access cannot be reviewed twice	passed	passed	passed		
+features/onc/emergency_access.feature:72	a	Emergency access records cannot be modified	passed	passed	passed		
+features/onc/emergency_access.feature:81	a	List pending emergency access reviews	passed	passed	passed		
+features/onc/implantable_device_list.feature:16	a	Parse GS1 UDI into all required components	passed	passed	passed		
+features/onc/implantable_device_list.feature:23	a	Parse UDI with manufacturing date	passed	passed	passed		
+features/onc/implantable_device_list.feature:28	a	Parse UDI with only device identifier	passed	passed	passed		
+features/onc/implantable_device_list.feature:38	e	Device list includes all UDI components	passed	passed	passed		stubs Device.for_patient
+features/onc/implantable_device_list.feature:47	e	Device list includes device description and type	passed	passed	passed		stubs Device.for_patient
+features/onc/implantable_device_list.feature:57	a	Look up device in FDA GUDID by device identifier	passed	passed	passed		
+features/onc/implantable_device_list.feature:67	e	Change device status from active to inactive	passed	passed	passed		stubs Device.for_patient
+features/onc/implantable_device_list.feature:72	e	Device list can be filtered by status	passed	passed	passed		stubs Device.for_patient
+features/onc/implantable_device_list.feature:81	e	FHIR Device includes US Core profile	passed	passed	passed		stubs Device.for_patient
+features/onc/implantable_device_list.feature:86	e	FHIR Device includes distinct identifier	passed	passed	passed		stubs Device.for_patient
+features/onc/patient_amendments.feature:16	a	Patient requests an amendment to their health record	passed	passed	passed		
+features/onc/patient_amendments.feature:25	a	Amendment request requires description and reason	passed	passed	passed		
+features/onc/patient_amendments.feature:37	a	Provider accepts an amendment request	passed	passed	passed		
+features/onc/patient_amendments.feature:48	a	Provider denies an amendment request with reason	passed	passed	passed		
+features/onc/patient_amendments.feature:55	a	Denied amendment reason is required	passed	passed	passed		
+features/onc/patient_amendments.feature:64	a	Amendment history is preserved for a patient	passed	passed	passed		
+features/onc/patient_amendments.feature:74	a	Denied amendment is appended to record per HIPAA	passed	passed	passed		
+features/onc/patient_amendments.feature:84	a	Amendment operations complete within acceptable time	passed	passed	passed		
+features/onc/provenance_revinclude.feature:19	b	Search with _revinclude=Provenance:target includes Provenance entries in Bundle	passed	passed	passed	ORWPT SELECT,ORWPT ID INFO	
+features/onc/provenance_revinclude.feature:26	b	Search without _revinclude does not include Provenance entries	passed	passed	passed	ORWPT SELECT,ORWPT ID INFO	
+features/onc/smart_ehr_launch.feature:11	a	EHR launch needs a signed-in user	passed	passed	passed		
+features/onc/smart_ehr_launch.feature:15	a	the style a launched app may follow is served as JSON	passed	passed	passed		
+features/onc/transitions_of_care.feature:101	a	Generated C-CDA includes author and custodian	passed	passed	passed		
+features/onc/transitions_of_care.feature:107	a	Generated C-CDA includes document type code	passed	passed	passed		
+features/onc/transitions_of_care.feature:16	a	Generate a Continuity of Care Document	passed	passed	passed		
+features/onc/transitions_of_care.feature:23	a	Generated C-CDA includes allergies section	passed	passed	passed		
+features/onc/transitions_of_care.feature:29	a	Generated C-CDA includes problems section	passed	passed	passed		
+features/onc/transitions_of_care.feature:35	a	Generated C-CDA includes medications section	passed	passed	passed		
+features/onc/transitions_of_care.feature:41	a	Generated C-CDA includes vital signs section	passed	passed	passed		
+features/onc/transitions_of_care.feature:46	a	Generated C-CDA includes encounters section	passed	passed	passed		
+features/onc/transitions_of_care.feature:52	a	Generated C-CDA omits patient address when all fields blank	passed	passed	passed		
+features/onc/transitions_of_care.feature:57	b	Transitions of care accepts egress zero-padded dfn for the same patient	passed	passed	passed	ORQQAL LIST,ORQQPL LIST,ORWPS ACTIVE	partly stubbed: Patient.find_by_dfn
+features/onc/transitions_of_care.feature:71:63	b	Transitions of care refuses C-CDA when egress patient dfn is not the requested patient	passed	passed	passed	ORQQAL LIST,ORQQPL LIST,ORWPS ACTIVE	partly stubbed: Patient.find_by_dfn
+features/onc/transitions_of_care.feature:72:63	b	Transitions of care refuses C-CDA when egress patient dfn is not the requested patient	passed	passed	passed	ORQQAL LIST,ORQQPL LIST,ORWPS ACTIVE	partly stubbed: Patient.find_by_dfn
+features/onc/transitions_of_care.feature:73:63	b	Transitions of care refuses C-CDA when egress patient dfn is not the requested patient	passed	passed	passed	ORQQAL LIST,ORQQPL LIST,ORWPS ACTIVE	partly stubbed: Patient.find_by_dfn
+features/onc/transitions_of_care.feature:74:63	b	Transitions of care refuses C-CDA when egress patient dfn is not the requested patient	passed	passed	passed	ORQQAL LIST,ORQQPL LIST,ORWPS ACTIVE	partly stubbed: Patient.find_by_dfn
+features/onc/transitions_of_care.feature:80	a	Generated C-CDA can be parsed by CcdaParser	passed	passed	passed		
+features/onc/transitions_of_care.feature:92	a	C-CDA generation completes within acceptable time	passed	passed	passed		
+features/onc/us_core_patient_api.feature:19	b	Search by _id returns patient with US Core profile in meta	passed	passed	passed	ORWPT SELECT,ORWPT ID INFO	
+features/onc/us_core_patient_api.feature:26	b	Search by name returns matching patients in Bundle	passed	passed	passed	ORWPT LIST ALL,ORWPT SELECT,ORWPT ID INFO	
+features/onc/us_core_patient_api.feature:32	b	Search by name and birthdate combination works	passed	passed	passed	ORWPT LIST ALL,ORWPT SELECT,ORWPT ID INFO	
+features/onc/us_core_patient_api.feature:38	b	Search by name and gender combination works	passed	passed	passed	ORWPT LIST ALL,ORWPT SELECT,ORWPT ID INFO	
+features/onc/us_core_patient_api.feature:44	b	Search by identifier with system|value format works	passed	passed	passed	ORWPT FULLSSN	
+features/onc/us_core_patient_api.feature:57	f	Patient resource includes US Core race extension with ombCategory coding	failed	not-run	not-run		unsourced: real acceptance test for a read not built yet
+features/onc/us_core_patient_api.feature:63	b	Patient resource includes US Core ethnicity extension	passed	passed	passed	ORWPT SELECT,ORWPT ID INFO	
+features/onc/us_core_patient_api.feature:68	a	Show returns 403 for patient outside SMART context	passed	passed	passed		
+features/onc/vital_signs_compliance.feature:14	b	Blood pressure observation uses component pattern	passed	passed	passed	ORQQVI VITALS	
+features/onc/vital_signs_compliance.feature:20	b	Vital signs observations include proper UCUM units	passed	passed	passed	ORQQVI VITALS	
+features/onc/vital_signs_compliance.feature:26	b	Vital signs observations include category coding with vital-signs	passed	passed	passed	ORQQVI VITALS	
+features/onc/vital_signs_compliance.feature:32	b	Blood pressure profile URL is us-core-blood-pressure	passed	passed	passed	ORQQVI VITALS	
+features/onc/vital_signs_compliance.feature:37	b	Each vital type has its specific US Core profile	passed	passed	passed	ORQQVI VITALS	
+features/part2_disclosure_gate.feature:101	f	A response-rendering path outside the reviewed allowlist fails the convention check	undefined	undefined	undefined		undefined
+features/part2_disclosure_gate.feature:110	f	An allowed disclosure is written to the accounting ledger	undefined	undefined	undefined		undefined
+features/part2_disclosure_gate.feature:117	f	An allowed disclosure carries the redisclosure prohibition notice	undefined	undefined	undefined		undefined
+features/part2_disclosure_gate.feature:122	f	A denied disclosure is auditable	undefined	undefined	undefined		undefined
+features/part2_disclosure_gate.feature:127	f	"Determined no Part 2 content" is distinguishable from "could not determine"	undefined	undefined	undefined		undefined
+features/part2_disclosure_gate.feature:134	f	Part 2 disclosures appear in the patient's accounting of disclosures	undefined	undefined	undefined		undefined
+features/part2_disclosure_gate.feature:29	f	Outbound disclosure of Part 2 content is denied without consent	undefined	undefined	undefined		undefined
+features/part2_disclosure_gate.feature:35	f	Outbound disclosure is allowed when a consent covers recipient and purpose	undefined	undefined	undefined		undefined
+features/part2_disclosure_gate.feature:40	f	A consent for a different recipient does not authorize this disclosure	undefined	undefined	undefined		undefined
+features/part2_disclosure_gate.feature:45	f	A consent for a different purpose does not authorize this disclosure	undefined	undefined	undefined		undefined
+features/part2_disclosure_gate.feature:50	f	An expired consent does not authorize this disclosure	undefined	undefined	undefined		undefined
+features/part2_disclosure_gate.feature:55	f	A revoked consent does not authorize this disclosure	undefined	undefined	undefined		undefined
+features/part2_disclosure_gate.feature:60	f	Non-Part-2 content is unaffected by the gate	undefined	undefined	undefined		undefined
+features/part2_disclosure_gate.feature:69	f	A mixed payload is never silently trimmed	undefined	undefined	undefined		undefined
+features/part2_disclosure_gate.feature:76	f	An explicitly redacted payload declares its redaction	undefined	undefined	undefined		undefined
+features/part2_disclosure_gate.feature:94:87	f	Each egress path enforces the gate	undefined	undefined	undefined		undefined
+features/part2_disclosure_gate.feature:95:87	f	Each egress path enforces the gate	undefined	undefined	undefined		undefined
+features/part2_disclosure_gate.feature:96:87	f	Each egress path enforces the gate	undefined	undefined	undefined		undefined
+features/part2_disclosure_gate.feature:97:87	f	Each egress path enforces the gate	undefined	undefined	undefined		undefined
+features/part2_disclosure_gate.feature:98:87	f	Each egress path enforces the gate	undefined	undefined	undefined		undefined
+features/part2_disclosure_gate.feature:99:87	f	Each egress path enforces the gate	undefined	undefined	undefined		undefined
+features/patient_banner.feature:10	b	Banner is visible on every chart screen	passed	passed	passed	ORWPT SELECT,ORWPT ID INFO,ORQQPL LIST,ORWPS ACTIVE,ORQQAL LIST,ORQQVI VITALS,BEHOXQ ALRLIST	
+features/patient_banner.feature:20	b	Allergies are always shown, even when empty	passed	passed	passed	ORWPT SELECT,ORWPT ID INFO,ORQQPL LIST,ORWPS ACTIVE,ORQQAL LIST,ORQQVI VITALS,BEHOXQ ALRLIST	
+features/patient_banner.feature:28	b	Clinician explicitly clears patient context	passed	passed	passed	ORWPT SELECT,ORWPT ID INFO,ORQQPL LIST,ORWPS ACTIVE,ORQQAL LIST,ORQQVI VITALS,BEHOXQ ALRLIST	
+features/patient_banner.feature:34	b	No patient open: the bar is the patient search (rpms-ux S-CHT-01.7)	passed	passed	passed	BEHOXQ ALRLIST	
+features/patient_banner.feature:40	a	Signed out login page shows no patient data	passed	passed	passed		
+features/patient_search.feature:16	b	Search for patient by name	passed	passed	passed	ORWPT LIST ALL,ORWPT SELECT,ORWPT ID INFO	
+features/patient_search.feature:21	b	Search for patient by SSN	passed	passed	passed	ORWPT FULLSSN	
+features/patient_search.feature:31	f	Retrieve patient by DFN	failed	not-run	not-run		unsourced: real acceptance test for a read not built yet
+features/patient_search.feature:41	f	View patient with referrals	pending	pending	pending		pending
+features/patient_search.feature:47	b	Search with no results	passed	passed	passed	ORWPT LIST ALL	
+features/patient_search.feature:51	b	Retrieve nonexistent patient	passed	passed	passed	ORWPT SELECT	
+features/patient_search.feature:55	b	Search returns multiple patients	passed	passed	passed	ORWPT LIST ALL,ORWPT SELECT,ORWPT ID INFO	
+features/phi_audit_logging.feature:10	b	FHIR Patient search creates an audit event	passed	passed	passed	ORWPT SELECT	
+features/phi_audit_logging.feature:23	b	FHIR AllergyIntolerance search creates an audit event	passed	passed	passed	ORQQAL LIST	
+features/phi_audit_logging.feature:37	a	404 request creates audit event with failure outcome	passed	passed	passed		
+features/phi_audit_logging.feature:48	a	Audit events cannot be updated	passed	passed	passed		
+features/phi_audit_logging.feature:53	a	Audit events cannot be deleted	passed	passed	passed		
+features/phi_audit_logging.feature:62	b	Audit events include required HIPAA fields	passed	passed	passed	ORWPT SELECT	
+features/phi_log_protection.feature:12	a	PHR controller source does not contain raw DFN logging	passed	passed	passed		
+features/phi_log_protection.feature:6	a	Service logs contain hashed identifiers not raw DFNs	passed	passed	passed		
+features/provider_search.feature:20	b	Search for provider by name	passed	not-run	passed	ORWU NEWPERS	
+features/provider_search.feature:31	f	Retrieve provider by IEN	failed	not-run	not-run		unsourced: real acceptance test for a read not built yet
+features/provider_search.feature:40	b	List all providers	passed	not-run	passed	ORWU NEWPERS	
+features/provider_search.feature:49	f	Identify providers who can prescribe controlled substances	failed	not-run	not-run		unsourced: real acceptance test for a read not built yet
+features/provider_search.feature:55	b	Search with no results	passed	not-run	passed	ORWU NEWPERS	
+features/provider_search.feature:59	b	Retrieve nonexistent provider	passed	not-run	passed	ORWU USERINFO	
+features/provider_search.feature:68	f	Provider has expected credentials	failed	not-run	not-run		unsourced: real acceptance test for a read not built yet
+features/rate_limiting.feature:21	b	Repeated failed sign-ins are throttled	passed	passed	passed	CIAVCXUS VIMINFO,CIANBRPC DIVGET,XUS GET USER INFO,ORWU USERINFO,ORWU NPHASKEY,ORWU HAS OPTION ACCESS	
+features/rate_limiting.feature:27	b	A throttled account is not locked out permanently	passed	failed	passed	CIAVCXUS VIMINFO,CIANBRPC DIVGET,XUS GET USER INFO,ORWU USERINFO,ORWU NPHASKEY,ORWU HAS OPTION ACCESS	
+features/rate_limiting.feature:32	b	Throttling is keyed by identity as well as address	passed	passed	passed	CIAVCXUS VIMINFO,CIANBRPC DIVGET,XUS GET USER INFO,ORWU USERINFO,ORWU NPHASKEY,ORWU HAS OPTION ACCESS	
+features/rate_limiting.feature:36	b	One throttled account does not throttle the clinic	passed	failed	passed	CIAVCXUS VIMINFO,CIANBRPC DIVGET,XUS GET USER INFO,ORWU USERINFO,ORWU NPHASKEY,ORWU HAS OPTION ACCESS	
+features/rate_limiting.feature:46	f	Token redemption is throttled by address	skipped	skipped	skipped		skipped
+features/rate_limiting.feature:51	f	A throttled miss is indistinguishable from a throttled hit	skipped	skipped	skipped		skipped
+features/rate_limiting.feature:60	f	Token redemption failures are recorded for review	skipped	skipped	skipped		skipped
+features/rate_limiting.feature:68	b	Patient search is throttled per authenticated session	passed	failed	passed	ORWPT LIST ALL	
+features/rate_limiting.feature:73	b	Throttled clinical reads are audited, not silently dropped	passed	failed	passed	ORWPT LIST ALL	
+features/rate_limiting.feature:83	a	Every route is throttled or explicitly allowlisted	passed	passed	passed		
+features/rate_limiting.feature:87	a	A newly added route that is neither fails the check	passed	passed	passed		
+features/referral_origination.feature:19	a	Originate an urgent referral	passed	passed	passed		
+features/referral_origination.feature:29	a	Originate a referral with missing service	passed	passed	passed		
+features/referral_origination.feature:38	a	Originate a referral with missing provider	passed	passed	passed		
+features/referral_origination.feature:45	a	Origination result includes patient identifier for PRC handoff	passed	passed	passed		
+features/referral_origination.feature:55	a	Origination with enrollment checker shows enrollment status	passed	passed	passed		
+features/referral_origination.feature:66	a	Origination with enrollment checker shows non-enrolled status	passed	passed	passed		
+features/referral_origination.feature:77	a	Origination without enrollment checker omits enrollment status	passed	passed	passed		
+features/referral_origination.feature:8	a	Originate a referral with valid patient and service	passed	passed	passed		
+features/screening_instruments.feature:106	f	The due banner links to the instrument for the patient in context	undefined	undefined	undefined		undefined
+features/screening_instruments.feature:112	f	Recording the instrument clears its due state	undefined	undefined	undefined		undefined
+features/screening_instruments.feature:122	f	A site with a different screening cadence gets its own interval	undefined	undefined	undefined		undefined
+features/screening_instruments.feature:131	f	Recording an instrument produces an audit event	undefined	undefined	undefined		undefined
+features/screening_instruments.feature:22	f	PHQ-9 total score is computed from item responses	undefined	undefined	undefined		undefined
+features/screening_instruments.feature:37	f	GAD-7 total score is computed from item responses	undefined	undefined	undefined		undefined
+features/screening_instruments.feature:50	f	An incomplete instrument is not scored	undefined	undefined	undefined		undefined
+features/screening_instruments.feature:55	f	Item responses are stored discretely, not only as a total	undefined	undefined	undefined		undefined
+features/screening_instruments.feature:74	f	A positive PHQ-9 item 9 raises a safety flag regardless of total score	undefined	undefined	undefined		undefined
+features/screening_instruments.feature:79	f	A zero item 9 raises no safety flag	undefined	undefined	undefined		undefined
+features/screening_instruments.feature:87	f	An instrument never administered is due	undefined	undefined	undefined		undefined
+features/screening_instruments.feature:91	f	An instrument inside its interval is not due	undefined	undefined	undefined		undefined
+features/screening_instruments.feature:95	f	An instrument past its interval is overdue	undefined	undefined	undefined		undefined
+features/screening_instruments.feature:99	f	Due state is surfaced on the chart, not only in a report	undefined	undefined	undefined		undefined
+features/sdoh_sogi.feature:15	a	Record housing status screening observation	passed	passed	passed		
+features/sdoh_sogi.feature:20	a	Record food insecurity screening observation	passed	passed	passed		
+features/sdoh_sogi.feature:24	a	SDOH observations use US Core social-history profile	passed	passed	passed		
+features/sdoh_sogi.feature:28	a	Survey observations use US Core screening-assessment profile	passed	passed	passed		
+features/sdoh_sogi.feature:37	b	Patient has sexual orientation extension in FHIR	passed	failed	passed	ORWPT SELECT,ORWPT ID INFO	
+features/sdoh_sogi.feature:42	b	Patient has gender identity extension in FHIR	passed	failed	passed	ORWPT SELECT,ORWPT ID INFO	
+features/smart_launch_context.feature:15	a	Mint a launch context with patient and encounter	passed	passed	passed		
+features/smart_launch_context.feature:21	a	Mint a launch context with facility	passed	passed	passed		
+features/smart_launch_context.feature:26	a	SMART context includes patient only when present	passed	passed	passed		
+features/smart_launch_context.feature:31	a	SMART context includes encounter only when present	passed	passed	passed		
+features/smart_launch_context.feature:36	a	Launch context token is unique	passed	passed	passed		
+features/smart_launch_context.feature:8	a	Mint a launch context with patient	passed	passed	passed		
+features/state_immunization_registry_exchange.feature:103	a	Connection status check	passed	passed	passed		
+features/state_immunization_registry_exchange.feature:16	a	Send patient immunizations to state IIS	passed	passed	passed		
+features/state_immunization_registry_exchange.feature:23	a	Send immunizations when state IIS is disabled	passed	passed	passed		
+features/state_immunization_registry_exchange.feature:33	a	Query state IIS for patient immunization history	passed	passed	passed		
+features/state_immunization_registry_exchange.feature:39	a	Query returns no records for unknown patient	passed	passed	passed		
+features/state_immunization_registry_exchange.feature:49	a	Process pending state IIS responses	passed	passed	passed		
+features/state_immunization_registry_exchange.feature:60	a	Full sync queries and processes responses for a patient	passed	passed	passed		
+features/state_immunization_registry_exchange.feature:70	a	Deduplication prevents duplicate immunization entries	passed	passed	passed		
+features/state_immunization_registry_exchange.feature:81	a	RPMS connection failure handled gracefully	passed	passed	passed		
+features/state_immunization_registry_exchange.feature:88	a	Configuration error handled gracefully	passed	passed	passed		
+features/state_immunization_registry_exchange.feature:99	a	Mock adapter used in test environment	passed	passed	passed		
+features/terminology.feature:10	a	ICD-10-CM code (US edition)	passed	passed	passed		
+features/terminology.feature:100	a	SNOMED CT international (no version)	passed	passed	passed		
+features/terminology.feature:105	a	Empty SNOMED code is unmapped	passed	passed	passed		
+features/terminology.feature:109	a	Whitespace-only code is unmapped	passed	passed	passed		
+features/terminology.feature:16	a	ICD-10-SE code (Swedish edition)	passed	passed	passed		
+features/terminology.feature:20	a	ICD-10-CA code (Canadian edition)	passed	passed	passed		
+features/terminology.feature:24	a	ICD-10 international (no edition)	passed	passed	passed		
+features/terminology.feature:28	a	ICD-10 to FHIR Coding	passed	passed	passed		
+features/terminology.feature:34	a	Empty ICD-10 code is unmapped	passed	passed	passed		
+features/terminology.feature:40	a	LOINC observation code	passed	passed	passed		
+features/terminology.feature:46	a	LOINC to FHIR Coding	passed	passed	passed		
+features/terminology.feature:54	a	RxNorm medication code	passed	passed	passed		
+features/terminology.feature:59	a	RxNorm to FHIR Coding	passed	passed	passed		
+features/terminology.feature:66	a	ATC drug classification code	passed	passed	passed		
+features/terminology.feature:73	a	DIN drug identification code	passed	passed	passed		
+features/terminology.feature:80	a	SNOMED CT code (no edition)	passed	passed	passed		
+features/terminology.feature:85	a	SNOMED CT US edition	passed	passed	passed		
+features/terminology.feature:90	a	SNOMED CT Swedish edition	passed	passed	passed		
+features/terminology.feature:95	a	SNOMED CT Canadian edition	passed	passed	passed		
+features/tribal_enrollment.feature:21	e	View patient tribal enrollment details	passed	passed	passed		stubs TribalEnrollmentGateway.enrollment_details
+features/tribal_enrollment.feature:35	e	Enrollment-number validation is a syntactic format check	passed	passed	passed		stubs TribalEnrollmentGateway.validate
+features/tribal_enrollment.feature:40	e	A malformed enrollment number reports invalid	passed	passed	passed		stubs TribalEnrollmentGateway.validate
+features/tribal_enrollment.feature:45	e	A present eligibility status never resolves to eligible (fail closed)	passed	passed	passed		stubs TribalEnrollmentGateway.eligibility
+features/tribal_enrollment.feature:52	e	An empty eligibility read is undetermined, never eligible	passed	passed	passed		stubs TribalEnrollmentGateway.eligibility
+features/tribal_enrollment.feature:58	b	A patient with no enrollment number is not eligible	passed	failed	passed	DDR GETS ENTRY DATA	
+features/tribal_enrollment.feature:64	f	A status determined eligible requires the signed-off mapping	skipped	skipped	skipped		skipped
+features/tribal_enrollment.feature:72	e	Service unit is a table lookup by IEN	passed	passed	passed		stubs TribalEnrollmentGateway.service_unit
+features/tribal_enrollment.feature:78	e	Tribe information comes from the enrollment's tribe pointer	passed	passed	passed		stubs TribalEnrollmentGateway.enrollment_details TribalEnrollmentGateway.tribe_info
+features/tribal_enrollment.feature:86	e	A patient whose enrollment names no tribe has no tribe information	passed	passed	passed		stubs TribalEnrollmentGateway.enrollment_details
+features/tribal_enrollment.feature:91	a	Patient with missing enrollment number cannot be validated	passed	passed	passed		
+features/url_patient_context.feature:11	b	Context is re-derived from the URL after refresh	passed	passed	passed	ORWPT SELECT,ORWPT ID INFO,ORQQPL LIST,ORWPS ACTIVE,ORQQAL LIST,ORQQVI VITALS	
+features/url_patient_context.feature:17	b	Invalid patient identifier clears context	passed	passed	passed	ORWPT SELECT,ORWPT ID INFO,ORQQPL LIST,ORWPS ACTIVE,ORQQAL LIST,ORQQVI VITALS,BEHOXQ ALRLIST	
+features/url_patient_context.feature:24	b	Backend failure clears rather than freezes context	passed	passed	passed	ORWPT SELECT,ORWPT ID INFO,ORQQPL LIST,ORWPS ACTIVE,ORQQAL LIST,ORQQVI VITALS	partly stubbed: PatientRepository.find
+features/vaccine_barcode.feature:13	a	Barcode scan resolves vaccine via GTIN lookup	passed	passed	passed		
+features/vaccine_barcode.feature:19	a	Invalid barcode returns helpful validation	passed	passed	passed		
+features/vaccine_barcode.feature:23	a	Barcode with FNC1 separators parsed correctly	passed	passed	passed		
+features/vaccine_barcode.feature:6	a	Parse GS1-128 barcode with lot, expiration, and NDC	passed	passed	passed		
+features/vaers_export.feature:17	b	VAERS export sources patient data from Patient model	passed	failed	passed	ORWPT SELECT,ORWPT ID INFO	
+features/vaers_export.feature:23	a	VAERS report validates required fields	passed	passed	passed		
+features/vaers_export.feature:28	b	VAERS export produces CSV output	passed	failed	passed	ORWPT SELECT,ORWPT ID INFO	
+features/vaers_export.feature:9	b	Export VAERS report for a patient with immunization and adverse reaction	passed	failed	passed	ORWPT SELECT,ORWPT ID INFO	
+features/valueset_audit.feature:14	a	Record ValueSet expansion	passed	passed	passed		
+features/valueset_audit.feature:20	a	Record code validation	passed	passed	passed		
+features/valueset_audit.feature:26	a	Record ValueSet creation	passed	passed	passed		
+features/valueset_audit.feature:32	a	Record ValueSet update	passed	passed	passed		
+features/valueset_audit.feature:38	a	Record ValueSet deletion	passed	passed	passed		
+features/valueset_audit.feature:44	a	Agent history across ValueSets	passed	passed	passed		
+features/valueset_audit.feature:50	a	Usage statistics	passed	passed	passed		
+features/valueset_audit.feature:58	a	History ordered by most recent first	passed	passed	passed		
+features/valueset_audit.feature:64	a	Creation with source document	passed	passed	passed		
+features/valueset_audit.feature:69	a	Expansion tracks code count and cache status	passed	passed	passed		
+features/valueset_audit.feature:8	a	Record ValueSet access	passed	passed	passed		
+features/vfc_compliance.feature:11	b	Non-eligible patient blocked from VFC vaccine	passed	failed	passed	BGOVIMM GETVFC,BGOVIMM2 GETELIG	
+features/vfc_compliance.feature:16	a	Non-VFC lot available to any patient	passed	passed	passed		
+features/vfc_compliance.feature:20	b	VFC eligibility codes are enumerable	passed	failed	passed	BGOVIMM2 GETELIG	
+features/vfc_compliance.feature:25	a	VFC eligible codes are V02 through V07	passed	passed	passed		
+features/vfc_compliance.feature:6	b	VFC-eligible patient receives VFC vaccine successfully	passed	failed	passed	BGOVIMM GETVFC,BGOVIMM2 GETELIG	

@@ -1,3 +1,4 @@
+@app
 Feature: Record a purpose of visit on an open encounter
   As a clinical provider
   I need to record the purpose of visit (POV) against the patient's open visit

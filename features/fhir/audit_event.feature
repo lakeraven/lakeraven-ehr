@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+@app
 Feature: AuditEvent FHIR resource
   As a compliance officer
   I need to represent audit events as FHIR resources

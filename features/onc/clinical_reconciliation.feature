@@ -13,6 +13,7 @@ Feature: Clinical Information Reconciliation
   # FHIR BUNDLE IMPORT
   # =============================================================================
 
+  @live
   Scenario: Import clinical data from FHIR Bundle
     Given a FHIR Bundle containing allergies, conditions, and medications
     When a clinician imports the FHIR Bundle for reconciliation
@@ -24,6 +25,7 @@ Feature: Clinical Information Reconciliation
   # C-CDA IMPORT
   # =============================================================================
 
+  @app
   Scenario: Import clinical data from C-CDA document
     Given a C-CDA document containing clinical data
     When a clinician imports the C-CDA document for reconciliation
@@ -45,12 +47,14 @@ Feature: Clinical Information Reconciliation
   # ACCEPT / REJECT
   # =============================================================================
 
+  @app
   Scenario: Clinician accepts a reconciliation item
     Given a reconciliation session exists with pending items
     When the clinician accepts an item
     Then the item decision should be "accepted"
     And the item should record who decided
 
+  @app
   Scenario: Clinician rejects a reconciliation item
     Given a reconciliation session exists with pending items
     When the clinician rejects an item
@@ -60,6 +64,7 @@ Feature: Clinical Information Reconciliation
   # BULK OPERATIONS
   # =============================================================================
 
+  @app
   Scenario: Clinician accepts all items of a type
     Given a reconciliation session exists with multiple pending allergy items
     When the clinician accepts all allergy items
@@ -69,12 +74,14 @@ Feature: Clinical Information Reconciliation
   # COMPLETE SESSION
   # =============================================================================
 
+  @app
   Scenario: Complete reconciliation after all decisions made
     Given a reconciliation session exists with all items decided
     When the clinician completes the reconciliation
     Then the session status should be "completed"
     And a provenance record should be created
 
+  @app
   Scenario: Cannot complete reconciliation with undecided items
     Given a reconciliation session exists with pending items
     When the clinician attempts to complete the reconciliation

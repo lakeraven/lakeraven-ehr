@@ -1,3 +1,4 @@
+@app
 Feature: Drug Interaction Checking (ONC § 170.315(a)(4))
   As a healthcare provider
   I need to check for drug-drug and drug-allergy interactions before prescribing
