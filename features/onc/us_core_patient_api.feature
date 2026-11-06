@@ -16,6 +16,7 @@ Feature: US Core Patient API
     # scope was wrong here, not the refusal.
     And I have a valid SMART token with scope "user/Patient.read"
 
+  @live
   Scenario: Search by _id returns patient with US Core profile in meta
     When I request GET "/fhir/Patient?_id=4" with the Bearer token
     Then the response status should be 200
@@ -23,24 +24,28 @@ Feature: US Core Patient API
     And the Bundle should contain at least 1 entries
     And the first patient entry should include US Core Patient profile in meta
 
+  @live
   Scenario: Search by name returns matching patients in Bundle
     When I request GET "/fhir/Patient?name=DEMO" with the Bearer token
     Then the response status should be 200
     And the response should be a FHIR Bundle
     And each entry should have resourceType "Patient"
 
+  @live
   Scenario: Search by name and birthdate combination works
     When I request GET "/fhir/Patient?name=DEMO&birthdate=2001-01-01" with the Bearer token
     Then the response status should be 200
     And the response should be a FHIR Bundle
     And the Bundle should contain at least 1 entries
 
+  @live
   Scenario: Search by name and gender combination works
     When I request GET "/fhir/Patient?name=DEMO&gender=female" with the Bearer token
     Then the response status should be 200
     And the response should be a FHIR Bundle
     And the Bundle should contain at least 1 entries
 
+  @live
   Scenario: Search by identifier with system|value format works
     When I request GET "/fhir/Patient?identifier=http://hl7.org/fhir/sid/us-ssn|666-01-0101" with the Bearer token
     Then the response status should be 200
@@ -60,11 +65,13 @@ Feature: US Core Patient API
     And the first patient entry should include US Core race extension
     And the race extension should contain an ombCategory coding
 
+  @live
   Scenario: Patient resource includes US Core ethnicity extension
     When I request GET "/fhir/Patient?_id=4" with the Bearer token
     Then the response status should be 200
     And the first patient entry should include US Core ethnicity extension
 
+  @app
   Scenario: Show returns 403 for patient outside SMART context
     # This scenario is ABOUT patient-context enforcement, so it needs a
     # patient-CONTEXT-bound token and overrides the population scope in the

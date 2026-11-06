@@ -9,6 +9,7 @@ Feature: Provider Search and Management
     Given these RPMS demo providers:
       | ien | name           |
       | 4   | Manager,System |
+      | 209 | Profile,Bill   |
       | 204 | Profile,Ma     |
       | 206 | Profile,Md     |
       | 207 | Profile,Reg    |
@@ -16,6 +17,7 @@ Feature: Provider Search and Management
       | 208 | Profile,Sched  |
       | 200 | Provider,Test  |
 
+  @live
   Scenario: Search for provider by name
     When I search for providers with name "PROVIDER"
     Then I should find 1 provider in the results
@@ -36,9 +38,10 @@ Feature: Provider Search and Management
       | NPI       | 1234567890     |
       | DEA       | AM1234563      |
 
+  @live
   Scenario: List all providers
     When I search for all providers
-    Then I should find 7 providers in the results
+    Then I should find 8 providers in the results
 
   # DEFERRED (@unsourced): the read this needs lives in rpms-rpc, not the
     # engine, and the field numbers were only verified against the live DD on
@@ -51,10 +54,12 @@ Feature: Provider Search and Management
     And the provider results should include "MARTINEZ,SARAH"
     But the provider results should not include "CHEN,JAMES"
 
+  @live
   Scenario: Search with no results
     When I search for providers with name "NONEXISTENT"
     Then I should find 0 providers in the results
 
+  @live
   Scenario: Retrieve nonexistent provider
     When I retrieve provider with IEN 99999
     Then the provider should be nil

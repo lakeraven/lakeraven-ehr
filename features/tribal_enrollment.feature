@@ -55,6 +55,7 @@ Feature: Tribal Enrollment Management
     Then the eligibility determination should be undetermined
     And the patient should not be eligible for IHS services
 
+  @live
   Scenario: A patient with no enrollment number is not eligible
     Given patient "4" has no enrollment number on file
     When I check IHS eligibility for patient "4"
@@ -88,6 +89,7 @@ Feature: Tribal Enrollment Management
     When I request tribe information for patient "1"
     Then no tribe information should be available
 
+  @app
   Scenario: Patient with missing enrollment number cannot be validated
     Given patient "4" has no enrollment number on file
     When I attempt to validate the patient's tribal enrollment

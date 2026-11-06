@@ -1,3 +1,4 @@
+@app
 Feature: A walk-in visit charted end to end
   This is the demo script as an executable spec: a walk-in patient is seen,
   vitals are taken, the purpose of visit is recorded, a note is written and

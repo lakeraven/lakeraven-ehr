@@ -1,4 +1,4 @@
-@onc
+@onc @app
 Feature: Emergency Access (ONC § 170.315(d)(6))
   As a healthcare provider in an emergency situation
   I need to access patient records via break-the-glass

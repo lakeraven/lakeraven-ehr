@@ -31,7 +31,7 @@ healthit.gov — each row's owner links the exact procedure when the work order 
 | (a)(1) | CPOE medications | `onc/cpoe.feature` (10), `onc/cpoe_audit_trail.feature` (7) | — | procedure walkthrough + cucumber report | implemented |
 | (a)(4)* | Drug-interaction checks | `drug_interactions.feature` (14) | — | procedure walkthrough | implemented (*SED-scoped elective, retained) |
 | (a)(5) | Demographics | `onc/us_core_patient_api.feature` (8), `sdoh_sogi.feature` (6) | #360 (USCDI v3 audit) | USCDI v3 element checklist | implemented, audit open |
-| (a)(14) | Implantable device list | `onc/implantable_device_list.feature` (10) | — | procedure walkthrough | implemented |
+| (a)(14) | Implantable device list | `onc/implantable_device_list.feature` (4) | — | procedure walkthrough | implemented |
 | (b)(1) | Transitions of care (C-CDA) | `onc/transitions_of_care.feature` (10), `care_coordination_interoperability.feature` (6) | #222 | **ETT / HL7 C-CDA validator** | implemented; Direct transport open (see h-row) |
 | (b)(2)* | Clinical reconciliation | `onc/clinical_reconciliation.feature` (8) | #362 | ONC b-2 test-procedure run | implemented, procedure pass open (*elective, near-done) |
 | (b)(10) | EHI export (condition) | `onc/ehi_export.feature` (9) | #229 | completeness manifest + format docs | implemented, docs open |
@@ -59,7 +59,7 @@ healthit.gov — each row's owner links the exact procedure when the work order 
 | Criterion | What | Spec (scenarios) | Issues | Validator | Status |
 |---|---|---|---|---|---|
 | (a)(15) | SDOH (Gravity IG) | `sdoh_sogi.feature` baseline | #153 | IG validation | partial |
-| (b)(3) | e-Prescribing | `onc/electronic_prescribing.feature` (10) | **#405 (network cert — longest external pole)** | network certification scripts | code implemented |
+| (b)(3) | e-Prescribing | `onc/electronic_prescribing.feature` (9) | **#405 (network cert — longest external pole)** | network certification scripts | code implemented |
 | (b)(7)(8) | Security tags send/receive | **spec gap** | #223, #224 | C-CDA w/ confidentiality codes | BDD-red first |
 | (e)(1) | View/Download/Transmit | `patient_portal_phr.feature` (16) + `patient_portal/` (33) | #225 | procedure walkthrough | partial |
 | (f)(1) | Immunization registry (VXU) | `state_immunization_registry_exchange.feature` (11), `vfc_compliance` (8), `vaers_export` (4) | #230 | **NIST HL7v2 validator** | implemented, VXU open |

@@ -18,21 +18,25 @@ Feature: Rate limiting on API and public endpoints
   # Authentication
   # ---------------------------------------------------------------------------
 
+  @live
   Scenario: Repeated failed sign-ins are throttled
     When I submit 10 failed sign-ins for account "provider1" from one address
     Then the next sign-in attempt should be throttled
     And the response status should be 429
     And the response should include a "Retry-After" header
 
+  @live
   Scenario: A throttled account is not locked out permanently
     Given account "provider1" is throttled after repeated failures
     When the throttle window elapses
     Then a correct sign-in for "provider1" should succeed
 
+  @live
   Scenario: Throttling is keyed by identity as well as address
     When I submit 10 failed sign-ins for account "provider1" from 10 different addresses
     Then the next sign-in attempt for "provider1" should be throttled
 
+  @live
   Scenario: One throttled account does not throttle the clinic
     Given account "provider1" is throttled after repeated failures
     When account "provider2" signs in from the same address
@@ -65,11 +69,13 @@ Feature: Rate limiting on API and public endpoints
   # Clinical read surface
   # ---------------------------------------------------------------------------
 
+  @live
   Scenario: Patient search is throttled per authenticated session
     Given I am authenticated with SMART-on-FHIR
     When I issue 200 patient searches within the throttle window
     Then the next patient search should be throttled
 
+  @live
   Scenario: Throttled clinical reads are audited, not silently dropped
     Given I am authenticated with SMART-on-FHIR
     And my session has been throttled for patient search
@@ -80,10 +86,12 @@ Feature: Rate limiting on API and public endpoints
   # Coverage is the deliverable
   # ---------------------------------------------------------------------------
 
+  @app
   Scenario: Every route is throttled or explicitly allowlisted
     When the rate-limit convention check runs
     Then every route should be either throttled or on the reviewed allowlist
 
+  @app
   Scenario: A newly added route that is neither fails the check
     Given a route exists that is neither throttled nor allowlisted
     When the rate-limit convention check runs

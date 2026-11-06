@@ -1,4 +1,4 @@
-@screenings
+@screenings @app
 Feature: Scored PHQ-9 and GAD-7 instruments
   As a therapist
   I need standardized scored screenings on the chart

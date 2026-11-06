@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+@app
 Feature: ValueSet audit trail
   As a compliance officer
   I need to track all ValueSet operations

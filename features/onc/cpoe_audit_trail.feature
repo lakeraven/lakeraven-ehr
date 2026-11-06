@@ -18,6 +18,7 @@ Feature: CPOE Audit Trail
     And the audit event action should be "C"
     And the audit event agent should be "789"
 
+  @app
   Scenario: Lab order creation is audited
     When the provider creates a lab order:
       | field       | value                |
@@ -26,6 +27,7 @@ Feature: CPOE Audit Trail
     Then an audit event should exist with subtype "lab_order_created"
     And the audit event action should be "C"
 
+  @app
   Scenario: Imaging order creation is audited
     When the provider creates an imaging order:
       | field       | value       |
@@ -45,6 +47,7 @@ Feature: CPOE Audit Trail
     And the audit event action should be "E"
     And the audit event should include a content hash
 
+  @app
   Scenario: Signing a lab order is audited
     Given a draft lab order exists for "CBC"
     When the provider signs the order
