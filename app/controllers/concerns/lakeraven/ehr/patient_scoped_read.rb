@@ -15,10 +15,9 @@ module Lakeraven
     # it. An id that names no patient is a 404 for every caller.
     module PatientScopedRead
       extend ActiveSupport::Concern
+      include PatientCompartment
 
       included do
-        include PatientCompartment
-
         rate_limit only: %i[index show]
 
         compartment_bound :index, param: :patient, require_param: true
