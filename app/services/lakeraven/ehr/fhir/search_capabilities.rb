@@ -42,6 +42,13 @@ module Lakeraven
           def type = "token"
         end
 
+        # A date search parameter FHIRSearchBundle#apply_date_searches filters
+        # on: where its value sits in the served resource (a date, a dateTime
+        # or a Period).
+        DateParam = Data.define(:documentation, :paths) do
+          def type = "date"
+        end
+
         ID = Sort.new(paths: [ %i[id] ], type: :string)
         NAME = Sort.new(paths: [ [ :name, 0, :family ], [ :name, 0, :given, 0 ] ], type: :string)
         STATUS = Sort.new(paths: [ %i[status] ], type: :string)
@@ -53,6 +60,8 @@ module Lakeraven
           documentation: "Required: Patient/<id> or <id>. A token bound to a patient may name only that patient."
         )
         TOKEN_FORMS = "A value is code, system|code, |code or system|; comma-separated values match any of them."
+        DATE_FORMS = "A prefix (eq, ne, gt, lt, ge, le, sa, eb) and a date of any precision; " \
+                     "repeat the parameter for a range. Any other value is refused with a 400 OperationOutcome."
 
         # Sorts and includes: only what the resource the server builds
         # actually carries. Encounter, ServiceRequest and Procedure have none:
@@ -68,10 +77,7 @@ module Lakeraven
             search: {
               "_id" => Param.new(type: "token", documentation: "The patient's DFN."),
               "name" => Param.new(type: "string", documentation: "Name, as the RPMS patient lookup matches it."),
-              "birthdate" => Param.new(
-                type: "date",
-                documentation: "One day, YYYY-MM-DD. A prefix or a partial date is refused with a 400 OperationOutcome."
-              ),
+              "birthdate" => DateParam.new(documentation: "The birth date. #{DATE_FORMS}", paths: [ %i[birthDate] ]),
               "gender" => Param.new(type: "token", documentation: "male, female, other or unknown.")
             },
             sort: {
@@ -127,9 +133,24 @@ module Lakeraven
             sort: { "_id" => ID, "status" => STATUS },
             include: { "MedicationRequest:patient" => SUBJECT, "MedicationRequest:subject" => SUBJECT }
           },
-          "Encounter" => { search: { "patient" => PATIENT_PARAM } },
-          "ServiceRequest" => { search: { "patient" => PATIENT_PARAM } },
-          "Procedure" => { search: { "patient" => PATIENT_PARAM } },
+          "Encounter" => {
+            search: {
+              "patient" => PATIENT_PARAM,
+              "date" => DateParam.new(documentation: "The encounter's period. #{DATE_FORMS}", paths: [ %i[period] ])
+            }
+          },
+          "ServiceRequest" => {
+            search: {
+              "patient" => PATIENT_PARAM,
+              "authored" => DateParam.new(documentation: "When it was authored. #{DATE_FORMS}", paths: [ %i[authoredOn] ])
+            }
+          },
+          "Procedure" => {
+            search: {
+              "patient" => PATIENT_PARAM,
+              "date" => DateParam.new(documentation: "When it was performed. #{DATE_FORMS}", paths: [ %i[performedDateTime] ])
+            }
+          },
           "Observation" => {
             search: {
               "patient" => PATIENT_PARAM,
@@ -137,7 +158,8 @@ module Lakeraven
                 documentation: "observation-category, such as vital-signs. #{TOKEN_FORMS}",
                 paths: [ [ :category, :* ] ]
               ),
-              "code" => Token.new(documentation: "LOINC code. #{TOKEN_FORMS}", paths: [ %i[code] ])
+              "code" => Token.new(documentation: "LOINC code. #{TOKEN_FORMS}", paths: [ %i[code] ]),
+              "date" => DateParam.new(documentation: "When it was observed. #{DATE_FORMS}", paths: [ %i[effectiveDateTime] ])
             },
             sort: {
               "_id" => ID, "status" => STATUS,
@@ -148,7 +170,10 @@ module Lakeraven
             include: { "Observation:patient" => SUBJECT, "Observation:subject" => SUBJECT }
           },
           "Immunization" => {
-            search: { "patient" => PATIENT_PARAM },
+            search: {
+              "patient" => PATIENT_PARAM,
+              "date" => DateParam.new(documentation: "When it was given. #{DATE_FORMS}", paths: [ %i[occurrenceDateTime] ])
+            },
             sort: {
               "_id" => ID, "status" => STATUS,
               "date" => Sort.new(paths: [ %i[occurrenceDateTime] ], type: :date)
@@ -198,6 +223,11 @@ module Lakeraven
         # The type's token parameters FHIRSearchBundle filters generically.
         def self.token_params_for(type)
           search_params_for(type).select { |_, param| param.is_a?(Token) }
+        end
+
+        # The type's date parameters FHIRSearchBundle filters generically.
+        def self.date_params_for(type)
+          search_params_for(type).select { |_, param| param.is_a?(DateParam) }
         end
 
         def self.revincludes_for(type)
