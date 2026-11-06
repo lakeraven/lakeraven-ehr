@@ -150,6 +150,14 @@
           can_edit: can_edit %>
   <% end %>
 
+  <% if @other_tribes && @eligibility_modifiers %>
+    <%= render "lakeraven/ehr/registration/other_tribes/section",
+          dfn: params[:dfn],
+          other_tribes: @other_tribes,
+          modifiers: @eligibility_modifiers,
+          can_edit: can_edit %>
+  <% end %>
+
   <% if @other_names %>
     <%= render "lakeraven/ehr/registration/other_names/section",
           dfn: params[:dfn],
