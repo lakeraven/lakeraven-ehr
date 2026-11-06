@@ -1,0 +1,81 @@
+<% page_title "Appointments" %>
+<% list = Lakeraven::EHR::Scheduling::AppointmentListsController %>
+
+<%= page_header "Appointments",
+      [ "The appointments in your clinics.",
+        "Future, past and all reach #{list::REACH_DAYS} days each way.",
+        "Open the clinic's day to act on one." ] %>
+
+<%= form_with url: scheduling_appointment_list_path,
+      method: :get,
+      local: true,
+      id: "appointment-list-filters",
+      class: "card flex flex-wrap items-end gap-4" do %>
+  <%= form_field :when, "When" do |aria| %>
+    <%= select_tag :when,
+          options_for_select(list::WHEN.invert, @when),
+          id: "when",
+          aria: aria %>
+  <% end %>
+  <%= form_field :status, "Status" do |aria| %>
+    <%= select_tag :status,
+          options_for_select([ [ "Any status", "" ] ] + list::STATUSES.invert.to_a, @status),
+          id: "status",
+          aria: aria %>
+  <% end %>
+  <%= form_field :sort, "Sort by" do |aria| %>
+    <%= select_tag :sort,
+          options_for_select(list::SORTS.invert, @sort),
+          id: "sort",
+          aria: aria %>
+  <% end %>
+  <%= submit_tag "Show appointments",
+        name: nil,
+        class: "button-secondary" %>
+<% end %>
+
+<% if @appointments == :unread %>
+  <%= alert_box :error,
+        "The appointments could not be read from RPMS.",
+        "Try again in a moment.",
+        id: "appointment-list-unread" %>
+<% elsif @appointments.empty? %>
+  <%= empty_state "No appointments match.",
+        id: "no-appointments" %>
+<% else %>
+  <table
+    id="appointment-list"
+    class="data-table mt-6"
+  >
+    <caption><%= pluralize(@appointments.size, "appointment") %>.</caption>
+    <thead>
+      <tr>
+        <th scope="col">Time</th>
+        <th scope="col">Clinic</th>
+        <th scope="col">Patient</th>
+        <th scope="col">Status</th>
+        <th scope="col"><span class="sr-only">Open the day</span></th>
+      </tr>
+    </thead>
+    <tbody>
+      <% @appointments.each do |appointment| %>
+        <% status_key, status = appointment_status(appointment) %>
+        <tr
+          data-appointment="<%= appointment[:id] %>"
+          data-resource="<%= appointment[:clinic][:id] %>"
+          data-patient="<%= appointment[:patient_dfn] %>"
+        >
+          <td><%= appointment[:start_time].strftime("%b %-d, %Y %H:%M") %></td>
+          <td><%= appointment[:clinic][:name] %></td>
+          <th scope="row"><%= appointment[:patient_name] %></th>
+          <td data-status="<%= status_key %>"><%= status_badge status_key, status %></td>
+          <td>
+            <%= link_to scheduling_clinic_path(appointment[:clinic][:id], date: appointment[:start_time].to_date.iso8601, anchor: "appointment-#{appointment[:id]}") do %>
+              Open the day<span class="sr-only"> at <%= appointment[:clinic][:name] %> for <%= appointment[:patient_name] %></span>
+            <% end %>
+          </td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+<% end %>

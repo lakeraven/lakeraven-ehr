@@ -3,20 +3,12 @@
 module Lakeraven
   module EHR
     class ConditionsController < ApplicationController
-      include PatientCompartment
+      include PatientScopedRead
 
-      rate_limit only: %i[index show]
+      private
 
-      compartment_bound :index, param: :patient, require_param: true
-
-      def index
-        dfn = patient_compartment_dfn
-        results = Condition.for_patient(dfn)
-        render_bundle_egress(results.map { |r| Condition.from_rpms_row(r, patient_dfn: dfn).to_fhir })
-      end
-
-      def show
-        render_not_found("Condition", params[:id])
+      def patient_resources(dfn)
+        Condition.for_patient(dfn).map { |row| Condition.from_rpms_row(row, patient_dfn: dfn).to_fhir }
       end
     end
   end
