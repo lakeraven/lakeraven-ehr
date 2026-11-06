@@ -8,6 +8,11 @@ module Lakeraven
     class AuthenticationService
       Result = Data.define(:success?, :value, :error)
 
+      # The codes were right, and RPMS refused this user the context the
+      # application signs on under (a terminal-only user, say). Only someone
+      # holding a good pair ever sees it, so saying so enumerates nothing.
+      CONTEXT_REFUSED = :context_refused
+
       # Process-local serialization for the shared broker client, used until
       # the gem ships its own wire lock (rpms-rpc#235). It is a correct
       # DEGRADED serialization: the failure mode is two sign-ons in ONE process
@@ -152,6 +157,9 @@ module Lakeraven
           verify_needs_change: VERIFY_CHANGE_GREETING.match?(signon[:greeting].to_s),
           rpms_session_id: client.session_uid
         }
+      rescue RpmsRpc::Client::ContextRefusedError => e
+        Rails.logger.warn("[auth] CIA sign-on refused: #{e.class}: #{e.message}")
+        { success: false, error: CONTEXT_REFUSED }
       rescue RpmsRpc::Client::AuthenticationError => e
         # The gem sanitizes these messages (RpmsRpc.sanitize_error), so the
         # reason is safe to log; the clinician still sees one message for

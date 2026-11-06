@@ -27,6 +27,15 @@ class LivePersonaScopesTest < ActiveSupport::TestCase
   # persona back on for whatever runs next.
   teardown { LiveRpmsSession.sign_on! if defined?(LIVE_RPMS) && LIVE_RPMS }
 
+  # PROFILE,BILL is a terminal user: its codes are good, and RPMS refuses it
+  # the context the application signs on under (rpms-rpc#501).
+  test "PROFILE,BILL is told RPMS does not let it into the application" do
+    result = Lakeraven::EHR::AuthenticationService.new.authenticate(access_code: "PBIL123", verify_code: "PBIL123!!")
+
+    refute result.success?
+    assert_equal Lakeraven::EHR::AuthenticationService::CONTEXT_REFUSED, result.error
+  end
+
   PAIRS.each do |persona, (access, verify)|
     test "#{persona} signs on and gets exactly the scopes its held keys and options grant" do
       result = Lakeraven::EHR::AuthenticationService.new.authenticate(access_code: access, verify_code: verify)

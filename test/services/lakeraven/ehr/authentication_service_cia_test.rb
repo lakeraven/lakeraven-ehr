@@ -14,10 +14,11 @@ class AuthenticationServiceCiaTest < ActiveSupport::TestCase
   class FakeCiaClient < RpmsRpc::CiaClient
     attr_reader :signons, :rpcs, :callers
 
-    def initialize(greeting: "MANAGER,SYSTEM signed on.  Good evening", reject: false, denied: [])
+    def initialize(greeting: "MANAGER,SYSTEM signed on.  Good evening", reject: false, denied: [], context_refused: false)
       super(host: "127.0.0.1", port: 9100)
       @greeting = greeting
       @reject = reject
+      @context_refused = context_refused
       @denied = denied
       @signons = []
       @rpcs = []
@@ -32,6 +33,7 @@ class AuthenticationServiceCiaTest < ActiveSupport::TestCase
       @signons << [ access_code, verify_code ]
       @callers << caller
       raise RpmsRpc::Client::AuthenticationError, "CIA sign-on rejected" if @reject
+      raise RpmsRpc::Client::ContextRefusedError, "CIA sign-on: this user may not use CIAV VUECENTRIC" if @context_refused
 
       @session_uid = "405"
       set_authenticated("77") # as CiaClient#authenticate does: held_keys binds a context and sends this DUZ
@@ -95,6 +97,15 @@ class AuthenticationServiceCiaTest < ActiveSupport::TestCase
 
     refute result.success?
     assert_equal "Invalid access/verify code", result.error
+  end
+
+  test "a user RPMS refuses the context is told apart from a wrong code" do
+    use(FakeCiaClient.new(context_refused: true))
+
+    result = service.authenticate(access_code: "PBIL123", verify_code: "PBIL123!!")
+
+    refute result.success?
+    assert_equal Lakeraven::EHR::AuthenticationService::CONTEXT_REFUSED, result.error
   end
 
   # A least-privilege clinician signs on under CIAV VUECENTRIC, whose RPC
