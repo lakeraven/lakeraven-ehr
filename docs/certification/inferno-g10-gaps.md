@@ -68,11 +68,11 @@ Evidence is file:line on `main`; tests are named where they prove the behaviour.
 | Condition (problems/health concerns): `patient`, `patient+category`, read | partial | `patient`; `category` and `clinical-status` added in #852; read always 404 | #845 |
 | Condition encounter-diagnosis profile | missing | `Condition.from_rpms_row` sets `problem-list-item` only (`condition.rb:72`) | #848 |
 | MedicationRequest: `patient+intent`, `patient+intent+status`, read; Medication by reference | partial | `intent` added in #852; `status` refuses `system|code`; read always 404; no Medication | #846, #845, #849 |
-| Observation vital-signs profiles: `patient+category`, `patient+code`, `patient+category+date`, read | partial | `category`, `code` (`search_capabilities.rb:105-118`) refuse `system|code`; no `date`; read always 404 | #846, #845 |
+| Observation vital-signs profiles: `patient+category`, `patient+code`, `patient+category+date`, read | partial | `category`, `code` and `date` with prefixes; read always 404 | #845 |
 | Observation lab, clinical-result, smoking status, screening-assessment, occupation, pregnancy, pediatric vitals | missing | Observation declares `us-core-vital-signs` only (`capability_statement.rb:41`) | #848 |
-| Encounter: `_id`, `patient`, `date+patient`, read | partial | `patient` only; entries are backend rows, not a US Core Encounter; no read (`routes.rb:75`) | #845, #846 |
-| Immunization, Procedure: `patient`, (`patient+date`), read | partial | `patient` only; no read (`routes.rb:79-80`) | #845, #846 |
-| ServiceRequest: `_id`, `patient`, `patient+category`, `patient+code`, `patient+category+authored`, read | partial | `patient` only; no read (`routes.rb:78`) | #845, #846 |
+| Encounter: `_id`, `patient`, `date+patient`, read | partial | `patient`, and `date` with prefixes; no `_id`; no read (`routes.rb:75`) | #845, #846 |
+| Immunization, Procedure: `patient`, (`patient+date`), read | partial | `patient` and `date` with prefixes; no read (`routes.rb:79-80`) | #845 |
+| ServiceRequest: `_id`, `patient`, `patient+category`, `patient+code`, `patient+category+authored`, read | partial | `patient` and `authored` with prefixes; no `_id`, `category` or `code`; no read (`routes.rb:78`) | #845, #846 |
 | Location `name`, `address`; Organization, Practitioner read | partial | reads served (`routes.rb:70,76-77`); Location has no search | #846 |
 | CarePlan, CareTeam, Goal | missing | models exist, not routed | #330, #334 |
 | Coverage | missing | not routed as FHIR Coverage | #239 |
