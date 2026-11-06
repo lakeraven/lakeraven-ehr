@@ -2,8 +2,9 @@
 
 require "test_helper"
 
-# Live (#845): every record a search finds on the demo build reads back by its
-# id, from RPMS, unchanged. DFN 2 and 4 are the panel patients with a chart.
+# Live (#845, #848): every record a search finds on the demo build reads back
+# by its id, from RPMS, unchanged. DFN 2 and 4 are the panel patients with a
+# chart.
 # The demo build has no MedicationRequest or ServiceRequest for them, so a
 # type that finds nothing fails here rather than proving nothing: see EMPTY.
 #
@@ -15,7 +16,7 @@ class LiveFhirReadTest < ActionDispatch::IntegrationTest
 
   ENGINE = "/lakeraven-ehr"
   DFN = "4"
-  SERVED = %w[Condition AllergyIntolerance Observation Immunization Procedure].freeze
+  SERVED = %w[Condition AllergyIntolerance Observation Immunization Procedure Encounter].freeze
   EMPTY = %w[MedicationRequest ServiceRequest].freeze
 
   setup do
@@ -50,6 +51,34 @@ class LiveFhirReadTest < ActionDispatch::IntegrationTest
       get "#{ENGINE}/#{type}/2-#{record}", headers: @headers
 
       assert_response :not_found
+    end
+  end
+
+  test "a visit is a US Core Encounter, and its references resolve" do
+    encounter = matches("Encounter", DFN).first
+
+    assert_equal "finished", encounter["status"]
+    assert_equal "AMB", encounter.dig("class", "code")
+    assert_equal "AMBULATORY", encounter.dig("type", 0, "text")
+    assert encounter.dig("period", "start")
+    [ encounter.dig("subject", "reference"), encounter.dig("location", 0, "location", "reference"),
+      encounter.dig("participant", 0, "individual", "reference") ].each do |reference|
+      get "#{ENGINE}/#{reference}", headers: @headers
+      assert_response :ok, "#{reference}: #{response.body}"
+    end
+  end
+
+  test "a visit diagnosis is an encounter-diagnosis that names a visit of the patient" do
+    visits = matches("Encounter", DFN).map { |encounter| encounter["id"] }
+    diagnoses = matches("Condition", DFN).select { |condition| condition.dig("category", 0, "coding", 0, "code") == "encounter-diagnosis" }
+
+    refute_empty diagnoses
+    assert diagnoses.any? { |diagnosis| diagnosis["encounter"] }, "the demo patient's clinic visits carry diagnoses"
+    diagnoses.each do |diagnosis|
+      reference = diagnosis.dig("encounter", "reference")
+      assert_includes visits, reference.delete_prefix("Encounter/") if reference
+      assert_match(/\A[A-Z]\d/, diagnosis.dig("code", "coding", 0, "code"))
+      assert_match(/\A\d{4}-\d\d-\d\d\z/, diagnosis["recordedDate"])
     end
   end
 

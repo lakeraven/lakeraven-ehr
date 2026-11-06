@@ -18,6 +18,7 @@ class FhirReadByIdTest < ActionDispatch::IntegrationTest
     "MedicationRequest" => -> { RpmsRpc.client.seed_text(:medication_active, "1", "~OP^41R;O^METFORMIN 500MG TAB^^3271231^1^^^120041^ACTIVE\n") },
     "Observation" => -> { },
     "Immunization" => -> { RpmsRpc.client.seed_keyed_collection(:immunization_list, "1^I", [ { record_type: "I", ien: 41, vaccine_display: "Influenza" } ]) },
+    "Encounter" => -> { RpmsRpc.client.seed_keyed_collection(:encounter_visit_list, "1", [ { visit_string: "1;3260310.09;A;41", location: "Clinic", category: "AMBULATORY" } ]) },
     "Procedure" => -> { RpmsRpc.client.seed_keyed_collection(:procedure_list, "1", [ { ien: 41, name: "Office visit", date: Date.new(2026, 3, 10) } ]) },
     "ServiceRequest" => -> { RpmsRpc.client.seed_keyed_collection(:referral_search, "1", [ { ien: 41, status: "A", purpose: "Cardiology" } ]) }
   }.freeze

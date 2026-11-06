@@ -124,7 +124,7 @@ class SmartLaunchContextTest < ActionDispatch::IntegrationTest
 
       body = approve_and_swap
       assert_equal "3", body["patient"]
-      assert_equal "42", body["encounter"]
+      assert_equal "3-42", body["encounter"]
       assert_equal "launch patient/Patient.rs user/Patient.rs", body["scope"]
     end
   end
