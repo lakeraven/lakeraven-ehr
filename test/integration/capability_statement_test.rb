@@ -81,7 +81,8 @@ class CapabilityStatementTest < ActionDispatch::IntegrationTest
       assert_empty search_ids("Procedure", patient: "1", date: "gt2026-03-31")
     },
     %w[Encounter date] => lambda {
-      RpmsRpc.client.seed_keyed_collection(:patient_appointments, "1", [ { datetime: Date.new(2026, 3, 10), location_ien: 1 } ])
+      RpmsRpc.client.seed_keyed_collection(:encounter_visit_list, "1", [ { visit_string: "1;3260310.09;A;11", location: "Clinic",
+                                                                           category: "AMBULATORY", datetime: Time.new(2026, 3, 10, 9, 0, 0) } ])
       refute_empty search_ids("Encounter", patient: "1", date: "ge2026-03-10")
       assert_empty search_ids("Encounter", patient: "1", date: "lt2026-03-01")
     },
@@ -176,7 +177,8 @@ class CapabilityStatementTest < ActionDispatch::IntegrationTest
   READ_SEEDS = PATIENT_SEEDS.merge(
     "AllergyIntolerance" => [ :allergy_list, { ien: 11, allergen: "Penicillin" } ],
     "ServiceRequest" => [ :referral_search, { ien: 11, status: "A", purpose: "Cardiology" } ],
-    "Immunization" => [ :immunization_list, { record_type: "I", ien: 11, vaccine_display: "Influenza" } ]
+    "Immunization" => [ :immunization_list, { record_type: "I", ien: 11, vaccine_display: "Influenza" } ],
+    "Encounter" => [ :encounter_visit_list, { visit_string: "1;3260310.09;A;11", location: "Clinic", category: "AMBULATORY" } ]
   ).freeze
   READ_SEED_KEYS = { "Immunization" => "1^I" }.freeze
 

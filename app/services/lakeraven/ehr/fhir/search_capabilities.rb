@@ -105,11 +105,11 @@ module Lakeraven
             search: {
               "patient" => PATIENT_PARAM,
               "category" => Token.new(
-                documentation: "condition-category. RPMS problems are problem-list-item. #{TOKEN_FORMS}",
+                documentation: "condition-category: problem-list-item for RPMS problems, encounter-diagnosis for visit diagnoses. #{TOKEN_FORMS}",
                 paths: [ [ :category, :* ] ]
               ),
               "clinical-status" => Token.new(
-                documentation: "condition-clinical: active or inactive, as RPMS records the problem. #{TOKEN_FORMS}",
+                documentation: "condition-clinical: active or inactive, as RPMS records a problem. A visit diagnosis carries none. #{TOKEN_FORMS}",
                 paths: [ %i[clinicalStatus] ]
               )
             },

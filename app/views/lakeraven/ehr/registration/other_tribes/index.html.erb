@@ -1,0 +1,102 @@
+<% page_title "Other tribes", @patient[:name], "Registration" %>
+
+<%= page_header @patient[:name],
+      "The patient's tribes other than the tribe of membership." %>
+
+<%= flash_alert id: "other-tribes-alert" %>
+
+<% if flash[:notice].present? %>
+  <%= alert_box :notice,
+        flash[:notice],
+        id: "other-tribes-notice" %>
+<% end %>
+
+<section
+  id="other-tribes-manage"
+  aria-labelledby="other-tribes-heading"
+  class="card flex flex-col gap-4"
+>
+  <h2
+    id="other-tribes-heading"
+    class="text-lg font-semibold"
+  >
+    Other tribes
+  </h2>
+  <% if @other_tribes.empty? %>
+    <%= empty_state "No other tribes on file.", id: "no-other-tribes" %>
+  <% else %>
+    <table
+      id="other-tribes"
+      class="data-table"
+    >
+      <caption class="sr-only">Other tribes</caption>
+      <thead>
+        <tr>
+          <th scope="col">Tribe</th>
+          <th scope="col">Quantum</th>
+          <th scope="col"><span class="sr-only">Actions</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        <% @other_tribes.each do |row| %>
+          <tr data-other-tribe="<%= row[:ien] %>">
+            <td><%= row[:tribe].titleize %></td>
+            <td><%= row[:quantum].presence || "Not recorded" %></td>
+            <td>
+              <%= button_to "Remove #{row[:tribe].titleize}",
+                    registration_remove_patient_other_tribe_path(@dfn, row[:ien]),
+                    method: :post,
+                    class: "button-secondary",
+                    form: { id: "remove-other-tribe-#{row[:ien]}" } %>
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  <% end %>
+
+  <%= form_errors @entry,
+        "The other tribe was not added.",
+        id: "other-tribe-errors" %>
+
+  <%= form_with scope: :other_tribe,
+        url: registration_patient_other_tribes_path(@dfn),
+        method: :post,
+        local: true,
+        id: "other-tribe-form",
+        class: "flex flex-col gap-4" do |f| %>
+    <%# OTHER TRIBE .01, 9000001.43. %>
+    <%= lookup_field f,
+          :tribe_ien,
+          legend: "Add another tribe",
+          search: :tribe_search,
+          search_label: "Tribe name starts with",
+          find_label: "Find tribe",
+          find_url: registration_patient_other_tribes_path(@dfn),
+          find_method: :get,
+          choices: @tribes.map { |tribe| [ tribe[:ien], tribe[:name], { tribe: tribe[:ien] } ] },
+          selected: @entry.tribe_ien,
+          chosen_text: "Tribe chosen.",
+          error: @entry.errors[:tribe_ien].first %>
+
+    <%# QUANTUM .02, 9000001.43. %>
+    <%= form_field :quantum,
+          "Quantum",
+          form: f,
+          hint: "A fraction such as 1/4, or FULL, UNKNOWN or NONE.",
+          error: @entry.errors[:quantum].first do |aria| %>
+      <%= f.text_field :quantum,
+            value: @entry.quantum,
+            autocomplete: "off",
+            aria: aria %>
+    <% end %>
+
+    <%= f.submit "Add the tribe",
+          class: "button-primary self-start" %>
+  <% end %>
+</section>
+
+<p class="mt-6">
+  <%= link_to "Back to the patient",
+        registration_patient_path(@dfn) %>
+</p>

@@ -78,11 +78,11 @@ module Lakeraven
         assert_equal %w[S256], config["code_challenge_methods_supported"]
         assert_includes config["token_endpoint_auth_signing_alg_values_supported"], "ES384"
         %w[launch-standalone launch-ehr authorize-post client-public client-confidential-symmetric
-           client-confidential-asymmetric context-standalone-patient context-ehr-patient context-banner
+           client-confidential-asymmetric context-standalone-patient context-ehr-patient context-ehr-encounter context-banner
            context-style permission-patient permission-user permission-v1 permission-v2].each do |capability|
           assert_includes config["capabilities"], capability
         end
-        %w[sso-openid-connect permission-offline context-ehr-encounter context-standalone-encounter].each do |capability|
+        %w[sso-openid-connect permission-offline context-standalone-encounter].each do |capability|
           refute_includes config["capabilities"], capability
         end
         refute config.key?("introspection_endpoint")

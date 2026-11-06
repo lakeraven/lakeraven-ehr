@@ -77,6 +77,28 @@ module Lakeraven
         )
       end
 
+      # VISIT SERVICE CATEGORY (#9000010 .07), as an encounter class. A category
+      # with no class of its own stays ambulatory, which is how RPMS lists it.
+      VISIT_CLASS = {
+        "A" => "AMB", "H" => "IMP", "I" => "IMP", "O" => "OBSENC", "R" => "NONAC", "S" => "SS", "T" => "VR"
+      }.freeze
+
+      # A row of RpmsRpc::Encounter.visits (BEHOENCX VISITLST). A visit has
+      # happened, so it is finished. RPMS records no end time on it.
+      def self.from_rpms_visit(row, patient_dfn:)
+        new(
+          ien: row[:visit_ien],
+          status: "finished",
+          class_code: VISIT_CLASS.fetch(row[:service_category], "AMB"),
+          type_display: row[:category],
+          period_start: row[:datetime],
+          patient_identifier: patient_dfn.to_s,
+          patient_dfn: patient_dfn.to_s,
+          practitioner_identifier: row[:provider_ien],
+          location_ien: row[:location_ien]
+        )
+      end
+
       def self.appointment_status(text, start)
         status = text.to_s.upcase
         return "cancelled" if status.include?("CANCEL") || status.include?("NO-SHOW") || status.include?("NO SHOW")
@@ -167,7 +189,7 @@ module Lakeraven
         end
 
         if location_ien
-          resource[:location] = [ { location: build_reference("Location", "rpms-location-#{location_ien}") } ]
+          resource[:location] = [ { location: build_reference("Location", location_ien) } ]
         end
 
         if service_provider_organization_ien

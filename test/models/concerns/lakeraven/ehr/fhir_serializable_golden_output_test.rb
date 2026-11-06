@@ -57,7 +57,7 @@ module Lakeraven
         reasonCode: [ { text: "General exam", coding: [ { code: "Z00.00" } ] } ],
         subject: { reference: "Patient/1" },
         participant: [ { individual: { reference: "Practitioner/101" } } ],
-        location: [ { location: { reference: "Location/rpms-location-5" } } ],
+        location: [ { location: { reference: "Location/5" } } ],
         serviceProvider: { reference: "Organization/rpms-organization-10" }
       }.freeze
 
