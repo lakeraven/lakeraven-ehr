@@ -30,15 +30,30 @@ module Lakeraven
         # booking. BPRM: CanViewPatient.
         "registration.view" => rule(any: %i[registration_menu registration_manager registration_view_only
                                             scheduling_user scheduling_supervisor]),
-        # Register a new patient. BPRM: CanRegisterPatient, AGZMENU and not
-        # AGZVIEWONLY. AGZMGR also registers here, as it edits patients in BPRM.
+        # Register a new patient, and edit a registered one (S-REG-20, S-REG-21).
+        # BPRM gates both on one policy, CanEditPatients: AGZMENU or AGZMGR, and
+        # not AGZVIEWONLY.
         "patient.register" => rule(any: %i[registration_menu registration_manager], deny: %i[registration_view_only]),
         # Open scheduling: resources whose BSDX rights let the user see them.
         # BPRM: CanAccessScheduling.
         "scheduling.open" => rule(any: %i[scheduling_user scheduling_supervisor]),
         # Every resource of the facility, and booking on any of them, whatever
         # its BSDX rights say. BPRM: SchedulingSupervisor.
-        "scheduling.supervise" => rule(any: %i[scheduling_supervisor])
+        "scheduling.supervise" => rule(any: %i[scheduling_supervisor]),
+        # Register a caller with no chart while booking them: name, date of
+        # birth, sex and SSN, and a temporary chart number (rpms-ux S-REG-05).
+        # RPMS: option BSDAM MINI REGISTRATION, locked by SDZREGMENU. BPRM
+        # implies the same key for its mini-registration (ADR 0010).
+        "patient.quick_register" => rule(any: %i[scheduling_registration], deny: %i[registration_view_only]),
+        # Revoke an in-clinic consent. Physician (ORES) and nurse (ORELSE) may
+        # revoke; OREMAS (clerk/medical assistant), registration and scheduling
+        # keys may not. The registration clerk may still start a handover (the
+        # CIAV VUECENTRIC user/Consent.c scope is unchanged).
+        "consent.revoke" => rule(any: %i[orders_sign orders_release]),
+        # Work the facility's referrals: list the ones still pending across
+        # patients (#873). RPMS: RCIS's menu key BMCZMENU, or its supervisor
+        # and manager keys, the same keys Roles.can_process_chs? reads.
+        "referrals.work" => rule(any: %i[referrals_user referrals_supervisor referrals_manager])
       }.freeze
 
       NAMES = TABLE.keys.freeze

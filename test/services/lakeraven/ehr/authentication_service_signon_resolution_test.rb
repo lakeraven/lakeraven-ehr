@@ -102,7 +102,7 @@ module Lakeraven
           { name: "SYNTH,USER" }
         end
 
-        # CIAVCXUS HASKEYS: the names asked that the user holds, in the order
+        # held_keys (ORWU NPHASKEY per key): the names asked that the user holds, in the order
         # asked, or nil when it could not ask.
         RpmsRpc::Authentication.define_singleton_method(:held_keys) do |names|
           asked << names

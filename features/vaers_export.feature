@@ -6,6 +6,7 @@ Feature: VAERS Export
   Background:
     Given I am logged in as a provider
 
+  @live
   Scenario: Export VAERS report for a patient with immunization and adverse reaction
     Given a patient with DFN "4" has immunizations in RPMS
     And the patient has adverse reactions in RPMS
@@ -14,17 +15,20 @@ Feature: VAERS Export
     And the report should include patient demographics
     And the report should include vaccine information
 
+  @live
   Scenario: VAERS export sources patient data from Patient model
     Given a patient with DFN "4" has immunizations in RPMS
     When I generate a VAERS export for patient "4" and immunization "IMM-1"
     Then the Patient model should have been called for demographics
     And the ImmunizationGateway should have been called for vaccine data
 
+  @app
   Scenario: VAERS report validates required fields
     When I attempt to create a VAERS report without required fields
     Then the report should be invalid
     And the validation errors should indicate missing fields
 
+  @live
   Scenario: VAERS export produces CSV output
     Given a patient with DFN "4" has immunizations in RPMS
     And the patient has adverse reactions in RPMS

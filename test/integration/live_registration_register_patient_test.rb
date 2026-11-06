@@ -45,7 +45,7 @@ class LiveRegistrationRegisterPatientTest < ActionDispatch::IntegrationTest
     follow_redirect!
     assert_select "#registered", text: /Health record number #{dfn}/
 
-    get "/lakeraven-ehr/registration/patients", params: { q: entry[:name], dob: entry[:dob] }
+    post "/lakeraven-ehr/registration/patients/search", params: { q: entry[:name], dob: entry[:dob] }
     assert_select "#matches tr[data-dfn='#{dfn}'] td", text: dfn
   end
 
@@ -74,7 +74,7 @@ class LiveRegistrationRegisterPatientTest < ActionDispatch::IntegrationTest
     # A second confirm of the same review files nothing more.
     post "/lakeraven-ehr/registration/patients/confirm", params: { review_token: token, registration: second }
     assert_response :conflict
-    get "/lakeraven-ehr/registration/patients", params: { q: second[:name], dob: second[:dob] }
+    post "/lakeraven-ehr/registration/patients/search", params: { q: second[:name], dob: second[:dob] }
     assert_select "#matches tbody tr", count: 1
   end
   test "S-REG-02.8 an SSN already on another patient is refused with RPMS's reason, and only one chart is filed" do
@@ -87,7 +87,7 @@ class LiveRegistrationRegisterPatientTest < ActionDispatch::IntegrationTest
     submit_registration(second)
     assert_response :unprocessable_content
     assert_select "[role=alert]", text: /SSN already used by another patient\./
-    get "/lakeraven-ehr/registration/patients", params: { q: second[:name], dob: second[:dob] }
+    post "/lakeraven-ehr/registration/patients/search", params: { q: second[:name], dob: second[:dob] }
     assert_select "#matches tr[data-dfn]", count: 0
   end
 
@@ -98,7 +98,7 @@ class LiveRegistrationRegisterPatientTest < ActionDispatch::IntegrationTest
     submit_registration(entry)
     assert_response :unprocessable_content
     assert_select "[role=alert]"
-    get "/lakeraven-ehr/registration/patients", params: { q: entry[:name], dob: entry[:dob] }
+    post "/lakeraven-ehr/registration/patients/search", params: { q: entry[:name], dob: entry[:dob] }
     assert_select "#matches tr[data-dfn]", count: 0
   end
 end

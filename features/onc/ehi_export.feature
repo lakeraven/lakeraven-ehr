@@ -13,6 +13,7 @@ Feature: Electronic Health Information Export
   # SINGLE-PATIENT EHI EXPORT
   # =============================================================================
 
+  @live
   Scenario: Generate a complete EHI export for a patient
     Given the patient has clinical data for EHI export
     When a single-patient EHI export is requested
@@ -21,6 +22,7 @@ Feature: Electronic Health Information Export
     And the export should contain audit log entries
     And the export should contain a manifest file
 
+  @live
   Scenario: EHI export includes all FHIR resource types
     Given the patient has clinical data for EHI export
     When a single-patient EHI export is requested
@@ -34,6 +36,7 @@ Feature: Electronic Health Information Export
   # NON-FHIR DATA
   # =============================================================================
 
+  @live
   Scenario: EHI export includes audit logs for the patient
     Given the patient has clinical data for EHI export
     And audit events exist for the patient
@@ -41,6 +44,7 @@ Feature: Electronic Health Information Export
     Then the export should contain an audit log CSV
     And the audit log should include patient-related events
 
+  @live
   Scenario: EHI export includes system configuration relevant to patient care
     Given the patient has clinical data for EHI export
     When a single-patient EHI export is requested
@@ -51,6 +55,7 @@ Feature: Electronic Health Information Export
   # EXPORT MANIFEST (CCG REQUIREMENT)
   # =============================================================================
 
+  @live
   Scenario: EHI export manifest documents contents and format
     Given the patient has clinical data for EHI export
     When a single-patient EHI export is requested
@@ -63,12 +68,14 @@ Feature: Electronic Health Information Export
   # EXPORT FORMATS
   # =============================================================================
 
+  @live
   Scenario: EHI export produces NDJSON for FHIR resources
     Given the patient has clinical data for EHI export
     When a single-patient EHI export is requested
     Then each FHIR resource file should be valid NDJSON
     And each NDJSON line should be valid JSON
 
+  @live
   Scenario: EHI export produces CSV for audit logs
     Given the patient has clinical data for EHI export
     And audit events exist for the patient
@@ -80,6 +87,7 @@ Feature: Electronic Health Information Export
   # FILTERING AND SCOPE
   # =============================================================================
 
+  @live
   Scenario: EHI export respects date range filter
     Given the patient has clinical data for EHI export
     When a single-patient EHI export is requested with a date range
@@ -89,6 +97,7 @@ Feature: Electronic Health Information Export
   # PERFORMANCE
   # =============================================================================
 
+  @live
   Scenario: EHI export completes within acceptable time
     Given the patient has clinical data for EHI export
     When a single-patient EHI export is requested with timing

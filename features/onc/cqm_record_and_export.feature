@@ -1,4 +1,4 @@
-@onc
+@onc @app
 Feature: CQM Record and Export (ONC § 170.315(c)(1))
   As a quality improvement coordinator
   I need to record clinical quality data and export it in standard formats

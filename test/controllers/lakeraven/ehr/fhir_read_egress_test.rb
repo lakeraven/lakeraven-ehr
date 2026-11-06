@@ -37,15 +37,6 @@ module Lakeraven
         teardown_smart_auth
       end
 
-      # STUBBED_ACTIONS: actions that exist but render 404 or empty content.
-      # When implemented with data, they must be wired to Part2EgressFilter and moved to WIRED_ACTIONS.
-      STUBBED_ACTIONS = [
-        "lakeraven/ehr/allergy_intolerances#show",
-        "lakeraven/ehr/conditions#show",
-        "lakeraven/ehr/medication_requests#show",
-        "lakeraven/ehr/observations#show"
-      ].freeze
-
       # Non-disclosing or out-of-scope controller actions that are explicitly allowed to bypass the seam.
       ALLOWED_WITHOUT_SEAM = [
         "lakeraven/ehr/demo_visits#show",     # Dev-gated demo UI, not API egress
@@ -61,30 +52,117 @@ module Lakeraven
         "lakeraven/ehr/allergies#new",              # Session-authenticated clinician entry/write surface (#644); discloses no stored clinical data
         "lakeraven/ehr/allergies#create",            # Session-authenticated clinician entry/write surface (#644); discloses no stored clinical data
         "lakeraven/ehr/allergies#no_known_allergies", # Session-authenticated clinician entry/write surface (#644); discloses no stored clinical data
+        # In-clinic consent (#793). HTML for the chart and the locked tablet,
+        # not a FHIR read. The list shows title, version, and status. The
+        # kiosk shows the template plus the patient's name and date of birth.
+        # Signature bytes stay on the row.
+        "lakeraven/ehr/consents#index",
+        "lakeraven/ehr/consents#new",
+        "lakeraven/ehr/consents#handover",
+        "lakeraven/ehr/consents#revocation",
+        "lakeraven/ehr/consent_kiosk#show",
+        "lakeraven/ehr/consent_kiosk#create",
+        "lakeraven/ehr/consent_kiosk#unlock",
         "lakeraven/ehr/sessions#new",         # Web UI login
         "lakeraven/ehr/sessions#create",      # Web UI login
         "lakeraven/ehr/sessions#destroy",     # Web UI logout
         "lakeraven/ehr/dashboards#show",      # Web UI dashboard; banner patient/allergy via filter_fhir_for_egress
+        "lakeraven/ehr/chart_searches#show",   # Patient bar: my recent patients' name, DOB, sex, HRN; no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/chart_searches#create", # Patient bar search: name, DOB, sex, HRN as registration's lookup; revisit with Part 2 (#494)
+        "lakeraven/ehr/notifications#index",   # The user's RPMS notifications (S-SGN-02.1): patient name, HRN, the alert's text and its comment or long text (BEHOXQ ALRMSG), which can name a result or an order; revisit with Part 2 (#494)
+        "lakeraven/ehr/notifications#destroy",          # Removing one of the user's notifications (S-SGN-02.2): a write, redirects to the list
+        "lakeraven/ehr/notification_forwards#new",      # Forwarding one (S-SGN-02.4): the notification's text and patient name, as the list shows them; revisit with Part 2 (#494)
+        "lakeraven/ehr/notification_forwards#find",     # The colleague search: users' names, and the notification as on #new
+        "lakeraven/ehr/notification_forwards#create",   # Forwarding it (S-SGN-02.4): a write, not disclosure
         "lakeraven/ehr/registration/patients#index", # Front-desk lookup: registration demographics (name, HRN, DOB, status), no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/registration/patients#show",  # Registration demographics (name, HRN, DOB, sex), no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/registration/patients#new",     # Registration entry form (S-REG-02), not disclosure
         "lakeraven/ehr/registration/patients#create",  # Registration entry; possible matches show registration demographics only; revisit with Part 2 (#494)
         "lakeraven/ehr/registration/patients#confirm", # Registration entry after review; as #create
+        "lakeraven/ehr/registration/demographics#edit",   # Registration demographics form (S-REG-20), no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/registration/demographics#update", # Registration demographics edit; as #edit
+        "lakeraven/ehr/registration/addresses#edit",      # Address and phones form (S-REG-21), no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/registration/addresses#update",    # Address and phones edit; as #edit
+        "lakeraven/ehr/registration/contacts#edit",    # The contact form (S-REG-08): registration demographics, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/registration/contacts#update",  # Saving a contact (S-REG-08), not disclosure
+        "lakeraven/ehr/registration/languages#edit",   # The languages form (S-REG-10): registration demographics, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/registration/languages#update", # Saving the languages (S-REG-10), not disclosure
+        "lakeraven/ehr/registration/other_names#index",   # Other names the patient has used (S-REG-12): registration demographics, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/registration/other_names#create",  # Adding an other name (S-REG-12), not disclosure
+        "lakeraven/ehr/registration/other_names#destroy", # Removing an other name (S-REG-12), not disclosure
+        "lakeraven/ehr/registration/social_statuses#edit",   # The migrant, homeless and internet questions (S-REG-11): registration data, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/registration/social_statuses#update", # Saving the answers (S-REG-31.3), not disclosure
+        "lakeraven/ehr/registration/preferred_names#edit",   # The name the patient goes by (S-REG-12.1): registration demographics, no clinical record
+        "lakeraven/ehr/registration/preferred_names#update", # Saving the preferred name (S-REG-12.1), not disclosure
+        "lakeraven/ehr/registration/other_tribes#index",   # A patient's other tribes (S-REG-07.2): registration data, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/registration/other_tribes#create",  # Adding an other tribe (S-REG-07.2), not disclosure
+        "lakeraven/ehr/registration/other_tribes#destroy", # Removing an other tribe (S-REG-07.2), not disclosure
+        "lakeraven/ehr/registration/eligibility_modifiers#index",   # The reasons behind an eligibility status (S-REG-07.3): registration data, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/registration/eligibility_modifiers#create",  # Adding a reason (S-REG-07.3), not disclosure
+        "lakeraven/ehr/registration/eligibility_modifiers#destroy", # Removing a reason (S-REG-07.3), not disclosure
+        "lakeraven/ehr/registration/race_ethnicities#edit",   # Race and ethnicity (S-REG-20.2): registration demographics, no clinical record
+        "lakeraven/ehr/registration/race_ethnicities#update", # Saving race and ethnicity (S-REG-20.2), not disclosure
+        "lakeraven/ehr/registration/applications#new",    # The form to record an application for coverage (S-REG-03.3): no clinical record
+        "lakeraven/ehr/registration/applications#create", # Recording an application (S-REG-03.3), not disclosure
+        "lakeraven/ehr/registration/applications#update", # Recording what happened to it (S-REG-03.4, 03.5), not disclosure
+        "lakeraven/ehr/registration/eligibilities#edit",   # Tribe and eligibility form (S-REG-07.1), registration data, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/registration/eligibilities#update", # Tribe and eligibility edit; as #edit
+        "lakeraven/ehr/registration/coverages#index",  # Payer, member number and dates for billing (S-REG-03), no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/registration/coverages#new",    # Coverage entry form (S-REG-03.1), not disclosure
+        "lakeraven/ehr/registration/coverages#create", # Coverage entry (S-REG-03.1); answers with the form or a redirect
         "lakeraven/ehr/scheduling/clinics#index",     # Scheduling: clinic resources, no patient data
         "lakeraven/ehr/scheduling/clinics#show",      # A clinic day: appointment times and patient names, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/scheduling/clinics#week",      # A clinic week: the same as the day, over seven days; revisit with Part 2 (#494)
         "lakeraven/ehr/scheduling/open_times#index",  # Open times in a clinic's blocks: times only, no patient data
+        "lakeraven/ehr/scheduling/wait_lists#index",   # A clinic's wait list (S-SCH-10): patient names, reasons and recall dates, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/scheduling/wait_lists#new",     # Adding to the wait list (S-SCH-10), not disclosure
+        "lakeraven/ehr/scheduling/wait_lists#create",  # Adding to the wait list (S-SCH-10), not disclosure
+        "lakeraven/ehr/scheduling/wait_lists#edit",    # Changing an entry (S-SCH-10.4), not disclosure
+        "lakeraven/ehr/scheduling/wait_lists#update",  # Changing an entry (S-SCH-10.4), not disclosure
+        "lakeraven/ehr/scheduling/wait_lists#removal", # Taking an entry off (S-SCH-10.5), not disclosure
+        "lakeraven/ehr/scheduling/wait_lists#remove",  # Taking an entry off (S-SCH-10.5), not disclosure
+        "lakeraven/ehr/scheduling/wait_lists#booking", # Booking from the list (S-SCH-10.7), not disclosure
+        "lakeraven/ehr/scheduling/wait_lists#book",    # Booking from the list (S-SCH-10.7), not disclosure
         "lakeraven/ehr/scheduling/patient_appointments#index", # One patient's appointments: clinics, times, statuses, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/scheduling/needing_action#index", # Appointments needing action (#875): times, clinics and patient names, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/scheduling/appointment_lists#index", # The appointments across a scheduler's clinics (S-SCH-05.5): times, clinics and patient names, no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/scheduling/appointments#new",   # Booking form: patient name, HRN, date of birth, no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/scheduling/appointments#create", # Booking entry, not disclosure
+        "lakeraven/ehr/scheduling/quick_registrations#new",    # Registering a caller from scheduling (S-REG-05): an entry form, not disclosure
+        "lakeraven/ehr/scheduling/quick_registrations#create", # Registration entry; possible matches show registration demographics only; revisit with Part 2 (#494)
         "lakeraven/ehr/scheduling/cancellations#new",    # Cancel form: patient name and time, no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/scheduling/cancellations#create", # Cancellation entry, not disclosure
         "lakeraven/ehr/scheduling/checkins#new",         # Check-in form: patient name and time, provider names, no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/scheduling/checkins#create",      # Check-in entry, not disclosure
+        "lakeraven/ehr/scheduling/reschedules#new",      # Move form: patient name, time, open times, reasons, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/scheduling/reschedules#create",   # Move entry, not disclosure
+        "lakeraven/ehr/scheduling/walk_ins#new",         # Walk-in form: no patient until searched
+        "lakeraven/ehr/scheduling/walk_ins#find",        # Walk-in searches: patient name, HRN, date of birth, provider names, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/scheduling/walk_ins#create",      # Walk-in entry, not disclosure
+        "lakeraven/ehr/scheduling/appointment_details#new",    # Details form: patient name, time, note or remarks, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/scheduling/appointment_details#create", # Details entry, not disclosure
+        "lakeraven/ehr/scheduling/checkins#undo",        # Undo check-in entry, not disclosure
+        "lakeraven/ehr/scheduling/checkouts#new",        # Check-out form: patient name and times, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/scheduling/checkouts#create",     # Check-out entry, not disclosure
+        "lakeraven/ehr/scheduling/checkouts#undo",       # Undo check-out entry, not disclosure
+        "lakeraven/ehr/scheduling/no_shows#create",      # No-show entry, not disclosure
+        "lakeraven/ehr/scheduling/no_shows#undo",        # Undo no-show entry, not disclosure
+        "lakeraven/ehr/scheduling/hours#new",            # Clinic hours form: access types, no patient data
+        "lakeraven/ehr/scheduling/hours#create",         # Hours entry; a refusal names an appointment time and patient name, no clinical record
+        "lakeraven/ehr/pending_referrals#index",         # Pending referrals (#873): date, patient name, status and number; no reason, diagnosis or referred-to; revisit with Part 2 (#494)
         "lakeraven/ehr/test_sessions#create", # Test only
         "lakeraven/ehr/smart_configuration#show", # Discovery
-        "lakeraven/ehr/smart_launch#show",    # Discovery
+        "lakeraven/ehr/smart_launch#show",    # EHR launch: lists registered apps for a patient named by name only
+        "lakeraven/ehr/smart_launch#create",  # EHR launch: mints a launch context, no clinical data
+        "lakeraven/ehr/smart_styles#show",    # SMART style: colours and type
         "lakeraven/ehr/capability_statements#show", # Discovery
         "lakeraven/ehr/backend_services#token", # Auth
+        "lakeraven/ehr/smart_authorizations#new",    # Auth: checks an app's request, no clinical data
+        "lakeraven/ehr/smart_authorizations#show",   # Auth: the approval screen, scopes in plain words
+        "lakeraven/ehr/smart_authorizations#decide", # Auth: issues a code, no clinical data
+        "lakeraven/ehr/smart_authorizations#patient",        # Auth: the patient picker, empty until searched
+        "lakeraven/ehr/smart_authorizations#choose_patient", # Auth: patient search: name, HRN, date of birth, sex, no clinical record
+        "lakeraven/ehr/smart_tokens#create",         # Auth
         "lakeraven/ehr/transitions_of_care#create", # Wired separately in #568
         "lakeraven/ehr/ccda_imports#create",  # Ingress
         "lakeraven/ehr/exports#create",       # Status/kickoff, no clinical data
@@ -95,6 +173,7 @@ module Lakeraven
         "lakeraven/ehr/practitioners#index",  # Directory data
         "lakeraven/ehr/practitioners#show",   # Directory data
         "lakeraven/ehr/organizations#show",   # Directory data
+        "lakeraven/ehr/locations#index",      # Directory data
         "lakeraven/ehr/locations#show",       # Directory data
         "lakeraven/ehr/value_sets#index",     # Terminology
         "lakeraven/ehr/value_sets#show",      # Terminology
@@ -106,7 +185,6 @@ module Lakeraven
       WIRED_ACTIONS = [
         "lakeraven/ehr/patients#index",
         "lakeraven/ehr/patients#show",
-        "lakeraven/ehr/patients#create",
         "lakeraven/ehr/charts#show",
         "lakeraven/ehr/screenings#index",
         "lakeraven/ehr/screenings#show",
@@ -118,6 +196,14 @@ module Lakeraven
         "lakeraven/ehr/service_requests#index",
         "lakeraven/ehr/immunizations#index",
         "lakeraven/ehr/procedures#index",
+        "lakeraven/ehr/allergy_intolerances#show",
+        "lakeraven/ehr/conditions#show",
+        "lakeraven/ehr/medication_requests#show",
+        "lakeraven/ehr/observations#show",
+        "lakeraven/ehr/service_requests#show",
+        "lakeraven/ehr/immunizations#show",
+        "lakeraven/ehr/procedures#show",
+        "lakeraven/ehr/encounters#show",
         "lakeraven/ehr/coverage_eligibility_requests#create",
         "lakeraven/ehr/measure_reports#index",
         "lakeraven/ehr/audit_events#index",
@@ -133,7 +219,7 @@ module Lakeraven
           "#{controller}##{action}" if controller && action
         end.compact.uniq
 
-        untested = controller_actions - ALLOWED_WITHOUT_SEAM - WIRED_ACTIONS - STUBBED_ACTIONS
+        untested = controller_actions - ALLOWED_WITHOUT_SEAM - WIRED_ACTIONS
 
         assert_empty untested, "Found routes that might disclose clinical data but are not explicitly tested for seam wiring or allowlisted."
       end
@@ -439,7 +525,6 @@ module Lakeraven
         { path: "/lakeraven-ehr/Patient", method: :get, params: { name: "Anderson" } },
         { path: "/lakeraven-ehr/Patient/1", method: :get },
         # POST /Patient requires an RPC response to register a patient, which isn't seeded data
-        { path: "/lakeraven-ehr/Patient", method: :post, params: { resourceType: "Patient", name: [ { family: "Test" } ], gender: "female", birthDate: "1985-06-15", identifier: [ { system: "http://hl7.org/fhir/sid/us-ssn", value: "111-11-1111" } ] }.to_json, content_type: "application/fhir+json", needs_registration_stub: true },
         { path: "/lakeraven-ehr/AllergyIntolerance", method: :get, params: { patient: "1" } },
         { path: "/lakeraven-ehr/Condition", method: :get, params: { patient: "1" } },
         { path: "/lakeraven-ehr/MedicationRequest", method: :get, params: { patient: "1" } },
@@ -448,6 +533,28 @@ module Lakeraven
         { path: "/lakeraven-ehr/ServiceRequest", method: :get, params: { patient: "1" } },
         { path: "/lakeraven-ehr/Immunization", method: :get, params: { patient: "1" } },
         { path: "/lakeraven-ehr/Procedure", method: :get, params: { patient: "1" } },
+        { path: "/lakeraven-ehr/AllergyIntolerance/1-7", method: :get, setup: -> {
+          RpmsRpc.client.seed_keyed_collection(:allergy_list, "1", [ { ien: 7, allergen: "Penicillin" } ])
+        } },
+        { path: "/lakeraven-ehr/Condition/1-7", method: :get, setup: -> {
+          RpmsRpc.client.seed_keyed_collection(:problem_list, "1", [ { ien: 7, status: "A", icd_code: "E11.9", description: "Diabetes" } ])
+        } },
+        { path: "/lakeraven-ehr/MedicationRequest/1-7R-O", method: :get, setup: -> {
+          RpmsRpc.client.seed_text(:medication_active, "1", "~OP^7R;O^METFORMIN 500MG TAB^^3271231^1^^^120007^ACTIVE\n")
+        } },
+        { path: "/lakeraven-ehr/Observation/1-8", method: :get },
+        { path: "/lakeraven-ehr/ServiceRequest/1-7", method: :get, setup: -> {
+          RpmsRpc.client.seed_keyed_collection(:referral_search, "1", [ { ien: 7, status: "A", purpose: "Cardiology" } ])
+        } },
+        { path: "/lakeraven-ehr/Immunization/1-7", method: :get, setup: -> {
+          RpmsRpc.client.seed_keyed_collection(:immunization_list, "1^I", [ { record_type: "I", ien: 7, vaccine_display: "Influenza" } ])
+        } },
+        { path: "/lakeraven-ehr/Procedure/1-7", method: :get, setup: -> {
+          RpmsRpc.client.seed_keyed_collection(:procedure_list, "1", [ { ien: 7, name: "Office visit", date: Date.new(2026, 3, 10) } ])
+        } },
+        { path: "/lakeraven-ehr/Encounter/1-7", method: :get, setup: -> {
+          RpmsRpc.client.seed_keyed_collection(:encounter_visit_list, "1", [ { visit_string: "1;3260310.09;A;7", location: "Clinic", category: "AMBULATORY" } ])
+        } },
         { path: "/lakeraven-ehr/CoverageEligibilityRequest", method: :post, params: { patient_dfn: "1", coverage_type: "medicaid" } },
         { path: "/lakeraven-ehr/MeasureReport", method: :get, params: { patient: "1" } },
         { path: "/lakeraven-ehr/AuditEvent", method: :get },
@@ -566,24 +673,6 @@ module Lakeraven
 
           assert_response :not_found
           refute_includes response.body, "Anderson", "Expected not to serve patient data"
-        end
-      end
-
-      [
-        [ "/lakeraven-ehr/AllergyIntolerance/1", { patient: "1" } ],
-        [ "/lakeraven-ehr/Condition/1", { patient: "1" } ],
-        [ "/lakeraven-ehr/MedicationRequest/1", { patient: "1" } ],
-        [ "/lakeraven-ehr/Observation/1", { patient: "1" } ]
-      ].each do |path, params|
-        test "stubbed action for #{path} does not serve data and fails if implemented without wiring" do
-          begin
-            get path, params: params, headers: @headers
-          rescue ActionController::RoutingError, ActionDispatch::MissingController, NameError, AbstractController::ActionNotFound
-            assert true
-          else
-            assert_response :not_found, "The action for #{path} was implemented but not moved to WIRED_ACTIONS in the test. If it is real, you must wire it to Part2EgressFilter and move it to WIRED_ACTIONS."
-            refute_includes response.body, "Anderson", "Expected not to serve patient data"
-          end
         end
       end
 
@@ -723,11 +812,7 @@ module Lakeraven
           }
 
           if is_html
-            if endpoint[:needs_registration_stub]
-              with_registration_success(&call_proc)
-            else
-              call_proc.call
-            end
+            call_proc.call
             assert_response :success
             assert_includes response.body, "Mild", "Expected seeded data (mild) to appear before filtering"
 
@@ -736,11 +821,7 @@ module Lakeraven
               calls += 1
               { "resourceType" => "Bundle", "type" => "searchset", "entry" => [] }
             }) do
-              if endpoint[:needs_registration_stub]
-                with_registration_success(&call_proc)
-              else
-                call_proc.call
-              end
+              call_proc.call
             end
 
             assert_response :success, "Expected successful response but got #{response.status}. Body: #{response.body}"
@@ -757,11 +838,7 @@ module Lakeraven
                 marker
               end
             }) do
-              if endpoint[:needs_registration_stub]
-                with_registration_success(&call_proc)
-              else
-                call_proc.call
-              end
+              call_proc.call
             end
 
             assert_response :success, "Expected successful response but got #{response.status}. Body: #{response.body}"
@@ -788,46 +865,22 @@ module Lakeraven
 
             instance_exec(&endpoint[:setup]) if endpoint[:setup]
             path = endpoint[:dynamic_path] ? instance_exec(&endpoint[:dynamic_path]) : endpoint[:path]
-            if endpoint[:needs_registration_stub]
-              with_registration_success(&call_proc)
-            else
-              call_proc.call
-            end
+            call_proc.call
           end
 
-          if endpoint[:method] == :post && endpoint[:needs_registration_stub]
-            assert_response :created
-            assert_not_nil response.headers["Location"], "Expected Location header on refused POST representation"
+          assert_response :service_unavailable
+          if test_name == "exports file show"
+            refute_includes response.body, "resourceType"
+          else
             body = JSON.parse(response.body)
             assert_equal "OperationOutcome", body["resourceType"]
-            refute_includes response.body, "Test" # the name from the request
-            refute_includes response.body, "111-11-1111"
-          else
-            assert_response :service_unavailable
-            if test_name == "exports file show"
-              refute_includes response.body, "resourceType"
-            else
-              body = JSON.parse(response.body)
-              assert_equal "OperationOutcome", body["resourceType"]
-              refute body.key?("entry")
-              refute_includes response.body, "Anderson"
-            end
+            refute body.key?("entry")
+            refute_includes response.body, "Anderson"
           end
         end
       end
 
       private
-
-      # Minitest 6 no longer ships minitest/mock; swap the method the same way
-      # stub_egress_filter does.
-      def with_registration_success
-        gateway = RegistrationGateway.singleton_class
-        original = gateway.instance_method(:register)
-        gateway.define_method(:register) { |*, **| { success: true, dfn: 123 } }
-        yield
-      ensure
-        gateway.define_method(:register, original)
-      end
 
       # session_auth rows (screenings) authenticate through the browser session
       # their setup opens; the class's system bearer token would replace it.

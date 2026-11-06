@@ -9,8 +9,12 @@ module Lakeraven
       # a four-slot block files), so the time is checked here first: it must lie
       # in an open block and have a place left at every step (ClinicDay). The
       # server's own refusals (the patient already booked then, not on file)
-      # come back as its message. Overbooking is not offered yet.
+      # come back as its message. A time with no room can be booked as an
+      # overbook under the overbook rules (S-SCH-01.9 to 01.11), after the
+      # scheduler confirms it, and is marked as one (#603).
       class AppointmentsController < BaseController
+        rate_limit only: %i[new create]
+
         before_action :load_resource!
         before_action :require_booking_right!
 
@@ -19,6 +23,8 @@ module Lakeraven
           length = params[:length].presence || @resource[:time_scale]
           @booking = AppointmentBooking.new(start: params[:start], length: length, patient_dfn: params.dig(:booking, :patient_dfn))
           @patients = AppointmentBookingGateway.patients(params[:q])
+          @quick_registered_hrn = flash[:quick_registered_hrn]
+          load_chosen
         end
 
         # POST /scheduling/clinics/:resource_id/appointments
@@ -26,15 +32,16 @@ module Lakeraven
           @booking = AppointmentBooking.new(booking_params)
           return render_new(:unprocessable_content) unless @booking.valid?
 
-          day, = AppointmentBookingGateway.day(@resource, @booking.start_time.to_date)
-          unless day.room_for?(@booking.start_time, @booking.length)
+          result = AppointmentBookingGateway.book_if_room(@booking, @resource, overbook: overbook_request)
+          if result.status == :full
             flash.now[:alert] = "That time is full or outside the clinic's open hours. Choose another time."
-            return render_new(:conflict)
-          end
-
-          result = AppointmentBookingGateway.book(@booking, @resource)
-          if result.booked?
+            render_new(:conflict)
+          elsif result.status == :overbook_offered
+            @offer_overbook = true
+            render_new(:conflict)
+          elsif result.booked?
             flash[:booked_id] = result.appointment_id
+            flash[:alert] = result.message if result.message
             redirect_to scheduling_clinic_path(@resource[:id], date: @booking.start_time.to_date.iso8601)
           elsif result.status == :unknown
             flash.now[:alert] = "RPMS did not confirm the booking. Check the clinic's day before booking again."
@@ -55,7 +62,24 @@ module Lakeraven
 
         def render_new(status)
           @patients = AppointmentBookingGateway.patients(params[:q])
+          load_chosen
           render :new, status: status
+        end
+
+        # Who is booking, for the overbook rules; confirmed once they chose
+        # "Book as an overbook".
+        def overbook_request
+          { duz: session[:duz].to_i, supervisor: supervisor?, confirmed: params[:overbook] == "1" }
+        end
+
+        # The patient already chosen (just registered, or picked from possible
+        # matches), named so the scheduler sees who they are booking.
+        def load_chosen
+          return if @patients.any? || @booking.patient_dfn.blank?
+
+          @chosen = RpmsRpc::Patient.brief_header(@booking.patient_dfn.to_i)
+        rescue RpmsRpc::Client::RpcError
+          @chosen = nil
         end
 
         def booking_params

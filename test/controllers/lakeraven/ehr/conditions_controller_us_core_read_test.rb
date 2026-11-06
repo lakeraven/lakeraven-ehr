@@ -30,7 +30,7 @@ module Lakeraven
         assert diabetes, "expected seeded Type 2 diabetes problem in the bundle"
 
         assert_equal "Condition", diabetes["resourceType"]
-        assert_equal "1", diabetes["id"]
+        assert_equal "1-1", diabetes["id"]
         assert_equal "Patient/1", diabetes.dig("subject", "reference")
         assert_equal "Type 2 diabetes mellitus", diabetes.dig("code", "text")
         assert_equal "http://hl7.org/fhir/sid/icd-10-cm", diabetes.dig("code", "coding", 0, "system")

@@ -8,6 +8,7 @@ module Lakeraven
   module EHR
     module SmartAuthentication
       extend ActiveSupport::Concern
+      include SessionIdleLimit
 
       # Doorkeeper application that owns every browser-session token. Tokens
       # minted for a browser are recognisable by it, which is what lets them be
@@ -15,12 +16,6 @@ module Lakeraven
       # them. #491's screening surface depends on this predicate — keep its
       # semantics stable.
       BROWSER_SSO_APP_NAME = "Lakeraven EHR Browser SSO"
-
-      # How long a browser session may sit idle before its token stops being
-      # accepted. The token's own 12-hour expiry is the outer bound; this is
-      # the inner one, and without it a signed-in workstation stayed signed in
-      # for half a day of inactivity.
-      SESSION_IDLE_TIMEOUT = 30.minutes
 
       # GET/HEAD/OPTIONS are reads. Defined here rather than assumed from a
       # sibling branch: #501 introduces the same constant in this same module
@@ -60,6 +55,15 @@ module Lakeraven
         # replayed from a log, lifted from a proxy — it is refused, and a
         # header token claiming to be one of ours is refused too.
         unless session_token_binding_holds?(token, source)
+          render_unauthorized("Invalid or revoked token")
+          return
+        end
+
+        # A token from a SMART launch (#839, #844) lives only as long as the
+        # browser session its user approved it in, and that session's RPMS
+        # connection. Once either is gone the token is revoked here, so it
+        # never reads RPMS as anyone, and the app has to launch again.
+        unless launched_token_binding_holds?(token)
           render_unauthorized("Invalid or revoked token")
           return
         end
@@ -352,26 +356,23 @@ module Lakeraven
         nil
       end
 
-      def session_idle_expired?
-        last_seen = session[:last_seen_at]
-        return false if last_seen.blank?
-
-        Time.current.to_i - last_seen.to_i > SESSION_IDLE_TIMEOUT.to_i
-      end
-
       # Revoke whatever SMART token this session carries, then clear it. Every
       # path that ends a session goes through here or WebController's
       # equivalent — sign-out, idle expiry, a failed sign-on, a broker outage,
       # and a DIFFERENT human signing in at the same workstation.
       def revoke_session_smart_token!
+        release_consent_kiosk_lock! if respond_to?(:release_consent_kiosk_lock!, true)
         raw = session[:smart_token].presence
         if raw
           token = Doorkeeper::AccessToken.by_token(raw)
           token.revoke if token && !token.revoked?
+          # The token's RPMS connection goes with it (ADR 0011 §4).
+          RpmsSessions.release(RpmsSessions.key_for(token)) if token && RpmsSessions.enabled?
         end
         session.delete(:smart_token)
         session.delete(:duz)
         session.delete(:last_seen_at)
+        session.delete(:rpms_pool_key)
       rescue StandardError => e
         Rails.logger.error("Session token revocation failed: #{e.class}")
       end
@@ -414,6 +415,9 @@ module Lakeraven
       # construction. A header/system token has no DUZ and gets nil: system
       # callers must not inherit a human's signature.
       def current_duz
+        # A launched token acts for the user who approved it: their DUZ, kept
+        # on the authorization, never read from the token's resource owner.
+        return launched_authorization.duz if launched_authorization
         return nil unless current_token && browser_sso_token?(current_token)
         # resource_owner_id carries the DUZ for a browser token and the patient
         # DFN for a patient-context token — two identifier namespaces in one
@@ -427,11 +431,29 @@ module Lakeraven
 
       # Display name of the signed-in clinician, for the audit trail.
       def current_user_name
+        return launched_authorization.user_name if launched_authorization
         return nil unless current_token && browser_sso_token?(current_token)
 
         session[:user_name].presence
       rescue StandardError
         nil
+      end
+
+      # The SMART launch the current token came from, or nil. Memoized per token.
+      def launched_authorization
+        return nil unless current_token
+        return @launched_authorization if defined?(@launched_authorization_for) && @launched_authorization_for == current_token.id
+
+        @launched_authorization_for = current_token.id
+        @launched_authorization = SmartAuthorization.for_access_token(current_token)
+      end
+
+      def launched_token_binding_holds?(token)
+        authorization = SmartAuthorization.for_access_token(token)
+        return true if authorization.nil? || authorization.binding_live?
+
+        token.revoke unless token.revoked?
+        false
       end
 
       def patient_context_scope?

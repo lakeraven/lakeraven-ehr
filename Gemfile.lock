@@ -1,7 +1,7 @@
 GIT
   remote: https://github.com/lakeraven/rpms-rpc.git
-  revision: 320cea00c13f6f375ec98189f91023139372f81f
-  ref: 320cea0
+  revision: d834c5858cb6b94bfaf87c62d6696c5af2c9c5d8
+  ref: d834c58
   specs:
     rpms-rpc (0.4.0)
       bigdecimal (>= 3.1)
@@ -100,7 +100,7 @@ GEM
       public_suffix (>= 2.0.2, < 8.0)
     ast (2.4.3)
     base64 (0.3.0)
-    bigdecimal (4.1.2)
+    bigdecimal (4.1.3)
     builder (3.3.0)
     capybara (3.40.0)
       addressable
@@ -113,7 +113,7 @@ GEM
       xpath (~> 3.2)
     concurrent-ruby (1.3.8)
     connection_pool (3.0.2)
-    crass (1.0.7)
+    crass (1.0.8)
     csv (3.3.5)
     cucumber (10.2.0)
       base64 (~> 0.2)
@@ -240,7 +240,7 @@ GEM
     pg (1.6.3-x86_64-linux-musl)
     pp (0.6.3)
       prettyprint
-    prettyprint (0.2.0)
+    prettyprint (0.2.1)
     prism (1.9.0)
     propshaft (1.3.2)
       actionpack (>= 7.0.0)

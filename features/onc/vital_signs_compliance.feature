@@ -11,29 +11,34 @@ Feature: Vital Signs US Core Compliance
     And I have a valid SMART token with scope "patient/Observation.read" for patient "4"
     And demo patient "4" has vital signs on file
 
+  @live
   Scenario: Blood pressure observation uses component pattern
     When I request GET "/fhir/Observation?patient=4&category=vital-signs&code=85354-9" with the Bearer token
     Then the response status should be 200
     And the response should be a FHIR Bundle
     And the first observation should have systolic and diastolic components
 
+  @live
   Scenario: Vital signs observations include proper UCUM units
     When I request GET "/fhir/Observation?patient=4&category=vital-signs" with the Bearer token
     Then the response status should be 200
     And the response should be a FHIR Bundle
     And vital sign observations should include UCUM unit codes
 
+  @live
   Scenario: Vital signs observations include category coding with vital-signs
     When I request GET "/fhir/Observation?patient=4&category=vital-signs" with the Bearer token
     Then the response status should be 200
     And the response should be a FHIR Bundle
     And each observation entry should have category "vital-signs"
 
+  @live
   Scenario: Blood pressure profile URL is us-core-blood-pressure
     When I request GET "/fhir/Observation?patient=4&category=vital-signs&code=85354-9" with the Bearer token
     Then the response status should be 200
     And the first observation should have profile "http://hl7.org/fhir/us/core/StructureDefinition/us-core-blood-pressure"
 
+  @live
   Scenario: Each vital type has its specific US Core profile
     When I request GET "/fhir/Observation?patient=4&category=vital-signs" with the Bearer token
     Then the response status should be 200

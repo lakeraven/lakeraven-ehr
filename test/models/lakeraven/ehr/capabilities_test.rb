@@ -14,7 +14,9 @@ module Lakeraven
       test "each demo persona holds exactly the capabilities of its keys" do
         assert_equal %w[registration.search registration.view patient.register], for_persona("PROFILE,REG")
         assert_equal %w[registration.view scheduling.open], for_persona("PROFILE,SCHED")
-        %w[PROFILE,MD PROFILE,RN PROFILE,MA].each { |clinician| assert_empty for_persona(clinician), clinician }
+        assert_equal %w[consent.revoke referrals.work], for_persona("PROFILE,MD"), "RCIS's menu key, BMCZMENU, and the ORES key"
+        assert_equal %w[consent.revoke], for_persona("PROFILE,RN")
+        assert_empty for_persona("PROFILE,MA"), "PROFILE,MA"
       end
 
       test "a deny key takes the capability away, as BPRM's AGZVIEWONLY does registering" do
@@ -25,6 +27,13 @@ module Lakeraven
       test "a scheduling supervisor supervises, and a scheduler does not" do
         assert Capabilities.allows?(%w[scheduling_supervisor], "scheduling.supervise")
         refute Capabilities.allows?(%w[scheduling_user], "scheduling.supervise")
+      end
+
+      test "S-REG-05.6 only the scheduling registration key registers from scheduling" do
+        assert Capabilities.allows?(%w[scheduling_user scheduling_registration], "patient.quick_register")
+        refute Capabilities.allows?(%w[scheduling_user], "patient.quick_register")
+        refute Capabilities.allows?(%w[scheduling_supervisor], "patient.quick_register")
+        refute Capabilities.allows?(%w[scheduling_registration registration_view_only], "patient.quick_register")
       end
 
       test "no keys, unknown keys and programmer mode grant nothing" do

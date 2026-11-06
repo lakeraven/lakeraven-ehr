@@ -30,7 +30,7 @@ class LiveSchedulingBookAppointmentTest < ActionDispatch::IntegrationTest
     get "/lakeraven-ehr/scheduling"
     assert_response :ok
     link = css_select("#resources a").find { |a| a.text == "DEMO IHS CLINIC" }
-    clinic = link["href"]
+    clinic = link["href"].delete_suffix("/week")
 
     day = weekday_ahead
     get clinic, params: { date: day.iso8601 }
@@ -54,15 +54,17 @@ class LiveSchedulingBookAppointmentTest < ActionDispatch::IntegrationTest
 
   test "S-SCH-02.1 and 02.6 the scheduler cancels an appointment for the clinic, which frees its place, once" do
     get "/lakeraven-ehr/scheduling"
-    clinic = css_select("#resources a").find { |a| a.text == "DEMO IHS CLINIC" }["href"]
+    clinic = css_select("#resources a").find { |a| a.text == "DEMO IHS CLINIC" }["href"].delete_suffix("/week")
     day = weekday_ahead
     get clinic, params: { date: day.iso8601 }
-    time = css_select("#open-times tr").select { |tr| tr["data-time"].to_s >= "11:00" && tr.at_css("td[data-open]")["data-open"].to_i.positive? }.sample["data-time"]
+    # A time MOUSE is not already booked at: earlier runs on the same container leave bookings.
+    mine = css_select("#appointments tr[data-patient=3]").map { |tr| tr.at_css("td").text[0, 5] }
+    time = css_select("#open-times tr").select { |tr| tr["data-time"].to_s >= "11:00" && !mine.include?(tr["data-time"]) && tr.at_css("td[data-open]")["data-open"].to_i.positive? }.sample["data-time"]
     open_before = css_select("#open-times tr[data-time='#{time}'] td[data-open]").first["data-open"].to_i
     post "#{clinic}/appointments", params: { booking: { patient_dfn: "3", start: "#{day.iso8601}T#{time}", length: "15", note: "" } }
     follow_redirect!
-    row = css_select("#appointments tr[data-patient='3']").find { |tr| tr.at_css("td").text.start_with?(time) }
-    cancel = row.at_css("a")["href"]
+    row = css_select("#appointments tr[data-patient='3']").find { |tr| tr.at_css("td").text.start_with?(time) && tr.at_css("td[data-status='booked']") }
+    cancel = row.css("a").find { |a| a.text == "Cancel" }["href"]
 
     get cancel.split("?").first, params: { date: day.iso8601, whom: "C" }
     reason = css_select("#cancellation-form select option").find { |o| o.text == "CLINIC STAFFING" }["value"]
@@ -78,7 +80,7 @@ class LiveSchedulingBookAppointmentTest < ActionDispatch::IntegrationTest
 
   test "S-SCH-03.1, 03.7 and 02.5 the scheduler checks a patient in today, once, and it can no longer be cancelled" do
     get "/lakeraven-ehr/scheduling"
-    clinic = css_select("#resources a").find { |a| a.text == "DEMO IHS CLINIC" }["href"]
+    clinic = css_select("#resources a").find { |a| a.text == "DEMO IHS CLINIC" }["href"].delete_suffix("/week")
     today = Date.today
     get clinic, params: { date: today.iso8601 }
     open = css_select("#open-times tr[data-time]").select { |tr| tr.at_css("td[data-open]")["data-open"].to_i.positive? }
@@ -106,7 +108,7 @@ class LiveSchedulingBookAppointmentTest < ActionDispatch::IntegrationTest
 
   test "S-SCH-04.1, 04.5 and 04.7 the scheduler finds an afternoon open time next week and books it, at the length searched for" do
     get "/lakeraven-ehr/scheduling"
-    clinic = css_select("#resources a").find { |a| a.text == "DEMO IHS CLINIC" }["href"]
+    clinic = css_select("#resources a").find { |a| a.text == "DEMO IHS CLINIC" }["href"].delete_suffix("/week")
     day = weekday_ahead
     get "#{clinic}/open_times", params: { from: day.iso8601, to: (day + 6).iso8601, length: "30", part: "pm" }
     assert_response :ok
@@ -131,7 +133,7 @@ class LiveSchedulingBookAppointmentTest < ActionDispatch::IntegrationTest
 
   test "S-SCH-05.6 and 05.7 the scheduler opens MOUSE,MICKEY M's future appointments and finds the one just booked" do
     get "/lakeraven-ehr/scheduling"
-    clinic = css_select("#resources a").find { |a| a.text == "DEMO IHS CLINIC" }["href"]
+    clinic = css_select("#resources a").find { |a| a.text == "DEMO IHS CLINIC" }["href"].delete_suffix("/week")
     day = weekday_ahead
     get "#{clinic}/open_times", params: { from: day.iso8601, to: day.iso8601, length: "15", part: "pm" }
     pick = css_select("#open-times [data-date='#{day.iso8601}'] a[data-time]").to_a.sample
@@ -163,7 +165,7 @@ class LiveSchedulingBookAppointmentTest < ActionDispatch::IntegrationTest
 
   test "S-SCH-04.3 and 04.4 the search leaves out a holiday, the days past the clinic's booking limit, and its inactive days" do
     get "/lakeraven-ehr/scheduling"
-    clinic = css_select("#resources a").find { |a| a.text == "DEMO IHS CLINIC" }["href"]
+    clinic = css_select("#resources a").find { |a| a.text == "DEMO IHS CLINIC" }["href"].delete_suffix("/week")
     ien = RpmsRpc::Scheduling.resources.find { |r| r[:name] == "DEMO IHS CLINIC" }[:hospital_location_id]
     holiday = RpmsRpc::SchedulingSetup.holidays(start_date: Date.today + 1, end_date: Date.today + 90)
                                      .map { |h| h[:date] }.find { |d| d.monday? || d.tuesday? || d.wednesday? }
@@ -196,7 +198,7 @@ class LiveSchedulingBookAppointmentTest < ActionDispatch::IntegrationTest
 
   test "S-SCH-04.2 and 04.6 the search keeps to one access type, and never offers a block whose type prevents access" do
     get "/lakeraven-ehr/scheduling"
-    clinic = css_select("#resources a").find { |a| a.text == "DEMO IHS CLINIC" }["href"]
+    clinic = css_select("#resources a").find { |a| a.text == "DEMO IHS CLINIC" }["href"].delete_suffix("/week")
     walk_in = access_type("LIVE WALK IN", prevents: false)
     held = access_type("LIVE SPEC PREVENTS", prevents: true)
     day = Date.today + 21 + rand(21)

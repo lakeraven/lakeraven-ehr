@@ -15,6 +15,10 @@ module Lakeraven
     # (development? && CHART_DEMO_OPEN=1 && SPIKE_MOCK_RPC=1); it 404s
     # everywhere else, so it can never front a real backend or ship to prod.
     class DemoVisitsController < ActionController::Base
+      # The chart's walk-in page is outside WebController. The tablet lock
+      # still has to cover it (#793).
+      include ConsentKioskLock
+
       # Deterministic demo gateways: they mirror the production gateway
       # interfaces the services call, and always report success. Nothing is
       # persisted here — the controller records what the provider entered in

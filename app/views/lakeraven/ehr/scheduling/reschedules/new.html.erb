@@ -1,0 +1,108 @@
+<% page_title "Move", @resource[:name] %>
+
+<%= page_header "Move an appointment",
+      "#{@appointment[:patient_name]}, #{@resource[:name]}, #{@appointment[:start_time].strftime("%b %-d, %Y at %H:%M")}, #{@length} minutes." %>
+
+<%= flash_alert id: "reschedule-alert" %>
+
+<% if @offer_overbook %>
+  <%= alert_box :notice,
+        "That time is full, or outside the clinic's open blocks.",
+        "You may move the appointment there as an overbook.",
+        id: "overbook-offer" %>
+<% end %>
+
+<%= form_errors @reschedule,
+      "The appointment was not moved. It is still booked at its old time.",
+      id: "reschedule-errors" %>
+
+<%= form_with url: scheduling_reschedule_clinic_appointment_path(@resource[:id], @appointment[:id]),
+      method: :get,
+      local: true,
+      id: "reschedule-find",
+      class: "card flex flex-wrap items-end gap-3" do %>
+  <%= hidden_field_tag :date, @date.iso8601 %>
+  <%= form_field :to, "Clinic" do |aria| %>
+    <%= select_tag :to,
+          options_for_select(@targets.map { |r| [ r[:name], r[:id] ] }, @reschedule.resource_id),
+          id: "to",
+          aria: aria %>
+  <% end %>
+  <%= form_field :on, "Day" do |aria| %>
+    <%= date_field_tag :on,
+          @on,
+          id: "on",
+          aria: aria %>
+  <% end %>
+  <fieldset class="flex gap-4">
+    <legend>Who asked to move it</legend>
+    <% Lakeraven::EHR::AppointmentCancellation::WHOM.each do |code, label| %>
+      <label>
+        <%= radio_button_tag :whom,
+              code,
+              @reschedule.whom == code %>
+        <%= label.capitalize %>
+      </label>
+    <% end %>
+  </fieldset>
+  <%= submit_tag "Show open times",
+        name: nil,
+        class: "button-secondary" %>
+<% end %>
+
+<%= form_with scope: :reschedule,
+      url: scheduling_reschedule_clinic_appointment_path(@resource[:id], @appointment[:id]),
+      method: :post,
+      local: true,
+      id: "reschedule-form",
+      class: "card mt-4 flex flex-col gap-4" do |f| %>
+  <%= hidden_field_tag :date, @date.iso8601 %>
+  <%= f.hidden_field :resource_id, value: @reschedule.resource_id %>
+  <%= f.hidden_field :whom, value: @reschedule.whom %>
+
+  <% if @times.empty? %>
+    <%= empty_state "No open time for #{@length} minutes at #{@target ? @target[:name] : 'this clinic'} on #{@on.strftime('%b %-d, %Y')}.",
+          "Choose another day or clinic above.",
+          id: "no-open-times" %>
+  <% else %>
+    <%= choice_list f,
+          :start,
+          legend: "New time at #{@target[:name]}, #{@on.strftime('%A, %b %-d')}",
+          choices: @times.map { |at| [ at.strftime("%Y-%m-%dT%H:%M"), "#{at.strftime('%H:%M')}#{' (full: overbook)' if @full.include?(at)}", { time: at.strftime("%H:%M"), full: @full.include?(at) || nil }.compact ] },
+          selected: @reschedule.start,
+          inline: true %>
+  <% end %>
+
+  <%# CANCELLATION REASON, PATIENT (#2.98) field 16. %>
+  <%= form_field :reason_ien, "Reason", form: f do |aria| %>
+    <%= f.select :reason_ien,
+          options_for_select(@reasons.map { |r| [ r[:name], r[:ien] ] }, @reschedule.reason_ien),
+          { include_blank: "Choose a reason" },
+          aria: aria %>
+  <% end %>
+
+  <%# Filed after "Rescheduled to <time> <clinic>" in CANCELLATION REMARKS, PATIENT (#2.98) field 17. %>
+  <%= form_field :extra,
+        "Remarks (optional)",
+        form: f,
+        hint: "The old appointment is marked cancelled, with a remark that says where it moved to." do |aria| %>
+    <%= f.text_field :extra,
+          value: @reschedule.extra,
+          maxlength: 100,
+          aria: aria %>
+  <% end %>
+
+  <% if @offer_overbook %>
+    <%= button_tag "Move as an overbook",
+          name: "overbook",
+          value: "1",
+          class: "button-primary self-start" %>
+  <% else %>
+    <%= f.submit "Move the appointment",
+          class: "button-primary self-start" %>
+  <% end %>
+<% end %>
+
+<p class="mt-6">
+  <%= link_to "Back to the clinic's day", scheduling_clinic_path(@resource[:id], date: @date.iso8601) %>
+</p>

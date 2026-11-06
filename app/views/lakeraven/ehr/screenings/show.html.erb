@@ -1,4 +1,4 @@
-<% content_for :title, (@instrument ? "#{@instrument.short_title} result | Lakeraven EHR" : "Screening | Lakeraven EHR") %>
+<% page_title(@instrument ? "#{@instrument.short_title} result" : "Screening") %>
 
 <% if @response && @instrument %>
 <div class="page-header">

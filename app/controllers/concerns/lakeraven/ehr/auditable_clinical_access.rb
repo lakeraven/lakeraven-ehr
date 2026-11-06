@@ -149,7 +149,8 @@ module Lakeraven
           entity_type: entity_type_value,
           entity_identifier: entity_identifier_value,
           **agent,
-          agent_network_address: request.remote_ip,
+          agent_network_address: ClientIp.resolve(request),
+          rpms_session_id: audit_rpms_session_id,
           tenant_identifier: tenant,
           facility_identifier: facility
         )
@@ -220,7 +221,7 @@ module Lakeraven
       # this wrapper.
       def publish_audit_context
         AuditContext.agent_resolver = -> { audit_agent_attributes }
-        AuditContext.network_address = request.remote_ip
+        AuditContext.network_address = ClientIp.resolve(request)
         AuditContext.tenant_identifier = audit_tenant_identifier
         AuditContext.facility_identifier = audit_facility_identifier
         AuditContext.inside_audited_request = true
@@ -299,6 +300,22 @@ module Lakeraven
       # resolved must NOT be filed under the shared browser application — every
       # clinician would look identical, which is the defect #486 fixes. It is
       # recorded as unattributed instead.
+      # The RPMS session the request ran under: the CIA session id sign-on
+      # returned, kept in the browser session (docs/identity-passthrough.md).
+      # Only when the audited clinician IS that session's user, so a row never
+      # names one user with another's RPMS session. Nil for API clients and
+      # the anonymous.
+      def audit_rpms_session_id
+        launched = launched_clinician_authorization(audit_current_token)
+        return launched.rpms_session_id.presence if launched
+        return nil unless respond_to?(:session, true) && session.respond_to?(:[])
+
+        duz = resolved_clinician_duz
+        session[:rpms_session_id].presence if duz.present? && session[:duz].to_s == duz.to_s
+      rescue StandardError
+        nil
+      end
+
       def audit_agent_attributes
         duz = resolved_clinician_duz
         if duz.present?
@@ -355,6 +372,11 @@ module Lakeraven
         session_duz = session_value(:duz)
 
         if token
+          # A SMART launch acts for the user who approved it (#839): that
+          # user, from the server-side authorization, never from a session.
+          launched = launched_clinician_authorization(token)
+          return launched.duz if launched
+
           if session_bound_browser_token?(token)
             human = current_duz_if_defined || session_duz
             return human if human.present?
@@ -386,6 +408,15 @@ module Lakeraven
       # everything else defaults to false.
       def session_authenticated_surface?
         false
+      end
+
+      # The SMART launch a token came from, when that token is this request's.
+      def launched_clinician_authorization(token)
+        return nil unless token && respond_to?(:launched_authorization, true) && token == audit_current_token
+
+        launched_authorization
+      rescue StandardError
+        nil
       end
 
       def current_duz_if_defined

@@ -1,4 +1,4 @@
-@behavioral_health
+@behavioral_health @app
 Feature: Psychotherapy visit coding is structured and duration-validated
   As a behavioral-health clinician
   I need visit-level psychotherapy CPT selection tied to documented face-to-face time

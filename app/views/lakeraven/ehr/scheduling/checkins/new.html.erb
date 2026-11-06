@@ -1,37 +1,37 @@
-<% content_for :title, "Check in | #{@resource[:name]} | Lakeraven EHR" %>
+<% page_title "Check in", @resource[:name] %>
 
-<div class="page-header">
-  <h1>Check in</h1>
-  <p>
-    <%= @appointment[:patient_name] %>, <%= @resource[:name] %>, <%= @appointment[:start_time].strftime("%b %-d, %Y at %H:%M") %>
-  </p>
-</div>
+<%= page_header "Check in",
+      "#{@appointment[:patient_name]}, #{@resource[:name]}, #{@appointment[:start_time].strftime("%b %-d, %Y at %H:%M")}" %>
 
-<% if flash[:alert].present? %>
-  <div
-    class="alert alert--error"
-    role="alert"
-  >
-    <p><%= flash[:alert] %></p>
-  </div>
+<%= flash_alert %>
+
+<%# S-REG-03.2: coverage in force today, as AG answers (MCDACT/MCRACT/PVTACT^AGGARVAL). %>
+<% case @coverage %>
+<% when :lapsed %>
+  <%= alert_box :error,
+        "None of this patient's coverage is in force today.",
+        "Ask for a current Medicaid, Medicare or insurance card before the visit, so it can be billed.",
+        id: "coverage-lapsed" do %>
+    <% if capability?("registration.view") %>
+      <p>
+        <%= link_to "See the patient's coverage", registration_patient_coverage_path(@appointment[:patient_dfn]) %>
+      </p>
+    <% end %>
+  <% end %>
+<% when :none %>
+  <%= alert_box :notice,
+        "No Medicaid, Medicare or private insurance is on file for this patient.",
+        id: "coverage-none" %>
+<% when :unchecked %>
+  <%= alert_box :notice,
+        "Coverage was not checked: RPMS did not answer, or does not let you read it.",
+        "Coverage is read through Patient Registration.",
+        id: "coverage-unchecked" %>
 <% end %>
 
-<% if @checkin.errors.any? %>
-  <div
-    id="checkin-errors"
-    class="alert alert--error"
-    role="alert"
-  >
-    <p>
-      The patient was not checked in.
-    </p>
-    <ul>
-      <% @checkin.errors.full_messages.each do |message| %>
-        <li><%= message %></li>
-      <% end %>
-    </ul>
-  </div>
-<% end %>
+<%= form_errors @checkin,
+      "The patient was not checked in.",
+      id: "checkin-errors" %>
 
 <%= form_with scope: :checkin,
       url: scheduling_checkin_clinic_appointment_path(@resource[:id], @appointment[:id]),
@@ -41,47 +41,41 @@
       class: "card flex flex-col gap-4" do |f| %>
   <%= hidden_field_tag :date, @date.iso8601 %>
 
-  <div class="flex flex-col gap-1">
-    <%= f.label :at, "Checked in at" %>
+  <%= form_field :at, "Checked in at", form: f do |aria| %>
     <%= f.datetime_local_field :at,
           value: @checkin.at,
           required: true,
-          class: "rounded border border-slate-300 px-3 py-2" %>
-  </div>
+          aria: aria %>
+  <% end %>
 
-  <fieldset class="flex flex-col gap-2">
-    <legend>
-      Visit provider<%= " (required at this clinic)" if @checkin.provider_required %>
-    </legend>
-    <div class="flex items-end gap-2">
-      <%= label_tag :provider_search, "Provider name starts with", class: "sr-only" %>
-      <%= text_field_tag :provider_search,
-            params[:provider_search],
-            placeholder: "Provider name starts with",
-            class: "rounded border border-slate-300 px-3 py-2" %>
-      <%= submit_tag "Find provider",
-            name: nil,
-            formaction: scheduling_checkin_clinic_appointment_path(@resource[:id], @appointment[:id]),
-            formmethod: :get,
-            formnovalidate: true,
-            class: "min-h-9 bg-white px-3 py-2 ring-1 ring-slate-300 ring-inset" %>
-    </div>
-    <% @providers.each do |provider| %>
-      <label data-provider="<%= provider.ien %>">
-        <%= f.radio_button :provider_ien,
-              provider.ien,
-              checked: @checkin.provider_ien == provider.ien %>
-        <%= provider.name %>
-      </label>
+  <%= lookup_field f,
+        :provider_ien,
+        legend: "Visit provider#{" (required at this clinic)" if @checkin.provider_required}",
+        search: :provider_search,
+        search_label: "Provider name starts with",
+        find_label: "Find provider",
+        find_url: scheduling_checkin_clinic_appointment_path(@resource[:id], @appointment[:id]),
+        find_method: :get,
+        choices: @providers.map { |provider| [ provider.ien, provider.name, { provider: provider.ien } ] },
+        selected: @checkin.provider_ien,
+        chosen_text: "Provider chosen." %>
+
+  <% if @checkin.stop_required %>
+    <%# BSDX CHECKIN APPOINTMENT clinic code: a CLINIC STOP (#40.7), filed as the visit's .08. %>
+    <%= form_field :stop_id,
+          "Clinic stop",
+          form: f,
+          hint: "This clinic uses several stops. Choose the one the patient is here for." do |aria| %>
+      <%= f.select :stop_id,
+            @stops.map { |stop| [ "#{stop[:name]} (#{stop[:code]})", stop[:ien] ] },
+            { include_blank: "Choose a stop", selected: @checkin.stop_id },
+            required: true,
+            aria: aria %>
     <% end %>
-    <% if @providers.empty? && @checkin.provider_ien %>
-      <%= f.hidden_field :provider_ien, value: @checkin.provider_ien %>
-      <p class="hint">Provider chosen.</p>
-    <% end %>
-  </fieldset>
+  <% end %>
 
   <%= f.submit "Check in",
-        class: "min-h-9 self-start bg-slate-900 px-4 py-2 text-white hover:bg-slate-700" %>
+        class: "button-primary self-start" %>
 <% end %>
 
 <p class="mt-6">

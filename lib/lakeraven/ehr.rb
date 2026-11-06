@@ -3,6 +3,7 @@
 require "doorkeeper"
 require "jwt"
 require "lakeraven/ehr/version"
+require "lakeraven/ehr/rpms_sessions"
 require "lakeraven/ehr/engine"
 
 module Lakeraven
@@ -45,7 +46,38 @@ module Lakeraven
       # criticality-bearing allergies come from here. Same trust boundary.
       attr_accessor :supplemental_allergy_intolerances_provider
 
+      # The site's limits on a signed-in browser session, after NIST SP
+      # 800-63B-3 at AAL2: re-authenticate after 30 minutes of inactivity, and
+      # at least every 12 hours however active the user is. A site may lower
+      # them; its HIPAA automatic-logoff policy is the place to say so.
+      #
+      # session_idle_limit caps how long a session may sit idle. A user's RPMS
+      # idle limit (their DTIME, read at sign-on) may only shorten it: DTIME is
+      # a terminal setting, and PROFILE,MD's 9999 seconds would hold a chart
+      # open in a browser for nearly three hours.
+      attr_accessor :session_idle_limit
+      # session_lifetime is how long a session lasts from sign-on, and how long
+      # its SMART token is valid.
+      attr_accessor :session_lifetime
+
+      # The name in the page header and at the end of every <title>. One
+      # setting, so the product's name in the chrome can change without
+      # touching a view; which name belongs there is still open (see
+      # docs/adr, "product name in the chrome").
+      attr_accessor :product_name
+
+      # When true (the default), ClientIp trusts X-Forwarded-For from
+      # config.action_dispatch.trusted_proxies. A direct-LAN deployment,
+      # where clients reach the app with no reverse proxy, sets this to
+      # false so the client address is REMOTE_ADDR and a caller-supplied
+      # forwarded header cannot choose a rate-limit or login bucket.
+      attr_accessor :trust_forwarded_for
+
       def initialize
+        @product_name = "Lakeraven EHR"
+        @trust_forwarded_for = true
+        @session_idle_limit = 30.minutes
+        @session_lifetime = 12.hours
         @tenant_resolver = ->(request) {
           value = request.headers["X-Tenant-Identifier"].to_s.strip
           value.empty? ? nil : value

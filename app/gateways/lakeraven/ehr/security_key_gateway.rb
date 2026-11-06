@@ -5,7 +5,7 @@ require "rpms_rpc/api/authentication"
 module Lakeraven
   module EHR
     # Which of the named SECURITY KEYs the signed-on user holds, asked with
-    # CIAVCXUS HASKEYS through RpmsRpc::Authentication.held_keys (rpms-rpc#318).
+    # ORWU NPHASKEY, once per key, through RpmsRpc::Authentication.held_keys (rpms-rpc#318, #556).
     # It is in CIAV VUECENTRIC's RPC multiple, so a least-privilege CIA user can
     # ask it about themself.
     #
@@ -18,7 +18,7 @@ module Lakeraven
 
       def self.held(names, via: ::RpmsRpc::Authentication)
         held = via.held_keys(names)
-        raise Unreadable, "security keys could not be read (CIAVCXUS HASKEYS)" if held.nil?
+        raise Unreadable, "security keys could not be read (ORWU NPHASKEY)" if held.nil?
 
         held
       end

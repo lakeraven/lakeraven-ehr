@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "rpms_rpc/api/pov"
 require "rpms_rpc/api/problem"
 
 module Lakeraven
@@ -32,6 +33,11 @@ module Lakeraven
 
       def self.for_patient(dfn)
         RpmsRpc::Problem.for_patient(dfn.to_s)
+      end
+
+      # The diagnoses recorded on the patient's visits (V POV).
+      def self.visit_diagnoses(dfn)
+        RpmsRpc::Pov.for_patient(dfn.to_s)
       end
 
       def self.add(dfn, problem)

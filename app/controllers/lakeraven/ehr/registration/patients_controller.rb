@@ -19,6 +19,9 @@ module Lakeraven
         REVIEW_PURPOSE = :registration_review
         REVIEW_TTL = 15.minutes
 
+        rate_limit only: %i[index show new create confirm]
+
+        before_action :require_bprm_registration!
         before_action :require_authentication
         # The search is AG's own lookup (AGG LOOKUP PATIENTS), which RPMS runs for
         # registration users only: a scheduler is refused it, and finds patients
@@ -27,10 +30,12 @@ module Lakeraven
         before_action -> { require_capability!("registration.view") }, only: :show
         before_action -> { require_capability!("patient.register") }, only: %i[new create confirm]
 
-        # GET /registration/patients?q=&dob=
+        # GET /registration/patients: the search form.
+        # POST /registration/patients/search (q, dob): the search. Only a POST searches,
+        # so a patient's SSN, name or date of birth never travels in a URL (#722).
         def index
-          @query = params[:q].to_s.strip
-          @dob = parse_dob(params[:dob])
+          @query = request.post? ? params[:q].to_s.strip : ""
+          @dob = request.post? ? parse_dob(params[:dob]) : nil
           @searched = @query.present?
           @matches = @searched ? PatientLookupGateway.find(@query, dob: @dob) : []
         rescue RpmsRpc::Client::RpcError, RpmsRpc::Client::ConnectionError => e
@@ -46,7 +51,23 @@ module Lakeraven
         def show
           @patient = RpmsRpc::Patient.brief_header(params[:dfn].to_i)
           @registered_hrn = flash[:registered_hrn]
-          render :not_found, status: :not_found unless @patient
+          return render :not_found, status: :not_found unless @patient
+
+          # AG's own edit checks run in its registration context, which RPMS
+          # gives registration users only, as for its lookup.
+          @checks = RegistrationChecksGateway.for(params[:dfn]) if capability?("registration.search")
+
+          @record = registration_record
+          @contacts = profile_read { PatientProfileGateway.contacts(params[:dfn]) } if @record
+          @languages = profile_read { PatientProfileGateway.languages(params[:dfn]) } if @record
+          @other_tribes = profile_read { PatientProfileGateway.other_tribes(params[:dfn]) } if @record
+          @eligibility_modifiers = profile_read { PatientProfileGateway.eligibility_modifiers(params[:dfn]) } if @record
+          @social_status = profile_read { PatientProfileGateway.social_status(params[:dfn]) } if @record
+          @other_names = profile_read { PatientProfileGateway.aliases(params[:dfn]) } if @record
+          @preferred_name = profile_read { PatientProfileGateway.preferred_name(params[:dfn]) } if @record
+          @address_history = profile_read { PatientRecordGateway.address_history(params[:dfn]) } if @record
+          @race_ethnicity = profile_read { PatientProfileGateway.race_ethnicity(params[:dfn]) } if @record
+          @patient = @patient.merge(preferred_name: @preferred_name) if @preferred_name.present?
         end
 
         # GET /registration/patients/new: the form, and the tribe and community
@@ -106,6 +127,35 @@ module Lakeraven
         end
 
         private
+
+        # The full registration, read through AG (AGGRPC), which RPMS serves to
+        # registration users only: a scheduler sees the summary alone. A read RPMS
+        # does not answer leaves the summary, and says so in the view.
+        def registration_record
+          return nil unless capability?("registration.search")
+
+          PatientRecordGateway.find(params[:dfn].to_i)
+        rescue RpmsRpc::Client::RpcError, RpmsRpc::Client::ConnectionError => e
+          Rails.logger.error("[registration] patient record read failed: #{e.class}")
+          nil
+        end
+
+        # A section of the record (contacts, S-REG-08), or nil when RPMS does not
+        # answer: the rest of the page still shows.
+        def profile_read
+          yield
+        rescue RpmsRpc::Error => e
+          Rails.logger.error("[registration] profile read failed: #{e.class}")
+          nil
+        end
+
+        # Registration runs on AG, which only an IHS backend serves (#647).
+        def require_bprm_registration!
+          return if BackendRegistry.current.provides?(:bprm_registration)
+
+          note_audit_denial("browser access refused: backend lacks bprm_registration")
+          render plain: "Registration is not available on this backend.", status: :not_found
+        end
 
         def handle(result)
           if result.registered?

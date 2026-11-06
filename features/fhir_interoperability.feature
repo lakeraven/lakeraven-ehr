@@ -8,6 +8,7 @@ Feature: FHIR R4 Interoperability
       | dfn | name             | ssn       | dob        | sex |
       | 4   | DEMO,PATIENT ONE | 666010101 | 2001-01-01 | F   |
 
+  @live
   Scenario: Retrieve patient as FHIR Patient resource
     When I request patient "4" in FHIR format
     Then I should receive a valid FHIR Patient resource
@@ -30,6 +31,7 @@ Feature: FHIR R4 Interoperability
     Then the FHIR Patient should have a tribal enrollment number in the identifiers
     And the tribal enrollment identifier should contain "EXNH-12345"
 
+  @live
   Scenario: FHIR Patient supports US Core Profile requirements
     When I request patient "4" in FHIR format
     Then the FHIR Patient should conform to US Core Patient profile
@@ -50,11 +52,13 @@ Feature: FHIR R4 Interoperability
     Then the FHIR Patient should have an address with state "AK"
     And the FHIR Patient should have a telecom with value "907-555-1234"
 
+  @live
   Scenario: FHIR Patient includes SSN identifier
     When I request patient "4" in FHIR format
     Then the FHIR Patient should have an identifier with system "http://hl7.org/fhir/sid/us-ssn"
     And the SSN identifier value should be "666010101"
 
+  @app
   Scenario: Round-trip FHIR serialization preserves data
     Given a patient with complete demographics
     When I serialize the patient to FHIR
@@ -62,6 +66,7 @@ Feature: FHIR R4 Interoperability
     Then the patient name should match the original
     And the patient gender should match the original
 
+  @live
   Scenario: FHIR content type is application/fhir+json
     When I request patient "4" via the FHIR API
     Then the response content type should be "application/fhir+json"

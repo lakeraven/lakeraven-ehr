@@ -34,6 +34,21 @@ module Lakeraven
         # this server does with it.
         Param = Data.define(:type, :documentation)
 
+        # A token search parameter FHIRSearchBundle#apply_token_searches filters
+        # on: where its value sits in the served resource. `paths` reach a
+        # CodeableConcept, or a `code` element whose CodeSystem is `system`.
+        Token = Data.define(:documentation, :paths, :system) do
+          def initialize(documentation:, paths:, system: nil) = super
+          def type = "token"
+        end
+
+        # A date search parameter FHIRSearchBundle#apply_date_searches filters
+        # on: where its value sits in the served resource (a date, a dateTime
+        # or a Period).
+        DateParam = Data.define(:documentation, :paths) do
+          def type = "date"
+        end
+
         ID = Sort.new(paths: [ %i[id] ], type: :string)
         NAME = Sort.new(paths: [ [ :name, 0, :family ], [ :name, 0, :given, 0 ] ], type: :string)
         STATUS = Sort.new(paths: [ %i[status] ], type: :string)
@@ -44,8 +59,14 @@ module Lakeraven
           type: "reference",
           documentation: "Required: Patient/<id> or <id>. A token bound to a patient may name only that patient."
         )
-        # Observation and its token parameters compare the code alone.
-        CODE_ONLY = "The code alone: a system|code value is refused with a 400 OperationOutcome."
+        ID_PARAM = Param.new(type: "token", documentation: "A record's id. Names its patient, so no patient parameter is needed.")
+        PATIENT_OR_ID_PARAM = Param.new(
+          type: "reference",
+          documentation: "Required without _id: Patient/<id> or <id>. A token bound to a patient may name only that patient."
+        )
+        TOKEN_FORMS = "A value is code, system|code, |code or system|; comma-separated values match any of them."
+        DATE_FORMS = "A prefix (eq, ne, gt, lt, ge, le, sa, eb) and a date of any precision; " \
+                     "repeat the parameter for a range. Any other value is refused with a 400 OperationOutcome."
 
         # Sorts and includes: only what the resource the server builds
         # actually carries. Encounter, ServiceRequest and Procedure have none:
@@ -61,10 +82,7 @@ module Lakeraven
             search: {
               "_id" => Param.new(type: "token", documentation: "The patient's DFN."),
               "name" => Param.new(type: "string", documentation: "Name, as the RPMS patient lookup matches it."),
-              "birthdate" => Param.new(
-                type: "date",
-                documentation: "One day, YYYY-MM-DD. A prefix or a partial date is refused with a 400 OperationOutcome."
-              ),
+              "birthdate" => DateParam.new(documentation: "The birth date. #{DATE_FORMS}", paths: [ %i[birthDate] ]),
               "gender" => Param.new(type: "token", documentation: "male, female, other or unknown.")
             },
             sort: {
@@ -77,36 +95,86 @@ module Lakeraven
             search: { "name" => Param.new(type: "string", documentation: "Name, as the RPMS person lookup matches it.") },
             sort: { "_id" => ID, "name" => NAME }
           },
+          "Location" => {
+            search: { "name" => Param.new(type: "string", documentation: "Required: the start of the name, any case.") }
+          },
           "AllergyIntolerance" => {
-            search: { "patient" => PATIENT_PARAM },
+            search: {
+              "patient" => PATIENT_PARAM,
+              "clinical-status" => Token.new(
+                documentation: "allergyintolerance-clinical: active, inactive or resolved. #{TOKEN_FORMS}",
+                paths: [ %i[clinicalStatus] ]
+              )
+            },
             sort: { "_id" => ID },
             include: { "AllergyIntolerance:patient" => PATIENT }
           },
           "Condition" => {
-            search: { "patient" => PATIENT_PARAM },
+            search: {
+              "patient" => PATIENT_PARAM,
+              "category" => Token.new(
+                documentation: "condition-category: problem-list-item for RPMS problems, encounter-diagnosis for visit diagnoses. #{TOKEN_FORMS}",
+                paths: [ [ :category, :* ] ]
+              ),
+              "clinical-status" => Token.new(
+                documentation: "condition-clinical: active or inactive, as RPMS records a problem. A visit diagnosis carries none. #{TOKEN_FORMS}",
+                paths: [ %i[clinicalStatus] ]
+              )
+            },
             sort: { "_id" => ID },
             include: { "Condition:patient" => SUBJECT, "Condition:subject" => SUBJECT }
           },
           "MedicationRequest" => {
             search: {
               "patient" => PATIENT_PARAM,
-              "status" => Param.new(
-                type: "token",
-                documentation: "Comma-separated status codes, any of which matches, mapped from the RPMS " \
-                               "order status. A system|code value is refused with a 400 OperationOutcome."
+              "status" => Token.new(
+                documentation: "medicationrequest-status, mapped from the RPMS order status. #{TOKEN_FORMS}",
+                paths: [ %i[status] ],
+                system: "http://hl7.org/fhir/CodeSystem/medicationrequest-status"
+              ),
+              "intent" => Token.new(
+                documentation: "medicationrequest-intent. RPMS orders are order. #{TOKEN_FORMS}",
+                paths: [ %i[intent] ],
+                system: "http://hl7.org/fhir/CodeSystem/medicationrequest-intent"
               )
             },
             sort: { "_id" => ID, "status" => STATUS },
             include: { "MedicationRequest:patient" => SUBJECT, "MedicationRequest:subject" => SUBJECT }
           },
-          "Encounter" => { search: { "patient" => PATIENT_PARAM } },
-          "ServiceRequest" => { search: { "patient" => PATIENT_PARAM } },
-          "Procedure" => { search: { "patient" => PATIENT_PARAM } },
+          "Encounter" => {
+            search: {
+              "_id" => ID_PARAM,
+              "patient" => PATIENT_OR_ID_PARAM,
+              "date" => DateParam.new(documentation: "The encounter's period. #{DATE_FORMS}", paths: [ %i[period] ])
+            }
+          },
+          "ServiceRequest" => {
+            search: {
+              "_id" => ID_PARAM,
+              "patient" => PATIENT_OR_ID_PARAM,
+              "category" => Token.new(
+                documentation: "An RCIS referral is SNOMED CT 3457005. #{TOKEN_FORMS}",
+                paths: [ [ :category, :* ] ]
+              ),
+              "code" => Token.new(documentation: "An RCIS referral is SNOMED CT 3457005. #{TOKEN_FORMS}", paths: [ %i[code] ]),
+              "authored" => DateParam.new(documentation: "When it was authored. #{DATE_FORMS}", paths: [ %i[authoredOn] ])
+            }
+          },
+          "Procedure" => {
+            search: {
+              "patient" => PATIENT_PARAM,
+              "date" => DateParam.new(documentation: "When it was performed. #{DATE_FORMS}", paths: [ %i[performedDateTime] ])
+            }
+          },
           "Observation" => {
             search: {
               "patient" => PATIENT_PARAM,
-              "category" => Param.new(type: "token", documentation: "A category code, such as vital-signs. #{CODE_ONLY}"),
-              "code" => Param.new(type: "token", documentation: "Comma-separated codes, any of which matches. #{CODE_ONLY}")
+              "category" => Token.new(
+                documentation: "observation-category, such as vital-signs. #{TOKEN_FORMS}",
+                paths: [ [ :category, :* ] ]
+              ),
+              "code" => Token.new(documentation: "LOINC code. #{TOKEN_FORMS}", paths: [ %i[code] ]),
+              "date" => DateParam.new(documentation: "When it was observed. #{DATE_FORMS}", paths: [ %i[effectiveDateTime] ])
             },
             sort: {
               "_id" => ID, "status" => STATUS,
@@ -117,7 +185,10 @@ module Lakeraven
             include: { "Observation:patient" => SUBJECT, "Observation:subject" => SUBJECT }
           },
           "Immunization" => {
-            search: { "patient" => PATIENT_PARAM },
+            search: {
+              "patient" => PATIENT_PARAM,
+              "date" => DateParam.new(documentation: "When it was given. #{DATE_FORMS}", paths: [ %i[occurrenceDateTime] ])
+            },
             sort: {
               "_id" => ID, "status" => STATUS,
               "date" => Sort.new(paths: [ %i[occurrenceDateTime] ], type: :date)
@@ -164,6 +235,16 @@ module Lakeraven
           RESOURCES.dig(type, :search) || {}
         end
 
+        # The type's token parameters FHIRSearchBundle filters generically.
+        def self.token_params_for(type)
+          search_params_for(type).select { |_, param| param.is_a?(Token) }
+        end
+
+        # The type's date parameters FHIRSearchBundle filters generically.
+        def self.date_params_for(type)
+          search_params_for(type).select { |_, param| param.is_a?(DateParam) }
+        end
+
         def self.revincludes_for(type)
           RESOURCES.dig(type, :revinclude) || []
         end
@@ -195,6 +276,13 @@ module Lakeraven
               documentation: "Forward references listed in each resource's searchInclude, " \
                              "for the matches on this page. Any other value is refused with " \
                              "a 400 OperationOutcome."
+            },
+            {
+              name: "_elements",
+              type: "string",
+              documentation: "Comma-separated top-level elements each match should carry. " \
+                             "id and meta always stay, and meta gains the SUBSETTED tag. " \
+                             "Anything else, such as a dotted path, is refused with a 400 OperationOutcome."
             }
           ]
         end

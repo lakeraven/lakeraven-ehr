@@ -58,7 +58,7 @@ class RpmsSessionEndedTest < ActionDispatch::IntegrationTest
   test "a registration search that finds the connection closed sends the user to sign in" do
     sign_in("registration_menu")
     with_connection_closed(raise_on_call: true) do
-      get "/lakeraven-ehr/registration/patients", params: { q: "DEMO" }
+      post "/lakeraven-ehr/registration/patients/search", params: { q: "DEMO" }
       assert_sent_to_sign_in
     end
   end

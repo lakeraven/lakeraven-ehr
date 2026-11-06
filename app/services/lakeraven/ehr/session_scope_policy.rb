@@ -33,38 +33,46 @@ module Lakeraven
     # 42 CFR PART 2 — READ THIS BEFORE EXTENDING THE TABLE, AND BEFORE
     # DEPLOYING ANYWHERE THAT HOLDS PART 2 CONTENT.
     #
-    # State the shipped position plainly, because it is not neutral:
-    # CIAV VUECENTRIC, held by everyone RPMS signs on to VueCentric, front desk
-    # and scheduler included, grants `user/Observation.rs` and
-    # `user/Condition.rs`, which is to say the PHQ-9 item-9 answer and the
-    # substance-use diagnosis. The behavioral health keys (`AMHZMENU`, `AMHZMGR`) grant NOTHING.
-    # So the effect today is not "no Part 2 control": it is that Part 2 content
-    # travels with ordinary chart access while the keys named for it are inert.
+    # Shipped position, stated plainly because it is not a Part 2 control:
+    # CIAV VUECENTRIC, held by everyone RPMS signs on to VueCentric (front
+    # desk and scheduler included), still grants `user/Observation.rs` and
+    # `user/Condition.rs`. Part 2-bearing content still travels with ordinary
+    # chart access. The behavioral health keys (`AMHZMENU`, `AMHZMGR`) grant
+    # read and write of QuestionnaireResponse, the PHQ-9/GAD-7 screening
+    # record, and nothing else.
     #
-    # That is deliberate, and it is not a solution. Gating whole FHIR resource
-    # types on the BH keys cannot segregate Part 2 content here — the same
-    # `Observation` endpoint returns a PHQ-9 item-9 answer and a blood
-    # pressure, the same `Condition` endpoint a substance-use diagnosis and
-    # asthma. Resource-type scopes are the wrong granularity for a
-    # record-level rule, and a table that merely LOOKED like it segregated
-    # Part 2 would be worse than an honest gap: it would be a control nobody
-    # re-examines. Record-level segmentation is real work, tracked as #494 and
-    # blocking for any deployment holding Part 2 content.
+    # That is not segmentation. A screening's score Observation still rides
+    # the chart's Observation read: the same endpoint returns that score and
+    # a blood pressure, and the same `Condition` endpoint a substance-use
+    # diagnosis and asthma. Resource-type scopes are the wrong granularity
+    # for a record-level rule, and a table that merely LOOKED like it
+    # segregated Part 2 would be a control nobody re-examines. Record-level
+    # segmentation remains #494, blocking for any deployment holding Part 2
+    # content.
     class SessionScopePolicy
       # Reading a chart: the read surface CIAV VUECENTRIC grants, and nothing
-      # that writes.
+      # that writes. In-clinic consent is not one of these types: its create
+      # grant is emitted as its own scope, below, so it is not folded into
+      # this read string.
       CHART_READ_TYPES = %w[
         Patient Practitioner Organization Location Encounter
         Observation Condition AllergyIntolerance MedicationRequest Medication
         Procedure Immunization DiagnosticReport CarePlan Provenance
       ].freeze
 
-      # Resource types this engine serves that are behavioural-health specific.
-      # Empty today: the BH content it can surface arrives through the general
-      # clinical types above and is not separable at this granularity. Kept as
-      # a named, asserted-on constant so the gate exists the moment a
-      # BH-specific type is routed, rather than being remembered.
-      BEHAVIORAL_HEALTH_TYPES = [].freeze
+      # In-clinic consent (#793). The chart option may read a signed consent
+      # and create one. It may not update or delete one. Create stays its own
+      # scope (`user/Consent.c`) because the builder emits one combined
+      # permission string per type, and combining these would be
+      # `user/Consent.rsc`.
+      CONSENT_TYPES = %w[Consent].freeze
+
+      # QuestionnaireResponse: the PHQ-9/GAD-7 screening record, routed by
+      # ScreeningsController. The behavioral health keys grant this list, read
+      # and write, because that record is their workflow; no other key or
+      # option references it. The score Observation is not in this list — it
+      # rides the chart option's Observation read and is not separable here.
+      BEHAVIORAL_HEALTH_TYPES = %w[QuestionnaireResponse].freeze
 
       # Referral / purchased-care workflow.
       REFERRAL_TYPES = %w[ServiceRequest].freeze
@@ -73,7 +81,11 @@ module Lakeraven
       # option name => { read: [types], write: [types] }. These are the options
       # sign-on asks RPMS about.
       OPTION_SCOPES = {
-        "CIAV VUECENTRIC" => { read: CHART_READ_TYPES, write: [] }
+        "CIAV VUECENTRIC" => {
+          read: (CHART_READ_TYPES + CONSENT_TYPES).freeze,
+          write: [].freeze,
+          create: CONSENT_TYPES
+        }.freeze
       }.freeze
 
       # key symbol => { read: [types], write: [types] }
@@ -87,7 +99,7 @@ module Lakeraven
         scheduling_admin: { read: %w[Encounter Location], write: %w[Encounter] },
         scheduling_user: { read: %w[Encounter Location], write: %w[Encounter] },
 
-        # Behavioural health (42 CFR Part 2): see the note above.
+        # Behavioural health: QuestionnaireResponse only. See the note above.
         behavioral_health_user: { read: BEHAVIORAL_HEALTH_TYPES, write: BEHAVIORAL_HEALTH_TYPES },
         behavioral_health_manager: { read: BEHAVIORAL_HEALTH_TYPES, write: BEHAVIORAL_HEALTH_TYPES }
 
@@ -105,15 +117,20 @@ module Lakeraven
 
         # One SMART v2 scope per resource type: `rs` for a type the options and
         # keys let the user read, `cud` for one they let the user change, `cruds`
-        # for both (SmartScope). An option the table does not list grants nothing.
+        # for both (SmartScope). A `:create` grant is the exception: it is
+        # emitted as its own `c` scope and is not folded into that string.
+        # An option the table does not list grants nothing.
         def scopes_for(security_keys:, options: [])
           granted = Array(security_keys).filter_map { |k| KEY_SCOPES[k.to_sym] } +
                     Array(options).filter_map { |name| OPTION_SCOPES[name.to_s] }
 
           reads = granted.flat_map { |g| g[:read] }.to_set
           writes = granted.flat_map { |g| g[:write] }.to_set
+          creates = granted.flat_map { |g| g.fetch(:create, []) }.to_set
 
-          (reads | writes).map { |type| user_scope(type, reads.include?(type), writes.include?(type)) }.sort
+          combined = (reads | writes).map { |type| user_scope(type, reads.include?(type), writes.include?(type)) }
+          created = creates.map { |type| SmartScope.build("user", type, "c").to_s }
+          (combined + created).uniq.sort
         end
 
         # Every scope this policy can ever mint. Used to declare the browser

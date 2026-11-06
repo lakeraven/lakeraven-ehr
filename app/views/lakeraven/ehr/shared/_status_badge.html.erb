@@ -1,0 +1,8 @@
+<%# A status in words (ComponentsHelper#status_badge).
+    Locals: key (booked, checked, no-show, cancelled, active, inactive,
+    deceased, or any other), label, tone (the colour class, or nil).
+    The words carry the meaning; the colour only repeats it. %>
+<span
+  class="status-badge <%= local_assigns[:tone] %>"
+  data-status-badge="<%= key %>"
+><%= label %></span>

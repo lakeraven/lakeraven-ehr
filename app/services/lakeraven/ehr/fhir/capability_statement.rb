@@ -6,8 +6,8 @@ module Lakeraven
       # The server's CapabilityStatement, served at /metadata (#574).
       #
       # Built from an explicit map, not scraped from the router: a route does
-      # not say whether an interaction works. Condition has a show route that
-      # always 404s, and a route can name a controller that does not exist.
+      # not say whether an interaction works, and a route can name a controller
+      # that does not exist.
       # A map can be wrong too, so the test checks it against the routes and
       # the wire in both directions: a declared capability that does not work
       # fails, and a routed one that is not declared fails.
@@ -36,39 +36,41 @@ module Lakeraven
           "Practitioner" => %w[us-core-practitioner],
           "Location" => %w[us-core-location],
           "AllergyIntolerance" => %w[us-core-allergyintolerance],
-          "Condition" => %w[us-core-condition-problems-health-concerns],
+          "Condition" => %w[us-core-condition-problems-health-concerns us-core-condition-encounter-diagnosis],
+          "Encounter" => %w[us-core-encounter],
           "MedicationRequest" => %w[us-core-medicationrequest],
           "Observation" => %w[us-core-vital-signs],
           "Immunization" => %w[us-core-immunization],
           "Procedure" => %w[us-core-procedure],
           "ServiceRequest" => %w[us-core-servicerequest]
         }.transform_values { |names| names.map { |name| "#{US_CORE}/#{name}" }.freeze }.freeze
-        SEARCH_ONLY_STUB = "No read by id: GET [type]/[id] is routed and always returns 404."
 
         # What each routed type supports, and where its data comes from:
         # integrators were told in prose which resources are live and which
         # are not, and this is where a client can read it.
         RESOURCES = {
-          "Patient" => { interactions: %w[read search-type create], source: "RPMS, through rpms-rpc." },
+          "Patient" => { interactions: %w[read search-type], source: "RPMS, through rpms-rpc." },
           "Practitioner" => { interactions: %w[read search-type], source: "RPMS, through rpms-rpc." },
           "Organization" => { interactions: %w[read], source: "RPMS, through rpms-rpc." },
-          "Location" => { interactions: %w[read], source: "RPMS, through rpms-rpc." },
+          "Location" => { interactions: %w[read search-type], source: "RPMS, through rpms-rpc." },
           "AllergyIntolerance" => {
-            interactions: %w[search-type],
-            source: "RPMS, through rpms-rpc, plus a deployment's supplemental allergy provider when one is configured. " \
-                    "#{SEARCH_ONLY_STUB}"
+            interactions: %w[read search-type],
+            source: "RPMS, through rpms-rpc, plus a deployment's supplemental allergy provider when one is configured."
           },
-          "Condition" => { interactions: %w[search-type], source: "RPMS, through rpms-rpc. #{SEARCH_ONLY_STUB}" },
-          "MedicationRequest" => { interactions: %w[search-type], source: "RPMS, through rpms-rpc. #{SEARCH_ONLY_STUB}" },
+          "Condition" => {
+            interactions: %w[read search-type],
+            source: "The RPMS problem list and the diagnoses on RPMS visits, through rpms-rpc."
+          },
+          "MedicationRequest" => { interactions: %w[read search-type], source: "RPMS, through rpms-rpc." },
           "Observation" => {
-            interactions: %w[search-type],
+            interactions: %w[read search-type],
             source: "Vital signs from RPMS, through rpms-rpc, plus a deployment's supplemental observation provider " \
-                    "when one is configured. #{SEARCH_ONLY_STUB}"
+                    "when one is configured."
           },
-          "Encounter" => { interactions: %w[search-type], source: "RPMS, through rpms-rpc." },
-          "ServiceRequest" => { interactions: %w[search-type], source: "RPMS referrals, through rpms-rpc." },
-          "Immunization" => { interactions: %w[search-type], source: "RPMS, through rpms-rpc." },
-          "Procedure" => { interactions: %w[search-type], source: "RPMS, through rpms-rpc." },
+          "Encounter" => { interactions: %w[read search-type], source: "RPMS visits, through rpms-rpc." },
+          "ServiceRequest" => { interactions: %w[read search-type], source: "RPMS referrals, through rpms-rpc." },
+          "Immunization" => { interactions: %w[read search-type], source: "RPMS, through rpms-rpc." },
+          "Procedure" => { interactions: %w[read search-type], source: "RPMS, through rpms-rpc." },
           "AuditEvent" => { interactions: %w[read search-type], source: "This server's own audit log." },
           "Measure" => { interactions: %w[search-type], source: "Measure definitions shipped with the engine." },
           "MeasureReport" => {

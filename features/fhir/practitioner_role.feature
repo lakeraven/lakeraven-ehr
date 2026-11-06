@@ -1,3 +1,4 @@
+@app
 Feature: PractitionerRole FHIR resource
   As a healthcare system
   I need to represent practitioner roles and specialties

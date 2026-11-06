@@ -68,15 +68,16 @@ Building to (g)(10) is therefore the durable bet; building to criteria that may 
 **In practice.**
 - Mint SMART v2 scopes (`user/Observation.rs`, `user/Patient.cruds`). Accept v1 scopes from older clients only by translating them to v2 at the edge.
 - Declare US Core 6.1.0 in the CapabilityStatement (`implementationGuide`), and only for resources that actually conform.
-- Validate FHIR output against US Core in CI with the HL7 validator, and run Inferno's (g)(10) suite against a deployed stack (#254). Hand-written serializers are fine; unvalidated ones are not.
+- Validate FHIR output against US Core in CI with the HL7 validator, and run Inferno's (g)(10) suite against a deployed stack (#261). Hand-written serializers are fine; unvalidated ones are not.
 - Advertise only what is served, in discovery and in the CapabilityStatement (#657, #658, #656).
 
 **Today.** Scopes are SMART v2 (#665): v1 scopes are translated at the edge, and discovery and the CapabilityStatement list only what is routed (#657, #658).
-There is no implementation-guide declaration yet, and FHIR output is validated by unit tests only.
+CI validates served FHIR against US Core 6.1.0 with the HL7 validator, and the CapabilityStatement declares US Core 6.1.0 for the types that pass (#666).
+Inferno has not been run against a deployed stack yet; `docs/certification/inferno-g10-gaps.md` maps each (g)(10) test group to what is served.
 
 **Next.**
-1. Add the validator to CI and declare US Core 6.1.0 for the types that pass (#666).
-2. Run Inferno's (g)(10) suite against a deployed stack (#254).
+1. Run Inferno's (g)(10) suite against a deployed stack and keep its report as the baseline (#261).
+2. Close the gaps that report and the gap map name, each in its own issue under #261.
 
 ## 5. Browsers hold a session cookie; API clients hold short-lived, sender-constrained tokens
 
@@ -92,9 +93,11 @@ There is no implementation-guide declaration yet, and FHIR output is validated b
   - DPoP (RFC 9449) for public clients when SMART launch is served.
 - Tokens carry capabilities and scopes, never raw RPMS key names (ADR 0010).
 
-**Today.** The browser session and the backend-services path follow this. SMART launch is not served, and since #665 it is no longer advertised.
+**Today.** The browser session and the backend-services path follow this.
+SMART App Launch is served (#839): authorization code with PKCE S256 required, public, client-secret and private_key_jwt clients, and short-lived opaque tokens bound to the approving user's session and RPMS connection.
+Tokens are not yet RFC 9068 JWTs, there are no refresh tokens (#840), and DPoP is not required, because the (g)(10) test kit does not send it.
 
-**Next.** Serve SMART authorization-code launch with PKCE, short-lived sender-constrained tokens, and refresh tokens bound to the client.
+**Next.** Refresh tokens bound to the client (#840), and sender-constrained tokens where clients support them.
 
 ## 6. Staff sign in with the organization's identity provider and phishing-resistant MFA
 

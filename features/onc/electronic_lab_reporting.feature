@@ -1,4 +1,4 @@
-@onc
+@onc @app
 Feature: Electronic Laboratory Reporting (ELR)
   As a public health authority
   I want reportable lab results to be transmitted electronically

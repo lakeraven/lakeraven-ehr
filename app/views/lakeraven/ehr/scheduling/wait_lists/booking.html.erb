@@ -1,0 +1,37 @@
+<% page_title "Book from the wait list", @resource[:name] %>
+
+<%= page_header "Book from the wait list",
+      [ "#{@entry[:patient]}, #{@resource[:name]}",
+        "Booking closes this entry today, resolved as an appointment made." ] %>
+
+<%= flash_alert id: "wait-list-alert" %>
+
+<%= form_errors @booking,
+      "The appointment was not booked.",
+      id: "booking-errors" %>
+
+<%= form_with scope: :booking,
+      url: scheduling_clinic_wait_list_booking_path(@resource[:id], @entry[:ien]),
+      method: :post,
+      local: true,
+      id: "wait-list-booking-form",
+      class: "card flex flex-col gap-4" do |f| %>
+  <%= form_field :start, "Time", form: f do |aria| %>
+    <%= f.datetime_local_field :start,
+          value: @booking.start,
+          required: true,
+          aria: aria %>
+  <% end %>
+
+  <%= form_field :length, "Length (minutes)", form: f do |aria| %>
+    <%= f.number_field :length,
+          value: @booking.length,
+          min: @resource[:time_scale],
+          step: @resource[:time_scale],
+          required: true,
+          aria: aria %>
+  <% end %>
+
+  <%= f.submit "Book the appointment",
+        class: "button-primary self-start" %>
+<% end %>

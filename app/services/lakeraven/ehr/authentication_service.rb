@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "socket"
 require "rpms_rpc/api/authentication"
 
 module Lakeraven
@@ -25,13 +26,40 @@ module Lakeraven
       #
       # NOTE: even serialized, one global client still holds one broker
       # identity — this narrows the window, it does not close it (rpms-rpc#234).
-      def authenticate(access_code:, verify_code:)
+      #
+      # client_ip is the browser's address. RPMS records it, with this
+      # application's workstation name, against the sign-on
+      # (docs/identity-passthrough.md).
+      def authenticate(access_code:, verify_code:, client_ip: nil)
         return failure("Password required") if verify_code.to_s.empty?
+        return authenticate_on_own_connection(access_code, verify_code, client_ip) if RpmsSessions.enabled?
 
-        with_broker_wire_lock { resolve_signon(access_code, verify_code) }
+        with_broker_wire_lock { resolve_signon(access_code, verify_code, client_ip) }
       end
 
+      # What RPMS records as the workstation of a lakeraven-ehr sign-on (CIA
+      # AUTH's WID): this application, and the host it runs on.
+      def self.workstation = "lakeraven-ehr #{Socket.gethostname}"[0, 40]
+
       private
+
+      # Sign on over a fresh connection of the user's own (ADR 0011 §3). The
+      # whole sign-on sequence runs inside that connection's scope, so every
+      # read in it (the user, class, keys, options, idle limit) asks the
+      # connection that just signed on, and nothing is shared with any other
+      # sign-on: no lock is needed. On success the value carries the client,
+      # for the caller to adopt into RpmsSessions; on any failure the
+      # connection is closed here.
+      def authenticate_on_own_connection(access_code, verify_code, client_ip)
+        client = RpmsSessions.new_client
+        result = RpmsRpc.with_client(client) { resolve_signon(access_code, verify_code, client_ip) }
+        return result.tap { client.disconnect } unless result.success?
+
+        Result.new(success?: true, error: nil, value: result.value.merge(client: client))
+      rescue StandardError
+        client&.disconnect
+        raise
+      end
 
       # Prefer the gem's cross-client wire lock when present; otherwise fall
       # back to a process-local mutex rather than running unsynchronized. Do
@@ -46,10 +74,10 @@ module Lakeraven
         BROKER_WIRE_MUTEX.synchronize(&block)
       end
 
-      def resolve_signon(access_code, verify_code)
+      def resolve_signon(access_code, verify_code, client_ip)
         auth =
           if cia_broker?
-            cia_signon(access_code, verify_code)
+            cia_signon(access_code, verify_code, client_ip)
           else
             RpmsRpc::Authentication.authenticate(access_code: access_code, verify_code: verify_code)
           end
@@ -70,6 +98,10 @@ module Lakeraven
         # The options the policy grants from (the chart's CIAV VUECENTRIC), asked
         # the same way and refused the same way when they cannot be read.
         options = OptionAccessGateway.held(SessionScopePolicy::OPTION_SCOPES.keys)
+        # How long RPMS lets this user sit idle (their DTIME): the session lasts
+        # that long, on RPMS's clock. Not knowing it is not a refused sign-on;
+        # the app's own limit applies instead.
+        idle_seconds = rpms_idle_seconds(duz_s)
 
         # Round-trip the server's user type through the short code so
         # :referrals_supervisor or :referrals_manager still elevates to "case_manager".
@@ -87,7 +119,10 @@ module Lakeraven
             # out). Dropping the flag granted a full session on a temporary
             # credential where CPRS would force the change first; the caller
             # decides, but it can only decide if it is told.
-            verify_needs_change: auth[:verify_needs_change] == true
+            verify_needs_change: auth[:verify_needs_change] == true,
+            idle_seconds: idle_seconds,
+            # The CIA session RPMS opened for this sign-on (nil over XWB).
+            rpms_session_id: auth[:rpms_session_id]
           }
         )
       end
@@ -104,16 +139,18 @@ module Lakeraven
       # (VueCentric shows it and prompts); there is no flag field to read.
       VERIFY_CHANGE_GREETING = /VERIFY CODE must be changed/i
 
-      def cia_signon(access_code, verify_code)
+      def cia_signon(access_code, verify_code, client_ip)
         client = RpmsRpc.client
         client.connect unless client.connected?
-        signon = client.authenticate(access_code, verify_code)
+        signon = client.authenticate(access_code, verify_code,
+                                     workstation: self.class.workstation, workstation_ip: client_ip.presence)
 
         {
           success: true,
           duz: signon[:duz],
           name: signon[:user],
-          verify_needs_change: VERIFY_CHANGE_GREETING.match?(signon[:greeting].to_s)
+          verify_needs_change: VERIFY_CHANGE_GREETING.match?(signon[:greeting].to_s),
+          rpms_session_id: client.session_uid
         }
       rescue RpmsRpc::Client::AuthenticationError => e
         # The gem sanitizes these messages (RpmsRpc.sanitize_error), so the
@@ -121,6 +158,13 @@ module Lakeraven
         # every refusal.
         Rails.logger.warn("[auth] CIA sign-on refused: #{e.class}: #{e.message}")
         { success: false, error: "Invalid access/verify code" }
+      end
+
+      def rpms_idle_seconds(duz)
+        RpmsRpc::Authentication.timed_read(duz)
+      rescue RpmsRpc::Client::RpcError => e
+        Rails.logger.warn("[auth] idle limit unavailable for DUZ #{duz}: #{e.class}")
+        nil
       end
 
       def failure(message)

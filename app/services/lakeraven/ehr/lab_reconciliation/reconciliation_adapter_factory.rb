@@ -6,7 +6,7 @@ module Lakeraven
       class ReconciliationAdapterFactory
         ADAPTERS = {
           mock: -> { MockAdapter.new },
-          rpms: -> { RpmsAdapter.new }
+          not_configured: -> { NotConfiguredAdapter.new }
         }.freeze
 
         def self.build(mode = nil)
@@ -19,7 +19,7 @@ module Lakeraven
         def self.detect_mode
           env_mode = ENV["LAB_RECONCILIATION_MODE"]
           return env_mode.to_sym if env_mode.present?
-          Rails.env.production? ? :rpms : :mock
+          Rails.env.production? ? :not_configured : :mock
         end
         private_class_method :detect_mode
       end

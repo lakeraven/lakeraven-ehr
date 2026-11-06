@@ -1,3 +1,4 @@
+@app
 Feature: Consent FHIR resource
   As a healthcare system
   I need to manage patient consent for proxy access and data sharing

@@ -7,6 +7,7 @@ require "test_helper"
 # check-in and one with no provider where the clinic requires one, so those
 # rules are checked here and tested here.
 class SchedulingCheckinAppointmentTest < ActionDispatch::IntegrationTest
+  include BrowserFormHelper
   RESOURCE = { id: 2, name: "DEMO IHS CLINIC", inactive: false, time_scale: 15, hospital_location_id: 3,
                view: true, overbook: true, modify_schedule: true, modify_appointments: true }.freeze
 
@@ -20,17 +21,31 @@ class SchedulingCheckinAppointmentTest < ActionDispatch::IntegrationTest
 
   def sign_in = post("/lakeraven-ehr/test_session", params: { duz: "208", user_type: "user", user_name: "PROFILE,SCHED", security_keys: "scheduling_user" })
 
-  def with_rpms(listed: [ appointment ], provider_required: "YES", checkin: ->(*) { { success: true } })
+  # after_checkin: the day as RPMS lists it once a check-in has been sent.
+  def with_rpms(listed: [ appointment ], after_checkin: listed, provider_required: "YES", several_stops: "NO", checkin: ->(*) { { success: true } })
     log = (@checkins ||= [])
-    setup = [ { location_ien: 3, location: "DEMO IHS CLINIC", visit_provider_required: provider_required } ]
+    setup = [ { location_ien: 3, location: "DEMO IHS CLINIC", visit_provider_required: provider_required, multiple_clinic_codes: several_stops } ]
     stubs = {
       RpmsRpc::Scheduling.singleton_class => {
         resources: ->(*) { [ RESOURCE ] },
-        appointments: ->(**) { listed },
+        appointments: ->(**) { log.empty? ? listed : after_checkin },
         clinic_setup: ->(*) { setup },
         checkin_appointment: ->(id, **kw) { log << kw.merge(id: id); checkin.call(id, kw) }
       },
-      RpmsRpc::Practitioner.singleton_class => { search: ->(_text) { [ { ien: 206, name: "PROFILE,MD" } ] } }
+      # RPMS answers as on a stock image: PROFILE,MD holds PROVIDER, PROFILE,SCHED does not.
+      RpmsRpc::Practitioner.singleton_class => {
+        search: lambda do |_text, key: nil|
+          md = { ien: 206, name: "PROFILE,MD" }
+          key == "PROVIDER" ? [ md ] : [ md, { ien: 208, name: "PROFILE,SCHED" } ]
+        end
+      }
+    }.merge(scheduling_setup_stubs)
+    # CLINIC STOP (#40.7) as DDR LISTER lists it: IEN, then .01 NAME, 1 CODE, 2 INACTIVE DATE.
+    stubs[RpmsRpc::DdrFileman.singleton_class] = {
+      lister: lambda do |**|
+        { entries: [ { ien: "28", pieces: [ "FAMILY PRACTICE", "28", "" ] }, { ien: "31", pieces: [ "ORTHOPEDIC", "31", "" ] },
+                     { ien: "2", pieces: [ "CARDIOLOGY", "02", "3200101" ] } ] }
+      end
     }
     stubs.each { |klass, methods| methods.each_key { |m| klass.alias_method(:"__#{m}", m) } }
     stubs.each { |klass, methods| methods.each { |m, body| klass.define_method(m, &body) } }
@@ -110,6 +125,16 @@ class SchedulingCheckinAppointmentTest < ActionDispatch::IntegrationTest
     assert_select "#checkin-form label[data-provider='206']", text: /PROFILE,MD/
   end
 
+  test "S-SCH-03.1 the visit provider offered is a provider, not any user" do
+    sign_in
+    with_rpms do
+      get path, params: { date: today.iso8601, provider_search: "PROF" }
+    end
+
+    assert_select "#checkin-form label[data-provider='206']"
+    assert_select "#checkin-form label[data-provider='208']", count: 0
+  end
+
   test "a refusal from RPMS shows its reason" do
     sign_in
     with_rpms(checkin: ->(*) { { success: false, error: "BSDX25: Patient has a temporary chart number" } }) do
@@ -118,5 +143,70 @@ class SchedulingCheckinAppointmentTest < ActionDispatch::IntegrationTest
 
     assert_response :unprocessable_content
     assert_select "[role='alert']", text: /temporary chart number/
+  end
+
+  # BSDX25 files the check-in, then makes the visit; an error trapped there
+  # answers ERROR^BSDX25's "RPMS Error" with the check-in already filed.
+  test "S-SCH-03.1 a check-in RPMS filed is reported as filed, even when the visit errored" do
+    sign_in
+    filed = appointment(checkin_time: at(0, 20))
+    with_rpms(after_checkin: [ filed ], checkin: ->(*) { { success: false, error: "RPMS Error" } }) do
+      post path, params: checkin_params
+      assert_redirected_to "/lakeraven-ehr/scheduling/clinics/2?date=#{today.iso8601}"
+    end
+
+    assert_match(/Checked in MOUSE,MICKEY M/, flash[:notice])
+    assert_match(/filed the check-in but reported: RPMS Error/, flash[:alert])
+  end
+
+  test "a check-in whose outcome is unknown is reported as filed when RPMS shows it" do
+    sign_in
+    with_rpms(after_checkin: [ appointment(checkin_time: at(0, 20)) ], checkin: ->(*) { raise IOError }) do
+      post path, params: checkin_params
+    end
+
+    assert_response :redirect
+  end
+  test "S-SCH-03.5 a clinic that uses several stops asks which one, refuses a check-in without one, and files the one chosen" do
+    sign_in
+    with_rpms(several_stops: "YES") do
+      get path, params: { date: today.iso8601 }
+      assert_select "#checkin-form select[name='checkin[stop_id]'] option", text: "ORTHOPEDIC (31)"
+      assert_select "#checkin-form select[name='checkin[stop_id]'] option", text: "CARDIOLOGY (02)", count: 0
+
+      post path, params: checkin_params
+      assert_response :unprocessable_content
+      assert_select "#checkin-errors li", text: /Stop is required: this clinic uses several stops/
+      assert_empty checkins
+
+      post path, params: checkin_params(stop_id: "31")
+      assert_response :redirect
+    end
+    assert_equal 31, checkins.sole[:clinic_code]
+  end
+
+  test "S-SCH-03.5 a clinic with one stop asks for none, and RPMS files its own" do
+    sign_in
+    with_rpms do
+      get path, params: { date: today.iso8601 }
+      assert_select "select[name='checkin[stop_id]']", count: 0
+      post path, params: checkin_params
+    end
+    assert_nil checkins.sole[:clinic_code]
+  end
+
+  # #896: a browser sends the form's own token; the look-up must accept it.
+  test "Find provider is accepted with forgery protection on, as in a browser" do
+    sign_in
+    with_rpms do
+      with_forgery_protection do
+        get path, params: { date: today.iso8601 }
+        press "Find provider", fill: { "provider_search" => "PROF" }
+      end
+    end
+
+    assert_response :ok
+    assert_select "#checkin-form label[data-provider='206']", text: /PROFILE,MD/
+    assert_empty checkins
   end
 end

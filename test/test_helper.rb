@@ -8,6 +8,12 @@ ActiveRecord::Migrator.migrations_paths = [ File.expand_path("../test/dummy/db/m
 ActiveRecord::Migrator.migrations_paths << File.expand_path("../db/migrate", __dir__)
 require "rails/test_help"
 
+# Integration TestResponse never picked up the success? alias LiveTestResponse
+# has. The consent specification calls response.success? for a non-2xx check.
+unless ActionDispatch::TestResponse.method_defined?(:success?)
+  ActionDispatch::TestResponse.alias_method :success?, :successful?
+end
+
 # Engine pages link the Tailwind build (tailwind.css), and a missing build is
 # a template error on any page that links it. `rails test:prepare` builds
 # it in an app, but an engine's test runner never calls test:prepare, so build
@@ -23,9 +29,12 @@ require_relative "support/fake_gateway"
 require_relative "support/stub_helpers"
 require_relative "support/scheduling_setup_stubs"
 require_relative "support/registration_form_helper"
+require_relative "support/browser_form_helper"
+require_relative "support/patient_profile_stubs"
 require_relative "support/ihs_feature_availability_test_helper"
 require "rpms_rpc/mock_client"
 require_relative "support/mock_session_user"
+require_relative "support/rate_limit_test_helper"
 
 # Baseline RpmsRpc mock seeds. Installed at load and again before every
 # example (GlobalStoreIsolation) so a test that adds seeds cannot leak
@@ -177,7 +186,7 @@ BASELINE_MOCK_SEEDS = lambda do |m|
   m.seed_user("302", credentials: "testnurse;test123", name: "NURSE,TEST", role: :nurse)
   m.seed_user("303", credentials: "testclerk;test123", name: "CLERK,TEST", role: :clerk)
   m.seed_user("304", credentials: "lindarodriguez;test123", name: "RODRIGUEZ,LINDA", role: :case_manager)
-  # The SECURITY KEYs DUZ 304 holds, answered to CIAVCXUS HASKEYS once 304 signs on.
+  # The SECURITY KEYs DUZ 304 holds, answered to ORWU NPHASKEY for 304.
   m.seed_held_keys("304", [ "BMCZSUPERVISOR", "ORELSE" ])
   # Everyone RPMS signs on over CIA holds CIAV VUECENTRIC, the context the
   # sign-on binds to. This mock signs on over XWB, where a user can sign on

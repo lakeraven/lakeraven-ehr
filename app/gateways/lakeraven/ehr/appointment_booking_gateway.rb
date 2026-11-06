@@ -21,6 +21,16 @@ module Lakeraven
 
       PATIENT_LIMIT = 15
 
+      # BSDX ADD NEW APPOINTMENT locks only the patient (BSDX07.m:40) and
+      # never refuses a full slot, and BSDX has no lock RPC, so the check for
+      # room and the booking run under a lock per resource and day here (#725).
+      # It covers every lakeraven-ehr user (one web process, ADR 0011), not a
+      # VueCentric user booking at the same moment, as stock RPMS does not.
+      BOOKING_LOCKS = Array.new(64) { Mutex.new }.freeze
+
+      # The lock a resource's day is booked and its hours replaced under.
+      def self.lock_for(resource, date) = BOOKING_LOCKS[[ resource[:id], date ].hash % BOOKING_LOCKS.size]
+
       def self.resources(via: ::RpmsRpc::Scheduling)
         Array(via.resources)
       end
@@ -53,10 +63,40 @@ module Lakeraven
         end
       end
 
+      # Whether a clinic keeps this user out (#729, S-SCH-01.13): its HOSPITAL
+      # LOCATION prohibits access (#44 field 2500) and the user is not one of its
+      # privileged users, or its principal clinic's, as RPMS's own scheduling
+      # checks (SDM1.m:33). SDZSUP is checked by the caller.
+      def self.kept_out?(resource, duz, setup: ::RpmsRpc::SchedulingSetup)
+        rules = setup.clinic_rules(resource[:hospital_location_id])
+        return false unless rules&.dig(:prohibit_access)
+
+        !Array(rules[:privileged_users]).include?(duz.to_i)
+      end
+
       # The access types the search can be kept to (S-SCH-04.6): those neither
       # inactive nor preventing access, by name.
       def self.access_types(setup: ::RpmsRpc::SchedulingSetup)
         Array(setup.access_types).reject { |t| t[:inactive] || t[:prevent_access] }
+      end
+
+      # The access types by id, for naming a block (S-SCH-05.2).
+      def self.access_type_names(setup: ::RpmsRpc::SchedulingSetup)
+        Array(setup.access_types).to_h { |t| [ t[:id], t[:name] ] }
+      end
+
+      # The day's appointments with what the BSDX reads leave out (S-SCH-05.3):
+      # :cancelled_by on a cancelled one, and :overbook on the others.
+      def self.marked(resource, appointments, setup: ::RpmsRpc::SchedulingSetup)
+        clinic = resource[:hospital_location_id]
+        appointments.map do |a|
+          where = { start_time: a[:start_time], patient_dfn: a[:patient_dfn] }
+          if a[:cancelled]
+            a.merge(cancelled_by: setup.cancelled_by(**where))
+          else
+            a.merge(overbook: clinic.present? && setup.overbook?(hospital_location_id: clinic, **where))
+          end
+        end
       end
 
       # What RPMS says about the resource's clinic over from..to, read once for
@@ -72,6 +112,47 @@ module Lakeraven
         ->(date) { { closed: ClinicDay.closed_on(date, rules: rules, holidays: holidays, today: today), prevented: prevented, opens_hour: rules&.dig(:display_begins) } }
       end
       private_class_method :rules_for
+
+      # How many appointments each resource holds on date, by resource name, from
+      # one read across every resource: BSDX ALL APPOINTMENTS (APBLKALL^BSDX05).
+      # The routine counts walk-ins and leaves out cancelled and no-show
+      # appointments (STCOMM^BSDX05). A resource with none is not a key.
+      def self.booked_counts(date, via: ::RpmsRpc::Scheduling)
+        Array(via.all_appointments(start_date: date, end_date: date)).group_by { |a| a[:resource_name] }.transform_values(&:size)
+      end
+
+      # Every appointment on the resources over dates, cancelled ones too, each
+      # with its clinic (S-SCH-05.5). One read per resource: BSDX ALL
+      # APPOINTMENTS leaves out what is cancelled or a no-show.
+      def self.listed(resources, dates, via: ::RpmsRpc::Scheduling)
+        resources.flat_map do |resource|
+          Array(via.appointments(resource: resource[:name], start_date: dates.begin, end_date: dates.end))
+            .map { |a| a.merge(clinic: resource.slice(:id, :name)) }
+        end
+      end
+
+      # The appointments needing action on the resources over window, earliest
+      # first (#875, rpms-ux S-SCH-13.5): past their start time with no check-in,
+      # check-out, cancellation or no-show recorded on BSDX APPOINTMENT, the
+      # appointments RPMS's own Appointments Requiring Action report lists
+      # (BSDAMR2: no status, or NO ACTION TAKEN). BSDX ALL APPOINTMENTS names the
+      # resources with a past appointment not cancelled or a no-show, and only
+      # those resources' days are read (BSDX CREATE APPT SCHEDULE), each row
+      # with its resource as :clinic. now is the server's local time, as BSDX
+      # times are.
+      def self.needing_action(resources, window, now: Time.now, via: ::RpmsRpc::Scheduling)
+        booked = Array(via.all_appointments(start_date: window.begin, end_date: window.end))
+        names = booked.select { |a| a[:start_time] < now }.to_set { |a| a[:resource_name] }
+        resources.select { |r| names.include?(r[:name]) }.flat_map do |resource|
+          Array(via.appointments(resource: resource[:name], start_date: window.begin, end_date: window.end))
+            .select { |a| needs_action?(a, now) }.map { |a| a.merge(clinic: resource) }
+        end.sort_by { |a| a[:start_time] }
+      end
+
+      def self.needs_action?(appointment, now)
+        appointment[:start_time] < now && !appointment[:cancelled] && !appointment[:no_show] &&
+          appointment[:checkin_time].nil? && appointment[:checkout_time].nil?
+      end
 
       def self.appointment(resource, id, date, via: ::RpmsRpc::Scheduling)
         Array(via.appointments(resource: resource[:name], start_date: date, end_date: date)).find { |a| a[:id] == id.to_i }
@@ -94,10 +175,65 @@ module Lakeraven
         end
       end
 
-      def self.book(booking, resource, via: ::RpmsRpc::Scheduling)
+      # Books if the time still has room, read again under the lock; :full if not.
+      # access_type: "WALKIN" books a walk-in (S-SCH-06.1); nil a scheduled appointment.
+      #
+      # overbook: who is booking, for a time with no room ({ duz:, supervisor:,
+      # confirmed: }), or nil to never overbook. When the overbook rules of
+      # S-SCH-01.9 to 01.11 let them (overbook_permitted?), the answer is
+      # :overbook_offered until they confirm; a confirmed overbook is booked
+      # and then marked OVERBOOK (#44.003 field 9), as BPRM marks it (#603).
+      def self.book_if_room(booking, resource, via: ::RpmsRpc::Scheduling, setup: ::RpmsRpc::SchedulingSetup, access_type: nil, overbook: nil)
+        date = booking.start_time.to_date
+        lock_for(resource, date).synchronize do
+          clinic_day, = day(resource, date, via: via, setup: setup)
+          next book(booking, resource, via: via, access_type: access_type) if clinic_day.room_for?(booking.start_time, booking.length)
+          next Result.new(status: :full, appointment_id: nil, message: nil) unless overbook && overbook_permitted?(clinic_day, booking, resource, overbook, via: via, setup: setup)
+          next Result.new(status: :overbook_offered, appointment_id: nil, message: nil) unless overbook[:confirmed]
+
+          booked = book(booking, resource, via: via, access_type: access_type)
+          booked.booked? ? mark_overbook(booked, booking, resource, setup: setup) : booked
+        end
+      end
+
+      # The overbook rules (rpms-ux S-SCH-01.9 to 01.11), as the Windows
+      # scheduler and BPRM apply them. Never on a day the clinic takes no
+      # booking (a holiday, past its booking limit, inactive). SDZSUP or the
+      # master overbook right on the resource (BSDX RESOURCE USER .06) may
+      # overbook anywhere else, past the clinic's daily maximum and outside its
+      # blocks. The overbook right (.03) may overbook a full time inside an
+      # open block while BSDX OVERBOOK says the day is under the clinic's
+      # OVERBOOKS/DAY MAXIMUM (#44 field 1918). A read that fails refuses.
+      def self.overbook_permitted?(clinic_day, booking, resource, who, via:, setup:)
+        return false if clinic_day.closed
+        return true if who[:supervisor] || setup.master_overbook?(resource_id: resource[:id], duz: who[:duz])
+        return false unless resource[:overbook] && clinic_day.in_block?(booking.start_time, booking.length)
+
+        via.overbook_allowed(hospital_location_id: resource[:hospital_location_id], start_time: booking.start_time, resource_id: resource[:id])
+      rescue ::RpmsRpc::Error, IOError, SystemCallError => e
+        Rails.logger.error("[scheduling] overbook check raised #{e.class}; refused")
+        false
+      end
+      private_class_method :overbook_permitted?
+
+      # Marks a booked overbook. The booking stands either way; when RPMS does
+      # not mark it, the result says so, so the clerk knows the clinic's
+      # overbook count will miss it.
+      def self.mark_overbook(booked, booking, resource, setup:)
+        marked = setup.mark_overbook(hospital_location_id: resource[:hospital_location_id], start_time: booking.start_time, patient_dfn: booking.patient_dfn)
+        return booked.with(status: :booked) if marked&.dig(:success)
+
+        booked.with(message: "Booked, but RPMS did not mark it as an overbook (#{marked&.dig(:error).presence || 'no reply'}). The clinic's overbook count will miss it.")
+      rescue ::RpmsRpc::Error, IOError, SystemCallError => e
+        Rails.logger.error("[scheduling] overbook mark raised #{e.class}")
+        booked.with(message: "Booked, but RPMS did not confirm it is marked as an overbook. The clinic's overbook count may miss it.")
+      end
+      private_class_method :mark_overbook
+
+      def self.book(booking, resource, via: ::RpmsRpc::Scheduling, access_type: nil)
         reply = via.add_appointment(patient_dfn: booking.patient_dfn, resource: resource[:name],
                                     start_time: booking.start_time, end_time: booking.end_time,
-                                    length_minutes: booking.length, note: booking.note)
+                                    length_minutes: booking.length, note: booking.note, **{ access_type: access_type }.compact)
         return Result.new(status: :unknown, appointment_id: nil, message: nil) if reply.nil?
         return Result.new(status: :booked, appointment_id: reply[:appointment_id], message: nil) if reply[:success]
 

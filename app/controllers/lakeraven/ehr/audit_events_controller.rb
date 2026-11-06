@@ -5,6 +5,8 @@ module Lakeraven
     class AuditEventsController < ApplicationController
       include PatientCompartment
 
+      rate_limit only: %i[index show]
+
       # AuditEvent IS the accounting-of-disclosures record: which patients a
       # facility touched, by whom, from where. Unbound, it handed a token bound
       # to patient 999 the access trail of every other patient — the same

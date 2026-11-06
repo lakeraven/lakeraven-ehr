@@ -9,8 +9,17 @@ module Lakeraven
       # covered on the day it is written, not on the day someone notices.
       # Pages that touch no patient data and name no user (the sign-in form)
       # need no row and are not refused one; see `audit_settled?`.
+      # Lock before the audit wrapper, so a locked redirect is inside the
+      # wrapper and the denial is recorded (#793). PhiPageCache is last so
+      # its no-store header is prepended outside that wrapper and survives
+      # a halted before_action.
+      include SessionIdleLimit
+      include ConsentKioskLock
       include AuditableClinicalAccess
       include PatientBannerRendering
+      include RpmsUserScope
+      include PhiPageCache
+      include RateLimitable
 
       helper ApplicationHelper
       layout "lakeraven/ehr/application"
@@ -38,9 +47,13 @@ module Lakeraven
       # rather than merely forgetting, because CookieStore leaves the client a
       # valid cookie after reset_session.
       def require_authentication
-        if session[:duz].present? && session_idle_expired?
+        if session[:duz].present? && (session_idle_expired? || session_lifetime_expired?)
           terminate_session!
           return redirect_to login_path, alert: "Your session timed out. Please sign in again."
+        end
+        if session[:duz].present? && session_token_revoked?
+          terminate_session!
+          return redirect_to login_path, alert: "Your session ended. Please sign in again."
         end
         return end_session_for_closed_rpms! if session[:duz].present? && rpms_connection_closed?
 
@@ -50,15 +63,35 @@ module Lakeraven
         redirect_to login_path, alert: "Please sign in"
       end
 
-      def session_idle_expired?
-        last_seen = session[:last_seen_at]
-        return false if last_seen.blank?
+      # Whether the credential this session was signed in with is no longer
+      # valid: revoked (a sign-in by the same user elsewhere, a sign-out, an
+      # administrator) or expired. The session dies with it (ADR 0011 §4). A
+      # session that carries no token (the test-only sign-in) has none to check.
+      def session_token_revoked?
+        raw = session[:smart_token].presence
+        return false if raw.nil?
 
-        Time.current.to_i - last_seen.to_i > SmartAuthentication::SESSION_IDLE_TIMEOUT.to_i
+        token = Doorkeeper::AccessToken.by_token(raw)
+        token.nil? || token.revoked? || token.expired?
+      end
+
+      # Whether the session has outlived the site's session_lifetime since
+      # sign-on, however active it has been. A session with no sign-on time was
+      # not made by sign-on, and ends.
+      def session_lifetime_expired?
+        signed_in = session[:signed_in_at]
+        signed_in.blank? || Time.current.to_i - signed_in.to_i > Lakeraven::EHR.configuration.session_lifetime.to_i
       end
 
       def touch_session!
         session[:last_seen_at] = Time.current.to_i
+        keep_rpms_session_alive!
+      end
+
+      # Keep this user's RPMS connection open for as long as they may sit idle;
+      # the pool's keeper ends it after (RpmsSessions, SessionPool#touch).
+      def keep_rpms_session_alive!
+        RpmsSessions.touch(session[:rpms_pool_key], idle_for: session_idle_limit) if RpmsSessions.enabled?
       end
 
       # RPMS ends an idle broker session on its own clock, and the session was
@@ -67,6 +100,9 @@ module Lakeraven
       # ends too and the user signs in again (a new connection). Pages that read
       # nothing from RPMS stop loading as if it were still there.
       def rpms_connection_closed?
+        # Held AND connected: a connection the broker dropped ends the session.
+        return !RpmsSessions.live?(session[:rpms_pool_key]) if RpmsSessions.enabled? && session[:rpms_pool_key].present?
+
         client = RpmsRpc.configuration.client
         client.respond_to?(:connected?) && !client.connected?
       end
@@ -80,7 +116,9 @@ module Lakeraven
       # sign-out, idle expiry, a failed sign-on, a broker outage, and a
       # different human signing in at this workstation.
       def terminate_session!
+        release_consent_kiosk_lock! if respond_to?(:release_consent_kiosk_lock!, true)
         revoke_session_token!
+        RpmsSessions.release(session[:rpms_pool_key]) if RpmsSessions.enabled?
         reset_session
       end
 
@@ -112,7 +150,7 @@ module Lakeraven
         return if capability?(name)
 
         note_audit_denial("browser access refused: lacks #{name}")
-        head :forbidden
+        render "lakeraven/ehr/shared/forbidden", formats: :html, status: :forbidden
       end
     end
   end

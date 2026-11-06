@@ -14,11 +14,8 @@ module Lakeraven
       # than the un-indexed `name` (race-safety — see #browser_sso_application).
       BROWSER_SSO_APP_UID = "lakeraven-ehr-browser-sso"
 
-      # How long a session may sit idle before it is signed out. RPMS sessions
-      # are not 12-hour credentials and neither is this one; the token's own
-      # expiry is the outer bound, this is the inner one.
-      IDLE_TIMEOUT = SmartAuthentication::SESSION_IDLE_TIMEOUT
-      TOKEN_LIFETIME = 12.hours
+
+      rate_limit only: :create, login_throttle: true
 
       def new
         # login form
@@ -30,6 +27,11 @@ module Lakeraven
       # fallback.
       def create
         access_code = params[:username].to_s
+        # An app's authorization request this sign-in is for (#839). Kept
+        # across the session resets below, so the user goes on to approve or
+        # deny it once signed in. It holds only what the app sent, and grants
+        # nothing until that user approves it (SmartAuthorizationsController).
+        pending_authorization = session[SmartAuthorizationsController::PENDING]
 
         # Whatever credential this browser is already carrying dies here,
         # before anything else happens. A sign-on at a workstation ends the
@@ -39,13 +41,15 @@ module Lakeraven
         # cannot reach. Clinician B signing in used to leave clinician A's
         # saved cookie working, audited as B.
         terminate_session!
+        # A failed attempt keeps it too, so the user can try again.
+        session[SmartAuthorizationsController::PENDING] = pending_authorization if pending_authorization.present?
 
-        if LoginThrottle.throttled?(access_code, request.remote_ip)
+        if LoginThrottle.throttled?(access_code, client_ip)
           # Refused BEFORE the credential is checked, and refused even when it
           # is correct: RPMS's own three-strike lock keys on the broker client
           # IP — the app server — so an unthrottled login route lets one
           # attacker lock out every clinician at once.
-          return render_throttled
+          return render_throttled(access_code)
         end
 
         result = authenticate(access_code: access_code, verify_code: params[:password].to_s)
@@ -60,6 +64,7 @@ module Lakeraven
         # so does this. Establishing no session is the fail-closed answer
         # until the change flow exists (#493 tracks building it).
         if provider[:verify_needs_change]
+          provider[:client]&.disconnect
           terminate_session!
           flash.now[:alert] = "Your verify code must be changed before you can sign in."
           return render :new, status: :forbidden
@@ -67,6 +72,13 @@ module Lakeraven
 
         LoginThrottle.clear_account(access_code)
         establish_session(provider)
+        return render_at_capacity unless adopt_connection(provider)
+
+        if pending_authorization.present?
+          session[SmartAuthorizationsController::PENDING] = pending_authorization
+          return redirect_to smart_authorization_approval_path
+        end
+
         redirect_to dashboard_path
       end
 
@@ -78,7 +90,7 @@ module Lakeraven
       private
 
       def authenticate(access_code:, verify_code:)
-        AuthenticationService.new.authenticate(access_code: access_code, verify_code: verify_code)
+        AuthenticationService.new.authenticate(access_code: access_code, verify_code: verify_code, client_ip: client_ip)
       rescue RpmsRpc::Client::ConnectionError, RpmsRpc::NotConfiguredError, Errno::ECONNREFUSED,
              IOError, SocketError,
              # A broker that answers but refuses the sign-on RPCs themselves (a CIA-only
@@ -97,7 +109,7 @@ module Lakeraven
       # attacker's failed attempt leaves the previous clinician signed in on a
       # shared workstation, which is the situation this feature exists for.
       def render_rejected(access_code, _error)
-        LoginThrottle.record_failure(access_code, request.remote_ip)
+        LoginThrottle.record_failure(access_code, client_ip)
         # F6 (#512): a determined credential refusal says so on its audit row.
         note_audit_denial("browser sign-in refused: invalid credentials") if respond_to?(:note_audit_denial, true)
         # One message for every failure mode — no enumeration oracle.
@@ -105,10 +117,41 @@ module Lakeraven
         render :new, status: :unprocessable_entity
       end
 
-      def render_throttled
-        response.headers["Retry-After"] = LoginThrottle.retry_after.to_s
+      def client_ip
+        ClientIp.resolve(request)
+      end
+
+      def render_throttled(access_code)
+        note_audit_denial("sign-in throttled")
+        response.headers["Retry-After"] = LoginThrottle.retry_after(access_code).to_s
         flash.now[:alert] = "Too many sign-in attempts. Try again later."
         render :new, status: :too_many_requests
+      end
+
+      # Hold the user's own RPMS connection for the session just established
+      # (ADR 0011), keyed to its SMART token: every way the session ends
+      # revokes that token, and each revocation releases the connection. True,
+      # or true at once when this process does not pool connections (a mock).
+      # At capacity the sign-in is refused, without evicting anyone already
+      # signed in: the connection closes and the new session ends.
+      def adopt_connection(provider)
+        client = provider[:client]
+        return true unless client
+
+        key = RpmsSessions.key_for(Doorkeeper::AccessToken.by_token(session[:smart_token]))
+        RpmsSessions.adopt(key, client)
+        session[:rpms_pool_key] = key
+        keep_rpms_session_alive!
+        true
+      rescue RpmsRpc::SessionPool::PoolExhaustedError
+        client.disconnect
+        terminate_session!
+        false
+      end
+
+      def render_at_capacity
+        flash.now[:alert] = "RPMS is at capacity right now. Try again shortly."
+        render :new, status: :service_unavailable
       end
 
       def render_broker_unavailable
@@ -123,8 +166,12 @@ module Lakeraven
         session[:user_type] = provider[:user_type].to_s
         session[:security_keys] = Array(provider[:security_keys]).map(&:to_s)
         session[:options] = Array(provider[:options]).map(&:to_s)
-        session[:last_seen_at] = Time.current.to_i
+        # The CIA session RPMS opened for this sign-on, so audit rows lead to it.
+        session[:rpms_session_id] = provider[:rpms_session_id]
+        session[:signed_in_at] = session[:last_seen_at] = Time.current.to_i
+        session[:rpms_idle_seconds] = provider[:idle_seconds]
         session[:smart_token] = mint_smart_token(provider)
+        keep_rpms_session_alive!
       end
 
       # Mint a SMART token for this session, bound to the human and scoped by
@@ -153,7 +200,7 @@ module Lakeraven
           application: browser_sso_application,
           scopes: scopes,
           resource_owner_id: provider[:duz].to_i,
-          expires_in: TOKEN_LIFETIME.to_i
+          expires_in: Lakeraven::EHR.configuration.session_lifetime.to_i
         )
         # Intrinsic marker: what makes this a BROWSER credential travels on the
         # token itself, not on a renameable application label. See
@@ -168,9 +215,14 @@ module Lakeraven
       # revocable by the clinician who owned them. One human, one live browser
       # token — which also bounds the table's growth.
       def revoke_previous_tokens_for(duz)
+        # Each revoked token's RPMS connection goes with it (ADR 0011 §4): the
+        # earlier browser's session can no longer reach RPMS as this user.
         Doorkeeper::AccessToken
           .where(application_id: browser_sso_application.id, resource_owner_id: duz.to_i, revoked_at: nil)
-          .find_each(&:revoke)
+          .find_each do |token|
+            token.revoke
+            RpmsSessions.release(RpmsSessions.key_for(token)) if RpmsSessions.enabled?
+          end
       end
 
       # Race-safe lookup/creation of the one browser SSO Doorkeeper application.

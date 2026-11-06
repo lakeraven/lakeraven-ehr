@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+@app
 Feature: Terminology mappers
   As a healthcare system
   I need to map clinical codes into standard terminology systems

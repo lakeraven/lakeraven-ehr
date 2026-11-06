@@ -10,10 +10,19 @@ module Lakeraven
     class TestSessionsController < WebController
       before_action :ensure_test_environment!
       skip_before_action :verify_authenticity_token, raise: false
+      # Seeding the session is the point of this endpoint. The kiosk lock
+      # would redirect the seed and leave the keys or idle limit unset.
+      skip_before_action :redirect_when_consent_kiosk_locked
 
       def create
         session[:duz] = params[:duz].presence || "99996"
         session[:user_type] = params[:user_type].presence || "case_manager"
+        # Idle starts at this sign-on, as SessionsController does. RPMS DTIME,
+        # when a test passes it, can only shorten the site's limit.
+        session[:signed_in_at] = session[:last_seen_at] = Time.current.to_i
+        if params[:rpms_idle_seconds].present?
+          session[:rpms_idle_seconds] = params[:rpms_idle_seconds].to_i
+        end
         session[:security_keys] = normalized_security_keys(params[:security_keys])
         # Tests exercising token-authenticated browser surfaces stash the
         # SMART token where the sign-on bridge does (#486): a browser token

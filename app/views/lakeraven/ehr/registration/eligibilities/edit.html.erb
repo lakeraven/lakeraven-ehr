@@ -1,0 +1,84 @@
+<% page_title "Edit tribe and eligibility", @record[:name], "Registration" %>
+
+<%= page_header "Edit tribe and eligibility",
+      [ @record[:name],
+        "RPMS checks the change before it is saved." ] %>
+
+<%= flash_alert id: "eligibility-alert" %>
+
+<%= form_errors @eligibility,
+      "The tribe and eligibility were not saved.",
+      id: "eligibility-errors" %>
+
+<%= form_with scope: :eligibility,
+      url: registration_patient_eligibility_path(params[:dfn]),
+      method: :patch,
+      local: true,
+      id: "eligibility-form",
+      class: "card flex flex-col gap-4" do |f| %>
+  <%# ELIGIBILITY STATUS, IHS PATIENT (9000001) field 1112. %>
+  <%= choice_list f,
+        :eligibility_status,
+        legend: "Eligibility",
+        choices: Lakeraven::EHR::PatientEligibility::STATUSES.map { |code, label| [ code, label, { status: code } ] },
+        selected: @eligibility.eligibility_status,
+        error: @eligibility.errors[:eligibility_status].first %>
+
+  <%# CLASSIFICATION/BENEFICIARY, IHS PATIENT (9000001) field 1111. %>
+  <%= form_field :classification_ien,
+        "Classification",
+        form: f,
+        error: @eligibility.errors[:classification_ien].first do |aria| %>
+    <%= f.select :classification_ien,
+          options_for_select(@classifications, @eligibility.classification_ien),
+          { include_blank: "Choose a classification" },
+          aria: aria %>
+  <% end %>
+
+  <%# TRIBE OF MEMBERSHIP, IHS PATIENT (9000001) field 1108. %>
+  <%= lookup_field f,
+        :tribe_ien,
+        legend: "Tribe of membership",
+        search: :tribe_search,
+        search_label: "Tribe name starts with",
+        find_label: "Find tribe",
+        find_url: registration_patient_eligibility_path(params[:dfn]),
+        choices: @tribes.map { |tribe| [ tribe[:ien], tribe[:name], { tribe: tribe[:ien] } ] },
+        selected: @eligibility.tribe_ien,
+        chosen_text: (@current_tribe && @current_tribe[:tribe_ien].to_s == @eligibility.tribe_ien.to_s ? "#{@current_tribe[:tribe_name]}." : "Tribe chosen."),
+        error: @eligibility.errors[:tribe_ien].first %>
+
+  <div class="flex flex-wrap gap-4">
+    <%# INDIAN BLOOD QUANTUM and TRIBE QUANTUM, IHS PATIENT (9000001) fields 1110 and 1109. %>
+    <% [ [ :blood_quantum, "Indian blood quantum" ], [ :tribe_quantum, "Tribe quantum" ] ].each do |field, label| %>
+      <%= form_field field,
+            label,
+            form: f,
+            hint: "A fraction such as 1/4, or FULL, UNKNOWN or NONE.",
+            error: @eligibility.errors[field].first do |aria| %>
+        <%= f.text_field field,
+              value: @eligibility.public_send(field),
+              autocomplete: "off",
+              aria: aria %>
+      <% end %>
+    <% end %>
+  </div>
+
+  <%# TRIBAL ENROLLMENT NUMBER, IHS PATIENT (9000001) field .07. %>
+  <%= form_field :enrollment_number,
+        "Enrollment number",
+        form: f,
+        error: @eligibility.errors[:enrollment_number].first do |aria| %>
+    <%= f.text_field :enrollment_number,
+          value: @eligibility.enrollment_number,
+          autocomplete: "off",
+          aria: aria %>
+  <% end %>
+
+  <%= f.submit "Save tribe and eligibility",
+        class: "button-primary self-start" %>
+<% end %>
+
+<p class="mt-6">
+  <%= link_to "Back to #{@record[:name]}", registration_patient_path(params[:dfn]) %>
+</p>

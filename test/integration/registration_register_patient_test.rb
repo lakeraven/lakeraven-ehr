@@ -7,6 +7,7 @@ require "test_helper"
 # tests stand in for it at the gem boundary and check what the screens do with
 # its answers, above all that the "different person" override cannot be forged.
 class RegistrationRegisterPatientTest < ActionDispatch::IntegrationTest
+  include BrowserFormHelper
   include RegistrationFormHelper
 
   ENTRY = { name: "PROBE,ALPHA", sex: "F", dob: "1990-05-01", ssn: "", tribe_ien: "611", community_ien: "16379" }.freeze
@@ -53,6 +54,21 @@ class RegistrationRegisterPatientTest < ActionDispatch::IntegrationTest
     get "/lakeraven-ehr/registration/patients/new"
 
     assert_response :forbidden
+  end
+
+  # Find tribe and Find community post this form to another path. The test environment
+  # leaves forgery protection off, so a refusal only a browser meets needs it turned on (#896).
+  test "Find tribe and Find community are accepted with forgery protection on, as in a browser" do
+    sign_in("registration_menu")
+    with_forgery_protection do
+      get "/lakeraven-ehr/registration/patients/new"
+      press "Find tribe", fill: { "tribe_search" => "KW", "registration[name]" => "PROBE,ALPHA" }
+      assert_response :success
+      assert_select "#registration-form input[name='registration[name]'][value='PROBE,ALPHA']"
+
+      press "Find community", fill: { "community_search" => "ANY" }
+      assert_response :success
+    end
   end
 
   test "S-REG-02.1 a new patient is registered and shows the health record number RPMS gave" do
@@ -200,7 +216,8 @@ class RegistrationRegisterPatientTest < ActionDispatch::IntegrationTest
 
       assert_response :service_unavailable
       assert_select "#outcome-unknown", text: /do not register them again yet/
-      assert_select "#search-after-unknown[href*='q=PROBE%2CALPHA']"
+      # The search is posted with the name, never linked with it in the URL (#722).
+      assert_select "form[action='/lakeraven-ehr/registration/patients/search'][method='post'] input[name='q'][value='PROBE,ALPHA']"
       assert_select "#registration-form", count: 0
     end
 
@@ -233,7 +250,7 @@ class RegistrationRegisterPatientTest < ActionDispatch::IntegrationTest
     gateway.alias_method(:__find, :find)
     Lakeraven::EHR::PatientLookupGateway.define_singleton_method(:find) { |*, **| [] }
 
-    get "/lakeraven-ehr/registration/patients", params: { q: "PROBE,ALPHA", dob: "1990-05-01" }
+    post "/lakeraven-ehr/registration/patients/search", params: { q: "PROBE,ALPHA", dob: "1990-05-01" }
 
     assert_select "#register-new-patient[href*='registration%5Bname%5D=PROBE%2CALPHA']"
   ensure

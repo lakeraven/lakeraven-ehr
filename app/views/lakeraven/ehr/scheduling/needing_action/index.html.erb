@@ -1,0 +1,79 @@
+<% page_title "Appointments needing action" %>
+
+<%= page_header "Appointments needing action",
+      [ "Appointments in your clinics that are past their time with no check-in, check-out, cancellation or no-show recorded in RPMS.",
+        "Open the clinic's day to check one in, cancel it or mark it a no-show." ] %>
+
+<%= form_with url: scheduling_needing_action_path,
+      method: :get,
+      local: true,
+      id: "needing-action-window",
+      class: "card flex flex-wrap items-end gap-4" do %>
+  <%= form_field :from, "From", hint: "Today unless you choose other dates, at most #{Lakeraven::EHR::NeedingActionWindow::MAX_DAYS} days.", error: @window_error do |aria| %>
+    <%= date_field_tag :from,
+          @window&.begin || @from,
+          id: "from",
+          aria: aria %>
+  <% end %>
+  <%= form_field :to, "To" do |aria| %>
+    <%= date_field_tag :to,
+          @window&.end || @to,
+          id: "to",
+          aria: aria %>
+  <% end %>
+  <%= submit_tag "Show appointments",
+        name: nil,
+        class: "button-secondary" %>
+<% end %>
+
+<% if @appointments == :unread %>
+  <% if @refusal %>
+    <%= alert_box :error,
+          "RPMS refused to list the appointments: #{@refusal}",
+          id: "needing-action-unread" %>
+  <% else %>
+    <%= alert_box :error,
+          "The appointments could not be read from RPMS.",
+          "Try again in a moment, or choose fewer dates.",
+          id: "needing-action-unread" %>
+  <% end %>
+<% elsif @appointments&.empty? %>
+  <%= empty_state "No appointments from #{@window.begin.strftime('%b %-d, %Y')} to #{@window.end.strftime('%b %-d, %Y')} need action.",
+        id: "no-needing-action" %>
+<% elsif @appointments %>
+  <table
+    id="needing-action"
+    class="data-table mt-6"
+  >
+    <caption>
+      <%= pluralize(@appointments.size, "appointment") %> needing action from <%= @window.begin.strftime("%b %-d, %Y") %> to <%= @window.end.strftime("%b %-d, %Y") %>, earliest first.
+    </caption>
+    <thead>
+      <tr>
+        <th scope="col">Time</th>
+        <th scope="col">Clinic</th>
+        <th scope="col">Patient</th>
+        <th scope="col"><span class="sr-only">Open the day</span></th>
+      </tr>
+    </thead>
+    <tbody>
+      <% @appointments.each do |appointment| %>
+        <% day = appointment[:start_time].to_date %>
+        <tr
+          data-appointment="<%= appointment[:id] %>"
+          data-resource="<%= appointment[:clinic][:id] %>"
+          data-patient="<%= appointment[:patient_dfn] %>"
+        >
+          <td data-start="<%= appointment[:start_time].strftime("%Y-%m-%dT%H:%M") %>"><%= appointment[:start_time].strftime("%b %-d, %Y %H:%M") %></td>
+          <td><%= appointment[:clinic][:name] %></td>
+          <th scope="row"><%= appointment[:patient_name] %></th>
+          <td>
+            <%= link_to scheduling_clinic_path(appointment[:clinic][:id], date: day.iso8601, anchor: "appointment-#{appointment[:id]}") do %>
+              Open the day<span class="sr-only"> at <%= appointment[:clinic][:name] %> for <%= appointment[:patient_name] %></span>
+            <% end %>
+          </td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+<% end %>

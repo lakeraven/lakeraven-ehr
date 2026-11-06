@@ -1,0 +1,17 @@
+<% content_for :title, "Choose a consent" %>
+
+<div class="page-header">
+  <h1>Choose a consent</h1>
+</div>
+
+<% if @templates_missing_reason %>
+  <p role="alert"><%= @templates_missing_reason %></p>
+<% end %>
+
+<%= form_with url: patient_consent_handover_path(@dfn), method: :post do %>
+  <% @templates.each do |template| %>
+    <button type="submit" name="template_key" value="<%= template.key %>">
+      <%= template.title %>
+    </button>
+  <% end %>
+<% end %>
