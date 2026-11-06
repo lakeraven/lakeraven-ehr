@@ -10,7 +10,9 @@ module Lakeraven
     #
     # The client publishes and rotates its keys at a JWKS URL registered on
     # its Doorkeeper application (jwks_uri). A short cache TTL keeps key
-    # rotation timely without refetching on every token request.
+    # rotation timely without refetching on every token request, and the
+    # client's own Cache-Control can only shorten it: max-age is honoured up
+    # to the TTL, and no-store or no-cache means no caching.
     #
     # Transport hardening (SSRF / key-substitution): keys are fetched ONLY
     # over HTTPS from hosts that resolve exclusively to public addresses —
@@ -46,8 +48,8 @@ module Lakeraven
           cached = Rails.cache.read(cache_key)
           return cached if cached
 
-          fetched = fetch_uncached(jwks_uri)
-          Rails.cache.write(cache_key, fetched, expires_in: CACHE_TTL) if fetched
+          fetched, lifetime = fetch_uncached(jwks_uri)
+          Rails.cache.write(cache_key, fetched, expires_in: lifetime) if fetched && lifetime&.positive?
           fetched
         end
 
@@ -66,6 +68,7 @@ module Lakeraven
 
         private
 
+        # [ the parsed JWKS, how long it may be cached ], or nil.
         def fetch_uncached(jwks_uri)
           return nil unless acceptable_uri?(jwks_uri)
 
@@ -77,9 +80,20 @@ module Lakeraven
           return nil unless response.is_a?(Net::HTTPSuccess)
 
           parsed = JSON.parse(response.body, symbolize_names: true)
-          parsed.is_a?(Hash) && parsed[:keys].is_a?(Array) ? parsed : nil
+          return nil unless parsed.is_a?(Hash) && parsed[:keys].is_a?(Array)
+
+          [ parsed, cache_lifetime(response["Cache-Control"]) ]
         rescue StandardError
           nil
+        end
+
+        # Seconds this response may be cached: never longer than CACHE_TTL.
+        def cache_lifetime(cache_control)
+          directives = cache_control.to_s.downcase
+          return 0 if directives.match?(/\bno-(store|cache)\b/)
+
+          max_age = directives[/\bmax-age=(\d+)/, 1]
+          max_age ? [ max_age.to_i, CACHE_TTL.to_i ].min : CACHE_TTL.to_i
         end
 
         # Proxy address/port/user/password are explicit nils. Net::HTTP.start
