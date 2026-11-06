@@ -37,15 +37,6 @@ module Lakeraven
         teardown_smart_auth
       end
 
-      # STUBBED_ACTIONS: actions that exist but render 404 or empty content.
-      # When implemented with data, they must be wired to Part2EgressFilter and moved to WIRED_ACTIONS.
-      STUBBED_ACTIONS = [
-        "lakeraven/ehr/allergy_intolerances#show",
-        "lakeraven/ehr/conditions#show",
-        "lakeraven/ehr/medication_requests#show",
-        "lakeraven/ehr/observations#show"
-      ].freeze
-
       # Non-disclosing or out-of-scope controller actions that are explicitly allowed to bypass the seam.
       ALLOWED_WITHOUT_SEAM = [
         "lakeraven/ehr/demo_visits#show",     # Dev-gated demo UI, not API egress
@@ -119,6 +110,7 @@ module Lakeraven
         "lakeraven/ehr/scheduling/open_times#index",  # Open times in a clinic's blocks: times only, no patient data
         "lakeraven/ehr/scheduling/patient_appointments#index", # One patient's appointments: clinics, times, statuses, no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/scheduling/needing_action#index", # Appointments needing action (#875): times, clinics and patient names, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/scheduling/appointment_lists#index", # The appointments across a scheduler's clinics (S-SCH-05.5): times, clinics and patient names, no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/scheduling/appointments#new",   # Booking form: patient name, HRN, date of birth, no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/scheduling/appointments#create", # Booking entry, not disclosure
         "lakeraven/ehr/scheduling/quick_registrations#new",    # Registering a caller from scheduling (S-REG-05): an entry form, not disclosure
@@ -188,6 +180,13 @@ module Lakeraven
         "lakeraven/ehr/service_requests#index",
         "lakeraven/ehr/immunizations#index",
         "lakeraven/ehr/procedures#index",
+        "lakeraven/ehr/allergy_intolerances#show",
+        "lakeraven/ehr/conditions#show",
+        "lakeraven/ehr/medication_requests#show",
+        "lakeraven/ehr/observations#show",
+        "lakeraven/ehr/service_requests#show",
+        "lakeraven/ehr/immunizations#show",
+        "lakeraven/ehr/procedures#show",
         "lakeraven/ehr/coverage_eligibility_requests#create",
         "lakeraven/ehr/measure_reports#index",
         "lakeraven/ehr/audit_events#index",
@@ -203,7 +202,7 @@ module Lakeraven
           "#{controller}##{action}" if controller && action
         end.compact.uniq
 
-        untested = controller_actions - ALLOWED_WITHOUT_SEAM - WIRED_ACTIONS - STUBBED_ACTIONS
+        untested = controller_actions - ALLOWED_WITHOUT_SEAM - WIRED_ACTIONS
 
         assert_empty untested, "Found routes that might disclose clinical data but are not explicitly tested for seam wiring or allowlisted."
       end
@@ -517,6 +516,25 @@ module Lakeraven
         { path: "/lakeraven-ehr/ServiceRequest", method: :get, params: { patient: "1" } },
         { path: "/lakeraven-ehr/Immunization", method: :get, params: { patient: "1" } },
         { path: "/lakeraven-ehr/Procedure", method: :get, params: { patient: "1" } },
+        { path: "/lakeraven-ehr/AllergyIntolerance/1-7", method: :get, setup: -> {
+          RpmsRpc.client.seed_keyed_collection(:allergy_list, "1", [ { ien: 7, allergen: "Penicillin" } ])
+        } },
+        { path: "/lakeraven-ehr/Condition/1-7", method: :get, setup: -> {
+          RpmsRpc.client.seed_keyed_collection(:problem_list, "1", [ { ien: 7, status: "A", icd_code: "E11.9", description: "Diabetes" } ])
+        } },
+        { path: "/lakeraven-ehr/MedicationRequest/1-7R-O", method: :get, setup: -> {
+          RpmsRpc.client.seed_text(:medication_active, "1", "~OP^7R;O^METFORMIN 500MG TAB^^3271231^1^^^120007^ACTIVE\n")
+        } },
+        { path: "/lakeraven-ehr/Observation/1-8", method: :get },
+        { path: "/lakeraven-ehr/ServiceRequest/1-7", method: :get, setup: -> {
+          RpmsRpc.client.seed_keyed_collection(:referral_search, "1", [ { ien: 7, status: "A", purpose: "Cardiology" } ])
+        } },
+        { path: "/lakeraven-ehr/Immunization/1-7", method: :get, setup: -> {
+          RpmsRpc.client.seed_keyed_collection(:immunization_list, "1^I", [ { record_type: "I", ien: 7, vaccine_display: "Influenza" } ])
+        } },
+        { path: "/lakeraven-ehr/Procedure/1-7", method: :get, setup: -> {
+          RpmsRpc.client.seed_keyed_collection(:procedure_list, "1", [ { ien: 7, name: "Office visit", date: Date.new(2026, 3, 10) } ])
+        } },
         { path: "/lakeraven-ehr/CoverageEligibilityRequest", method: :post, params: { patient_dfn: "1", coverage_type: "medicaid" } },
         { path: "/lakeraven-ehr/MeasureReport", method: :get, params: { patient: "1" } },
         { path: "/lakeraven-ehr/AuditEvent", method: :get },
@@ -635,24 +653,6 @@ module Lakeraven
 
           assert_response :not_found
           refute_includes response.body, "Anderson", "Expected not to serve patient data"
-        end
-      end
-
-      [
-        [ "/lakeraven-ehr/AllergyIntolerance/1", { patient: "1" } ],
-        [ "/lakeraven-ehr/Condition/1", { patient: "1" } ],
-        [ "/lakeraven-ehr/MedicationRequest/1", { patient: "1" } ],
-        [ "/lakeraven-ehr/Observation/1", { patient: "1" } ]
-      ].each do |path, params|
-        test "stubbed action for #{path} does not serve data and fails if implemented without wiring" do
-          begin
-            get path, params: params, headers: @headers
-          rescue ActionController::RoutingError, ActionDispatch::MissingController, NameError, AbstractController::ActionNotFound
-            assert true
-          else
-            assert_response :not_found, "The action for #{path} was implemented but not moved to WIRED_ACTIONS in the test. If it is real, you must wire it to Part2EgressFilter and move it to WIRED_ACTIONS."
-            refute_includes response.body, "Anderson", "Expected not to serve patient data"
-          end
         end
       end
 

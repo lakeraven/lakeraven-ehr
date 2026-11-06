@@ -2,6 +2,9 @@
 
 <%= page_header "Scheduling",
       "Choose a clinic to see its day and book into it." do %>
+  <%= link_to "Appointments",
+        scheduling_appointment_list_path,
+        id: "appointment-list-link" %>
   <%= link_to "Appointments needing action",
         scheduling_needing_action_path,
         id: "needing-action-link" %>
