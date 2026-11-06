@@ -1,3 +1,4 @@
+@app
 Feature: Background job orchestration with audit logging
   As a compliance officer
   I need background jobs to create audit trails

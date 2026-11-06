@@ -1,4 +1,4 @@
-@breach_detection
+@breach_detection @app
 Feature: Breach Detection
   As a HIPAA-compliant system
   Suspicious activity should trigger security incidents

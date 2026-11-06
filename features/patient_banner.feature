@@ -7,6 +7,7 @@ Feature: Persistent patient banner
   Background:
     Given demo clinical seeds are loaded
 
+  @live
   Scenario: Banner is visible on every chart screen
     Given patient "Anderson,Alice" is the active patient context
     When the clinician navigates to the dashboard
@@ -17,6 +18,7 @@ Feature: Persistent patient banner
     When the clinician navigates to the HTML chart for that patient
     Then the patient banner shows name, MRN, DOB, age, and sex
 
+  @live
   Scenario: Allergies are always shown, even when empty
     Given patient "DEMOPATIENT,MARA" is the active patient context
     And the active patient has no recorded allergies in the chart source
@@ -25,18 +27,21 @@ Feature: Persistent patient banner
     And the banner allergies field has state "none-recorded"
     And the allergies field is not hidden
 
+  @live
   Scenario: Clinician explicitly clears patient context
     Given patient "Anderson,Alice" is the active patient context
     When the clinician activates "Clear patient context"
     Then no patient is in context
     And the banner shows the empty state directing to chart search
 
+  @live
   Scenario: No patient open: the bar is the patient search (rpms-ux S-CHT-01.7)
     Given the clinician is signed in with no patient in context
     When the clinician navigates to the dashboard
     Then the banner shows the empty state directing to chart search
     And no clinical screen renders patient data
 
+  @app
   Scenario: Signed out login page shows no patient data
     Given the clinician is not signed in
     When the clinician visits the login page

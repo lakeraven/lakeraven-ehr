@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+@app
 Feature: Process-global store isolation between scenarios
   Scenarios in this file run in definition order. The second scenario fails when
   state from the first leaks, which makes the suite order-dependent.

@@ -1,3 +1,4 @@
+@app
 Feature: RelatedPerson FHIR resource
   As a healthcare system
   I need to represent patient contacts and advocates

@@ -1,4 +1,4 @@
-@treatment_plans @behavioral_health
+@treatment_plans @behavioral_health @app
 Feature: Treatment plan progress-review due dates
   As a behavioral-health clinician
   I need treatment plans to carry review due dates I can query for compliance

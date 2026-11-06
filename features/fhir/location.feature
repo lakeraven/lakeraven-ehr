@@ -1,3 +1,4 @@
+@app
 Feature: Location FHIR resource
   As a healthcare system
   I need to represent facility locations

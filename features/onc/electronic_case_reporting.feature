@@ -1,4 +1,4 @@
-@onc
+@onc @app
 Feature: Electronic Case Reporting (eCR)
   As a public health authority
   I want reportable conditions to automatically generate case reports

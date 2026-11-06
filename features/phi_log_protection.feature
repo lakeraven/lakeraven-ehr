@@ -1,3 +1,4 @@
+@app
 Feature: PHI Log Protection
   As a HIPAA-compliant system
   Log statements should not contain raw PHI identifiers

@@ -17,6 +17,7 @@ Feature: Provider Search and Management
       | 208 | Profile,Sched  |
       | 200 | Provider,Test  |
 
+  @live
   Scenario: Search for provider by name
     When I search for providers with name "PROVIDER"
     Then I should find 1 provider in the results
@@ -37,6 +38,7 @@ Feature: Provider Search and Management
       | NPI       | 1234567890     |
       | DEA       | AM1234563      |
 
+  @live
   Scenario: List all providers
     When I search for all providers
     Then I should find 8 providers in the results
@@ -52,10 +54,12 @@ Feature: Provider Search and Management
     And the provider results should include "MARTINEZ,SARAH"
     But the provider results should not include "CHEN,JAMES"
 
+  @live
   Scenario: Search with no results
     When I search for providers with name "NONEXISTENT"
     Then I should find 0 providers in the results
 
+  @live
   Scenario: Retrieve nonexistent provider
     When I retrieve provider with IEN 99999
     Then the provider should be nil

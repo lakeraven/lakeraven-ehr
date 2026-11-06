@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   lint:
@@ -197,3 +198,63 @@ jobs:
           fi
 
           echo "No failing scenarios. $summary"
+  cucumber-live:
+    # The @live scenarios, against the RPMS image, as a client would reach it.
+    # Not on pull_request: the image is private and this repository is public,
+    # so a run must not hand a fork code that can read it.
+    name: Cucumber live (RPMS image)
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    env:
+      RAILS_ENV: test
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/lakeraven_ehr_test
+      CUCUMBER_PUBLISH_QUIET: "true"
+      # bcer-9.0-20261104-9b5cccd-ydb. features/support/rpms_demo_site.rb is read
+      # from the same build; the run aborts if they disagree.
+      RPMS_IMAGE: ghcr.io/lakeraven/rpms-ydb@sha256:330ac2ebe210658237755c78400576342727779485cbade64aff9c812ba3b2f2
+      LIVE_RPMS: "1"
+      VISTA_BROKER: cia
+      VISTA_RPC_HOST: 127.0.0.1
+      VISTA_RPC_PORT: "9100"
+      # The published demo pair (rpms-ops SEEDPERS).
+      LIVE_RPMS_ACCESS: PMD123
+      LIVE_RPMS_VERIFY: PMD123!!
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+          bundler-cache: true
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Start RPMS
+        run: |
+          docker run -d --name rpms -p 127.0.0.1:9100:9100 "$RPMS_IMAGE"
+          for _ in $(seq 1 60); do
+            [ "$(docker inspect -f '{{.State.Health.Status}}' rpms)" = healthy ] && exit 0
+            sleep 5
+          done
+          docker logs rpms | tail -20
+          echo "::error::RPMS did not become healthy"
+          exit 1
+      - run: bundle exec rails db:create db:schema:load
+      - name: Run the @live scenarios
+        run: bundle exec cucumber --profile live --tags @live --format progress
