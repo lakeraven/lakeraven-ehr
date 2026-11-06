@@ -57,7 +57,7 @@ module Lakeraven
         reasonCode: [ { text: "General exam", coding: [ { code: "Z00.00" } ] } ],
         subject: { reference: "Patient/1" },
         participant: [ { individual: { reference: "Practitioner/101" } } ],
-        location: [ { location: { reference: "Location/rpms-location-5" } } ],
+        location: [ { location: { reference: "Location/5" } } ],
         serviceProvider: { reference: "Organization/rpms-organization-10" }
       }.freeze
 
@@ -98,6 +98,7 @@ module Lakeraven
           ],
           text: "Cardiology consult"
         },
+        category: [ { coding: [ { system: "http://snomed.info/sct", code: "3457005", display: "Patient referral" } ] } ],
         subject: { reference: "Patient/100" },
         authoredOn: "2024-03-15",
         reasonCode: [ { text: "Chest pain" } ]

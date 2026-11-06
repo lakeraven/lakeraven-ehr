@@ -6,11 +6,13 @@ Feature: FHIR SMART Authentication
   Background:
     Given the system is configured for FHIR API access
 
+  @app
   Scenario: Unauthenticated request to FHIR endpoint is rejected
     When I request GET "/lakeraven-ehr/Observation?patient=1" without a Bearer token
     Then the response status should be 401
     And the response should be a FHIR OperationOutcome with code "login"
 
+  @live
   Scenario: Authenticated request with valid read scope returns data
     Given I have a valid SMART token with scope "patient/Observation.read"
     When I request GET "/lakeraven-ehr/Observation" with the Bearer token and params:
@@ -18,6 +20,7 @@ Feature: FHIR SMART Authentication
     Then the response status should be 200
     And the response should be a FHIR Bundle
 
+  @app
   Scenario: Token with wrong resource scope is forbidden
     Given I have a valid SMART token with scope "patient/MedicationRequest.read"
     When I request GET "/lakeraven-ehr/Observation" with the Bearer token and params:
@@ -25,6 +28,7 @@ Feature: FHIR SMART Authentication
     Then the response status should be 403
     And the response should be a FHIR OperationOutcome with code "forbidden"
 
+  @live
   Scenario: Wildcard patient scope grants read access
     Given I have a valid SMART token with scope "patient/*.read"
     When I request GET "/lakeraven-ehr/AllergyIntolerance" with the Bearer token and params:
@@ -32,6 +36,7 @@ Feature: FHIR SMART Authentication
     Then the response status should be 200
     And the response should be a FHIR Bundle
 
+  @live
   Scenario: System-scoped token can access clinical resources
     Given I have a valid SMART token with scope "system/Observation.read"
     When I request GET "/lakeraven-ehr/Observation" with the Bearer token and params:
@@ -39,6 +44,7 @@ Feature: FHIR SMART Authentication
     Then the response status should be 200
     And the response should be a FHIR Bundle
 
+  @live
   Scenario: User-scoped token can access clinical resources
     Given I have a valid SMART token with scope "user/Condition.read"
     When I request GET "/lakeraven-ehr/Condition" with the Bearer token and params:
@@ -46,11 +52,13 @@ Feature: FHIR SMART Authentication
     Then the response status should be 200
     And the response should be a FHIR Bundle
 
+  @app
   Scenario: Unauthenticated show request is rejected
     When I request GET "/lakeraven-ehr/Observation/1" without a Bearer token
     Then the response status should be 401
     And the response should be a FHIR OperationOutcome with code "login"
 
+  @live
   Scenario: Multiple scopes grant combined access
     Given I have a valid SMART token with scope "patient/Observation.read patient/Condition.read"
     When I request GET "/lakeraven-ehr/Condition" with the Bearer token and params:

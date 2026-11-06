@@ -5,13 +5,14 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: "3.4"
@@ -44,7 +45,7 @@ jobs:
       RAILS_ENV: test
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/lakeraven_ehr_test
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: ${{ matrix.ruby }}
@@ -82,7 +83,7 @@ jobs:
       VALIDATOR_VERSION: "6.10.4"
       VALIDATOR_SHA256: 1106b9d58f9e363e47bea7c4fc065841e5fc91fe9d062775c3bfdd212bd653cc
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: "3.4"
@@ -115,19 +116,12 @@ jobs:
           if-no-files-found: warn
 
   cucumber:
-    # NON-BLOCKING on purpose (lakeraven-ehr#561). CI has never run cucumber,
-    # and 33 of 829 scenarios fail on main today -- 18 of them because the
-    # feature still expects a 200 on a cross-patient read that
-    # PatientCompartment now correctly refuses with 403. Making this required
-    # before those are triaged would turn main red and teach everyone to
-    # ignore the job, so it reports and does not gate.
-    #
-    # The point is to make the count VISIBLE on every PR instead of invisible.
-    # Step 3 of #561 removes continue-on-error and adds this to branch
-    # protection, once the 33 are triaged.
-    name: Cucumber (non-blocking)
+    # Blocks a merge. @pending and @unsourced scenarios specify work not built yet.
+    # @live scenarios also run here, on the mock, until cucumber-live can read the
+    # RPMS image. A pass of one here is not evidence about RPMS. Once that job
+    # runs on every push, this becomes --profile app. See docs/reports/cucumber-live-sort.md.
+    name: Cucumber
     runs-on: ubuntu-latest
-    continue-on-error: true
     services:
       postgres:
         image: postgres:18
@@ -145,55 +139,75 @@ jobs:
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/lakeraven_ehr_test
       CUCUMBER_PUBLISH_QUIET: "true"
     steps:
+      - uses: actions/checkout@v7
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+          bundler-cache: true
+      # db:schema:load, NOT db:migrate: db:migrate applied no migrations here and
+      # cucumber aborted on pending migrations (#558).
+      - run: bundle exec rails db:create db:schema:load
+      - run: bundle exec cucumber --tags "not @unsourced and not @pending" --format progress
+
+  cucumber-live:
+    # The @live scenarios, against the RPMS image, as a client would reach it.
+    # Not on pull_request: the image is private and this repository is public,
+    # so a run must not hand a fork code that can read it.
+    # Dispatch only for now: GITHUB_TOKEN needs Actions access to the rpms-ydb
+    # package. With that granted, make this `github.event_name != 'pull_request'`.
+    name: Cucumber live (RPMS image)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    env:
+      RAILS_ENV: test
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/lakeraven_ehr_test
+      CUCUMBER_PUBLISH_QUIET: "true"
+      # bcer-9.0-20261104-9b5cccd-ydb. features/support/rpms_demo_site.rb is read
+      # from the same build; the run aborts if they disagree.
+      RPMS_IMAGE: ghcr.io/lakeraven/rpms-ydb@sha256:330ac2ebe210658237755c78400576342727779485cbade64aff9c812ba3b2f2
+      LIVE_RPMS: "1"
+      VISTA_BROKER: cia
+      VISTA_RPC_HOST: 127.0.0.1
+      VISTA_RPC_PORT: "9100"
+      # The published demo pair (rpms-ops SEEDPERS).
+      LIVE_RPMS_ACCESS: PMD123
+      LIVE_RPMS_VERIFY: PMD123!!
+    steps:
       - uses: actions/checkout@v4
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: "3.4"
           bundler-cache: true
-      # db:schema:load, NOT db:migrate. The first run of this job showed
-      # `db:migrate` creating the database and applying ZERO migrations, which
-      # left schema_migrations empty and cucumber aborting with "15 pending
-      # migrations" (lakeraven-ehr#558). The Test job survives the same command
-      # only because rails/test_help's maintain_test_schema! silently loads
-      # schema.rb when it finds migrations pending; cucumber's equivalent
-      # raises instead. test/dummy/db/schema.rb is the committed source of
-      # truth for the test database, so load it directly.
-      - run: bundle exec rails db:create db:schema:load
-      # Fails on FAILED SCENARIOS or on no summary at all. Does NOT fail on the
-      # 125 undefined / 11 pending steps that already exist on main, because
-      # cucumber exits 1 for those too (verified: 0 failures, exit 1) and a job
-      # permanently red over pre-existing scaffolding rot is a job everyone
-      # learns to ignore -- which is the decay this is here to stop.
-      #
-      # This is NOT the `|| true` mistake again. That masked every outcome, so
-      # a cucumber which never ran reported PASS in 38 seconds. Here the counts
-      # are always published, a MISSING summary is treated as a crash and
-      # fails, and "failed" in the summary fails. Undefined and pending stay
-      # visible as numbers rather than silently passing or permanently failing.
-      - name: Run cucumber and record the scenario counts
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Start RPMS
         run: |
-          set -o pipefail
-          bundle exec cucumber --format progress 2>&1 | tee cucumber.log || true
-
-          summary=$(grep -E "^[0-9]+ scenarios" cucumber.log || true)
-
-          {
-            echo "### Cucumber"
-            if [ -z "$summary" ]; then
-              echo "**No scenario summary produced — cucumber did not run.**"
-            else
-              echo "\`$summary\`"
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
-
-          if [ -z "$summary" ]; then
-            echo "::error::cucumber produced no scenario summary; it did not run"
-            exit 1
-          fi
-
-          if echo "$summary" | grep -q "failed"; then
-            echo "::error::cucumber reported failing scenarios: $summary"
-            exit 1
-          fi
-
-          echo "No failing scenarios. $summary"
+          docker run -d --name rpms -p 127.0.0.1:9100:9100 "$RPMS_IMAGE"
+          for _ in $(seq 1 60); do
+            [ "$(docker inspect -f '{{.State.Health.Status}}' rpms)" = healthy ] && exit 0
+            sleep 5
+          done
+          docker logs rpms | tail -20
+          echo "::error::RPMS did not become healthy"
+          exit 1
+      - run: bundle exec rails db:create db:schema:load
+      - name: Run the @live scenarios
+        run: bundle exec cucumber --profile live --tags @live --format progress

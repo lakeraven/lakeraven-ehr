@@ -1,3 +1,4 @@
+@app
 Feature: State Immunization Information System Exchange (ONC § 170.315(f)(1))
   As a healthcare provider
   I need bidirectional immunization data exchange with the state IIS

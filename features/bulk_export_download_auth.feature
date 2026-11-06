@@ -1,3 +1,4 @@
+@app
 Feature: Bulk Export Download Authentication
   As an ONC-certified EHR system
   Bulk export download, status, and cancel endpoints should require SMART authentication

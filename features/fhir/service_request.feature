@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+@app
 Feature: ServiceRequest FHIR resource
   As a healthcare system
   I need to represent healthcare referrals

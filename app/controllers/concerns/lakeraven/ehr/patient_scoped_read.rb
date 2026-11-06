@@ -13,6 +13,9 @@ module Lakeraven
     # patient's record: the accounting of disclosures counts rows against the
     # Patient, so a read recorded against Condition/<id> would be missing from
     # it. An id that names no patient is a 404 for every caller.
+    #
+    # A type that declares `_id` (FHIR::SearchCapabilities) can be searched by
+    # it alone, and the id's patient is the compartment, as for a read.
     module PatientScopedRead
       extend ActiveSupport::Concern
       include PatientCompartment
@@ -25,7 +28,10 @@ module Lakeraven
       end
 
       def index
-        render_bundle_egress(scoped_resources(patient_compartment_dfn))
+        dfn = patient_compartment_dfn
+        resources = dfn.present? ? scoped_resources(dfn) : []
+        resources = resources.select { |resource| resource[:id] == params[:_id] } if id_search?
+        render_bundle_egress(resources)
       end
 
       def show
@@ -42,7 +48,25 @@ module Lakeraven
       end
 
       def read_patient_dfn
-        FHIR::PatientScopedId.patient_dfn(params[:id])
+        FHIR::PatientScopedId.patient_dfn(id_search? ? params[:_id] : params[:id])
+      end
+
+      def id_search?
+        params[:_id].present? && FHIR::SearchCapabilities.search_params_for(fhir_resource_type).key?("_id")
+      end
+
+      # With an `_id` the id names the patient; a `patient` beside it has to
+      # name the same one.
+      def enforce_declared_compartment!(param, require_param: false)
+        return super unless id_search? && params[param].blank?
+
+        authorize_patient_search!(read_patient_dfn)
+      end
+
+      def patient_compartment_dfn
+        return super if params[:patient].present? || !id_search?
+
+        read_patient_dfn
       end
 
       def enforce_read_compartment!
@@ -64,7 +88,7 @@ module Lakeraven
       end
 
       def audit_entity_reference
-        return super unless action_name == "show" && read_patient_dfn
+        return super unless (action_name == "show" || id_search?) && read_patient_dfn
 
         [ "Patient", read_patient_dfn ]
       end

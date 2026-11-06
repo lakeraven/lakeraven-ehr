@@ -39,13 +39,20 @@ module Lakeraven
         context = LaunchContext.mint(
           oauth_application_uid: app.uid,
           patient_dfn: @dfn,
-          encounter_id: params[:encounter].to_s.presence&.then { |id| id if id.match?(DFN) },
+          encounter_id: launch_encounter_id,
           duz: session[:duz].to_s
         )
         redirect_to launch_url(app, context), allow_other_host: true
       end
 
       private
+
+      # A launch names a visit of its patient; the token names that Encounter by
+      # the id a read takes, so the app can fetch it.
+      def launch_encounter_id
+        visit = params[:encounter].to_s
+        FHIR::PatientScopedId.build(@dfn, visit) if visit.match?(DFN)
+      end
 
       def require_patient_read!
         return if SmartScope.permits?(session_token_scopes, "Patient", "r")

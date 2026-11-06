@@ -87,9 +87,9 @@ Lakeraven::EHR::Engine.routes.draw do
   resources :conditions, path: "Condition", only: %i[index show]
   resources :medication_requests, path: "MedicationRequest", only: %i[index show]
   resources :observations, path: "Observation", only: %i[index show]
-  resources :encounters, path: "Encounter", only: %i[index]
+  resources :encounters, path: "Encounter", only: %i[index show]
   resources :organizations, path: "Organization", only: %i[show], param: :ien
-  resources :locations, path: "Location", only: %i[show], param: :ien
+  resources :locations, path: "Location", only: %i[index show], param: :ien
   resources :service_requests, path: "ServiceRequest", only: %i[index show]
   resources :immunizations, path: "Immunization", only: %i[index show]
   resources :procedures, path: "Procedure", only: %i[index show]
@@ -213,6 +213,13 @@ Lakeraven::EHR::Engine.routes.draw do
       get "race_ethnicity/edit", to: "race_ethnicities#edit", as: :edit_patient_race_ethnicity
       post "race_ethnicity", to: "race_ethnicities#update", as: :patient_race_ethnicity
       # The other names the patient has used (S-REG-12): ALIAS, PATIENT (2.01).
+      # The other tribes and eligibility modifiers (S-REG-07.2, S-REG-07.3).
+      get "other_tribes", to: "other_tribes#index", as: :patient_other_tribes
+      post "other_tribes", to: "other_tribes#create"
+      post "other_tribes/:ien/remove", to: "other_tribes#destroy", as: :remove_patient_other_tribe, constraints: { ien: /\d+/ }
+      get "eligibility_modifiers", to: "eligibility_modifiers#index", as: :patient_eligibility_modifiers
+      post "eligibility_modifiers", to: "eligibility_modifiers#create"
+      post "eligibility_modifiers/:ien/remove", to: "eligibility_modifiers#destroy", as: :remove_patient_eligibility_modifier, constraints: { ien: /\d+/ }
       get "other_names", to: "other_names#index", as: :patient_other_names
       post "other_names", to: "other_names#create"
       post "other_names/:ien/remove", to: "other_names#destroy", as: :remove_patient_other_name, constraints: { ien: /\d+/ }
@@ -240,6 +247,20 @@ Lakeraven::EHR::Engine.routes.draw do
     get "/", to: "clinics#index", as: :home
     get "clinics/:id", to: "clinics#show", as: :clinic, constraints: { id: /\d+/ }
     get "clinics/:id/week", to: "clinics#week", as: :clinic_week, constraints: { id: /\d+/ }
+    # A clinic's wait list (S-SCH-10).
+    scope "clinics/:resource_id/wait_list", constraints: { resource_id: /\d+/ } do
+      get "/", to: "wait_lists#index", as: :clinic_wait_list
+      post "/", to: "wait_lists#create"
+      get "new", to: "wait_lists#new", as: :new_clinic_wait_list
+      scope ":entry_id", constraints: { entry_id: /\d+/ } do
+        get "edit", to: "wait_lists#edit", as: :edit_clinic_wait_list
+        post "/", to: "wait_lists#update", as: :clinic_wait_list_entry
+        get "removal", to: "wait_lists#removal", as: :clinic_wait_list_removal
+        post "removal", to: "wait_lists#remove"
+        get "booking", to: "wait_lists#booking", as: :clinic_wait_list_booking
+        post "booking", to: "wait_lists#book"
+      end
+    end
     # The appointments across the scheduler's clinics (S-SCH-05.5).
     get "appointments", to: "appointment_lists#index", as: :appointment_list
     # The appointments needing action in the scheduler's clinics (S-SCH-13.5, #875).
