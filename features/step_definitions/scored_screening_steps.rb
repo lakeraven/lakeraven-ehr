@@ -261,7 +261,9 @@ Then("the form is redisplayed with a safety prompt") do
   assert_equal 422, last_response.status
   assert_includes last_response.body, "Safety check required"
   assert_includes last_response.body, 'name="safety_acknowledged"'
-  refute_includes last_response.body, "<script"
+  # The gate is plain form posts: the form itself carries no script. The page
+  # around it does (the layout's consent kiosk channel).
+  assert_empty Nokogiri::HTML(last_response.body).css(".screening-form script")
 end
 
 Then("no score is recorded") do
