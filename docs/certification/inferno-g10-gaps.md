@@ -67,12 +67,12 @@ Evidence is file:line on `main`; tests are named where they prove the behaviour.
 | AllergyIntolerance: `patient`, read | met | search and read (`PatientScopedRead`); `clinical-status` added in #852; `fhir_read_by_id_test.rb`, live `live_fhir_read_test.rb` | #845 |
 | Condition (problems/health concerns): `patient`, `patient+category`, read | met | `patient`, `category` and `clinical-status` (#852); read (`PatientScopedRead`) | #845 |
 | Condition encounter-diagnosis profile | missing | `Condition.from_rpms_row` sets `problem-list-item` only (`condition.rb:72`) | #848 |
-| MedicationRequest: `patient+intent`, `patient+intent+status`, read; Medication by reference | partial | `intent` added in #852; read (`PatientScopedRead`); no Medication | #849 |
-| Observation vital-signs profiles: `patient+category`, `patient+code`, `patient+category+date`, read | partial | `category`, `code` (`search_capabilities.rb:105-118`) match `system|code` (#856); no `date`; read (`PatientScopedRead`) | #846 |
+| MedicationRequest: `patient+intent`, `patient+intent+status`, read; Medication by reference | met | `intent` (#852), `status`; read (`PatientScopedRead`); the medication is inline, so nothing references a Medication; the demo build has no order to read live | #845 |
+| Observation vital-signs profiles: `patient+category`, `patient+code`, `patient+category+date`, read | met | `category`, `code` and `date` with prefixes; read (`PatientScopedRead`) | #845 |
 | Observation lab, clinical-result, smoking status, screening-assessment, occupation, pregnancy, pediatric vitals | missing | Observation declares `us-core-vital-signs` only (`capability_statement.rb:41`) | #848 |
-| Encounter: `_id`, `patient`, `date+patient`, read | partial | `patient` only; entries are backend rows, not a US Core Encounter; no read (`routes.rb:75`) | #845, #846 |
-| Immunization, Procedure: `patient`, (`patient+date`), read | partial | `patient`, read (`PatientScopedRead`); no `date` | #846 |
-| ServiceRequest: `_id`, `patient`, `patient+category`, `patient+code`, `patient+category+authored`, read | partial | `patient`, read (`PatientScopedRead`); the demo build has no referral to read live | #846 |
+| Encounter: `_id`, `patient`, `date+patient`, read | partial | `patient`, and `date` with prefixes; no `_id`; no read (`routes.rb:75`) | #845, #846 |
+| Immunization, Procedure: `patient`, (`patient+date`), read | met | `patient` and `date` with prefixes; read (`PatientScopedRead`) | #845 |
+| ServiceRequest: `_id`, `patient`, `patient+category`, `patient+code`, `patient+category+authored`, read | partial | `patient` and `authored` with prefixes; read (`PatientScopedRead`); no `_id`, `category` or `code`; the demo build has no referral to read live | #846 |
 | Location `name`, `address`; Organization, Practitioner read | partial | reads served (`routes.rb:70,76-77`); Location has no search | #846 |
 | CarePlan, CareTeam, Goal | missing | models exist, not routed | #330, #334 |
 | Coverage | missing | not routed as FHIR Coverage | #239 |

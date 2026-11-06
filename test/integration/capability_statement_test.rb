@@ -31,8 +31,15 @@ class CapabilityStatementTest < ActionDispatch::IntegrationTest
     },
     %w[Patient birthdate] => lambda {
       assert_equal %w[3], search_ids("Patient", birthdate: "1990-12-25")
-      assert_refused("Patient", birthdate: "1990")
-      assert_refused("Patient", birthdate: "ge1990-12-25")
+      assert_equal %w[3], search_ids("Patient", birthdate: "1990")
+      assert_equal %w[3], search_ids("Patient", birthdate: "1990-12")
+      assert_equal %w[1 3], search_ids("Patient", birthdate: "lt2000-01-01").sort
+      assert_equal %w[2 3], search_ids("Patient", birthdate: "ge1990-12-25").sort
+      get "#{ENGINE}/Patient?birthdate=ge1990-12-25&birthdate=lt2000", headers: @headers
+      assert_equal %w[3], JSON.parse(response.body)["entry"].map { |e| e.dig("resource", "id") }
+      assert_refused("Patient", birthdate: "yesterday")
+      assert_refused("Patient", birthdate: "1990-13-01")
+      assert_refused("Patient", birthdate: "ap1990")
     },
     %w[Patient gender] => lambda {
       assert_equal %w[2], search_ids("Patient", gender: "male")
@@ -59,6 +66,35 @@ class CapabilityStatementTest < ActionDispatch::IntegrationTest
       assert_equal %w[8867-4], search_resources("Observation", patient: "1", code: "http://loinc.org|8867-4")
         .map { |r| r.dig("code", "coding", 0, "code") }
       assert_empty search_ids("Observation", patient: "1", code: "http://snomed.info/sct|8867-4")
+    },
+    %w[Observation date] => lambda {
+      refute_empty search_ids("Observation", patient: "1", date: "2026-09")
+      refute_empty search_ids("Observation", patient: "1", date: "ge2026-01-01")
+      assert_empty search_ids("Observation", patient: "1", date: "lt2026-01-01")
+      assert_refused("Observation", patient: "1", date: "soon")
+    },
+    %w[Procedure date] => lambda {
+      RpmsRpc.client.seed_keyed_collection(:procedure_list, "1", [ { ien: 7001, name: "Office visit", date: "03/10/2026",
+                                                                     provider: "MARTINEZ,SARAH", status: "C" } ])
+      assert_equal %w[7001], search_ids("Procedure", patient: "1", date: "2026-03")
+      assert_equal %w[7001], search_ids("Procedure", patient: "1", date: "le2026-03-10")
+      assert_empty search_ids("Procedure", patient: "1", date: "gt2026-03-31")
+    },
+    %w[Encounter date] => lambda {
+      RpmsRpc.client.seed_keyed_collection(:patient_appointments, "1", [ { datetime: Date.new(2026, 3, 10), location_ien: 1 } ])
+      refute_empty search_ids("Encounter", patient: "1", date: "ge2026-03-10")
+      assert_empty search_ids("Encounter", patient: "1", date: "lt2026-03-01")
+    },
+    %w[Immunization date] => lambda {
+      RpmsRpc.client.seed_keyed_collection(:immunization_list, "1^I", [ { record_type: "I", ien: 1, vaccine_display: "COVID-19 Vaccine",
+                                                                          occurrence_datetime: DateTime.new(2026, 1, 15, 9, 0, 0) } ])
+      refute_empty search_ids("Immunization", patient: "1", date: "2026")
+      assert_empty search_ids("Immunization", patient: "1", date: "2025")
+    },
+    %w[ServiceRequest authored] => lambda {
+      RpmsRpc.client.seed_keyed_collection(:referral_search, "1", [ { ien: 41, date: Date.new(2026, 3, 10), status: "A" } ])
+      refute_empty search_ids("ServiceRequest", patient: "1", authored: "2026-03-10")
+      assert_empty search_ids("ServiceRequest", patient: "1", authored: "eb2026-01-01")
     },
     %w[AuditEvent patient] => lambda {
       mine = Lakeraven::EHR::AuditEvent.create!(event_type: "rest", action: "R", outcome: "0",
