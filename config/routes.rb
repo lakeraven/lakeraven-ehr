@@ -197,6 +197,11 @@ Lakeraven::EHR::Engine.routes.draw do
       get "contacts/:kind/edit", to: "contacts#edit", as: :edit_patient_contact
       post "contacts/:kind/edit", to: "contacts#edit"
       post "contacts/:kind", to: "contacts#update", as: :patient_contact
+      # The migrant, homeless and internet questions (S-REG-11, S-REG-22.5, S-REG-31.3):
+      # each answer a new dated entry.
+      get "social_status/edit", to: "social_statuses#edit", as: :edit_patient_social_status
+      post "social_status", to: "social_statuses#update", as: :patient_social_status
+
       # The patient's languages (S-REG-10): each save a new dated entry.
       get "languages/edit", to: "languages#edit", as: :edit_patient_languages
       post "languages/edit", to: "languages#edit"
