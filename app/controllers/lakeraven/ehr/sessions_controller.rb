@@ -55,6 +55,7 @@ module Lakeraven
         result = authenticate(access_code: access_code, verify_code: params[:password].to_s)
 
         return render_broker_unavailable if result.nil?
+        return render_context_refused(access_code) if result.error == AuthenticationService::CONTEXT_REFUSED
         return render_rejected(access_code, result.error) unless result.success?
 
         provider = result.value
@@ -115,6 +116,17 @@ module Lakeraven
         # One message for every failure mode — no enumeration oracle.
         flash.now[:alert] = "Invalid username or password"
         render :new, status: :unprocessable_entity
+      end
+
+      # The codes were right and RPMS will not let this user into the application,
+      # so the user is sent to their site manager, not back to their codes. No
+      # throttle strike: nothing here is a guess, and a user who retries must
+      # not lock out everyone behind the app server's address.
+      def render_context_refused(access_code)
+        LoginThrottle.clear_account(access_code)
+        note_audit_denial("browser sign-in refused: RPMS does not give this user the application's context") if respond_to?(:note_audit_denial, true)
+        flash.now[:alert] = "Your RPMS user is not set up for this application. Ask your site manager to give you access."
+        render :new, status: :forbidden
       end
 
       def client_ip
