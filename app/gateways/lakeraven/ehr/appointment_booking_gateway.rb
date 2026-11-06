@@ -80,6 +80,25 @@ module Lakeraven
         Array(setup.access_types).reject { |t| t[:inactive] || t[:prevent_access] }
       end
 
+      # The access types by id, for naming a block (S-SCH-05.2).
+      def self.access_type_names(setup: ::RpmsRpc::SchedulingSetup)
+        Array(setup.access_types).to_h { |t| [ t[:id], t[:name] ] }
+      end
+
+      # The day's appointments with what the BSDX reads leave out (S-SCH-05.3):
+      # :cancelled_by on a cancelled one, and :overbook on the others.
+      def self.marked(resource, appointments, setup: ::RpmsRpc::SchedulingSetup)
+        clinic = resource[:hospital_location_id]
+        appointments.map do |a|
+          where = { start_time: a[:start_time], patient_dfn: a[:patient_dfn] }
+          if a[:cancelled]
+            a.merge(cancelled_by: setup.cancelled_by(**where))
+          else
+            a.merge(overbook: clinic.present? && setup.overbook?(hospital_location_id: clinic, **where))
+          end
+        end
+      end
+
       # What RPMS says about the resource's clinic over from..to, read once for
       # the range (SchedulingSetup: the clinic's #44 rules, the holidays, the
       # access types that prevent access), as a function from a date to
