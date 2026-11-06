@@ -12,7 +12,7 @@ module Lakeraven
     class ClinicDay
       Time_ = Data.define(:at, :open)
 
-      attr_reader :blocks, :appointments, :time_scale, :closed, :opens_hour
+      attr_reader :blocks, :listed_blocks, :appointments, :time_scale, :closed, :opens_hour
 
       # blocks: Scheduling.slot_schedule rows; appointments: rows with
       # :start_time/:end_time on this resource; time_scale: minutes. closed: why
@@ -22,6 +22,9 @@ module Lakeraven
       # start hour, before which the search offers no time (S-SCH-04.1).
       def initialize(blocks:, appointments:, time_scale:, closed: nil, prevented: [], opens_hour: nil)
         @closed = closed
+        # The blocks with places, as the clinic's hours show them (S-SCH-05.2).
+        # BSDX pads the day with blocks of none.
+        @listed_blocks = Array(blocks).select { |b| b[:slots].to_i.positive? }
         @blocks = closed ? [] : Array(blocks).select { |b| b[:slots].to_i.positive? && !prevented.include?(b[:access_type_id]) }
         @appointments = Array(appointments)
         @time_scale = [ time_scale.to_i, 1 ].max
