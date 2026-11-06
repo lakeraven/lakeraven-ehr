@@ -9,8 +9,8 @@ module RateLimitingSteps
   PATIENT_SEARCH_PATH = "/lakeraven-ehr/Patient"
 
   ACCOUNTS = {
-    "provider1" => %w[testprovider test123],
-    "provider2" => %w[testnurse test123]
+    "provider1" => %w[PMD123 PMD123!!],
+    "provider2" => %w[PRN123 PRN123!!]
   }.freeze
 
   SYNTHETIC_UNLISTED_ROUTE = "lakeraven/ehr/rate_limit_convention_synthetic_probe#index"
@@ -41,6 +41,7 @@ Before("@pending") do |scenario|
 end
 
 def rate_limit_post_login(username:, password:, remote_addr: @rate_limit_client_ip)
+  @signed_on_as_scenario_user = true
   post RateLimitingSteps::LOGIN_PATH,
        { username: username, password: password },
        { "REMOTE_ADDR" => remote_addr }
