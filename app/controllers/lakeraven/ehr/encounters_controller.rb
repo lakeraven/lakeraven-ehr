@@ -2,17 +2,15 @@
 
 module Lakeraven
   module EHR
+    # A US Core Encounter is a visit, not an appointment: the V files hang
+    # from the visit, so the visit is what a diagnosis or a launch names.
     class EncountersController < ApplicationController
-      include PatientCompartment
+      include PatientScopedRead
 
-      rate_limit only: :index
+      private
 
-      compartment_bound :index, param: :patient, require_param: true
-
-      def index
-        dfn = patient_compartment_dfn
-        results = EncounterGateway.for_patient(dfn)
-        render_bundle_egress(results.map { |r| Encounter.from_rpms_row(r, patient_dfn: dfn).to_fhir })
+      def patient_resources(dfn)
+        EncounterGateway.visits(dfn).map { |row| Encounter.from_rpms_visit(row, patient_dfn: dfn).to_fhir }
       end
     end
   end

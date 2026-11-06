@@ -187,6 +187,7 @@ module Lakeraven
         "lakeraven/ehr/service_requests#show",
         "lakeraven/ehr/immunizations#show",
         "lakeraven/ehr/procedures#show",
+        "lakeraven/ehr/encounters#show",
         "lakeraven/ehr/coverage_eligibility_requests#create",
         "lakeraven/ehr/measure_reports#index",
         "lakeraven/ehr/audit_events#index",
@@ -534,6 +535,9 @@ module Lakeraven
         } },
         { path: "/lakeraven-ehr/Procedure/1-7", method: :get, setup: -> {
           RpmsRpc.client.seed_keyed_collection(:procedure_list, "1", [ { ien: 7, name: "Office visit", date: Date.new(2026, 3, 10) } ])
+        } },
+        { path: "/lakeraven-ehr/Encounter/1-7", method: :get, setup: -> {
+          RpmsRpc.client.seed_keyed_collection(:encounter_visit_list, "1", [ { visit_string: "1;3260310.09;A;7", location: "Clinic", category: "AMBULATORY" } ])
         } },
         { path: "/lakeraven-ehr/CoverageEligibilityRequest", method: :post, params: { patient_dfn: "1", coverage_type: "medicaid" } },
         { path: "/lakeraven-ehr/MeasureReport", method: :get, params: { patient: "1" } },
