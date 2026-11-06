@@ -247,6 +247,20 @@ Lakeraven::EHR::Engine.routes.draw do
     get "/", to: "clinics#index", as: :home
     get "clinics/:id", to: "clinics#show", as: :clinic, constraints: { id: /\d+/ }
     get "clinics/:id/week", to: "clinics#week", as: :clinic_week, constraints: { id: /\d+/ }
+    # A clinic's wait list (S-SCH-10).
+    scope "clinics/:resource_id/wait_list", constraints: { resource_id: /\d+/ } do
+      get "/", to: "wait_lists#index", as: :clinic_wait_list
+      post "/", to: "wait_lists#create"
+      get "new", to: "wait_lists#new", as: :new_clinic_wait_list
+      scope ":entry_id", constraints: { entry_id: /\d+/ } do
+        get "edit", to: "wait_lists#edit", as: :edit_clinic_wait_list
+        post "/", to: "wait_lists#update", as: :clinic_wait_list_entry
+        get "removal", to: "wait_lists#removal", as: :clinic_wait_list_removal
+        post "removal", to: "wait_lists#remove"
+        get "booking", to: "wait_lists#booking", as: :clinic_wait_list_booking
+        post "booking", to: "wait_lists#book"
+      end
+    end
     # The appointments across the scheduler's clinics (S-SCH-05.5).
     get "appointments", to: "appointment_lists#index", as: :appointment_list
     # The appointments needing action in the scheduler's clinics (S-SCH-13.5, #875).
