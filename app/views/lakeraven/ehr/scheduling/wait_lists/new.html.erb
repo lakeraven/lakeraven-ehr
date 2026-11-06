@@ -1,0 +1,69 @@
+<% page_title "Add to the wait list", @resource[:name] %>
+
+<%= page_header "Add to the wait list",
+      @resource[:name] %>
+
+<%= flash_alert id: "wait-list-alert" %>
+
+<%= form_errors @addition,
+      "The patient was not added.",
+      id: "wait-list-errors" %>
+
+<%= form_with url: scheduling_new_clinic_wait_list_path(@resource[:id]),
+      method: :get,
+      local: true,
+      id: "patient-search",
+      class: "flex items-end gap-2" do %>
+  <%= form_field :q, "Patient name starts with" do |aria| %>
+    <%= text_field_tag :q,
+          params[:q],
+          id: "q",
+          autocomplete: "off",
+          aria: aria %>
+  <% end %>
+  <%= submit_tag "Find patient",
+        name: nil,
+        class: "button-secondary" %>
+<% end %>
+
+<%= form_with scope: :wait_list,
+      model: @addition,
+      url: scheduling_clinic_wait_list_path(@resource[:id]),
+      method: :post,
+      local: true,
+      id: "wait-list-form",
+      class: "card mt-4 flex flex-col gap-4" do |f| %>
+  <%= hidden_field_tag :q, params[:q] %>
+
+  <%= choice_list f,
+        :patient_dfn,
+        legend: "Patient",
+        choices: @patients.map { |patient| [ patient[:dfn], patient[:name], { patient: patient[:dfn] } ] },
+        selected: @addition.patient_dfn,
+        error: @addition.errors[:patient_dfn].first do %>
+    <%= render "lakeraven/ehr/shared/lookup_chosen",
+          form: f,
+          attribute: :patient_dfn,
+          selected: @addition.patient_dfn,
+          any_choices: @patients.any?,
+          chosen_text: "Patient chosen.",
+          empty_text: "Find the patient by name above." %>
+  <% end %>
+
+  <%# DATE ADDED TO LIST, 9009017.11 .03. %>
+  <%= form_field :added_on, "Date added", form: f, error: @addition.errors[:added_on].first do |aria| %>
+    <%= f.date_field :added_on,
+          value: @addition.added_on,
+          aria: aria %>
+  <% end %>
+
+  <%= render "fields",
+        f: f,
+        addition: @addition,
+        reasons: @reasons,
+        providers: @providers,
+        find_url: scheduling_new_clinic_wait_list_path(@resource[:id]) %>
+
+  <%= f.submit "Add to the wait list",
+        class: "button-primary self-start" %>
+<% end %>
