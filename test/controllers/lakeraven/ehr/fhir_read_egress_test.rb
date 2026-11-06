@@ -99,6 +99,8 @@ module Lakeraven
         "lakeraven/ehr/registration/other_names#index",   # Other names the patient has used (S-REG-12): registration demographics, no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/registration/other_names#create",  # Adding an other name (S-REG-12), not disclosure
         "lakeraven/ehr/registration/other_names#destroy", # Removing an other name (S-REG-12), not disclosure
+        "lakeraven/ehr/registration/social_statuses#edit",   # The migrant, homeless and internet questions (S-REG-11): registration data, no clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/registration/social_statuses#update", # Saving the answers (S-REG-31.3), not disclosure
         "lakeraven/ehr/registration/preferred_names#edit",   # The name the patient goes by (S-REG-12.1): registration demographics, no clinical record
         "lakeraven/ehr/registration/preferred_names#update", # Saving the preferred name (S-REG-12.1), not disclosure
         "lakeraven/ehr/registration/race_ethnicities#edit",   # Race and ethnicity (S-REG-20.2): registration demographics, no clinical record
