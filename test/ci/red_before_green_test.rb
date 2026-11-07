@@ -928,6 +928,118 @@ class RedBeforeGreenTest < Minitest::Test
                  "scratch worktree must be removed after cleanup"
   end
 
+  # --- lakeraven-ehr#663 owner decision 7 Nov 2026 (M1) ---
+  # The scratch worktree uses the PR's own database.yml, which may ignore
+  # TEST_DATABASE. The script must check what Rails resolves against the printed
+  # scratch name BEFORE setup, refuse on any difference, and never drop a
+  # database its own setup did not create.
+
+  VICTIM_DB = "lakeraven_ehr_victim_synthetic"
+
+  def rbg_env(resolve_opts = {}, runner_body = nil)
+    runner_body ||= <<~RUBY
+      puts "RUNNER TEST_DATABASE=\#{ENV['TEST_DATABASE']}"
+      puts "Failure:\\nGreeterTest#test_it [test/greeter_test.rb:3]:\\nExpected: 1"
+      puts "#{FIN}1 runs, 1 assertions, 1 failures, 0 errors, 0 skips"
+      exit 1
+    RUBY
+    fake_runner(runner_body).merge(fake_db_commands(**resolve_opts)).merge("DATABASE_URL" => "")
+  end
+
+  def assert_refused_before_setup(out, status)
+    assert_equal 2, status.exitstatus, out
+    assert_match(/^VERDICT: UNDETERMINED$/, out)
+    refute_match(/^DB_SETUP /, out, "setup must not run when resolution is not verified")
+    refute_match(/^RUNNER /, out, "tests must not run")
+    refute_match(/^DB_TEARDOWN/, out, "nothing may be dropped")
+  end
+
+  def test_m1_resolved_name_differing_from_scratch_name_is_refused_before_setup
+    fixed_pr
+    out, status = run_script(env: rbg_env(resolve_name: VICTIM_DB))
+
+    assert_refused_before_setup(out, status)
+    scratch = out[/^test database: (\S+)/, 1]
+    refute_nil scratch, out
+    verdict_block = out[/^VERDICT: UNDETERMINED.*/m]
+    assert_includes verdict_block, scratch, "detail must name the scratch database\n#{out}"
+    assert_includes verdict_block, VICTIM_DB, "detail must name the database Rails resolved\n#{out}"
+  end
+
+  def test_m1_resolve_command_failure_is_undetermined_with_no_setup_or_teardown
+    fixed_pr
+    out, status = run_script(env: rbg_env(resolve_exit: 3))
+
+    assert_refused_before_setup(out, status)
+    assert_match(/resol/i, out[/^VERDICT: UNDETERMINED.*/m])
+    assert_includes out[/^VERDICT: UNDETERMINED.*/m], out[/^test database: (\S+)/, 1]
+  end
+
+  def test_m1_resolve_printing_nothing_is_undetermined_with_no_setup_or_teardown
+    fixed_pr
+    out, status = run_script(env: rbg_env(resolve_silent: true))
+
+    assert_refused_before_setup(out, status)
+    assert_match(/resol/i, out[/^VERDICT: UNDETERMINED.*/m])
+  end
+
+  def test_m1_noise_before_the_resolved_name_is_tolerated_and_resolution_runs_in_the_worktree
+    fixed_pr
+    env = rbg_env({ resolve_noise: true }, nil).merge("TEST_ENV_NUMBER" => "2")
+
+    out, status = run_script(env: env)
+
+    assert_equal 0, status.exitstatus, out
+    assert_match(/^VERDICT: RED$/, out)
+    scratch = out[/^test database: (\S+)/, 1]
+    refute_nil scratch
+    resolve = out.lines.find { |l| l.start_with?("DB_RESOLVE ") }
+    refute_nil resolve, "the script must run RBG_DB_RESOLVE_CMD\n#{out}"
+    assert_match(/DB_RESOLVE pwd=wt /, resolve)
+    assert_equal scratch, resolve[/TEST_DATABASE=(\S+)/, 1]
+    assert_match(/TEST_ENV_NUMBER=<unset>/, resolve)
+    assert_match(/^DB_SETUP /, out)
+    assert_match(/^DB_TEARDOWN pwd=wt TEST_DATABASE=#{Regexp.escape(scratch)} /, out)
+  end
+
+  def test_m1_resolution_runs_before_setup
+    fixed_pr
+    out, status = run_script(env: rbg_env)
+
+    assert_equal 0, status.exitstatus, out
+    first_resolve = out.lines.index { |l| l.start_with?("DB_RESOLVE ") }
+    setup = out.lines.index { |l| l.start_with?("DB_SETUP ") }
+    refute_nil first_resolve, "no DB_RESOLVE line\n#{out}"
+    refute_nil setup
+    assert_operator first_resolve, :<, setup
+  end
+
+  def test_m1_second_resolution_differing_skips_teardown_and_warns_but_keeps_the_verdict
+    fixed_pr
+    out, status = run_script(env: rbg_env(resolve_name: VICTIM_DB, resolve_name_only_after_first: true))
+
+    assert_equal 0, status.exitstatus, out
+    assert_match(/^VERDICT: RED$/, out)
+    assert_equal 2, out.lines.count { |l| l.start_with?("DB_RESOLVE ") }, out
+    assert_match(/^DB_SETUP /, out)
+    refute_match(/^DB_TEARDOWN/, out, "must not drop a database it cannot verify")
+    scratch = out[/^test database: (\S+)/, 1]
+    warning = out.lines.find { |l| l =~ /warning/i && l.include?(scratch) }
+    refute_nil warning, "a warning must name the scratch database as possibly left behind\n#{out}"
+  end
+
+  def test_m1_with_database_url_set_nothing_is_resolved
+    fixed_pr
+    env = fake_runner.merge(fake_db_commands).merge("DATABASE_URL" => "postgres://ci.example/test")
+
+    out, status = run_script(env: env)
+
+    assert_equal 0, status.exitstatus, out
+    refute_match(/^DB_RESOLVE /, out)
+    refute_match(/^DB_SETUP /, out)
+    refute_match(/^DB_TEARDOWN/, out)
+  end
+
   private
 
   def kill_orphan(test_pid)
@@ -1086,7 +1198,9 @@ class RedBeforeGreenTest < Minitest::Test
     { "RBG_TEST_CMD" => "ruby #{path}" }
   end
 
-  def fake_db_commands(setup_exit: 0, test_pid_file: nil, teardown_sleep: 0)
+  def fake_db_commands(setup_exit: 0, test_pid_file: nil, teardown_sleep: 0,
+                       resolve_name: nil, resolve_exit: 0, resolve_silent: false,
+                       resolve_noise: false, resolve_name_only_after_first: false)
     @db_cmd_seq = (@db_cmd_seq || 0) + 1
     dir = File.join(@dir, ".git", "rbg-db-cmd-#{@db_cmd_seq}")
     FileUtils.mkdir_p(dir)
@@ -1113,6 +1227,23 @@ class RedBeforeGreenTest < Minitest::Test
       echo "DB_SETUP pwd=$(basename "$PWD") TEST_DATABASE=${TEST_DATABASE:-} $(#{env_number_field})"
       exit #{setup_exit}
     SH
+    resolve = File.join(dir, "resolve.sh")
+    counter = File.join(dir, "resolve.count")
+    # stdout is the answer (last non-blank line); the log goes to stderr.
+    # resolve_name_only_after_first: answer correctly once, then resolve_name.
+    File.write(resolve, <<~SH)
+      #!/usr/bin/env bash
+      n=$(cat #{counter} 2>/dev/null || echo 0); n=$((n + 1)); echo $n > #{counter}
+      echo "DB_RESOLVE pwd=$(basename "$PWD") TEST_DATABASE=${TEST_DATABASE:-} $(#{env_number_field})" >&2
+      [ #{resolve_exit} -eq 0 ] || exit #{resolve_exit}
+      [ "#{resolve_silent}" = "true" ] && exit 0
+      [ "#{resolve_noise}" = "true" ] && echo "booting rails noise"
+      if [ -n "#{resolve_name}" ] && { [ "#{resolve_name_only_after_first}" != "true" ] || [ "$n" -gt 1 ]; }; then
+        echo "#{resolve_name}"
+      else
+        echo "${TEST_DATABASE:-}"
+      fi
+    SH
     File.write(teardown, <<~SH)
       #!/usr/bin/env bash
       #{teardown_child_check}
@@ -1123,7 +1254,9 @@ class RedBeforeGreenTest < Minitest::Test
     SH
     FileUtils.chmod(0o755, setup)
     FileUtils.chmod(0o755, teardown)
+    FileUtils.chmod(0o755, resolve)
     {
+      "RBG_DB_RESOLVE_CMD" => resolve,
       "RBG_DB_SETUP_CMD" => setup,
       "RBG_DB_TEARDOWN_CMD" => teardown
     }
