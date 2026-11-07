@@ -57,8 +57,15 @@ module Lakeraven
       include PhiPageCache
 
       include RateLimitable
+      include DisclosureSurfaceGate
 
       rate_limit only: :show
+      # The chart's FHIR representation, and any read carrying an
+      # Authorization header, are fhir_api (#522). The gate refuses them
+      # while fhir_api is closed, ahead of the rate limiter, every callback
+      # and authentication. A browser session with no header reads the HTML
+      # chart ungoverned.
+      disclosure_surface :fhir_api, if: :fhir_api_request?
 
       FHIR_CONTENT_TYPE = "application/fhir+json"
 
@@ -83,8 +90,6 @@ module Lakeraven
       # adds an outcome entry instead of those resources (#647).
       CHART_CAPABILITY_RESOURCES = { ihs_immunization: "Immunization" }.freeze
 
-      # Declared after every include, so it is the first callback to run.
-      prepend_before_action :refuse_closed_fhir_surface!
       before_action :authenticate_chart_request!
       before_action :require_patient_scope!
       # After authentication and Patient scope, before the token compartment
@@ -329,16 +334,11 @@ module Lakeraven
 
       # -- Disclosure surface (#522) ---------------------------------------------
 
-      # The engine route already refuses a closed surface. This covers a host
-      # route that points at this controller directly (the dummy app's root
-      # /patients/:dfn does). Prepended, so it runs before authentication,
-      # before the rate limiter and before any broker call; the 404 carries no
-      # body. The HTML chart is never governed.
-      def refuse_closed_fhir_surface!
-        return unless fhir_requested?
-        return if DisclosureSurfaces.open?(:fhir_api)
-
-        head :not_found
+      # The same rule the engine's chart route constraint applies, so a host
+      # route at this controller (the dummy app's root /patients/:dfn) is
+      # refused exactly where the engine route would not match.
+      def fhir_api_request?
+        ChartRepresentation.fhir_api_request?(request)
       end
 
       # -- Data loading (per-type scope enforced; a mock miss yields []) --------

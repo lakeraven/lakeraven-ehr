@@ -6,6 +6,10 @@ module Lakeraven
       include SmartAuthentication
       include AuditableClinicalAccess
       include RateLimitable
+      # Each subclass names the disclosure surface it serves (#522), per
+      # controller rather than here: ccda_imports, Measure/$import and the
+      # export controllers (bulk_export, not fhir_api) share this base.
+      include DisclosureSurfaceGate
       include FHIRReadEgress
       include FHIRSearchBundle
       include FeatureUnavailableRendering

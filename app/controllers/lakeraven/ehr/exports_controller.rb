@@ -8,6 +8,8 @@ module Lakeraven
 
       rate_limit only: %i[create show destroy]
 
+      disclosure_surface :bulk_export
+
       # A bulk export IS a read of the patient's record; it needs read scope as
       # well as write, and it is bound to the compartment.
       # A bulk export dumps the patient's record; EhiExportService::FHIR_RESOURCE_TYPES

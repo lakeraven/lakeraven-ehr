@@ -9,6 +9,8 @@ module Lakeraven
 
       rate_limit only: :create
 
+      disclosure_surface :ccda
+
       # Types in the C-CDA body. A scope named after this controller is not
       # one of them.
       DISCLOSED_TYPES = %w[Patient AllergyIntolerance Condition MedicationRequest].freeze

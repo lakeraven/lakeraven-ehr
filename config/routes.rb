@@ -14,9 +14,11 @@ Lakeraven::EHR::Engine.routes.draw do
   # RESTful path: the chart is the human-facing representation of a patient,
   # so it lives at /patients/:dfn (the FHIR API keeps /Patient per convention;
   # that resource also owns the patient_path helper, hence :patient_chart).
-  # Disclosure surfaces (#522): the FHIR representation of the chart is part of
-  # fhir_api, so while fhir_api is closed a request the chart would answer
-  # with FHIR JSON does not match (a plain 404); the HTML chart always does.
+  # Disclosure surfaces (#522): the FHIR representation of the chart, and any
+  # chart request carrying an Authorization header, are part of fhir_api, so
+  # while fhir_api is closed they do not match (a plain 404). A browser
+  # session with no Authorization header always reaches the HTML chart.
+  # ChartsController applies the same rule itself, for host routes.
   constraints Lakeraven::EHR::DisclosureSurfaces::ChartRouteConstraint.new do
     get "patients/:dfn(.:format)", to: "charts#show", as: :patient_chart, constraints: { dfn: %r{[^/.?]+} }
   end
@@ -86,8 +88,10 @@ Lakeraven::EHR::Engine.routes.draw do
   # §5(a)): each governed group below matches only while the host has opened
   # its surface in config.x.lakeraven_ehr.open_disclosure_surfaces. Closed (the
   # default) is a plain 404 before any controller code runs, so no
-  # authentication and no broker call. /metadata, SMART discovery and launch,
-  # OAuth, ccda_imports and Measure/$import are not governed.
+  # authentication and no broker call. Each governed controller also refuses
+  # a closed surface itself (DisclosureSurfaceGate), which covers host routes
+  # drawn straight at it. /metadata, SMART discovery and launch, OAuth,
+  # ccda_imports and Measure/$import are not governed.
   #
   # Doorkeeper models (Application, AccessToken) are used directly;
   # routes are NOT mounted here because the engine provides its own

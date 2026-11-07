@@ -5,6 +5,8 @@ module Lakeraven
     class MedicationRequestsController < ApplicationController
       include PatientScopedRead
 
+      disclosure_surface :fhir_api
+
       # status and intent are token parameters: FHIRSearchBundle filters the
       # served resources on them (FHIR::SearchCapabilities), system included.
 

@@ -15,7 +15,10 @@ module Lakeraven
     # The check is prepended onto the controller, ahead of the callback
     # chain. A subclass `prepend_before_action` (registration and scheduling
     # gates, forgery protection) cannot run first and answer 401 or 404
-    # before the 429.
+    # before the 429. The one thing that does run first is a closed
+    # disclosure surface (DisclosureSurfaceGate, #522): it wraps `process`,
+    # outside process_action, so a surface that is closed answers 404 and
+    # never reaches this limiter.
     #
     # `login_throttle: true` marks sessions#create, which LoginThrottle also
     # guards. The flag does not skip this limiter — that action is enforced
@@ -27,7 +30,8 @@ module Lakeraven
 
       # Runs before ActionController's callback chain, so every controller
       # that declares `rate_limit` throttles before its own prepended
-      # callbacks and before callbacks inherited from a base.
+      # callbacks and before callbacks inherited from a base. It runs inside
+      # `process`, so DisclosureSurfaceGate's closed-surface refusal precedes it.
       module RateLimitGate
         def process_action(...)
           enforce_rate_limit!

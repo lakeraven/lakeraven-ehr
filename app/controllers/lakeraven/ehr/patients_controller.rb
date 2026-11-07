@@ -7,6 +7,8 @@ module Lakeraven
 
       rate_limit only: %i[index show]
 
+      disclosure_surface :fhir_api
+
       before_action :enforce_patient_context!, only: :show
       before_action :enforce_patient_search_context!, only: :index
       before_action :validate_patient_search_values!, only: :index

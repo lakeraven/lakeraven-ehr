@@ -4,6 +4,7 @@ module Lakeraven
   module EHR
     class OrganizationsController < ApplicationController
       rate_limit only: :show
+      disclosure_surface :fhir_api
 
       def show
         org = Organization.find_by_ien(params[:ien])

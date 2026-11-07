@@ -2,9 +2,11 @@
 
 module Lakeraven
   module EHR
-    # The chart's content negotiation (#452), in one place: ChartsController
-    # renders the FHIR Bundle exactly when this says so, and the fhir_api
-    # disclosure surface (#522) refuses exactly those requests.
+    # The chart's content negotiation (#452) and its fhir_api disclosure rule
+    # (#522), in one place: ChartsController renders the FHIR Bundle exactly
+    # when fhir_requested? says so, and both the chart route constraint and
+    # the chart controller's disclosure gate refuse exactly the requests
+    # fhir_api_request? names while fhir_api is closed.
     module ChartRepresentation
       FHIR_CONTENT_TYPE = "application/fhir+json"
 
@@ -19,6 +21,21 @@ module Lakeraven
         return true if params[:_format].to_s == "json"
 
         request.headers["Accept"].to_s.include?(FHIR_CONTENT_TYPE)
+      end
+
+      # The request carries an Authorization header — any scheme, any value,
+      # even an empty one. The header SmartAuthentication reads a bearer token
+      # from. Decided on presence, before (and never by) authentication.
+      def header_authenticated?(request)
+        request.headers.key?("Authorization")
+      end
+
+      # The chart requests that belong to the fhir_api surface: the FHIR
+      # representation, and ANY header-authenticated read, whose HTML is the
+      # same clinical content handed to a machine client. Only a browser
+      # session with no Authorization header reads the HTML chart ungoverned.
+      def fhir_api_request?(request)
+        fhir_requested?(request) || header_authenticated?(request)
       end
     end
   end

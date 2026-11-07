@@ -21,7 +21,7 @@ such. **Absence of evidence is called out as UNKNOWN rather than reported as abs
 
 | # | Path | Content it can carry | Gate today | Reachable in Phase 1? | Disable-able for Phase 1? |
 |---|---|---|---|---|---|
-| 1 | **HTML chart UI** — `charts#show`, `screenings#index/show/new`, `demo_visits` (`config/routes.rb:13,17,24,37,39,40`) | Full chart as rendered to the clinician, incl. PHQ-9/GAD-7 items | Session auth + `SessionScopePolicy`; audited via `AuditableClinicalAccess` | **Yes — this IS the therapist's workflow** | **No.** Must stay on |
+| 1 | **HTML chart UI** — `charts#show`, `screenings#index/show/new`, `demo_visits` (`config/routes.rb:13,17,24,37,39,40`) | Full chart as rendered to the clinician, incl. PHQ-9/GAD-7 items | Session auth + `SessionScopePolicy`; audited via `AuditableClinicalAccess`. *(#522: `charts#show` also accepted a bearer token, so a machine client could read the same HTML. A chart request carrying any `Authorization` header now counts as path 4, `fhir_api`, and is refused while that surface is closed; only the browser session reads path 1.)* | **Yes — this IS the therapist's workflow** | **No.** Must stay on |
 | 2 | **Bulk EHI export** — `POST/GET/DELETE /exports`, `GET /exports/:id/files/:name` (`routes.rb:76-78`) | **Widest path.** `Patient, AllergyIntolerance, Condition, MedicationRequest, Observation` + audit CSV + configuration + manifest (`ehi_export_service.rb:17-21,29-37`) | `create` → write scope (`exports_controller.rb:27`); `show/destroy/files` → `authorize_export_owner!` (`:15`, `export_files_controller.rb:12`), **fail-closed as of #528** | Yes, if a token has the scope | **Yes** — no Phase 1 therapist workflow needs it |
 | 3 | **C-CDA / transitions of care** — `POST /transitions_of_care` (`routes.rb:72`) | `Patient, AllergyIntolerance, Condition, MedicationRequest` (`transitions_of_care_controller.rb:14-15`) | `discloses_clinical_data` + write scope | Only if a referral-out flow is used | **Yes** — interop is out of Phase 1 scope |
 | 4 | **FHIR REST read API** — ~20 resource types (`routes.rb:45-67`) incl. `Condition`, `Observation`, `DiagnosticReport`, `CarePlan`, `Encounter`, `AuditEvent` | Per-type record content | SMART scopes, verb-aware + compartment-aware + deny-by-default (#528) | Yes, for any issued token | **Mostly** — the therapist uses the HTML UI, not the API |
@@ -159,10 +159,15 @@ every path unconditionally — there is no switch to set. Turning paths 2–4 of
 building the mechanism. Small, but not zero, and §3(b) reads as though it were free.
 
 *Update (#522):* the mechanism now exists. `config.x.lakeraven_ehr.open_disclosure_surfaces`
-names the surfaces a host opens (`fhir_api`, `bulk_export`, `ccda`); routing constraints
-answer 404 for every other one before authentication and before any broker call, and the
-default (nothing configured) is closed. Paths 2–4 are off unless named; path 1, `/metadata`
-and SMART discovery are never governed. See the README's "Disclosure surfaces" section.
+names the surfaces a host opens (`fhir_api`, `bulk_export`, `ccda`); every other one
+answers 404 before the rate limiter, before authentication and before any broker call, and
+the default (nothing configured) is closed. The engine's routing constraints refuse it, and
+each governed controller refuses it again itself (`DisclosureSurfaceGate`), so a host route
+drawn straight at a controller is closed too. Paths 2–4 are off unless named. Path 1 is the
+browser session with no `Authorization` header: a header-authenticated chart read is
+`fhir_api`, like the chart's FHIR JSON. `/metadata` and SMART discovery are never governed;
+`/metadata` still lists the FHIR resources while `fhir_api` is closed (known, follow-up).
+See the README's "Disclosure surfaces" section.
 
 **(b) The "Gate today" column is currently decoration for paths 2–4, and this audit
 omits the reason.** #496 is not cited anywhere above. It is open, and the defect is live:

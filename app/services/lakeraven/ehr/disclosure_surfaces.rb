@@ -15,7 +15,8 @@ module Lakeraven
     # or Symbol, a Hash, or an unknown name opens nothing. The value is read on
     # every call, so a change takes effect on the next request.
     module DisclosureSurfaces
-      # fhir_api    — the FHIR REST resource routes and the chart's FHIR JSON.
+      # fhir_api    — the FHIR REST resource routes, the chart's FHIR JSON and
+      #               any header-authenticated chart read.
       # bulk_export — bulk EHI export ($export kick-off, status, files).
       # ccda        — C-CDA transitions of care (outbound documents).
       NAMES = %i[fhir_api bulk_export ccda].freeze
@@ -48,7 +49,10 @@ module Lakeraven
 
       # A routing constraint: the governed routes only match while their
       # surface is open, so a closed surface is a plain 404 and no controller
-      # code (authentication, broker calls) runs.
+      # code (authentication, broker calls) runs. Defence in depth: each
+      # governed controller also refuses a closed surface itself
+      # (DisclosureSurfaceGate), which is what covers a host route drawn
+      # straight at the controller.
       class RouteConstraint
         def initialize(surface)
           raise ArgumentError, "unknown disclosure surface: #{surface.inspect}" unless DisclosureSurfaces.known_name(surface)
@@ -62,13 +66,15 @@ module Lakeraven
         end
       end
 
-      # The chart route serves HTML (never governed) and a FHIR Bundle
-      # (governed by fhir_api). It matches unless the request asks for the
-      # FHIR representation while fhir_api is closed, by the same negotiation
-      # ChartsController uses to decide which representation to render.
+      # The chart route serves the HTML chart to a browser session (never
+      # governed) and, to fhir_api, its FHIR Bundle and any request carrying
+      # an Authorization header. It matches unless the request is one of
+      # those while fhir_api is closed, by the same rule
+      # (ChartRepresentation.fhir_api_request?) ChartsController's disclosure
+      # gate applies.
       class ChartRouteConstraint
         def matches?(request)
-          return true unless ChartRepresentation.fhir_requested?(request)
+          return true unless ChartRepresentation.fhir_api_request?(request)
 
           DisclosureSurfaces.open?(:fhir_api)
         end

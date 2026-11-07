@@ -7,6 +7,8 @@ module Lakeraven
 
       rate_limit only: :show
 
+      disclosure_surface :bulk_export
+
       # This endpoint serves the export's actual BYTES — one patient's whole
       # record, SSN included. It had no ownership check and no compartment
       # check at all, so the guard on the status endpoint next to it was a
