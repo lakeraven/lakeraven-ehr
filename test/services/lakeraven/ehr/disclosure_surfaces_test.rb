@@ -161,6 +161,78 @@ module Lakeraven
         refute DisclosureSurfaces.open?(:bulk_export)
       end
 
+      # -- The host's options object: Hash or OrderedOptions, String or Symbol key
+      #
+      # Amendment 2, gap H. config.x.lakeraven_ehr is normally an
+      # OrderedOptions (which symbolises keys on write), but a host may assign
+      # a plain Hash, and one written with a String key meant what it says:
+      #   Rails.application.config.x.lakeraven_ehr = { "open_disclosure_surfaces" => [:fhir_api] }
+      # opens fhir_api. The reader accepts the key spelled either way on either
+      # container. Each test swaps the whole options object and restores it,
+      # so the class-level teardown (which writes to the original object)
+      # still finds that object in place.
+
+      def with_options_object(value)
+        original = Rails.application.config.x.lakeraven_ehr
+        Rails.application.config.x.lakeraven_ehr = value
+        yield
+      ensure
+        Rails.application.config.x.lakeraven_ehr = original
+      end
+
+      test "a plain Hash with the String key open_disclosure_surfaces opens the named surface" do
+        with_options_object({ "open_disclosure_surfaces" => [ :fhir_api ] }) do
+          assert DisclosureSurfaces.open?(:fhir_api), "a String key on a plain Hash must open fhir_api"
+          refute DisclosureSurfaces.open?(:bulk_export)
+          refute DisclosureSurfaces.open?(:ccda)
+        end
+      end
+
+      test "a plain Hash with the Symbol key open_disclosure_surfaces opens the named surface" do
+        with_options_object({ open_disclosure_surfaces: [ "bulk_export" ] }) do
+          refute DisclosureSurfaces.open?(:fhir_api)
+          assert DisclosureSurfaces.open?(:bulk_export), "a Symbol key on a plain Hash must open bulk_export"
+          refute DisclosureSurfaces.open?(:ccda)
+        end
+      end
+
+      test "an OrderedOptions written with a String key opens the named surface" do
+        options = ActiveSupport::OrderedOptions.new
+        options["open_disclosure_surfaces"] = [ :ccda ]
+        with_options_object(options) do
+          refute DisclosureSurfaces.open?(:fhir_api)
+          refute DisclosureSurfaces.open?(:bulk_export)
+          assert DisclosureSurfaces.open?(:ccda), "a String key on OrderedOptions must open ccda"
+        end
+      end
+
+      # Accepting the String spelling must not widen anything else: a plain
+      # Hash whose String-keyed value is malformed, or names nothing, still
+      # closes everything.
+      test "a plain Hash with a String key and a non-Array value closes every surface" do
+        with_options_object({ "open_disclosure_surfaces" => "fhir_api" }) do
+          assert_all_closed "the String-keyed value is a bare String"
+        end
+        with_options_object({ "open_disclosure_surfaces" => true }) do
+          assert_all_closed "the String-keyed value is true"
+        end
+      end
+
+      test "a plain Hash with no open_disclosure_surfaces key under either spelling closes every surface" do
+        with_options_object({ "something_else" => [ :fhir_api ] }) do
+          assert_all_closed "the plain Hash names no open_disclosure_surfaces key"
+        end
+        with_options_object({}) do
+          assert_all_closed "the plain Hash is empty"
+        end
+      end
+
+      test "swapping the options object leaves the original in place afterwards" do
+        original = Rails.application.config.x.lakeraven_ehr
+        with_options_object({ "open_disclosure_surfaces" => [ :fhir_api ] }) { DisclosureSurfaces.open?(:fhir_api) }
+        assert_same original, Rails.application.config.x.lakeraven_ehr
+      end
+
       # -- Read on every call, not cached ---------------------------------------
 
       test "the value is read on every call" do

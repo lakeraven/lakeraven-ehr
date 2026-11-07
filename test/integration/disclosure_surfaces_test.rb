@@ -33,6 +33,27 @@ require "test_helper"
 #      that should not exist. A closed surface answers 404 even over the
 #      limit, and writes no rate-limit audit row.
 #
+# Amendment 2 (reviewer gaps E–F):
+#   E. Gap A closed the chart to a header token, but every OTHER browser
+#      surface that authenticates a header bearer (SmartAuthentication, via
+#      BrowserSmartAuthentication: screenings, patient contexts, allergies,
+#      consents, the consent kiosk) was still open to a machine client while
+#      every surface was closed. Reproduced: a Backend Services token with no
+#      human sign-on fetched a CSRF token anonymously, POSTed a patient
+#      context (302) and read a PHQ-9 result page — total, band, every item
+#      answer and the item-9 self-harm note — as text/html. New rule: while
+#      fhir_api is closed, a request carrying `Authorization: Bearer …` to ANY
+#      engine controller that can authenticate a header token answers 404
+#      before authentication, before CSRF/forgery handling has any side
+#      effect, before any broker call, with no clinical content. The
+#      enumerating sweep over every such controller lives in
+#      test/integration/disclosure_surfaces_route_coverage_test.rb.
+#   F. Only a header SmartAuthentication would authenticate FROM counts:
+#      scheme `Bearer`, case-insensitive (extract_bearer_token's regexp). A
+#      proxy-injected `Authorization: Basic …` is "no bearer found" and falls
+#      through to the session, so it must not cost a signed-in browser its
+#      chart or its screenings page. Amends gap A's "ANY header" rule.
+#
 # The dummy app's test environment opens all three so the rest of the suite
 # keeps working; every test here sets the value itself and restores it.
 class DisclosureSurfacesTest < ActionDispatch::IntegrationTest
@@ -46,6 +67,20 @@ class DisclosureSurfacesTest < ActionDispatch::IntegrationTest
   # Seeded test user (test/test_helper.rb): DUZ 304 RODRIGUEZ,LINDA, whose
   # RPMS keys grant the chart's Patient read scope through the sign-on bridge.
   BROWSER_USER = { username: "lindarodriguez", password: "test123" }.freeze
+  # A behavioural-health clinician, seeded per test (the mock's seeds are
+  # reset before every example): the AMHZMENU key mints the
+  # QuestionnaireResponse scopes the screenings surface needs, and the chart
+  # option mints the chart's Patient read, through the same sign-on bridge.
+  BH_BROWSER_USER = { username: "bhtestuser", password: "test123" }.freeze
+  BH_BROWSER_DUZ = "305"
+  PHQ9 = Lakeraven::EHR::ScreeningInstrument::PHQ9
+  CONTEXT_SESSION_KEY = Lakeraven::EHR::ClinicianPatientContext::SESSION_KEY
+  # Words a PHQ-9 result page carries and a closed surface must not: the
+  # instrument, the self-harm note, item 9's text and the score markup.
+  SCREENING_CONTENT = [
+    "PHQ-9", "Self-harm response recorded", "better off dead", "Item 9 indicates",
+    "screening-score", "Severity band"
+  ].freeze
 
   setup do
     @config = Rails.application.config.x.lakeraven_ehr
@@ -58,6 +93,7 @@ class DisclosureSurfacesTest < ActionDispatch::IntegrationTest
     # The sign-on throttle and the request limiter are process-global.
     Lakeraven::EHR::LoginThrottle.reset!
     Lakeraven::EHR::RateLimit.reset!
+    @forgery_was = ActionController::Base.allow_forgery_protection
   end
 
   teardown do
@@ -66,10 +102,63 @@ class DisclosureSurfacesTest < ActionDispatch::IntegrationTest
     else
       @config.delete(:open_disclosure_surfaces)
     end
+    ActionController::Base.allow_forgery_protection = @forgery_was
     teardown_smart_auth
     Lakeraven::EHR::ExportsController.reset_store!
     Lakeraven::EHR::LoginThrottle.reset!
     Lakeraven::EHR::RateLimit.reset!
+    Lakeraven::EHR::ScreeningResponse.where(patient_dfn: PATIENT_DFN).delete_all
+  end
+
+  # Production posture for the reproduced sequence: CSRF enforced, so the
+  # machine client has to fetch a token the way the reviewer did.
+  def with_forgery_protection
+    ActionController::Base.allow_forgery_protection = true
+    yield
+  ensure
+    ActionController::Base.allow_forgery_protection = @forgery_was
+  end
+
+  def seed_bh_browser_user
+    mock = RpmsRpc.client
+    mock.seed_user(BH_BROWSER_DUZ, credentials: "#{BH_BROWSER_USER[:username]};#{BH_BROWSER_USER[:password]}",
+      name: "BH,TESTUSER", role: :provider)
+    mock.seed_held_keys(BH_BROWSER_DUZ, [ "AMHZMENU" ])
+    mock.seed_options(BH_BROWSER_DUZ, [ "CIAV VUECENTRIC" ])
+  end
+
+  # A completed PHQ-9 for the synthetic patient, item 9 positive and
+  # acknowledged, so its result page carries everything a closed surface
+  # must withhold: total, band, every item answer and the self-harm note.
+  def seed_phq9_screening
+    Lakeraven::EHR::ScreeningResponse.where(patient_dfn: PATIENT_DFN).delete_all
+    answers = PHQ9.link_ids.index_with { 1 }
+    answers[PHQ9.safety_link_id] = 3
+    Lakeraven::EHR::ScreeningResponse.create!(
+      patient_dfn: PATIENT_DFN, encounter_ien: "2090061", instrument_key: PHQ9.key,
+      answers: answers, total_score: answers.values.sum, severity_band: PHQ9.band_label_for(answers.values.sum),
+      effective_at: Time.utc(2026, 3, 1), source: Lakeraven::EHR::ScreeningResponse::SOURCE_CLINICIAN,
+      administered_by: BH_BROWSER_DUZ, safety_flagged: true,
+      safety_acknowledged_at: Time.utc(2026, 3, 1), safety_acknowledged_by: BH_BROWSER_DUZ
+    )
+  end
+
+  # The CSRF token from a page this session may load. Anonymous, GET /login
+  # is the sign-in form; signed in, it may redirect, in which case the page
+  # it lands on carries the token.
+  def csrf_token_from_login_page
+    get "/lakeraven-ehr/login"
+    follow_redirect! while response.redirect?
+    assert_response :ok, "GET /login must answer (got #{response.status})"
+    token = response.body[/name="csrf-token" content="([^"]+)"/, 1]
+    assert token.present?, "GET /login must carry a CSRF meta tag"
+    token
+  end
+
+  def assert_no_screening_content(label)
+    SCREENING_CONTENT.each do |text|
+      refute_includes response.body, text, "#{label}: a closed surface must not carry the screening (#{text.inspect})"
+    end
   end
 
   def open_surfaces(value)
@@ -84,6 +173,49 @@ class DisclosureSurfacesTest < ActionDispatch::IntegrationTest
   def sign_in_browser_session
     post "/lakeraven-ehr/login", params: BROWSER_USER
     assert_response :redirect, "setup: the seeded clinician must sign in (got #{response.status})"
+  end
+
+  # The behavioural-health clinician's browser session, with the patient's
+  # record opened the way the web surface opens it: an audited POST on the
+  # session, no Authorization header. A browser session may only write where
+  # forgery protection is actually enforced (SmartAuthentication's landing
+  # contract), so this runs with it ON, as in production, and carries the
+  # CSRF token of a page the session loaded. Teardown restores the flag.
+  def sign_in_bh_browser_session_with_open_context
+    seed_bh_browser_user
+    ActionController::Base.allow_forgery_protection = true
+    post "/lakeraven-ehr/login", params: BH_BROWSER_USER.merge(authenticity_token: csrf_token_from_login_page)
+    assert_response :redirect, "setup: the BH clinician must sign in (got #{response.status})"
+    # Sign-on resets the session: a fresh token, not the pre-login one.
+    post "/lakeraven-ehr/patients/#{PATIENT_DFN}/context", params: { authenticity_token: csrf_token_from_login_page }
+    assert_response :redirect, "setup: the browser session must open the patient's record (got #{response.status})"
+  end
+
+  def screenings_index(headers = {})
+    get "/lakeraven-ehr/patients/#{PATIENT_DFN}/screenings", headers: headers
+  end
+
+  def screening_show(id, headers = {})
+    get "/lakeraven-ehr/patients/#{PATIENT_DFN}/screenings/#{id}", headers: headers
+  end
+
+  def allergy_form(headers = {})
+    get "/lakeraven-ehr/patients/#{PATIENT_DFN}/allergies/new", headers: headers
+  end
+
+  def assert_screenings_index_rendered(label)
+    assert_response :ok, "#{label}: the screenings index must render (got #{response.status})"
+    assert_equal "text/html", response.media_type, label
+    assert_includes response.body, "PHQ-9", "#{label}: the index must list the seeded PHQ-9"
+  end
+
+  def assert_screening_result_rendered(row, label)
+    assert_response :ok, "#{label}: the screening result must render (got #{response.status})"
+    assert_equal "text/html", response.media_type, label
+    assert_includes response.body, PHQ9.title, label
+    assert_includes response.body, "Self-harm response recorded", "#{label}: the item-9 note must render"
+    assert_includes response.body, "better off dead", "#{label}: item 9's text must render"
+    assert_select "span.screening-score__number", text: row.total_score.to_s
   end
 
   def assert_html_chart_rendered(label)
@@ -290,6 +422,44 @@ class DisclosureSurfacesTest < ActionDispatch::IntegrationTest
     refute_equal "application/xml", response.media_type
   end
 
+  # The two FHIR API calls routed outside the fhir_api block, on the FHIR base
+  # and bearer-only: Measure/$import and the inbound C-CDA import. They are
+  # fhir_api like every other call on that base (amendment 2, lead decision):
+  # inbound C-CDA ingest drops Part 2 security labels today (Half 2 of #522),
+  # so it must not run while the API is closed. Today both authenticate the
+  # bearer and answer an OperationOutcome (400 for an empty body).
+  def ccda_import(headers = @headers)
+    post "/lakeraven-ehr/ccda_imports", headers: headers
+  end
+
+  def measure_import(headers = @headers)
+    post "/lakeraven-ehr/Measure/$import", headers: headers
+  end
+
+  test "nil: POST /ccda_imports is 404 with no broker call" do
+    open_surfaces nil
+    assert_closed_request("POST /ccda_imports") { ccda_import }
+    refute_match(/"resourceType"\s*:\s*"OperationOutcome"/, response.body,
+      "POST /ccda_imports: a closed surface must not answer with an OperationOutcome")
+  end
+
+  test "nil: POST /Measure/$import is 404 with no broker call" do
+    open_surfaces nil
+    assert_closed_request("POST /Measure/$import") { measure_import }
+    refute_match(/"resourceType"\s*:\s*"OperationOutcome"/, response.body,
+      "POST /Measure/$import: a closed surface must not answer with an OperationOutcome")
+  end
+
+  # The other side, so the 404 is the switch's: with fhir_api open the same
+  # bearer requests are answered (whatever they answer an empty body).
+  test "fhir_api only: POST /ccda_imports and POST /Measure/$import are not 404" do
+    open_surfaces [ :fhir_api ]
+    ccda_import
+    refute_equal 404, response.status, "POST /ccda_imports while fhir_api is open must not be 404"
+    measure_import
+    refute_equal 404, response.status, "POST /Measure/$import while fhir_api is open must not be 404"
+  end
+
   # Closed means closed BEFORE authentication: an unauthenticated request gets
   # the same 404, not a 401 that confirms the surface exists.
   test "nil: a closed surface answers 404, not 401, to a request with no token" do
@@ -330,21 +500,40 @@ class DisclosureSurfacesTest < ActionDispatch::IntegrationTest
     assert_closed_request("GET /patients/:dfn Bearer, text/html (host root)") { host_chart_html }
   end
 
-  # ANY Authorization header, whatever its scheme or value: the refusal is a
-  # routing decision on the header's presence, not an authentication outcome.
-  # Even a signed-in browser session is refused when a header rides along.
-  test "nil: any Authorization header on the HTML chart is 404 before authentication" do
-    sign_in_browser_session
+  # Gap F (amendment 2). Only a header SmartAuthentication would authenticate
+  # FROM counts: scheme `Bearer`, case-insensitive, whatever the token's
+  # value. The refusal is decided on the header's shape before authentication,
+  # not on an authentication outcome, so an unknown token is refused like a
+  # valid one — never a 401 that confirms a surface worth authenticating
+  # against. A `Basic` header (a proxy's) is "no bearer found" and falls
+  # through to the session exactly as extract_bearer_token does, so a
+  # signed-in browser behind such a proxy keeps its chart and its screenings.
+  test "nil: a Bearer Authorization header on the HTML chart is 404 before authentication; a Basic header falls through to the session" do
+    seed_phq9_screening
+    sign_in_bh_browser_session_with_open_context
     open_surfaces nil
 
     basic = { "Authorization" => "Basic #{Base64.strict_encode64('proxy:secret')}" }
-    assert_closed_request("GET /lakeraven-ehr/patients/:dfn Basic header + session") { chart_html(basic) }
-    assert_closed_request("GET /patients/:dfn Basic header + session (host root)") { host_chart_html(basic) }
+    chart_html(basic)
+    assert_html_chart_rendered("GET /lakeraven-ehr/patients/:dfn Basic header + session")
+    host_chart_html(basic)
+    assert_html_chart_rendered("GET /patients/:dfn Basic header + session (host root)")
+    screenings_index(basic)
+    assert_screenings_index_rendered("GET /lakeraven-ehr/patients/:dfn/screenings Basic header + session")
 
-    # Not a 401 that confirms a surface worth authenticating against.
     junk = { "Authorization" => "Bearer not-a-token" }
-    assert_closed_request("GET /lakeraven-ehr/patients/:dfn junk bearer") { chart_html(junk) }
-    assert_closed_request("GET /patients/:dfn junk bearer (host root)") { host_chart_html(junk) }
+    assert_closed_request("GET /lakeraven-ehr/patients/:dfn junk bearer + session") { chart_html(junk) }
+    assert_closed_request("GET /patients/:dfn junk bearer + session (host root)") { host_chart_html(junk) }
+
+    # The scheme match is case-insensitive, as extract_bearer_token's is: a
+    # lower-case `bearer` carrying a VALID system token is still a header
+    # token, and is refused on the chart and on the screenings alike.
+    lower = { "Authorization" => @headers["Authorization"].sub(/\ABearer/, "bearer") }
+    assert_match(/\Abearer /, lower["Authorization"])
+    assert_closed_request("GET /lakeraven-ehr/patients/:dfn lower-case bearer + session") { chart_html(lower) }
+    assert_closed_request("GET /patients/:dfn lower-case bearer + session (host root)") { host_chart_html(lower) }
+    assert_closed_request("GET /lakeraven-ehr/patients/:dfn/screenings lower-case bearer + session") { screenings_index(lower) }
+    assert_no_screening_content("GET /lakeraven-ehr/patients/:dfn/screenings lower-case bearer + session")
   end
 
   # The other side of the rule, pinned so the refusal cannot grow into a
@@ -357,6 +546,87 @@ class DisclosureSurfacesTest < ActionDispatch::IntegrationTest
 
     host_chart_html
     assert_html_chart_rendered("GET /patients/:dfn Bearer (host root)")
+  end
+
+  # ============================================================================
+  # Gap E: the header-token rule covers every surface that authenticates one
+  # ============================================================================
+
+  # The reviewer's reproduction, step for step, with forgery protection ON as
+  # in production: a Backend Services token and no human sign-on. Today step
+  # 2 answers 302 (the context opens), step 3 renders the PHQ-9 result page
+  # and its index, and step 4 renders the allergy form. Each must be the
+  # closed surface's 404: before authentication, before the CSRF check has a
+  # side effect (no context is opened on the session), before any broker
+  # call, and with no screening content in the body.
+  test "nil: a bearer-only machine client is refused the patient context, the screenings and the allergy form (forgery protection on)" do
+    with_forgery_protection do
+      row = seed_phq9_screening
+      open_surfaces nil
+
+      # 1. Anonymous: the sign-in page hands out a CSRF token and a session cookie.
+      csrf = csrf_token_from_login_page
+
+      # 2. The bearer plus that token: today 302 (context opened).
+      assert_closed_request("POST /patients/:dfn/context Bearer + authenticity_token") do
+        post "/lakeraven-ehr/patients/#{PATIENT_DFN}/context",
+          params: { authenticity_token: csrf }, headers: @headers
+      end
+      assert_nil session[CONTEXT_SESSION_KEY],
+        "POST /patients/:dfn/context: a refused request must not open a patient context on the session"
+
+      # 3. The screening result and index with the bearer and the cookie: today 200 text/html.
+      assert_closed_request("GET /patients/:dfn/screenings/:id Bearer + cookie") { screening_show(row.id, @headers) }
+      assert_no_screening_content("GET /patients/:dfn/screenings/:id Bearer + cookie")
+      assert_closed_request("GET /patients/:dfn/screenings Bearer + cookie") { screenings_index(@headers) }
+      assert_no_screening_content("GET /patients/:dfn/screenings Bearer + cookie")
+
+      # 4. The allergy form: today 200.
+      assert_closed_request("GET /patients/:dfn/allergies/new Bearer + cookie") { allergy_form(@headers) }
+      refute_includes response.body, "<form", "GET /patients/:dfn/allergies/new: a closed surface must not render the form"
+    end
+  end
+
+  # The other side, so the 404s above are the switch's and not some other
+  # refusal: with fhir_api open the same bearer requests are answered (not
+  # 404), as they are today. Pinned loosely — "not 404" — because what a
+  # system token may do on these surfaces while the API is open is their own
+  # specs' business, not this switch's.
+  test "fhir_api only: the same bearer requests are not 404 (the refusal is the switch's)" do
+    with_forgery_protection do
+      row = seed_phq9_screening
+      open_surfaces [ :fhir_api ]
+
+      csrf = csrf_token_from_login_page
+      post "/lakeraven-ehr/patients/#{PATIENT_DFN}/context", params: { authenticity_token: csrf }, headers: @headers
+      refute_equal 404, response.status, "POST /patients/:dfn/context Bearer while fhir_api is open must not be 404"
+
+      screening_show(row.id, @headers)
+      refute_equal 404, response.status, "GET /patients/:dfn/screenings/:id Bearer while fhir_api is open must not be 404"
+
+      allergy_form(@headers)
+      refute_equal 404, response.status, "GET /patients/:dfn/allergies/new Bearer while fhir_api is open must not be 404"
+    end
+  end
+
+  # Path 1 must keep working: the clinician's browser session, no
+  # Authorization header, opens the record and reads the screenings while
+  # everything is closed. Pins behaviour that must not regress (passes today).
+  test "nil: a signed-in browser session with no Authorization header still opens a context and reads the screenings" do
+    row = seed_phq9_screening
+    open_surfaces nil
+
+    sign_in_bh_browser_session_with_open_context
+    assert_equal PATIENT_DFN, session[CONTEXT_SESSION_KEY].to_s, "the browser session must hold the open record"
+
+    screenings_index
+    assert_screenings_index_rendered("GET /patients/:dfn/screenings (browser session)")
+
+    screening_show(row.id)
+    assert_screening_result_rendered(row, "GET /patients/:dfn/screenings/:id (browser session)")
+
+    allergy_form
+    assert_response :ok, "GET /patients/:dfn/allergies/new (browser session) must render (got #{response.status})"
   end
 
   test "nil: GET /metadata still answers 200" do
