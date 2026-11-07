@@ -1,0 +1,68 @@
+<% page_title "Migrant, homeless and internet", @patient[:name], "Registration" %>
+<% entry = Lakeraven::EHR::SocialStatusEntry %>
+<% answers = entry::ANSWERS.to_a %>
+
+<%= page_header "Migrant, homeless and internet",
+      [ @patient[:name],
+        "Each answer you give is a new entry dated today. Earlier answers are kept.",
+        "A question you leave unanswered is not recorded." ] %>
+
+<%= flash_alert id: "social-status-alert" %>
+
+<%= form_errors @entry,
+      "The answers were not saved.",
+      id: "social-status-errors" %>
+
+<%= form_with scope: :social_status,
+      model: @entry,
+      url: registration_patient_social_status_path(@dfn),
+      method: :post,
+      local: true,
+      id: "social-status-form",
+      class: "card flex flex-col gap-4" do |f| %>
+  <%# MIGRANT WORKER QUESTION DATE, 9000001.84 .02 and .03. %>
+  <%= choice_list f,
+        :migrant,
+        legend: "Is the patient a migrant worker?",
+        choices: answers,
+        selected: @entry.migrant,
+        inline: true,
+        hint: ("On file: #{entry::ANSWERS[@current.dig(:migrant, :status)]}, #{@current.dig(:migrant, :date)}." if @current.dig(:migrant, :status)) %>
+  <%= choice_list f,
+        :migrant_type,
+        legend: "Type of migrant worker, for a yes",
+        choices: entry::MIGRANT_TYPES.to_a,
+        selected: @entry.migrant_type,
+        error: @entry.errors[:migrant_type].first %>
+
+  <%# HOMELESS STATUS QUESTION DATE, 9000001.85 .02 and .03. %>
+  <%= choice_list f,
+        :homeless,
+        legend: "Is the patient homeless?",
+        choices: answers,
+        selected: @entry.homeless,
+        inline: true,
+        hint: ("On file: #{entry::ANSWERS[@current.dig(:homeless, :status)]}, #{@current.dig(:homeless, :date)}." if @current.dig(:homeless, :status)) %>
+  <%= choice_list f,
+        :homeless_type,
+        legend: "Type of homelessness, for a yes",
+        choices: entry::HOMELESS_TYPES.to_a,
+        selected: @entry.homeless_type,
+        error: @entry.errors[:homeless_type].first %>
+
+  <%# INTERNET ACCESS QUESTION DATE, 9000001.81. %>
+  <%= choice_list f,
+        :internet,
+        legend: "Can the patient use the internet?",
+        choices: answers,
+        selected: @entry.internet,
+        inline: true,
+        hint: ("On file: #{entry::ANSWERS[@current.dig(:internet, :access) ? 'Y' : 'N']}, #{@current.dig(:internet, :date)}." unless @current.dig(:internet, :access).nil?) %>
+
+  <div class="flex items-center gap-4">
+    <%= f.submit "Save the answers",
+          id: "save-social-status" %>
+    <%= link_to "Cancel",
+          registration_patient_path(@dfn) %>
+  </div>
+<% end %>

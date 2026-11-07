@@ -85,7 +85,7 @@ jobs:
     name: Risk tier
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # The BASE commit. Never the PR head: see the warning at the top of this file.
           ref: ${{ github.event.pull_request.base.sha }}

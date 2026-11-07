@@ -59,6 +59,14 @@ module Lakeraven
         assert_equal digests.size, digests.uniq.size
         assert_equal registration.digest, registration.digest
       end
+      # S-REG-02.6: the reason is one of PATIENT .0906's own codes, and travels
+      # to RPMS only when given. Whether one is needed is RPMS's call.
+      test "S-REG-02.6 a reason for no SSN is one of RPMS's codes, and is sent when given" do
+        assert_equal %w[R S N], PatientRegistration::NO_SSN_REASONS.keys
+        assert_equal "N", registration(no_ssn_reason: "N").register_attrs[:no_ssn_reason]
+        refute registration(no_ssn_reason: "X").valid?
+        refute registration.register_attrs.key?(:no_ssn_reason)
+      end
     end
   end
 end

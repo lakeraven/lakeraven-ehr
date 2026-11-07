@@ -10,3 +10,9 @@ development:
 test:
   <<: *default
   database: "<%= require Rails.root.join("lib/test_database_name").to_s; Lakeraven::EHR::TestDatabaseName.resolve(checkout_root: Rails.root.join("../..").to_s, env: ENV) %>"
+
+# A deployed instance names its database with DATABASE_URL (docs/deploy_container.md),
+# which Rails merges over this entry.
+production:
+  <<: *default
+  database: lakeraven_ehr_production

@@ -12,24 +12,31 @@ class AuthenticationServiceCiaTest < ActiveSupport::TestCase
   # A CiaClient with the wire replaced: records what the service asked of it
   # and answers the sign-on the way CiaClient#authenticate does.
   class FakeCiaClient < RpmsRpc::CiaClient
-    attr_reader :signons, :rpcs
+    attr_reader :signons, :rpcs, :callers
 
-    def initialize(greeting: "MANAGER,SYSTEM signed on.  Good evening", reject: false, denied: [])
+    def initialize(greeting: "MANAGER,SYSTEM signed on.  Good evening", reject: false, denied: [], context_refused: false)
       super(host: "127.0.0.1", port: 9100)
       @greeting = greeting
       @reject = reject
+      @context_refused = context_refused
       @denied = denied
       @signons = []
       @rpcs = []
+      @callers = []
       @connected = false
     end
 
     def connect(*) = (@connected = true)
     def connected? = @connected
 
-    def authenticate(access_code, verify_code, **)
+    def authenticate(access_code, verify_code, **caller)
       @signons << [ access_code, verify_code ]
+      @callers << caller
       raise RpmsRpc::Client::AuthenticationError, "CIA sign-on rejected" if @reject
+      raise RpmsRpc::Client::ContextRefusedError, "CIA sign-on: this user may not use CIAV VUECENTRIC" if @context_refused
+
+      @session_uid = "405"
+      set_authenticated("77") # as CiaClient#authenticate does: held_keys binds a context and sends this DUZ
 
       { success: true, user: "PROVIDER,TEST", duz: 77, greeting: @greeting }
     end
@@ -44,8 +51,10 @@ class AuthenticationServiceCiaTest < ActiveSupport::TestCase
       raise RpmsRpc::Client::RpcError, "4 Access denied for remote procedure: #{name}" if @denied.include?(name)
 
       return USERINFO_REPLY if name == "ORWU USERINFO"
-      # CIAVCXUS HASKEYS: this user holds none of the names asked.
-      return "\x01\x00".b + params.first.to_s.split("^", -1).map { "0" }.join("^").b if name == "CIAVCXUS HASKEYS"
+      # ORWU NPHASKEY: this user holds none of the keys asked.
+      return "\x01\x00".b + "0".b if name == "ORWU NPHASKEY"
+      # ORWU HAS OPTION ACCESS: a CIA sign-on binds to CIAV VUECENTRIC, so it holds that.
+      return "\x01\x00".b + (params.first == "CIAV VUECENTRIC" ? "1" : "0").b if name == "ORWU HAS OPTION ACCESS"
 
       ""
     end
@@ -90,6 +99,15 @@ class AuthenticationServiceCiaTest < ActiveSupport::TestCase
     assert_equal "Invalid access/verify code", result.error
   end
 
+  test "a user RPMS refuses the context is told apart from a wrong code" do
+    use(FakeCiaClient.new(context_refused: true))
+
+    result = service.authenticate(access_code: "PBIL123", verify_code: "PBIL123!!")
+
+    refute result.success?
+    assert_equal Lakeraven::EHR::AuthenticationService::CONTEXT_REFUSED, result.error
+  end
+
   # A least-privilege clinician signs on under CIAV VUECENTRIC, whose RPC
   # multiple lacks XUS GET USER INFO. The DUZ is already verified by then;
   # a denied display-name read must not turn the sign-on into a 500.
@@ -121,6 +139,27 @@ class AuthenticationServiceCiaTest < ActiveSupport::TestCase
   end
 
   private
+
+# docs/identity-passthrough.md: RPMS records the workstation and the
+# browser's address against the sign-on, and the CIA session it opened is
+# kept so audit rows can lead to it.
+test "tells RPMS the workstation and the browser's address, and keeps the CIA session" do
+  client = use(FakeCiaClient.new)
+
+  result = service.authenticate(access_code: "PROV123", verify_code: "VERIFY", client_ip: "203.0.113.9")
+
+  assert_equal [ { workstation: Lakeraven::EHR::AuthenticationService.workstation, workstation_ip: "203.0.113.9" } ], client.callers
+  assert_match(/\Alakeraven-ehr /, Lakeraven::EHR::AuthenticationService.workstation)
+  assert_equal "405", result.value[:rpms_session_id]
+end
+
+test "without a browser address, none is sent" do
+  client = use(FakeCiaClient.new)
+
+  service.authenticate(access_code: "PROV123", verify_code: "VERIFY")
+
+  assert_nil client.callers.first[:workstation_ip]
+end
 
   def service = Lakeraven::EHR::AuthenticationService.new
 

@@ -56,6 +56,62 @@ class FhirSearchPagingTest < ActionDispatch::IntegrationTest
     assert_equal first_page, entry_ids, "previous returns the same first page"
   end
 
+  # -- _elements ----------------------------------------------------------------
+
+  test "_elements cuts each match down to what was asked for, and marks it SUBSETTED" do
+    get "/lakeraven-ehr/Patient", params: { _elements: "gender" }, headers: @headers
+
+    assert_response :ok
+    assert_equal 3, bundle["total"]
+    bundle["entry"].each do |entry|
+      resource = entry["resource"]
+      assert_equal %w[gender id meta resourceType], resource.keys.sort
+      assert_includes resource.dig("meta", "tag").map { |tag| tag["code"] }, "SUBSETTED"
+    end
+  end
+
+  test "the Part 2 egress seam reads the whole resource, not the subset" do
+    seen = nil
+    filter = Lakeraven::EHR::Part2EgressFilter.singleton_class
+    original = filter.instance_method(:call)
+    filter.define_method(:call) do |payload|
+      seen = payload
+      original.bind(Lakeraven::EHR::Part2EgressFilter).call(payload)
+    end
+
+    begin
+      get "/lakeraven-ehr/Patient", params: { _elements: "gender" }, headers: @headers
+    ensure
+      filter.define_method(:call, original)
+    end
+
+    assert_response :ok
+    assert seen[:entry].first[:resource].key?(:name), "the seam was handed a cut-down resource"
+    refute bundle["entry"].first["resource"].key?("name")
+  end
+
+  test "a shared-path search honours _elements too" do
+    get "/lakeraven-ehr/Practitioner", params: { _elements: "name" }, headers: @headers
+
+    assert_response :ok
+    assert_equal %w[id meta name resourceType], bundle["entry"].first["resource"].keys.sort
+  end
+
+  test "paging links repeat _elements" do
+    get "/lakeraven-ehr/Patient", params: { _elements: "gender", _count: "1" }, headers: @headers
+
+    assert_includes link("next"), "_elements=gender"
+  end
+
+  test "an _elements value that is not a top-level element name is refused" do
+    [ "name.family", "", "gender,", "gen der" ].each do |value|
+      get "/lakeraven-ehr/Patient", params: { _elements: value }, headers: @headers
+
+      assert_response :bad_request, "#{value.inspect} should be refused"
+      assert_equal "OperationOutcome", bundle["resourceType"]
+    end
+  end
+
   test "the same _offset returns the same entries every time" do
     get "/lakeraven-ehr/Patient", params: { _count: "1", _offset: "1" }, headers: @headers
     once = entry_ids
@@ -195,7 +251,8 @@ class FhirSearchPagingTest < ActionDispatch::IntegrationTest
 
   FHIR_SEARCH_PATHS.each do |path|
     test "#{path} pages: a Bundle with self link, and a bad _count is a 400" do
-      get path, params: { patient: "1" }, headers: @headers
+      search = path.end_with?("/Location") ? { name: "CLINIC" } : { patient: "1" }
+      get path, params: search, headers: @headers
       assert_response :ok
       assert_equal "Bundle", bundle["resourceType"]
       assert_equal "20", query_of(link("self"))["_count"]

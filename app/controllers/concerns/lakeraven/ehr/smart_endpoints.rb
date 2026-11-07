@@ -25,6 +25,20 @@ module Lakeraven
       def smart_token_endpoint
         Lakeraven::EHR.configuration.token_endpoint_url.presence || "#{smart_base_url}oauth/token"
       end
+
+      def smart_authorization_endpoint
+        "#{smart_fhir_base_url}/oauth/authorize"
+      end
+
+      # The FHIR base URL, the one value a launch's `aud` must name. Read off
+      # the configured token endpoint when there is one, so a proxy that
+      # rewrites Host cannot change it; otherwise the engine's own base.
+      def smart_fhir_base_url
+        configured = Lakeraven::EHR.configuration.token_endpoint_url.presence
+        return configured.delete_suffix("/oauth/token") if configured&.end_with?("/oauth/token")
+
+        smart_base_url.chomp("/")
+      end
     end
   end
 end

@@ -12,7 +12,7 @@
 # narratives, mixed-case ORWU NEWPERS names). Change a value only after
 # reading it from the pinned build.
 module RpmsDemoSite
-  BUILD = "rpms-ydb e9b78c8 (bcer-9.0, rpms-ops demo site seed)"
+  BUILD = "rpms-ydb 9b5cccd (bcer-9.0, rpms-ops demo site seed)"
 
   # ORWPT SELECT / ORWPT ID INFO / ORWPT FULLSSN, by DFN.
   PATIENTS = {
@@ -55,6 +55,7 @@ module RpmsDemoSite
   # ORWU NEWPERS: a page of the NEW PERSON name index, in index order.
   PROVIDERS = [
     { ien: "4", name: "Manager,System" },
+    { ien: "209", name: "Profile,Bill" },
     { ien: "204", name: "Profile,Ma" },
     { ien: "206", name: "Profile,Md" },
     { ien: "207", name: "Profile,Reg" },

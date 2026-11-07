@@ -1,3 +1,4 @@
+@app
 Feature: Encounter management
   As a clinical provider
   I need to create, view, and close encounters

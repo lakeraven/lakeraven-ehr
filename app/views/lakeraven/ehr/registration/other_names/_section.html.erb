@@ -1,0 +1,28 @@
+<%# The other names a patient has used (rpms-ux S-REG-12), a section of the
+    patient's registration page: ALIAS, PATIENT (2.01).
+    Locals: dfn, other_names (RpmsRpc::PatientProfile.aliases), can_edit. %>
+<section
+  id="other-names-section"
+  aria-labelledby="other-names-section-heading"
+  class="card mt-6"
+>
+  <div class="flex items-baseline justify-between gap-4">
+    <h2 id="other-names-section-heading">Other names</h2>
+    <% if can_edit %>
+      <%= link_to "Add or remove other names",
+            registration_patient_other_names_path(dfn),
+            id: "edit-other-names" %>
+    <% end %>
+  </div>
+  <% if other_names.empty? %>
+    <p>
+      None on file.
+    </p>
+  <% else %>
+    <ul id="other-names-list">
+      <% other_names.each do |row| %>
+        <li data-other-name="<%= row[:ien] %>"><%= row[:name] %></li>
+      <% end %>
+    </ul>
+  <% end %>
+</section>

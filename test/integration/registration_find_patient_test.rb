@@ -4,6 +4,7 @@ require "test_helper"
 
 # rpms-ux S-REG-01: the front desk finds the patient before registering.
 class RegistrationFindPatientTest < ActionDispatch::IntegrationTest
+  include IhsFeatureAvailabilityTestHelper
   # Looked up when a test runs, not when the file loads.
   def match(**attrs) = Lakeraven::EHR::PatientLookupGateway::Match.new(**attrs)
 
@@ -28,6 +29,19 @@ class RegistrationFindPatientTest < ActionDispatch::IntegrationTest
     gateway.singleton_class.remove_method(:__find)
   end
 
+  # AG is IHS-only (#647): a backend without bprm_registration has no
+  # registration screens, and nothing is asked of it.
+  test "registration is not offered on a backend without bprm_registration" do
+    sign_in("registration_menu")
+    with_restricted_backend do
+      before = RpmsRpc.client.received_calls.length
+      get "/lakeraven-ehr/registration/patients"
+
+      assert_response :not_found
+      assert_no_rpc_calls_since(before)
+    end
+  end
+
   test "a user without a registration or scheduling key is refused" do
     sign_in("orders_sign")
     get "/lakeraven-ehr/registration/patients"
@@ -38,7 +52,7 @@ class RegistrationFindPatientTest < ActionDispatch::IntegrationTest
   # AG's lookup is refused to a scheduler by RPMS, so the search is not offered.
   test "a scheduler cannot search here, and can open a registration" do
     sign_in("scheduling_user")
-    get "/lakeraven-ehr/registration/patients", params: { q: "MOUSE" }
+    post "/lakeraven-ehr/registration/patients/search", params: { q: "MOUSE" }
 
     assert_response :forbidden
   end
@@ -48,7 +62,7 @@ class RegistrationFindPatientTest < ActionDispatch::IntegrationTest
     sign_in("registration_menu")
 
     with_lookup([ mouse ]) do |asked|
-      get "/lakeraven-ehr/registration/patients", params: { q: "MOUSE", dob: "1910-02-14" }
+      post "/lakeraven-ehr/registration/patients/search", params: { q: "MOUSE", dob: "1910-02-14" }
 
       assert_equal [ [ "MOUSE", Date.new(1910, 2, 14) ] ], asked
     end
@@ -63,7 +77,7 @@ class RegistrationFindPatientTest < ActionDispatch::IntegrationTest
     deceased = match(dfn: 6, name: "DUCK,DAISY", hrn: "1003", dob: Date.new(1940, 1, 1), dod: Date.new(2020, 3, 1), inactive: false)
     sign_in("registration_view_only")
 
-    with_lookup([ inactive, deceased ]) { get "/lakeraven-ehr/registration/patients", params: { q: "DUCK" } }
+    with_lookup([ inactive, deceased ]) { post "/lakeraven-ehr/registration/patients/search", params: { q: "DUCK" } }
 
     assert_select "tr[data-dfn='5'] td[data-status='inactive']", text: "Inactive"
     assert_select "tr[data-dfn='6'] td[data-status='deceased']", text: /Deceased Mar 1, 2020/
@@ -71,7 +85,7 @@ class RegistrationFindPatientTest < ActionDispatch::IntegrationTest
 
   test "S-REG-01.2 no match says so" do
     sign_in("registration_menu")
-    with_lookup([]) { get "/lakeraven-ehr/registration/patients", params: { q: "ZZZNOBODY" } }
+    with_lookup([]) { post "/lakeraven-ehr/registration/patients/search", params: { q: "ZZZNOBODY" } }
 
     assert_select "#no-match", text: /No patient matches “ZZZNOBODY”/
   end
@@ -79,7 +93,7 @@ class RegistrationFindPatientTest < ActionDispatch::IntegrationTest
   test "a lookup that fails says the results are not complete, never no match" do
     sign_in("registration_menu")
     with_lookup(raises: RpmsRpc::Client::RpcError.new("4 Access denied")) do
-      get "/lakeraven-ehr/registration/patients", params: { q: "MOUSE" }
+      post "/lakeraven-ehr/registration/patients/search", params: { q: "MOUSE" }
     end
 
     assert_response :service_unavailable

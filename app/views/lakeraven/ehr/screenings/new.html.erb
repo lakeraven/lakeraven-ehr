@@ -9,7 +9,7 @@
   role="alert" with in-page links to the offending question, and DOM order is
   question order so keyboard tabbing walks the instrument top to bottom.
 %>
-<% content_for :title, "#{@instrument.short_title} | Lakeraven EHR" %>
+<% page_title "#{@instrument.short_title}" %>
 <%
   missing = @result&.missing_link_ids || []
   safety_prompt = @result&.safety_prompt_required?

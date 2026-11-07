@@ -36,13 +36,13 @@ module Lakeraven
 
       test "gateways call the client of whichever backend is configured" do
         rpms_side = FakeBroker.new
-        other = FakeBroker.new.on(SchedulingGateway::APPTLST_RPC, [])
+        other = FakeBroker.new.on("ORWPT APPTLST", [])
         BackendRegistry.register(:test_double, client: -> { other }, capabilities: [])
         Lakeraven::EHR.configuration.backend = :test_double
 
-        use_broker(rpms_side) { SchedulingGateway.patient_appointments(42) }
+        use_broker(rpms_side) { RpcSupport.broker.call_rpc("ORWPT APPTLST", "42") }
 
-        assert_equal 1, other.calls_for(SchedulingGateway::APPTLST_RPC).size
+        assert_equal 1, other.calls_for("ORWPT APPTLST").size
         assert_empty rpms_side.calls
       end
 

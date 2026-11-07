@@ -3,6 +3,14 @@
 Rails.application.routes.draw do
   mount Lakeraven::EHR::Engine => "/lakeraven-ehr"
 
+  # The engine is mounted under /lakeraven-ehr, so the bare host and /login would be 404s.
+  # Both go to the engine's sign-in page. 302, not 301: a homepage at / may replace this.
+  root to: redirect("/lakeraven-ehr/login", status: 302)
+  get "login", to: redirect("/lakeraven-ehr/login", status: 302)
+
+  # Health check for the container and its load balancer: 200 once the app boots.
+  get "up" => "rails/health#show", as: :rails_health_check
+
   # Demo convenience: expose the engine's read-only chart at the host root
   # so the partner demo URL is simply /patients/:dfn (issue #452).
   get "patients/:dfn(.:format)", to: "lakeraven/ehr/charts#show", constraints: { dfn: /\d+/ }

@@ -1,4 +1,4 @@
-@onc
+@onc @app
 Feature: CQM Import and Calculate (ONC 170.315(c)(2))
   As a quality improvement coordinator
   I need to import clinical quality measure definitions and calculate them

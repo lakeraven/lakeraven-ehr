@@ -42,7 +42,7 @@ module Lakeraven
         return Result.new(status: :cancelled, message: nil) if reply[:success]
 
         Result.new(status: :refused, message: reply[:error].to_s)
-      rescue ::RpmsRpc::Client::RpcError, ::RpmsRpc::Client::ConnectionError, IOError, SystemCallError => e
+      rescue ::RpmsRpc::Error, IOError, SystemCallError => e
         Rails.logger.error("[scheduling] cancel raised #{e.class}; the outcome is unknown")
         Result.new(status: :unknown, message: nil)
       end

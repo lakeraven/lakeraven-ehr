@@ -1,0 +1,109 @@
+<% page_title "Hours | #{@resource[:name]}" %>
+
+<%= page_header "Set the clinic's hours", @resource[:name] %>
+
+<p>
+  Each chosen day in the range gets one block of these hours.
+  A day that already has hours is replaced.
+  Days not chosen keep their hours.
+</p>
+
+<%= flash_alert %>
+
+<% if @result&.status == :conflict %>
+  <%= alert_box :error,
+        "The hours were not changed.",
+        "These appointments would be outside them.",
+        "Move or cancel them first, or choose hours that cover them.",
+        id: "hours-conflicts" do %>
+    <ul>
+      <% @result.conflicts.each do |appointment| %>
+        <li data-appointment="<%= appointment[:id] %>">
+          <%= appointment[:start_time].strftime("%a %b %-d, %Y at %H:%M") %>, <%= appointment[:patient_name] %>
+        </li>
+      <% end %>
+    </ul>
+  <% end %>
+<% end %>
+
+<% if @result && @result.days_set.any? && !@result.set? %>
+  <%= alert_box :notice,
+        "Hours were set through #{@result.days_set.last.strftime("%b %-d, %Y")} before the change stopped.",
+        id: "hours-partial" %>
+<% end %>
+
+<%= form_errors @hours,
+      "The hours were not set.",
+      id: "hours-errors" %>
+
+<%= form_with scope: :hours,
+      url: scheduling_clinic_hours_path(@resource[:id]),
+      method: :post,
+      local: true,
+      id: "hours-form",
+      class: "card flex flex-col gap-4" do |f| %>
+  <fieldset class="flex flex-wrap gap-3">
+    <legend>Days</legend>
+    <% Lakeraven::EHR::ClinicHours::WEEKDAYS.each do |number, name| %>
+      <label class="flex items-center gap-1">
+        <%= check_box_tag "hours[weekdays][]",
+              number,
+              @hours.weekdays.include?(number),
+              id: "hours_weekday_#{number}" %>
+        <%= name %>
+      </label>
+    <% end %>
+  </fieldset>
+
+  <div class="flex flex-wrap gap-4">
+    <%= form_field :opens, "Opens", form: f do |aria| %>
+      <%= f.time_field :opens,
+            value: @hours.opens,
+            required: true,
+            aria: aria %>
+    <% end %>
+    <%= form_field :closes, "Closes", form: f do |aria| %>
+      <%= f.time_field :closes,
+            value: @hours.closes,
+            required: true,
+            aria: aria %>
+    <% end %>
+    <%= form_field :slots, "Appointments per time", form: f do |aria| %>
+      <%= f.number_field :slots,
+            value: @hours.slots,
+            min: 1,
+            required: true,
+            aria: aria %>
+    <% end %>
+    <%= form_field :access_type_id, "Access type", form: f do |aria| %>
+      <%= f.select :access_type_id,
+            options_for_select(@access_types.map { |t| [ t[:name], t[:id] ] }, @hours.access_type_id),
+            { include_blank: "Choose an access type" },
+            required: true,
+            aria: aria %>
+    <% end %>
+  </div>
+
+  <div class="flex flex-wrap gap-4">
+    <%= form_field :first_date, "From", form: f do |aria| %>
+      <%= f.date_field :first_date,
+            value: @hours.first_date,
+            required: true,
+            aria: aria %>
+    <% end %>
+    <%= form_field :last_date, "Through", form: f do |aria| %>
+      <%= f.date_field :last_date,
+            value: @hours.last_date,
+            required: true,
+            aria: aria %>
+    <% end %>
+  </div>
+
+  <%= f.submit "Set hours",
+        class: "button-primary self-start" %>
+<% end %>
+
+<p>
+  <%= link_to "Back to the clinic",
+        scheduling_clinic_path(@resource[:id]) %>
+</p>

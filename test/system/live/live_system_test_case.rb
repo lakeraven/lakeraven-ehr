@@ -11,6 +11,11 @@
 #   LIVE_RPMS_ACCESS=... LIVE_RPMS_VERIFY=... \
 #   bin/rails test test/system/live
 #
+# The same command reaches a YottaDB stack's CIA on 9100 or an IRIS stack's on 9200;
+# neither needs a UCI setting (RPMS_UCI stays unset). On an IRIS stack a sign-on
+# from this loopback browser waits about 20 s server-side (rpms-ops#1051), longer
+# than the browser's default response timeout.
+#
 # The staging test account PROV123 is refused by rpms-rpc outside Rails
 # development (its debug-credential guard), and `bin/rails test` forces the
 # test environment. For PROV123, run the file directly instead:

@@ -5,6 +5,8 @@ module Lakeraven
     class CoverageEligibilityRequestsController < ApplicationController
       include PatientCompartment
 
+      rate_limit only: :create
+
       # Returns the patient's coverage, so: read as well as write, and bound
       # to the compartment.
       # The response names the patient and their coverage.

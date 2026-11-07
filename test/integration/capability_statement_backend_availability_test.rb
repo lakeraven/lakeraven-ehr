@@ -27,10 +27,10 @@ module Lakeraven
         .map(&:first).uniq.freeze
 
       PINNED_DEFAULT_INTERACTIONS = {
-        "Patient" => %w[create read search-type],
+        "Patient" => %w[read search-type],
         "Practitioner" => %w[read search-type],
-        "ServiceRequest" => %w[search-type],
-        "Immunization" => %w[search-type]
+        "ServiceRequest" => %w[read search-type],
+        "Immunization" => %w[read search-type]
       }.freeze
 
       setup do
@@ -198,9 +198,9 @@ module Lakeraven
         load_metadata_interactions!
         load_scopes_supported!
 
-        assert_includes @scopes_supported, "system/ServiceRequest.s"
-        assert_includes @scopes_supported, "system/Immunization.s"
-        assert_includes @scopes_supported, "system/Patient.crs"
+        assert_includes @scopes_supported, "system/ServiceRequest.rs"
+        assert_includes @scopes_supported, "system/Immunization.rs"
+        assert_includes @scopes_supported, "system/Patient.rs"
       end
 
       private

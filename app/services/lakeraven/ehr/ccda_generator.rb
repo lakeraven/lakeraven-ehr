@@ -14,12 +14,28 @@ module Lakeraven
       ICD10_OID    = "2.16.840.1.113883.6.90"
       SNOMED_OID   = "2.16.840.1.113883.6.96"
       CPT_OID      = "2.16.840.1.113883.6.12"
+      # Same local provider namespace the author DUZ and the custodian use.
+      PROVIDER_OID = "2.16.840.1.113883.19.5"
+
+      CLINICAL_ROW_CLASS = {
+        allergies: AllergyIntolerance,
+        conditions: Condition,
+        medications: MedicationRequest,
+        vitals: Observation,
+        encounters: Encounter
+      }.freeze
 
       def self.generate(patient:, allergies: [], conditions: [], medications: [], vitals: [], encounters: [], author: {})
         new(patient:, allergies:, conditions:, medications:, vitals:, encounters:, author:).build
       end
 
+      # Patient and each clinical row are model objects. A Hash, another
+      # model, or a non-Array list raises here, naming that argument,
+      # before any XML is built. Nil lists are empty. The author stays a
+      # hash — it is the attestation the controller assembled, not a chart
+      # row.
       def initialize(patient:, allergies:, conditions:, medications:, vitals:, encounters:, author:)
+        reject_non_model_input!(patient, allergies, conditions, medications, vitals, encounters)
         @patient = patient
         @allergies = allergies || []
         @conditions = conditions || []
@@ -58,34 +74,52 @@ module Lakeraven
         xml.id(root: "2.16.840.1.113883.19.5.99999.1", extension: SecureRandom.uuid)
         xml.code(code: "34133-9", codeSystem: LOINC_OID, displayName: "Summarization of Episode Note")
         xml.title("Continuity of Care Document")
-        xml.effectiveTime(value: Time.current.strftime("%Y%m%d%H%M%S"))
+        xml.effectiveTime(value: hl7_timestamp(Time.current))
         xml.confidentialityCode(code: "N", codeSystem: "2.16.840.1.113883.5.25")
         xml.languageCode(code: "en-US")
       end
 
       def build_record_target(xml)
+        family, given = patient_name_parts
         xml.recordTarget do
           xml.patientRole do
-            xml.id(extension: @patient[:dfn])
-            if @patient[:address]
-              xml.addr do
-                xml.streetAddressLine(@patient[:address][:street]) if @patient[:address][:street]
-                xml.city(@patient[:address][:city]) if @patient[:address][:city]
-                xml.state(@patient[:address][:state]) if @patient[:address][:state]
-                xml.postalCode(@patient[:address][:zip]) if @patient[:address][:zip]
-              end
-            end
+            xml.id(extension: @patient.dfn.to_s)
+            build_patient_address(xml)
             xml.patient do
               xml.name do
-                xml.given(@patient.dig(:name, :given))
-                xml.family(@patient.dig(:name, :family))
+                xml.given(given)
+                xml.family(family)
               end
-              xml.administrativeGenderCode(code: @patient[:sex]) if @patient[:sex]
-              if @patient[:dob]
-                xml.birthTime(value: @patient[:dob].to_s.delete("-"))
-              end
+              xml.administrativeGenderCode(code: @patient.sex) if @patient.sex
+              xml.birthTime(value: hl7_date(@patient.dob)) if @patient.dob
             end
           end
+        end
+      end
+
+      # Patient#name is "FAMILY,GIVEN" (VistA). The document still carries
+      # the two parts in separate elements.
+      def patient_name_parts
+        return [ nil, nil ] if @patient.name.blank?
+
+        family, given = @patient.name.split(",", 2)
+        [ family&.strip, given&.strip ]
+      end
+
+      # An empty <addr/> is not an address. Omit the element when every
+      # part is blank, and otherwise emit only the parts that are present.
+      def build_patient_address(xml)
+        street = @patient.address_line1
+        city = @patient.city
+        state = @patient.state
+        zip = @patient.zip_code
+        return if [ street, city, state, zip ].all?(&:blank?)
+
+        xml.addr do
+          xml.streetAddressLine { xml.text(street) } if street.present?
+          xml.city { xml.text(city) } if city.present?
+          xml.state { xml.text(state) } if state.present?
+          xml.postalCode { xml.text(zip) } if zip.present?
         end
       end
 
@@ -102,7 +136,7 @@ module Lakeraven
       # an assignedAuthoringDevice naming the client that generated it.
       def build_author(xml)
         xml.author do
-          xml.time(value: Time.current.strftime("%Y%m%d%H%M%S"))
+          xml.time(value: hl7_timestamp(Time.current))
           xml.assignedAuthor do
             build_author_id(xml)
             if @author[:name].present?
@@ -125,9 +159,9 @@ module Lakeraven
         if @author[:npi].present?
           xml.id(root: "2.16.840.1.113883.4.6", extension: @author[:npi])
         elsif @author[:duz].present?
-          xml.id(root: "2.16.840.1.113883.19.5", extension: @author[:duz].to_s)
+          xml.id(root: PROVIDER_OID, extension: @author[:duz].to_s)
         else
-          xml.id(root: "2.16.840.1.113883.19.5", nullFlavor: "NA")
+          xml.id(root: PROVIDER_OID, nullFlavor: "NA")
         end
       end
 
@@ -135,7 +169,7 @@ module Lakeraven
         xml.custodian do
           xml.assignedCustodian do
             xml.representedCustodianOrganization do
-              xml.id(root: "2.16.840.1.113883.19.5")
+              xml.id(root: PROVIDER_OID)
               xml.name(@author[:institution] || "Healthcare Facility")
             end
           end
@@ -159,12 +193,12 @@ module Lakeraven
                         xml.participantRole(classCode: "MANU") do
                           xml.playingEntity(classCode: "MMAT") do
                             xml.code(
-                              code: allergy[:code],
-                              codeSystem: allergy[:code_system] || RXNORM_OID,
-                              codeSystemName: code_system_name(allergy[:code_system]),
-                              displayName: allergy[:display]
+                              code: allergy.allergen_code,
+                              codeSystem: RXNORM_OID,
+                              codeSystemName: code_system_name(RXNORM_OID),
+                              displayName: allergy.allergen
                             )
-                            xml.name(allergy[:display])
+                            xml.name(allergy.allergen)
                           end
                         end
                       end
@@ -192,10 +226,10 @@ module Lakeraven
                       xml.templateId(root: "2.16.840.1.113883.10.20.22.4.4")
                       xml.value(
                         "xsi:type" => "CD",
-                        code: condition[:code],
-                        codeSystem: condition[:code_system] || ICD10_OID,
-                        codeSystemName: code_system_name(condition[:code_system]),
-                        displayName: condition[:display]
+                        code: condition.code,
+                        codeSystem: condition_code_system_oid(condition),
+                        codeSystemName: condition_code_system_name(condition),
+                        displayName: condition.display
                       )
                     end
                   end
@@ -221,12 +255,12 @@ module Lakeraven
                       xml.templateId(root: "2.16.840.1.113883.10.20.22.4.23")
                       xml.manufacturedMaterial do
                         xml.code(
-                          code: med[:code],
-                          codeSystem: med[:code_system] || RXNORM_OID,
-                          codeSystemName: code_system_name(med[:code_system]),
-                          displayName: med[:display]
+                          code: med.medication_code,
+                          codeSystem: RXNORM_OID,
+                          codeSystemName: code_system_name(RXNORM_OID),
+                          displayName: med.medication_display
                         )
-                        xml.name(med[:display])
+                        xml.name(med.medication_display)
                       end
                     end
                   end
@@ -250,9 +284,9 @@ module Lakeraven
                   xml.component do
                     xml.observation(classCode: "OBS", moodCode: "EVN") do
                       xml.templateId(root: "2.16.840.1.113883.10.20.22.4.27")
-                      xml.code(code: vital[:code], codeSystem: LOINC_OID, displayName: vital[:display])
-                      xml.effectiveTime(value: vital[:date]&.to_s&.delete("-")) if vital[:date]
-                      xml.value("xsi:type" => "PQ", value: vital[:value], unit: vital[:units])
+                      xml.code(code: vital.code, codeSystem: LOINC_OID, displayName: vital.display)
+                      xml.effectiveTime(value: hl7_timestamp(vital.effective_datetime)) if vital.effective_datetime
+                      xml.value("xsi:type" => "PQ", value: vital.value, unit: vital.unit)
                     end
                   end
                 end
@@ -272,22 +306,86 @@ module Lakeraven
               xml.entry do
                 xml.encounter(classCode: "ENC", moodCode: "EVN") do
                   xml.templateId(root: "2.16.840.1.113883.10.20.22.4.49")
-                  xml.code(code: enc[:type_code], codeSystem: CPT_OID, displayName: enc[:type_display]) if enc[:type_code]
-                  xml.effectiveTime(value: enc[:date]&.to_s&.delete("-")) if enc[:date]
-                  if enc[:performer]
-                    xml.performer do
-                      xml.assignedEntity do
-                        xml.assignedPerson do
-                          xml.name { xml.text(enc[:performer]) }
-                        end
-                      end
-                    end
-                  end
+                  xml.code(code: enc.type_code, codeSystem: CPT_OID, displayName: enc.type_display) if enc.type_code
+                  xml.effectiveTime(value: hl7_timestamp(enc.period_start)) if enc.period_start
+                  build_encounter_performer(xml, enc)
                 end
               end
             end
           end
         end
+      end
+
+      # The practitioner is an id, not a name. A blank identifier is
+      # omitted; it is never written into <name> or <text>.
+      def build_encounter_performer(xml, enc)
+        return if enc.practitioner_identifier.blank?
+
+        xml.performer do
+          xml.assignedEntity do
+            xml.id(root: PROVIDER_OID, extension: enc.practitioner_identifier)
+          end
+        end
+      end
+
+      # AllergyIntolerance and MedicationRequest have no code-system
+      # attribute; both are RxNorm, which is the OID those sections
+      # already emitted. Condition#code_system is "icd10" or "snomed".
+      def condition_code_system_oid(condition)
+        system = condition.code_system
+        return ICD10_OID if system.blank?
+
+        case system
+        when "icd10" then ICD10_OID
+        when "snomed" then SNOMED_OID
+        else system
+        end
+      end
+
+      def condition_code_system_name(condition)
+        code_system_name(condition_code_system_oid(condition))
+      end
+
+      # A Date is the day only. A Time or DateTime keeps the clock and
+      # the UTC offset; DateTime is a Date, so it must be excluded here.
+      def hl7_date(value)
+        value.strftime("%Y%m%d")
+      end
+
+      def hl7_timestamp(value)
+        return hl7_date(value) if value.is_a?(Date) && !value.is_a?(DateTime)
+
+        value.strftime("%Y%m%d%H%M%S%z")
+      end
+
+      def reject_non_model_input!(patient, allergies, conditions, medications, vitals, encounters)
+        raise ArgumentError, model_input_message("patient") unless patient.is_a?(Patient)
+
+        {
+          allergies: allergies,
+          conditions: conditions,
+          medications: medications,
+          vitals: vitals,
+          encounters: encounters
+        }.each do |name, rows|
+          reject_non_model_rows!(rows, name)
+        end
+      end
+
+      def reject_non_model_rows!(rows, name)
+        return if rows.nil?
+        raise ArgumentError, model_input_message(name) unless rows.is_a?(Array)
+
+        model = CLINICAL_ROW_CLASS.fetch(name)
+        rows.each do |row|
+          raise ArgumentError, model_input_message(name) unless row.is_a?(model)
+        end
+      end
+
+      # The message names the argument and nothing about the rejected
+      # value, so a bad row cannot leak into the error.
+      def model_input_message(name)
+        "#{name} must be a model object"
       end
 
       def code_system_name(oid)

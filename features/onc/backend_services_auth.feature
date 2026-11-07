@@ -1,4 +1,4 @@
-@onc
+@onc @app
 Feature: Backend Services JWT Authentication
   As an ONC-certified EHR system
   The token endpoint should support backend services authorization with JWT client assertion

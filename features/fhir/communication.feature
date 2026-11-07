@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+@app
 Feature: Communication FHIR resource
   As a healthcare system
   I need to represent secure messages between care team members

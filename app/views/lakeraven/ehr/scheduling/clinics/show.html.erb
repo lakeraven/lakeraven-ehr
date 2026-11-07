@@ -1,55 +1,68 @@
-<% content_for :title, "#{@resource[:name]} | Scheduling | Lakeraven EHR" %>
+<% page_title "#{@resource[:name]} | Scheduling" %>
 
-<div class="page-header">
-  <h1><%= @resource[:name] %></h1>
-  <p>
-    <%= @date.strftime("%A, %b %-d, %Y") %>
-  </p>
-</div>
+<%= page_header @resource[:name],
+      @date.strftime("%A, %b %-d, %Y") %>
 
 <% if @notice.present? %>
-  <div
-    id="notice"
-    class="alert alert--notice"
-    role="status"
-  >
-    <p><%= @notice %></p>
-  </div>
+  <%= alert_box :notice, @notice, id: "notice" %>
 <% end %>
 
+<%= flash_alert id: "clinic-alert" %>
+
 <% if @booked_id.present? %>
-  <div
-    id="booked"
-    class="alert alert--notice"
-    role="status"
-  >
-    <p>
-      Booked.
-    </p>
-  </div>
+  <%= alert_box :notice, "Booked.", id: "booked" %>
 <% end %>
 
 <%= form_with url: scheduling_clinic_path(@resource[:id]),
       method: :get,
       local: true,
       class: "flex items-end gap-2" do %>
-  <%= label_tag :date, "Day" %>
-  <%= date_field_tag :date,
-        @date,
-        id: "date",
-        class: "rounded border border-slate-300 px-3 py-2" %>
+  <%= form_field :date, "Day" do |aria| %>
+    <%= date_field_tag :date,
+          @date,
+          id: "date",
+          aria: aria %>
+  <% end %>
   <%= submit_tag "Show",
         name: nil,
-        class: "min-h-9 bg-white px-3 py-2 ring-1 ring-slate-300 ring-inset" %>
+        class: "button-secondary" %>
+<% end %>
+
+<p>
+  <%= link_to "See the week",
+        scheduling_clinic_week_path(@resource[:id], date: @date.iso8601),
+        id: "week-view" %>
+</p>
+
+<p>
+  <%= link_to "Find an open time",
+        scheduling_clinic_open_times_path(@resource[:id], from: @date.iso8601),
+        id: "find-open-time" %>
+</p>
+
+<p>
+  <%= link_to "See the wait list",
+        scheduling_clinic_wait_list_path(@resource[:id]),
+        id: "wait-list-link" %>
+</p>
+
+<%= render "walk_in_link", resource: @resource, date: @date %>
+
+<% if can_set_hours?(@resource) %>
+  <p>
+    <%= link_to "Set the clinic's hours",
+          scheduling_new_clinic_hours_path(@resource[:id]),
+          id: "set-hours" %>
+  </p>
 <% end %>
 
 <h2>Booked</h2>
 <% if @appointments.empty? %>
-  <p class="hint">No appointments.</p>
+  <%= empty_state "No appointments." %>
 <% else %>
   <table
     id="appointments"
-    class="w-full text-left"
+    class="data-table"
   >
     <caption class="sr-only">Appointments on <%= @resource[:name] %></caption>
     <thead>
@@ -62,28 +75,66 @@
     </thead>
     <tbody>
       <% @appointments.sort_by { |a| a[:start_time] }.each do |appointment| %>
-        <% status = if appointment[:cancelled] then "Cancelled"
-                    elsif appointment[:no_show] then "No-show"
-                    elsif appointment[:checkin_time] then "Checked in #{appointment[:checkin_time].strftime('%H:%M')}"
-                    else "Booked"
-                    end %>
+        <% status_key, status = appointment_status(appointment) %>
         <tr
+          id="appointment-<%= appointment[:id] %>"
           data-patient="<%= appointment[:patient_dfn] %>"
           data-appointment="<%= appointment[:id] %>"
         >
           <td><%= appointment[:start_time].strftime("%H:%M") %>–<%= appointment[:end_time].strftime("%H:%M") %></td>
-          <td><%= appointment[:patient_name] %></td>
-          <td data-status="<%= status.split.first.downcase %>"><%= status %></td>
           <td>
-            <% if status == "Booked" && can_book?(@resource) %>
-              <% if appointment[:start_time].to_date == Date.current %>
-                <%= link_to "Check in",
-                      scheduling_checkin_clinic_appointment_path(@resource[:id], appointment[:id], date: @date.iso8601) %>
-              <% end %>
-              <%= link_to "Cancel",
-                    scheduling_cancel_clinic_appointment_path(@resource[:id], appointment[:id], date: @date.iso8601) %>
+            <%= link_to appointment[:patient_name],
+                  scheduling_patient_appointments_path(appointment[:patient_dfn]),
+                  data: { patient_appointments: true } %>
+          </td>
+          <td data-status="<%= status_key %>">
+            <%= status_badge status_key, status %>
+            <% if appointment[:overbook] %>
+              <span data-overbook="true"><%= status_badge "warning", "Overbook" %></span>
             <% end %>
           </td>
+          <td>
+            <%= render "lakeraven/ehr/scheduling/appointments/actions",
+                  appointment: appointment,
+                  resource: @resource,
+                  date: @date %>
+            <%= render "closed_actions", resource: @resource, appointment: appointment, date: @date, status_key: status_key %>
+          </td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+<% end %>
+
+<h2>Hours</h2>
+<% if @day.closed %>
+  <%= alert_box :notice,
+        "#{closed_reason(@day.closed)}: the clinic takes no appointments this day.",
+        id: "day-closed" %>
+<% elsif @day.listed_blocks.empty? %>
+  <%= empty_state "The clinic has no hours this day.",
+        id: "no-hours" %>
+<% else %>
+  <table
+    id="blocks"
+    class="data-table"
+  >
+    <caption class="sr-only">Hours on <%= @resource[:name] %></caption>
+    <thead>
+      <tr>
+        <th scope="col">From</th>
+        <th scope="col">To</th>
+        <th scope="col">Access type</th>
+        <th scope="col">Slots</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% @day.listed_blocks.sort_by { |b| b[:start_time] }.each do |block| %>
+        <tr data-block="<%= block[:start_time].strftime("%H:%M") %>">
+          <td><%= block[:start_time].strftime("%H:%M") %></td>
+          <td><%= block[:end_time].strftime("%H:%M") %></td>
+          <td data-access-type="<%= block[:access_type_id] %>"><%= @access_type_names[block[:access_type_id]] || "Not named" %></td>
+          <td data-slots="<%= block[:slots] %>"><%= block[:slots] %></td>
         </tr>
       <% end %>
     </tbody>
@@ -93,16 +144,12 @@
 <h2>Open times</h2>
 <% times = @day.times %>
 <% if times.empty? %>
-  <p
-    id="no-open-times"
-    class="hint"
-  >
-    The clinic has no open times this day.
-  </p>
+  <%= empty_state "The clinic has no open times this day.",
+        id: "no-open-times" %>
 <% else %>
   <table
     id="open-times"
-    class="w-full text-left"
+    class="data-table"
   >
     <caption class="sr-only">Open times on <%= @resource[:name] %></caption>
     <thead>
@@ -121,6 +168,10 @@
             <% if time.open.positive? && can_book?(@resource) %>
               <%= link_to "Book",
                     scheduling_new_clinic_appointment_path(@resource[:id], start: time.at.strftime("%Y-%m-%dT%H:%M")) %>
+            <% elsif can_overbook?(@resource) %>
+              <%= link_to "Overbook",
+                    scheduling_new_clinic_appointment_path(@resource[:id], start: time.at.strftime("%Y-%m-%dT%H:%M")),
+                    data: { overbook: true } %>
             <% end %>
           </td>
         </tr>

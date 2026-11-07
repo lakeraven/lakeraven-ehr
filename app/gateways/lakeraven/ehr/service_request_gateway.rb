@@ -10,6 +10,15 @@ module Lakeraven
         RpmsRpc::Referral.for_patient(dfn.to_s)
       end
 
+      # The referrals still pending at the facility, for every patient: STATUS
+      # OF REFERRAL ACTIVE or APPROVED, DATE INITIATED in window (a Range of
+      # Dates), oldest first. Stock BMC SEARCH REFERRAL by date, read as the
+      # signed-on user (RpmsRpc::Referral.pending, rpms-rpc#589).
+      def self.pending(window)
+        CapabilityGuard.ensure!(:prc_referrals)
+        RpmsRpc::Referral.pending(from: window.begin, to: window.end)
+      end
+
       def self.create(dfn, params)
         CapabilityGuard.ensure!(:prc_referrals)
         RpmsRpc::Referral.create(dfn.to_s, params)

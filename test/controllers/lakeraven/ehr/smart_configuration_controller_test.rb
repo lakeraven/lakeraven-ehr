@@ -47,7 +47,8 @@ module Lakeraven
         get "/lakeraven-ehr/metadata"
         security = JSON.parse(response.body).dig("rest", 0, "security")
         oauth = security.fetch("extension").find { |extension| extension["url"] == OAUTH_URIS }
-        published = oauth.fetch("extension").to_h { |extension| [ "#{extension['url']}_endpoint", extension["valueUri"] ] }
+        names = { "authorize" => "authorization_endpoint", "token" => "token_endpoint" }
+        published = oauth.fetch("extension").to_h { |extension| [ names.fetch(extension["url"]), extension["valueUri"] ] }
 
         assert_equal config.slice(*published.keys), published
         assert_equal config.keys.grep(/_endpoint\z/).sort, published.keys.sort
@@ -62,6 +63,30 @@ module Lakeraven
           post "/lakeraven-ehr/oauth/token", params: { grant_type: grant_type }
           refute_equal "unsupported_grant_type", JSON.parse(response.body)["error"], grant_type
         end
+      end
+
+      # #839, #657: the launch capabilities are claimed because they are served
+      # (test/integration/smart_*_test.rb prove each); what is not served is
+      # not claimed.
+      test "it claims the SMART launch it serves, and nothing it does not" do
+        get CONFIG
+        config = JSON.parse(response.body)
+
+        assert_equal "http://www.example.com/lakeraven-ehr/oauth/authorize", config["authorization_endpoint"]
+        assert_equal %w[authorization_code client_credentials], config["grant_types_supported"]
+        assert_equal %w[code], config["response_types_supported"]
+        assert_equal %w[S256], config["code_challenge_methods_supported"]
+        assert_includes config["token_endpoint_auth_signing_alg_values_supported"], "ES384"
+        %w[launch-standalone launch-ehr authorize-post client-public client-confidential-symmetric
+           client-confidential-asymmetric context-standalone-patient context-ehr-patient context-ehr-encounter context-banner
+           context-style permission-patient permission-user permission-v1 permission-v2].each do |capability|
+          assert_includes config["capabilities"], capability
+        end
+        %w[sso-openid-connect permission-offline context-standalone-encounter].each do |capability|
+          refute_includes config["capabilities"], capability
+        end
+        refute config.key?("introspection_endpoint")
+        refute config.key?("jwks_uri")
       end
 
       private

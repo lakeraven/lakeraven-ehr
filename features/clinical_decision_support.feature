@@ -1,4 +1,4 @@
-@cds
+@cds @app
 Feature: Clinical Decision Support Alerts
   As a healthcare provider
   I need to see clinical alerts on a patient's profile

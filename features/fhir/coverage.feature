@@ -1,3 +1,4 @@
+@app
 Feature: Coverage FHIR resource
   As a healthcare system
   I need to represent patient insurance coverage as FHIR resources

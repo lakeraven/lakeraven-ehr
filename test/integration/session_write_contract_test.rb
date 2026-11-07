@@ -90,7 +90,7 @@ class SessionWriteContractTest < ActionDispatch::IntegrationTest
   test "an idle session cannot write on a protected route" do
     with_csrf do
       sign_in
-      travel(Lakeraven::EHR::SessionsController::IDLE_TIMEOUT + 1.minute) do
+      travel(Lakeraven::EHR.configuration.session_idle_limit + 1.minute) do
         post "/csrf_probe", params: { patient_dfn: "1", authenticity_token: csrf_token }
 
         assert_response :unauthorized

@@ -3,6 +3,8 @@
 module Lakeraven
   module EHR
     class OrganizationsController < ApplicationController
+      rate_limit only: :show
+
       def show
         org = Organization.find_by_ien(params[:ien])
 

@@ -15,7 +15,11 @@ module Lakeraven
     # column, so a token for organization A can still read organization B's
     # patients. Closing that gap is lakeraven-ehr#553.
     class BackendServicesController < ActionController::API
-      CLIENT_ASSERTION_TYPE = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
+      include RateLimitable
+
+      rate_limit only: :token
+
+      CLIENT_ASSERTION_TYPE = ClientAssertion::TYPE
       # SMART Backend Services requires the authentication JWT to be signed
       # with RS384 and requires the authorization server to reject every
       # other alg. One algorithm, not a menu: RS256 is a different signature,
@@ -24,14 +28,6 @@ module Lakeraven
       # cannot choose a symmetric or unsigned algorithm.
       ALLOWED_ALGORITHMS = %w[RS384].freeze
       TOKEN_LIFETIME = 5.minutes
-      # SMART Backend Services: assertion exp SHALL be no more than five
-      # minutes in the future — a hard cap, with no skew allowance on top
-      # (an earlier +30s allowance exceeded the spec ceiling).
-      MAX_ASSERTION_LIFETIME = 5.minutes
-      # Every claim the verifier relies on must be present; JWT.decode
-      # otherwise treats a MISSING exp as "never expires" (nil.to_i == 0
-      # passes the max-lifetime check), yielding a replayable assertion.
-      REQUIRED_CLAIMS = %w[iss sub aud exp jti].freeze
 
       def token
         unless params[:grant_type] == "client_credentials"
@@ -113,60 +109,15 @@ module Lakeraven
 
       # Locate the client from the assertion's (unverified) iss claim; the
       # signature is then verified against that client's published JWKS.
-      def client_for(assertion)
-        return nil unless assertion.is_a?(String)
-
-        unverified, = JWT.decode(assertion, nil, false)
-        Doorkeeper::Application.find_by(uid: unverified["iss"])
-      rescue JWT::DecodeError
-        nil
-      end
+      def client_for(assertion) = ClientAssertion.claimed_client(assertion)
 
       # Verifies signature (against the client's published JWKS), aud, exp,
-      # iss/sub consistency, and jti uniqueness. Renders the token error and
-      # returns nil on any failure.
+      # iss/sub consistency, and jti uniqueness (ClientAssertion). Renders the
+      # token error and returns nil on any failure.
       def verify_assertion!(assertion, app)
-        return render_invalid_client("undecodable") unless assertion.is_a?(String)
-
-        jwks = ClientJwks.fetch(app.jwks_uri)
-        unless jwks
-          return render_invalid_client("no_retrievable_jwks")
-        end
-
-        claims, = JWT.decode(
-          assertion, nil, true,
-          algorithms: ALLOWED_ALGORITHMS,
-          jwks: JWT::JWK::Set.new(jwks),
-          verify_aud: true,
-          aud: token_endpoint_url,
-          required_claims: REQUIRED_CLAIMS
-        )
-
-        unless claims["iss"] == app.uid && claims["sub"] == app.uid
-          return render_invalid_client("iss_sub_mismatch")
-        end
-
-        exp = claims["exp"].to_i
-        if exp > MAX_ASSERTION_LIFETIME.from_now.to_i
-          return render_invalid_client("exp_too_far")
-        end
-        if claims["iat"].present? && exp - claims["iat"].to_i > MAX_ASSERTION_LIFETIME.to_i
-          return render_invalid_client("lifetime_too_long")
-        end
-
-        jti = claims["jti"].to_s
-        return render_invalid_client("missing_jti") if jti.blank?
-        if AssertionReplayGuard.replayed?(app.uid, jti, exp)
-          return render_invalid_client("replayed_jti")
-        end
-
-        claims
-      rescue JWT::ExpiredSignature
-        render_invalid_client("expired")
-      rescue JWT::InvalidAudError
-        render_invalid_client("bad_audience")
-      rescue JWT::DecodeError
-        render_invalid_client("undecodable")
+        ClientAssertion.new(assertion, app: app, audience: token_endpoint_url, algorithms: ALLOWED_ALGORITHMS).verify!
+      rescue ClientAssertion::Refused => e
+        render_invalid_client(e.message)
       end
 
       # Grant each requested system/ scope narrowed to the client's

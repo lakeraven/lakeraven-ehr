@@ -32,6 +32,12 @@ module Lakeraven
         @patient_banner = build_patient_banner
       end
 
+      # The patient bar offers its search (rpms-ux S-CHT-01) only to a session
+      # that may read the chart's patients.
+      def patient_search_allowed?
+        banner_token&.can_read?("Patient") ? true : false
+      end
+
       private
 
       def build_patient_banner

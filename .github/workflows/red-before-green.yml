@@ -43,7 +43,7 @@ jobs:
     continue-on-error: true
     services:
       postgres:
-        image: postgres:16
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: postgres
         options: >-
@@ -57,13 +57,15 @@ jobs:
       RAILS_ENV: test
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/lakeraven_ehr_test
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # The merge-base needs full history.
           fetch-depth: 0
       - uses: ruby/setup-ruby@v1
         with:
-          ruby-version: "3.4"
+          # The minor .ruby-version names; setup-ruby takes the newest patch the runner offers
+          # (ubuntu-latest has only the latest 4.0.x), while .ruby-version pins what rbenv installs.
+          ruby-version: "4.0"
           bundler-cache: true
       - run: bundle exec rails db:create db:schema:load
       - name: Run the PR's new tests against main's app code

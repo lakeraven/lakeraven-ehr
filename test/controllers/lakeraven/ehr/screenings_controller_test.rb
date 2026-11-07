@@ -184,8 +184,10 @@ module Lakeraven
       test "the form carries no JavaScript" do
         get "#{BASE}/new", params: { instrument: "phq-9" }, headers: auth_headers
 
-        assert_no_match(/<script/i, response.body)
+        # The only script allowed is the consent re-lock listener (#793), which the form does not depend on.
+        assert_select "script:not([data-consent-kiosk-listener])", count: 0
         assert_no_match(/onclick=/i, response.body)
+        assert_no_match(/\son[a-z]+=/i, response.body)
       end
 
       test "an unknown instrument is a 404, not a blank form" do
@@ -531,7 +533,9 @@ module Lakeraven
         # about a record that is already in the table.
         assert_response :unprocessable_entity
         assert_equal 0, ScreeningResponse.count
-        assert_no_match(/<script/i, response.body)
+        # The only script allowed is the consent re-lock listener (#793), which the form does not depend on.
+        assert_select "script:not([data-consent-kiosk-listener])", count: 0
+        assert_no_match(/\son[a-z]+=/i, response.body)
         assert_select "form input[name=safety_acknowledged]"
       end
 

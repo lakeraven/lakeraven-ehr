@@ -1,0 +1,21 @@
+<%# Who the front desk has open (ComponentsHelper#patient_summary): name,
+    health record number, date of birth and sex, and nothing clinical.
+    Locals: patient (Hash: :mrn, :dob, :sex, and :preferred_name when the page
+    read it), id. The name is the page's
+    heading, so it is not repeated here. %>
+<dl
+  id="<%= id %>"
+  class="patient-summary card"
+>
+  <% if patient[:preferred_name].present? %>
+    <%# PREFERRED NAME, IHS PATIENT (9000001) field 9001: the name the patient goes by. %>
+    <dt>Goes by</dt>
+    <dd data-field="preferred_name"><%= patient[:preferred_name] %></dd>
+  <% end %>
+  <dt>Health record number</dt>
+  <dd data-field="hrn"><%= patient[:mrn].presence || "None at this facility" %></dd>
+  <dt>Date of birth</dt>
+  <dd data-field="dob"><%= patient[:dob]&.strftime("%b %-d, %Y") %></dd>
+  <dt>Sex</dt>
+  <dd data-field="sex"><%= patient[:sex] %></dd>
+</dl>

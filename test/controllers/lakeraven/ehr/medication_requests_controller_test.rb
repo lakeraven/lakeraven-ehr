@@ -69,34 +69,29 @@ module Lakeraven
       test "entries carry the status mapped from the RPMS order status" do
         seed_three_orders
 
-        assert_equal({ "1R-O" => "active", "2R-O" => "stopped", "3R-O" => "on-hold" }, statuses_by_id({}))
+        assert_equal({ "1-1R-O" => "active", "1-2R-O" => "stopped", "1-3R-O" => "on-hold" }, statuses_by_id({}))
       end
 
       test "status search returns only the matching orders" do
         seed_three_orders
 
-        assert_equal({ "1R-O" => "active" }, statuses_by_id(status: "active"))
-        assert_equal({ "2R-O" => "stopped" }, statuses_by_id(status: "stopped"))
+        assert_equal({ "1-1R-O" => "active" }, statuses_by_id(status: "active"))
+        assert_equal({ "1-2R-O" => "stopped" }, statuses_by_id(status: "stopped"))
         assert_equal({}, statuses_by_id(status: "completed"))
       end
 
       test "status search with several codes matches any of them" do
         seed_three_orders
 
-        assert_equal({ "2R-O" => "stopped", "3R-O" => "on-hold" }, statuses_by_id(status: "stopped,on-hold"))
+        assert_equal({ "1-2R-O" => "stopped", "1-3R-O" => "on-hold" }, statuses_by_id(status: "stopped,on-hold"))
       end
 
-      test "status search refuses a system|code value with a 400" do
+      test "status search matches a system|code value in the medicationrequest-status system" do
         seed_three_orders
 
-        get "/lakeraven-ehr/MedicationRequest",
-          params: { patient: "1", status: "http://hl7.org/fhir/CodeSystem/medicationrequest-status|active" },
-          headers: @headers
-
-        assert_response :bad_request
-        body = JSON.parse(response.body)
-        assert_equal "OperationOutcome", body["resourceType"]
-        assert_includes body.dig("issue", 0, "diagnostics"), "status"
+        assert_equal({ "1-1R-O" => "active" },
+                     statuses_by_id(status: "http://hl7.org/fhir/CodeSystem/medicationrequest-status|active"))
+        assert_equal({}, statuses_by_id(status: "http://example.org/other|active"))
       end
 
       test "status search refuses an empty value with a 400" do

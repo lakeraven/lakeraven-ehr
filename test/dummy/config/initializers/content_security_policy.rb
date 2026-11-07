@@ -29,3 +29,13 @@
 #   # Report violations without enforcing the policy.
 #   # config.content_security_policy_report_only = true
 # end
+
+# javascript_tag nonce: true reads this generator. The policy stays commented
+# above: the host owns the directive list. A missing session id still yields
+# a nonce, so the attribute is never blank.
+Rails.application.configure do
+  config.content_security_policy_nonce_generator = lambda { |request|
+    request.session.id.to_s.presence || SecureRandom.base64(16)
+  }
+  config.content_security_policy_nonce_directives = %w[script-src style-src]
+end

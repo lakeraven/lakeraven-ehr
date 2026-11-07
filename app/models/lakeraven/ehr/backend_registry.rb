@@ -28,21 +28,21 @@ module Lakeraven
       ].freeze
 
       # FHIR interactions each IHS capability owns (#574, #647). Patient
-      # read and search stay available with no capability; registration
-      # only adds Patient create. The supported set is this map filtered
+      # read and search stay available with no capability; registration is
+      # AG's screens, not a FHIR interaction (#542). The supported set is this map filtered
       # by BackendRegistry.current.provides?. ServiceRequest and Immunization
       # are routed index-only, so only search-type is listed; add read with
       # its show route.
       CAPABILITY_FHIR_INTERACTIONS = {
         prc_referrals: [
+          %w[ServiceRequest read],
           %w[ServiceRequest search-type]
         ].freeze,
         tribal_enrollment: [].freeze,
-        bprm_registration: [
-          %w[Patient create]
-        ].freeze,
+        bprm_registration: [].freeze,
         bprm_scheduling: [].freeze,
         ihs_immunization: [
+          %w[Immunization read],
           %w[Immunization search-type]
         ].freeze,
         pcc_screens: [].freeze

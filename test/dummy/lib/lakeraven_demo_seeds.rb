@@ -220,6 +220,15 @@ module LakeravenDemoSeeds
       [ { datetime: Date.new(2026, 2, 1), location_ien: 1,
           location: "Riverbend Family Health Clinic", status: "scheduled" } ])
 
+    # Visits (BEHOENCX VISITLST) and their diagnoses (BGOVPOV RECENT).
+    m.seed_keyed_collection(:encounter_visit_list, "1",
+      [ { visit_string: "1;3260115.09;A;1", location: "Riverbend Family Health Clinic",
+          datetime: Time.new(2026, 1, 15, 9, 0, 0), category: "AMBULATORY", provider_ien: 101,
+          provider: "MARTINEZ,SARAH" } ])
+    m.seed_keyed_collection(:patient_pov_list, "1",
+      [ { ien: "1", visit_ien: "1", visit_date: "01/15/2026", icd_code: "I10.",
+          icd_name: "Essential (primary) hypertension", narrative: "HYPERTENSION" } ])
+
     # Immunizations — V IMMUNIZATION through BGOVIMM GET ("DFN^I") drives
     # Immunization.for_patient; the text summary (BEHOCIR GETTXT) is seeded
     # too for parity with the RPC surface.
@@ -262,6 +271,10 @@ module LakeravenDemoSeeds
       m.seed_keyed_collection(:patient_appointments, dfn,
         [ { datetime: Date.new(2026, 9, 3), location_ien: 1,
             location: "Riverbend Family Health Clinic", status: "scheduled" } ])
+
+      m.seed_keyed_collection(:encounter_visit_list, dfn,
+        [ { visit_string: "1;3260903.09;A;#{dfn}", location: "Riverbend Family Health Clinic",
+            datetime: Time.new(2026, 9, 3, 9, 0, 0), category: "AMBULATORY" } ])
 
       # Keep sections that would otherwise fall through to another patient's
       # unkeyed data explicitly empty instead.

@@ -1,0 +1,29 @@
+<%# Radio buttons in a fieldset (ComponentsHelper#choice_list).
+    Locals: form, attribute, legend, choices ([value, label] or
+    [value, label, data]), selected, inline, hint, error,
+    before and after (HTML or nil, around the choices).
+    Each radio sits inside its <label>, so the whole line is clickable. %>
+<fieldset
+  class="choice-list<%= " choice-list--inline" if local_assigns[:inline] %><%= " form-field--error" if local_assigns[:error].present? %>"
+>
+  <legend><%= legend %></legend>
+  <% if local_assigns[:hint].present? %>
+    <p class="hint"><%= hint %></p>
+  <% end %>
+  <% if local_assigns[:error].present? %>
+    <p class="form-field__error"><%= error %></p>
+  <% end %>
+  <%= local_assigns[:before] %>
+  <% choices.each do |value, text, data| %>
+    <label
+      <%= tag.attributes(data: data) %>
+      class="choice"
+    >
+      <%= form.radio_button attribute,
+            value,
+            checked: local_assigns[:selected].present? && selected.to_s == value.to_s %>
+      <%= text %>
+    </label>
+  <% end %>
+  <%= local_assigns[:after] %>
+</fieldset>
