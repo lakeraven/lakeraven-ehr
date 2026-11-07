@@ -2,6 +2,7 @@
 
 require "test_helper"
 require "prism"
+require "find"
 
 module Lakeraven
   module EHR
@@ -12,6 +13,14 @@ module Lakeraven
     # fails this test. The scan is by reference over the Prism AST, never a
     # grep: comments and strings do not match, a call split across lines does,
     # and `::RpmsRpc::X.y` is the same reference as `RpmsRpc::X.y`.
+    #
+    # A reference is client-resolving when it is a call on a gem API module
+    # or client class, a client accessor on the root module, the registry or
+    # the gem configuration, reflective dispatch on the root module, or a gem
+    # constant taken as a value (an argument, a default, an assignment, a
+    # pattern, an operand of `==` or `<=`), because a module held in a variable
+    # resolves the client the moment it is called, wherever that happens.
+    # Error classes and pure parsers are allowed everywhere, by rule.
     #
     # The scanner lives in this file so that the code under test cannot
     # change it, and its self-tests on inline source prove it is not vacuous.
@@ -38,17 +47,35 @@ module Lakeraven
         app/services/lakeraven/ehr/authentication_service.rb
       ].freeze
 
-      # Named exemptions. An exemption is a path plus its reason, no wildcards
-      # (6e). There are none in this slice: every leak moves behind a gateway.
-      EXEMPTIONS = {}.freeze
+      # Named exemptions (6e): a path plus its reason, no wildcards. An
+      # exemption applies to that exact path and nothing else, and a file
+      # named here must still hold a hit, so an exemption that outlives its
+      # reference fails the test instead of lingering.
+      EXEMPTIONS = {
+        "app/models/lakeraven/ehr/backend_registry.rb" =>
+          "The rpms backend's client source (#646): gateways get their client through " \
+          "BackendRegistry.current, so the registry's registration resolves RpmsRpc.client " \
+          "by design; ADR 0013 6e lists it, and it is exempt by name, not moved, so that no " \
+          "synonym of RpmsRpc.client exists outside the door."
+      }.freeze
 
       # The reference scanner. One instance per source string; `hits` are the
       # client-resolving references, `scope_openers` the with_client/new_client
-      # calls, each as [line, ref].
+      # calls, each as [line, ref]. Every site is reported once.
       class Scanner
         TYPE_CHECKS = %i[is_a? kind_of? instance_of?].freeze
         CLIENT_CLASSES = %w[MockClient CiaClient Client].freeze
-        ROOT_MODULE_CALLS = %i[client fhir_client configure mock! with_client].freeze
+        # Calls on the root module that resolve, build or install a client.
+        # Any other `RpmsRpc.<name>` whose name mentions a client or starts
+        # with `mock` is one too (`scoped_client`, `client_for`, `mock_fhir!`),
+        # so a sibling accessor added to the gem is caught without a change
+        # here. `RpmsRpc.configuration` and `RpmsRpc.respond_to?` are not:
+        # one is a settings object (its client accessors are caught below),
+        # the other a probe, like `defined?`.
+        ROOT_MODULE_CALLS = %i[client fhir_client scoped_client client_for configure mock! mock_fhir! with_client].freeze
+        # Reflective dispatch on the root module reaches any of those by a
+        # name the scan cannot read, so the dispatch itself is the reference.
+        REFLECTIVE_CALLS = %i[send __send__ public_send method public_method singleton_method instance_method const_get].freeze
         PURE_PARSERS = %w[FilemanDateParser].freeze
 
         attr_reader :hits, :scope_openers
@@ -62,6 +89,10 @@ module Lakeraven
           @path = path
           @hits = []
           @scope_openers = []
+          # Nodes already judged by their parent (a call's constant receiver,
+          # a type check's argument), so the bare-constant rule does not
+          # report the same site a second time.
+          @judged = Set.new.compare_by_identity
         end
 
         def scan
@@ -75,7 +106,7 @@ module Lakeraven
         private
 
         def walk(node)
-          return if node.nil?
+          return if node.nil? || @judged.include?(node)
 
           case node
           when Prism::DefinedNode then return # a constant probe, not a reference
@@ -87,22 +118,28 @@ module Lakeraven
           node.compact_child_nodes.each { |child| walk(child) }
         end
 
-        # A constant on its own (rescue, rescue_from, raise, an argument) is not
-        # client-resolving, except RpmsRpc::SessionPool itself.
+        # A gem constant taken as a value: `via: RpmsRpc::Tribal`, `m =
+        # RpmsRpc::Patient`, `in RpmsRpc::MockClient`, `x.class ==
+        # RpmsRpc::MockClient`, `RpmsRpc::SessionPool`, the root module
+        # itself. Error classes (a last segment ending in `Error`) and pure
+        # parsers are allowed by rule; `defined?(...)` never reaches here.
         def flag_bare_constant(node)
-          hit(node, "RpmsRpc::SessionPool") if session_pool?(segments(node))
+          segs = segments(node)
+          hit(node, segs.join("::")) if client_resolving_constant?(segs)
         end
 
         def visit_call(node)
           receiver = node.receiver
           receiver_segments = segments(receiver)
+          # A constant receiver is judged with its call, here, not as a value.
+          @judged << receiver if receiver_segments
 
           if receiver_segments && receiver_segments.first == "RpmsRpc"
             visit_rpms_rpc_call(node, receiver_segments)
-          elsif node.name == :client || node.name == :client=
-            visit_client_read(node, receiver)
           elsif node.name == :new_client && receiver_segments&.last == "RpmsSessions"
             scope_opener(node, "#{receiver_segments.join('::')}.new_client")
+          elsif client_accessor?(node.name)
+            visit_client_accessor(node, receiver)
           end
 
           flag_type_check(node)
@@ -111,16 +148,20 @@ module Lakeraven
         def visit_rpms_rpc_call(node, receiver_segments)
           ref = "#{receiver_segments.join('::')}.#{node.name}"
           if receiver_segments.length == 1
-            hit(node, ref) if ROOT_MODULE_CALLS.include?(node.name)
+            hit(node, ref) if root_module_call?(node.name)
             scope_opener(node, ref) if node.name == :with_client
-          elsif !PURE_PARSERS.include?(receiver_segments[1])
+          elsif client_resolving_constant?(receiver_segments)
             hit(node, ref)
           end
         end
 
-        # `.client` on `RpmsRpc.configuration` or on `BackendRegistry.current`,
-        # whatever namespace prefix the registry carries.
-        def visit_client_read(node, receiver)
+        # A client accessor (`client`, `client=`, `fhir_client`, `fhir_client=`)
+        # on `RpmsRpc.configuration`, or on anything reached from the registry
+        # (`BackendRegistry.current.client`, `BackendRegistry.fetch(:rpms).client`),
+        # whatever namespace prefix the registry carries. `r = BackendRegistry
+        # .current; r.client` is not seen: the scan is by reference, and
+        # tracking a local variable to its value is out of its scope.
+        def visit_client_accessor(node, receiver)
           return unless receiver.is_a?(Prism::CallNode)
 
           inner = segments(receiver.receiver)
@@ -128,36 +169,65 @@ module Lakeraven
 
           if receiver.name == :configuration && inner == [ "RpmsRpc" ]
             hit(node, "RpmsRpc.configuration.#{node.name}")
-          elsif receiver.name == :current && inner.last == "BackendRegistry"
-            hit(node, "#{inner.join('::')}.current.#{node.name}")
+          elsif inner.last == "BackendRegistry"
+            hit(node, "#{inner.join('::')}.#{receiver.name}.#{node.name}")
           end
         end
 
-        # `x.is_a?(RpmsRpc::MockClient)` and friends. `RpmsRpc::Client === x`
-        # is a call on RpmsRpc::Client and is caught by visit_rpms_rpc_call.
+        # `x.is_a?(RpmsRpc::MockClient)` and friends, named for what they are.
+        # The bare-constant rule would catch the argument anyway; this gives
+        # the site its name and judges the argument so it is reported once.
+        # `RpmsRpc::Client === x` is a call on RpmsRpc::Client and is caught
+        # by visit_rpms_rpc_call.
         def flag_type_check(node)
           return unless TYPE_CHECKS.include?(node.name)
 
           Array(node.arguments&.arguments).each do |argument|
-            next unless client_class?(segments(argument))
+            segs = segments(argument)
+            next unless client_class?(segs)
 
-            hit(node, "#{node.name}(#{segments(argument).join('::')})")
+            @judged << argument
+            hit(node, "#{node.name}(#{segs.join('::')})")
           end
         end
 
-        # `case x when RpmsRpc::Client` is an implicit ===.
+        # `case x when RpmsRpc::Client` is an implicit ===. (`case x in
+        # RpmsRpc::Client` is a pattern, and its constant is a value caught by
+        # the bare-constant rule.)
         def visit_when(node)
           node.conditions.each do |condition|
-            hit(condition, "when #{segments(condition).join('::')}") if client_class?(segments(condition))
+            segs = segments(condition)
+            next unless client_class?(segs)
+
+            @judged << condition
+            hit(condition, "when #{segs.join('::')}")
           end
+        end
+
+        def root_module_call?(name)
+          ROOT_MODULE_CALLS.include?(name) || REFLECTIVE_CALLS.include?(name) || name.to_s.match?(/client|\Amock/)
+        end
+
+        def client_accessor?(name)
+          name.to_s.include?("client")
         end
 
         def client_class?(segs)
           segs && segs.length == 2 && segs.first == "RpmsRpc" && CLIENT_CLASSES.include?(segs.last)
         end
 
-        def session_pool?(segs)
-          segs == %w[RpmsRpc SessionPool]
+        # `RpmsRpc`, or `RpmsRpc::<Const>[::...]`, unless an error class or a
+        # pure parser.
+        def client_resolving_constant?(segs)
+          segs && segs.first == "RpmsRpc" && !error_class?(segs) && !pure_parser?(segs)
+        end
+
+        def error_class?(segs)
+          segs.last.end_with?("Error")
+        end
+
+        def pure_parser?(segs)
+          segs.length > 1 && PURE_PARSERS.include?(segs[1])
         end
 
         # The constant path as names, `::` prefix dropped: `::RpmsRpc::A::B` and
@@ -201,27 +271,66 @@ module Lakeraven
                      "#{SCOPE_OPENERS.join(' and ')} (ADR 0013 decision 6e):\n  #{openers.join("\n  ")}"
       end
 
+      test "every named exemption still holds a hit" do
+        EXEMPTIONS.each do |path, reason|
+          assert_not_empty scan_engine.fetch(path).hits,
+                           "exemption #{path} is stale: the scan finds no client-resolving reference in it, " \
+                           "so the reason (#{reason}) no longer applies; remove the exemption"
+        end
+      end
+
       test "the scanner flags every client-resolving form" do
         {
+          # a call on a gem API module or client class
           "RpmsRpc::Patient.brief_header(1)" => "RpmsRpc::Patient.brief_header",
           "::RpmsRpc::Scheduling.clinic_setup" => "RpmsRpc::Scheduling.clinic_setup",
           "RpmsRpc::Tribal\n  .enrollment(dfn)" => "RpmsRpc::Tribal.enrollment",
+          "RpmsRpc::A::B.m" => "RpmsRpc::A::B.m",
+          "RpmsRpc::SessionPool.new" => "RpmsRpc::SessionPool.new",
+          "RpmsRpc::MockClient.new" => "RpmsRpc::MockClient.new",
+          # the root module's client accessors, their siblings and reflective dispatch
           "RpmsRpc.client" => "RpmsRpc.client",
-          "RpmsRpc.configuration.client" => "RpmsRpc.configuration.client",
           "RpmsRpc.fhir_client" => "RpmsRpc.fhir_client",
+          "RpmsRpc.scoped_client" => "RpmsRpc.scoped_client",
+          "RpmsRpc.client_for(key)" => "RpmsRpc.client_for",
           "RpmsRpc.configure { }" => "RpmsRpc.configure",
           "RpmsRpc.mock!" => "RpmsRpc.mock!",
+          "RpmsRpc.mock_fhir!" => "RpmsRpc.mock_fhir!",
           "RpmsRpc.with_client(c) { }" => "RpmsRpc.with_client",
-          "RpmsRpc::SessionPool.new" => "RpmsRpc::SessionPool.new",
-          "pool = RpmsRpc::SessionPool" => "RpmsRpc::SessionPool",
+          "RpmsRpc.send(:client)" => "RpmsRpc.send",
+          "RpmsRpc.__send__(:client)" => "RpmsRpc.__send__",
+          "::RpmsRpc.public_send(name)" => "RpmsRpc.public_send",
+          "RpmsRpc.method(:client).call" => "RpmsRpc.method",
+          "RpmsRpc.const_get(:MockClient)" => "RpmsRpc.const_get",
+          # the configuration's client accessors, reads and writes
+          "RpmsRpc.configuration.client" => "RpmsRpc.configuration.client",
+          "RpmsRpc.configuration.client = x" => "RpmsRpc.configuration.client=",
+          "RpmsRpc.configuration.fhir_client" => "RpmsRpc.configuration.fhir_client",
+          "RpmsRpc.configuration.fhir_client = x" => "RpmsRpc.configuration.fhir_client=",
+          # the registry's client, under any prefix and through any lookup
           "BackendRegistry.current.client" => "BackendRegistry.current.client",
           "Lakeraven::EHR::BackendRegistry.current.client" => "Lakeraven::EHR::BackendRegistry.current.client",
+          "BackendRegistry.fetch(:rpms).client" => "BackendRegistry.fetch.client",
+          "::Lakeraven::EHR::BackendRegistry.fetch(name).client" => "Lakeraven::EHR::BackendRegistry.fetch.client",
+          # a client class as a type check
           "x.is_a?(RpmsRpc::MockClient)" => "is_a?(RpmsRpc::MockClient)",
           "x.kind_of?(::RpmsRpc::CiaClient)" => "kind_of?(RpmsRpc::CiaClient)",
           "x.instance_of?(RpmsRpc::Client)" => "instance_of?(RpmsRpc::Client)",
           "RpmsRpc::Client === x" => "RpmsRpc::Client.===",
           "case x\nwhen RpmsRpc::MockClient then 1\nend" => "when RpmsRpc::MockClient",
-          "RpmsRpc::A::B.m" => "RpmsRpc::A::B.m"
+          "case x\nin RpmsRpc::MockClient then 1\nend" => "RpmsRpc::MockClient",
+          "x.class == RpmsRpc::MockClient" => "RpmsRpc::MockClient",
+          "x.class <= RpmsRpc::Client" => "RpmsRpc::Client",
+          # a gem module, client class or the root module taken as a value
+          "pool = RpmsRpc::SessionPool" => "RpmsRpc::SessionPool",
+          "def f(via: ::RpmsRpc::Tribal) = via.enrollment(1)" => "RpmsRpc::Tribal",
+          "m = RpmsRpc::Patient" => "RpmsRpc::Patient",
+          "klass = RpmsRpc::MockClient" => "RpmsRpc::MockClient",
+          "use(RpmsRpc::Scheduling)" => "RpmsRpc::Scheduling",
+          "MAX = ::RpmsRpc::Notifications::COMMENT_MAX" => "RpmsRpc::Notifications::COMMENT_MAX",
+          "class Foo < RpmsRpc::Client; end" => "RpmsRpc::Client",
+          "m = RpmsRpc" => "RpmsRpc",
+          "f(::RpmsRpc)" => "RpmsRpc"
         }.each do |source, expected_ref|
           refs = Scanner.scan(source).hits.map(&:last)
           assert_includes refs, expected_ref, "expected the scanner to flag #{source.inspect}"
@@ -231,21 +340,52 @@ module Lakeraven
         assert_equal [ [ 2, "RpmsRpc::Tribal.enrollment" ] ], split_call, "a split call is reported once, at its first line"
       end
 
+      test "the scanner reports each site once" do
+        {
+          "RpmsRpc::Patient.brief_header(1)" => [ "RpmsRpc::Patient.brief_header" ],
+          "x.is_a?(RpmsRpc::MockClient)" => [ "is_a?(RpmsRpc::MockClient)" ],
+          "case x\nwhen RpmsRpc::MockClient then 1\nend" => [ "when RpmsRpc::MockClient" ],
+          "RpmsRpc::Client === x" => [ "RpmsRpc::Client.===" ],
+          "RpmsRpc.configuration.client" => [ "RpmsRpc.configuration.client" ],
+          "RpmsRpc.send(:client)" => [ "RpmsRpc.send" ],
+          "def f(via: RpmsRpc::Tribal) = via.enrollment(1)" => [ "RpmsRpc::Tribal" ]
+        }.each do |source, expected_refs|
+          assert_equal expected_refs, Scanner.scan(source).hits.map(&:last), "expected one hit for #{source.inspect}"
+        end
+      end
+
       test "the scanner leaves error classes, parsers, comments, strings and probes alone" do
         [
+          # error classes rescued, raised, compared, built or checked
           "begin\n  x\nrescue RpmsRpc::Client::ConnectionError, RpmsRpc::NotConfiguredError => e\n  e\nend",
           "rescue_from RpmsRpc::SessionPool::PoolExhaustedError, with: :pool_exhausted",
           "rescue_from ::RpmsRpc::Error, with: :render_rpms_unavailable",
           "e.is_a?(::RpmsRpc::Client::RpcRefusedError)",
           "raise RpmsRpc::Client::RpcError, \"refused\"",
+          "RpmsRpc::Client::ConnectionError.new(\"x\")",
+          "raise RpmsRpc::NotConfiguredError.new(\"x\")",
+          "RpmsRpc::Error === e",
+          "case e\nwhen RpmsRpc::Error then 1\nend",
+          "case e\nin RpmsRpc::Client::RpcError then 1\nend",
+          "class Unreadable < RpmsRpc::Client::RpcError; end",
+          "errors = [ RpmsRpc::Error, RpmsRpc::SessionPool::PoolExhaustedError ]",
+          # pure parsers, called or held
           "RpmsRpc::FilemanDateParser.parse(x)",
           "::RpmsRpc::FilemanDateParser.to_fileman(date)",
+          "parser = RpmsRpc::FilemanDateParser",
+          # comments, strings and probes
           "# RpmsRpc::Patient.brief_header(1)",
           "\"RpmsRpc.client\"",
           "defined?(RpmsRpc::MockClient)",
           "defined?(RpmsRpc::SessionPool)",
+          "defined?(RpmsRpc)",
+          "RpmsRpc.respond_to?(:fhir_client)",
+          # another namespace's RpmsRpc, and settings that are not a client
           "Other::RpmsRpc.client",
-          "RpmsRpc.configuration.timeout"
+          "Other::RpmsRpc::Patient.brief_header(1)",
+          "x = Other::RpmsRpc",
+          "RpmsRpc.configuration.timeout",
+          "RpmsRpc.configuration"
         ].each do |source|
           scanner = Scanner.scan(source)
           assert_empty scanner.hits, "expected the scanner not to flag #{source.inspect}"
@@ -277,12 +417,25 @@ module Lakeraven
           assert File.directory?(ROOT.join(path)), "door entry #{path} is not a directory"
         end
         assert_empty EXEMPTIONS.keys.grep(/[*?{\[]/), "an exemption is a path, not a wildcard"
-        EXEMPTIONS.each_key { |path| assert File.file?(ROOT.join(path)), "exemption #{path} is not a file" }
+        EXEMPTIONS.each do |path, reason|
+          assert File.file?(ROOT.join(path)), "exemption #{path} is not a file"
+          assert_not door?(path), "exemption #{path} is inside the door and needs no exemption"
+          assert_kind_of String, reason, "exemption #{path} has no reason"
+          assert_not reason.strip.empty?, "exemption #{path} has no reason"
+        end
       end
 
       test "the scan sees every ruby file" do
         scanned = scan_engine.keys
-        expected = Dir[ROOT.join("{#{SCANNED_DIRECTORIES.join(',')}}/**/*.rb").to_s].map { |path| relative(path) }
+        # Walked independently of the scanner's glob, so the two cannot agree
+        # by construction.
+        expected = SCANNED_DIRECTORIES.flat_map do |dir|
+          found = []
+          Find.find(ROOT.join(dir).to_s) do |path|
+            found << relative(path) if File.file?(path) && File.extname(path) == ".rb"
+          end
+          found
+        end
 
         assert_operator scanned.length, :>, 0, "the scan parsed no files"
         assert_equal expected.sort, scanned.sort
