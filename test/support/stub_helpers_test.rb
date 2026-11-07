@@ -26,6 +26,8 @@ class SharedStubHelpersTest < ActiveSupport::TestCase
 
   ORIGINAL = :sh673_original
   STUB_VALUE = :sh673_stubbed
+  OUTER_STUB = :sh673_outer_stub
+  INNER_STUB = :sh673_inner_stub
 
   # --- with_stub: owned singleton methods by visibility ---
 
@@ -501,7 +503,129 @@ class SharedStubHelpersTest < ActiveSupport::TestCase
     assert_raises(NoMethodError) { host.send(NEVER_DEFINED) }
   end
 
+  # --- Double stub of the same owned singleton method (lakeraven-ehr#673 H1) ---
+  #
+  # The hidden alias that saves the original must be unique per install, so a
+  # nested or repeated stub of the same owned method restores the original
+  # instead of raising NameError and deleting the method.
+
+  test "nested with_stub of the same owned public singleton method restores the outer stub, then the original" do
+    host = host_with_owned_singleton_method(:public, OWNED_PUBLIC, ORIGINAL)
+
+    with_stub(host, OWNED_PUBLIC, OUTER_STUB) do
+      assert_equal OUTER_STUB, host.send(OWNED_PUBLIC)
+
+      with_stub(host, OWNED_PUBLIC, INNER_STUB) do
+        assert_equal INNER_STUB, host.send(OWNED_PUBLIC),
+                     "inner stub value should win while the inner block runs"
+      end
+
+      assert_equal OUTER_STUB, host.send(OWNED_PUBLIC),
+                   "outer stub value should be back after the inner block"
+    end
+
+    assert_after_restore(host, OWNED_PUBLIC, ORIGINAL, :public)
+  end
+
+  test "nested with_stub of the same owned private singleton method restores the outer stub, then the original as private" do
+    host = host_with_owned_singleton_method(:private, OWNED_PRIVATE, ORIGINAL)
+
+    with_stub(host, OWNED_PRIVATE, OUTER_STUB) do
+      assert_equal OUTER_STUB, host.send(OWNED_PRIVATE)
+
+      with_stub(host, OWNED_PRIVATE, INNER_STUB) do
+        assert_equal INNER_STUB, host.send(OWNED_PRIVATE),
+                     "inner stub value should win while the inner block runs"
+      end
+
+      assert_equal OUTER_STUB, host.send(OWNED_PRIVATE),
+                   "outer stub value should be back after the inner block"
+    end
+
+    assert_after_restore(host, OWNED_PRIVATE, ORIGINAL, :private)
+  end
+
+  test "nested with_stub of the same owned protected singleton method restores the outer stub, then the original as protected" do
+    host = host_with_owned_singleton_method(:protected, OWNED_PROTECTED, ORIGINAL)
+
+    with_stub(host, OWNED_PROTECTED, OUTER_STUB) do
+      assert_equal OUTER_STUB, host.send(OWNED_PROTECTED)
+
+      with_stub(host, OWNED_PROTECTED, INNER_STUB) do
+        assert_equal INNER_STUB, host.send(OWNED_PROTECTED),
+                     "inner stub value should win while the inner block runs"
+      end
+
+      assert_equal OUTER_STUB, host.send(OWNED_PROTECTED),
+                   "outer stub value should be back after the inner block"
+    end
+
+    assert_after_restore(host, OWNED_PROTECTED, ORIGINAL, :protected)
+  end
+
+  test "Cucumber After-hook style reverse_each over two install_singleton_stub restores of the same owned method restores the original" do
+    host = host_with_owned_singleton_method(:public, OWNED_PUBLIC, ORIGINAL)
+
+    restore_first = install_singleton_stub(host, OWNED_PUBLIC, OUTER_STUB)
+    assert_equal OUTER_STUB, host.send(OWNED_PUBLIC)
+    restore_second = install_singleton_stub(host, OWNED_PUBLIC, INNER_STUB)
+    assert_equal INNER_STUB, host.send(OWNED_PUBLIC)
+
+    [ restore_first, restore_second ].reverse_each(&:call)
+
+    assert_after_restore(host, OWNED_PUBLIC, ORIGINAL, :public)
+  end
+
+  test "Cucumber After-hook style reverse_each over two install_singleton_stub restores of the same owned private method restores the original as private" do
+    host = host_with_owned_singleton_method(:private, OWNED_PRIVATE, ORIGINAL)
+
+    restore_first = install_singleton_stub(host, OWNED_PRIVATE, OUTER_STUB)
+    restore_second = install_singleton_stub(host, OWNED_PRIVATE, INNER_STUB)
+    assert_equal INNER_STUB, host.send(OWNED_PRIVATE)
+
+    [ restore_first, restore_second ].reverse_each(&:call)
+
+    assert_after_restore(host, OWNED_PRIVATE, ORIGINAL, :private)
+  end
+
+  test "nested with_stub of the same owned singleton method leaves no hidden alias on the receiver singleton class" do
+    host = host_with_owned_singleton_method(:public, OWNED_PUBLIC, ORIGINAL)
+    before = own_singleton_method_names(host)
+    assert_includes before[:public], OWNED_PUBLIC
+
+    with_stub(host, OWNED_PUBLIC, OUTER_STUB) do
+      with_stub(host, OWNED_PUBLIC, INNER_STUB) { }
+    end
+
+    assert_equal ORIGINAL, host.send(OWNED_PUBLIC)
+    assert_equal before, own_singleton_method_names(host),
+                 "receiver singleton class should have exactly the same own methods as before the first stub"
+  end
+
+  test "two install_singleton_stub restores of the same owned singleton method leave no hidden alias on the receiver singleton class" do
+    host = host_with_owned_singleton_method(:private, OWNED_PRIVATE, ORIGINAL)
+    before = own_singleton_method_names(host)
+    assert_includes before[:private], OWNED_PRIVATE
+
+    restore_first = install_singleton_stub(host, OWNED_PRIVATE, OUTER_STUB)
+    restore_second = install_singleton_stub(host, OWNED_PRIVATE, INNER_STUB)
+    [ restore_first, restore_second ].reverse_each(&:call)
+
+    assert_equal ORIGINAL, host.send(OWNED_PRIVATE)
+    assert_equal before, own_singleton_method_names(host),
+                 "receiver singleton class should have exactly the same own methods as before the first stub"
+  end
+
   private
+
+  def own_singleton_method_names(host)
+    singleton = singleton_of(host)
+    {
+      public: singleton.public_instance_methods(false).sort,
+      private: singleton.private_instance_methods(false).sort,
+      protected: singleton.protected_instance_methods(false).sort
+    }
+  end
 
   def host_with_owned_singleton_method(visibility, method_name, return_value)
     klass = Class.new
