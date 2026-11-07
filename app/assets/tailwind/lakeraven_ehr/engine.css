@@ -122,24 +122,116 @@
   @apply border-emerald-300 bg-emerald-50 text-emerald-900;
 }
 
-@utility summary-counts {
-  @apply grid gap-4 sm:grid-cols-3;
-}
-
-@utility summary-count {
-  @apply flex flex-col rounded-lg border border-slate-200 bg-white p-5 shadow-sm;
-}
-
-@utility summary-count__number {
-  @apply text-3xl font-semibold text-slate-900 tabular-nums;
-}
-
-@utility summary-count__label {
-  @apply mt-1 text-sm font-medium text-slate-600;
-}
-
 @utility hint {
   @apply mt-1 text-sm text-slate-600;
+}
+
+/* ---------------------------------------------------------------------------
+ * Front-desk components (docs/DESIGN-SYSTEM.md). The partials are in
+ * app/views/lakeraven/ehr/shared/; ComponentsHelper renders them.
+ * Dense on purpose: a clerk at a shared workstation, mostly on the keyboard.
+ * ------------------------------------------------------------------------ */
+@utility page-header__actions {
+  @apply mt-3 flex flex-wrap items-center gap-3;
+}
+
+/* Buttons. One primary per form: the action the form exists for. Everything
+   else (Find, Show, Back) is secondary. */
+@utility button-primary {
+  @apply min-h-9 rounded-md bg-slate-900 px-4 py-2 font-semibold text-white hover:bg-slate-700;
+}
+
+@utility button-secondary {
+  @apply min-h-9 rounded-md bg-white px-3 py-2 font-semibold text-slate-900 ring-1 ring-slate-300 ring-inset hover:bg-slate-50;
+}
+
+@utility form-field {
+  @apply flex flex-col gap-1;
+}
+
+@utility form-field--error {
+  @apply border-l-4 border-red-700 pl-3;
+}
+
+@utility form-field__error {
+  @apply my-0 text-sm font-semibold text-red-800;
+}
+
+@utility choice-list {
+  @apply flex flex-col gap-2;
+}
+
+@utility choice-list--inline {
+  @apply flex-row flex-wrap items-center gap-4;
+}
+
+@utility choice {
+  @apply flex min-h-9 items-center gap-2 font-normal;
+}
+
+@utility lookup-search {
+  @apply flex items-end gap-2;
+}
+
+/* Tables of records: a caption (sr-only if the heading says it), th with
+   scope, one row per record. */
+@utility data-table {
+  @apply w-full text-left text-sm;
+}
+
+/* A status in words; colour only repeats it. Text is the 900 shade on the
+   50 shade, well over 4.5:1. */
+@utility status-badge {
+  @apply inline-block rounded px-2 py-0.5 text-sm font-medium whitespace-nowrap ring-1 ring-inset;
+}
+
+@utility status-badge--booked {
+  @apply bg-blue-50 text-blue-900 ring-blue-200;
+}
+
+@utility status-badge--checked {
+  @apply bg-emerald-50 text-emerald-900 ring-emerald-200;
+}
+
+@utility status-badge--checked-out {
+  @apply bg-white text-emerald-900 ring-emerald-300;
+}
+
+@utility status-badge--no-show {
+  @apply bg-amber-50 text-amber-900 ring-amber-200;
+}
+
+@utility status-badge--cancelled {
+  @apply bg-slate-100 text-slate-800 ring-slate-300;
+}
+
+@utility status-badge--active {
+  @apply bg-emerald-50 text-emerald-900 ring-emerald-200;
+}
+
+@utility status-badge--inactive {
+  @apply bg-slate-100 text-slate-800 ring-slate-300;
+}
+
+@utility status-badge--deceased {
+  @apply bg-slate-800 text-white ring-slate-800;
+}
+
+/* A registration item (S-REG-23): an error to fix, a warning to ask about. */
+@utility status-badge--error {
+  @apply bg-red-50 text-red-900 ring-red-200;
+}
+
+@utility status-badge--warning {
+  @apply bg-amber-50 text-amber-900 ring-amber-200;
+}
+
+@utility empty-state {
+  @apply my-4 text-slate-600;
+}
+
+@utility patient-summary {
+  @apply grid grid-cols-[max-content_1fr] gap-x-6 gap-y-2;
 }
 
 /* ---------------------------------------------------------------------------

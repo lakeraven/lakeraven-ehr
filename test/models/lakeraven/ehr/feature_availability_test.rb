@@ -6,7 +6,7 @@ module Lakeraven
   module EHR
     # Pins the CapabilityStatement source of truth for #574 / #647: each IHS
     # capability names the FHIR interactions it owns; Patient read/search stay
-    # available without any IHS capability (registration only gates create).
+    # available without any IHS capability; registration owns no FHIR interaction.
     class FeatureAvailabilityTest < ActiveSupport::TestCase
       include IhsFeatureAvailabilityTestHelper
 
@@ -14,15 +14,13 @@ module Lakeraven
 
       PINNED_CAPABILITY_FHIR_INTERACTIONS = {
         prc_referrals: [
-          %w[ServiceRequest search-type]
+          %w[ServiceRequest read], %w[ServiceRequest search-type]
         ],
         tribal_enrollment: [],
-        bprm_registration: [
-          %w[Patient create]
-        ],
+        bprm_registration: [],
         bprm_scheduling: [],
         ihs_immunization: [
-          %w[Immunization search-type]
+          %w[Immunization read], %w[Immunization search-type]
         ],
         pcc_screens: []
       }.freeze
@@ -32,11 +30,10 @@ module Lakeraven
                      BackendRegistry.capability_fhir_interactions
       end
 
-      # The engine routes ServiceRequest and Immunization as index only, so the
-      # map must not advertise a read it does not serve (Copilot round, #659).
-      test "ServiceRequest and Immunization advertise search-type only, because they have no show route" do
+      # A backend without the capability withholds the read with the search (#845).
+      test "ServiceRequest and Immunization advertise the read and the search their capability owns" do
         %w[ServiceRequest Immunization].each do |type|
-          assert_equal [ "search-type" ], BackendRegistry.supported_fhir_interactions(type), type
+          assert_equal %w[read search-type], BackendRegistry.supported_fhir_interactions(type), type
         end
       end
 
@@ -81,14 +78,6 @@ module Lakeraven
           assert_includes BackendRegistry.supported_fhir_interactions("Patient"), "read"
           assert_includes BackendRegistry.supported_fhir_interactions("Patient"), "search-type"
           refute_includes BackendRegistry.supported_fhir_interactions("Patient"), "create"
-        end
-      end
-
-      test "supported_fhir_interactions adds Patient create when bprm_registration is provided" do
-        with_restricted_backend(capabilities: [ :bprm_registration ]) do
-          interactions = BackendRegistry.supported_fhir_interactions("Patient")
-          assert_includes interactions, "read"
-          assert_includes interactions, "create"
         end
       end
 

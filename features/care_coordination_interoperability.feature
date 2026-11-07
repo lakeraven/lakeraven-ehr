@@ -8,6 +8,7 @@ Feature: Care Coordination with External Systems
       | dfn | name             | ssn       | dob        | sex |
       | 4   | DEMO,PATIENT ONE | 666010101 | 2001-01-01 | F   |
 
+  @live
   Scenario: External system requests patient information
     Given patient "DEMO,PATIENT ONE" has consented to data sharing
     When an authorized external system requests patient data
@@ -25,6 +26,7 @@ Feature: Care Coordination with External Systems
     Then tribal affiliation is included
     And enrollment information is available for eligibility checks
 
+  @live
   Scenario: Sending service request to care navigation platform
     Given patient "DEMO,PATIENT ONE" needs specialty care
     And a service request has been created for cardiology
@@ -34,6 +36,7 @@ Feature: Care Coordination with External Systems
     And funding source information is provided
     And the platform can process the service request automatically
 
+  @live
   Scenario: Receiving care recommendations from external platform
     Given patient "DEMO,PATIENT ONE" has an active service request
     When the care navigation platform provides specialist recommendations
@@ -42,6 +45,7 @@ Feature: Care Coordination with External Systems
     And I can see appointment availability
     And I can accept or modify the recommendations
 
+  @live
   Scenario: Updating service request status from external system
     Given a service request was sent to the care navigation platform
     When the external platform approves the service request
@@ -49,6 +53,7 @@ Feature: Care Coordination with External Systems
     And the clinician is notified
     And the patient can be informed of next steps
 
+  @live
   Scenario: Ensuring data privacy during external sharing
     Given patient "DEMO,PATIENT ONE" has consented to data sharing
     When patient information is shared with external systems
@@ -66,6 +71,7 @@ Feature: Care Coordination with External Systems
     When patient information is shared with external systems
     Then tribal-specific information is properly protected
 
+  @app
   Scenario: Handling external system outages gracefully
     Given the care navigation platform is temporarily unavailable
     When I attempt to submit a service request

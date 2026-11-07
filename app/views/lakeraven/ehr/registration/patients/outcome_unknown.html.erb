@@ -1,24 +1,16 @@
-<% content_for :title, "Registration not confirmed | Lakeraven EHR" %>
+<% page_title "Registration not confirmed" %>
 
-<div class="page-header">
-  <h1>The registration was not confirmed</h1>
-</div>
+<%= page_header "The registration was not confirmed" %>
 
-<div
-  id="outcome-unknown"
-  class="alert alert--error"
-  role="alert"
->
-  <p>
-    RPMS did not say whether <%= @registration.name %> was registered.
-  </p>
-  <p>
-    The patient may already be on file, so do not register them again yet.
-  </p>
-</div>
+<%= alert_box :error,
+      "RPMS did not say whether #{@registration.name} was registered.",
+      "The patient may already be on file, so do not register them again yet.",
+      id: "outcome-unknown" %>
 
 <p class="mt-6">
-  <%= link_to "Search for #{@registration.name}",
-        registration_patients_path(q: @registration.name, dob: @registration.dob&.iso8601),
-        id: "search-after-unknown" %>
+  <%= button_to "Search for #{@registration.name}",
+        registration_search_patients_path,
+        params: { q: @registration.name, dob: @registration.dob&.iso8601 },
+        id: "search-after-unknown",
+        class: "button-primary" %>
 </p>

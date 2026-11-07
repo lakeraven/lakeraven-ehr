@@ -335,9 +335,9 @@ module AllergyWriteTestHelper
     rpc_name = mapping.rpc_name
     keyed = (client.instance_variable_get(:@keyed_collections) || {}).dup
     keyed[rpc_name] = (keyed[rpc_name] || {}).dup
-    keyed[rpc_name][dfn.to_s] = [
-      { ien: 901, allergen: allergen, reaction: SYNTHETIC_SYMPTOM, severity: "moderate" }
-    ]
+    # The line LIST^ORQQAL writes (IEN^ALLERGEN^SEVERITY^SIGNS): a Hash here is
+    # no ORQQAL line, and the gem reads one as a conflicting reply (#672).
+    keyed[rpc_name][dfn.to_s] = [ "901^#{allergen}^MODERATE^#{SYNTHETIC_SYMPTOM}" ]
     client.instance_variable_set(:@keyed_collections, keyed)
   end
 end

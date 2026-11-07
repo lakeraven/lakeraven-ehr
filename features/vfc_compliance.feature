@@ -3,25 +3,30 @@ Feature: VFC compliance
   I need to enforce VFC eligibility before administering funded vaccines
   So that I comply with federal VFC program requirements
 
+  @live
   Scenario: VFC-eligible patient receives VFC vaccine successfully
     Given patient "4" has VFC eligibility code "V04"
     When I check VFC eligibility for patient "4"
     Then the patient should be VFC eligible
 
+  @live
   Scenario: Non-eligible patient blocked from VFC vaccine
     Given patient "99" has VFC eligibility code "V01"
     When I check VFC eligibility for patient "99"
     Then the patient should not be VFC eligible
 
+  @app
   Scenario: Non-VFC lot available to any patient
     Given patient "99" has VFC eligibility code "V01"
     Then a non-VFC vaccine lot should be available regardless of eligibility
 
+  @live
   Scenario: VFC eligibility codes are enumerable
     When I list all VFC eligibility codes
     Then the list should include code "V04" with label containing "AK Native"
     And the list should include code "V01" with label containing "Not"
 
+  @app
   Scenario: VFC eligible codes are V02 through V07
     Then code "V02" should be VFC eligible
     And code "V03" should be VFC eligible

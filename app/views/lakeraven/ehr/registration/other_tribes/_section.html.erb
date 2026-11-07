@@ -1,0 +1,53 @@
+<%# The patient's other tribes and the reasons behind their eligibility status
+    (rpms-ux S-REG-07.2, S-REG-07.3), a section of the patient's registration page.
+    Locals: dfn, other_tribes (RpmsRpc::PatientProfile.other_tribes),
+    modifiers (RpmsRpc::Registration.eligibility_modifiers), can_edit. %>
+<section
+  id="other-tribes-section"
+  aria-labelledby="other-tribes-section-heading"
+  class="card mt-6"
+>
+  <div class="flex items-baseline justify-between gap-4">
+    <h2 id="other-tribes-section-heading">Other tribes and eligibility reasons</h2>
+    <% if can_edit %>
+      <span class="flex gap-4">
+        <%= link_to "Add or remove other tribes",
+              registration_patient_other_tribes_path(dfn),
+              id: "edit-other-tribes" %>
+        <%= link_to "Add or remove eligibility reasons",
+              registration_patient_eligibility_modifiers_path(dfn),
+              id: "edit-eligibility-modifiers" %>
+      </span>
+    <% end %>
+  </div>
+  <dl class="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-2">
+    <%# OTHER TRIBE, 9000001.43. %>
+    <dt>Other tribes</dt>
+    <dd data-field="other_tribes">
+      <% if other_tribes.empty? %>
+        None on file
+      <% else %>
+        <% other_tribes.each do |row| %>
+          <span
+            class="block"
+            data-other-tribe="<%= row[:ien] %>"
+          ><%= row[:tribe].titleize %><%= ", #{row[:quantum]}" if row[:quantum].present? %></span>
+        <% end %>
+      <% end %>
+    </dd>
+    <%# ELIGIBILITY MODIFIERS, 9000001.03401. %>
+    <dt>Eligibility reasons</dt>
+    <dd data-field="eligibility_modifiers">
+      <% if modifiers.empty? %>
+        None on file
+      <% else %>
+        <% modifiers.each do |row| %>
+          <span
+            class="block"
+            data-modifier="<%= row[:ien] %>"
+          ><%= row[:name] %></span>
+        <% end %>
+      <% end %>
+    </dd>
+  </dl>
+</section>

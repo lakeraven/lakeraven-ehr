@@ -13,8 +13,9 @@ name: private-boundary
 # terms are never echoed — only file:line — so the blocklist cannot leak
 # through public CI logs. Terms match on word boundaries that also treat "_"
 # as a boundary (so tnt_<term> and <term>_x are caught), which plain `grep -w`
-# would miss. If the secret is unset the job FAILS (fork PRs excepted —
-# secrets are unavailable there; the scan runs again on merge to main).
+# would miss. If the secret is unset the job FAILS (fork PRs and Dependabot PRs
+# excepted — Actions secrets are unavailable to both; the scan runs again on
+# merge to main).
 on:
   pull_request:
   push:
@@ -24,7 +25,7 @@ jobs:
   scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Commit messages cannot be scanned from a shallow clone.
           fetch-depth: 0
@@ -41,6 +42,8 @@ jobs:
           PUSH_BEFORE: ${{ github.event.before }}
           PUSH_AFTER: ${{ github.event.after }}
           IS_FORK_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
+          # Dependabot runs read only the separate Dependabot secret store.
+          IS_DEPENDABOT_PR: ${{ github.event.pull_request.user.login == 'dependabot[bot]' }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
@@ -48,6 +51,10 @@ jobs:
           if [ -z "${BLOCKLIST:-}" ]; then
             if [ "${IS_FORK_PR}" = "true" ]; then
               echo "::notice::Fork PR: secrets unavailable; boundary scan runs on merge."
+              exit 0
+            fi
+            if [ "${IS_DEPENDABOT_PR}" = "true" ]; then
+              echo "::notice::Dependabot PR: secrets unavailable; boundary scan runs on merge."
               exit 0
             fi
             echo "::error::LAKERAVEN_BOUNDARY_BLOCKLIST is unset — the boundary guard is inert. Set the org secret."

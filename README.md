@@ -3,12 +3,12 @@ A web front end for RPMS.
 RPMS stays the system of record: this engine reads and writes through its RPC brokers and keeps no clinical data of its own.
 
 ## Usage
-How to use my plugin.
+App developers: the [FHIR API guide](docs/fhir-api.md) covers endpoints, app registration and search.
 
 ## Development
 
 Rails runs on your machine; RPMS runs in Docker, from a pinned [rpms-ops](https://github.com/lakeraven/rpms-ops) release (`compose.yml`).
-You need Ruby 3.4, Docker and PostgreSQL.
+You need Ruby 4.0 (the version in `.ruby-version`), Docker and PostgreSQL.
 
 Once, log in to the private image registry:
 
@@ -27,6 +27,7 @@ $ bin/setup                   # gems, database, Tailwind build; then starts bin/
 
 `bin/dev` runs the Rails server and the Tailwind watcher.
 Sign in at http://localhost:3000/lakeraven-ehr/login as `SYS123` / `RPMS.000`, the image's development operator.
+`bin/rails lakeraven_ehr:consent_templates:install` installs the synthetic in-clinic consent templates the tablet handover needs.
 
 - **No PostgreSQL on your machine:** `docker compose --profile postgres up -d`, then `export PGHOST=127.0.0.1 PGUSER=postgres PGPASSWORD=postgres` before `bin/setup`. To use another password, set `POSTGRES_PASSWORD` before the first start and export the same value as `PGPASSWORD`.
 - **Start RPMS over**, or move to a new release after `RPMS_TAG` changes in `compose.yml`: remove the RPMS container and its volume only, so the database stays.
@@ -62,12 +63,19 @@ Each value can come from the environment (`VISTA_BROKER`, `VISTA_RPC_HOST`, `VIS
 With no host named, the app boots and logs `No RPMS backend configured`, and sign-in fails.
 A host app may instead set `RpmsRpc.configure { |c| c.client = ... }` in an initializer; the engine leaves a configured client alone.
 
+Each signed-in user gets an RPMS connection of their own, opened at sign-in and closed when their session ends, so RPMS runs every request as that user (ADR 0011).
+`max_sessions` in `config/rpms.yml` caps how many users one app process holds at once (default 64); each is an M job on the RPMS host.
+At capacity, sign-in is refused; no one already signed in is signed out to make room.
+The connections live in the process's memory, so run one app process per instance (threads are fine): with more than one Puma worker (`WEB_CONCURRENCY`), the app refuses to boot.
+
 **Local: an rpms-ops release in Docker.**
 `docker compose up -d` runs one ("Development", above); development's defaults point at it.
 
 **A deployed stack.**
 Forward the stack's broker port to your machine (cloud-rpms runs its stacks behind SSM) and point `VISTA_RPC_HOST` and `VISTA_RPC_PORT` at the forwarded port.
 A YottaDB stack serves CIA on 9100; an IRIS stack serves XWB on 9100 and CIA on 9200.
+No UCI (namespace) setting is needed on either: the CIA client asks for the broker's own namespace.
+`RPMS_UCI` overrides that, only to run in another namespace.
 
 **Tests need no backend.**
 `bin/rails test` and `bundle exec cucumber` run against rpms-rpc's in-memory `MockClient`.

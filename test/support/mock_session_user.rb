@@ -14,13 +14,19 @@ require "rpms_rpc/mock_client"
 # from that user's own seed_user arguments. Users seeded another way are
 # left alone. Belongs in rpms-rpc's MockClient; kept here until it is.
 #
-# CIAVCXUS HASKEYS is answered the same way: for the user the sign-on bound,
-# one 0/1 per name asked, from the keys seed_held_keys gave that DUZ (HASKEY,
-# CIAVCXUS.m:8-12, reads ^XUSEC(KEY,DUZ)). With nobody signed on it answers
-# nothing, which held_keys reads as "could not ask".
+# ORWU NPHASKEY (NPHASKEY^ORWU(VAL,NP,KEY) = ''$D(^XUSEC(KEY,NP))) answers 1 or 0
+# for the DUZ and key it is given, from the keys seed_held_keys gave that DUZ.
+# held_keys sends the signed-on DUZ, which the sign-on records on the mock
+# (set_authenticated), as Client does. With nobody signed on held_keys sends
+# nothing, and reads that as "could not ask".
+#
+# ORWU HAS OPTION ACCESS likewise answers for the user the sign-on bound: ["1"]
+# for an option seed_options gave that DUZ, ["0"] for any other (the shape a
+# real broker sends), and nothing with nobody signed on.
 module MockSessionUser
   AV_CODE_RPC = "XUS AV CODE"
-  HELD_KEYS_RPC = "CIAVCXUS HASKEYS"
+  HAS_KEY_RPC = "ORWU NPHASKEY"
+  OPTION_ACCESS_RPC = "ORWU HAS OPTION ACCESS"
 
   def seed_user(duz, credentials:, name:, role:)
     super
@@ -32,10 +38,16 @@ module MockSessionUser
     (@held_keys ||= {})[duz.to_i] = Array(names)
   end
 
+  # The options DUZ may run: what ORWU HAS OPTION ACCESS would say.
+  def seed_options(duz, names)
+    (@options ||= {})[duz.to_i] = Array(names)
+  end
+
   def seeded_reply(rpc_name, *params)
     reply = super
     bind_session_user(reply) if rpc_name == AV_CODE_RPC
-    return held_keys_reply(params.first) if rpc_name == HELD_KEYS_RPC && reply == "" && @session_duz
+    return has_key_reply(params[0], params[1]) if rpc_name == HAS_KEY_RPC && reply == ""
+    return option_access_reply(params.first) if rpc_name == OPTION_ACCESS_RPC && reply == "" && @session_duz
 
     reply
   end
@@ -48,13 +60,17 @@ module MockSessionUser
     return unless duz.positive? && lines[1].to_s.strip == "0"
 
     @session_duz = duz
+    set_authenticated(duz.to_s)
     user = @session_users&.dig(duz)
     seed_user(duz.to_s, **user) if user
   end
 
-  def held_keys_reply(asked)
-    held = @held_keys&.dig(@session_duz) || []
-    [ asked.to_s.split("^", -1).map { |name| held.include?(name) ? "1" : "0" }.join("^") ]
+  def option_access_reply(name)
+    [ Array(@options&.dig(@session_duz)).include?(name.to_s) ? "1" : "0" ]
+  end
+
+  def has_key_reply(duz, name)
+    [ Array(@held_keys&.dig(duz.to_i)).include?(name.to_s) ? "1" : "0" ]
   end
 end
 

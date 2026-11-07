@@ -1,0 +1,25 @@
+<%# The search row of a lookup field (ComponentsHelper#lookup_field).
+    Locals: search (param name), search_label, find_label, find_url,
+    find_method. The Find button resubmits the whole form to
+    find_url, unvalidated, so what the clerk typed elsewhere is kept.
+    The form's own token fits only the form's action, so a Find that posts
+    sends a token of its own as the button's value, which the browser adds
+    after the form's and so is the one read (#896). %>
+<% find_token = lookup_find_token(find_method) %>
+<div class="lookup-search">
+  <%= label_tag search,
+        search_label,
+        class: "sr-only" %>
+  <%= text_field_tag search,
+        params[search],
+        placeholder: search_label,
+        autocomplete: "off" %>
+  <%= button_tag find_label,
+        type: "submit",
+        name: (request_forgery_protection_token if find_token),
+        value: find_token,
+        formaction: find_url,
+        formmethod: find_method,
+        formnovalidate: true,
+        class: "button-secondary" %>
+</div>

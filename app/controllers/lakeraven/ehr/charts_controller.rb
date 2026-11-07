@@ -36,6 +36,11 @@ module Lakeraven
     # test/dummy/lib/lakeraven_demo_seeds.rb).
     class ChartsController < ActionController::Base
       helper ApplicationHelper
+      # The chart reads RPMS on its signed-in user's own connection (ADR 0011).
+      include RpmsUserScope
+      # This base is not WebController. The tablet lock has to live here too,
+      # or the chart stays reachable during a handover (#793).
+      include ConsentKioskLock
       include SmartAuthentication
       # FAIL-CLOSED audit, the same terms the clinician screening surface is
       # held to. The chart now carries scored screenings (#474), so it serves
@@ -49,6 +54,11 @@ module Lakeraven
       # enforce_patient_context! (token compartment, not the session gate);
       # a GET still must not open a context.
       include ClinicianPatientContext
+      include PhiPageCache
+
+      include RateLimitable
+
+      rate_limit only: :show
 
       FHIR_CONTENT_TYPE = "application/fhir+json"
 
@@ -110,6 +120,10 @@ module Lakeraven
         load_clinical_collections
         render_chart
       end
+
+      # The patient bar offers "Switch patient" to a credential that may read
+      # patients (rpms-ux S-CHT-01.9).
+      def patient_search_allowed? = can_read?("Patient")
 
       private
 

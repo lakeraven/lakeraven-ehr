@@ -41,9 +41,11 @@ such. **Absence of evidence is called out as UNKNOWN rather than reported as abs
 
 ## 2. The path that is *not* in this codebase
 
-**Write-back to the shared RPMS backend.** The engine writes to RPMS through
-`RpcSupport`-based gateways: `scheduling_gateway`, `adt_gateway`,
-`registration_gateway` (`app/gateways/`). Anything written there is readable by **other
+**Write-back to the shared RPMS backend.** The engine writes to RPMS through its
+gateways (`app/gateways/`). The scheduling and ADT twin gateways named here when this was
+written were retired unused (#542): scheduling now writes through
+`appointment_booking_gateway`, `appointment_cancellation_gateway` and
+`appointment_checkin_gateway`. Anything written there is readable by **other
 RPMS consumers** (CPRS, VueCentric, BPRM, reporting) and **cannot be gated by this
 engine**.
 

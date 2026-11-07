@@ -1,9 +1,10 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <%# Views set a page-specific title via content_for; the engine name is the
-      fallback. A distinct title per page is a basic screen-reader affordance. %>
-  <title><%= content_for(:title).presence || "Lakeraven EHR" %></title>
+  <%# Views set a page-specific title with page_title; the product name
+      (Configuration#product_name) is the fallback.
+      A distinct title per page is a basic screen-reader affordance. %>
+  <title><%= content_for(:title).presence || product_name %></title>
   <meta
     name="viewport"
     content="width=device-width, initial-scale=1"
@@ -23,11 +24,28 @@
     whose session is open, and be able to end it. %>
 <header class="border-b border-slate-200 bg-white">
   <div class="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 px-4 py-3">
-    <%= link_to "Lakeraven EHR",
+    <%= link_to product_name,
           session[:duz].present? ? dashboard_path : login_path,
           class: "text-lg font-semibold text-slate-900 no-underline hover:text-slate-700" %>
 
     <% if session[:duz].present? %>
+      <%# Each link shows only to a user its screen would let in (ADR 0010). %>
+      <nav aria-label="Main"
+           class="flex items-center gap-4 text-sm">
+        <% if patient_search_allowed? %>
+          <%= link_to "Notifications", notifications_path %>
+        <% end %>
+        <% if capability?("registration.search") %>
+          <%= link_to "Registration", registration_patients_path %>
+        <% end %>
+        <% if capability?("scheduling.open") && feature_available?(:bprm_scheduling) %>
+          <%= link_to "Scheduling", scheduling_home_path %>
+        <% end %>
+        <% if capability?("referrals.work") && feature_available?(:prc_referrals) %>
+          <%= link_to "Referrals", pending_referrals_path %>
+        <% end %>
+      </nav>
+
       <div class="flex items-center gap-4 text-sm">
         <span class="text-slate-600">
           Signed in as
@@ -50,5 +68,10 @@
   <%= yield %>
 </main>
 
+<% if flash[:consent_handover_ended] %>
+  <%= render "lakeraven/ehr/shared/consent_kiosk_channel", announce: "handover-ended", listen: true %>
+<% else %>
+  <%= render "lakeraven/ehr/shared/consent_kiosk_channel" %>
+<% end %>
 </body>
 </html>

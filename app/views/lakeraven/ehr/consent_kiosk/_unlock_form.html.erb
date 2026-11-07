@@ -1,0 +1,11 @@
+<%= form_with url: consent_kiosk_unlock_path, method: :post do %>
+  <div>
+    <label for="access_code">Access code</label>
+    <input type="password" name="access_code" id="access_code" autocomplete="off" value="">
+  </div>
+  <div>
+    <label for="verify_code">Verify code</label>
+    <input type="password" name="verify_code" id="verify_code" autocomplete="off" value="">
+  </div>
+  <button type="submit">Unlock</button>
+<% end %>

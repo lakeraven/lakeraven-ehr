@@ -7,6 +7,7 @@ Feature: PHI Audit Logging
   # AUDIT EVENTS FROM FHIR API ACCESS
   # =============================================================================
 
+  @live
   Scenario: FHIR Patient search creates an audit event
     Given I am authenticated with SMART-on-FHIR
     And no audit events exist
@@ -20,6 +21,7 @@ Feature: PHI Audit Logging
     Then the response status should be 200
     And an audit event should exist with action "R" and entity type "Patient"
 
+  @live
   Scenario: FHIR AllergyIntolerance search creates an audit event
     Given I am authenticated with SMART-on-FHIR
     And no audit events exist
@@ -34,6 +36,7 @@ Feature: PHI Audit Logging
     # the rule and derives both halves together).
     And an audit event should exist with action "R" and entity type "Patient"
 
+  @app
   Scenario: 404 request creates audit event with failure outcome
     Given I am authenticated with SMART-on-FHIR
     And no audit events exist
@@ -45,11 +48,13 @@ Feature: PHI Audit Logging
   # IMMUTABILITY
   # =============================================================================
 
+  @app
   Scenario: Audit events cannot be updated
     Given an audit event exists in the database
     When I try to update the audit event
     Then the update should be rejected as immutable
 
+  @app
   Scenario: Audit events cannot be deleted
     Given an audit event exists in the database
     When I try to delete the audit event
@@ -59,6 +64,7 @@ Feature: PHI Audit Logging
   # AUDIT EVENT STRUCTURE
   # =============================================================================
 
+  @live
   Scenario: Audit events include required HIPAA fields
     Given I am authenticated with SMART-on-FHIR
     And no audit events exist

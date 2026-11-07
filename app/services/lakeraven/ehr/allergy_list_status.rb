@@ -6,7 +6,8 @@ module Lakeraven
     # assessed NKA, nothing was dropped, the merged list is empty, and
     # the egress filter passed that empty list through whole. A raise, a
     # missing scope, a nil filter, a filter that dropped entries, an
-    # unassessed patient, or an indeterminate reply is "not loaded".
+    # unassessed patient, or an indeterminate reply is "not loaded". So is
+    # a conflicting reply (#672): the names it has show as incomplete.
     #
     # Not-loaded does not hide a name that did load. A dropped row or a
     # filter that withheld entries keeps the state not-loaded — never
@@ -28,8 +29,8 @@ module Lakeraven
       end
 
       def self.from_counts(source_status:, source_count:, filtered_names:,
-                           verified_absence: false, dropped_count: 0)
-        if complete_reading?(source_status, source_count, filtered_names, dropped_count)
+                           verified_absence: false, dropped_count: 0, conflict: false)
+        if !conflict && complete_reading?(source_status, source_count, filtered_names, dropped_count)
           return recorded(source_count, filtered_names) if verified_absence || source_count.positive?
 
           return not_loaded

@@ -6,9 +6,10 @@ require "test_helper"
 # the gem boundary. Live on a built image BSDX CANCEL APPOINTMENT refuses only a
 # checked-in appointment, so the rest is checked here and tested here.
 class SchedulingCancelAppointmentTest < ActionDispatch::IntegrationTest
+  include BrowserFormHelper
   DAY = Date.new(2026, 10, 28)
 
-  def at(hour, min = 0) = Time.utc(DAY.year, DAY.month, DAY.day, hour, min)
+  def at(hour, min = 0) = Time.new(DAY.year, DAY.month, DAY.day, hour, min)
 
   RESOURCE = { id: 2, name: "DEMO IHS CLINIC", inactive: false, time_scale: 15, hospital_location_id: 3,
                view: true, overbook: true, modify_schedule: true, modify_appointments: true }.freeze
@@ -41,7 +42,7 @@ class SchedulingCancelAppointmentTest < ActionDispatch::IntegrationTest
         cancel_appointment: ->(id, **kw) { log << kw.merge(id: id); cancel.call(id, kw) }
       },
       RpmsRpc::DdrFileman.singleton_class => { lister: ->(**) { REASONS } }
-    }
+    }.merge(scheduling_setup_stubs)
     stubs.each { |klass, methods| methods.each_key { |m| klass.alias_method(:"__#{m}", m) } }
     stubs.each { |klass, methods| methods.each { |m, body| klass.define_method(m, &body) } }
     yield
@@ -124,7 +125,7 @@ class SchedulingCancelAppointmentTest < ActionDispatch::IntegrationTest
     end
 
     assert_select "#appointments tr[data-appointment='8'] td[data-status='cancelled']"
-    assert_select "#appointments tr[data-appointment='8'] a", count: 0
+    assert_select "#appointments tr[data-appointment='8'] a[href*='/cancel'], #appointments tr[data-appointment='8'] a[href*='/checkin']", count: 0
     assert_select "#open-times tr[data-time='09:00'] td[data-open='1']"
   end
 
@@ -137,5 +138,20 @@ class SchedulingCancelAppointmentTest < ActionDispatch::IntegrationTest
 
     assert_response :unprocessable_content
     assert_select "[role='alert']", text: /already checked in/
+  end
+
+  # #896: a browser sends the form's own token; Show reasons must accept it.
+  test "Show reasons is accepted with forgery protection on, as in a browser" do
+    sign_in
+    with_rpms do
+      with_forgery_protection do
+        get path, params: { date: "2026-10-28" }
+        press "Show reasons", fill: { "cancellation[whom]" => "C" }
+      end
+
+      assert_response :ok
+      assert_equal [ "CLINIC STAFFING", "OTHER" ], css_select("#cancellation-form select option").map(&:text).drop(1)
+    end
+    assert_empty cancels
   end
 end

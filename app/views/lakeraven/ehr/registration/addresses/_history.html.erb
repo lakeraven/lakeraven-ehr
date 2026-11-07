@@ -1,0 +1,63 @@
+<%# Where the patient used to live (rpms-ux S-REG-21.1), read only, a section of
+    the patient's registration page: PREVIOUS MAIL ADDRESSES, IHS PATIENT
+    (9000001.83). RPMS adds an entry when the address changes.
+    Locals: history (PatientRecordGateway.address_history, newest first, or nil
+    when RPMS did not send it). %>
+<section
+  id="address-history-section"
+  aria-labelledby="address-history-heading"
+  class="card mt-6"
+>
+  <h2 id="address-history-heading">Previous addresses</h2>
+  <% if history.nil? %>
+    <%= alert_box :error,
+          "RPMS did not send the previous addresses.",
+          "Open the patient again in a minute.",
+          id: "address-history-unavailable" %>
+  <% elsif history.empty? %>
+    <%= empty_state "No previous addresses on file.",
+          id: "no-address-history" %>
+  <% else %>
+    <table
+      id="address-history"
+      class="data-table"
+    >
+      <caption class="sr-only">Previous addresses, newest first</caption>
+      <thead>
+        <tr>
+          <th scope="col">Address</th>
+          <th scope="col">Lived there</th>
+          <th scope="col">Home phone</th>
+          <th scope="col">Recorded</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% history.each do |entry| %>
+          <tr data-address-history="<%= entry[:ien] %>">
+            <%# STREET ADDRESS [LINE 1-3], CITY, STATE, ZIP CODE: 9000001.83 .02-.07. %>
+            <td>
+              <% [ entry[:line1], entry[:line2], entry[:line3],
+                   [ entry[:city], entry[:state], entry[:zip] ].compact_blank.join(" ") ].compact_blank.each do |line| %>
+                <span class="block"><%= line %></span>
+              <% end %>
+            </td>
+            <%# DATE FROM and DATE TO, 9000001.83 .11 and .12. %>
+            <td data-field="lived">
+              <% if entry[:lived_from] || entry[:lived_to] %>
+                <%= entry[:lived_from]&.strftime("%b %-d, %Y") || "Not recorded" %>
+                to
+                <%= entry[:lived_to]&.strftime("%b %-d, %Y") || "not recorded" %>
+              <% else %>
+                Not recorded
+              <% end %>
+            </td>
+            <%# PHONE NUMBER [RESIDENCE], 9000001.83 .08. %>
+            <td><%= entry[:phone].presence || "None" %></td>
+            <%# DATE CHANGED, 9000001.83 .01. %>
+            <td><%= entry[:changed_on].strftime("%b %-d, %Y") %></td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  <% end %>
+</section>

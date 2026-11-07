@@ -1,3 +1,4 @@
+@app
 Feature: Write and sign a progress note on an open encounter
   As a clinical provider
   I need to write a progress note against the visit and sign it

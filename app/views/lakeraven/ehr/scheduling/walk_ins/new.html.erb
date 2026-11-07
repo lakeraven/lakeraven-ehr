@@ -1,0 +1,87 @@
+<% page_title "Walk-in", @resource[:name] %>
+
+<%= page_header "Walk-in",
+      [ "#{@resource[:name]}, today.",
+        "Book a patient who is here without an appointment, and check them in." ] %>
+
+<%= flash_alert id: "walk-in-alert" %>
+
+<% if @offer_overbook %>
+  <%= alert_box :notice,
+        "The clinic has no place at this time.",
+        "You may book the walk-in as an overbook.",
+        id: "overbook-offer" %>
+<% end %>
+
+<%= form_errors @walk_in,
+      "The walk-in was not booked.",
+      id: "walk-in-errors" %>
+
+<%= form_with scope: :walk_in,
+      url: scheduling_clinic_walk_ins_path(@resource[:id]),
+      method: :post,
+      local: true,
+      id: "walk-in-form",
+      class: "card flex flex-col gap-4" do |f| %>
+  <%= lookup_field f,
+        :patient_dfn,
+        legend: "Patient",
+        search: :q,
+        search_label: "Patient name starts with",
+        find_label: "Find patient",
+        find_url: scheduling_find_clinic_walk_in_path(@resource[:id]),
+        find_method: :post,
+        choices: @patients.map { |patient|
+          [ patient[:dfn],
+            "#{patient[:name]}, #{patient[:hrn] ? "health record number #{patient[:hrn]}" : "no health record number"}, born #{patient[:dob]&.strftime("%b %-d, %Y")}",
+            { patient: patient[:dfn] } ]
+        },
+        selected: @walk_in.patient_dfn,
+        chosen_text: "Patient chosen.",
+        empty_text: "Find the patient by name." %>
+
+  <%# CHECK-IN DATE/TIME, BSDX APPOINTMENT (#9002018.4) field .03. %>
+  <%= form_field :at, "Checked in at", form: f do |aria| %>
+    <%= f.datetime_local_field :at,
+          value: @walk_in.at,
+          required: true,
+          aria: aria %>
+  <% end %>
+
+  <%= lookup_field f,
+        :provider_ien,
+        legend: "Visit provider#{" (required at this clinic)" if @walk_in.provider_required}",
+        search: :provider_search,
+        search_label: "Provider name starts with",
+        find_label: "Find provider",
+        find_url: scheduling_find_clinic_walk_in_path(@resource[:id]),
+        find_method: :post,
+        choices: @providers.map { |provider| [ provider.ien, provider.name, { provider: provider.ien } ] },
+        selected: @walk_in.provider_ien,
+        chosen_text: "Provider chosen." %>
+
+  <% if @walk_in.stop_required %>
+    <%# CLINIC STOP (#40.7), filed on the visit. The clinic uses several (#9009017.2 MULTIPLE CLINIC CODES USED?). %>
+    <%= form_field :stop_ien, "Clinic stop", form: f do |aria| %>
+      <%= f.select :stop_ien,
+            options_for_select(@stops.map { |s| [ "#{s[:name]} (#{s[:code]})", s[:ien] ] }, @walk_in.stop_ien),
+            { include_blank: "Choose a clinic stop" },
+            required: true,
+            aria: aria %>
+    <% end %>
+  <% end %>
+
+  <% if @offer_overbook %>
+    <%= button_tag "Book as an overbook and check in",
+          name: "overbook",
+          value: "1",
+          class: "button-primary self-start" %>
+  <% else %>
+    <%= f.submit "Book and check in",
+          class: "button-primary self-start" %>
+  <% end %>
+<% end %>
+
+<p class="mt-6">
+  <%= link_to "Back to the clinic's day", scheduling_clinic_path(@resource[:id], date: Date.today.iso8601) %>
+</p>

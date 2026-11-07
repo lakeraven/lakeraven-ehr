@@ -1,0 +1,66 @@
+<% page_title "Allow access", @app.name %>
+
+<div class="mx-auto mt-8 max-w-lg">
+  <div class="card">
+    <h1>Allow <%= @app.name %> to use your RPMS access?</h1>
+    <p class="text-sm text-slate-600">
+      You are signed in as <%= session[:user_name] %>.
+      The app will act as you, and RPMS will check everything it reads against your own access.
+    </p>
+
+    <% if @patient %>
+      <p
+        id="launch-patient"
+        class="mt-4"
+        data-dfn="<%= @patient.dfn %>"
+      >
+        Patient: <strong><%= @patient.name %></strong>, born <%= @patient.dob&.strftime("%b %-d, %Y") %>.
+      </p>
+    <% end %>
+
+    <% if @scopes.any? %>
+      <p class="mt-4">
+        If you allow it, the app can:
+      </p>
+      <ul
+        id="granted-scopes"
+        class="mt-2 list-disc pl-6"
+      >
+        <% @scopes.each do |scope| %>
+          <li data-scope="<%= scope %>"><%= Lakeraven::EHR::ScopeDescription.for(scope) %></li>
+        <% end %>
+      </ul>
+      <p class="mt-4 text-sm text-slate-600">
+        Access ends when you sign out, or when your session times out.
+      </p>
+    <% else %>
+      <p
+        id="nothing-to-grant"
+        class="mt-4"
+      >
+        Your RPMS access doesn't cover anything this app asked for.
+        Return to the app, or ask your site manager about access.
+      </p>
+    <% end %>
+
+    <%= form_with url: smart_authorization_approval_path,
+          method: :post,
+          local: true,
+          id: "authorization-decision",
+          class: "mt-6 flex gap-3" do %>
+      <% if @scopes.any? %>
+        <button
+          type="submit"
+          name="decision"
+          value="approve"
+        >Allow</button>
+      <% end %>
+      <button
+        type="submit"
+        name="decision"
+        value="deny"
+        class="button-secondary"
+      ><%= @scopes.any? ? "Don't allow" : "Return to the app" %></button>
+    <% end %>
+  </div>
+</div>

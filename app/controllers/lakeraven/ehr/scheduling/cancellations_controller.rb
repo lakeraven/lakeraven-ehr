@@ -10,13 +10,17 @@ module Lakeraven
       # second cancellation of a cancelled one and a reason of the wrong type.
       # So the appointment's state and the reason's type are checked here first.
       class CancellationsController < BaseController
+        rate_limit only: %i[new create]
+
         before_action :load_resource!
         before_action :require_booking_right!
         before_action :load_appointment!
 
         # GET /scheduling/clinics/:resource_id/appointments/:appointment_id/cancel?date=&whom=
+        # Show reasons sends the form itself, so who cancelled comes as cancellation[whom].
         def new
-          @cancellation = AppointmentCancellation.new(whom: params[:whom].presence || "PC")
+          whom = params[:whom].presence || params.dig(:cancellation, :whom).presence || "PC"
+          @cancellation = AppointmentCancellation.new(whom: whom)
           @reasons = AppointmentCancellationGateway.reasons(@cancellation.whom)
         end
 

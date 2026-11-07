@@ -110,22 +110,22 @@ class SsoSessionTokenBridgeSecurityTest < ActionDispatch::IntegrationTest
     assert_response :unauthorized
   end
 
-  # -- B1: deny-by-default scopes from security keys ------------------------
+  # -- B1: deny-by-default scopes from RPMS options and security keys --------
 
-  test "a user with no security keys receives no clinical scopes" do
+  test "a user RPMS gives neither the chart option nor a key receives no clinical scopes" do
     sign_in("testclerk", "test123")
 
     assert_equal "", session_token.scopes.to_s.strip
   end
 
-  test "a user with no security keys cannot read a chart" do
+  test "a user RPMS gives neither the chart option nor a key cannot read a chart" do
     sign_in("testclerk", "test123")
 
     get "/lakeraven-ehr/patients/1"
     assert_response :forbidden
   end
 
-  test "a clerk with no keys receives strictly less than a keyed provider" do
+  test "a clerk with neither the chart option nor a key receives strictly less than a provider" do
     sign_in("testclerk", "test123")
     clerk_scopes = session_token.scopes.to_a
 
@@ -513,11 +513,28 @@ class SsoSessionTokenBridgeSecurityTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "a user RPMS refuses the context is sent to their site manager, with no strike against the account" do
+    refused = Lakeraven::EHR::AuthenticationService::Result.new(
+      success?: false, value: nil, error: Lakeraven::EHR::AuthenticationService::CONTEXT_REFUSED
+    )
+    refusing = Object.new
+    refusing.define_singleton_method(:authenticate) { |**| refused }
+
+    with_singleton(Lakeraven::EHR::AuthenticationService, :new, ->(*) { refusing }) do
+      (Lakeraven::EHR::LoginThrottle::MAX_ATTEMPTS + 1).times { sign_in }
+
+      assert_response :forbidden
+      assert_nil session[:duz]
+      assert_match "not set up for this application", response.body
+      assert_no_match(/Invalid username or password/, response.body)
+    end
+  end
+
   # -- M2: session timeout ---------------------------------------------------
 
   test "an idle session past the timeout is signed out" do
     sign_in
-    travel(Lakeraven::EHR::SessionsController::IDLE_TIMEOUT + 1.minute) do
+    travel(Lakeraven::EHR.configuration.session_idle_limit + 1.minute) do
       get "/lakeraven-ehr/patients/1"
       assert_response :unauthorized
     end
@@ -571,7 +588,7 @@ class SsoSessionTokenBridgeSecurityTest < ActionDispatch::IntegrationTest
   # compartment left nothing behind.
   test "an idle session past the timeout cannot reach the dashboard" do
     sign_in
-    travel(Lakeraven::EHR::SessionsController::IDLE_TIMEOUT + 1.minute) do
+    travel(Lakeraven::EHR.configuration.session_idle_limit + 1.minute) do
       get "/lakeraven-ehr/dashboard"
       assert_response :redirect
     end
@@ -581,7 +598,7 @@ class SsoSessionTokenBridgeSecurityTest < ActionDispatch::IntegrationTest
     sign_in
     token = session_token
 
-    travel(Lakeraven::EHR::SessionsController::IDLE_TIMEOUT + 1.minute) do
+    travel(Lakeraven::EHR.configuration.session_idle_limit + 1.minute) do
       get "/lakeraven-ehr/patients/1"
       assert_response :unauthorized
     end
@@ -649,18 +666,23 @@ class SsoSessionTokenBridgeSecurityTest < ActionDispatch::IntegrationTest
 
   # -- M: the C-CDA author must not be caller-supplied --------------------
 
-  test "the chart key grants Part 2-bearing resource types and the BH keys grant nothing" do
-    chart = Lakeraven::EHR::SessionScopePolicy.scopes_for(security_keys: [ :orders_sign ])
-    bh = Lakeraven::EHR::SessionScopePolicy.scopes_for(security_keys: [ :behavioral_health_user, :behavioral_health_manager ])
+  test "the chart option grants Part 2-bearing read types and BH keys grant QuestionnaireResponse only" do
+    chart = Lakeraven::EHR::SessionScopePolicy.scopes_for(security_keys: [], options: [ "CIAV VUECENTRIC" ])
+    bh_user = Lakeraven::EHR::SessionScopePolicy.scopes_for(security_keys: [ :behavioral_health_user ])
+    bh_mgr = Lakeraven::EHR::SessionScopePolicy.scopes_for(security_keys: [ :behavioral_health_manager ])
 
     assert_includes chart, "user/Observation.rs", "PHQ-9 item 9 rides on Observation"
     assert_includes chart, "user/Condition.rs",   "substance-use diagnoses ride on Condition"
-    assert_empty bh, "the BH keys grant nothing today — see #494"
-    assert_empty Lakeraven::EHR::SessionScopePolicy::BEHAVIORAL_HEALTH_TYPES
+    assert_equal [ "user/QuestionnaireResponse.cruds" ], bh_user
+    assert_equal [ "user/QuestionnaireResponse.cruds" ], bh_mgr
+    assert_equal %w[QuestionnaireResponse], Lakeraven::EHR::SessionScopePolicy::BEHAVIORAL_HEALTH_TYPES
   end
 
-  test "no key in the table grants Condition write" do
-    every = Lakeraven::EHR::SessionScopePolicy.scopes_for(security_keys: Lakeraven::EHR::SessionScopePolicy::KEY_SCOPES.keys)
+  test "no option or key in the table grants Condition write" do
+    every = Lakeraven::EHR::SessionScopePolicy.scopes_for(
+      security_keys: Lakeraven::EHR::SessionScopePolicy::KEY_SCOPES.keys,
+      options: Lakeraven::EHR::SessionScopePolicy::OPTION_SCOPES.keys
+    )
 
     assert_equal [ "user/Condition.rs" ], every.select { |scope| scope.start_with?("user/Condition.") }
   end

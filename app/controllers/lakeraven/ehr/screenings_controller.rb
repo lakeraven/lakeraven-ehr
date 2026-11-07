@@ -39,6 +39,8 @@ module Lakeraven
       include ClinicianPatientContext
       include FHIRReadEgress
 
+      rate_limit only: %i[index create new show]
+
       FHIR_CONTENT_TYPE = "application/fhir+json"
 
       # The item-level answers are what this surface reads and writes, and they

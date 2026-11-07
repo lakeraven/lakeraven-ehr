@@ -1,0 +1,100 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# This repo's rows of the rpms-ux test plan: docs/product-cycle/tests/lakeraven-ehr.tsv
+# (rpms-ux IMPLEMENTATIONS.md, "Producers"). One row per scenario a test names in its
+# title, read from the tests themselves, so the plan cannot drift from them.
+#
+#   bin/scenario-plan                  print the rows
+#   bin/scenario-plan --write RPMS_UX  write them into an rpms-ux checkout
+#   bin/scenario-plan --check RPMS_UX  exit 1 when that checkout's file differs, or a
+#                                      test names a scenario its STORIES.md does not have
+#
+# A title names scenarios the way the tests already do: a full id, then any short ids
+# of the same story area after it ("S-SCH-03.1, 03.7 and 02.5 ..." names S-SCH-03.1,
+# S-SCH-03.7 and S-SCH-02.5).
+#
+# proves is "partial" for every row: no test here yet asserts its scenario's whole
+# Then. A test that does is marked by "(whole Then)" in its title, and its row says
+# "full". as is the demo persona the test signs on as, or "-" when it signs on as none.
+
+COLUMNS = %w[scenario proves interface state as repo spec example].freeze
+PLAN = "docs/product-cycle/tests/lakeraven-ehr.tsv"
+FULL_ID = /\AS-([A-Z]{3})-(\d{2}\.\d+)\z/
+SHORT_ID = /\A\d{2}\.\d+\z/
+PERSONA_BY_ACCESS = {
+  "PREG123" => "PROFILE,REG", "PSCH123" => "PROFILE,SCHED", "PMD123" => "PROFILE,MD",
+  "PRN123" => "PROFILE,RN", "PMA123" => "PROFILE,MA", "PBIL123" => "PROFILE,BILL"
+}.freeze
+
+def scenario_ids(title)
+  tokens = title.split(/[\s,()]+/).reject(&:empty?)
+  ids = []
+  area = nil
+  tokens.each do |token|
+    if (m = token.match(FULL_ID))
+      area = m[1]
+      ids << token
+    elsif area && token.match?(SHORT_ID)
+      ids << "S-#{area}-#{token}"
+    elsif token != "and"
+      area = nil
+    end
+  end
+  ids.uniq
+end
+
+# The persona a test signs on as: its own sign-on if it has one, else its file's
+# (a setup block or a sign_in helper).
+def persona(body, file)
+  [ body, file ].each do |text|
+    named = text[/user_name: "(PROFILE,[A-Z]+)"/, 1]
+    return named if named
+
+    access = text[/username: "(P[A-Z]+123)"/, 1]
+    return PERSONA_BY_ACCESS.fetch(access) if PERSONA_BY_ACCESS.key?(access)
+  end
+  "-"
+end
+
+def rows(root)
+  Dir.glob("test/**/*_test.rb", base: root).sort.flat_map do |path|
+    lines = File.readlines(File.join(root, path))
+    starts = lines.each_index.select { |i| lines[i].match?(/^\s*test "/) }
+    starts.each_with_index.flat_map do |start, n|
+      title = lines[start][/test "(.*)" do/, 1].to_s
+      body = lines[start...(starts[n + 1] || lines.size)].join
+      scenario_ids(title).map do |id|
+        proves = title.include?("(whole Then)") ? "full" : "partial"
+        [ id, proves, "lakeraven-ehr", "written", persona(body, lines.join), "lakeraven-ehr", "#{path}:#{start + 1}", title ]
+      end
+    end
+  end
+end
+
+def tsv(rows) = ([ COLUMNS ] + rows).map { |r| r.join("\t") }.join("\n") + "\n"
+
+root = File.expand_path("..", __dir__)
+out = tsv(rows(root))
+mode, dir = ARGV
+
+case mode
+when nil
+  print out
+when "--write"
+  abort "usage: bin/scenario-plan --write RPMS_UX_DIR" unless dir && File.directory?(dir)
+  File.write(File.join(dir, PLAN), out)
+  puts "wrote #{File.join(dir, PLAN)}: #{out.lines.size - 1} rows"
+when "--check"
+  abort "usage: bin/scenario-plan --check RPMS_UX_DIR" unless dir && File.directory?(dir)
+  stories = File.read(File.join(dir, "docs/product-cycle/STORIES.md"))
+  known = stories.scan(/\*\*(S-[A-Z]{3}-\d{2}\.\d+)\*\*/).flatten.to_set
+  unknown = rows(root).map(&:first).uniq.reject { |id| known.include?(id) }
+  stale = !File.exist?(File.join(dir, PLAN)) || File.read(File.join(dir, PLAN)) != out
+  unknown.each { |id| warn "EXPLICIT FAILURE: a test names #{id}, which is not a scenario in STORIES.md" }
+  warn "EXPLICIT FAILURE: #{PLAN} is not what the tests say; run bin/scenario-plan --write" if stale
+  exit 1 if stale || unknown.any?
+  puts "EXPLICIT SUCCESS: #{PLAN} matches the tests"
+else
+  abort "usage: bin/scenario-plan [--write|--check RPMS_UX_DIR]"
+end

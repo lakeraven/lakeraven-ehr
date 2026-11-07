@@ -1,0 +1,15 @@
+<%# A message box (ComponentsHelper#alert_box).
+    Locals: kind (:error or :notice), messages (Array of sentences),
+    id (optional), body (HTML or nil).
+    An error interrupts (role=alert); a notice waits its turn (role=status). %>
+<% kind = local_assigns.fetch(:kind, :error).to_sym %>
+<div
+  <%= tag.attributes(id: local_assigns[:id]) %>
+  class="alert alert--<%= kind == :notice ? "notice" : "error" %>"
+  role="<%= kind == :notice ? "status" : "alert" %>"
+>
+  <% Array(local_assigns[:messages]).each do |message| %>
+    <p><%= message %></p>
+  <% end %>
+  <%= local_assigns[:body] %>
+</div>

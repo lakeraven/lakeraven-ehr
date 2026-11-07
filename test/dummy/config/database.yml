@@ -10,3 +10,9 @@ development:
 test:
   <<: *default
   database: lakeraven_ehr_test
+
+# A deployed instance names its database with DATABASE_URL (docs/deploy_container.md),
+# which Rails merges over this entry.
+production:
+  <<: *default
+  database: lakeraven_ehr_production

@@ -1,0 +1,83 @@
+<% page_title "Register a caller", @resource[:name] %>
+
+<%= page_header "Register a caller who has no chart",
+      [ "Enter what the caller tells you, then book them.",
+        "The front desk completes the registration when they arrive." ] %>
+
+<%= flash_alert %>
+
+<%= form_errors @registration,
+      "The caller was not registered.",
+      id: "registration-errors" %>
+
+<%= form_with scope: :registration,
+      url: scheduling_clinic_registrations_path(@resource[:id]),
+      method: :post,
+      local: true,
+      id: "quick-registration-form",
+      class: "card flex flex-col gap-4" do |f| %>
+  <%= hidden_field_tag :submission_id,
+        @submission_id %>
+  <%= hidden_field_tag :start,
+        @start %>
+  <%= hidden_field_tag :length,
+        @length %>
+
+  <%= form_field :name, "Name (LAST,FIRST MIDDLE)", form: f do |aria| %>
+    <%= f.text_field :name,
+          value: @registration.name,
+          required: true,
+          autocomplete: "off",
+          aria: aria %>
+  <% end %>
+
+  <%= choice_list f,
+        :sex,
+        legend: "Sex",
+        choices: [ [ "F", "Female" ], [ "M", "Male" ] ],
+        selected: @registration.sex,
+        inline: true %>
+
+  <%= form_field :dob, "Date of birth", form: f do |aria| %>
+    <%= f.date_field :dob,
+          value: @registration.dob,
+          required: true,
+          aria: aria %>
+  <% end %>
+
+  <%= form_field :ssn, "Social security number", form: f do |aria| %>
+    <%= f.text_field :ssn,
+          value: @registration.ssn,
+          inputmode: "numeric",
+          autocomplete: "off",
+          aria: aria %>
+  <% end %>
+
+  <%# PATIENT .0906 PSEUDO SSN REASON %>
+  <%= form_field :no_ssn_reason, "Or, the reason there is none", form: f do |aria| %>
+    <%= f.select :no_ssn_reason,
+          Lakeraven::EHR::PatientRegistration::NO_SSN_REASONS.map { |code, label| [ label, code ] },
+          { include_blank: true, selected: @registration.no_ssn_reason },
+          aria: aria %>
+  <% end %>
+
+  <%# IHS PATIENT HEALTH RECORD NO. (#9000001.41 .02) %>
+  <%= form_field :chart_number,
+        "Chart number (optional)",
+        form: f,
+        hint: "Only if the caller was given one here. Leave it empty and RPMS gives a temporary chart number." do |aria| %>
+    <%= f.text_field :chart_number,
+          value: @registration.chart_number,
+          inputmode: "numeric",
+          autocomplete: "off",
+          aria: aria %>
+  <% end %>
+
+  <%= f.submit "Register and book",
+        class: "button-primary self-start" %>
+<% end %>
+
+<p class="mt-4">
+  <%= link_to "Back to booking",
+        scheduling_new_clinic_appointment_path(@resource[:id], start: @start, length: @length) %>
+</p>

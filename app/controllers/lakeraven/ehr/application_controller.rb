@@ -5,6 +5,7 @@ module Lakeraven
     class ApplicationController < ActionController::API
       include SmartAuthentication
       include AuditableClinicalAccess
+      include RateLimitable
       include FHIRReadEgress
       include FHIRSearchBundle
       include FeatureUnavailableRendering
@@ -23,6 +24,9 @@ module Lakeraven
       # nothing from a 400.
       before_action :validate_fhir_paging!, if: :fhir_search?
       before_action :validate_fhir_sort_and_include!, if: :fhir_search?
+      # A launched token reads RPMS on its user's own connection (#844, ADR
+      # 0011), after every check above has passed. Any other token has none.
+      around_action :run_on_launched_users_connection
 
       # Actions that DISCLOSE clinical data even though they are shaped as
       # writes — generating a C-CDA, running a bulk export, requesting an
@@ -52,6 +56,30 @@ module Lakeraven
       end
 
       private
+
+      # The request runs inside the approving user's RPMS connection
+      # (RpmsSessions.with_user), so every RPC it makes runs as that user. Using
+      # the token counts as the user's activity and keeps the connection open
+      # for their idle limit; it never extends the session past its lifetime,
+      # because the token itself expires first (SmartAuthorization).
+      # authenticate_smart_token! has already refused a token whose session or
+      # connection is gone; one that went in between answers 401.
+      def run_on_launched_users_connection(&action)
+        authorization = launched_authorization
+        return action.call unless authorization && RpmsSessions.enabled?
+
+        RpmsSessions.touch(authorization.pool_key, idle_for: launched_idle_limit(authorization))
+        RpmsSessions.with_user(authorization.pool_key, &action)
+      rescue RpmsSessions::SignInAgain, RpmsRpc::SessionPool::PoolExhaustedError
+        current_token.revoke unless current_token.revoked?
+        render_unauthorized("Invalid or revoked token")
+      end
+
+      # The user's RPMS idle limit when shorter than the site's (WebController).
+      def launched_idle_limit(authorization)
+        site = Lakeraven::EHR.configuration.session_idle_limit.to_i
+        [ authorization.rpms_idle_seconds, site ].compact.min
+      end
 
       # Write scope for the operation, read scope for EVERY type it discloses.
       def authorize_disclosing_write!(disclosed_types)
@@ -96,6 +124,21 @@ module Lakeraven
       # message and the DFN stay in the server log, because this response field
       # is caller-visible and the same reasoning as the audit note below applies
       # -- a rescued message is free text that can carry PHI.
+      # An API request carries a token, not a signed-in user's RPMS connection,
+      # and this process holds no shared one (ADR 0011). Until a deployment
+      # gives backend clients a named service account (ADR 0011 §6), a request
+      # that reaches for RPMS is refused, never served on another user's
+      # connection.
+      rescue_from RpmsRpc::NotConfiguredError do
+        Rails.logger.warn("[rpms] API request with no RPMS identity: #{controller_path}##{action_name}")
+        render_operation_outcome(
+          status: :service_unavailable,
+          severity: "error",
+          code: "transient",
+          diagnostics: "This request has no RPMS connection of its own."
+        )
+      end
+
       rescue_from Lakeraven::EHR::SupplementalProviderError do |error|
         Rails.logger.error("supplemental clinical provider failed: #{error.message}")
         render_operation_outcome(
@@ -135,7 +178,7 @@ module Lakeraven
       end
 
       def render_bundle(entries, type: "searchset")
-        render json: fhir_search_bundle(entries, type: type), status: :ok, content_type: FHIR_CONTENT_TYPE
+        render json: fhir_subset_bundle(fhir_search_bundle(entries, type: type)), status: :ok, content_type: FHIR_CONTENT_TYPE
       end
     end
   end

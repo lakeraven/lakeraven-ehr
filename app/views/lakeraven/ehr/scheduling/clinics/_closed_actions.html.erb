@@ -1,0 +1,7 @@
+<%# A cancelled or no-show appointment's remarks can still be corrected (rpms-ux S-SCH-09.3). %>
+<% if %w[cancelled no-show].include?(status_key) && can_book?(resource) %>
+  <%= link_to "Change remarks",
+        scheduling_appointment_details_path(resource[:id], appointment[:id], date: date.iso8601),
+        data: { action_name: "remarks" },
+        aria: { label: "Change the remarks on #{appointment[:patient_name]}'s appointment at #{appointment[:start_time].strftime('%H:%M')}" } %>
+<% end %>

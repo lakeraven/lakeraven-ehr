@@ -17,6 +17,13 @@ module Lakeraven
     class ClinicalDecisionSupportService
       CONFIG_PATH = Lakeraven::EHR::Engine.root.join("db/data/cds_rules.yml")
 
+      UNAVAILABLE_CHECK_ALERT =
+        "Drug interactions could not be checked: drug interaction checking is not available on this server."
+      GENERIC_INCOMPLETE_CHECK_ALERT =
+        "Drug interactions could not be checked: the drug interaction check did not complete."
+      DATA_FETCH_INCOMPLETE_ALERT =
+        "Drug interactions could not be checked: the patient's medications or allergies could not be retrieved."
+
       def self.rules_config
         @rules_config ||= YAML.safe_load_file(CONFIG_PATH, permitted_classes: [ Symbol ]).deep_symbolize_keys
       end
@@ -66,12 +73,18 @@ module Lakeraven
 
           proposed = OpenStruct.new(medication_display: proposed_drug, medication_code: nil)
 
-          # Use the local knowledge base service for interaction checking
-          service = DrugInteractionService.new
+          # A failed fetch is not an empty chart. Do not check against missing data.
           active_meds = fetch_active_medications(patient_dfn)
           allergies = fetch_allergies(patient_dfn)
+          if active_meds.nil? || allergies.nil?
+            return CdsResult.new(
+              patient_dfn: patient_dfn,
+              alerts: [ incomplete_drug_interaction_alert(DATA_FETCH_INCOMPLETE_ALERT) ]
+            )
+          end
 
-          result = service.check(
+          # Configured backend; the local YAML knowledge base when none is set.
+          result = DrugInteractionService.new.check(
             active_medications: active_meds,
             proposed_medication: proposed,
             allergies: allergies
@@ -90,6 +103,11 @@ module Lakeraven
               created_at: Time.current
             }
           end
+
+          # An incomplete check carries no interaction list. One high alert
+          # records that the check did not run. Unavailable is the only cause
+          # that uses the unavailable wording; exception text is never shown.
+          alerts << incomplete_drug_interaction_alert(incomplete_alert_message(result)) if result.incomplete?
 
           CdsResult.new(patient_dfn: patient_dfn, alerts: alerts)
         end
@@ -131,16 +149,39 @@ module Lakeraven
 
         private
 
+        def incomplete_drug_interaction_alert(message)
+          {
+            id: "cds-di-#{SecureRandom.hex(4)}",
+            category: "drug-interaction-check-incomplete",
+            severity: "high",
+            message: message,
+            source: "DrugInteractionService",
+            created_at: Time.current
+          }
+        end
+
+        # AdapterNotAvailable is the fixed unavailable reason. Anything else,
+        # including a builder failure or a check error, stays generic so the
+        # alert cannot repeat exception text or patient identifiers.
+        def incomplete_alert_message(result)
+          if result.incomplete_reason == DrugInteractionService::UNAVAILABLE_INCOMPLETE_REASON
+            UNAVAILABLE_CHECK_ALERT
+          else
+            GENERIC_INCOMPLETE_CHECK_ALERT
+          end
+        end
+
+        # nil means the load raised. An empty list is a real empty chart.
         def fetch_active_medications(patient_dfn)
           MedicationRequest.checked_for_patient(patient_dfn)
         rescue
-          []
+          nil
         end
 
         def fetch_allergies(patient_dfn)
           SupplementalClinicalResources.merged_allergy_intolerances_for_patient(patient_dfn)
         rescue
-          []
+          nil
         end
 
         def evaluate_clinical_reminders

@@ -1,3 +1,4 @@
+@app
 Feature: Vaccine Barcode Scanning
   As a clinical staff member
   I need to scan vaccine vial barcodes to capture lot and NDC information

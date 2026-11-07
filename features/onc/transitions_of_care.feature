@@ -13,6 +13,7 @@ Feature: Transitions of Care — C-CDA Send
   # C-CDA GENERATION — create valid C-CDA from patient data
   # =============================================================================
 
+  @app
   Scenario: Generate a Continuity of Care Document
     Given the patient has clinical data for a care summary
     When a C-CDA document is generated for the patient
@@ -20,38 +21,72 @@ Feature: Transitions of Care — C-CDA Send
     And the document should have CCD template ID "2.16.840.1.113883.10.20.22.1.2"
     And the document should include the patient demographics
 
+  @app
   Scenario: Generated C-CDA includes allergies section
     Given the patient has clinical data for a care summary
     When a C-CDA document is generated for the patient
     Then the document should include an allergies section
     And the allergies section should contain coded entries
 
+  @app
   Scenario: Generated C-CDA includes problems section
     Given the patient has clinical data for a care summary
     When a C-CDA document is generated for the patient
     Then the document should include a problems section
     And the problems section should contain coded entries
 
+  @app
   Scenario: Generated C-CDA includes medications section
     Given the patient has clinical data for a care summary
     When a C-CDA document is generated for the patient
     Then the document should include a medications section
     And the medications section should contain coded entries
 
+  @app
   Scenario: Generated C-CDA includes vital signs section
     Given the patient has clinical data for a care summary
     When a C-CDA document is generated for the patient
     Then the document should include a vital signs section
 
+  @app
   Scenario: Generated C-CDA includes encounters section
     Given the patient has clinical data for a care summary
     When a C-CDA document is generated for the patient
     Then the document should include an encounters section
+    And the encounters section should follow CDA element order
+
+  @app
+  Scenario: Generated C-CDA omits patient address when all fields blank
+    Given the patient has no address on file for a care summary
+    When a C-CDA document is generated for the patient
+    Then the document should omit patient addr
+
+  @live
+  Scenario: Transitions of care accepts egress zero-padded dfn for the same patient
+    Given a patient exists with DFN "1"
+    Given the Part 2 egress filter rewrites the patient dfn to "01"
+    When a transitions of care document is requested for the patient
+    Then the transitions of care response should include C-CDA with patient id extension "1"
+
+  @live
+  Scenario Outline: Transitions of care refuses C-CDA when egress patient dfn is not the requested patient
+    Given a patient exists with DFN "1"
+    Given the Part 2 egress filter rewrites the patient dfn to "<rewritten>"
+    When a transitions of care document is requested for the patient
+    Then the transitions of care response should refuse egress with status 503
+
+    Examples:
+      | rewritten |
+      | 2         |
+      | REDACTED  |
+      | 12A       |
+      | 0         |
 
   # =============================================================================
   # ROUND-TRIP VALIDATION — generated C-CDA can be re-parsed
   # =============================================================================
 
+  @app
   Scenario: Generated C-CDA can be parsed by CcdaParser
     Given the patient has clinical data for a care summary
     When a C-CDA document is generated for the patient
@@ -64,6 +99,7 @@ Feature: Transitions of Care — C-CDA Send
   # PERFORMANCE — (b)(1) test procedure requires timing
   # =============================================================================
 
+  @app
   Scenario: C-CDA generation completes within acceptable time
     Given the patient has clinical data for a care summary
     When a C-CDA document is generated with timing
@@ -73,12 +109,14 @@ Feature: Transitions of Care — C-CDA Send
   # DOCUMENT METADATA — required for transmission
   # =============================================================================
 
+  @app
   Scenario: Generated C-CDA includes author and custodian
     Given the patient has clinical data for a care summary
     When a C-CDA document is generated for the patient
     Then the document should include an author section
     And the document should include a custodian section
 
+  @app
   Scenario: Generated C-CDA includes document type code
     Given the patient has clinical data for a care summary
     When a C-CDA document is generated for the patient

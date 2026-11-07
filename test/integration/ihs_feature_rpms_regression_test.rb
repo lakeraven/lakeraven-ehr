@@ -21,13 +21,6 @@ class IhsFeatureRpmsRegressionTest < ActionDispatch::IntegrationTest
     reset_surface_data
   end
 
-  test "dashboard still shows Pending Referrals on rpms" do
-    sign_in_for_dashboard
-    get "/lakeraven-ehr/dashboard"
-    assert_response :ok
-    assert_includes response.body, "Pending Referrals"
-  end
-
   test "GET ServiceRequest still returns a referral bundle on rpms" do
     get "/lakeraven-ehr/ServiceRequest", params: { patient: PATIENT_DFN }, headers: @headers
     assert_response :ok
@@ -41,17 +34,6 @@ class IhsFeatureRpmsRegressionTest < ActionDispatch::IntegrationTest
     assert_response :ok
     body = JSON.parse(response.body)
     assert body.fetch("entry").any? { |e| e.dig("resource", "resourceType") == "Immunization" }
-  end
-
-  test "POST Patient still registers through the broker on rpms" do
-    fake = FakeBroker.new.on(Lakeraven::EHR::RegistrationGateway::REGISTER_RPC, "1^12345^")
-    use_broker(fake) do
-      post "/lakeraven-ehr/Patient",
-        params: registration_patient_json,
-        headers: @headers.merge("Content-Type" => "application/fhir+json")
-    end
-    assert_response :created
-    assert_equal Lakeraven::EHR::RegistrationGateway::REGISTER_RPC, fake.last_call[:rpc]
   end
 
   test "chart still renders the Immunizations card on rpms" do

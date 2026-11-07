@@ -1,0 +1,81 @@
+<% page_title "Open times | #{@resource[:name]} | Scheduling" %>
+
+<%= page_header "Open times at #{@resource[:name]}",
+      "#{@from.strftime("%b %-d")} to #{@to.strftime("%b %-d, %Y")}, #{@length} minutes." %>
+
+<%= form_with url: scheduling_clinic_open_times_path(@resource[:id]),
+      method: :get,
+      local: true,
+      id: "open-times-search",
+      class: "card flex flex-wrap items-end gap-3" do %>
+  <%= form_field :from, "From" do |aria| %>
+    <%= date_field_tag :from,
+          @from,
+          aria: aria %>
+  <% end %>
+  <%= form_field :to, "To (#{Lakeraven::EHR::Scheduling::OpenTimesController::MAX_DAYS} days at most)" do |aria| %>
+    <%= date_field_tag :to,
+          @to,
+          aria: aria %>
+  <% end %>
+  <%= form_field :length, "Minutes" do |aria| %>
+    <%= number_field_tag :length,
+          @length,
+          min: @resource[:time_scale],
+          step: @resource[:time_scale],
+          aria: aria %>
+  <% end %>
+  <%= form_field :part, "Time of day" do |aria| %>
+    <%= select_tag :part,
+          options_for_select([ [ "Any time", "" ], [ "Mornings", "am" ], [ "Afternoons", "pm" ] ], @part),
+          aria: aria %>
+  <% end %>
+  <%= form_field :access_type, "Access type" do |aria| %>
+    <%= select_tag :access_type,
+          options_for_select([ [ "Any type", "" ] ] + @access_types.map { |t| [ t[:name], t[:id] ] }, @access_type),
+          aria: aria %>
+  <% end %>
+  <%= submit_tag "Search",
+        name: nil,
+        class: "button-primary" %>
+<% end %>
+
+<div id="open-times">
+  <% @times.each do |date, times| %>
+    <% closed = @days[date].closed %>
+    <section
+      class="card"
+      data-date="<%= date.iso8601 %>"
+      data-closed="<%= closed %>"
+    >
+      <h2><%= date.strftime("%A, %b %-d") %></h2>
+      <% if closed == :holiday %>
+        <p>
+          Holiday: the clinic does not schedule on holidays.
+        </p>
+      <% elsif closed == :beyond_booking %>
+        <p>
+          Past the clinic's limit for booking ahead.
+        </p>
+      <% elsif closed == :inactive %>
+        <p>
+          The clinic is inactive on this day.
+        </p>
+      <% elsif times.empty? %>
+        <p>
+          No open time.
+        </p>
+      <% else %>
+        <ul class="flex flex-wrap gap-2">
+          <% times.each do |time| %>
+            <li>
+              <%= link_to time.strftime("%H:%M"),
+                    scheduling_new_clinic_appointment_path(@resource[:id], start: time.strftime("%Y-%m-%dT%H:%M"), length: @length),
+                    data: { time: time.strftime("%H:%M") } %>
+            </li>
+          <% end %>
+        </ul>
+      <% end %>
+    </section>
+  <% end %>
+</div>

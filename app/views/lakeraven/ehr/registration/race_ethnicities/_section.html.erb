@@ -1,0 +1,38 @@
+<%# The patient's races and ethnicities (rpms-ux S-REG-20.2), a section of the
+    patient's registration page: RACE INFORMATION and ETHNICITY INFORMATION,
+    PATIENT (2.02 and 2.06), each with its METHOD OF COLLECTION (.02).
+    Locals: dfn, race_ethnicity (RpmsRpc::Registration.race_ethnicity), can_edit. %>
+<section
+  id="race-ethnicity-section"
+  aria-labelledby="race-ethnicity-heading"
+  class="card mt-6"
+>
+  <div class="flex items-baseline justify-between gap-4">
+    <h2 id="race-ethnicity-heading">Race and ethnicity</h2>
+    <% if can_edit %>
+      <%= link_to "Record race and ethnicity",
+            registration_edit_patient_race_ethnicity_path(dfn),
+            id: "edit-race-ethnicity" %>
+    <% end %>
+  </div>
+  <dl class="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-2">
+    <% { races: "Race", ethnicities: "Ethnicity" }.each do |kind, label| %>
+      <dt><%= label %></dt>
+      <dd data-field="<%= kind %>">
+        <% rows = Array(race_ethnicity[kind]) %>
+        <% if rows.empty? %>
+          Not recorded
+        <% else %>
+          <% rows.each do |row| %>
+            <span class="block">
+              <%= row[:name].to_s.titleize %>
+              <% if row[:method_name].present? %>
+                <span class="hint">(<%= row[:method_name].to_s.downcase %>)</span>
+              <% end %>
+            </span>
+          <% end %>
+        <% end %>
+      </dd>
+    <% end %>
+  </dl>
+</section>

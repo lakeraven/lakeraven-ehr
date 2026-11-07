@@ -14,11 +14,13 @@ Feature: Authentication
   # VALID LOGIN SCENARIOS
   # =============================================================================
 
+  @live
   Scenario: Provider logs in with valid access and verify codes
     When I login as "PMD123" with password "PMD123!!"
     Then I should be logged in successfully
     And my user type should be "provider"
 
+  @live
   Scenario: Nurse logs in with valid credentials
     When I login as "PRN123" with password "PRN123!!"
     Then I should be logged in successfully
@@ -26,16 +28,19 @@ Feature: Authentication
 
   # The registration clerk and the scheduler hold only their package menus
   # (AGZMENU, SDZMENU) and USRCLS 0, so the engine resolves them as "user".
+  @live
   Scenario: Registration clerk logs in with valid credentials
     When I login as "PREG123" with password "PREG123!!"
     Then I should be logged in successfully
     And my user type should be "user"
 
+  @live
   Scenario: Scheduler logs in with valid credentials
     When I login as "PSCH123" with password "PSCH123!!"
     Then I should be logged in successfully
     And my user type should be "user"
 
+  @live
   Scenario: Clerk logs in with valid credentials
     When I login as "PMA123" with password "PMA123!!"
     Then I should be logged in successfully
@@ -45,16 +50,19 @@ Feature: Authentication
   # INVALID LOGIN SCENARIOS
   # =============================================================================
 
+  @live
   Scenario: Login fails with invalid access code
     When I login as "INVALID" with password "test123"
     Then I should see an authentication error "Invalid"
     And I should not be logged in
 
+  @live
   Scenario: Login fails with a wrong verify code
     When I login as "PMD123" with password "NOT-THE-CODE"
     Then I should see an authentication error "Invalid"
     And I should not be logged in
 
+  @live
   Scenario: Login fails with invalid verify code
     When I login as "PMD123" with password ""
     Then I should see an authentication error "Password required"
@@ -64,6 +72,7 @@ Feature: Authentication
   # LOGOUT SCENARIOS
   # =============================================================================
 
+  @app
   Scenario: User logs out successfully
     Given I am logged in as a provider
     When I log out
@@ -73,6 +82,7 @@ Feature: Authentication
   # ROLE-BASED PERMISSIONS
   # =============================================================================
 
+  @app
   Scenario: Provider can view and create referrals
     Given I am logged in as a provider
     Then I should have permission to "view_patients"
@@ -81,6 +91,7 @@ Feature: Authentication
     And I should have permission to "edit_own_referrals"
     But I should not have permission to "approve_referrals"
 
+  @app
   Scenario: Nurse can view patients and referrals
     Given I am logged in as a nurse
     Then I should have permission to "view_patients"
@@ -88,6 +99,7 @@ Feature: Authentication
     And I should have permission to "update_referral_status"
     But I should not have permission to "create_referrals"
 
+  @app
   Scenario: Clerk has limited view permissions
     Given I am logged in as a clerk
     Then I should have permission to "view_patients"
@@ -95,6 +107,7 @@ Feature: Authentication
     But I should not have permission to "create_referrals"
     And I should not have permission to "approve_referrals"
 
+  @app
   Scenario: Case manager can approve and manage referrals
     Given I am logged in as a case_manager
     Then I should have permission to "view_patients"
@@ -107,20 +120,24 @@ Feature: Authentication
   # SECURITY KEY CHECKS
   # =============================================================================
 
+  @app
   Scenario: User with BMCZSUPERVISOR key can approve CHS
     Given I am logged in as a case_manager with security key "BMCZSUPERVISOR"
     Then I should be able to approve CHS referrals
 
+  @app
   Scenario: User without BMCZSUPERVISOR key cannot approve CHS
     Given I am logged in as a clerk without security keys
     Then I should not be able to approve CHS referrals
 
+  @app
   Scenario: User with BMCZMENU key can process CHS claims
     Given I am logged in as a clerk with security key "BMCZMENU"
     Then I should be able to process CHS claims
 
   # GMRC MGR is a menu option, not a SECURITY KEY, and no key for consults is
   # decided yet (#578): it grants nothing.
+  @app
   Scenario: No key grants consult management until one is decided
     Given I am logged in as a nurse with security key "GMRC MGR"
     Then I should not be able to manage consults
@@ -129,6 +146,7 @@ Feature: Authentication
   # UNAUTHENTICATED ACCESS
   # =============================================================================
 
+  @app
   Scenario: Unauthenticated user has no permissions
     Given I am not logged in
     Then I should not have a current user
