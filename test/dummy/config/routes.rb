@@ -52,4 +52,19 @@ Rails.application.routes.draw do
     post "reset_session_probe" => "reset_session_probe#create"
     post "conditional_skip_probe" => "conditional_skip_probe#create"
   end
+
+  # Test-only: host routes that point STRAIGHT at the engine's governed
+  # controllers, bypassing the engine's routing constraints (#522 gap B). A
+  # host app can draw exactly these, so a closed disclosure surface must
+  # still answer 404 here — before authentication, before the rate limiter
+  # and before any broker call. Param names match the engine's own routes
+  # (config/routes.rb) and the controllers' params[...] reads.
+  if Rails.env.test?
+    get "host_fhir/Patient/:dfn", to: "lakeraven/ehr/patients#show"
+    get "host_fhir/Condition", to: "lakeraven/ehr/conditions#index"
+    post "host_exports", to: "lakeraven/ehr/exports#create"
+    get "host_exports/:export_id/files/:file_name", to: "lakeraven/ehr/export_files#show",
+      format: false, constraints: { file_name: %r{[^/]+} }
+    post "host_transitions_of_care", to: "lakeraven/ehr/transitions_of_care#create"
+  end
 end
