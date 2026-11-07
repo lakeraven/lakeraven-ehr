@@ -12,6 +12,9 @@ class SchedulingVisitDayTest < ActionDispatch::IntegrationTest
   RESOURCE = { id: 2, name: "DEMO IHS CLINIC", inactive: false, time_scale: 15, hospital_location_id: 3,
                view: true, overbook: true, modify_schedule: true, modify_appointments: true }.freeze
 
+  # Midday, so "an hour ago" is still today whenever CI runs.
+  setup { travel_to Time.now.change(hour: 12) }
+
   def today = Date.today
   def ago(minutes) = Time.now - (minutes * 60)
 
