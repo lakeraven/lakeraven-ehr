@@ -29,6 +29,14 @@ module Lakeraven
         setup.nil? || setup[:visit_provider_required].to_s.upcase != "NO"
       end
 
+      # Whether the resource's clinic makes a visit at check-in: CLINIC SETUP
+      # PARAMETERS CREATE VISIT AT CHECK-IN, by the linked clinic (BSDX CLINIC
+      # SETUP). Unknown counts as not.
+      def self.creates_visit?(resource, via: ::RpmsRpc::Scheduling)
+        setup = Array(via.clinic_setup).find { |c| c[:location_ien].to_i == resource[:hospital_location_id].to_i }
+        setup&.dig(:create_visit).to_s.upcase == "YES"
+      end
+
       # reread: returns the appointment as RPMS now has it. clinic_code: the
       # CLINIC STOP code, for a clinic that uses several (S-SCH-03.5, 06.3).
       def self.check_in(appointment_id, at:, provider_ien:, reread:, clinic_code: nil, via: ::RpmsRpc::Scheduling)

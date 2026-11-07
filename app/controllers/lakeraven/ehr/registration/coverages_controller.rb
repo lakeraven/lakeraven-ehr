@@ -93,7 +93,7 @@ module Lakeraven
         end
 
         def load_patient!
-          @patient = RpmsRpc::Patient.brief_header(params[:dfn].to_i)
+          @patient = PatientGateway.brief_header(params[:dfn])
           render "lakeraven/ehr/registration/patients/not_found", status: :not_found unless @patient
         end
 

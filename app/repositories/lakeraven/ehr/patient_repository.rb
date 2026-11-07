@@ -61,7 +61,7 @@ module Lakeraven
         def try_fhir(dfn)
           return nil unless fhir_available?
 
-          fhir_data = RpmsRpc.fhir_client.read("Patient", dfn.to_s)
+          fhir_data = RpmsClientGateway.fhir_client.read("Patient", dfn.to_s)
           return nil if fhir_data.nil? || fhir_data["resourceType"] == "OperationOutcome"
 
           patient = Patient.from_fhir(fhir_data)
@@ -73,7 +73,7 @@ module Lakeraven
         end
 
         def fhir_available?
-          RpmsRpc.respond_to?(:fhir_client) && RpmsRpc.fhir_client.present?
+          RpmsRpc.respond_to?(:fhir_client) && RpmsClientGateway.fhir_client.present?
         rescue
           false
         end

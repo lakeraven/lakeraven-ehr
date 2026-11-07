@@ -51,7 +51,7 @@ module Lakeraven
 
         def load_page
           @modifiers = PatientProfileGateway.eligibility_modifiers(@dfn)
-          @status = RpmsRpc::Tribal.enrollment(@dfn)&.dig(:eligibility_status).presence
+          @status = PatientProfileGateway.enrollment(@dfn)&.dig(:eligibility_status).presence
           @choices = PatientProfileGateway.eligibility_modifier_choices(@status).reject { |row| @modifiers.any? { |m| m[:ien] == row[:ien] } }
         end
       end

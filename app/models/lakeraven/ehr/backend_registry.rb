@@ -137,7 +137,7 @@ module Lakeraven
         end
       end
 
-      register :rpms, client: -> { RpmsRpc.client }, capabilities: CAPABILITIES
+      register :rpms, client: -> { RpmsSessions.client }, capabilities: CAPABILITIES
     end
   end
 end
