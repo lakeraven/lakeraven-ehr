@@ -22,8 +22,10 @@
 #   UNDETERMINED           2    could not tell. Never a pass: no merge-base, no parseable
 #                               summary, zero tests run, every test skipped, unreadable errors,
 #                               a Gemfile/lockfile/gemspec/Rakefile or bin/ change alongside
-#                               tests (not revertible by restoring app paths), or the throwaway
-#                               database setup failed.
+#                               tests (not revertible by restoring app paths), the scratch
+#                               worktree's Rails config resolves the test database to a name
+#                               other than the printed scratch name, or the throwaway database
+#                               setup failed.
 #
 # The summary is read only from the single "Finished in" block minitest prints; a run
 # with no such block, or more than one, is UNDETERMINED (test output can imitate a summary).
@@ -38,25 +40,39 @@
 # migration: the test database is loaded from the PR's schema before this script runs and is
 # not reverted, so the base app code ran against a schema it may not have had.
 #
+# This runs the PR's own copy of this script. It therefore cannot police a PR that edits
+# the script (or its workflow) to say what it likes. That is why it is advisory, and why the
+# workflow must stay on `pull_request`: it executes the PR's tests, so it must never gain
+# the secrets or write token that `pull_request_target` would give it.
+#
 # When DATABASE_URL is unset, the scratch worktree has no database of its own: the
 # name would be derived from a path that was just created. The script exports
 # TEST_DATABASE=lakeraven_ehr_rbg_<unique suffix> (a PostgreSQL identifier, at most
-# 63 bytes, different every run) and unsets TEST_ENV_NUMBER for setup, the tests,
-# and teardown inside that worktree, so the name Rails resolves is exactly the
-# printed one. Setup is $RBG_DB_SETUP_CMD, defaulting to
+# 63 bytes, different every run), unsets TEST_ENV_NUMBER for every command it runs
+# inside that worktree, and prints the name. The printed name is verified, not
+# assumed: the worktree runs the PR's own test/dummy/config/database.yml, which may
+# ignore TEST_DATABASE, in which case setup would act on, and teardown would drop,
+# somebody else's database. So before setup the script runs $RBG_DB_RESOLVE_CMD in
+# the worktree, with the same environment setup gets, and takes the last non-blank
+# line of its stdout (CR and trailing whitespace stripped; stderr is passed through)
+# as the database Rails resolves. By default that is a bin/rails runner printing the
+# one database in configs_for(env_name: "test"), the set db:create and db:drop act
+# on; it does not need the database to exist, and exits non-zero if more than one
+# database is configured. A non-zero exit, no output, or a name that is not byte for
+# byte the printed one is UNDETERMINED, naming both names; setup, the tests, and
+# teardown do not run, and nothing is created or dropped. Only after that match does
+# the script own the database. Setup is $RBG_DB_SETUP_CMD, defaulting to
 # "RAILS_ENV=test bin/rails db:create db:schema:load"; if it fails the verdict is
 # UNDETERMINED. Teardown is $RBG_DB_TEARDOWN_CMD, or by default
 # "RAILS_ENV=test bin/rails db:drop" (Rails' config, as setup uses, so a PGHOST
 # cannot aim the drop at another server). It runs from the cleanup trap only after
 # the test process group is gone, before the worktree is removed, on every exit
-# path including RED and a caught signal. A failure prints a warning naming the
-# database and does not change the verdict. With DATABASE_URL set, CI's database
-# is used and this script does not create or drop one.
-#
-# This runs the PR's own copy of this script. It therefore cannot police a PR that edits
-# the script (or its workflow) to say what it likes. That is why it is advisory, and why the
-# workflow must stay on `pull_request`: it executes the PR's tests, so it must never gain
-# the secrets or write token that `pull_request_target` would give it.
+# path including RED and a caught signal, and only when setup was started. Before
+# the drop, the script resolves the name again in the worktree; if that fails, prints
+# nothing, or differs from the printed name, the drop is skipped and a WARNING names
+# the scratch database as possibly left behind, with the dropdb command for it. A
+# teardown failure or skip does not change the verdict. With DATABASE_URL set, CI's
+# database is used and this script neither resolves, creates, nor drops one.
 #
 # On the first INT, TERM, or HUP, those three stay trapped to a handler that only
 # records later signals — they are not reset to the default — while the child is
@@ -79,16 +95,32 @@
 #   RBG_EXEMPT=1     skip the check (CI sets it from the `red-green-exempt` label)
 #   RBG_TEST_CMD     the test command (default "bundle exec rails test"); changed test
 #                    files are appended as arguments
+#   RBG_DB_RESOLVE_CMD
+#                    when DATABASE_URL is unset, print the test database the scratch
+#                    worktree's Rails config resolves. Run in the worktree with the
+#                    same environment as setup (TEST_DATABASE exported, TEST_ENV_NUMBER
+#                    and DATABASE_URL unset); the answer is the last non-blank line
+#                    of its stdout, stderr is passed through. Default: a
+#                    "RAILS_ENV=test bin/rails runner" that prints the one database in
+#                    configs_for(env_name: "test") and exits non-zero if there is not
+#                    exactly one. It must not need the database to exist. Run once
+#                    before setup (a failure, no output, or a name other than the
+#                    printed TEST_DATABASE is UNDETERMINED, and nothing is set up,
+#                    run, or dropped) and again before teardown (then a failure or a
+#                    different name skips the drop with a warning).
 #   RBG_DB_SETUP_CMD when DATABASE_URL is unset, create the throwaway test database
 #                    (default "RAILS_ENV=test bin/rails db:create db:schema:load").
+#                    Runs only after RBG_DB_RESOLVE_CMD reported the printed name.
 #                    A failure is UNDETERMINED, naming the database setup.
 #   RBG_DB_TEARDOWN_CMD
 #                    drop that database. Default: "RAILS_ENV=test bin/rails db:drop"
 #                    (Rails' config, same as setup, so PGHOST cannot redirect it).
-#                    Runs from the cleanup trap after the test process group is
-#                    gone and before the worktree is removed, including after INT,
-#                    TERM, or HUP. A failure prints a warning naming the database
-#                    and does not change the verdict. Unused when DATABASE_URL is set.
+#                    Runs from the cleanup trap, only when setup was started, after
+#                    the test process group is gone and before the worktree is
+#                    removed, including after INT, TERM, or HUP, and only if
+#                    RBG_DB_RESOLVE_CMD again reports the printed name. A failure or
+#                    a skipped drop prints a warning naming the database and does
+#                    not change the verdict. Unused when DATABASE_URL is set.
 #   RBG_REPORT=FILE  also append the verdict block to FILE (CI: $GITHUB_STEP_SUMMARY)
 #   RBG_ANNOTATE=1   also print ::warning:: workflow commands for warnings (CI sets it)
 set -uo pipefail
@@ -200,11 +232,22 @@ if [ -n "$EXEMPT_REASON" ]; then echo "exempt: yes ($EXEMPT_REASON)"; else echo 
 # --- scratch worktree at HEAD with the app code put back to the base ---------
 SCRATCH=$(mktemp -d "${TMPDIR:-/tmp}/rbg.XXXXXX") || verdict UNDETERMINED 2 "cannot create a scratch directory"
 WT="$SCRATCH/wt"
-# 0 until a throwaway TEST_DATABASE is chosen. The trap drops it, then the worktree.
+# 0 until this script's own setup of the throwaway TEST_DATABASE has started, which
+# happens only after the worktree's Rails config was seen to resolve that exact
+# name. The trap drops the database (after resolving it again), then the worktree.
 RBG_OWN_DB=0
-# eval, not a bare expansion: these are command lines (the setup default starts
-# with RAILS_ENV=test), same as TEST_CMD below. Teardown uses Rails' config, as
-# setup does, and runs only after the test process group is gone.
+# eval, not a bare expansion: these are command lines (the defaults start with
+# RAILS_ENV=test), same as TEST_CMD below. Teardown uses Rails' config, as setup
+# does, and runs only after the test process group is gone.
+# The resolver prints the database Rails would use for the test environment in the
+# worktree. configs_for(env_name: "test") is the set db:create and db:drop act on,
+# so the answer covers what setup and teardown would touch; with more than one
+# database configured, one name could not vouch for the rest, so it exits non-zero.
+# Reading the configuration does not connect, so the database need not exist.
+read -r -d '' DEFAULT_DB_RESOLVE_CMD <<'RUBY' || true
+RAILS_ENV=test bin/rails runner 'c = ActiveRecord::Base.configurations.configs_for(env_name: Rails.env).map(&:database).uniq; abort %(red-before-green: #{c.size} test databases configured, not 1) unless c.size == 1; print c.first'
+RUBY
+DB_RESOLVE_CMD="${RBG_DB_RESOLVE_CMD:-$DEFAULT_DB_RESOLVE_CMD}"
 DB_SETUP_CMD="${RBG_DB_SETUP_CMD:-RAILS_ENV=test bin/rails db:create db:schema:load}"
 DB_TEARDOWN_CMD="${RBG_DB_TEARDOWN_CMD:-RAILS_ENV=test bin/rails db:drop}"
 
@@ -327,10 +370,15 @@ cleanup() {
   ensure_group_gone
   if [ "$RBG_OWN_DB" -eq 1 ]; then
     # Drop before the worktree is removed, on every exit path, and only once
-    # the test process group is gone. The verdict's code, when one was reached,
-    # is what this trap exits with; otherwise 128 plus the first signal.
-    if ! ( cd "$WT" && eval "$DB_TEARDOWN_CMD" ); then
-      echo "red-before-green: WARNING: failed to drop test database ${TEST_DATABASE}." >&2
+    # the test process group is gone. The drop acts on whatever Rails resolves
+    # in the worktree, so resolve again first and drop only when that is still
+    # the database this run's setup created; otherwise leave it and say so.
+    # The verdict's code, when one was reached, is what this trap exits with;
+    # otherwise 128 plus the first signal.
+    if ! resolve_db "$SCRATCH/resolve.teardown.out"; then
+      echo "red-before-green: WARNING: not dropping test database ${TEST_DATABASE}: ${RESOLVE_PROBLEM}. If ${TEST_DATABASE} exists it was created by this run and is left behind; drop it with: dropdb ${TEST_DATABASE}" >&2
+    elif ! ( cd "$WT" && eval "$DB_TEARDOWN_CMD" ); then
+      echo "red-before-green: WARNING: failed to drop test database ${TEST_DATABASE}; drop it with: dropdb ${TEST_DATABASE}" >&2
     fi
   fi
   git worktree remove --force "$WT" >/dev/null 2>&1 || true
@@ -369,6 +417,34 @@ run_group() {
   return "$rc"
 }
 
+# resolve_db OUTFILE — run $DB_RESOLVE_CMD in the scratch worktree, in its own
+# process group like setup, with stdout in OUTFILE and stderr passed through. The
+# answer is the last non-blank line of that stdout, CR and trailing whitespace
+# stripped. Returns 0 only when the command exited 0 and the answer is byte for
+# byte $TEST_DATABASE. Otherwise RESOLVE_PROBLEM says why, and the caller must not
+# touch any database: an absent or different answer is not a name to act on.
+RESOLVE_PROBLEM=""
+resolve_db() {
+  local out="$1" rc=0 resolved
+  RESOLVE_PROBLEM=""
+  run_group - bash -c 'cd "$1" && exec >"$3" && eval "$2"' rbg "$WT" "$DB_RESOLVE_CMD" "$out" || rc=$?
+  ensure_group_gone
+  if [ "$rc" -ne 0 ]; then
+    RESOLVE_PROBLEM="database resolution failed (RBG_DB_RESOLVE_CMD exited $rc in the scratch worktree), so the database Rails resolves there is unknown"
+    return 1
+  fi
+  resolved=$(tr -d '\r' < "$out" 2>/dev/null | sed -e 's/[[:space:]]*$//' -e '/^$/d' | tail -n 1)
+  if [ -z "$resolved" ]; then
+    RESOLVE_PROBLEM="database resolution printed no database name (RBG_DB_RESOLVE_CMD wrote no non-blank line to stdout in the scratch worktree), so the database Rails resolves there is unknown"
+    return 1
+  fi
+  if [ "$resolved" != "$TEST_DATABASE" ]; then
+    RESOLVE_PROBLEM="the scratch worktree resolves the test database to '$resolved', not to the scratch name '$TEST_DATABASE' (its database.yml, or RBG_DB_RESOLVE_CMD, does not follow TEST_DATABASE)"
+    return 1
+  fi
+  return 0
+}
+
 git worktree add -q --detach "$WT" HEAD >/dev/null 2>&1 \
   || verdict UNDETERMINED 2 "cannot create a scratch worktree at HEAD"
 
@@ -397,8 +473,16 @@ if [ -z "${DATABASE_URL:-}" ]; then
   TEST_DATABASE="lakeraven_ehr_rbg_${raw}_$$_${rand}"
   [ "${#TEST_DATABASE}" -le 63 ] || TEST_DATABASE="${TEST_DATABASE:0:63}"
   export TEST_DATABASE
-  RBG_OWN_DB=1
   echo "test database: $TEST_DATABASE"
+  # The worktree runs the PR's database.yml, which may ignore TEST_DATABASE and
+  # name a database that already belongs to somebody. Setup, and so the later
+  # drop, may act only on a config seen to resolve the printed name; anything
+  # else, including a resolver that fails or says nothing, is a refusal.
+  resolve_db "$SCRATCH/resolve.setup.out" \
+    || verdict UNDETERMINED 2 "$RESOLVE_PROBLEM; refusing to set up, test against, or drop a database for scratch name $TEST_DATABASE"
+  # Ownership starts here, after the verified match and right before setup:
+  # from now on the cleanup trap drops the database (after resolving it again).
+  RBG_OWN_DB=1
   if ! run_group - bash -c 'cd "$1" && eval "$2"' rbg "$WT" "$DB_SETUP_CMD"; then
     verdict UNDETERMINED 2 "database setup failed (TEST_DATABASE=$TEST_DATABASE)"
   fi

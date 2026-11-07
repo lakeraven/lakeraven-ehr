@@ -89,11 +89,27 @@ $ RAILS_ENV=test bin/rails db:drop
 ```
 
 Locally, `bin/red-before-green` makes and drops its own scratch database
-(named `lakeraven_ehr_rbg_<suffix>`) when `DATABASE_URL` is unset. A cancelled
-or killed red-before-green run can leave a stale `lakeraven_ehr_rbg_*` database
-behind; the listing above finds it. A hard-killed run (SIGKILL, or power loss)
-never reaches that cleanup, so it can leave the scratch worktree and that
-database. The `psql -l | grep lakeraven_ehr_` listing above finds the database.
-Remove the worktree with `git worktree remove --force <path>`. If the directory
-is already gone and git still has it registered, run `git worktree prune`.
-CI sets `DATABASE_URL`, so the script does not create or drop a database there.
+(named `lakeraven_ehr_rbg_<suffix>`, printed as `test database: ...`) when
+`DATABASE_URL` is unset. It passes that name as `TEST_DATABASE`, but the scratch
+worktree runs the PR's own `test/dummy/config/database.yml`, which may ignore
+`TEST_DATABASE`, so the script does not assume the name is used. Before creating
+anything it runs `RBG_DB_RESOLVE_CMD` in the worktree (by default a
+`bin/rails runner` that prints the database the test environment is configured
+with, which does not need the database to exist) and requires the answer to be
+exactly the printed name. If the resolver fails, prints nothing, or names another
+database, the verdict is `UNDETERMINED` naming both databases, and the script
+creates, runs against, and drops nothing. It drops a database only after its own
+`db:create` ran, and only if resolving again just before the drop still gives the
+printed name; otherwise it skips the drop and prints a warning naming the scratch
+database and the `dropdb` command for it. A PR whose `database.yml` pins the test
+database to a fixed name therefore gets `UNDETERMINED` rather than having that
+database dropped.
+
+A cancelled or killed red-before-green run can leave a stale
+`lakeraven_ehr_rbg_*` database behind; the listing above finds it. A hard-killed
+run (SIGKILL, or power loss) never reaches that cleanup, so it can leave the
+scratch worktree and that database. The `psql -l | grep lakeraven_ehr_` listing
+above finds the database. Remove the worktree with
+`git worktree remove --force <path>`. If the directory is already gone and git
+still has it registered, run `git worktree prune`. CI sets `DATABASE_URL`, so the
+script does not resolve, create, or drop a database there.
