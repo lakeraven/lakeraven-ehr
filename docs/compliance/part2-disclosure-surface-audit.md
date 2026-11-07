@@ -158,6 +158,12 @@ defines no feature flags, ENV toggles or config accessors, and `config/routes.rb
 every path unconditionally — there is no switch to set. Turning paths 2–4 off requires
 building the mechanism. Small, but not zero, and §3(b) reads as though it were free.
 
+*Update (#522):* the mechanism now exists. `config.x.lakeraven_ehr.open_disclosure_surfaces`
+names the surfaces a host opens (`fhir_api`, `bulk_export`, `ccda`); routing constraints
+answer 404 for every other one before authentication and before any broker call, and the
+default (nothing configured) is closed. Paths 2–4 are off unless named; path 1, `/metadata`
+and SMART discovery are never governed. See the README's "Disclosure surfaces" section.
+
 **(b) The "Gate today" column is currently decoration for paths 2–4, and this audit
 omits the reason.** #496 is not cited anywhere above. It is open, and the defect is live:
 `backend_services_controller.rb:52-56` decodes the client assertion with no signature

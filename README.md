@@ -117,6 +117,30 @@ Then add this line to the host's `app/assets/tailwind/application.css`:
 The engine's styles cannot restyle the host's own pages.
 They define no theme, and every element default is scoped to `.lr-ehr`, the class the engine layout puts on `<body>`.
 
+### Disclosure surfaces
+
+Three egress paths are closed unless the host opens them by name (#522):
+
+```ruby
+# config/environments/production.rb (or an initializer)
+config.x.lakeraven_ehr.open_disclosure_surfaces = %i[fhir_api]
+```
+
+| Name | Governs |
+| --- | --- |
+| `fhir_api` | The FHIR REST resource routes (`/Patient`, `/Condition`, ... `/ValueSet/:id/$expand`, `/Measure`, `/MeasureReport`, `/AuditEvent`, `/CoverageEligibilityRequest`) and the chart's FHIR JSON (`/patients/:dfn.json`, `?_format=json`, `Accept: application/fhir+json`). |
+| `bulk_export` | Bulk export: `/exports` kick-off, status, delete and its files. |
+| `ccda` | Outbound C-CDA: `/transitions_of_care`. |
+
+The default is closed.
+Only an Array opens anything, and only entries naming one of the three (Strings and Symbols alike).
+An absent key, `nil`, `true`, a bare String or Symbol, a Hash, or an unknown name opens nothing.
+The value is read on every request.
+A closed surface answers 404 before authentication and before any broker call, with no clinical content.
+
+Never governed: the HTML chart, `/metadata`, `/.well-known/smart-configuration`, SMART launch and OAuth, `ccda_imports` (inbound) and `Measure/$import`.
+The dummy app opens all three in development and test, and none in production.
+
 ## Contributing
 Contribution directions go here.
 

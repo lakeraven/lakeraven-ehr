@@ -53,4 +53,8 @@ Rails.application.configure do
 
   # Raise error when a before_action's only/except options reference missing actions.
   config.action_controller.raise_on_missing_callback_actions = true
+
+  # Disclosure surfaces (#522): the local demo opens all three. A host that
+  # names none is closed (production.rb opens nothing).
+  config.x.lakeraven_ehr.open_disclosure_surfaces = %i[fhir_api bulk_export ccda]
 end

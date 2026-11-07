@@ -83,6 +83,8 @@ module Lakeraven
       # adds an outcome entry instead of those resources (#647).
       CHART_CAPABILITY_RESOURCES = { ihs_immunization: "Immunization" }.freeze
 
+      # Declared after every include, so it is the first callback to run.
+      prepend_before_action :refuse_closed_fhir_surface!
       before_action :authenticate_chart_request!
       before_action :require_patient_scope!
       # After authentication and Patient scope, before the token compartment
@@ -319,11 +321,24 @@ module Lakeraven
 
       # -- Content negotiation --------------------------------------------------
 
+      # Shared with the fhir_api disclosure surface (#522), so the request the
+      # chart would answer with FHIR JSON is the request a closed surface refuses.
       def fhir_requested?
-        return true if params[:format].to_s == "json"
-        return true if params[:_format].to_s == "json"
+        ChartRepresentation.fhir_requested?(request)
+      end
 
-        request.headers["Accept"].to_s.include?("application/fhir+json")
+      # -- Disclosure surface (#522) ---------------------------------------------
+
+      # The engine route already refuses a closed surface. This covers a host
+      # route that points at this controller directly (the dummy app's root
+      # /patients/:dfn does). Prepended, so it runs before authentication,
+      # before the rate limiter and before any broker call; the 404 carries no
+      # body. The HTML chart is never governed.
+      def refuse_closed_fhir_surface!
+        return unless fhir_requested?
+        return if DisclosureSurfaces.open?(:fhir_api)
+
+        head :not_found
       end
 
       # -- Data loading (per-type scope enforced; a mock miss yields []) --------
