@@ -6,6 +6,18 @@
 # method stays inherited. An undef entry on the receiver singleton class is
 # restored after the stub is removed.
 module StubHelpers
+  # Process-wide serial for hidden alias names, so every install gets its own
+  # alias and a nested or repeated stub of the same owned method cannot
+  # overwrite the saved original (lakeraven-ehr#673 H1). The state lives on the
+  # module itself, not in an includer ivar: module_function copies the methods,
+  # and every copy must draw from the same counter.
+  HIDDEN_ALIAS_LOCK = Mutex.new
+  @hidden_alias_serial = 0
+
+  def self.next_hidden_alias_serial
+    HIDDEN_ALIAS_LOCK.synchronize { @hidden_alias_serial += 1 }
+  end
+
   module_function
 
   def with_stub(klass, method_name, value)
@@ -97,7 +109,7 @@ module StubHelpers
   end
 
   def unique_hidden_alias(sc, name)
-    :"__stub_helpers_#{sc.object_id}_#{name}_#{Process.pid}__"
+    :"__stub_helpers_#{sc.object_id}_#{name}_#{Process.pid}_#{StubHelpers.next_hidden_alias_serial}__"
   end
 
   def own_singleton_instance_method(singleton, method_name)
