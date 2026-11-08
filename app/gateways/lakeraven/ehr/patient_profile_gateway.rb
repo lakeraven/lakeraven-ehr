@@ -75,8 +75,10 @@ module Lakeraven
         end
 
         # The patient's tribe, enrollment and eligibility status as registration
-        # shows them, or nil. Not gated on tribal_enrollment, as the
-        # registration screens it serves never were (ADR 0013, decision 6e).
+        # shows them, or nil. The registration screens' ungated read of the
+        # same RPC as TribalEnrollmentGateway.enrollment_details: those screens
+        # never were gated on tribal_enrollment, and moving them under that
+        # capability would be a behaviour change outside this slice.
         def enrollment(dfn, via: ::RpmsRpc::Tribal)
           via.enrollment(dfn)
         end

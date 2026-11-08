@@ -69,11 +69,6 @@ module Lakeraven
           @pool.with_client(key) { |client| RpmsRpc.with_client(client, &block) }
         end
 
-        # The client an RPMS call runs on now: the user's own connection inside
-        # with_user, else the configured one. Raises RpmsRpc::NotConfiguredError
-        # when there is neither. The rpms backend's client source (BackendRegistry).
-        def client = RpmsRpc.client
-
         # Whether the configured client, the one used where no user holds a
         # connection here, has dropped. One that cannot say, or none, has not.
         def configured_client_closed?
