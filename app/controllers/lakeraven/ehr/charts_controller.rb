@@ -60,11 +60,12 @@ module Lakeraven
       include DisclosureSurfaceGate
 
       rate_limit only: :show
-      # The chart's FHIR representation, and any read carrying an
-      # Authorization header, are fhir_api (#522). The gate refuses them
-      # while fhir_api is closed, ahead of the rate limiter, every callback
-      # and authentication. A browser session with no header reads the HTML
-      # chart ungoverned.
+      # The chart's FHIR representation, and any read carrying a header bearer
+      # token, are fhir_api (#522). The gate refuses them while fhir_api is
+      # closed, ahead of the rate limiter, every callback and authentication.
+      # (The bearer half is also SmartAuthentication's own rule; this one adds
+      # the FHIR representation.) A browser session reads the HTML chart
+      # ungoverned, even behind a proxy that adds a `Basic` header.
       disclosure_surface :fhir_api, if: :fhir_api_request?
 
       FHIR_CONTENT_TYPE = "application/fhir+json"

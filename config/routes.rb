@@ -15,9 +15,10 @@ Lakeraven::EHR::Engine.routes.draw do
   # so it lives at /patients/:dfn (the FHIR API keeps /Patient per convention;
   # that resource also owns the patient_path helper, hence :patient_chart).
   # Disclosure surfaces (#522): the FHIR representation of the chart, and any
-  # chart request carrying an Authorization header, are part of fhir_api, so
+  # chart request carrying a header bearer token, are part of fhir_api, so
   # while fhir_api is closed they do not match (a plain 404). A browser
-  # session with no Authorization header always reaches the HTML chart.
+  # session with no bearer header (a proxy's `Basic` header is not one)
+  # always reaches the HTML chart.
   # ChartsController applies the same rule itself, for host routes.
   constraints Lakeraven::EHR::DisclosureSurfaces::ChartRouteConstraint.new do
     get "patients/:dfn(.:format)", to: "charts#show", as: :patient_chart, constraints: { dfn: %r{[^/.?]+} }
@@ -90,8 +91,11 @@ Lakeraven::EHR::Engine.routes.draw do
   # default) is a plain 404 before any controller code runs, so no
   # authentication and no broker call. Each governed controller also refuses
   # a closed surface itself (DisclosureSurfaceGate), which covers host routes
-  # drawn straight at it. /metadata, SMART discovery and launch, OAuth,
-  # ccda_imports and Measure/$import are not governed.
+  # drawn straight at it. ccda_imports and Measure/$import are FHIR API calls
+  # too, so fhir_api governs them below. Every controller that can
+  # authenticate a header bearer token (SmartAuthentication) also refuses a
+  # bearer request while fhir_api is closed, whatever route reached it.
+  # /metadata, SMART discovery and launch, and OAuth are not governed.
   #
   # Doorkeeper models (Application, AccessToken) are used directly;
   # routes are NOT mounted here because the engine provides its own
@@ -122,11 +126,15 @@ Lakeraven::EHR::Engine.routes.draw do
   end
 
   # Transitions of Care — ONC §170.315(b)(1). Outbound C-CDA is the ccda
-  # surface; inbound ccda_imports is ingest and stays routed.
+  # surface. Inbound ccda_imports is a FHIR API call, so fhir_api: it drops
+  # Part 2 security labels today (#522 Half 2) and must not run while the API
+  # is closed.
   constraints Lakeraven::EHR::DisclosureSurfaces::RouteConstraint.new(:ccda) do
     resources :transitions_of_care, only: [ :create ]
   end
-  resources :ccda_imports, only: [ :create ]
+  constraints Lakeraven::EHR::DisclosureSurfaces::RouteConstraint.new(:fhir_api) do
+    resources :ccda_imports, only: [ :create ]
+  end
 
   # Exports — ONC §170.315(b)(10) + (g)(10)
   # The bulk_export surface: kick-off, status, delete and every file.
@@ -164,8 +172,10 @@ Lakeraven::EHR::Engine.routes.draw do
     constraints: ->(req) { req.request_parameters["grant_type"] == "authorization_code" }
   post "oauth/token", to: "backend_services#token"
 
-  # Measure $import
-  post "Measure/$import", to: "measures#import"
+  # Measure $import — a FHIR API call, governed by fhir_api (#522).
+  constraints Lakeraven::EHR::DisclosureSurfaces::RouteConstraint.new(:fhir_api) do
+    post "Measure/$import", to: "measures#import"
+  end
 
   # Web UI — login, dashboard (accessibility / ops surface)
   get "login" => "sessions#new", as: :login

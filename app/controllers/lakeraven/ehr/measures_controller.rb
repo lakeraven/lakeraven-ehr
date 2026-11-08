@@ -4,9 +4,9 @@ module Lakeraven
   module EHR
     class MeasuresController < ApplicationController
       rate_limit only: %i[index import]
-      # Measure/$import is ingest (a measure definition, no record content)
-      # and stays open; the measure listing is fhir_api.
-      disclosure_surface :fhir_api, only: :index
+      # Both the listing and Measure/$import are FHIR API calls on this base
+      # (bearer-only), so both are fhir_api (#522).
+      disclosure_surface :fhir_api
 
       skip_before_action :authorize_fhir_scope!, only: :import
       before_action :authorize_write_scope!, only: :import

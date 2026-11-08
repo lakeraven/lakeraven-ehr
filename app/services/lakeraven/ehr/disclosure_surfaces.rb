@@ -15,8 +15,10 @@ module Lakeraven
     # or Symbol, a Hash, or an unknown name opens nothing. The value is read on
     # every call, so a change takes effect on the next request.
     module DisclosureSurfaces
-      # fhir_api    — the FHIR REST resource routes, the chart's FHIR JSON and
-      #               any header-authenticated chart read.
+      # fhir_api    — the FHIR REST resource routes (Measure/$import and the
+      #               inbound C-CDA import included), the chart's FHIR JSON and
+      #               any request carrying a header bearer token to a
+      #               controller that can authenticate one.
       # bulk_export — bulk EHI export ($export kick-off, status, files).
       # ccda        — C-CDA transitions of care (outbound documents).
       NAMES = %i[fhir_api bulk_export ccda].freeze
@@ -40,11 +42,17 @@ module Lakeraven
         NAMES.find { |surface| surface.to_s == value.to_s }
       end
 
+      KEY = :open_disclosure_surfaces
+
+      # The host's options object is normally an OrderedOptions, but a host
+      # may assign a plain Hash; either way the key may be spelled as a Symbol
+      # or a String. The value rules above are unchanged.
       def configured_surfaces
         options = Rails.application.config.x.lakeraven_ehr
         return nil unless options.is_a?(Hash)
+        return options[KEY] if options.key?(KEY)
 
-        options[:open_disclosure_surfaces]
+        options[KEY.to_s]
       end
 
       # A routing constraint: the governed routes only match while their
@@ -68,7 +76,7 @@ module Lakeraven
 
       # The chart route serves the HTML chart to a browser session (never
       # governed) and, to fhir_api, its FHIR Bundle and any request carrying
-      # an Authorization header. It matches unless the request is one of
+      # a header bearer token. It matches unless the request is one of
       # those while fhir_api is closed, by the same rule
       # (ChartRepresentation.fhir_api_request?) ChartsController's disclosure
       # gate applies.

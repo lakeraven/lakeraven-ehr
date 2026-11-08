@@ -23,19 +23,15 @@ module Lakeraven
         request.headers["Accept"].to_s.include?(FHIR_CONTENT_TYPE)
       end
 
-      # The request carries an Authorization header — any scheme, any value,
-      # even an empty one. The header SmartAuthentication reads a bearer token
-      # from. Decided on presence, before (and never by) authentication.
-      def header_authenticated?(request)
-        request.headers.key?("Authorization")
-      end
-
       # The chart requests that belong to the fhir_api surface: the FHIR
-      # representation, and ANY header-authenticated read, whose HTML is the
-      # same clinical content handed to a machine client. Only a browser
-      # session with no Authorization header reads the HTML chart ungoverned.
+      # representation, and any read carrying a header bearer token, whose HTML
+      # is the same clinical content handed to a machine client. "Bearer" is
+      # SmartAuthentication's own definition (BEARER_AUTHORIZATION), decided on
+      # the header's shape before authentication. Any other Authorization
+      # header (a proxy's `Basic`) is not a bearer and falls through to the
+      # browser session, exactly as authentication does.
       def fhir_api_request?(request)
-        fhir_requested?(request) || header_authenticated?(request)
+        fhir_requested?(request) || SmartAuthentication.bearer_authorization?(request)
       end
     end
   end

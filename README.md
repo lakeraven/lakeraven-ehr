@@ -128,7 +128,7 @@ config.x.lakeraven_ehr.open_disclosure_surfaces = %i[fhir_api]
 
 | Name | Governs |
 | --- | --- |
-| `fhir_api` | The FHIR REST resource routes (`/Patient`, `/Condition`, ... `/ValueSet/:id/$expand`, `/Measure`, `/MeasureReport`, `/AuditEvent`, `/CoverageEligibilityRequest`), the chart's FHIR JSON (`/patients/:dfn.json`, `?_format=json`, `Accept: application/fhir+json`), and any chart request carrying an `Authorization` header. |
+| `fhir_api` | The FHIR REST resource routes (`/Patient`, `/Condition`, ... `/ValueSet/:id/$expand`, `/Measure`, `/MeasureReport`, `/AuditEvent`, `/CoverageEligibilityRequest`), the chart's FHIR JSON (`/patients/:dfn.json`, `?_format=json`, `Accept: application/fhir+json`), `/Measure/$import`, the inbound C-CDA import (`POST /ccda_imports`), and any request carrying an `Authorization: Bearer` header to a controller that can authenticate one (the chart, screenings, patient contexts, allergies, consents, the consent kiosk). |
 | `bulk_export` | Bulk export: `/exports` kick-off, status, delete and its files. |
 | `ccda` | Outbound C-CDA: `/transitions_of_care`. |
 
@@ -144,12 +144,17 @@ Enforcement is at the controller, not only the router.
 The engine's routes carry routing constraints, and each governed controller also declares its surface (`disclosure_surface :fhir_api`, from `Lakeraven::EHR::DisclosureSurfaceGate`) and refuses a closed one itself.
 So a host route drawn straight at a governed controller (`get "fhir/Patient/:dfn", to: "lakeraven/ehr/patients#show"`) is closed too.
 Both use the same predicate (`DisclosureSurfaces.open?`, and for the chart `ChartRepresentation.fhir_api_request?`).
+The key may be a Symbol or a String, on an `OrderedOptions` or a plain Hash (`{ "open_disclosure_surfaces" => [:fhir_api] }` opens `fhir_api`); the value rules above are unchanged.
 
-The chart is governed by how it is reached.
-A signed-in browser session with no `Authorization` header reads the HTML chart whatever is configured.
-A chart request carrying an `Authorization` header (any scheme, any value, even alongside a session) counts as `fhir_api`, because it hands the same clinical content to a machine client: while `fhir_api` is closed it is a 404 like any other closed surface.
+The browser surfaces are governed by how they are reached.
+A signed-in browser session reads the HTML chart, screenings, allergies, consents and the consent kiosk whatever is configured.
+A request carrying an `Authorization: Bearer` header (the scheme matched case-insensitively, any token value, valid or not, even alongside a session) to any controller that includes `SmartAuthentication` counts as `fhir_api`, because it hands the same clinical content to a machine client: while `fhir_api` is closed it is a 404 before forgery protection, authentication or any broker call.
+The rule is declared once, by `SmartAuthentication` itself, so a new controller that includes it is covered automatically; the export and transitions-of-care controllers restate it as their own surface (`bearer_disclosure_surface`).
+Any other scheme (a proxy-injected `Authorization: Basic ...`) is not a bearer and falls through to the session, as authentication does.
 
-Never governed: the browser-session HTML chart, `/metadata`, `/.well-known/smart-configuration`, SMART launch and OAuth, `ccda_imports` (inbound) and `Measure/$import`.
+`Measure/$import` and `ccda_imports` are FHIR API calls and are `fhir_api`: inbound C-CDA ingest drops Part 2 security labels today (#522, Half 2), so it must not run while the API is closed.
+
+Never governed: the browser-session surfaces above, `/metadata`, `/.well-known/smart-configuration`, SMART launch and OAuth.
 Known gap (follow-up): `/metadata` still lists the FHIR resources while `fhir_api` is closed.
 The dummy app opens all three in development and test, and none in production.
 

@@ -10,6 +10,11 @@ module Lakeraven
 
       rate_limit only: :create
 
+      # A FHIR API call (bearer-only, on the FHIR base), so fhir_api (#522).
+      # Fail closed: inbound C-CDA ingest drops Part 2 security labels today
+      # (#522 Half 2), so it must not run while the API is closed.
+      disclosure_surface :fhir_api
+
       # The one patient-naming write that had no compartment declaration. It
       # moves no data today only because ClinicalReconciliationService's
       # persistence is still a stub — but the 201 is already a false

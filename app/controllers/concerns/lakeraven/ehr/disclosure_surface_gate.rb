@@ -30,12 +30,19 @@ module Lakeraven
     #
     # Declarations are inherited and accumulate. A request is refused when
     # ANY declaration that governs its action names a closed surface.
+    #
+    # A declaration may carry a `key:`. A keyed declaration REPLACES an
+    # inherited one with the same key instead of adding to it; that is how a
+    # subclass restates which surface a shared rule names (SmartAuthentication's
+    # header-token rule, `bearer_disclosure_surface`). Unkeyed declarations only
+    # ever accumulate, so a subclass cannot drop one it inherited.
     module DisclosureSurfaceGate
       extend ActiveSupport::Concern
 
       # One declaration: the surface, the actions it governs (nil = every
-      # action) and an optional instance-method predicate.
-      Rule = Struct.new(:surface, :actions, :condition) do
+      # action), an optional instance-method predicate and an optional key
+      # (see above).
+      Rule = Struct.new(:surface, :actions, :condition, :key) do
         def governs?(controller, action)
           return false if actions && !actions.include?(action)
           return true if condition.nil?
@@ -50,7 +57,8 @@ module Lakeraven
 
       class_methods do
         # `if:` is a Symbol naming a predicate method on the controller.
-        def disclosure_surface(surface, only: nil, if: nil)
+        # `key:` (a Symbol) replaces an inherited declaration with that key.
+        def disclosure_surface(surface, only: nil, if: nil, key: nil)
           name = DisclosureSurfaces.known_name(surface)
           raise ArgumentError, "unknown disclosure surface: #{surface.inspect}" unless name
 
@@ -59,9 +67,12 @@ module Lakeraven
             raise ArgumentError, "disclosure_surface if: takes a method name (Symbol)"
           end
 
+          raise ArgumentError, "disclosure_surface key: takes a Symbol" unless key.nil? || key.is_a?(Symbol)
+
           actions = only.nil? ? nil : Array(only).map(&:to_s).freeze
-          rule = Rule.new(name, actions, condition).freeze
-          self.disclosure_surface_rules = (disclosure_surface_rules + [ rule ]).freeze
+          rule = Rule.new(name, actions, condition, key).freeze
+          inherited = key.nil? ? disclosure_surface_rules : disclosure_surface_rules.reject { |r| r.key == key }
+          self.disclosure_surface_rules = (inherited + [ rule ]).freeze
         end
       end
 
