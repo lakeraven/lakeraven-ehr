@@ -66,6 +66,7 @@ module Lakeraven
         "lakeraven/ehr/sessions#new",         # Web UI login
         "lakeraven/ehr/sessions#create",      # Web UI login
         "lakeraven/ehr/sessions#destroy",     # Web UI logout
+        "lakeraven/ehr/sessions#accept_demo_terms", # Public demo terms (#952): sets a cookie, no data
         "lakeraven/ehr/dashboards#show",      # Web UI dashboard; banner patient/allergy via filter_fhir_for_egress
         "lakeraven/ehr/chart_searches#show",   # Patient bar: my recent patients' name, DOB, sex, HRN; no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/chart_searches#create", # Patient bar search: name, DOB, sex, HRN as registration's lookup; revisit with Part 2 (#494)
