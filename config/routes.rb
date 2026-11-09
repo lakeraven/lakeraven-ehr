@@ -149,6 +149,9 @@ Lakeraven::EHR::Engine.routes.draw do
   # SMART session token. Open in all environments (replaces the #401 test-only
   # canned login).
   post "login" => "sessions#create"
+  # The public demo's terms (#952): accepting them lets the sign-in form show.
+  # Not found unless Configuration#demo_mode is on.
+  post "login/demo_terms" => "sessions#accept_demo_terms", as: :accept_demo_terms
   delete "logout" => "sessions#destroy", as: :logout
   get "dashboard" => "dashboards#show", as: :dashboard
   # The signed-in user's RPMS notifications (rpms-ux S-SGN-02.1, #874).

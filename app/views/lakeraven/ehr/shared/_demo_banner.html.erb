@@ -1,0 +1,18 @@
+<%# The public demo says what it is on every page, the sign-in included (#952).
+    It cannot be dismissed.
+    It is the first thing in the page, so a screen reader reads it first, and it is a labelled region, so it is listed among the page's landmarks.
+    Its head styles are in _demo_banner_style. %>
+<% if demo_mode? %>
+  <div
+    id="demo-banner"
+    class="lr-demo-banner"
+    role="region"
+    aria-label="Test environment"
+  >
+    <p>
+      <strong>Test environment.</strong>
+      Synthetic data only.
+      Data may be reset at any time; anything you enter can be erased.
+    </p>
+  </div>
+<% end %>

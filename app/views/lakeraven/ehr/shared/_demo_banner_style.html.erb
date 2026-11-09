@@ -1,0 +1,25 @@
+<%# The test-environment banner's look (#952), in the page's <head>.
+    Its own styles rather than Tailwind classes, so the banner looks the same on pages that do not link the Tailwind build (the standalone chart).
+    Black on yellow, well past WCAG AAA contrast. %>
+<% if demo_mode? %>
+  <%= tag.style nonce: content_security_policy_nonce do %>
+    .lr-demo-banner {
+      margin: 0;
+      padding: 0.625rem 1rem;
+      background: #ffd60a;
+      color: #111111;
+      border-bottom: 3px solid #111111;
+      font: 600 1rem/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+      text-align: center;
+    }
+
+    .lr-demo-banner p {
+      margin: 0;
+      color: #111111;
+    }
+
+    .lr-demo-banner strong {
+      font-weight: 800;
+    }
+  <% end %>
+<% end %>

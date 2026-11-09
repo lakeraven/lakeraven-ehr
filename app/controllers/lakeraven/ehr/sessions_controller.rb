@@ -17,8 +17,21 @@ module Lakeraven
 
       rate_limit only: :create, login_throttle: true
 
+      # The public demo's terms, accepted for this browser session (#952). A
+      # cookie of its own, with no expiry, so the browser forgets it when it
+      # closes, and the session resets at sign-in and sign-out leave it alone.
+      DEMO_TERMS_COOKIE = :lakeraven_ehr_demo_terms
+
       def new
-        # login form
+        # In the public demo the terms come first: the sign-in form waits.
+        render :demo_terms unless demo_terms_accepted?
+      end
+
+      def accept_demo_terms
+        return head :not_found unless demo_mode?
+
+        cookies.signed[DEMO_TERMS_COOKIE] = { value: "accepted", httponly: true, same_site: :lax }
+        redirect_to login_path
       end
 
       # Real RPMS sign-on (#332, replacing the #401 canned interim): validate
@@ -26,6 +39,9 @@ module Lakeraven
       # session, and mint a SMART token the API layer accepts via its session
       # fallback.
       def create
+        # A sign-in posted past the demo's terms is not attempted (#952).
+        return redirect_to login_path unless demo_terms_accepted?
+
         access_code = params[:username].to_s
         # An app's authorization request this sign-in is for (#839). Kept
         # across the session resets below, so the user goes on to approve or
@@ -89,6 +105,12 @@ module Lakeraven
       end
 
       private
+
+      def demo_mode? = Lakeraven::EHR.configuration.demo_mode == true
+
+      def demo_terms_accepted?
+        !demo_mode? || cookies.signed[DEMO_TERMS_COOKIE] == "accepted"
+      end
 
       def authenticate(access_code:, verify_code:)
         AuthenticationService.new.authenticate(access_code: access_code, verify_code: verify_code, client_ip: client_ip)

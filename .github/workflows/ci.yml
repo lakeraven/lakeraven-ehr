@@ -52,6 +52,10 @@ jobs:
           bundler-cache: true
       - run: bundle exec rails db:create db:migrate
       - run: bundle exec rails test
+      # `rails test` leaves test/system out. The mocked system tests (a real
+      # headless Chrome, the runner's own, against the mocked broker) run here
+      # by path; test/system/live needs a broker and stays out.
+      - run: bundle exec rails test test/system/*_test.rb
 
   us-core:
     # The FHIR the engine serves, checked by the official HL7 validator

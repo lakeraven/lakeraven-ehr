@@ -8,8 +8,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title><%= product_name %></title>
+  <%= render "lakeraven/ehr/shared/demo_banner_style" %>
 </head>
 <body>
+  <%= render "lakeraven/ehr/shared/demo_banner" %>
   <%= render "lakeraven/ehr/shared/patient_banner", banner: @patient_banner %>
   <p role="alert">This chart could not be loaded. The record service is unavailable.</p>
 </body>

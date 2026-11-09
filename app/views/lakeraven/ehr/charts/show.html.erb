@@ -126,8 +126,10 @@
     .footer{margin-top:26px;color:var(--muted);font-size:12px;text-align:center;line-height:1.7}
     .footer code{background:#e9eef4;padding:1px 6px;border-radius:5px}
   </style>
+  <%= render "lakeraven/ehr/shared/demo_banner_style" %>
 </head>
 <body>
+  <%= render "lakeraven/ehr/shared/demo_banner" %>
   <div class="wrap">
     <% if flash[:notice].present? %>
       <p class="flash notice" role="status"><%= flash[:notice] %></p>

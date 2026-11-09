@@ -1,0 +1,52 @@
+<% page_title "Before you sign in" %>
+
+<%# The public demo's terms, shown in place of the sign-in form until the visitor accepts them (#952).
+    A plain page and a form, so it works with no JavaScript and reads in order.
+    Keep it consistent with the full terms at Configuration#demo_terms_url. %>
+<div class="mx-auto mt-8 max-w-xl">
+  <div class="card">
+    <h1>Before you sign in</h1>
+    <p>
+      This is a public demonstration.
+      Please read these terms; signing in means you agree to them.
+    </p>
+
+    <ul
+      id="demo-terms"
+      class="mt-4 list-disc space-y-3 pl-5"
+    >
+      <li>
+        <strong>It is a test system, with synthetic data only.</strong>
+        Every patient in it is made up, and it is not used for care.
+      </li>
+      <li>
+        <strong>Never enter real patient information.</strong>
+        That includes your own, a family member's, or anyone else's.
+        Anyone can sign in with the published sign-in pairs, so others can see and change what you enter.
+      </li>
+      <li>
+        <strong>No promise of uptime or of keeping data.</strong>
+        It may be slow, down, or changed without notice.
+        It is reset from time to time, and anything entered is erased.
+      </li>
+      <li>
+        <strong>Feedback goes in GitHub issues.</strong>
+        <a href="<%= Lakeraven::EHR.configuration.demo_feedback_url %>">Open an issue</a>, and leave out anything about a real person.
+      </li>
+    </ul>
+
+    <p class="mt-4">
+      <a href="<%= Lakeraven::EHR.configuration.demo_terms_url %>">Read the full terms of use</a>.
+    </p>
+
+    <%= form_with url: accept_demo_terms_path,
+          method: :post,
+          local: true,
+          class: "mt-6" do %>
+      <button
+        type="submit"
+        class="w-full"
+      >I accept these terms</button>
+    <% end %>
+  </div>
+</div>

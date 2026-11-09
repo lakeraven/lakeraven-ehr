@@ -18,6 +18,7 @@ A deploy pins an immutable `sha-<short>` tag, never `main`.
 | `RPMS_UCI` | no | Unset on either engine: the CIA client asks for the broker's own namespace. Set it only to run in another namespace |
 | `RAILS_FORCE_SSL` | no | Unset: TLS, terminated in front of the app (a load balancer). Exactly `false` serves plain HTTP, only for an app reachable solely inside a private network; any other value keeps TLS |
 | `RAILS_LOG_LEVEL` | no | Default `info` |
+| `DEMO_MODE` | no | Exactly `1` makes this the public demo: a test-environment banner on every page, and sign-in waits until the visitor accepts the demo's terms (#952). Unset, or any other value, shows neither |
 
 The entrypoint runs `bin/rails db:prepare` before the server starts, so a new database is created and loaded, and an existing one is migrated.
 The container listens on 3000 and answers `GET /up` with 200 once the app has booted; the image's `HEALTHCHECK` uses it.
