@@ -14,6 +14,8 @@ routes:
   # Login form (GET) and logout — POST login is throttled via LoginThrottle / RateLimit
   - lakeraven/ehr/sessions#new
   - lakeraven/ehr/sessions#destroy
+  # The public demo's terms (#952): sets a cookie, takes no credential, reads no data
+  - lakeraven/ehr/sessions#accept_demo_terms
 
   # Session teardown only; does not open or read a patient record
   - lakeraven/ehr/active_patient_contexts#destroy

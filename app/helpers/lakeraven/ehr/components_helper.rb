@@ -12,6 +12,11 @@ module Lakeraven
       # The product's name in the chrome: one setting (Configuration#product_name).
       def product_name = Lakeraven::EHR.configuration.product_name
 
+      # Whether this is the public demo (Configuration#demo_mode, #952): every
+      # page carries the test-environment banner, and sign-in waits for the
+      # demo's terms to be accepted.
+      def demo_mode? = Lakeraven::EHR.configuration.demo_mode == true
+
       # Sets the page's <title>: the parts, most specific first, then the
       # product name. page_title "Book", "Dental clinic"
       #   => "Book | Dental clinic | Lakeraven EHR"

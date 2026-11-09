@@ -73,7 +73,19 @@ module Lakeraven
       # forwarded header cannot choose a rate-limit or login bucket.
       attr_accessor :trust_forwarded_for
 
+      # A public demonstration, with synthetic data and published sign-in
+      # pairs (#952). When true, every page carries a test-environment banner
+      # and sign-in waits until the visitor accepts the demo's terms. Off
+      # unless DEMO_MODE is exactly "1", so a real deployment never shows it.
+      attr_accessor :demo_mode
+      # Where the demo's full terms are published, and where its visitors
+      # leave feedback. The disclaimer links both.
+      attr_accessor :demo_terms_url, :demo_feedback_url
+
       def initialize
+        @demo_mode = ENV["DEMO_MODE"] == "1"
+        @demo_terms_url = "https://openrpms.org/demo"
+        @demo_feedback_url = "https://github.com/afomi/open-rpms-website/issues"
         @product_name = "Lakeraven EHR"
         @trust_forwarded_for = true
         @session_idle_limit = 30.minutes

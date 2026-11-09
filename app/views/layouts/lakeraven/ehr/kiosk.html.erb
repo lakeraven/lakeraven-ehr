@@ -6,8 +6,10 @@
   <%= csrf_meta_tags %>
   <%= csp_meta_tag %>
   <%= stylesheet_link_tag "tailwind", media: "all" %>
+  <%= render "lakeraven/ehr/shared/demo_banner_style" %>
 </head>
 <body class="lr-ehr min-h-screen bg-slate-50 text-slate-900 antialiased">
+  <%= render "lakeraven/ehr/shared/demo_banner" %>
   <main class="mx-auto max-w-3xl px-4 py-6">
     <%= yield %>
   </main>
