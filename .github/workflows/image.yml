@@ -77,14 +77,32 @@ jobs:
         if: env.HAS_ROLE != 'true'
         run: echo "::notice::DEMO_DEPLOY_ROLE_ARN is not set; the demo was not deployed."
 
-      - uses: aws-actions/configure-aws-credentials@v4
+      # Two pushes build at once, and the deploy queue keeps their deploys apart but not in order: an
+      # older run that reaches this job after a newer one would put the demo back on the older image.
+      # So only main's head deploys. This runs inside the queued job, so it reads main after the
+      # previous deploy; a run whose commit is no longer the head skips, and the newer run deploys.
+      - name: Only the head of main deploys
+        id: head
         if: env.HAS_ROLE == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          head="$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq .sha)"
+          if [ "$head" = "$GITHUB_SHA" ]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::main is now at ${head::7}, and its own run deploys it; ${GITHUB_SHA::7} is not deployed."
+          fi
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        if: steps.head.outputs.deploy == 'true'
         with:
           role-to-assume: ${{ secrets.DEMO_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Deploy this commit's image, and wait for the host's verdict
-        if: env.HAS_ROLE == 'true'
+        if: steps.head.outputs.deploy == 'true'
         env:
           DOCUMENT: ${{ vars.DEMO_DEPLOY_DOCUMENT }}
           TARGET: ${{ vars.DEMO_DEPLOY_TARGET }}
@@ -107,7 +125,7 @@ jobs:
           [ "$status" = Success ] || { echo "::error::the deploy ended $status (the host rolls back when the new image does not answer)"; exit 1; }
 
       - name: The public demo answers
-        if: env.HAS_ROLE == 'true'
+        if: steps.head.outputs.deploy == 'true'
         run: |
           for path in /up /lakeraven-ehr/login; do
             code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "https://demo.openrpms.org$path")"
