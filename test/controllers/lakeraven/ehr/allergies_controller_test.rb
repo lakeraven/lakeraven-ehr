@@ -126,6 +126,38 @@ module Lakeraven
         assert_select "input[name=?]", "allergy[agent]"
       end
 
+      # The page names its patient with the chart's own banner, not a
+      # "Patient #3" line of its own.
+      test "the allergy form shows the patient in the same banner as the chart" do
+        get CHART
+        chart_banner = css_select("#patient-banner .banner").first
+        assert chart_banner, "the chart shows the patient banner"
+
+        get "#{BASE}/new"
+
+        assert_equal chart_banner.text.squish, css_select("#patient-banner .banner").first&.text&.squish
+        assert_select "main h1", text: "Record an allergy"
+        assert_no_match(/Patient #/, response.body)
+      end
+
+      # Each coded field is a choice, and every choice is a code
+      # RPMS accepts for a new allergy (the rpms-rpc validation the gateway runs).
+      test "the allergy form offers only codes RPMS accepts" do
+        get "#{BASE}/new"
+
+        codes = ->(name) { css_select("select[name='#{name}'] option").map { |o| o["value"] }.reject(&:empty?) }
+        assert_equal RpmsRpc::Allergy::NATURE, codes.call("allergy[nature]")
+        assert_equal RpmsRpc::Allergy::SEVERITY, codes.call("allergy[severity]")
+        assert_equal RpmsRpc::Allergy::OBHX,
+                     css_select("input[type=radio][name='allergy[observed_or_historical]']").map { |i| i["value"] }
+        types = codes.call("allergy[type]")
+        assert_includes types, "D"
+        types.each do |type|
+          assert_match RpmsRpc::Allergy::TYPE, type
+          assert_equal type.chars.uniq.size, type.size, "#{type} repeats a letter"
+        end
+      end
+
       # -- Successful writes ----------------------------------------------------
 
       test "POST allergy with valid synthetic data calls gateway once and redirects with success notice" do

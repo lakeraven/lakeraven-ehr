@@ -1,17 +1,32 @@
-<% content_for :title, "Choose a consent" %>
+<% page_title "Choose a consent" %>
+<%# The patient is in the banner above (shared/_patient_banner), the same
+    one the chart shows. Choosing a consent locks the clinic tablet to it. %>
 
-<div class="page-header">
-  <h1>Choose a consent</h1>
-</div>
+<%= page_header "Choose a consent",
+      [ "Choose the form the patient will sign.",
+        "The tablet then shows only that form, until the patient hands it back." ] %>
 
 <% if @templates_missing_reason %>
-  <p role="alert"><%= @templates_missing_reason %></p>
+  <%= alert_box :error, @templates_missing_reason, id: "consent-templates-missing" %>
 <% end %>
 
-<%= form_with url: patient_consent_handover_path(@dfn), method: :post do %>
+<%= form_with url: patient_consent_handover_path(@dfn),
+      method: :post,
+      class: "grid gap-3 sm:grid-cols-2" do %>
   <% @templates.each do |template| %>
-    <button type="submit" name="template_key" value="<%= template.key %>">
+    <button
+      type="submit"
+      name="template_key"
+      value="<%= template.key %>"
+      class="button-secondary min-h-16 justify-start px-5 text-left text-base"
+    >
       <%= template.title %>
     </button>
   <% end %>
 <% end %>
+
+<div class="form-actions mt-6">
+  <%= link_to "Back to consents",
+        patient_consents_path(@dfn),
+        class: "button-secondary no-underline" %>
+</div>
