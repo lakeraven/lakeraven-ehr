@@ -50,3 +50,86 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # A push to main deploys the image it just published to the public demo (demo.openrpms.org).
+  # The host swaps its container, gates on /up and the sign-in page, and rolls back by itself if the
+  # new image does not answer (cloud-rpms terraform/modules/lakeraven-ehr, "Deploy from GitHub").
+  # GitHub's OIDC token assumes a role that trusts this repository's main branch only and may send
+  # only the demo's deploy document to the demo's web host. No stored keys.
+  # Repository settings: secret DEMO_DEPLOY_ROLE_ARN; variables DEMO_DEPLOY_DOCUMENT and
+  # DEMO_DEPLOY_TARGET (the host's Name tag). Without the secret, the job says so and does nothing.
+  deploy-demo:
+    name: Deploy to the demo
+    needs: image
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    concurrency:
+      group: deploy-demo
+      cancel-in-progress: false
+    env:
+      AWS_REGION: us-west-2
+      HAS_ROLE: ${{ secrets.DEMO_DEPLOY_ROLE_ARN != '' }}
+    steps:
+      - name: No deploy role configured
+        if: env.HAS_ROLE != 'true'
+        run: echo "::notice::DEMO_DEPLOY_ROLE_ARN is not set; the demo was not deployed."
+
+      # Two pushes build at once, and the deploy queue keeps their deploys apart but not in order: an
+      # older run that reaches this job after a newer one would put the demo back on the older image.
+      # So only main's head deploys. This runs inside the queued job, so it reads main after the
+      # previous deploy; a run whose commit is no longer the head skips, and the newer run deploys.
+      - name: Only the head of main deploys
+        id: head
+        if: env.HAS_ROLE == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          head="$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq .sha)"
+          if [ "$head" = "$GITHUB_SHA" ]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::main is now at ${head::7}, and its own run deploys it; ${GITHUB_SHA::7} is not deployed."
+          fi
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        if: steps.head.outputs.deploy == 'true'
+        with:
+          role-to-assume: ${{ secrets.DEMO_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy this commit's image, and wait for the host's verdict
+        if: steps.head.outputs.deploy == 'true'
+        env:
+          DOCUMENT: ${{ vars.DEMO_DEPLOY_DOCUMENT }}
+          TARGET: ${{ vars.DEMO_DEPLOY_TARGET }}
+        run: |
+          image="ghcr.io/lakeraven/lakeraven-ehr:sha-${GITHUB_SHA::7}"
+          echo "deploying $image to the host tagged Name=$TARGET"
+          id="$(aws ssm send-command --document-name "$DOCUMENT" \
+                --targets "Key=tag:Name,Values=$TARGET" \
+                --parameters "imageRef=$image" \
+                --comment "lakeraven-ehr ${GITHUB_SHA::7} (run $GITHUB_RUN_ID)" \
+                --query Command.CommandId --output text)"
+          for _ in $(seq 1 90); do
+            status="$(aws ssm list-command-invocations --command-id "$id" --details \
+                      --query 'CommandInvocations[0].Status' --output text)"
+            case "$status" in Success|Failed|Cancelled|TimedOut) break ;; esac
+            sleep 10
+          done
+          aws ssm list-command-invocations --command-id "$id" --details \
+            --query 'CommandInvocations[0].CommandPlugins[0].Output' --output text
+          [ "$status" = Success ] || { echo "::error::the deploy ended $status (the host rolls back when the new image does not answer)"; exit 1; }
+
+      - name: The public demo answers
+        if: steps.head.outputs.deploy == 'true'
+        run: |
+          for path in /up /lakeraven-ehr/login; do
+            code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "https://demo.openrpms.org$path")"
+            echo "$code https://demo.openrpms.org$path"
+            [ "$code" = 200 ] || { echo "::error::https://demo.openrpms.org$path answered $code"; exit 1; }
+          done
+          echo "EXPLICIT SUCCESS: demo.openrpms.org runs sha-${GITHUB_SHA::7}"
