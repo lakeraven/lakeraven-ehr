@@ -35,6 +35,7 @@ require_relative "support/ihs_feature_availability_test_helper"
 require "rpms_rpc/mock_client"
 require_relative "support/mock_session_user"
 require_relative "support/rate_limit_test_helper"
+require_relative "support/live_stack"
 
 # Baseline RpmsRpc mock seeds. Installed at load and again before every
 # example (GlobalStoreIsolation) so a test that adds seeds cannot leak
@@ -214,7 +215,15 @@ end
 # path a deployed app takes, and the run signs on through the engine's own
 # AuthenticationService as LIVE_RPMS_ACCESS / LIVE_RPMS_VERIFY. It never falls
 # back to the mock: a missing broker or a refused sign-on aborts the run.
-LIVE_RPMS = ENV["LIVE_RPMS"] == "1"
+#
+# LIVE_STACK=1 (cucumber --profile stack, #962) binds the run from
+# LiveStack::VARIABLES alone and signs on as that persona, who must not hold
+# XUPROGMODE. A stack it cannot confirm runs on the mock, and @live scenarios
+# report not run (features/support/live_stack.rb).
+LIVE_STACK = LiveStack.requested?(ENV) ? LiveStack.prepare(ENV) : nil
+LIVE_STACK_BINDING = (LiveStack.binding(ENV) if LIVE_STACK&.ready?)
+LIVE_RPMS = ENV["LIVE_RPMS"] == "1" || LIVE_STACK&.ready? == true
+warn "[stack] #{LiveStack.not_run_message(LIVE_STACK)}" if LIVE_STACK && !LIVE_STACK.ready?
 if LIVE_RPMS
   abort "LIVE_RPMS=1: no broker configured (set VISTA_RPC_HOST)" unless RpmsRpc.configuration.client
 
@@ -225,17 +234,38 @@ if LIVE_RPMS
     # sign on as someone else call this afterwards, since one process holds
     # one broker identity (rpms-rpc#234).
     def sign_on!
+      if LIVE_STACK_BINDING
+        stack_sign_on!
+      else
+        result = Lakeraven::EHR::AuthenticationService.new.authenticate(
+          access_code: ENV.fetch("LIVE_RPMS_ACCESS"), verify_code: ENV.fetch("LIVE_RPMS_VERIFY")
+        )
+        abort "LIVE_RPMS=1: sign-on refused: #{result.error}" unless result.success?
+        result
+      end
+    end
+
+    # The stack persona again, and again without XUPROGMODE. Reasons only,
+    # never the broker's message: it could carry the codes.
+    def stack_sign_on!
       result = Lakeraven::EHR::AuthenticationService.new.authenticate(
-        access_code: ENV.fetch("LIVE_RPMS_ACCESS"), verify_code: ENV.fetch("LIVE_RPMS_VERIFY")
+        access_code: LIVE_STACK_BINDING.access_code, verify_code: LIVE_STACK_BINDING.verify_code
       )
-      abort "LIVE_RPMS=1: sign-on refused: #{result.error}" unless result.success?
+      abort "LIVE_STACK=1: the persona's sign-on was refused" unless result.success?
+      keys = RpmsRpc::Authentication.held_keys([ LiveStack::PROGRAMMER_KEY ])
+      abort "LIVE_STACK=1: the persona holds #{LiveStack::PROGRAMMER_KEY}, or it could not be asked" unless keys == []
       result
     end
   end
 
   live_user = LiveRpmsSession.sign_on!.value
-  settings = Lakeraven::EHR::Engine.rpms_settings
-  warn "[live] RPMS #{settings[:broker]} #{settings[:host]}:#{settings[:port]} signed on as #{live_user.inspect[0, 120]}"
+  if LIVE_STACK_BINDING
+    RpmsRpc.client.class.prepend(LiveStack::RefusalWatch)
+    warn "[stack] ready: #{LIVE_STACK_BINDING.broker} #{LIVE_STACK_BINDING.host}:#{LIVE_STACK_BINDING.port}"
+  else
+    settings = Lakeraven::EHR::Engine.rpms_settings
+    warn "[live] RPMS #{settings[:broker]} #{settings[:host]}:#{settings[:port]} signed on as #{live_user.inspect[0, 120]}"
+  end
 else
   RpmsRpc.mock!(&BASELINE_MOCK_SEEDS)
 end
