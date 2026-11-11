@@ -1,11 +1,14 @@
 <% page_title "No known allergies" %>
 
-<div class="page-header">
-  <h1><%= nka_failure_heading %></h1>
-</div>
+<%= page_header "No known allergies" %>
 
-<div class="screening-errors" role="alert">
+<%= alert_box :error, id: "nka-failure" do %>
+  <h2 class="mt-0 text-lg"><%= nka_failure_heading %></h2>
   <p><%= nka_failure_detail %></p>
-</div>
+<% end %>
 
-<p><%= link_to "Back to chart", patient_chart_path(@dfn) %></p>
+<div class="form-actions">
+  <%= link_to "Back to chart",
+        patient_chart_path(@dfn),
+        class: "button-secondary no-underline" %>
+</div>

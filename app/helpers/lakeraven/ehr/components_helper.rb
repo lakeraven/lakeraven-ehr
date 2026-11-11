@@ -114,6 +114,7 @@ module Lakeraven
         "cancelled" => "status-badge--cancelled",
         "active" => "status-badge--active",
         "inactive" => "status-badge--inactive",
+        "revoked" => "status-badge--cancelled",
         "deceased" => "status-badge--deceased",
         "error" => "status-badge--error",
         "warning" => "status-badge--warning"

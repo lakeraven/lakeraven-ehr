@@ -1,88 +1,171 @@
 <% page_title "Record an allergy" %>
+<%# The patient is in the banner above (shared/_patient_banner), the same
+    one the chart shows, so the page does not name them again.
+    Codes are the ones RPMS accepts for a new allergy (rpms-rpc
+    RpmsRpc::Api::Allergy: TYPE, NATURE, OBHX, SEVERITY). %>
 
-<div class="page-header">
-  <h1>Record an allergy</h1>
-  <p>Patient #<%= @dfn %></p>
-</div>
+<%= page_header "Record an allergy",
+      "Enter what the patient reacts to and how it was found out." %>
 
 <% if @allergy_not_saved %>
-  <div class="screening-errors" role="alert">
-    <h2><%= allergy_failure_heading %></h2>
+  <%= alert_box :error, id: "allergy-failure" do %>
+    <h2 class="mt-0 text-lg"><%= allergy_failure_heading %></h2>
     <p><%= allergy_failure_detail %></p>
-  </div>
+  <% end %>
 <% end %>
 
-<%= form_with url: patient_allergies_path(@dfn), method: :post, class: "allergy-form" do %>
-  <div class="screening-visit">
-    <label for="allergy_agent">Allergen</label>
-    <%= text_field_tag "allergy[agent]", allergy_value("agent"), id: "allergy_agent", autocomplete: "off" %>
-  </div>
-
-  <div class="screening-visit">
-    <label for="allergy_agent_pointer">Allergen pointer</label>
-    <%= text_field_tag "allergy[agent_pointer]", allergy_value("agent_pointer"),
-          id: "allergy_agent_pointer", autocomplete: "off" %>
-  </div>
-
-  <div class="screening-visit">
-    <label for="allergy_type">Type</label>
-    <%= text_field_tag "allergy[type]", allergy_value("type"), id: "allergy_type", autocomplete: "off" %>
-  </div>
-
-  <div class="screening-visit">
-    <label for="allergy_nature">Nature</label>
-    <%= text_field_tag "allergy[nature]", allergy_value("nature"), id: "allergy_nature", autocomplete: "off" %>
-  </div>
-
-  <div class="screening-visit">
-    <label for="allergy_originated_at">Originated at</label>
-    <%= text_field_tag "allergy[originated_at]", allergy_value("originated_at"),
-          id: "allergy_originated_at", autocomplete: "off" %>
-  </div>
-
-  <div class="screening-visit">
-    <label for="allergy_observed_or_historical">Observed or historical</label>
-    <%= text_field_tag "allergy[observed_or_historical]", allergy_value("observed_or_historical"),
-          id: "allergy_observed_or_historical", autocomplete: "off" %>
-  </div>
-
-  <div class="screening-visit">
-    <label for="allergy_reaction_date">Reaction date</label>
-    <%= text_field_tag "allergy[reaction_date]", allergy_value("reaction_date"),
-          id: "allergy_reaction_date", autocomplete: "off" %>
-  </div>
-
-  <div class="screening-visit">
-    <label for="allergy_severity">Severity</label>
-    <%= text_field_tag "allergy[severity]", allergy_value("severity"), id: "allergy_severity", autocomplete: "off" %>
-  </div>
-
+<%= form_with url: patient_allergies_path(@dfn),
+      scope: :allergy,
+      method: :post,
+      class: "allergy-form entry-form" do |f| %>
   <fieldset>
-    <legend>Symptom</legend>
-    <div class="screening-visit">
-      <label for="allergy_symptom_ien">Symptom IEN</label>
-      <%= text_field_tag "allergy[symptoms][][ien]", symptom_value("ien"),
-            id: "allergy_symptom_ien", autocomplete: "off" %>
+    <legend>Allergen</legend>
+
+    <div class="field-row">
+      <%= form_field :agent, "Allergen", form: f do |aria| %>
+        <%= f.text_field :agent,
+              value: allergy_value("agent"),
+              autocomplete: "off",
+              required: true,
+              aria: aria %>
+      <% end %>
+
+      <%# GMRAGNT piece 2: a variable pointer, "IEN;GLOBAL(FILE,". %>
+      <%= form_field :agent_pointer,
+            "Allergen entry in RPMS",
+            form: f,
+            hint: "Its RPMS pointer, for example 12;GMRD(120.82, until allergen search is built." do |aria| %>
+        <%= f.text_field :agent_pointer,
+              value: allergy_value("agent_pointer"),
+              autocomplete: "off",
+              required: true,
+              class: "font-mono",
+              aria: aria %>
+      <% end %>
     </div>
-    <div class="screening-visit">
-      <label for="allergy_symptom_text">Symptom</label>
-      <%= text_field_tag "allergy[symptoms][][text]", symptom_value("text"),
-            id: "allergy_symptom_text", autocomplete: "off" %>
-    </div>
-    <div class="screening-visit">
-      <label for="allergy_symptom_date">Symptom date</label>
-      <%= text_field_tag "allergy[symptoms][][date]", symptom_value("date"),
-            id: "allergy_symptom_date", autocomplete: "off" %>
+
+    <div class="field-row">
+      <%# GMRATYPE, PATIENT ALLERGIES (120.8) field 3.1. %>
+      <%= form_field :type, "Type", form: f do |aria| %>
+        <%= f.select :type,
+              [ [ "Drug", "D" ], [ "Food", "F" ], [ "Other", "O" ], [ "Drug and food", "DF" ] ],
+              { include_blank: "Choose a type", selected: allergy_value("type") },
+              required: true,
+              aria: aria %>
+      <% end %>
+
+      <%# GMRANATR, PATIENT ALLERGIES (120.8) field 17. %>
+      <%= form_field :nature, "Nature of reaction", form: f do |aria| %>
+        <%= f.select :nature,
+              [ [ "Allergy", "A" ], [ "Pharmacologic (side effect)", "P" ], [ "Unknown", "U" ] ],
+              { include_blank: "Choose a nature", selected: allergy_value("nature") },
+              required: true,
+              aria: aria %>
+      <% end %>
     </div>
   </fieldset>
 
-  <div class="screening-visit">
-    <label for="allergy_comment">Comment</label>
-    <%= text_field_tag "allergy[comments][]", comment_value, id: "allergy_comment", autocomplete: "off" %>
-  </div>
+  <fieldset>
+    <legend>How it is known</legend>
 
-  <div class="screening-actions">
-    <button type="submit">Record allergy</button>
-    <%= link_to "Back to chart", patient_chart_path(@dfn) %>
+    <%# GMRAOBHX: "o" observed here, "h" reported history. %>
+    <%= choice_list f,
+          :observed_or_historical,
+          legend: "Observed or historical",
+          choices: [ [ "o", "Observed in this clinic" ], [ "h", "Historical (reported by the patient or another record)" ] ],
+          selected: allergy_value("observed_or_historical") %>
+
+    <div class="field-row">
+      <%# GMRAORDT, a FileMan date and time. %>
+      <%= form_field :originated_at,
+            "Entered on",
+            form: f,
+            hint: "FileMan date and time, for example 3261110.1430 for Nov 10, 2026 at 14:30." do |aria| %>
+        <%= f.text_field :originated_at,
+              value: allergy_value("originated_at"),
+              autocomplete: "off",
+              required: true,
+              class: "font-mono",
+              aria: aria %>
+      <% end %>
+
+      <%# GMRARDT, a FileMan date. %>
+      <%= form_field :reaction_date,
+            "Reaction date (optional)",
+            form: f,
+            hint: "FileMan date, for example 3261108." do |aria| %>
+        <%= f.text_field :reaction_date,
+              value: allergy_value("reaction_date"),
+              autocomplete: "off",
+              class: "font-mono",
+              aria: aria %>
+      <% end %>
+    </div>
+
+    <%# GMRASEVR: 1 mild, 2 moderate, 3 severe. %>
+    <%= form_field :severity, "Severity (optional)", form: f do |aria| %>
+      <%= f.select :severity,
+            [ [ "Mild", "1" ], [ "Moderate", "2" ], [ "Severe", "3" ] ],
+            { include_blank: "Not given", selected: allergy_value("severity") },
+            class: "sm:max-w-xs",
+            aria: aria %>
+    <% end %>
+  </fieldset>
+
+  <fieldset>
+    <legend>Symptom (optional)</legend>
+
+    <%# GMRASYMP(n) = "ien^text^FileMan date". %>
+    <div class="field-row">
+      <%= form_field :symptom_text, "Symptom", id: "allergy_symptom_text" do |aria| %>
+        <%= text_field_tag "allergy[symptoms][][text]",
+              symptom_value("text"),
+              id: "allergy_symptom_text",
+              autocomplete: "off",
+              aria: aria %>
+      <% end %>
+
+      <%= form_field :symptom_ien,
+            "Symptom entry in RPMS",
+            id: "allergy_symptom_ien",
+            hint: "Its RPMS number, or FT for free text." do |aria| %>
+        <%= text_field_tag "allergy[symptoms][][ien]",
+              symptom_value("ien"),
+              id: "allergy_symptom_ien",
+              autocomplete: "off",
+              class: "font-mono",
+              aria: aria %>
+      <% end %>
+    </div>
+
+    <%= form_field :symptom_date,
+          "Symptom date",
+          id: "allergy_symptom_date",
+          hint: "FileMan date, for example 3261108." do |aria| %>
+      <%= text_field_tag "allergy[symptoms][][date]",
+            symptom_value("date"),
+            id: "allergy_symptom_date",
+            autocomplete: "off",
+            class: "font-mono sm:max-w-xs",
+            aria: aria %>
+    <% end %>
+  </fieldset>
+
+  <%# GMRACMTS(n): one comment line. %>
+  <%= form_field :comment, "Comment (optional)", id: "allergy_comment" do |aria| %>
+    <%= text_field_tag "allergy[comments][]",
+          comment_value,
+          id: "allergy_comment",
+          autocomplete: "off",
+          aria: aria %>
+  <% end %>
+
+  <div class="form-actions">
+    <%= f.submit "Record allergy",
+          name: nil,
+          class: "button-primary" %>
+    <%= link_to "Back to chart",
+          patient_chart_path(@dfn),
+          class: "button-secondary no-underline" %>
   </div>
 <% end %>
