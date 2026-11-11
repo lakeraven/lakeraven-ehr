@@ -203,7 +203,7 @@ jobs:
           # (ubuntu-latest has only the latest 4.0.x), while .ruby-version pins what rbenv installs.
           ruby-version: "4.0"
           bundler-cache: true
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
