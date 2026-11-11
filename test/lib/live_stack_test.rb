@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require "test_helper"
+require "pp"
+require "cucumber/core/test/result"
 
 # Contract for LiveStack (test/support/live_stack.rb), the harness behind
 # `cucumber --profile stack` (#962).
@@ -254,56 +256,300 @@ class LiveStackTest < ActiveSupport::TestCase
     assert_equal "not run: #{status.reason}", LiveStack.not_run_message(status)
   end
 
-  # -- refusals in the middle of a scenario ---------------------------------
+  # -- prepare: amendment 1 -------------------------------------------------
 
-  # A broker client whose call_rpc raises what the test asks, or answers.
+  test "an unexpected error from any collaborator is not ready and its message is not repeated" do
+    boom = -> { raise "exploded with #{ACCESS};#{VERIFY}" }
+    {
+      connect: { connect: ->(_b) { boom.call } },
+      authenticate: { authenticate: ->(_a, _v) { boom.call } },
+      held_keys: { held_keys: ->(_names) { boom.call } }
+    }.each do |name, collaborator|
+      status, _calls = prepare(full_env, **collaborator)
+
+      assert_not_ready status
+      assert_not_includes status.reason, "exploded", "#{name}: the error's message reached the reason"
+    end
+  end
+
+  test "RPMS_UCI in the environment is not ready, is named, and touches nothing" do
+    status, calls = prepare(full_env("RPMS_UCI" => "EHR"))
+
+    assert_not_ready status
+    assert_includes status.reason, "RPMS_UCI"
+    assert_empty calls, "nothing may be called when the environment carries more than the binding"
+  end
+
+  test "a client installed before a not-ready outcome is disconnected and the previous client restored" do
+    before = RpmsRpc.configuration.client
+    fake = Class.new do
+      attr_reader :disconnects
+
+      def initialize = @disconnects = 0
+      def disconnect = @disconnects += 1
+    end.new
+
+    begin
+      status, _calls = prepare(
+        full_env,
+        connect: ->(_b) { RpmsRpc.configure { |c| c.client = fake } },
+        held_keys: ->(_names) { [ "XUPROGMODE" ] }
+      )
+
+      assert_not_ready status
+      assert_operator fake.disconnects, :>=, 1, "the installed client was not disconnected"
+      assert_same before, RpmsRpc.configuration.client, "the client from before prepare was not restored"
+    ensure
+      RpmsRpc.configure { |c| c.client = before }
+    end
+  end
+
+  test "a ready status exposes the persona's DUZ as a String" do
+    signed_on = Result.new(success?: true, value: { duz: 4321 }, error: nil)
+    status, _calls = prepare(full_env, authenticate: ->(_a, _v) { signed_on })
+
+    assert status.ready?, "expected ready, got: #{status.reason}"
+    assert_equal "4321", status.persona_duz
+  end
+
+  # -- the binding keeps its codes to itself --------------------------------
+
+  test "a binding reveals its codes only through access_code and verify_code" do
+    binding = LiveStack.binding(full_env)
+
+    assert_equal ACCESS, binding.access_code
+    assert_equal VERIFY, binding.verify_code
+    assert_no_codes binding.inspect
+    assert_no_codes binding.to_s
+    assert_no_codes binding.pretty_inspect
+    assert_not binding.respond_to?(:to_h), "to_h would hand out the codes"
+    assert_not binding.respond_to?(:to_a), "to_a would hand out the codes"
+    assert_not binding.respond_to?(:deconstruct), "deconstruct would hand out the codes"
+    assert_not_kind_of Struct, binding
+  end
+
+  # -- evidence: what a scenario did against the stack ----------------------
+
+  WATCHED = %i[call_rpc call_rpc_raw call_rpc_global_array create_context].freeze
+  RPC_METHODS = %i[call_rpc call_rpc_raw call_rpc_global_array].freeze
+  Client = RpmsRpc::Client
+
+  # A broker client whose four watched methods raise what the test asks, or
+  # answer with their arguments.
   def watched_client(raises: nil)
     Class.new do
       prepend LiveStack::RefusalWatch
 
-      define_method(:call_rpc) do |rpc_name, *params|
+      RPC_METHODS.each do |name|
+        define_method(name) do |rpc_name, *params|
+          raise raises if raises
+
+          [ rpc_name, *params ]
+        end
+      end
+
+      define_method(:create_context) do |option_name = "OR CPRS GUI CHART"|
         raise raises if raises
 
-        [ rpc_name, *params ]
+        option_name
       end
     end.new
   end
 
-  test "a refused RPC is recorded by name and still raised" do
-    LiveStack.take_refusals
-    error = RpmsRpc::Client::RpcRefusedError.new("not in this context")
-    client = watched_client(raises: error)
-
-    raised = assert_raises(RpmsRpc::Client::RpcRefusedError) { client.call_rpc("ORWPT LIST ALL", "A", 1) }
-
-    assert_same error, raised
-    assert_equal [ "ORWPT LIST ALL" ], LiveStack.take_refusals
+  def assert_not_run(error, naming:)
+    assert_kind_of Cucumber::Core::Test::Result::Skipped, error
+    assert error.message.start_with?("not run:"), "expected #{error.message.inspect} to start with 'not run:'"
+    assert_includes error.message, naming
+    assert_no_codes error.message
   end
 
-  test "taking the refusals clears them" do
-    LiveStack.take_refusals
-    client = watched_client(raises: RpmsRpc::Client::RpcRefusedError.new("refused"))
-    assert_raises(RpmsRpc::Client::RpcRefusedError) { client.call_rpc("ORWU USERINFO") }
-    assert_raises(RpmsRpc::Client::RpcRefusedError) { client.call_rpc("ORQQAL LIST", 4) }
-
-    assert_equal [ "ORWU USERINFO", "ORQQAL LIST" ], LiveStack.take_refusals
-    assert_equal [], LiveStack.take_refusals
+  test "NotRun is a cucumber skip" do
+    assert_operator LiveStack::NotRun, :<, Cucumber::Core::Test::Result::Skipped
   end
 
-  test "an answered RPC passes through and records nothing" do
-    LiveStack.take_refusals
+  test "evidence starts empty once taken" do
+    LiveStack.take_evidence
+    evidence = LiveStack.take_evidence
 
-    assert_equal [ "ORWU USERINFO", "x" ], watched_client.call_rpc("ORWU USERINFO", "x")
-    assert_equal [], LiveStack.take_refusals
+    assert_equal 0, evidence.rpc_count
+    assert_equal [], evidence.reasons
   end
 
-  test "other broker errors are raised and not recorded as refusals" do
-    LiveStack.take_refusals
-    [ RpmsRpc::Client::ConnectionError, RpmsRpc::Client::RpcNotAvailableError, RpmsRpc::Client::RpcMError ].each do |klass|
-      client = watched_client(raises: klass.new("boom"))
-      assert_raises(klass) { client.call_rpc("ORWU USERINFO") }
+  test "every answered call on a watched method counts as a stack RPC and records no reason" do
+    RPC_METHODS.each do |name|
+      LiveStack.take_evidence
+
+      assert_equal [ "ORWU USERINFO", "x" ], watched_client.public_send(name, "ORWU USERINFO", "x"), name.to_s
+      assert_operator LiveStack.rpc_count, :>=, 1, "#{name} was not counted"
+
+      evidence = LiveStack.take_evidence
+      assert_kind_of Integer, evidence.rpc_count
+      assert_operator evidence.rpc_count, :>=, 1, "#{name} was not counted"
+      assert_equal [], evidence.reasons
+    end
+  end
+
+  test "an answered create_context counts as a stack RPC" do
+    LiveStack.take_evidence
+
+    assert_equal "OR CPRS GUI CHART", watched_client.create_context("OR CPRS GUI CHART")
+
+    evidence = LiveStack.take_evidence
+    assert_operator evidence.rpc_count, :>=, 1
+    assert_equal [], evidence.reasons
+  end
+
+  test "taking the evidence clears the count and the reasons" do
+    LiveStack.take_evidence
+    client = watched_client(raises: Client::RpcRefusedError.new("refused"))
+    assert_raises(LiveStack::NotRun) { client.call_rpc("ORWU USERINFO") }
+    assert_raises(LiveStack::NotRun) { client.call_rpc("ORQQAL LIST", 4) }
+
+    evidence = LiveStack.take_evidence
+    assert_operator evidence.rpc_count, :>=, 2
+    assert_equal 2, evidence.reasons.size
+    assert_includes evidence.reasons.first, "ORWU USERINFO"
+    assert_includes evidence.reasons.last, "ORQQAL LIST"
+
+    again = LiveStack.take_evidence
+    assert_equal 0, again.rpc_count
+    assert_equal [], again.reasons
+    assert_equal 0, LiveStack.rpc_count
+  end
+
+  test "a call the stack would not or could not answer is not run, on every watched RPC method" do
+    [
+      Client::RpcRefusedError, Client::RpcNotAvailableError, Client::ConnectionError,
+      Client::RpcTimeoutError, Client::AuthenticationError
+    ].each do |klass|
+      RPC_METHODS.each do |name|
+        LiveStack.take_evidence
+        client = watched_client(raises: klass.new("broker said #{ACCESS};#{VERIFY}"))
+
+        error = assert_raises(LiveStack::NotRun, "#{klass} from #{name}") { client.public_send(name, "ORWPT LIST ALL", "A", 1) }
+        assert_not_run error, naming: "ORWPT LIST ALL"
+
+        evidence = LiveStack.take_evidence
+        assert_operator evidence.rpc_count, :>=, 1, "#{klass} from #{name} was not counted"
+        assert_equal 1, evidence.reasons.size, "#{klass} from #{name}"
+        assert_kind_of String, evidence.reasons.first
+        assert_includes evidence.reasons.first, "ORWPT LIST ALL"
+        assert_no_codes evidence.reasons.first
+      end
+    end
+  end
+
+  test "any broker error from create_context is not run and names the context option" do
+    [
+      RpmsRpc::Error, Client::ContextRefusedError, Client::RpcRefusedError, Client::ConnectionError,
+      Client::RpcMError, Client::ParseError
+    ].each do |klass|
+      LiveStack.take_evidence
+      client = watched_client(raises: klass.new("broker said #{ACCESS};#{VERIFY}"))
+
+      error = assert_raises(LiveStack::NotRun, klass.to_s) { client.create_context("OR CPRS GUI CHART") }
+      assert_not_run error, naming: "OR CPRS GUI CHART"
+
+      evidence = LiveStack.take_evidence
+      assert_equal 1, evidence.reasons.size, klass.to_s
+      assert_includes evidence.reasons.first, "OR CPRS GUI CHART"
+      assert_no_codes evidence.reasons.first
+    end
+  end
+
+  test "a routine that ran and failed is raised unchanged and records no reason" do
+    RPC_METHODS.each do |name|
+      LiveStack.take_evidence
+      failure = Client::RpcMError.new("<UNDEFINED>X+1^ORWU")
+      client = watched_client(raises: failure)
+
+      raised = assert_raises(Client::RpcMError, name.to_s) { client.public_send(name, "ORWU USERINFO") }
+
+      assert_same failure, raised
+      evidence = LiveStack.take_evidence
+      assert_equal [], evidence.reasons
+      assert_operator evidence.rpc_count, :>=, 1, "#{name} reached the stack and was not counted"
+    end
+  end
+
+  test "errors that are not the stack declining pass through every watched method unchanged" do
+    [ Client::ParseError.new("bad frame"), ArgumentError.new("wrong argument") ].each do |failure|
+      RPC_METHODS.each do |name|
+        LiveStack.take_evidence
+        raised = assert_raises(failure.class, name.to_s) { watched_client(raises: failure).public_send(name, "ORWU USERINFO") }
+
+        assert_same failure, raised
+        assert_equal [], LiveStack.take_evidence.reasons
+      end
     end
 
-    assert_equal [], LiveStack.take_refusals
+    LiveStack.take_evidence
+    failure = ArgumentError.new("wrong argument")
+    raised = assert_raises(ArgumentError) { watched_client(raises: failure).create_context("OR CPRS GUI CHART") }
+
+    assert_same failure, raised
+    assert_equal [], LiveStack.take_evidence.reasons
+  end
+
+  # -- the verdict: run only with evidence ----------------------------------
+
+  Evidence = Struct.new(:rpc_count, :reasons)
+  SignedOn = Struct.new(:duz)
+
+  def verdict(evidence: Evidence.new(3, []), client: nil, stack_client: nil, persona_duz: "4321")
+    stack_client ||= SignedOn.new("4321")
+    client ||= stack_client
+    LiveStack.verdict(evidence: evidence, client: client, stack_client: stack_client, persona_duz: persona_duz)
+  end
+
+  def assert_verdict(reason, containing:)
+    assert_kind_of String, reason
+    assert_includes reason, containing
+    assert_no_codes reason
+  end
+
+  test "a scenario that reached the stack as the persona on the stack's client ran" do
+    assert_nil verdict
+    assert_nil verdict(evidence: Evidence.new(1, []))
+    assert_nil verdict(stack_client: SignedOn.new(4321), persona_duz: "4321"), "DUZ is compared as text"
+    assert_nil verdict(stack_client: SignedOn.new("4321"), persona_duz: 4321), "DUZ is compared as text"
+  end
+
+  test "a recorded reason is the verdict" do
+    first = "ORWPT LIST ALL refused in the persona's context"
+    reason = verdict(evidence: Evidence.new(2, [ first, "ORQQAL LIST not available" ]))
+
+    assert_verdict reason, containing: first
+  end
+
+  test "a recorded reason is the verdict even when nothing else is right" do
+    first = "ORWPT LIST ALL refused in the persona's context"
+    reason = verdict(evidence: Evidence.new(0, [ first ]), client: SignedOn.new(nil), stack_client: SignedOn.new("4321"))
+
+    assert_verdict reason, containing: first
+  end
+
+  test "a scenario that made no RPC did not run" do
+    assert_verdict verdict(evidence: Evidence.new(0, [])), containing: "no RPC reached the stack"
+  end
+
+  test "a scenario on another client did not run, however alike the client" do
+    stack_client = SignedOn.new("4321")
+    twin = SignedOn.new("4321")
+    assert_equal stack_client, twin
+
+    assert_verdict verdict(client: twin, stack_client: stack_client), containing: "not the stack's client"
+  end
+
+  test "a scenario signed on as someone else did not run" do
+    assert_verdict verdict(stack_client: SignedOn.new("1"), persona_duz: "4321"), containing: "not signed on as the persona"
+  end
+
+  test "a scenario with no signed-on user did not run" do
+    [ nil, "" ].each do |duz|
+      reason = verdict(stack_client: SignedOn.new(duz), persona_duz: duz)
+
+      assert_verdict reason, containing: "not signed on as the persona"
+    end
   end
 end
