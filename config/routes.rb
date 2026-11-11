@@ -169,6 +169,16 @@ Lakeraven::EHR::Engine.routes.draw do
   # The referrals pending at the facility, for a user who works referrals (#873).
   get "referrals/pending", to: "pending_referrals#index", as: :pending_referrals
 
+  # Demo prototype (#988, #989; not in the December build). A registered
+  # outside app posts a referral follow-up as a FHIR Communication, held for
+  # review; staff confirm or reject it, and only a confirmed one is written
+  # to the RPMS referral.
+  resources :communications, path: "Communication", only: %i[create show]
+  get "referrals/follow_ups", to: "referral_follow_ups#index", as: :referral_follow_ups
+  post "referrals/follow_ups/:id/confirm", to: "referral_follow_ups#confirm", as: :confirm_referral_follow_up, constraints: { id: /\d+/ }
+  post "referrals/follow_ups/:id/reject", to: "referral_follow_ups#reject", as: :reject_referral_follow_up, constraints: { id: /\d+/ }
+  post "referrals/follow_ups/:id/retry", to: "referral_follow_ups#retry", as: :retry_referral_follow_up, constraints: { id: /\d+/ }
+
   # The patient bar's search and recent patients (rpms-ux S-CHT-01). A search
   # names a patient, so it is posted, never carried in a URL (#722).
   get "chart_search", to: "chart_searches#show", as: :chart_search

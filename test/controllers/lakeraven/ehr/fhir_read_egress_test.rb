@@ -63,6 +63,16 @@ module Lakeraven
         "lakeraven/ehr/consent_kiosk#show",
         "lakeraven/ehr/consent_kiosk#create",
         "lakeraven/ehr/consent_kiosk#unlock",
+        # Demo prototype (#988, #989; demo/app-integration-writeback only). Communication
+        # hands back only what the posting app sent, to that app; the review
+        # queue is session-authenticated staff UI. communications_controller_test
+        # and referral_follow_ups_test cover them.
+        "lakeraven/ehr/communications#create",
+        "lakeraven/ehr/communications#show",
+        "lakeraven/ehr/referral_follow_ups#index",
+        "lakeraven/ehr/referral_follow_ups#confirm",
+        "lakeraven/ehr/referral_follow_ups#reject",
+        "lakeraven/ehr/referral_follow_ups#retry",
         "lakeraven/ehr/sessions#new",         # Web UI login
         "lakeraven/ehr/sessions#create",      # Web UI login
         "lakeraven/ehr/sessions#destroy",     # Web UI logout

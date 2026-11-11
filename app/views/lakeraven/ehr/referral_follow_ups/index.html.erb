@@ -1,0 +1,106 @@
+<% page_title "Outside app follow-ups" %>
+
+<%= page_header "Outside app follow-ups",
+      [ "Results that registered outside apps posted about open referrals. Nothing here reaches RPMS until you confirm it.",
+        "Confirming writes the appointment date and a case note to the RPMS referral, then reads the referral back." ] %>
+
+<%= alert_box :notice,
+      "Demo prototype on synthetic data. Not part of the December build, and the FHIR API is not certified.",
+      id: "prototype-banner" %>
+
+<% if flash[:notice].present? %>
+  <%= alert_box :notice, flash[:notice], id: "follow-up-notice" %>
+<% end %>
+<%= flash_alert(id: "follow-up-alert") %>
+
+<h2 class="mt-6 text-lg font-semibold">Waiting for review</h2>
+<% if @pending.empty? %>
+  <%= empty_state "No follow-ups are waiting for review.", id: "no-pending-follow-ups" %>
+<% else %>
+  <table id="pending-follow-ups" class="data-table mt-2">
+    <caption><%= pluralize(@pending.size, "follow-up") %> waiting, oldest first.</caption>
+    <thead>
+      <tr>
+        <th scope="col">Received</th>
+        <th scope="col">Patient</th>
+        <th scope="col">Referral</th>
+        <th scope="col">From</th>
+        <th scope="col">Outcome</th>
+        <th scope="col">Decision</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% @pending.each do |f| %>
+        <tr data-follow-up="<%= f.id %>" data-status="pending">
+          <td><%= f.created_at.strftime("%b %-d, %Y %-l:%M %p") %></td>
+          <td>Patient <%= f.patient_dfn %></td>
+          <td>RPMS referral <%= f.referral_ien %></td>
+          <td>
+            <%= f.app_name %>
+            <% if f.ai_generated %><%= status_badge "warning", "AI-generated" %><% end %>
+          </td>
+          <td>
+            <p><%= f.summary %></p>
+            <p class="text-sm">
+              Reached: <%= f.reached.nil? ? "not said" : (f.reached ? "yes" : "no") %>.
+              Appointment: <%= f.appointment_on ? f.appointment_on.strftime("%b %-d, %Y") : "none given" %>.
+            </p>
+          </td>
+          <td class="flex gap-2">
+            <%= button_to "Confirm", confirm_referral_follow_up_path(f), method: :post, class: "button-primary",
+                  form: { id: "confirm-#{f.id}" } %>
+            <%= button_to "Reject", reject_referral_follow_up_path(f), method: :post, class: "button-secondary",
+                  form: { id: "reject-#{f.id}" } %>
+          </td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+<% end %>
+
+<h2 class="mt-8 text-lg font-semibold">Reviewed</h2>
+<% if @reviewed.empty? %>
+  <%= empty_state "Nothing reviewed yet.", id: "no-reviewed-follow-ups" %>
+<% else %>
+  <table id="reviewed-follow-ups" class="data-table mt-2">
+    <caption>The last <%= pluralize(@reviewed.size, "reviewed follow-up") %>, newest first.</caption>
+    <thead>
+      <tr>
+        <th scope="col">Decision</th>
+        <th scope="col">Patient and referral</th>
+        <th scope="col">Outcome</th>
+        <th scope="col">RPMS</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% @reviewed.each do |f| %>
+        <tr data-follow-up="<%= f.id %>" data-status="<%= f.status %>" data-write-back="<%= f.write_back_status %>">
+          <td>
+            <%= status_badge(f.confirmed? ? "active" : "cancelled", f.status.capitalize) %>
+            by <%= f.reviewed_by_name %>, <%= f.reviewed_at&.strftime("%b %-d, %Y %-l:%M %p") %>
+          </td>
+          <td>Patient <%= f.patient_dfn %>, RPMS referral <%= f.referral_ien %></td>
+          <td>
+            <%= f.summary %>
+            <% if f.ai_generated %><%= status_badge "warning", "AI-generated" %><% end %>
+          </td>
+          <td>
+            <% if f.rejected? %>
+              Not written.
+            <% elsif f.written_back? %>
+              <p>Written. RPMS reads back:</p>
+              <dl class="text-sm" id="read-back-<%= f.id %>">
+                <dt>Status</dt><dd data-read-back="status"><%= f.read_back&.dig("status") %></dd>
+                <dt>Date of service</dt><dd data-read-back="appointment"><%= f.read_back&.dig("appointment_on") || "none" %></dd>
+                <dt>Case note</dt><dd data-read-back="case_note"><%= f.read_back&.dig("case_note") %></dd>
+              </dl>
+            <% elsif f.write_back_failed? %>
+              <p data-write-back-error>Write failed: <%= f.write_back_detail %></p>
+              <%= button_to "Retry write", retry_referral_follow_up_path(f), method: :post, class: "button-secondary" %>
+            <% end %>
+          </td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+<% end %>

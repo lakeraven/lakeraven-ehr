@@ -19,6 +19,23 @@ module Lakeraven
         RpmsRpc::Referral.pending(from: window.begin, to: window.end)
       end
 
+      # Demo prototype (#990; not in the December build). A confirmed outside-app
+      # follow-up filed on the RPMS referral: the date of service and a case
+      # note, through BMC UPDATE REFERRAL (RpmsRpc::Referral.record_follow_up,
+      # rpms-rpc#722, not yet run live). Returns the gem's
+      # { success:, message:, error: } hash.
+      def self.record_follow_up(ien, appointment_on:, case_note:)
+        CapabilityGuard.ensure!(:prc_referrals)
+        RpmsRpc::Referral.record_follow_up(ien.to_s, appointment_on: appointment_on, case_note: case_note)
+      end
+
+      # What RPMS now holds for that referral: status, date of service (1106,
+      # FileMan internal) and its case notes (RpmsRpc::Referral.follow_up_state).
+      def self.follow_up_state(ien)
+        CapabilityGuard.ensure!(:prc_referrals)
+        RpmsRpc::Referral.follow_up_state(ien.to_s)
+      end
+
       def self.create(dfn, params)
         CapabilityGuard.ensure!(:prc_referrals)
         RpmsRpc::Referral.create(dfn.to_s, params)

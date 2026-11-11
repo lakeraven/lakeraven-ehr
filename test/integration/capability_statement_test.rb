@@ -469,6 +469,10 @@ class CapabilityStatementTest < ActionDispatch::IntegrationTest
       Lakeraven::EHR::AuditEvent.create!(event_type: "rest", action: "R", outcome: "0",
                                          entity_type: "Patient", entity_identifier: "1").id
     when "ValueSet" then "capability-probe"
+    # Demo prototype (#988): the posting app reads back its own follow-up.
+    when "Communication"
+      Lakeraven::EHR::AppFollowUp.create!(client_id: @oauth_app.uid, app_name: @oauth_app.name, patient_dfn: 1,
+                                          referral_ien: 1, summary: "capability probe").id
     when "Patient", "Organization", "Location" then "1"
     else patient_scoped_read_probe_id(type)
     end

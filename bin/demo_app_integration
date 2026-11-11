@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# bin/demo_app_integration — the outside app integration loop, end to end, on
+# synthetic data (demo prototype; not in the December build; the FHIR API is
+# not certified). It runs test/integration/app_integration_demo_test.rb and
+# prints each step:
+#   0 register the app (SMART Backend Services) and get a scoped token; a token
+#     without Communication create is refused the write
+#   1 read the synthetic patient and their referral over FHIR
+#   2 a stand-in client (a script, no AI) posts the call outcome as a Communication
+#   3 it is held as pending for review, never applied, and audited
+#   4 a coordinator confirms it on the review page
+#   5 confirming writes it to the RPMS referral (BMC UPDATE REFERRAL) and reads it back
+#
+#   bin/demo_app_integration           test harness: the mock broker, every RPMS reply seeded
+#   bin/demo_app_integration --live    a throwaway RPMS container on 127.0.0.1:9100 (WRITES)
+#
+# --live needs the rpms-rpc branch with Referral.record_follow_up (rpms-rpc#722):
+# the Gemfile pins it, or set RPMS_RPC_PATH to a checkout of it. Start RPMS
+# first from that rpms-rpc checkout:
+#   LAKERAVEN_EHR_PATH=<this checkout> bin/cloud_rpms up
+# Overrides: VISTA_RPC_PORT, LIVE_RPMS_ACCESS, LIVE_RPMS_VERIFY, DEMO_PATIENT_DFN.
+# The transcript is also written to tmp/demo_app_integration.<mode>.log.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+mode=harness
+if [ "${1:-}" = "--live" ]; then
+  mode=live
+  export LIVE_RPMS=1 LIVE_RPMS_WRITES=1
+  export VISTA_BROKER="${VISTA_BROKER:-cia}" VISTA_RPC_HOST="${VISTA_RPC_HOST:-127.0.0.1}" VISTA_RPC_PORT="${VISTA_RPC_PORT:-9100}"
+  # The published synthetic demo pair (rpms-ops SEEDPERS), a provider who works referrals.
+  export LIVE_RPMS_ACCESS="${LIVE_RPMS_ACCESS:-PMD123}" LIVE_RPMS_VERIFY="${LIVE_RPMS_VERIFY:-PMD123!!}"
+elif [ -n "${1:-}" ]; then
+  echo "usage: bin/demo_app_integration [--live]" >&2
+  exit 2
+fi
+
+mkdir -p tmp
+log="tmp/demo_app_integration.${mode}.log"
+export RAILS_ENV=test DEMO_TRANSCRIPT=1
+set +e
+bin/rails test test/integration/app_integration_demo_test.rb 2>&1 | tee "$log"
+status=${PIPESTATUS[0]}
+set -e
+if [ "$status" -eq 0 ] && grep -q "^DEMO COMPLETE" "$log"; then
+  echo "[demo] passed ($mode); transcript: $log"
+else
+  echo "[demo] FAILED ($mode); transcript: $log" >&2
+  exit 1
+fi

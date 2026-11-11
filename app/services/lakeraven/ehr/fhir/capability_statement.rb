@@ -87,6 +87,14 @@ module Lakeraven
             source: "Create takes patient_dfn, coverage_type, provider_npi, service_date and purpose as request " \
                     "parameters, not a CoverageEligibilityRequest resource, and returns the response the " \
                     "configured eligibility adapter gives."
+          },
+          # Demo prototype (#988; branch demo/app-integration-writeback only, not in the
+          # December build). Listed here because every routed type must be;
+          # #988 wants it listed only once the host opens the API (#970).
+          "Communication" => {
+            interactions: %w[create read],
+            source: "Demo prototype: a registered app's referral follow-up, held in this server for staff review; " \
+                    "nothing reaches RPMS until a person confirms it."
           }
         }.freeze
 
