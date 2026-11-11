@@ -125,6 +125,20 @@ module Lakeraven
       # patients (rpms-ux S-CHT-01.9).
       def patient_search_allowed? = can_read?("Patient")
 
+      # The chart renders in the engine layout, like every other page with a
+      # patient open. The layout asks for the banner and for capabilities.
+      # The banner is the chart's own (assign_patient_banner), read from the
+      # same filtered bundle as the page; the layout never reads it again.
+      helper_method :patient_banner, :capability?
+
+      def patient_banner = @patient_banner
+
+      # The same question WebController#capability? answers, for the header's
+      # links (ADR 0010).
+      def capability?(name)
+        Capabilities.allows?(Array(session[:security_keys]), name)
+      end
+
       private
 
       # -- Identifier format (#467) ----------------------------------------------
@@ -666,7 +680,7 @@ module Lakeraven
 
         assign_chart_from_bundle(bundle)
         assign_patient_banner
-        render :show, layout: false
+        render :show, layout: "lakeraven/ehr/application"
       end
 
       # The banner and the allergy sections both read the filtered bundle.
