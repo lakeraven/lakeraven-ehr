@@ -136,7 +136,7 @@ The words carry the meaning; the colour only repeats it.
 <td data-status="<%= status_key %>"><%= status_badge status_key, status %></td>
 ```
 
-Keys with a colour: booked, scheduled, checked, checked in, no-show, cancelled, active, inactive, deceased, and for a registration item, error and warning. Any other key gets the plain badge; add a key to `STATUS_TONES` in the helper (classes are written out whole there so the Tailwind build keeps them).
+Keys with a colour: booked, scheduled, checked, checked in, no-show, cancelled, active, inactive, revoked, deceased, and for a registration item, error and warning. Any other key gets the plain badge; add a key to `STATUS_TONES` in the helper (classes are written out whole there so the Tailwind build keeps them).
 Locals: `key`, `label`, `tone`.
 
 ### empty_state
@@ -161,6 +161,17 @@ Who the front desk has open: health record number, date of birth, sex. The name 
 ```
 
 Locals: `patient` (a hash with `:mrn`, `:dob`, `:sex`), `id`.
+
+### The clinical patient banner
+
+On a clinical page (the chart, allergy entry, consents, screenings), the patient is shown by `shared/_patient_banner`: name, date of birth, age, sex, record number and allergies.
+The layout renders it for every page with a patient open, so a page never names the patient itself (no "Patient #4" in the heading).
+The chart is a self-contained page that styles the banner inline; everywhere else it is styled by the `banner`, `demoinfo` and `patient-banner__*` utilities in engine.css.
+Change both together, so the patient looks the same on every page.
+
+### entry-form, field-row, form-actions
+
+A clinical entry form (allergy entry): `entry-form` on the `<form>`, one `<fieldset>` per group of fields, `field-row` around fields read together (two columns from `sm` up), and `form-actions` around the primary button and the way back.
 
 ### Buttons
 

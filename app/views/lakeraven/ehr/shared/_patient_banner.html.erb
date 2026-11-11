@@ -1,5 +1,7 @@
 <%# Stays on screen while a long chart scrolls, so the clinician can still
-    see which patient they are documenting on. %>
+    see which patient they are documenting on.
+    One partial on every page with a patient open. The chart styles these
+    classes inline; the layout's pages get them from engine.css. %>
 <div
   id="patient-banner"
   class="sticky top-0 z-20 bg-slate-50"
@@ -10,50 +12,59 @@
       <%= render "lakeraven/ehr/shared/patient_search_form", query: @query %>
     <% end %>
   <% else %>
-    <% if banner.notice.present? %>
-      <p><%= banner.notice %></p>
-    <% end %>
+    <div class="patient-banner__inner">
+      <% if banner.notice.present? %>
+        <p><%= banner.notice %></p>
+      <% end %>
 
-    <% if banner.demographics %>
-      <div class="banner">
-        <div>
-          <h1><%= banner.demographics.name %></h1>
+      <% if banner.demographics %>
+        <div class="banner">
+          <div>
+            <h1><%= banner.demographics.name %></h1>
+          </div>
+          <dl class="demoinfo">
+            <div><dt>DOB</dt><dd><%= banner.demographics.dob_text %></dd></div>
+            <div><dt>Age</dt><dd><%= banner.demographics.age_text %></dd></div>
+            <div><dt>Sex</dt><dd><%= banner.demographics.sex_text %></dd></div>
+            <div><dt>MRN / DFN</dt><dd><%= banner.demographics.mrn %></dd></div>
+          </dl>
         </div>
-        <dl class="demoinfo">
-          <div><dt>DOB</dt><dd><%= banner.demographics.dob_text %></dd></div>
-          <div><dt>Age</dt><dd><%= banner.demographics.age_text %></dd></div>
-          <div><dt>Sex</dt><dd><%= banner.demographics.sex_text %></dd></div>
-          <div><dt>MRN / DFN</dt><dd><%= banner.demographics.mrn %></dd></div>
-        </dl>
-      </div>
-    <% end %>
+      <% end %>
 
-    <% if banner.allergies %>
-      <div class="patient-banner__allergies" data-allergies-state="<%= banner.allergies.state %>">
-        <span>Allergies</span>
-        <%# Loaded is the names alone. Otherwise #text is "None recorded",
-            "Not loaded", or the known names plus the incomplete-list note. %>
-        <% if banner.allergies.loaded? %>
-          <% banner.allergies.names.each do |name| %>
-            <span><%= name %></span>
+      <% if banner.allergies %>
+        <div
+          class="patient-banner__allergies"
+          data-allergies-state="<%= banner.allergies.state %>"
+        >
+          <span>Allergies</span>
+          <%# Loaded is the names alone. Otherwise #text is "None recorded",
+              "Not loaded", or the known names plus the incomplete-list note. %>
+          <% if banner.allergies.loaded? %>
+            <% banner.allergies.names.each do |name| %>
+              <span><%= name %></span>
+            <% end %>
+          <% else %>
+            <%= banner.allergies.text %>
           <% end %>
-        <% else %>
-          <%= banner.allergies.text %>
+        </div>
+      <% end %>
+
+      <div class="patient-banner__actions">
+        <%# Another patient can be found without closing this chart (S-CHT-01.9). %>
+        <% if patient_search_allowed? %>
+          <%= link_to "Switch patient",
+                chart_search_path,
+                id: "switch-patient" %>
+        <% end %>
+
+        <% if banner.show_clear? %>
+          <%# URL rather than path: the route helper already includes the engine
+              mount, and a root-relative action would be prefixed with it again. %>
+          <%= button_to "Clear patient context",
+                active_patient_context_url,
+                method: :delete %>
         <% end %>
       </div>
-    <% end %>
-
-    <%# Another patient can be found without closing this chart (S-CHT-01.9). %>
-    <% if patient_search_allowed? %>
-      <%= link_to "Switch patient",
-            chart_search_path,
-            id: "switch-patient" %>
-    <% end %>
-
-    <% if banner.show_clear? %>
-      <%# URL rather than path: the route helper already includes the engine
-          mount, and a root-relative action would be prefixed with it again. %>
-      <%= button_to "Clear patient context", active_patient_context_url, method: :delete %>
-    <% end %>
+    </div>
   <% end %>
 </div>

@@ -235,6 +235,92 @@
 }
 
 /* ---------------------------------------------------------------------------
+ * The clinical patient banner (shared/_patient_banner).
+ *
+ * The chart (charts/show) is a self-contained page with its own inline CSS
+ * for these classes. Every other page with a patient open (allergy entry,
+ * consents, screenings) gets the banner through the layout, styled here to
+ * look the same: the patient on a blue card, then their allergies.
+ * ------------------------------------------------------------------------ */
+@utility patient-banner__inner {
+  @apply mx-auto flex max-w-5xl flex-col gap-2 px-4 pt-4 pb-2;
+}
+
+@utility banner {
+  @apply flex flex-wrap items-center gap-x-7 gap-y-2 rounded-xl bg-linear-to-b from-sky-800 to-sky-900 px-5 py-4 text-white shadow-lg;
+
+  & h1 {
+    @apply m-0 text-2xl font-bold tracking-tight text-white;
+  }
+}
+
+@utility demoinfo {
+  @apply m-0 ml-auto flex flex-wrap gap-x-6 gap-y-1.5;
+
+  & div {
+    @apply flex flex-col;
+  }
+
+  & dt {
+    @apply text-xs tracking-wider text-sky-200 uppercase;
+  }
+
+  & dd {
+    @apply m-0 text-base font-semibold tabular-nums;
+  }
+}
+
+/* Allergies stay in red even when the list is short: they are what a
+   clinician must not miss before writing anything on this chart. */
+@utility patient-banner__allergies {
+  @apply flex flex-wrap items-center gap-2 rounded-lg border border-l-4 border-red-200 border-l-red-700 bg-red-50 px-4 py-2 text-sm text-red-900;
+
+  & > span:first-child {
+    @apply mr-1 font-bold tracking-wide uppercase;
+  }
+
+  & > span + span {
+    @apply rounded-full border border-red-200 bg-white px-3 py-0.5 font-semibold;
+  }
+}
+
+@utility patient-banner__actions {
+  @apply flex flex-wrap items-center gap-3 text-sm;
+
+  & form {
+    @apply m-0;
+  }
+
+  & button {
+    @apply min-h-9 bg-white px-3 py-1.5 text-sm font-semibold text-slate-900 ring-1 ring-slate-300 ring-inset hover:bg-slate-50;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Clinical entry forms on a chart (allergy entry). Fields read together sit
+ * in a row; each group is a fieldset with a legend.
+ * ------------------------------------------------------------------------ */
+@utility entry-form {
+  @apply flex flex-col gap-5;
+
+  & fieldset {
+    @apply m-0 flex flex-col gap-4 bg-white;
+  }
+
+  & legend {
+    @apply px-1 font-semibold text-slate-900;
+  }
+}
+
+@utility field-row {
+  @apply grid gap-4 sm:grid-cols-2;
+}
+
+@utility form-actions {
+  @apply flex flex-wrap items-center gap-3;
+}
+
+/* ---------------------------------------------------------------------------
  * Scored screening instruments (PHQ-9 / GAD-7).
  *
  * Tuned for a shared clinic tablet: touch targets are at least 44px tall,

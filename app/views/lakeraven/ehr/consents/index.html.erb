@@ -1,43 +1,82 @@
-<% content_for :title, "Consents" %>
+<% page_title "Consents" %>
+<%# The patient is in the banner above (shared/_patient_banner), the same
+    one the chart shows. %>
 
-<div class="page-header">
-  <h1>Consents</h1>
-  <%= link_to "Start a consent", new_patient_consent_path(@dfn) %>
-</div>
+<%= page_header "Consents",
+      "What this patient has signed in the clinic, and what they have revoked." do %>
+  <%= link_to "Start a consent",
+        new_patient_consent_path(@dfn),
+        class: "button-primary no-underline" %>
+<% end %>
 
-<table>
-  <thead>
-    <tr>
-      <th>Consent</th>
-      <th>Version</th>
-      <th>Status</th>
-      <th>Signed</th>
-      <th>Witness</th>
-      <th>Revocation</th>
-    </tr>
-  </thead>
-  <tbody>
-    <% @consents.each do |row| %>
-      <% consent = row.to_consent(revoked: @revocations_by_signature_id.key?(row.id)) %>
-      <% revocation = @revocations_by_signature_id[row.id] %>
+<% if @consents.empty? %>
+  <%= empty_state "This patient has not signed a consent in the clinic.",
+        id: "no-consents" %>
+<% else %>
+  <table
+    id="consents"
+    class="data-table"
+  >
+    <caption class="sr-only">Signed consents</caption>
+    <thead>
       <tr>
-        <td><%= row.consent_template.title %></td>
-        <td><%= row.template_version %></td>
-        <td><%= consent.status_display %></td>
-        <td><%= row.signed_at.strftime("%b %-d, %Y") %></td>
-        <td><%= row.witness_duz %></td>
-        <td>
-          <% if revocation %>
-            <%= revocation.revocation_reason %>
-          <% elsif capability?("consent.revoke") %>
-            <%= form_with url: patient_consent_revocation_path(@dfn, row), method: :post do %>
-              <label for="revocation_reason_<%= row.id %>">Reason</label>
-              <input type="text" name="reason" id="revocation_reason_<%= row.id %>" required>
-              <button type="submit">Revoke</button>
-            <% end %>
-          <% end %>
-        </td>
+        <th scope="col">Consent</th>
+        <th scope="col">Version</th>
+        <th scope="col">Status</th>
+        <th scope="col">Signed</th>
+        <th scope="col">Witness</th>
+        <th scope="col">Revocation</th>
       </tr>
-    <% end %>
-  </tbody>
-</table>
+    </thead>
+    <tbody>
+      <% @consents.each do |row| %>
+        <% consent = row.to_consent(revoked: @revocations_by_signature_id.key?(row.id)) %>
+        <% revocation = @revocations_by_signature_id[row.id] %>
+        <tr data-consent="<%= row.id %>">
+          <td><%= row.consent_template.title %></td>
+          <td><%= row.template_version %></td>
+          <td data-status="<%= consent.status %>"><%= status_badge consent.status, consent.status_display %></td>
+          <td><%= row.signed_at.strftime("%b %-d, %Y") %></td>
+          <td><%= row.witness_duz %></td>
+          <td>
+            <% if revocation %>
+              <%= revocation.revocation_reason %>
+            <% elsif capability?("consent.revoke") %>
+              <%= form_with url: patient_consent_revocation_path(@dfn, row),
+                    method: :post,
+                    class: "flex flex-wrap items-end gap-2" do %>
+                <div class="form-field">
+                  <label
+                    for="revocation_reason_<%= row.id %>"
+                    class="text-sm"
+                  >
+                    Reason
+                  </label>
+                  <input
+                    type="text"
+                    name="reason"
+                    id="revocation_reason_<%= row.id %>"
+                    required
+                    class="min-h-9 py-1"
+                  >
+                </div>
+                <button
+                  type="submit"
+                  class="button-secondary"
+                >
+                  Revoke
+                </button>
+              <% end %>
+            <% end %>
+          </td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+<% end %>
+
+<div class="form-actions mt-6">
+  <%= link_to "Back to chart",
+        patient_chart_path(@dfn),
+        class: "button-secondary no-underline" %>
+</div>

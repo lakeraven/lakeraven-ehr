@@ -32,6 +32,13 @@ module Lakeraven
         end
       end
 
+      test "GET index with no signatures says so" do
+        get BASE
+
+        assert_select "#no-consents"
+        assert_select "table#consents", count: 0
+      end
+
       test "GET index lists each consent with template title version and status" do
         signature = SignedConsent.create!(
           patient_dfn: DFN,
