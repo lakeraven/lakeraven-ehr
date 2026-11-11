@@ -18,7 +18,7 @@ class LiveStackCucumberTest < ActiveSupport::TestCase
   # Nothing of the caller's environment may bind or unbind the run.
   CLEARED = %w[
     LIVE_STACK LIVE_RPMS RPMS_IP RPMS_PORT RPMS_BROKER RPMS_ACCESS RPMS_VERIFY
-    LIVE_RPMS_ACCESS LIVE_RPMS_VERIFY
+    LIVE_RPMS_ACCESS LIVE_RPMS_VERIFY RPMS_UCI VISTA_RPC_HOST VISTA_RPC_PORT VISTA_BROKER
   ].to_h { |name| [ name, nil ] }.freeze
 
   def scenario_location
@@ -58,11 +58,12 @@ class LiveStackCucumberTest < ActiveSupport::TestCase
   end
 
   test "a stack run that cannot reach its broker reports not run, never passed" do
-    output, _status = cucumber("--profile", "stack", env: {
+    output, status = cucumber("--profile", "stack", env: {
       "RPMS_IP" => "127.0.0.1", "RPMS_PORT" => closed_local_port.to_s, "RPMS_BROKER" => "cia",
       "RPMS_ACCESS" => ACCESS, "RPMS_VERIFY" => VERIFY
     })
 
+    assert_equal 0, status.exitstatus, "expected exit 0:\n#{output}"
     assert_includes output, "not run:"
     assert_skipped_not_passed output
     assert_not_includes output, VERIFY, "the verify code leaked into the run's output"
