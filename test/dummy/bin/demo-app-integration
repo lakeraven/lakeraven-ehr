@@ -1,0 +1,13 @@
+#!/usr/bin/env sh
+# Referral-loop demo (#993) on synthetic data. Prototype, not for merge.
+# Runbook: docs/demo_app_integration_runbook.md
+#
+#   test/dummy/bin/demo-app-integration                # whole loop
+#   DEMO_PAUSE=1 test/dummy/bin/demo-app-integration   # Enter between steps
+#
+# Needs only Ruby, the bundle and the dev Postgres the chart demo uses.
+# RPMS is the in-memory mock broker: no live RPMS, no network, no PHI.
+set -e
+cd "$(dirname "$0")/.."
+RAILS_ENV=development bin/rails db:prepare >/dev/null
+exec env RAILS_ENV=development bin/rails demo:app_integration
