@@ -196,7 +196,7 @@ jobs:
       LIVE_RPMS_ACCESS: PMD123
       LIVE_RPMS_VERIFY: PMD123!!
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ruby/setup-ruby@v1
         with:
           # The minor .ruby-version names; setup-ruby takes the newest patch the runner offers
