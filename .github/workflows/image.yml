@@ -41,7 +41,7 @@ jobs:
             type=semver,pattern={{version}}
 
       # amd64 only: the AWS module runs it on an x86_64 box.
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64
