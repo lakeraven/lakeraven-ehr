@@ -1,0 +1,111 @@
+<% page_title "#{@group[:name]} | Scheduling" %>
+
+<%= page_header @group[:name],
+      @date.strftime("%A, %b %-d, %Y") do %>
+  <%= link_to "All groups",
+        scheduling_resource_groups_path %>
+<% end %>
+
+<% if @notice.present? %>
+  <%= alert_box :notice, @notice, id: "resource-group-notice" %>
+<% end %>
+
+<%= flash_alert id: "resource-group-alert" %>
+
+<%= form_with url: scheduling_resource_group_path(@group[:id]),
+      method: :get,
+      local: true,
+      class: "flex items-end gap-2" do %>
+  <%= form_field :date, "Day" do |aria| %>
+    <%= date_field_tag :date,
+          @date,
+          id: "date",
+          aria: aria %>
+  <% end %>
+  <%= submit_tag "Show",
+        name: nil,
+        class: "button-secondary" %>
+<% end %>
+
+<% if @days.empty? %>
+  <%= empty_state "None of this group's clinics is open to you.",
+        id: "no-group-days" %>
+<% else %>
+  <div
+    id="group-days"
+    class="grid gap-4"
+    style="grid-template-columns: repeat(<%= @days.size %>, minmax(14rem, 1fr));"
+  >
+    <% @days.each do |resource, day, appointments| %>
+      <section
+        class="card"
+        data-group-day="<%= resource[:id] %>"
+      >
+        <h2><%= link_to resource[:name], scheduling_clinic_path(resource[:id], date: @date.iso8601) %></h2>
+        <% if day.closed %>
+          <p data-closed="<%= day.closed %>"><%= closed_reason(day.closed) %>: no appointments this day.</p>
+        <% elsif day.listed_blocks.empty? %>
+          <p data-no-hours="true">No hours this day.</p>
+        <% else %>
+          <ul class="flex flex-col gap-1">
+            <% day.listed_blocks.sort_by { |b| b[:start_time] }.each do |block| %>
+              <li data-block="<%= block[:start_time].strftime("%H:%M") %>">
+                <%= block[:start_time].strftime("%H:%M") %>–<%= block[:end_time].strftime("%H:%M") %>,
+                <%= @access_type_names[block[:access_type_id]] || "Not named" %>
+              </li>
+            <% end %>
+          </ul>
+        <% end %>
+        <h3>Booked</h3>
+        <% if appointments.empty? %>
+          <p>No appointments.</p>
+        <% else %>
+          <ul class="flex flex-col gap-1">
+            <% appointments.sort_by { |a| a[:start_time] }.each do |appointment| %>
+              <li data-appointment="<%= appointment[:id] %>">
+                <%= appointment[:start_time].strftime("%H:%M") %>, <%= appointment[:patient_name] %>
+              </li>
+            <% end %>
+          </ul>
+        <% end %>
+      </section>
+    <% end %>
+  </div>
+<% end %>
+
+<% if supervisor? %>
+  <section
+    id="group-members"
+    class="card"
+  >
+    <h2>Resources in this group</h2>
+    <ul class="flex flex-col gap-2">
+      <% @members.each do |item, resource| %>
+        <li data-member="<%= resource[:id] %>">
+          <%= resource[:name] %>
+          <%= button_to "Take out",
+                scheduling_remove_resource_group_member_path(@group[:id], item[:id]),
+                method: :post,
+                form: { class: "inline" },
+                class: "button-secondary" %>
+        </li>
+      <% end %>
+    </ul>
+    <% if @addable.any? %>
+      <%= form_with url: scheduling_resource_group_members_path(@group[:id]),
+            method: :post,
+            local: true,
+            id: "add-member-form",
+            class: "flex items-end gap-2" do %>
+        <%= form_field :resource_id, "Add a clinic" do |aria| %>
+          <%= select_tag :resource_id,
+                options_for_select(@addable.map { |r| [ r[:name], r[:id] ] }),
+                id: "resource_id",
+                aria: aria %>
+        <% end %>
+        <%= submit_tag "Add",
+              class: "button-secondary" %>
+      <% end %>
+    <% end %>
+  </section>
+<% end %>
