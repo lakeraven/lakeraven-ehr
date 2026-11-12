@@ -11,10 +11,13 @@ module Lakeraven
     # the site's note title (Configuration#progress_note_title_ien); without
     # a title the form does not exist.
     #
-    # Each rendered form carries a one-time token, kept server-side in the
-    # session. A POST must bring a token this session was given for this
-    # patient; it is spent before any RPC, whatever happens next, so the same
-    # form cannot file a second note.
+    # Each rendered form carries a one-time token. The session lists the
+    # last few tokens it was given, per patient, and a POST must bring one of
+    # them. The token is then claimed in the database (NoteFormClaim) before
+    # any RPC, whatever happens next: the session is a cookie the client
+    # holds, so an older copy of it still lists the token, but a claim is
+    # made once, by one request, under any cookie. A token that was not
+    # issued to this session, or was claimed before, is refused with 409.
     #
     # The POST re-reads the patient's visits and files the note only on one
     # of that patient's open visits: a visit RPMS reports as not locked
@@ -27,12 +30,14 @@ module Lakeraven
     # A TIU write is an RPC. It cannot join the audit transaction, so the
     # action proves the audit log takes a row before any RPC (AuditLogProbe).
     # If the request's own audit row then fails, the page says what is in
-    # RPMS (saved, or possibly started) and that it must not be entered
-    # again. Once a write was sent, anything that raises leaves the outcome
-    # unknown: the page says to check the chart, and never shows the raised
-    # message, which can carry broker text. An empty reply to note creation
-    # or signing is an unknown outcome too. The signature code is never
-    # rendered back, logged or audited.
+    # RPMS and that it must not be entered again; the claim was committed on
+    # its own, so the form still cannot be replayed. A broker or connection
+    # error from the signature check, before any write, means the code could
+    # not be checked and nothing was saved. Once a write was sent, anything
+    # that raises leaves the outcome unknown: the page says to check the
+    # chart, and never shows the raised message, which can carry broker
+    # text. An empty reply to note creation or signing is an unknown outcome
+    # too. The signature code is never rendered back, logged or audited.
     class ProgressNotesController < WebController
       include BrowserSmartAuthentication
       include ClinicianPatientContext
@@ -43,8 +48,9 @@ module Lakeraven
       # unknown: the broker raised, or the connection did.
       UNKNOWN_OUTCOME_ERRORS = [ ::RpmsRpc::Error, IOError, SystemCallError ].freeze
       IEN_FORMAT = /\A[0-9]+\z/
-      # One-time form tokens: kept in the session as "dfn:token", at most
-      # this many at once (the oldest is dropped).
+      # The form tokens issued to this session, as "dfn:token", at most this
+      # many at once (the oldest is dropped). Whether a token was spent is in
+      # NoteFormClaim, not here.
       FORM_TOKEN_SESSION_KEY = :progress_note_form_tokens
       FORM_TOKEN_FIELD = "note_form_token"
       FORM_TOKEN_LIMIT = 5
@@ -62,10 +68,11 @@ module Lakeraven
         form_token_refused: "progress note form already submitted or expired"
       }.freeze
       # What is in RPMS for each outcome, when the audit row fails after it:
-      # :written is certain, :maybe is possible.
+      # :written and :empty (a note without its text) are certain, :maybe is
+      # possible.
       WRITE_OUTCOMES = {
         signed: :written, unsigned: :written, sign_not_permitted: :written,
-        text_not_written: :maybe, unknown: :maybe
+        text_not_written: :empty, unknown: :maybe
       }.freeze
 
       rate_limit only: %i[new create]
@@ -88,8 +95,9 @@ module Lakeraven
       end
 
       def create
-        return render_form_token_refused unless spend_form_token
+        return render_form_token_refused unless form_token_issued?
         return if audit_unwritable?
+        return render_form_token_refused unless NoteFormClaim.claim!(params[FORM_TOKEN_FIELD])
 
         @note_text = string_param(:note_text)
         @open_visits = read_open_visits
@@ -165,31 +173,14 @@ module Lakeraven
         token
       end
 
-      # Removes the posted token from the session. True when it was one this
-      # session was given for this patient. A token is spent once, whatever
-      # the POST then does.
-      def spend_form_token
+      # Whether the posted token is one this session was given for this
+      # patient. Whether it was already spent is the claim's to say.
+      def form_token_issued?
         posted = params[FORM_TOKEN_FIELD]
         return false unless posted.is_a?(String) && posted.present?
 
-        entries = stored_form_tokens
         wanted = form_token_entry(posted)
-        found = entries.find { |entry| ActiveSupport::SecurityUtils.secure_compare(entry, wanted) }
-        return false unless found
-
-        entries.delete(found)
-        session[FORM_TOKEN_SESSION_KEY] = entries
-        @spent_form_token = found
-        true
-      end
-
-      # The audit refusal restores the session to what it held before the
-      # action, which would hand a spent token back. Once a write was sent
-      # the token stays spent.
-      def respend_form_token
-        return unless @spent_form_token
-
-        session[FORM_TOKEN_SESSION_KEY] = stored_form_tokens - [ @spent_form_token ]
+        stored_form_tokens.any? { |entry| ActiveSupport::SecurityUtils.secure_compare(entry, wanted) }
       end
 
       def stored_form_tokens
@@ -214,11 +205,12 @@ module Lakeraven
       def render_unrecorded_access_denial
         case unaudited_write_outcome
         when :written
-          respend_form_token
           log_unaudited_note("recorded in RPMS")
           render plain: unaudited_written_message, status: :service_unavailable
+        when :empty
+          log_unaudited_note("created without its text")
+          render plain: unaudited_empty_message, status: :service_unavailable
         when :maybe
-          respend_form_token
           log_unaudited_note("outcome unknown")
           render plain: unaudited_maybe_message, status: :service_unavailable
         else
@@ -252,9 +244,15 @@ module Lakeraven
           "It must not be entered again. Check the chart."
       end
 
+      # The note exists: TIU answered its IEN before the text was refused.
+      def unaudited_empty_message
+        "Service Unavailable: A progress note was created on this visit without its text. " \
+          "It was started in RPMS and is unsigned and empty, but this access could not be audited. " \
+          "Check the chart before writing it again: a note written now may duplicate it."
+      end
+
       def unaudited_maybe_message
-        state = @note_outcome == :text_not_written ? "started without its text" : "saved or signed"
-        "Service Unavailable: This progress note may have been #{state} in RPMS. " \
+        "Service Unavailable: This progress note may have been saved or signed in RPMS. " \
           "The outcome is unknown, and this access could not be audited. " \
           "Check the chart before writing it again."
       end
@@ -353,16 +351,18 @@ module Lakeraven
       def file_note(signature_code)
         result = run_note_sequence(signature_code)
         return render_outcome_unknown if result.nil?
+        return render_signature_unchecked if result == :signature_check_raised
 
         result.success? ? note_signed : render_note_failure(result)
       end
 
-      # The e-signature check and the TIU sequence, or nil when the outcome
-      # is unknown. Before a write is sent, only a broker or connection error
-      # is an unknown outcome; anything else raised is a fault and goes on.
-      # Once a write was sent, anything raised (NotImplementedError too)
-      # leaves the chart unknown. A missing RPMS connection goes on to
-      # RpmsUserScope. Class only in the log line.
+      # The e-signature check and the TIU sequence; nil when the outcome is
+      # unknown; :signature_check_raised when the check raised a broker or
+      # connection error before any write (nothing was saved). Anything else
+      # raised before a write is a fault and goes on. Once a write was sent,
+      # anything raised (NotImplementedError too) leaves the chart unknown.
+      # A missing RPMS connection goes on to RpmsUserScope. Class only in the
+      # log line.
       def run_note_sequence(signature_code)
         @note_service = ProgressNoteService.new(
           dfn: @dfn, visit_ien: canonical_ien(@visit[:visit_ien]), author_duz: current_duz
@@ -371,7 +371,12 @@ module Lakeraven
       rescue ::RpmsRpc::NotConfiguredError
         raise
       rescue StandardError, NotImplementedError => error
-        raise unless @note_service&.write_sent? || UNKNOWN_OUTCOME_ERRORS.any? { |known| error.is_a?(known) }
+        unless @note_service&.write_sent?
+          raise unless UNKNOWN_OUTCOME_ERRORS.any? { |known| error.is_a?(known) }
+
+          Rails.logger.error("[progress_note] signature check raised #{error.class}; nothing written")
+          return :signature_check_raised
+        end
 
         Rails.logger.error("[progress_note] create outcome unknown: #{error.class}")
         nil
@@ -404,13 +409,17 @@ module Lakeraven
       end
 
       def render_signature_refusal(result)
-        if result.error == :invalid_signature_code
-          @note_outcome = :code_not_accepted
-          render_note_refused("The electronic signature code was not accepted. Nothing was saved.")
-        else
-          @note_outcome = :code_unchecked
-          render_note_refused("The electronic signature code could not be checked. Nothing was saved.")
-        end
+        return render_signature_unchecked unless result.error == :invalid_signature_code
+
+        @note_outcome = :code_not_accepted
+        render_note_refused("The electronic signature code was not accepted. Nothing was saved.")
+      end
+
+      # RPMS gave no answer to the check (or raised), before anything was
+      # written: a refusal, not an unknown outcome.
+      def render_signature_unchecked
+        @note_outcome = :code_unchecked
+        render_note_refused("The electronic signature code could not be checked. Nothing was saved.")
       end
 
       def render_not_created
@@ -418,12 +427,13 @@ module Lakeraven
         render_note_refused("The note was not saved. RPMS did not create it.")
       end
 
-      # The note may exist without its text. The form is not offered again:
+      # TIU created the note (it answered its IEN), then refused its text:
+      # the note exists, unsigned and empty. The form is not offered again:
       # the chart has to be checked first.
       def render_text_not_written
         @note_outcome = :text_not_written
-        @closing_message = "The note was not saved: its text could not be written. " \
-                           "An empty note may have been started on this visit. Check the chart before writing it again."
+        @closing_message = "A note was created on this visit without its text. It is in RPMS, unsigned and empty. " \
+                           "Check the chart before writing it again."
         render :new, status: :unprocessable_entity
       end
 
