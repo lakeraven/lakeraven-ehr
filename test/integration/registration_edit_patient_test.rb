@@ -253,7 +253,7 @@ class RegistrationEditPatientTest < ActionDispatch::IntegrationTest
       patch "/lakeraven-ehr/registration/patients/#{DFN}/address", params: { address: address(phone_work: "123") }
 
       assert_response :unprocessable_content
-      assert_select "#address-errors", text: /Phone work must be 4 to 20 characters/
+      assert_select "#address-errors", text: /Work phone must be 4 to 20 characters/
       assert_empty updates
     end
   end

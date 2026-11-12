@@ -6,6 +6,9 @@
 
 <%= flash_alert id: "address-alert" %>
 
+<%= site_settings_unavailable_alert @address,
+      id: "address-settings-unavailable" %>
+
 <%= form_errors @address,
       "The address and phones were not saved.",
       id: "address-errors" %>
@@ -23,36 +26,42 @@
          [ :address_line2, "Street address, line 2 (optional)" ],
          [ :address_line3, "Street address, line 3 (optional)" ] ].each do |field, label| %>
       <%= form_field field,
-            label,
+            site_field_label(@address, field, label),
             form: f,
             error: @address.errors[field].first do |aria| %>
         <%= f.text_field field,
               value: @address.public_send(field),
               autocomplete: "off",
+              required: @address.required_by_site?(field),
               aria: aria %>
       <% end %>
     <% end %>
     <div class="flex flex-wrap gap-4">
       <%# CITY, PATIENT (2) field .114. %>
       <%= form_field :city,
-            "City",
+            site_field_label(@address, :city, "City"),
             form: f,
             error: @address.errors[:city].first do |aria| %>
         <%= f.text_field :city,
               value: @address.city,
               autocomplete: "off",
+              required: @address.required_by_site?(:city),
               aria: aria %>
       <% end %>
       <%# STATE, PATIENT (2) field .115. %>
-      <%= form_field :state, "State", form: f do |aria| %>
+      <%= form_field :state,
+            site_field_label(@address, :state, "State"),
+            form: f,
+            error: @address.errors[:state].first do |aria| %>
         <%= f.select :state,
               options_for_select(@states, @address.state),
               { include_blank: "Choose a state" },
+              required: @address.required_by_site?(:state),
               aria: aria %>
       <% end %>
       <%# ZIP CODE, PATIENT (2) field .116 (ZIP+4 .1112), filed by AG's PTZP^AGGUL2. %>
       <%= form_field :zip,
-            "Zip code",
+            site_field_label(@address, :zip, "Zip code"),
             form: f,
             hint: "5 or 9 digits.",
             error: @address.errors[:zip].first do |aria| %>
@@ -60,6 +69,7 @@
               value: @address.zip,
               inputmode: "numeric",
               autocomplete: "off",
+              required: @address.required_by_site?(:zip),
               aria: aria %>
       <% end %>
     </div>
@@ -84,13 +94,14 @@
          [ :phone_other, "Other phone (optional)", :telephone_field ],
          [ :email, "Email (optional)", :email_field ] ].each do |field, label, input| %>
       <%= form_field field,
-            label,
+            site_field_label(@address, field, label),
             form: f,
             error: @address.errors[field].first do |aria| %>
         <%= f.public_send input,
               field,
               value: @address.public_send(field),
               autocomplete: "off",
+              required: @address.required_by_site?(field),
               aria: aria %>
       <% end %>
     <% end %>

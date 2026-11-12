@@ -13,6 +13,7 @@ module Lakeraven
       # changes nothing (S-REG-20.9).
       class PatientEditsController < WebController
         include RpmsUnavailableRendering
+        include RegistrationSiteSettingsLookup
 
         before_action :require_bprm_registration!
         before_action :require_authentication
