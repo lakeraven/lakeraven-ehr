@@ -11,7 +11,7 @@ require_relative "../support/demo_persona_keys"
 #   LIVE_RPMS_ACCESS=PMD123 LIVE_RPMS_VERIFY='PMD123!!' \
 #   bin/rails test test/integration/live_persona_scopes_test.rb
 #
-# The pairs are the build's published demo pairs (rpms-ops SEEDPERS).
+# The pairs are the build's published demo pairs (openrpms SEEDPERS).
 class LivePersonaScopesTest < ActiveSupport::TestCase
   PAIRS = {
     "PROFILE,MD" => %w[PMD123 PMD123!!],
