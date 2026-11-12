@@ -9,7 +9,7 @@ require "test_helper"
 # LIVE_RPMS_WRITES=1. Never point it at a shared stack.
 #
 # PROFILE,SCHED holds SDZREGMENU and AG's AGGRPC context from the build's
-# persona seed (openrpms SEEDPERS, lakeraven/openrpms#1056): a scheduler
+# persona seed (rpms-ops SEEDPERS, lakeraven/rpms-ops#1056): a scheduler
 # mini-registers. An image cut before that seed lacks both, and the first
 # assertion below says so.
 #

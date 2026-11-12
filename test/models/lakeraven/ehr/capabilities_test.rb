@@ -6,7 +6,7 @@ require_relative "../../../support/demo_persona_keys"
 module Lakeraven
   module EHR
     # The capabilities each demo persona holds, from the keys the build gives it
-    # (DemoPersonaKeys, openrpms SEEDPERS), read through Roles' symbolic names as
+    # (DemoPersonaKeys, rpms-ops SEEDPERS), read through Roles' symbolic names as
     # sign-on reads them.
     class CapabilitiesTest < ActiveSupport::TestCase
       def for_persona(persona) = Capabilities.for(Roles.symbolize_keys(DemoPersonaKeys::BY_PERSONA.fetch(persona)))

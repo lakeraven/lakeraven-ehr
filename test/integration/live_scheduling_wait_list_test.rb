@@ -5,7 +5,7 @@ require_relative "../support/live_scheduling_readback"
 
 # Live (rpms-ux S-SCH-10): the scheduler persona keeps a clinic's wait list on a
 # real RPMS, and FileMan is read back. The demo build has no list
-# (openrpms#1083), so the test makes one. It WRITES, so it runs only against a
+# (rpms-ops#1083), so the test makes one. It WRITES, so it runs only against a
 # throwaway container and only when asked twice.
 #
 #   LIVE_RPMS=1 LIVE_RPMS_WRITES=1 VISTA_BROKER=cia VISTA_RPC_HOST=127.0.0.1 VISTA_RPC_PORT=9146 \
