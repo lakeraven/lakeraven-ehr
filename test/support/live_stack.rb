@@ -16,7 +16,7 @@ module LiveStack
   # Read by the broker client but not part of the binding: a run that carries
   # it would not be bound by VARIABLES alone.
   FOREIGN = %w[RPMS_UCI].freeze
-  WATCHED = %i[call_rpc call_rpc_raw call_rpc_global_array create_context].freeze
+  WATCHED = %i[call_rpc call_rpc_raw call_rpc_global_array create_context authenticate].freeze
 
   # The persona's codes leave only through access_code and verify_code.
   class Binding
@@ -43,12 +43,15 @@ module LiveStack
   # The stack declined a step: the scenario is skipped as not run, not failed.
   class NotRun < Cucumber::Core::Test::Result::Skipped; end
 
-  # Prepended onto the broker client class. A call that returned counts as
+  # Prepended onto the broker client class. Only the outermost watched call on
+  # a thread decides (LiveStack.watch). A parsed call that returned counts as
   # evidence only on the armed client signed on as the persona (LiveStack.arm!);
-  # any other answered call records why it does not count. A broker error the
-  # stack would not or could not answer records a reason and raises NotRun. A
-  # routine that ran and failed (RpcMError) and every other error pass through
-  # unchanged. Inside LiveStack.transparently the watch stands aside.
+  # any other answered parsed call records why it does not count. A raw reply
+  # or a created context is never evidence. A routine that ran and failed
+  # (RpcMError) records an M error and raises unchanged; any other broker error
+  # records a reason and raises NotRun; every other error passes through
+  # unchanged. A sign-on records that the scenario signed on as someone else
+  # and answers as it did. Inside LiveStack.transparently the watch stands aside.
   module RefusalWatch
     DECLINED = {
       RpmsRpc::Client::RpcRefusedError => "refused in the persona's context",
@@ -57,19 +60,11 @@ module LiveStack
       RpmsRpc::Client::AuthenticationError => "was not authenticated on the stack"
     }.freeze
 
-    def call_rpc(rpc_name, *params) = LiveStack.watch(self, rpc_name) { super }
-    def call_rpc_raw(rpc_name, *params) = LiveStack.watch(self, rpc_name) { super }
-    def call_rpc_global_array(rpc_name, *params) = LiveStack.watch(self, rpc_name) { super }
-
-    # Never evidence: on CIA it sends no frame.
-    def create_context(*arguments)
-      super
-    rescue RpmsRpc::Error
-      raise if LiveStack.transparent?
-
-      option = arguments.first || "the default context"
-      raise LiveStack.not_run("context #{option} could not be created in the persona's context"), cause: nil
-    end
+    def call_rpc(rpc_name, *params) = LiveStack.watch(self, rpc_name, :parsed) { super }
+    def call_rpc_raw(rpc_name, *params) = LiveStack.watch(self, rpc_name, :raw) { super }
+    def call_rpc_global_array(rpc_name, *params) = LiveStack.watch(self, rpc_name, :parsed) { super }
+    def create_context(*arguments) = LiveStack.watch(self, arguments.first || "the default context", :context) { super }
+    def authenticate(*arguments, **options) = LiveStack.watch(self, "the sign-on", :sign_on) { super }
 
     # A watched method the client itself lacks (XwbClient has no
     # call_rpc_global_array) stays absent: callers branch on respond_to?.
@@ -80,10 +75,17 @@ module LiveStack
     end
   end
 
+  # Prepended onto the mock client class in a ready stack run: an answer from
+  # the mock is never evidence.
+  module MockWatch
+    def call_rpc(rpc_name, *params) = LiveStack.watch(self, rpc_name, :mock) { super }
+  end
+
   EVIDENCE = { rpc_count: 0, reasons: [] }
   ARMED = {}
   EVIDENCE_LOCK = Mutex.new
   TRANSPARENT = :live_stack_transparent
+  WATCHING = :live_stack_watching
 
   module_function
 
@@ -188,21 +190,46 @@ module LiveStack
 
   def transparent? = Thread.current.thread_variable_get(TRANSPARENT) == true
 
-  def watch(client, rpc_name)
-    return yield if transparent?
+  # Runs a watched call. Only the outermost watched frame on this thread
+  # decides, after it returns or raises. A frame inside it (CiaClient#call_rpc
+  # reads through call_rpc_raw, authenticate signs on through both) answers and
+  # raises exactly as unwatched, so a client's own rescue still sees the
+  # broker's error. kind is :parsed, :raw, :context, :sign_on or :mock.
+  def watch(client, name, kind)
+    return yield if transparent? || Thread.current.thread_variable_get(WATCHING)
 
     begin
+      Thread.current.thread_variable_set(WATCHING, true)
       answer = yield
-    rescue RpmsRpc::Client::RpcMError
-      raise
     rescue RpmsRpc::Error => e
-      declined = RefusalWatch::DECLINED.find { |klass, _| e.is_a?(klass) }&.last || "failed at the broker"
-      # cause: nil, so the broker's message does not travel with the skip.
-      raise not_run("#{rpc_name} #{declined}"), cause: nil
+      decline(e, name, kind)
+    ensure
+      Thread.current.thread_variable_set(WATCHING, nil)
+      record("the scenario signed on as someone else") if kind == :sign_on
     end
-    witness(client)
+    record("#{name} was answered by the mock, not the stack") if kind == :mock
+    witness(client) if kind == :parsed
     answer
   end
+
+  # Raises in place of a broker error from an outermost watched call: the
+  # original from a sign-on, the mock or a routine that ran and failed (which
+  # records an M error), else NotRun. cause: nil, so the broker's message does
+  # not travel with the skip.
+  def decline(error, name, kind)
+    raise error if %i[sign_on mock].include?(kind)
+    raise not_run("context #{name} could not be created in the persona's context"), cause: nil if kind == :context
+
+    if error.is_a?(RpmsRpc::Client::RpcMError)
+      record("#{name} raised an M error")
+      raise error
+    end
+
+    declined = RefusalWatch::DECLINED.find { |klass, _| error.is_a?(klass) }&.last || "failed at the broker"
+    raise not_run("#{name} #{declined}"), cause: nil
+  end
+
+  def record(reason) = EVIDENCE_LOCK.synchronize { EVIDENCE[:reasons] << reason }
 
   # Counts an answered call, or records why it is not the persona's.
   def witness(client)
@@ -219,9 +246,11 @@ module LiveStack
 
   def rpc_count = EVIDENCE_LOCK.synchronize { EVIDENCE[:rpc_count] }
 
-  # Records the reason and answers the NotRun to raise in place of the error.
+  # Records and says the reason, and answers the NotRun to raise in place of
+  # the error.
   def not_run(reason)
-    EVIDENCE_LOCK.synchronize { EVIDENCE[:reasons] << reason }
+    record(reason)
+    warn "[stack] not run: #{reason}"
     NotRun.new("not run: #{reason}")
   end
 
