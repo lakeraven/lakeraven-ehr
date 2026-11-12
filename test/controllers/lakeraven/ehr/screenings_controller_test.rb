@@ -14,7 +14,16 @@ module Lakeraven
       VISIT = "2090061"
       DUZ = "99999"
       DFN_PARAM = "1"
-      FULL_SCOPES = "user/QuestionnaireResponse.read user/QuestionnaireResponse.write"
+      # Without the visit list a screening cannot be attached to a visit at all
+      # (#1003): the form offers the patient's open visits and create accepts
+      # only one of them, so the clinician's credential reads Encounter too.
+      SCREENING_ONLY_SCOPES = "user/QuestionnaireResponse.read user/QuestionnaireResponse.write"
+      FULL_SCOPES = "#{SCREENING_ONLY_SCOPES} user/Encounter.read".freeze
+      # Synthetic names only.
+      CLINIC = "Riverbend Behavioral Health"
+      PROVIDER = "TESTPROVIDER,ALPHA"
+      OTHER_DFN = "2"
+      OTHER_PATIENT_VISIT = "5550077"
 
       setup do
         # #486's landing contract: a session-derived credential may only
@@ -27,6 +36,8 @@ module Lakeraven
         ActionController::Base.allow_forgery_protection = true
         sign_in
         open_patient(1)
+        # The visit every existing test records against: open, checked in today.
+        seed_visits(DFN_PARAM, [ visit_row(VISIT, at: today_at(9, 30)) ])
       end
 
       teardown do
@@ -138,6 +149,68 @@ module Lakeraven
                      ->(*) { raise ActiveRecord::StatementInvalid, "audit down" }, &block)
       end
 
+      # -- Visits (BEHOENCX VISITLST, through EncounterGateway.visits) ----------
+
+      # One VISITLST row. The fourth piece of the visit string is the visit
+      # IEN; a row without it is an appointment pending check-in, not a visit.
+      def visit_row(ien, at:, clinic: CLINIC, provider: PROVIDER, provider_ien: 9001, locked: false)
+        fileman = format("%<ymd>s.%<hm>s", ymd: "#{at.year - 1700}#{at.strftime('%m%d')}", hm: at.strftime("%H%M"))
+        { visit_string: "40;#{fileman};A;#{ien}", location: clinic, category: "AMBULATORY",
+          datetime: at, locked: locked, provider_ien: provider_ien, provider: provider }
+      end
+
+      def seed_visits(dfn, rows)
+        RpmsRpc.client.seed_keyed_collection(:encounter_visit_list, dfn.to_s, rows)
+      end
+
+      # A wall-clock time on a day relative to Date.current, kept to office
+      # hours so no time zone can move it onto a neighbouring date.
+      def today_at(hour, minute = 0, days_ago: 0)
+        day = Date.current - days_ago
+        Time.zone.local(day.year, day.month, day.day, hour, minute)
+      end
+
+      def visit_radios = css_select("input[type=radio][name=encounter_ien]")
+      def offered_visit_iens = visit_radios.map { |radio| radio["value"] }
+      def checked_visit_iens = visit_radios.select { |radio| radio.key?("checked") }.map { |radio| radio["value"] }
+
+      # The visible text of the <label for> bound to a visit's radio.
+      def visit_label_text(ien)
+        radio = visit_radios.find { |candidate| candidate["value"] == ien.to_s }
+        assert radio, "expected a radio name=encounter_ien value=#{ien}; offered: #{offered_visit_iens.inspect}"
+        assert radio["id"].present?, "the visit radio needs an id for its label to bind to"
+        label = css_select("label[for='#{radio['id']}']").first
+        assert label, "expected a <label for=#{radio['id'].inspect}> for visit #{ien}"
+        label.text.squish
+      end
+
+      # The clinician never types an internal record number: nothing named
+      # encounter_ien is a typed field (a text input, a number input, an input
+      # with no type, a textarea), in any state of the form.
+      def assert_no_typed_visit_field
+        assert_select "input[name=encounter_ien]:not([type=radio]):not([type=hidden])", count: 0
+        assert_select "textarea[name=encounter_ien]", count: 0
+      end
+
+      def assert_alert(pattern)
+        texts = css_select("[role=alert]").map { |node| node.text.squish }
+        assert texts.any? { |text| text.match?(pattern) },
+               "expected a role=alert region matching #{pattern.inspect}; alerts were: #{texts.inspect}"
+      end
+
+      # A day shown in any of the usual clinical renderings.
+      def assert_shows_date(text, time)
+        formats = [ "%b %-d, %Y", "%B %-d, %Y", "%b %d, %Y", "%Y-%m-%d", "%m/%d/%Y", "%-m/%-d/%Y", "%-d %b %Y", "%d %b %Y" ]
+        assert formats.any? { |fmt| text.include?(time.strftime(fmt)) },
+               "expected #{text.inspect} to show the date #{time.to_date.iso8601}"
+      end
+
+      # 24-hour or 12-hour clock.
+      def assert_shows_time(text, time)
+        assert [ time.strftime("%H:%M"), time.strftime("%-l:%M") ].any? { |shown| text.include?(shown) },
+               "expected #{text.inspect} to show the time #{time.strftime('%H:%M')}"
+      end
+
       def answers(instrument, values) = instrument.link_ids.zip(values).to_h
       def all_answered(instrument, value) = instrument.link_ids.index_with { value }
 
@@ -166,7 +239,8 @@ module Lakeraven
         assert_select "fieldset.screening-item", 9
         assert_select "legend", /Little interest or pleasure in doing things/
         # Four choices per item, each with an explicit label bound to its input.
-        assert_select "input[type=radio]", 36
+        # (Counted by name: the visit choices of #1003 are radios too.)
+        assert_select "input[type=radio][name^=answers]", 36
         PHQ9.link_ids.each do |link_id|
           assert_select "input[type=radio][name=?]", "answers[#{link_id}]", 4
           assert_select "label[for=?]", "answer-#{link_id}-0"
@@ -178,7 +252,7 @@ module Lakeraven
 
         assert_response :ok
         assert_select "fieldset.screening-item", 7
-        assert_select "input[type=radio]", 28
+        assert_select "input[type=radio][name^=answers]", 28
       end
 
       test "the form carries no JavaScript" do
@@ -1021,6 +1095,365 @@ module Lakeraven
 
         assert_response :unprocessable_entity
         assert_no_match(/999/, response.body)
+      end
+
+      # -- Visit picker (#1003) --------------------------------------------------
+      #
+      # The form used to ask for a "Visit (encounter) number" in a free-text
+      # field, and nothing in the browser shows that number. It now offers the
+      # patient's OPEN visits — read from BEHOENCX VISITLST, the same list the
+      # chart's Encounter read uses — and create accepts only one of them.
+
+      test "GET new offers each open visit as a labelled radio showing when, where and with whom" do
+        earlier = today_at(14, 45, days_ago: 3)
+        seed_visits(DFN_PARAM, [
+          visit_row(VISIT, at: today_at(9, 30)),
+          visit_row("2090050", at: earlier, clinic: "Cedar Hollow Primary Care", provider: "TESTPROVIDER,BRAVO")
+        ])
+
+        get "#{BASE}/new", params: { instrument: "phq-9" }
+
+        assert_response :ok
+        assert_equal [ VISIT, "2090050" ].sort, offered_visit_iens.sort
+
+        today_label = visit_label_text(VISIT)
+        assert_includes today_label, CLINIC
+        assert_includes today_label, PROVIDER
+        assert_shows_time today_label, today_at(9, 30)
+
+        earlier_label = visit_label_text("2090050")
+        assert_includes earlier_label, "Cedar Hollow Primary Care"
+        assert_includes earlier_label, "TESTPROVIDER,BRAVO"
+        assert_shows_date earlier_label, earlier
+        assert_shows_time earlier_label, earlier
+      end
+
+      test "the visit IEN is the radio's value and never visible text" do
+        get "#{BASE}/new", params: { instrument: "phq-9" }
+
+        assert_response :ok
+        assert_equal [ VISIT ], offered_visit_iens
+        assert_not_includes visit_label_text(VISIT), VISIT
+        assert_not_includes css_select("form.screening-form").text, VISIT
+      end
+
+      test "a locked visit is not offered" do
+        seed_visits(DFN_PARAM, [
+          visit_row(VISIT, at: today_at(9, 30)),
+          visit_row("2090040", at: today_at(11, 0), clinic: "Cedar Hollow Primary Care", locked: true)
+        ])
+
+        get "#{BASE}/new", params: { instrument: "phq-9" }
+
+        assert_response :ok
+        assert_equal [ VISIT ], offered_visit_iens
+        assert_select "input[name=encounter_ien][value=?]", "2090040", count: 0
+        assert_no_match(/Cedar Hollow Primary Care/, response.body)
+      end
+
+      test "only this patient's visits are offered" do
+        seed_visits(OTHER_DFN, [ visit_row(OTHER_PATIENT_VISIT, at: today_at(10, 0), clinic: "Cedar Hollow Primary Care") ])
+
+        get "#{BASE}/new", params: { instrument: "phq-9" }
+
+        assert_response :ok
+        assert_equal [ VISIT ], offered_visit_iens
+      end
+
+      # Today's visits first (the one just checked in), newest first within
+      # today; then everything else, newest first. Seeded out of order, with a
+      # visit dated after today, so neither the seed order nor a plain
+      # newest-first sort satisfies it.
+      test "today's visits come first, then the rest, newest first" do
+        seed_visits(DFN_PARAM, [
+          visit_row("3001", at: today_at(10, 0, days_ago: 1)),
+          visit_row("3002", at: today_at(8, 15)),
+          visit_row("3003", at: today_at(9, 0, days_ago: -1)),
+          visit_row("3004", at: today_at(15, 20)),
+          visit_row("3005", at: today_at(13, 0, days_ago: 30))
+        ])
+
+        get "#{BASE}/new", params: { instrument: "phq-9" }
+
+        assert_response :ok
+        assert_equal %w[3004 3002 3003 3001 3005], offered_visit_iens
+      end
+
+      test "the form has no typed visit number" do
+        get "#{BASE}/new", params: { instrument: "phq-9" }
+
+        assert_response :ok
+        assert_no_typed_visit_field
+        assert_no_match(/Visit \(encounter\) number/i, response.body)
+      end
+
+      test "a re-rendered form has no typed visit number either" do
+        post BASE, params: { instrument: "phq-9", answers: all_answered(PHQ9, 1) }.merge(csrf_param)
+
+        assert_response :unprocessable_entity
+        assert_no_typed_visit_field
+      end
+
+      test "a visit carried in from the context it was opened from is preselected" do
+        seed_visits(DFN_PARAM, [
+          visit_row(VISIT, at: today_at(9, 30)),
+          visit_row("2090050", at: today_at(14, 45, days_ago: 3))
+        ])
+
+        get "#{BASE}/new", params: { instrument: "phq-9", encounter_ien: "2090050" }
+
+        assert_response :ok
+        assert_equal [ "2090050" ], checked_visit_iens
+      end
+
+      test "with no visit in the context nothing is preselected" do
+        get "#{BASE}/new", params: { instrument: "phq-9" }
+
+        assert_response :ok
+        assert_equal [ VISIT ], offered_visit_iens
+        assert_empty checked_visit_iens
+      end
+
+      test "a visit in the context that is not one of the patient's open visits is neither preselected nor offered" do
+        seed_visits(OTHER_DFN, [ visit_row(OTHER_PATIENT_VISIT, at: today_at(10, 0)) ])
+
+        get "#{BASE}/new", params: { instrument: "phq-9", encounter_ien: OTHER_PATIENT_VISIT }
+
+        assert_response :ok
+        assert_equal [ VISIT ], offered_visit_iens
+        assert_empty checked_visit_iens
+        assert_select "input[name=encounter_ien][value=?]", OTHER_PATIENT_VISIT, count: 0
+        assert_no_match(/#{OTHER_PATIENT_VISIT}/, response.body)
+      end
+
+      test "a locked visit in the context is neither preselected nor offered" do
+        seed_visits(DFN_PARAM, [
+          visit_row(VISIT, at: today_at(9, 30)),
+          visit_row("2090040", at: today_at(11, 0), locked: true)
+        ])
+
+        get "#{BASE}/new", params: { instrument: "phq-9", encounter_ien: "2090040" }
+
+        assert_response :ok
+        assert_equal [ VISIT ], offered_visit_iens
+        assert_empty checked_visit_iens
+        assert_select "input[name=encounter_ien][value=?]", "2090040", count: 0
+      end
+
+      test "a patient with no open visit is told to check the patient in first" do
+        seed_visits(DFN_PARAM, [ visit_row("2090040", at: today_at(11, 0), locked: true) ])
+
+        get "#{BASE}/new", params: { instrument: "phq-9" }
+
+        assert_response :ok
+        assert_alert(/No open visit/i)
+        assert_alert(/No open visit.*check/im)
+        assert_empty offered_visit_iens
+        assert_no_typed_visit_field
+      end
+
+      test "a patient with no visits at all is told there is no open visit" do
+        seed_visits(DFN_PARAM, [])
+
+        get "#{BASE}/new", params: { instrument: "phq-9" }
+
+        assert_response :ok
+        assert_alert(/No open visit/i)
+        assert_empty offered_visit_iens
+        assert_no_typed_visit_field
+      end
+
+      # Fail closed AND SAY WHY: a list that could not be read is not an
+      # empty list, and it is not an invitation to type a number instead.
+      test "without an Encounter read scope the form says the visits could not be read and offers none" do
+        sign_in(scopes: SCREENING_ONLY_SCOPES)
+        open_patient(1)
+
+        get "#{BASE}/new", params: { instrument: "phq-9", encounter_ien: VISIT }
+
+        assert_response :ok
+        assert_alert(/visits could not be read/i)
+        assert_empty offered_visit_iens
+        assert_select "input[name=encounter_ien][value=?]", VISIT, count: 0
+        assert_no_typed_visit_field
+        assert_select "fieldset.screening-item", 9
+      end
+
+      test "without an Encounter read scope the visit list is not read at all" do
+        sign_in(scopes: SCREENING_ONLY_SCOPES)
+        open_patient(1)
+        reads = 0
+
+        with_failing(EncounterGateway, :visits, ->(*) { reads += 1; [] }) do
+          get "#{BASE}/new", params: { instrument: "phq-9" }
+        end
+
+        assert_response :ok
+        assert_equal 0, reads, "a credential that may not read Encounter must not cause a visit read"
+        assert_alert(/visits could not be read/i)
+      end
+
+      [ [ "RpmsRpc::Error", -> { raise RpmsRpc::Error, "broker down" } ],
+        [ "IOError", -> { raise IOError, "socket closed" } ] ].each do |name, failure|
+        test "a visit read that raises #{name} renders the form saying the visits could not be read" do
+          with_failing(EncounterGateway, :visits, ->(*) { failure.call }) do
+            get "#{BASE}/new", params: { instrument: "phq-9", encounter_ien: VISIT }
+          end
+
+          assert_response :ok
+          assert_alert(/visits could not be read/i)
+          assert_empty offered_visit_iens
+          assert_select "input[name=encounter_ien][value=?]", VISIT, count: 0
+          assert_no_typed_visit_field
+          assert_no_match(/broker down|socket closed/, response.body)
+        end
+
+        test "a submission while the visit read raises #{name} is refused and says the visits could not be read" do
+          with_failing(EncounterGateway, :visits, ->(*) { failure.call }) do
+            submit
+          end
+
+          assert_response :unprocessable_entity
+          assert_equal 0, ScreeningResponse.count
+          assert_alert(/visits could not be read/i)
+          assert_no_typed_visit_field
+        end
+      end
+
+      # The acceptance path: check in, open the chart, start a PHQ-9, save it
+      # against that visit — choosing it, never typing it.
+      test "the visit chosen from the form is the visit the screening is saved against" do
+        seed_visits(DFN_PARAM, [
+          visit_row("2090050", at: today_at(14, 45, days_ago: 3), clinic: "Cedar Hollow Primary Care"),
+          visit_row(VISIT, at: today_at(9, 30))
+        ])
+        get "#{BASE}/new", params: { instrument: "phq-9" }
+        assert_response :ok
+        chosen = offered_visit_iens.find { |ien| visit_label_text(ien).include?(CLINIC) }
+        assert_equal VISIT, chosen, "expected today's #{CLINIC} visit among the choices"
+
+        submit(encounter_ien: chosen)
+
+        assert_response :redirect
+        assert_equal 1, ScreeningResponse.count
+        assert_equal VISIT, ScreeningResponse.last.encounter_ien.to_s
+      end
+
+      test "a visit that is not in this patient's visit list is refused" do
+        seed_visits(OTHER_DFN, [ visit_row(OTHER_PATIENT_VISIT, at: today_at(10, 0)) ])
+
+        submit(encounter_ien: OTHER_PATIENT_VISIT)
+
+        assert_response :unprocessable_entity
+        assert_equal 0, ScreeningResponse.count
+        assert_alert(/not one of this patient['’]s open visits/i)
+        assert_select "fieldset.screening-item", 9
+        assert_empty checked_visit_iens
+        assert_select "input[name=encounter_ien][value=?]", OTHER_PATIENT_VISIT, count: 0
+      end
+
+      test "a visit number nobody was offered is refused" do
+        submit(encounter_ien: "1")
+
+        assert_response :unprocessable_entity
+        assert_equal 0, ScreeningResponse.count
+        assert_alert(/not one of this patient['’]s open visits/i)
+      end
+
+      test "a locked visit is refused" do
+        seed_visits(DFN_PARAM, [
+          visit_row(VISIT, at: today_at(9, 30)),
+          visit_row("2090040", at: today_at(11, 0), locked: true)
+        ])
+
+        submit(encounter_ien: "2090040")
+
+        assert_response :unprocessable_entity
+        assert_equal 0, ScreeningResponse.count
+        assert_alert(/not one of this patient['’]s open visits/i)
+      end
+
+      # The list is read when the form is SUBMITTED, not remembered from when
+      # it was rendered: a visit locked in between is no longer a choice.
+      test "a visit that was open when the form rendered and is locked at submission is refused" do
+        get "#{BASE}/new", params: { instrument: "phq-9" }
+        assert_equal [ VISIT ], offered_visit_iens
+        seed_visits(DFN_PARAM, [ visit_row(VISIT, at: today_at(9, 30), locked: true) ])
+
+        submit
+
+        assert_response :unprocessable_entity
+        assert_equal 0, ScreeningResponse.count
+        assert_alert(/not one of this patient['’]s open visits/i)
+      end
+
+      test "a submission without an Encounter read scope is refused and says the visits could not be read" do
+        sign_in(scopes: SCREENING_ONLY_SCOPES)
+        open_patient(1)
+
+        submit
+
+        assert_response :unprocessable_entity
+        assert_equal 0, ScreeningResponse.count
+        assert_alert(/visits could not be read/i)
+        assert_no_typed_visit_field
+      end
+
+      test "a refused visit does not hide the unanswered items" do
+        missing = [ PHQ9.items[2].link_id ]
+
+        submit(encounter_ien: "1", answers: complete_without_safety_flag(PHQ9).except(*missing))
+
+        assert_response :unprocessable_entity
+        assert_equal 0, ScreeningResponse.count
+        assert_alert(/not one of this patient['’]s open visits/i)
+        assert_select ".screening-errors", /not scored/i
+      end
+
+      test "a submission with no visit is told to choose one, not to enter a number" do
+        post BASE, params: { instrument: "phq-9", answers: all_answered(PHQ9, 1) }.merge(csrf_param)
+
+        assert_response :unprocessable_entity
+        assert_equal 0, ScreeningResponse.count
+        assert_alert(/Visit required/)
+        assert_alert(/Visit required.*choose/im)
+        assert_no_match(/Enter the visit number/i, response.body)
+        assert_equal [ VISIT ], offered_visit_iens
+      end
+
+      test "the chosen visit survives a re-render for unanswered items" do
+        seed_visits(DFN_PARAM, [
+          visit_row(VISIT, at: today_at(9, 30)),
+          visit_row("2090050", at: today_at(14, 45, days_ago: 3))
+        ])
+
+        submit(encounter_ien: "2090050", answers: { PHQ9.items[0].link_id => 3 })
+
+        assert_response :unprocessable_entity
+        assert_equal 0, ScreeningResponse.count
+        assert_equal [ "2090050" ], checked_visit_iens
+        assert_select "input[type=radio][id=?][checked]", "answer-#{PHQ9.items[0].link_id}-3"
+      end
+
+      test "the chosen visit survives the safety prompt" do
+        submit(answers: all_answered(PHQ9, 0).merge(PHQ9.safety_link_id => 2))
+
+        assert_response :unprocessable_entity
+        assert_select ".screening-safety[role=alert]"
+        assert_equal [ VISIT ], checked_visit_iens
+      end
+
+      test "the visit choices add no JavaScript" do
+        seed_visits(DFN_PARAM, [
+          visit_row(VISIT, at: today_at(9, 30)),
+          visit_row("2090050", at: today_at(14, 45, days_ago: 3))
+        ])
+
+        get "#{BASE}/new", params: { instrument: "phq-9", encounter_ien: VISIT }
+
+        assert_equal 2, visit_radios.length
+        assert_select "script:not([data-consent-kiosk-listener])", count: 0
+        assert_no_match(/\son[a-z]+=/i, response.body)
       end
     end
   end
