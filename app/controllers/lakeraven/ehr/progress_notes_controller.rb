@@ -21,11 +21,21 @@ module Lakeraven
     #
     # The POST re-reads the patient's visits and files the note only on one
     # of that patient's open visits: a visit RPMS reports as not locked
-    # (locked: false). The signature code is checked with RPMS before
-    # anything is written, so a code RPMS does not accept creates no note.
+    # (locked: false). An empty visit list is also what an empty broker reply
+    # reads as, so the page says only that no open visit was found.
+    #
+    # TIU and the e-signature check take the author and the signer from the
+    # RPMS connection's own DUZ, never from a parameter. So before the code
+    # is checked or anything is written, the request's connection
+    # (RpmsRpc.client) must report the author's DUZ; a connection signed on
+    # as nobody, as someone else, or that cannot say, is refused (403) and
+    # nothing is sent. The visit read is not gated.
+    #
+    # The signature code is checked with RPMS before anything is written,
+    # so a code RPMS does not accept (or answers false for) creates no note.
     # Then the note is created and its text written. TIU is asked which
     # signing action the author holds on the note, and only "sign" signs it;
-    # any other answer leaves it saved unsigned.
+    # any other answer, none included, leaves it saved unsigned.
     #
     # A TIU write is an RPC. It cannot join the audit transaction, so the
     # action proves the audit log takes a row before any RPC (AuditLogProbe).
@@ -36,8 +46,12 @@ module Lakeraven
     # not be checked and nothing was saved. Once a write was sent, anything
     # that raises leaves the outcome unknown: the page says to check the
     # chart, and never shows the raised message, which can carry broker
-    # text. An empty reply to note creation or signing is an unknown outcome
-    # too. The signature code is never rendered back, logged or audited.
+    # text. A missing RPMS connection after the note was created is an
+    # unknown outcome as well; before any write it ends the session
+    # (RpmsUserScope). An empty reply to note creation, to its text write or
+    # to signing is an unknown outcome too: only a reply that says something
+    # is a refusal. The signature code is never rendered back, logged or
+    # audited.
     class ProgressNotesController < WebController
       include BrowserSmartAuthentication
       include ClinicianPatientContext
@@ -59,14 +73,21 @@ module Lakeraven
       NOTE_OUTCOME_NOTES = {
         signed: "progress note signed",
         unsigned: "progress note saved unsigned",
-        sign_not_permitted: "progress note saved unsigned: TIU does not let this user sign it",
+        sign_not_permitted: "progress note saved unsigned: TIU did not confirm this user may sign it",
         text_not_written: "progress note text not written",
         not_created: "progress note not created",
-        code_not_accepted: "signature code not accepted",
+        code_not_accepted: "signature code not accepted or not confirmed by RPMS; nothing written",
         code_unchecked: "signature code check failed",
         unknown: "progress note outcome unknown",
-        form_token_refused: "progress note form already submitted or expired"
+        form_token_refused: "progress note form already submitted or expired",
+        connection_not_author: "progress note refused: the RPMS connection is not signed on as the author; " \
+                               "nothing written",
+        no_open_visit: "no open visit found; nothing written",
+        visits_unread: "patient visits could not be read; nothing written"
       }.freeze
+      # Refusals that end in a 5xx page although nothing was written: the
+      # chart did not change, so the audit row is not a serious failure.
+      NOTHING_WRITTEN_OUTCOMES = %i[visits_unread].freeze
       # What is in RPMS for each outcome, when the audit row fails after it:
       # :written and :empty (a note without its text) are certain, :maybe is
       # possible.
@@ -102,6 +123,8 @@ module Lakeraven
         @note_text = string_param(:note_text)
         @open_visits = read_open_visits
         return render_visits_unread if @open_visits.nil?
+        return render_connection_not_author unless connection_signed_on_as_author?
+        return render_no_open_visit if @open_visits.empty?
 
         refusal = input_refusal
         return render_note_refused(refusal) if refusal
@@ -192,7 +215,8 @@ module Lakeraven
       def render_form_token_refused
         @note_outcome = :form_token_refused
         note_audit_denial("progress note form token refused")
-        @closing_message = "This form was already submitted or has expired, so nothing was sent to RPMS from it. " \
+        @closing_message = "This form was already submitted or has expired. This submission sent nothing to RPMS, " \
+                           "but an earlier submission of this form may have filed the note. " \
                            "Check the chart before writing the note again."
         render :new, status: :conflict
       end
@@ -266,8 +290,10 @@ module Lakeraven
       end
 
       # An unknown outcome is a serious failure: the chart may have changed.
+      # A refusal before any write is not, whatever the page's status.
       def audit_outcome
         return "8" if @note_outcome == :unknown
+        return "4" if NOTHING_WRITTEN_OUTCOMES.include?(@note_outcome)
 
         super
       end
@@ -283,6 +309,33 @@ module Lakeraven
         note = canonical_ien(@note_service.created_note_ien)
         visit = canonical_ien(@visit && @visit[:visit_ien])
         [ ("note #{note}" if note), ("on visit #{visit}" if visit) ].compact.join(" ").presence
+      end
+
+      # -- The RPMS connection's user ---------------------------------------
+
+      # Whether the request's RPMS connection reports the author's DUZ. TIU
+      # and the e-signature check sign as that connection's user, so a note
+      # filed on any other connection would not be the author's. A request
+      # with no RPMS connection of its own goes on to RpmsUserScope; anything
+      # else raised while asking is not a confirmation. Class only in the log.
+      def connection_signed_on_as_author?
+        client = ::RpmsRpc.client
+        return false unless client.respond_to?(:duz)
+
+        connected = canonical_ien(client.duz)
+        !connected.nil? && connected == canonical_ien(current_duz)
+      rescue ::RpmsRpc::NotConfiguredError
+        raise
+      rescue StandardError => error
+        Rails.logger.error("[progress_note] RPMS connection user could not be read: #{error.class}")
+        false
+      end
+
+      def render_connection_not_author
+        @note_outcome = :connection_not_author
+        @closing_message = "This note cannot be filed: the RPMS connection is not signed on as you. " \
+                           "Nothing was saved. Sign in again, then write the note."
+        render :new, status: :forbidden
       end
 
       # -- Visits -----------------------------------------------------------
@@ -361,15 +414,20 @@ module Lakeraven
       # connection error before any write (nothing was saved). Anything else
       # raised before a write is a fault and goes on. Once a write was sent,
       # anything raised (NotImplementedError too) leaves the chart unknown.
-      # A missing RPMS connection goes on to RpmsUserScope. Class only in the
-      # log line.
+      # A missing RPMS connection goes on to RpmsUserScope until the note is
+      # created; after that, the note is in RPMS and its outcome is unknown.
+      # Class only in the log line.
       def run_note_sequence(signature_code)
         @note_service = ProgressNoteService.new(
           dfn: @dfn, visit_ien: canonical_ien(@visit[:visit_ien]), author_duz: current_duz
         )
         @note_service.create_and_sign(title_ien: note_title_ien, text: @note_text, signature_code: signature_code)
-      rescue ::RpmsRpc::NotConfiguredError
-        raise
+      rescue ::RpmsRpc::NotConfiguredError => error
+        raise if @note_service&.created_note_ien.nil?
+
+        Rails.logger.error("[progress_note] no RPMS connection after the note was created; outcome unknown: " \
+                           "#{error.class}")
+        nil
       rescue StandardError, NotImplementedError => error
         unless @note_service&.write_sent?
           raise unless UNKNOWN_OUTCOME_ERRORS.any? { |known| error.is_a?(known) }
@@ -399,20 +457,25 @@ module Lakeraven
         end
       end
 
-      # A note creation or signing that RPMS answered with nothing: it is
-      # not a refusal, so the outcome is unknown.
+      # A note creation, text write or signing that RPMS answered with
+      # nothing: it is not a refusal, so the outcome is unknown. A text write
+      # refused before it was sent says why (:error), and is a refusal.
       def empty_reply?(result)
-        return false unless result.error == :gateway_error && %i[create sign].include?(result.stage)
+        return false unless result.error == :gateway_error && %i[create text sign].include?(result.stage)
 
         reply = result.raw
-        !reply.is_a?(Hash) || reply[:raw].to_s.strip.empty?
+        return true unless reply.is_a?(Hash)
+        return false if result.stage == :text && reply[:error].present?
+
+        reply[:raw].to_s.strip.empty?
       end
 
       def render_signature_refusal(result)
         return render_signature_unchecked unless result.error == :invalid_signature_code
 
         @note_outcome = :code_not_accepted
-        render_note_refused("The electronic signature code was not accepted. Nothing was saved.")
+        render_note_refused("The electronic signature code was not accepted or could not be confirmed by RPMS. " \
+                            "Nothing was saved.")
       end
 
       # RPMS gave no answer to the check (or raised), before anything was
@@ -443,11 +506,12 @@ module Lakeraven
         render :new, status: :unprocessable_entity
       end
 
-      # TIU answered that the author's action on the note is not "sign"
-      # (a cosignature, or none), so the code was not sent.
+      # TIU did not answer "sign" as the author's action on the note (it
+      # answered a cosignature, another action, or nothing, which is also
+      # what an empty reply reads as), so the code was not sent.
       def render_sign_not_permitted
         @note_outcome = :sign_not_permitted
-        @closing_message = "The note is saved unsigned on this visit. RPMS does not let you sign this note, " \
+        @closing_message = "The note is saved unsigned on this visit. RPMS did not confirm that you may sign it, " \
                            "so it was not signed. Check the chart for who must sign it."
         render :new, status: :unprocessable_entity
       end
@@ -460,7 +524,15 @@ module Lakeraven
       end
 
       def render_visits_unread
+        @note_outcome = :visits_unread
         render :new, status: :service_unavailable
+      end
+
+      # RPMS listed no open visit: none was found, which an empty reply
+      # also reads as. The view says so and offers no form.
+      def render_no_open_visit
+        @note_outcome = :no_open_visit
+        render :new, status: :unprocessable_entity
       end
 
       def render_note_refused(message)

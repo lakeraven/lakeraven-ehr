@@ -20,9 +20,12 @@
     <%= alert_box :error, @refusal, id: "progress-note-refusal" %>
   <% end %>
 
+  <%# An empty visit list is also what an empty broker reply reads as: the
+      page says only that none was found. %>
   <% if @open_visits.empty? %>
     <%= alert_box :notice,
-          "This patient has no open visit. Check the patient in first; a note is written on an open visit.",
+          "No open visit was found for this patient, and a note is written on an open visit. " \
+          "If the patient has been checked in, RPMS may not have answered: try again, or check the chart.",
           id: "progress-note-no-open-visit" %>
     <p><%= link_to "Back to chart", patient_chart_path(@dfn), class: "button-secondary no-underline" %></p>
   <% else %>

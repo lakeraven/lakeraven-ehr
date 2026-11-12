@@ -19,8 +19,8 @@ module Lakeraven
       # stage names the step a failure happened at: :signature_check (nothing
       # written), :create (no note), :text (a note may exist without its
       # text), :sign_action (the note and its text are saved, unsigned: TIU
-      # does not let the author sign it), or :sign (the note and its text are
-      # saved, unsigned).
+      # did not answer that the author may sign it), or :sign (the note and
+      # its text are saved, unsigned).
       Result = Struct.new(:success, :note_ien, :error, :raw, :stage, keyword_init: true) do
         def success? = success
       end
