@@ -11,10 +11,16 @@ module Lakeraven
     # answers: true when RPMS accepts the code, false when it does not. Only
     # true is an accepted code. Any other answer (nil, a hash, a string) is a
     # gateway error, never an acceptance.
+    #
+    # The chart's flow (create_and_sign) also asks TIU which signing action
+    # the author holds on the new note (ESignatureGateway.which_action) and
+    # signs only when the answer is :sign.
     class ProgressNoteService
       # stage names the step a failure happened at: :signature_check (nothing
       # written), :create (no note), :text (a note may exist without its
-      # text), or :sign (the note and its text are saved, unsigned).
+      # text), :sign_action (the note and its text are saved, unsigned: TIU
+      # does not let the author sign it), or :sign (the note and its text are
+      # saved, unsigned).
       Result = Struct.new(:success, :note_ien, :error, :raw, :stage, keyword_init: true) do
         def success? = success
       end
@@ -29,16 +35,26 @@ module Lakeraven
         @author_duz = author_duz
         @gateway = gateway
         @esignature_gateway = esignature_gateway
+        @write_sent = false
       end
+
+      # The note created by this service, once TIU answered with its IEN.
+      attr_reader :created_note_ien
+
+      # Whether a TIU write (note creation) has been sent. Once it has, a
+      # raised call leaves the chart in an unknown state.
+      def write_sent? = @write_sent
 
       def create(title_ien:, text:)
         return failure(:invalid_input, stage: :create) if @dfn.nil? || @visit_ien.nil?
         return failure(:missing_title, stage: :create) if title_ien.nil?
 
+        @write_sent = true
         created = @gateway.create(@dfn, @visit_ien, title_ien)
         return failure(:gateway_error, raw: created, stage: :create) unless created.is_a?(Hash) && created[:success]
 
         note_ien = created[:ien]
+        @created_note_ien = note_ien
         written = @gateway.update_text(note_ien, text)
         unless written.is_a?(Hash) && written[:success]
           return failure(:gateway_error, raw: written, stage: :text, note_ien: note_ien)
@@ -73,8 +89,11 @@ module Lakeraven
       end
 
       # The chart's flow: the code is checked first, so a code RPMS does not
-      # accept creates no note. Then the note is created, its text written,
-      # and it is signed with the code just checked.
+      # accept creates no note. Then the note is created and its text
+      # written. TIU is asked which signing action the author holds on it,
+      # and only :sign signs it, with the code just checked. Any other answer
+      # (:cosign, nil) leaves the note saved unsigned, and the code is not
+      # sent.
       def create_and_sign(title_ien:, text:, signature_code:)
         checked = check_signature_code(signature_code)
         return checked unless checked.success?
@@ -82,7 +101,11 @@ module Lakeraven
         created = create(title_ien: title_ien, text: text)
         return created unless created.success?
 
-        add_signature(created.note_ien, signature_code)
+        note_ien = created.note_ien
+        action = @esignature_gateway.which_action(note_ien, @author_duz)
+        return failure(:sign_not_permitted, stage: :sign_action, note_ien: note_ien) unless action == :sign
+
+        add_signature(note_ien, signature_code)
       end
 
       private

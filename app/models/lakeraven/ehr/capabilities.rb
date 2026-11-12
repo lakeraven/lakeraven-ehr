@@ -56,8 +56,10 @@ module Lakeraven
         "referrals.work" => rule(any: %i[referrals_user referrals_supervisor referrals_manager]),
         # Write a progress note on an open visit from the chart and sign it
         # with the user's electronic signature code (#1001). The PROVIDER key
-        # marks the clinicians who author notes; RPMS still checks the
-        # signature code and the user's TIU authority inside each RPC.
+        # marks the clinicians who author notes. Before anything is written,
+        # RPMS is asked whether it accepts the signature code; before the note
+        # is signed, TIU is asked which signing action the author holds on it
+        # (ESignatureGateway.which_action), and only "sign" signs it.
         "progress_note.write" => rule(any: %i[provider])
       }.freeze
 

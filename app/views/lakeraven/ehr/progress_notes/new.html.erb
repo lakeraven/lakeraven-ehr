@@ -29,6 +29,8 @@
     <%= form_with url: patient_progress_notes_path(@dfn),
           method: :post,
           class: "progress-note-form entry-form" do |f| %>
+      <%# One-time: a POST spends it, so the same form files one note. %>
+      <%= hidden_field_tag "note_form_token", note_form_token, id: nil %>
       <fieldset>
         <legend>Visit</legend>
         <% @open_visits.each do |visit| %>
