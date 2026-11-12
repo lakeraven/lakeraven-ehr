@@ -8,7 +8,7 @@ module Lakeraven
   module EHR
     class OrderGatewayTest < ActiveSupport::TestCase
       # Replies as a fresh rpms-ydb e9b78c8 sent them for DFN 4 (DEMO,PATIENT
-      # ONE, whose one order the rpms-ops demo seed files), replayed through the
+      # ONE, whose one order the openrpms demo seed files), replayed through the
       # real RpmsRpc::Order, so a change to the gem's signature fails here.
       AGET_DFN4 = [ "1^2^3261024.062548", "1;1^13^3261023.2048^^" ].freeze
       UNSIGN_DFN4 = [ "1;1^206^Nursing^0^0^0^0" ].freeze

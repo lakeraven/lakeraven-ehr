@@ -91,7 +91,7 @@ class LiveRegistrationRegisterPatientTest < ActionDispatch::IntegrationTest
     assert_select "#matches tr[data-dfn]", count: 0
   end
 
-  # On this build AG cannot check a registration with neither (rpms-ops#1040),
+  # On this build AG cannot check a registration with neither (openrpms#1040),
   # so it is refused; when RPMS can answer, it decides.
   test "S-REG-02.6 neither an SSN nor a reason is refused, and nothing is filed" do
     entry = fresh_entry.merge(no_ssn_reason: "")
