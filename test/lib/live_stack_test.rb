@@ -344,8 +344,11 @@ class LiveStackTest < ActiveSupport::TestCase
 
   # -- evidence: what a scenario did against the stack ----------------------
 
-  WATCHED = %i[call_rpc call_rpc_raw call_rpc_global_array create_context].freeze
+  WATCHED = %i[call_rpc call_rpc_raw call_rpc_global_array create_context authenticate].freeze
   RPC_METHODS = %i[call_rpc call_rpc_raw call_rpc_global_array].freeze
+  # The parsed calls: the only ones whose answer can be evidence. A raw reply
+  # is unparsed, so a refusal can arrive in it as data.
+  COUNTED = %i[call_rpc call_rpc_global_array].freeze
   Client = RpmsRpc::Client
   PERSONA_DUZ = "4321"
 
@@ -424,8 +427,8 @@ class LiveStackTest < ActiveSupport::TestCase
     assert_equal [], evidence.reasons
   end
 
-  test "every answered call by the persona on the armed client counts as a stack RPC and records no reason" do
-    RPC_METHODS.each do |name|
+  test "every answered parsed call by the persona on the armed client counts as a stack RPC and records no reason" do
+    COUNTED.each do |name|
       LiveStack.take_evidence
       client = armed_client
 
@@ -471,7 +474,7 @@ class LiveStackTest < ActiveSupport::TestCase
   end
 
   test "an answered call when nothing is armed counts nothing and says so" do
-    RPC_METHODS.each do |name|
+    COUNTED.each do |name|
       LiveStack.take_evidence
 
       assert_equal [ "ORWU USERINFO", "x" ], watched_client.public_send(name, "ORWU USERINFO", "x"), name.to_s
@@ -486,7 +489,7 @@ class LiveStackTest < ActiveSupport::TestCase
   end
 
   test "an answered call on any other object counts nothing, however alike the object" do
-    RPC_METHODS.each do |name|
+    COUNTED.each do |name|
       LiveStack.take_evidence
       armed_client
       twin = watched_client
@@ -503,7 +506,7 @@ class LiveStackTest < ActiveSupport::TestCase
 
   test "an answered call on the armed client signed on as someone else, or as no one, counts nothing" do
     [ "1", 1, nil, "" ].each do |duz|
-      RPC_METHODS.each do |name|
+      COUNTED.each do |name|
         LiveStack.take_evidence
         client = armed_client(duz: duz)
 
@@ -663,19 +666,57 @@ class LiveStackTest < ActiveSupport::TestCase
     end
   end
 
-  test "a routine that ran and failed is raised unchanged, records no reason and does not count" do
+  # An M error is not evidence: the step still fails on the original error,
+  # and a scenario that swallows it is not run.
+  test "a routine that ran and failed is raised unchanged, does not count, and records an M error naming the RPC" do
     RPC_METHODS.each do |name|
       LiveStack.take_evidence
-      failure = Client::RpcMError.new("<UNDEFINED>X+1^ORWU")
+      failure = Client::RpcMError.new("<UNDEFINED>X+1^ORWU #{ACCESS};#{VERIFY}")
       client = armed_client(raises: failure)
 
       raised = assert_raises(Client::RpcMError, name.to_s) { client.public_send(name, "ORWU USERINFO") }
 
-      assert_same failure, raised
+      assert_same failure, raised, "#{name}: the M error must stay the original object, not a skip"
       evidence = LiveStack.take_evidence
-      assert_equal [], evidence.reasons
       assert_nothing_counted evidence, "#{name} raised"
+      assert_equal 1, evidence.reasons.size, name.to_s
+      assert_includes evidence.reasons.first, "ORWU USERINFO", name.to_s
+      assert_includes evidence.reasons.first, "M error", name.to_s
+      assert_not_includes evidence.reasons.first, "UNDEFINED", "#{name}: the broker's message was repeated"
+      assert_no_codes evidence.reasons.first
     end
+  end
+
+  test "an M error is recorded whoever made the call" do
+    failure = Client::RpcMError.new("<UNDEFINED>X+1^ORWU")
+
+    raised = assert_raises(Client::RpcMError) { watched_client(raises: failure).call_rpc("ORWU USERINFO") }
+
+    assert_same failure, raised
+    evidence = LiveStack.take_evidence
+    assert_nothing_counted evidence, "nothing armed"
+    assert_equal 1, evidence.reasons.size
+    assert_includes evidence.reasons.first, "M error"
+  end
+
+  test "a swallowed M error makes the verdict not run, whatever else was read" do
+    client = armed_client
+    client.call_rpc("ORWU USERINFO")
+    client.raises = Client::RpcMError.new("<UNDEFINED>X+1^ORQQAL")
+    begin
+      client.call_rpc("ORQQAL LIST", 4)
+    rescue Client::RpcMError
+      nil
+    end
+    client.raises = nil
+    client.call_rpc("ORWU USERINFO")
+
+    reason = LiveStack.verdict(evidence: LiveStack.take_evidence, client: client, stack_client: client,
+                               persona_duz: PERSONA_DUZ)
+
+    assert_kind_of String, reason, "a scenario that swallowed an M error was reported as run"
+    assert_includes reason, "ORQQAL LIST"
+    assert_includes reason, "M error"
   end
 
   test "errors that are not broker errors pass through every watched method unchanged" do
@@ -696,6 +737,374 @@ class LiveStackTest < ActiveSupport::TestCase
 
     assert_same failure, raised
     assert_equal [], LiveStack.take_evidence.reasons
+  end
+
+  # -- nesting: only the outermost watched frame decides --------------------
+
+  # A broker client whose watched methods call one another the way the real
+  # ones do: call_rpc reads its raw reply through call_rpc_raw and parses it
+  # afterwards (CIA raises the broker's error there), create_context sends its
+  # frame through call_rpc_raw (XWB), and authenticate makes its sign-on RPCs
+  # through both. Each stage raises what the test asks.
+  def nesting_client(duz: PERSONA_DUZ)
+    Class.new do
+      prepend LiveStack::RefusalWatch
+
+      # raw_raises: from call_rpc_raw. parse_raises: from call_rpc, after the
+      # raw reply returned. context_raises / sign_on_raises: from create_context
+      # / authenticate, after their inner calls returned. during: run once
+      # inside call_rpc, between the raw reply and the answer.
+      attr_accessor :duz, :raw_raises, :parse_raises, :context_raises, :sign_on_raises, :sign_on_duz, :during
+
+      define_method(:initialize) { @duz = duz }
+
+      define_method(:call_rpc_raw) do |rpc_name, *_params|
+        raise @raw_raises if @raw_raises
+
+        "raw #{rpc_name}"
+      end
+
+      define_method(:call_rpc) do |rpc_name, *params|
+        call_rpc_raw(rpc_name, *params)
+        if @during
+          once, @during = @during, nil
+          once.call
+        end
+        raise @parse_raises if @parse_raises
+
+        [ rpc_name, *params ]
+      end
+
+      define_method(:create_context) do |option_name = "OR CPRS GUI CHART"|
+        call_rpc_raw("XWB CREATE CONTEXT", option_name)
+        raise @context_raises if @context_raises
+
+        true
+      end
+
+      # The client's own rescue, as in production: a refused sign-on RPC is
+      # answered with false, not raised.
+      define_method(:authenticate) do |_access_code = nil, _verify_code = nil|
+        begin
+          call_rpc("XUS SIGNON SETUP")
+          call_rpc_raw("XUS AV CODE")
+        rescue RpmsRpc::Client::RpcRefusedError
+          return false
+        end
+        raise @sign_on_raises if @sign_on_raises
+
+        @duz = @sign_on_duz if @sign_on_duz
+        true
+      end
+    end.new
+  end
+
+  def armed_nesting_client(duz: PERSONA_DUZ)
+    nesting_client(duz: duz).tap { |client| LiveStack.arm!(client: client, persona_duz: PERSONA_DUZ) }
+  end
+
+  test "the watched methods are the four RPC entry points and the sign-on" do
+    assert_equal WATCHED.sort, LiveStack::WATCHED.sort
+  end
+
+  test "a parsed call that reads its raw reply inside counts once" do
+    client = armed_nesting_client
+
+    assert_equal [ "ORWU USERINFO", "x" ], client.call_rpc("ORWU USERINFO", "x")
+
+    evidence = LiveStack.take_evidence
+    assert_equal 1, evidence.rpc_count, "the nested call_rpc_raw was counted by itself"
+    assert_equal [], evidence.reasons
+  end
+
+  test "an M error raised by the outer call after its raw reply returned counts nothing" do
+    client = armed_nesting_client
+    failure = Client::RpcMError.new("<UNDEFINED>X+1^ORWU")
+    client.parse_raises = failure
+
+    raised = assert_raises(Client::RpcMError) { client.call_rpc("ORWU USERINFO") }
+
+    assert_same failure, raised
+    assert_equal 0, LiveStack.rpc_count, "the raw reply inside a call that ended in an M error was counted"
+    evidence = LiveStack.take_evidence
+    assert_equal 1, evidence.reasons.size
+    assert_includes evidence.reasons.first, "ORWU USERINFO"
+    assert_includes evidence.reasons.first, "M error"
+  end
+
+  test "a broker error raised by the outer call after its raw reply returned is not run and counts nothing" do
+    client = armed_nesting_client
+    client.parse_raises = Client::RpcRefusedError.new("broker said #{ACCESS};#{VERIFY}")
+
+    error = assert_raises(LiveStack::NotRun) { client.call_rpc("ORWPT LIST ALL") }
+
+    assert_not_run error, naming: "ORWPT LIST ALL"
+    evidence = LiveStack.take_evidence
+    assert_nothing_counted evidence, "the raw reply inside a refused call"
+    assert_equal 1, evidence.reasons.size
+    assert_includes evidence.reasons.first, "refused"
+  end
+
+  test "a nested call that is declined records nothing by itself: the outermost call is the one not run" do
+    client = armed_nesting_client
+    client.raw_raises = Client::RpcRefusedError.new("broker said #{ACCESS};#{VERIFY}")
+
+    error = assert_raises(LiveStack::NotRun) { client.call_rpc("ORWPT LIST ALL") }
+
+    assert_not_run error, naming: "ORWPT LIST ALL"
+    assert_nil error.cause
+    evidence = LiveStack.take_evidence
+    assert_nothing_counted evidence
+    assert_equal 1, evidence.reasons.size, "the nested call recorded a reason of its own"
+    assert_includes evidence.reasons.first, "ORWPT LIST ALL"
+  end
+
+  test "a call on another thread while one is in progress is the outermost of its own thread" do
+    client = armed_nesting_client
+    client.during = -> { Thread.new { client.call_rpc("ORQQAL LIST", 4) }.value }
+
+    client.call_rpc("ORWU USERINFO")
+
+    evidence = LiveStack.take_evidence
+    assert_equal 2, evidence.rpc_count, "one call on each thread, each counted once"
+    assert_equal [], evidence.reasons
+  end
+
+  test "the watch decides again after a nested call has returned or raised" do
+    client = armed_nesting_client
+    client.call_rpc("ORWU USERINFO")
+    client.parse_raises = Client::RpcMError.new("<UNDEFINED>X+1^ORWU")
+    assert_raises(Client::RpcMError) { client.call_rpc("ORWU USERINFO") }
+    client.parse_raises = nil
+    LiveStack.take_evidence
+
+    client.call_rpc("ORWU USERINFO")
+    client.call_rpc("ORQQAL LIST", 4)
+
+    evidence = LiveStack.take_evidence
+    assert_equal 2, evidence.rpc_count
+    assert_equal [], evidence.reasons
+  end
+
+  # -- a raw reply is not evidence ------------------------------------------
+
+  test "an answered call_rpc_raw counts nothing and records nothing, whoever made it" do
+    { "the armed client" => armed_client, "another client" => watched_client,
+      "the armed client signed on as someone else" => armed_client(duz: "1") }.each do |who, client|
+      LiveStack.take_evidence
+
+      assert_equal [ "ORWU USERINFO", "x" ], client.call_rpc_raw("ORWU USERINFO", "x"), who
+
+      assert_equal 0, LiveStack.rpc_count, "#{who}: an unparsed reply was counted"
+      evidence = LiveStack.take_evidence
+      assert_nothing_counted evidence, who
+      assert_equal [], evidence.reasons, who
+    end
+
+    LiveStack.disarm!
+    watched_client.call_rpc_raw("ORWU USERINFO")
+    evidence = LiveStack.take_evidence
+    assert_nothing_counted evidence, "nothing armed"
+    assert_equal [], evidence.reasons, "nothing armed"
+  end
+
+  test "a scenario that only read raw replies did not run" do
+    client = armed_client
+    client.call_rpc_raw("ORWU USERINFO")
+
+    reason = LiveStack.verdict(evidence: LiveStack.take_evidence, client: client, stack_client: client,
+                               persona_duz: PERSONA_DUZ)
+
+    assert_includes reason.to_s, "no RPC reached the stack"
+  end
+
+  test "a create_context that sends its frame through call_rpc_raw never counts and records no reason" do
+    client = armed_nesting_client
+
+    assert_equal true, client.create_context("OR CPRS GUI CHART")
+
+    assert_equal 0, LiveStack.rpc_count, "the frame inside create_context was counted"
+    evidence = LiveStack.take_evidence
+    assert_nothing_counted evidence, "create_context over call_rpc_raw"
+    assert_equal [], evidence.reasons
+  end
+
+  test "a create_context refused in its own frame or after it is not run and names the context option" do
+    %i[raw_raises context_raises].each do |stage|
+      LiveStack.take_evidence
+      client = armed_nesting_client
+      client.public_send("#{stage}=", Client::RpcRefusedError.new("broker said #{ACCESS};#{VERIFY}"))
+
+      error = assert_raises(LiveStack::NotRun, stage.to_s) { client.create_context("OR CPRS GUI CHART") }
+
+      assert_not_run error, naming: "OR CPRS GUI CHART"
+      evidence = LiveStack.take_evidence
+      assert_nothing_counted evidence, stage
+      assert_equal 1, evidence.reasons.size, "#{stage}: the nested frame recorded a reason of its own"
+      assert_includes evidence.reasons.first, "OR CPRS GUI CHART", stage.to_s
+      assert_no_codes evidence.reasons.first
+    end
+  end
+
+  # -- a sign-on inside a scenario is not the persona -----------------------
+
+  test "a sign-on outside transparently is answered as it was, never counts, and says the scenario signed on as someone else" do
+    client = armed_nesting_client
+
+    assert_equal true, client.authenticate(ACCESS, VERIFY)
+
+    assert_equal 0, LiveStack.rpc_count, "an RPC inside the sign-on was counted"
+    evidence = LiveStack.take_evidence
+    assert_nothing_counted evidence, "authenticate"
+    assert_equal 1, evidence.reasons.size
+    assert_includes evidence.reasons.first, "signed on as someone else"
+    assert_no_codes evidence.reasons.first
+  end
+
+  test "a sign-on back to the persona's own DUZ is still not the persona" do
+    client = armed_nesting_client
+    client.sign_on_duz = PERSONA_DUZ
+
+    client.authenticate(ACCESS, VERIFY)
+    client.call_rpc("ORWU USERINFO")
+
+    evidence = LiveStack.take_evidence
+    assert_includes evidence.reasons.first.to_s, "signed on as someone else"
+    assert_kind_of String, LiveStack.verdict(evidence: evidence, client: client, stack_client: client,
+                                             persona_duz: PERSONA_DUZ)
+  end
+
+  test "a sign-on that raises outside transparently raises the original error and records the same reason" do
+    [ Client::AuthenticationError, Client::ContextRefusedError, Client::ConnectionError ].each do |klass|
+      LiveStack.take_evidence
+      client = armed_nesting_client
+      failure = klass.new("broker said #{ACCESS};#{VERIFY}")
+      client.sign_on_raises = failure
+
+      raised = assert_raises(klass) { client.authenticate(ACCESS, VERIFY) }
+
+      assert_same failure, raised, "#{klass}: the sign-on's error must stay the original object, not a skip"
+      evidence = LiveStack.take_evidence
+      assert_nothing_counted evidence, klass
+      assert_equal 1, evidence.reasons.size, klass.to_s
+      assert_includes evidence.reasons.first, "signed on as someone else", klass.to_s
+      assert_no_codes evidence.reasons.first
+    end
+  end
+
+  test "an RPC refused inside a sign-on reaches the client's own rescue and records nothing by itself" do
+    client = armed_nesting_client
+    client.raw_raises = Client::RpcRefusedError.new("broker said #{ACCESS};#{VERIFY}")
+
+    answer = nil
+    assert_nothing_raised { answer = client.authenticate(ACCESS, VERIFY) }
+
+    assert_equal false, answer, "the client's own rescue did not see the broker's error"
+    evidence = LiveStack.take_evidence
+    assert_nothing_counted evidence
+    assert_equal 1, evidence.reasons.size
+    assert_includes evidence.reasons.first, "signed on as someone else"
+  end
+
+  test "a sign-on inside transparently records nothing and counts nothing" do
+    client = armed_nesting_client
+
+    assert_equal true, LiveStack.transparently { client.authenticate(ACCESS, VERIFY) }
+
+    evidence = LiveStack.take_evidence
+    assert_nothing_counted evidence, "authenticate inside transparently"
+    assert_equal [], evidence.reasons
+
+    failure = Client::AuthenticationError.new("refused")
+    client.sign_on_raises = failure
+    raised = assert_raises(Client::AuthenticationError) { LiveStack.transparently { client.authenticate(ACCESS, VERIFY) } }
+
+    assert_same failure, raised
+    assert_equal [], LiveStack.take_evidence.reasons
+  end
+
+  # -- a not-run is always said ---------------------------------------------
+
+  test "not_run says its reason on stderr and still records it" do
+    error = nil
+    assert_output(nil, /^\[stack\] not run: the persona's sign-on was refused$/) do
+      error = LiveStack.not_run("the persona's sign-on was refused")
+    end
+
+    assert_kind_of LiveStack::NotRun, error
+    assert_equal "not run: the persona's sign-on was refused", error.message
+    assert_equal [ "the persona's sign-on was refused" ], LiveStack.take_evidence.reasons
+  end
+
+  test "a declined RPC is said on stderr, without the broker's message or the codes" do
+    client = armed_client(raises: Client::RpcRefusedError.new("broker said #{ACCESS};#{VERIFY}"))
+
+    _out, err = capture_io { assert_raises(LiveStack::NotRun) { client.call_rpc("ORWPT LIST ALL", "A", 1) } }
+
+    assert_match(/^\[stack\] not run: ORWPT LIST ALL /, err)
+    assert_not_includes err, "broker said"
+    assert_no_codes err
+  end
+
+  test "a refused create_context is said on stderr" do
+    client = armed_client(raises: Client::ContextRefusedError.new("broker said #{ACCESS};#{VERIFY}"))
+
+    _out, err = capture_io { assert_raises(LiveStack::NotRun) { client.create_context("OR CPRS GUI CHART") } }
+
+    assert_match(/^\[stack\] not run: .*OR CPRS GUI CHART/, err)
+    assert_no_codes err
+  end
+
+  # -- the mock is never evidence -------------------------------------------
+
+  def mock_client(duz: PERSONA_DUZ)
+    assert LiveStack.const_defined?(:MockWatch), "LiveStack::MockWatch is not defined"
+    Class.new do
+      prepend LiveStack::MockWatch
+
+      attr_accessor :duz
+
+      define_method(:initialize) { @duz = duz }
+      define_method(:call_rpc) { |rpc_name, *params| [ rpc_name, *params ] }
+    end.new
+  end
+
+  test "an answered call on the mock counts nothing and says it was the mock" do
+    client = mock_client
+
+    assert_equal [ "ORWU USERINFO", "x" ], client.call_rpc("ORWU USERINFO", "x")
+
+    evidence = LiveStack.take_evidence
+    assert_nothing_counted evidence, "the mock"
+    assert_equal 1, evidence.reasons.size
+    assert_includes evidence.reasons.first, "mock"
+    assert_no_codes evidence.reasons.first
+  end
+
+  test "the mock is not evidence even armed and signed on as the persona" do
+    client = mock_client
+    LiveStack.arm!(client: client, persona_duz: PERSONA_DUZ)
+
+    client.call_rpc("ORWU USERINFO")
+    client.call_rpc("ORQQAL LIST", 4)
+
+    evidence = LiveStack.take_evidence
+    assert_nothing_counted evidence, "the armed mock"
+    assert_operator evidence.reasons.size, :>=, 1
+    assert_includes evidence.reasons.first, "mock"
+    assert_kind_of String, LiveStack.verdict(evidence: evidence, client: client, stack_client: client,
+                                             persona_duz: PERSONA_DUZ)
+  end
+
+  test "a scenario that read from the mock and from the stack did not run" do
+    stack = armed_client
+    stack.call_rpc("ORWU USERINFO")
+    mock_client.call_rpc("ORWU USERINFO")
+
+    reason = LiveStack.verdict(evidence: LiveStack.take_evidence, client: stack, stack_client: stack,
+                               persona_duz: PERSONA_DUZ)
+
+    assert_includes reason.to_s, "mock"
   end
 
   # -- the harness's own sign-on is transparent -----------------------------
