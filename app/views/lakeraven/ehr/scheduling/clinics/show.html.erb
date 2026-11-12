@@ -35,6 +35,12 @@
 </p>
 
 <p>
+  <%= link_to "Clinic settings",
+        scheduling_clinic_settings_path(@resource[:id]),
+        id: "clinic-settings-link" %>
+</p>
+
+<p>
   <%= link_to "Find an open time",
         scheduling_clinic_open_times_path(@resource[:id], from: @date.iso8601),
         id: "find-open-time" %>

@@ -1,0 +1,69 @@
+<% page_title "Settings | #{@resource[:name]}" %>
+
+<%= page_header "Clinic settings",
+      @settings[:name] do %>
+  <% if supervisor? %>
+    <%= link_to "Change settings",
+          scheduling_edit_clinic_settings_path(@resource[:id]),
+          id: "edit-settings" %>
+  <% end %>
+  <%= link_to "Back to the clinic",
+        scheduling_clinic_path(@resource[:id]) %>
+<% end %>
+
+<% if flash[:notice].present? %>
+  <%= alert_box :notice, flash[:notice], id: "settings-notice" %>
+<% end %>
+
+<% if @warning.present? %>
+  <%= alert_box :error, @warning, id: "default-provider-warning" %>
+<% end %>
+
+<p>
+  These settings are read from the clinic's entry in RPMS each time this page opens.
+  A change applies to the next booking; no one needs to sign out and in again.
+</p>
+
+<% yes_no = ->(value) { value ? "Yes" : "No" } %>
+<% named = ->(pointer) { pointer ? pointer[:name] : "None" } %>
+<% sections = {
+     "General" => [
+       [ :abbreviation, @settings[:abbreviation] ],
+       [ :division, named.(@settings[:division]), "Division" ],
+       [ :institution, named.(@settings[:institution]), "Facility" ],
+       [ :stop_code, named.(@settings[:stop_code]) ],
+       [ :meets_at_facility, yes_no.(@settings[:meets_at_facility]) ],
+       [ :non_count, yes_no.(@settings[:non_count]) ],
+       [ :include_on_file_room_lists, yes_no.(@settings[:include_on_file_room_lists]) ],
+       [ :prohibit_access, yes_no.(@settings[:prohibit_access]) ]
+     ],
+     "Scheduling" => [
+       [ :length_minutes, @settings[:length_minutes] ],
+       [ :variable_length, yes_no.(@settings[:variable_length]) ],
+       [ :display_begins, @settings[:display_begins] || "8 (not set)" ],
+       [ :increments_per_hour, Lakeraven::EHR::ClinicSettings::INCREMENTS[@settings[:increments_per_hour]] ],
+       [ :overbooks_per_day, @settings[:overbooks_per_day] ],
+       [ :allowable_no_shows, @settings[:allowable_no_shows] ],
+       [ :max_future_days, @settings[:max_future_days] ],
+       [ :schedule_on_holidays, yes_no.(@settings[:schedule_on_holidays]) ],
+       [ :no_show_waiting_days, @settings[:no_show_waiting_days] ]
+     ],
+     "Check-in" => [
+       [ :create_visit_at_checkin, yes_no.(@settings[:create_visit_at_checkin]) ],
+       [ :visit_provider_required, yes_no.(@settings[:visit_provider_required]) ],
+       [ :default_provider, @settings[:providers].find { |p| p[:default] }&.dig(:name) || "None", "Default provider" ]
+     ],
+     "Letters" => Lakeraven::EHR::ClinicSettings::LETTERS.keys.map { |key| [ key, named.(@settings[key]) ] }
+   } %>
+
+<% sections.each do |heading, rows| %>
+  <section class="card">
+    <h2><%= heading %></h2>
+    <dl class="grid grid-cols-2 gap-2">
+      <% rows.each do |key, value, label| %>
+        <dt><%= label || Lakeraven::EHR::ClinicSettings::LABELS.fetch(key) %></dt>
+        <dd data-setting="<%= key %>"><%= value.nil? ? "Not set" : value %></dd>
+      <% end %>
+    </dl>
+  </section>
+<% end %>
