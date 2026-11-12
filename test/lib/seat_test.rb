@@ -139,6 +139,17 @@ class SeatTest < ActiveSupport::TestCase
     end
   end
 
+  test "a failed Codex review that quotes an error phrase keeps its exit code" do
+    with_seat(agent: OUT_OF_USAGE) do |dir, env|
+      quoting = recording_codex(dir, reply: "bin/seat:118 greps for usage limit and codex login", status: 3)
+      write_exe(File.join(dir, "bin", "codex"), quoting)
+      out, _err, code = seat(env, dir, "gate2", "brief.md")
+
+      assert_equal 3, code
+      refute_includes out, "SEAT_FALLBACK"
+    end
+  end
+
   test "Codex is not used while Cursor answers" do
     with_seat(agent: ANSWERS) do |dir, env|
       write_exe(File.join(dir, "bin", "codex"), recording_codex(dir))
