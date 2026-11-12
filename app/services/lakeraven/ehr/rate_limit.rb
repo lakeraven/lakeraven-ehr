@@ -682,11 +682,12 @@ module Lakeraven
         def sweep_some!(now, limit)
           scanned = 0
           while scanned < limit && order.any?
-            @cursor = 0 if @cursor.to_i >= order.size
+            @cursor = @cursor.to_i
+            @cursor = 0 if @cursor >= order.size
             size_before = order.size
             fresh_count(order[@cursor], now)
             scanned += 1
-            @cursor = @cursor.to_i + 1 if order.size == size_before
+            @cursor += 1 if order.size == size_before
           end
         end
 
