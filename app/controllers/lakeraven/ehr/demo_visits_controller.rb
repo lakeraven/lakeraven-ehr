@@ -37,7 +37,8 @@ module Lakeraven
       end
 
       class DemoESignatureGateway
-        def validate(_duz, code) = { success: code.to_s.strip.present?, raw: "1" }
+        # Answers as ESignatureGateway does: true or false, never a hash.
+        def validate(_duz, code) = code.to_s.strip.present?
         def add(_note_ien, _duz, _code, action: :sign) = { success: true, raw: "1" }
       end
 
@@ -193,10 +194,7 @@ module Lakeraven
       end
 
       def require_demo_mode!
-        demo = Rails.env.development? &&
-          ENV["CHART_DEMO_OPEN"] == "1" &&
-          ENV["SPIKE_MOCK_RPC"] == "1"
-        head :not_found unless demo
+        head :not_found unless LocalChartDemo.open?
       end
 
       def visit_state(dfn)

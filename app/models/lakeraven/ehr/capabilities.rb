@@ -53,7 +53,12 @@ module Lakeraven
         # Work the facility's referrals: list the ones still pending across
         # patients (#873). RPMS: RCIS's menu key BMCZMENU, or its supervisor
         # and manager keys, the same keys Roles.can_process_chs? reads.
-        "referrals.work" => rule(any: %i[referrals_user referrals_supervisor referrals_manager])
+        "referrals.work" => rule(any: %i[referrals_user referrals_supervisor referrals_manager]),
+        # Write a progress note on an open visit from the chart and sign it
+        # with the user's electronic signature code (#1001). The PROVIDER key
+        # marks the clinicians who author notes; RPMS still checks the
+        # signature code and the user's TIU authority inside each RPC.
+        "progress_note.write" => rule(any: %i[provider])
       }.freeze
 
       NAMES = TABLE.keys.freeze

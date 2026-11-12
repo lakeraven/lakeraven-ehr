@@ -82,7 +82,19 @@ module Lakeraven
       # leave feedback. The disclaimer links both.
       attr_accessor :demo_terms_url, :demo_feedback_url
 
+      # The TIU DOCUMENT DEFINITION (#8925.1) a progress note written from
+      # the chart is filed under (#1001), from PROGRESS_NOTE_TITLE_IEN when
+      # the configuration is built. Only a string of digits naming a positive
+      # integer sets it. There is no default: a site that has not named its
+      # title gets no note form, rather than notes filed under a guess.
+      attr_reader :progress_note_title_ien
+
+      # The whole value must be digits: \z, not $, so a second line cannot
+      # carry a number past the check.
+      TITLE_IEN_FORMAT = /\A[0-9]+\z/
+
       def initialize
+        @progress_note_title_ien = positive_ien(ENV["PROGRESS_NOTE_TITLE_IEN"])
         @demo_mode = ENV["DEMO_MODE"] == "1"
         @demo_terms_url = "https://openrpms.org/demo"
         @demo_feedback_url = "https://github.com/afomi/open-rpms-website/issues"
@@ -100,6 +112,15 @@ module Lakeraven
         }
         @eligibility_adapter = MockEligibilityAdapter.new
         @backend = :rpms
+      end
+
+      private
+
+      def positive_ien(value)
+        return unless value.is_a?(String) && value.match?(TITLE_IEN_FORMAT)
+
+        ien = Integer(value, 10)
+        ien if ien.positive?
       end
     end
 
