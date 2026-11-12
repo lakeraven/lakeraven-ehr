@@ -7,7 +7,7 @@ module Lakeraven
     # A patient's applications for coverage (rpms-ux S-REG-03.3 to 03.5): AG's
     # PATIENT APPLICATIONS (#9000045). RPMS has no registration call for them,
     # so RpmsRpc::PatientApplication files them the way AG's Benefits
-    # Coordinator screens do, under AG's edit lock (rpms-ops#1053).
+    # Coordinator screens do, under AG's edit lock (openrpms#1053).
     #
     # Reads raise the gem's errors. Writes answer a Result: an error mid-call
     # is :unknown, because the write may already have filed.

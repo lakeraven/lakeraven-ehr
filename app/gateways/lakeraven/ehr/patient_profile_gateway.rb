@@ -115,7 +115,7 @@ module Lakeraven
 
         # The name the patient goes by (S-REG-12.1): "" when none is on file.
         # RPMS has no registration call for it; RpmsRpc::Registration files it
-        # the way $$SETPREF^AUPNSOGI does, under AG's edit lock (rpms-ops#1059).
+        # the way $$SETPREF^AUPNSOGI does, under AG's edit lock (openrpms#1059).
         def preferred_name(dfn, via: ::RpmsRpc::Registration)
           via.preferred_name(dfn.to_i)
         end
@@ -129,7 +129,7 @@ module Lakeraven
         # The patient's races and ethnicities, each with how it was collected
         # (S-REG-20.2), and the ones a clerk picks from. RPMS has no registration
         # call for them; RpmsRpc::Registration files them the way AG's page 10
-        # does, under AG's edit lock (rpms-ops#1055).
+        # does, under AG's edit lock (openrpms#1055).
         def race_ethnicity(dfn, via: ::RpmsRpc::Registration) = via.race_ethnicity(dfn.to_i)
         def race_ethnicity_choices(via: ::RpmsRpc::Registration) = via.race_ethnicity_choices
 

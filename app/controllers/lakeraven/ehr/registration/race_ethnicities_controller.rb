@@ -7,7 +7,7 @@ module Lakeraven
       # (rpms-ux S-REG-20.2 to 20.4), shown on the patient's registration page
       # (race_ethnicities/_section). RPMS has no registration call for them, so
       # the gem files them the way AG's own page 10 does, under AG's edit lock
-      # (rpms-ops#1055).
+      # (openrpms#1055).
       class RaceEthnicitiesController < PatientSectionController
         # Throttled like every credentialed route (#498).
         rate_limit only: %i[edit update]

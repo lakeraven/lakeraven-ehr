@@ -6,7 +6,7 @@ module Lakeraven
       # The name the patient goes by (rpms-ux S-REG-12.1), shown on the patient's
       # registration page (preferred_names/_section). RPMS has no registration
       # call for it, so the gem files the field the way IHS's own API does
-      # (rpms-ops#1059).
+      # (openrpms#1059).
       class PreferredNamesController < PatientSectionController
         # Throttled like every credentialed route (#498).
         rate_limit only: %i[edit update]

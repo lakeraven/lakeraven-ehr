@@ -1,18 +1,18 @@
 # Local services for lakeraven-ehr development. Rails runs on your machine; these run in Docker.
 #
-#   docker compose up -d                     # RPMS: a pinned rpms-ops release, CIA broker on 127.0.0.1:9100
+#   docker compose up -d                     # RPMS: a pinned openrpms release, CIA broker on 127.0.0.1:9100
 #   docker compose --profile postgres up -d  # also PostgreSQL, if you have none (README, "Development")
 #
 # lakeraven-ehr is a front end for RPMS: test/dummy/config/rpms.yml points development at
 # 127.0.0.1:9100, this service. Sign on as SYS123 / RPMS.000, the image's development operator.
 #
 # The image is private: `docker login ghcr.io` first (README, "Development").
-# The service runs the image's own entrypoint, its supervisor (tini -> ydb_supervise, rpms-ops#408),
+# The service runs the image's own entrypoint, its supervisor (tini -> ydb_supervise, openrpms#408),
 # which starts the brokers and TaskMan and restarts either if it dies. Do not override it.
 # Ports are on loopback only: the brokers speak plaintext.
 #
 # /data is a named volume, seeded from the image on first start, so RPMS state survives restarts.
-# The image refuses another build's /data (rpms-ops#514): to move to a new release, change RPMS_TAG
+# The image refuses another build's /data (openrpms#514): to move to a new release, change RPMS_TAG
 # here, then remove the RPMS container and volume and start it again (README, "Development"). Do not use
 # `docker compose down -v` for that: it also deletes the postgres profile's database.
 
@@ -27,7 +27,7 @@ services:
     volumes:
       - rpms-data:/data
     healthcheck:
-      # LISTEN state, not a connect: a connect is a session to the broker (rpms-ops#444).
+      # LISTEN state, not a connect: a connect is a session to the broker (openrpms#444).
       test: ["CMD-SHELL", "ss -ltnH | grep -q ':9100 '"]
       interval: 30s
       timeout: 5s

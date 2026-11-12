@@ -3,7 +3,7 @@ Feature: Provider Search and Management
   I need to search for healthcare providers
   So that I can create appropriate referrals and track provider activity
 
-  # The NEW PERSON entries of the pinned RPMS build (rpms-ops demo site seed),
+  # The NEW PERSON entries of the pinned RPMS build (openrpms demo site seed),
   # as ORWU NEWPERS names them. Checked against features/support/rpms_demo_site.rb.
   Background:
     Given these RPMS demo providers:
