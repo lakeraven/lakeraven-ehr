@@ -157,25 +157,39 @@ module Lakeraven
       # -- Visit choices (#1003) --------------------------------------------------
 
       # The patient's OPEN visits, today's first and then newest first. Read
-      # only by a credential that may read Encounter. A read that is not
+      # only by a credential that may search Encounter. A read that is not
       # permitted or fails is NOT an empty list: @visits_unreadable is set, the
       # form says so, and nothing can be chosen (fail closed, no typed fallback).
       # Only the error class is logged, never a row.
       def load_open_visits
         @open_visits = []
         @visits_unreadable = false
-        unless can_read?("Encounter")
+        unless can_read?("Encounter", "s")
           @visits_unreadable = true
           return
         end
 
-        rows = EncounterGateway.visits(@dfn).reject { |row| row[:locked] == true }
-        today = Date.current
-        @open_visits = rows.sort_by { |row| row[:datetime] }.reverse.partition { |row| row[:datetime].to_date == today }.flatten
+        @open_visits = normalise_visits(EncounterGateway.visits(@dfn))
       rescue RpmsRpc::Error, IOError, SystemCallError => e
         Rails.logger.warn("[screening] visit list unreadable: #{e.class}")
         @open_visits = []
         @visits_unreadable = true
+      end
+
+      # Open (lock explicitly false: an unknown lock is not open), dated,
+      # one row per valid visit IEN, today's first and then newest first.
+      def normalise_visits(rows)
+        # The gem builds visit times with Time.new in the process zone (see WallClock), so "today" is the process-local date, not the Rails zone's.
+        today = Time.now.to_date # rubocop:disable Rails/TimeZone
+        seen = {}
+        rows = Array(rows).select do |row|
+          ien = row[:visit_ien].to_s.strip
+          next false unless row[:locked] == false && row[:datetime].respond_to?(:to_date)
+          next false unless ien.match?(/\A[1-9]\d*\z/) && !seen[ien]
+
+          seen[ien] = true
+        end
+        rows.sort_by { |row| row[:datetime] }.reverse.partition { |row| row[:datetime].to_date == today }.flatten
       end
 
       def offered_visit?(ien)
