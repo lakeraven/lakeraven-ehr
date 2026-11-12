@@ -8,7 +8,7 @@ module Lakeraven
       # BPRM's table maintenance (SDZSUP, S-SCH-17.5). An access type that
       # prevents access takes no booking (S-SCH-17.2, AppointmentBookingGateway).
       class AccessTypesController < BaseController
-        rate_limit only: %i[create update]
+        rate_limit only: %i[index new create edit update]
 
         before_action :require_supervisor!
         before_action :load_access_type!, only: %i[edit update]

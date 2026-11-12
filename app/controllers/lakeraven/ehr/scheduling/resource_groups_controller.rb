@@ -9,7 +9,7 @@ module Lakeraven
       # rights on it let them see; making and changing groups takes SDZSUP, as
       # in BPRM's table maintenance.
       class ResourceGroupsController < BaseController
-        rate_limit only: %i[create add_member remove_member]
+        rate_limit only: %i[index new create show add_member remove_member]
 
         before_action :require_supervisor!, only: %i[new create add_member remove_member]
         helper_method :supervisor?
