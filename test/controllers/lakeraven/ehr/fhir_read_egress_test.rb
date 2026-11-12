@@ -159,6 +159,9 @@ module Lakeraven
         "lakeraven/ehr/scheduling/checkouts#undo",       # Undo check-out entry, not disclosure
         "lakeraven/ehr/scheduling/no_shows#create",      # No-show entry, not disclosure
         "lakeraven/ehr/scheduling/no_shows#undo",        # Undo no-show entry, not disclosure
+        "lakeraven/ehr/scheduling/clinic_settings#show",   # A clinic's settings, letters and default provider: no patient data
+        "lakeraven/ehr/scheduling/clinic_settings#edit",   # The same, as a form
+        "lakeraven/ehr/scheduling/clinic_settings#update", # Files a clinic's settings; no patient data
         "lakeraven/ehr/scheduling/hours#new",            # Clinic hours form: access types, no patient data
         "lakeraven/ehr/scheduling/hours#create",         # Hours entry; a refusal names an appointment time and patient name, no clinical record
         "lakeraven/ehr/pending_referrals#index",         # Pending referrals (#873): date, patient name, status and number; no reason, diagnosis or referred-to; revisit with Part 2 (#494)

@@ -8,11 +8,11 @@ module Lakeraven
       # SDZSUP, as BPRM's clinic configuration does (S-SCH-15.4). They are read
       # from and filed to RPMS each time (ClinicSettingsGateway).
       class ClinicSettingsController < BaseController
-        rate_limit only: %i[edit update]
+        rate_limit only: %i[show edit update]
 
+        before_action :require_supervisor!, only: %i[edit update]
         before_action :load_resource!
         before_action :require_clinic!
-        before_action :require_supervisor!, only: %i[edit update]
         helper_method :supervisor?
 
         # GET /scheduling/clinics/:resource_id/settings
