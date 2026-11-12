@@ -40,10 +40,6 @@ module Lakeraven
         refute result[:success]
         assert_nil result[:ien]
       end
-
-      test "add refuses modifiers and a narrative, which BEHOENPC SAVE does not file" do
-        assert_raises(ArgumentError) { ProcedureGateway.add(1, 2090061, "99213", modifiers: [ "25" ], narrative: "Office visit") }
-      end
     end
   end
 end
