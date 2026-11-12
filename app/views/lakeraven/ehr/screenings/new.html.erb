@@ -108,7 +108,7 @@
 
   <%# Every reason the submission was refused is shown, not just the first:
       the visit AND the unanswered items, in one pass. %>
-  <% if @result&.errors&.include?(:missing_encounter) %>
+  <% if @result&.errors&.include?(:missing_encounter) && !@visits_unreadable && @open_visits.any? %>
     <div class="screening-errors" role="alert">
       <h2>Visit required</h2>
       <p>A screening is recorded against the patient&rsquo;s open visit. Choose the visit below and submit again.</p>
@@ -130,7 +130,7 @@
   <% elsif @open_visits.empty? %>
     <div class="screening-errors" role="alert">
       <h2>No open visit</h2>
-      <p>This patient has no open visit. Check the patient in first, then start the screening again.</p>
+      <p>This patient has no open visit. Check the patient in first, then start the screening again. If the patient is already checked in, reload this page, and report it if the visit still does not appear.</p>
     </div>
   <% end %>
 
@@ -146,8 +146,8 @@
                  <%= "checked" if @encounter_ien == ien %>>
           <label for="<%= input_id %>">
             <%= visit[:datetime].strftime("%b %-d, %Y %H:%M") %>
-            &middot; <%= visit[:location] %>
-            &middot; <%= visit[:provider] %>
+            &middot; <%= visit[:location].presence || "Clinic not recorded" %>
+            &middot; <%= visit[:provider].presence || "Provider not recorded" %>
           </label>
         </div>
       <% end %>
