@@ -26,38 +26,26 @@ module Lakeraven
 
       # --- write: add / update / delete ---
 
-      test "add returns success with the saved IEN" do
-        # rpms-rpc 0.3.0: Problem.add/update write via :problem_set (was :problem_edit).
-        RpmsRpc.client.seed_scalar(:problem_set, "1", "55")
-
-        result = ConditionGateway.add(1, { icd_code: "E11.9", description: "Type 2 diabetes" })
-
-        assert result[:success]
-        assert_equal 55, result[:ien]
+      # rpms-rpc#693: Problem.add, update and delete file through BGOPROB SET / DEL
+      # and read the PROBLEM entry back with DDR; the gem's live spec proves the
+      # filing. Here: that the gateway hands a coded problem to the gem and
+      # returns its answer.
+      test "add hands a coded problem to RpmsRpc::Problem.add and returns its answer" do
+        with_stub(RpmsRpc::Problem, :add, { success: true, ien: 55 }) do
+          assert_equal({ success: true, ien: 55 }, ConditionGateway.add(1, { icd_code: "E11.9", description: "Type 2 diabetes" }))
+        end
       end
 
-      test "update returns success with the saved IEN" do
-        RpmsRpc.client.seed_scalar(:problem_set, "1", "55")
-
-        result = ConditionGateway.update(1, 55, { status: "I" })
-
-        assert result[:success]
-        assert_equal 55, result[:ien]
+      test "update hands the change to RpmsRpc::Problem.update and returns its answer" do
+        with_stub(RpmsRpc::Problem, :update, { success: true, ien: 55 }) do
+          assert_equal({ success: true, ien: 55 }, ConditionGateway.update(1, 55, { status: "I" }))
+        end
       end
 
-      test "delete issues BGOPROB DEL with the IEN and reason, and returns success" do
-        # 0.3.0: delete calls DEL^BGOPROB (:problem_remove), whose success
-        # reply is "" — the same value the mock returns for ANY unseeded RPC.
-        # Asserting result[:success] alone is therefore vacuous (a regression
-        # to another RPC, or to no RPC at all, would ride the default green),
-        # so pin the recorded wire call: name and IEN^TYPE^REASON param.
-        result = ConditionGateway.delete(1, 55, reason: "Entered in error")
-
-        assert result[:success]
-        assert_equal 55, result[:ien]
-        call = RpmsRpc.client.received_calls.last
-        assert_equal "BGOPROB DEL", call[:rpc]
-        assert_equal [ "55^^Entered in error" ], call[:params]
+      test "delete hands the reason to RpmsRpc::Problem.delete and returns its answer" do
+        with_stub(RpmsRpc::Problem, :delete, { success: true, ien: 55 }) do
+          assert_equal({ success: true, ien: 55 }, ConditionGateway.delete(1, 55, reason: "Entered in error"))
+        end
       end
 
       test "delete surfaces a server error reply as failure" do
@@ -107,9 +95,9 @@ module Lakeraven
       end
 
       test "add still writes an ICD-10-CM code outside F10-F19" do
-        RpmsRpc.client.seed_scalar(:problem_set, "8", "56")
-
-        result = ConditionGateway.add(8, { icd_code: "F32.1", description: "Major depressive disorder" })
+        result = with_stub(RpmsRpc::Problem, :add, { success: true, ien: 56 }) do
+          ConditionGateway.add(8, { icd_code: "F32.1", description: "Major depressive disorder" })
+        end
 
         assert result[:success]
         assert_equal 56, result[:ien]
