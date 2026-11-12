@@ -79,13 +79,14 @@ module Lakeraven
         @responses = screening_pages(filtered)
       end
 
-      # TODO(#480): `encounter_ien` arrives as a query param and is rendered as
-      # a free-text field because there is no encounter picker in the web UI
-      # yet. The scheduling surface (#480, Sprint 3) supplies it; until then
-      # this is interim, not a finished design. See the note in new.html.erb.
+      # The visit is CHOSEN from the patient's open visits (#1003), read from
+      # the same VISITLST list the chart's Encounter read uses. `encounter_ien`
+      # arriving as a query param only preselects a visit that is in that list.
       def new
         @answers = {}
-        @encounter_ien = params[:encounter_ien]
+        load_open_visits
+        @encounter_ien = params[:encounter_ien].to_s.strip.presence
+        @encounter_ien = nil unless offered_visit?(@encounter_ien)
         # Minted when the form is RENDERED: it identifies this submission, so a
         # double-tap or a back-button replay of the same form is one
         # administration, while a second screening later the same day comes
@@ -95,10 +96,16 @@ module Lakeraven
 
       def create
         @answers = submitted_answers
-        @encounter_ien = params[:encounter_ien]
+        load_open_visits
+        @encounter_ien = params[:encounter_ien].to_s.strip.presence
         # Carried through a re-render (an incomplete form, the safety prompt) so
         # that acknowledging and resubmitting is still the SAME submission.
         @submission_token = params[:submission_token].presence
+
+        # The list is read NOW, not remembered from when the form rendered: a
+        # visit locked in between is no longer a choice. A visit that is not
+        # one of the open ones is refused before the service is reached.
+        return render_refused_visit if @encounter_ien && !offered_visit?(@encounter_ien)
 
         @result = ScreeningEntryService.new(
           instrument: @instrument,
@@ -145,6 +152,53 @@ module Lakeraven
         else
           "Screening recorded."
         end
+      end
+
+      # -- Visit choices (#1003) --------------------------------------------------
+
+      # The patient's OPEN visits, today's first and then newest first. Read
+      # only by a credential that may read Encounter. A read that is not
+      # permitted or fails is NOT an empty list: @visits_unreadable is set, the
+      # form says so, and nothing can be chosen (fail closed, no typed fallback).
+      # Only the error class is logged, never a row.
+      def load_open_visits
+        @open_visits = []
+        @visits_unreadable = false
+        unless can_read?("Encounter")
+          @visits_unreadable = true
+          return
+        end
+
+        rows = EncounterGateway.visits(@dfn).reject { |row| row[:locked] == true }
+        today = Date.current
+        @open_visits = rows.sort_by { |row| row[:datetime] }.reverse.partition { |row| row[:datetime].to_date == today }.flatten
+      rescue RpmsRpc::Error, IOError, SystemCallError => e
+        Rails.logger.warn("[screening] visit list unreadable: #{e.class}")
+        @open_visits = []
+        @visits_unreadable = true
+      end
+
+      def offered_visit?(ien)
+        return false if @visits_unreadable || ien.blank?
+
+        @open_visits.any? { |row| row[:visit_ien].to_s.strip == ien.to_s.strip }
+      end
+
+      # Nothing is stored. The other reasons the service would report
+      # (unanswered items, the safety prompt) are still reported alongside the
+      # visit, by scoring the answers without saving them.
+      def render_refused_visit
+        score = @instrument.score(@answers)
+        safety_required = score.safety_triggered? && !ScreeningEntryService.acknowledged?(params[:safety_acknowledged])
+        reasons = [ :invalid_encounter ]
+        reasons << :incomplete unless score.complete?
+        reasons << :safety_unacknowledged if safety_required
+        @result = ScreeningEntryService::Result.new(
+          success: false, score: score, error: reasons.first, errors: reasons,
+          missing_link_ids: score.missing_link_ids, safety_prompt_required: safety_required
+        )
+        @encounter_ien = nil
+        render :new, status: :unprocessable_entity
       end
 
       # -- Authorization --------------------------------------------------------
