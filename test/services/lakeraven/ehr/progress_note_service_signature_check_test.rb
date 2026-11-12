@@ -69,6 +69,66 @@ module Lakeraven
         assert_equal :gateway_error, result.error
         assert_equal %i[validate add], esignature.calls.map(&:first)
       end
+
+      # -- Review round 1: TIU says which signing action the author holds -------
+
+      # Answers which_action too, as ESignatureGateway does.
+      class AuthorityESignatureGateway < BooleanESignatureGateway
+        def initialize(which_action:, **options)
+          super(**options)
+          @which_action = which_action
+        end
+
+        def which_action(note_ien, duz)
+          @calls << [ :which_action, note_ien.to_s, duz.to_s ]
+          @which_action
+        end
+      end
+
+      # Records create and update_text into the e-signature fake's call list,
+      # so one list holds the order of the whole flow.
+      class RecordingNoteGateway
+        def initialize(calls) = @calls = calls
+
+        def create(dfn, visit_ien, title_ien)
+          @calls << [ :create, dfn.to_s, visit_ien.to_s, title_ien.to_s ]
+          { success: true, ien: NOTE_IEN, raw: NOTE_IEN.to_s }
+        end
+
+        def update_text(note_ien, text)
+          @calls << [ :update_text, note_ien.to_s, text ]
+          { success: true, raw: NOTE_IEN.to_s }
+        end
+      end
+
+      def create_and_sign_with(esignature)
+        ProgressNoteService
+          .new(dfn: "3", visit_ien: "501", author_duz: DUZ,
+               gateway: RecordingNoteGateway.new(esignature.calls), esignature_gateway: esignature)
+          .create_and_sign(title_ien: 1234, text: "SYNTHETIC-NOTE-BODY", signature_code: CODE)
+      end
+
+      test "create_and_sign asks which signing action the author holds, after the text and before signing" do
+        esignature = AuthorityESignatureGateway.new(accepts: true, which_action: :sign)
+
+        result = create_and_sign_with(esignature)
+
+        assert result.success?, "error: #{result.error.inspect}"
+        assert_equal %i[validate create update_text which_action add], esignature.calls.map(&:first)
+        assert_equal [ :which_action, NOTE_IEN.to_s, DUZ ], esignature.calls[3]
+      end
+
+      { "cosign" => :cosign, "nothing" => nil, "an action that is not sign" => :addend }.each do |label, answer|
+        test "create_and_sign leaves the note unsigned, and never sends the code, when the author's action is #{label}" do
+          esignature = AuthorityESignatureGateway.new(accepts: true, which_action: answer)
+
+          result = create_and_sign_with(esignature)
+
+          refute result.success?
+          assert_equal NOTE_IEN, result.note_ien, "the note that was saved is named"
+          assert_equal %i[validate create update_text which_action], esignature.calls.map(&:first)
+        end
+      end
     end
   end
 end

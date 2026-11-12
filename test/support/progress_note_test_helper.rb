@@ -6,8 +6,15 @@ require_relative "patient_banner_test_helper"
 #
 # The fakes stand at the gateway class methods the flow is specified to reach
 # (EncounterGateway.visits, ProgressNoteGateway.create / update_text,
-# ESignatureGateway.validate / add) and answer in the shapes the real gateways
-# answer in: validate is a boolean, the others are hashes.
+# ESignatureGateway.validate / which_action / add) and answer in the shapes
+# the real gateways answer in: validate is a boolean, which_action is the
+# signing action TIU allows the user on the note (:sign, :cosign or nil), the
+# others are hashes.
+#
+# Review round 1 amendments: the fake answers which_action (default :sign);
+# a POST carries the one-time form token its form was given
+# (fetch_note_form_token); with_audit_failing_after_probe lets the pre-RPC
+# audit probe through and fails the request's own audit row.
 module ProgressNoteTestHelper
   include PatientBannerTestHelper
 
@@ -21,6 +28,7 @@ module ProgressNoteTestHelper
   SYNTHETIC_NOTE_TEXT = "SYNTHETIC-NOTE-BODY line one"
   SYNTHETIC_SIGNATURE_CODE = "SYNTH-SIG-CODE-1001"
   SYNTHETIC_BROKER_MESSAGE = "SYNTHETIC-BROKER-TEXT-1001"
+  FORM_TOKEN_FIELD = "note_form_token"
 
   OPEN_VISIT_IEN = 501
   LOCKED_VISIT_IEN = 502
@@ -49,9 +57,11 @@ module ProgressNoteTestHelper
                    create: { success: true, ien: NOTE_IEN, raw: NOTE_IEN.to_s },
                    update_text: { success: true, raw: NOTE_IEN.to_s },
                    add: { success: true, raw: "0" },
+                   which_action: :sign,
                    raises: {})
       @visits_by_dfn = visits_by_dfn.transform_keys(&:to_s)
-      @returns = { validate: validate, create: create, update_text: update_text, add: add }
+      @returns = { validate: validate, create: create, update_text: update_text, add: add,
+                   which_action: which_action }
       @raises = raises
       @calls = []
     end
@@ -79,6 +89,7 @@ module ProgressNoteTestHelper
     [ "Lakeraven::EHR::ProgressNoteGateway", :create ],
     [ "Lakeraven::EHR::ProgressNoteGateway", :update_text ],
     [ "Lakeraven::EHR::ESignatureGateway", :validate ],
+    [ "Lakeraven::EHR::ESignatureGateway", :which_action ],
     [ "Lakeraven::EHR::ESignatureGateway", :add ]
   ].freeze
 
@@ -92,6 +103,50 @@ module ProgressNoteTestHelper
     yield
   ensure
     Array(restores).reverse_each { |restore| restore&.call }
+  end
+
+  # The one-time form token in the page just received, or nil when the page
+  # carries none.
+  def note_form_token_in_page
+    field = Nokogiri::HTML(response.body.to_s).at_css("input[name='#{FORM_TOKEN_FIELD}']")
+    field && field["value"].to_s.presence
+  end
+
+  # GETs the note form for the patient and answers the token it was given.
+  # The GET runs against a fake of its own, with one open visit, so the fake
+  # a test passes to its POST records the POST's calls only. nil when no form
+  # came back (no session, no capability, no title).
+  def fetch_note_form_token(new_path, dfn:)
+    form_fake = FakeTiu.new(visits_by_dfn: { dfn.to_s => [ open_visit_row ] })
+    with_fake_tiu(form_fake) { get new_path }
+    note_form_token_in_page
+  end
+
+  # POSTs a note the way a browser does: with the token of a form it was
+  # shown. `form_token: :fetch` GETs the form first; any other value is
+  # posted as given, and nil posts no token at all.
+  def post_progress_note(path, new_path:, dfn:, fake:, params:, form_token: :fetch)
+    token = form_token == :fetch ? fetch_note_form_token(new_path, dfn: dfn) : form_token
+    params = params.merge(FORM_TOKEN_FIELD => token) unless token.nil?
+    params = params.merge(authenticity_token: csrf_token)
+    with_fake_tiu(fake) { post path, params: params }
+  end
+
+  # The audit probe (the request's first AuditEvent.create!) succeeds; every
+  # later insert raises. This is the audit log failing after TIU was written.
+  def with_audit_failing_after_probe
+    calls = 0
+    audit_model = Lakeraven::EHR::AuditEvent
+    original = audit_model.method(:create!)
+    audit_model.define_singleton_method(:create!) do |*args, **kwargs|
+      calls += 1
+      raise ActiveRecord::StatementInvalid, "audit down" if calls > 1
+
+      original.call(*args, **kwargs)
+    end
+    yield
+  ensure
+    audit_model.singleton_class.send(:remove_method, :create!)
   end
 
   # The title is read from ENV when the configuration is built, so each
