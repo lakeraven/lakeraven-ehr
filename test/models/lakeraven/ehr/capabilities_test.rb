@@ -36,6 +36,14 @@ module Lakeraven
         refute Capabilities.allows?(%w[scheduling_registration registration_view_only], "patient.quick_register")
       end
 
+      test "#982 only the registration manager key keeps the eligibility modifier table, as BPRM's AGZMGR" do
+        manager = Roles.symbolize_keys(%w[AGZMENU AGZMGR])
+        assert Capabilities.allows?(manager, "registration.table_maintenance")
+        assert Capabilities.allows?(manager, "registration.setup")
+        refute Capabilities.allows?(Roles.symbolize_keys(%w[AGZMENU]), "registration.table_maintenance")
+        refute Capabilities.allows?(Roles.symbolize_keys(%w[AGZMENU]), "registration.setup")
+      end
+
       test "no keys, unknown keys and programmer mode grant nothing" do
         assert_empty Capabilities.for([])
         assert_empty Capabilities.for(nil)

@@ -101,6 +101,12 @@ module Lakeraven
         "lakeraven/ehr/registration/eligibility_modifiers#index",   # The reasons behind an eligibility status (S-REG-07.3): registration data, no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/registration/eligibility_modifiers#create",  # Adding a reason (S-REG-07.3), not disclosure
         "lakeraven/ehr/registration/eligibility_modifiers#destroy", # Removing a reason (S-REG-07.3), not disclosure
+        "lakeraven/ehr/registration/setup/tables#index",                # The setup tables a user may open (#982): links only, no patient data
+        "lakeraven/ehr/registration/setup/eligibility_modifiers#index",  # The site's eligibility modifier table (#982): site setup, no patient data
+        "lakeraven/ehr/registration/setup/eligibility_modifiers#new",    # Adding a modifier (#982), not disclosure
+        "lakeraven/ehr/registration/setup/eligibility_modifiers#create", # Adding a modifier (#982), not disclosure
+        "lakeraven/ehr/registration/setup/eligibility_modifiers#edit",   # Renaming a modifier (#982), not disclosure
+        "lakeraven/ehr/registration/setup/eligibility_modifiers#update", # Renaming a modifier (#982), not disclosure
         "lakeraven/ehr/registration/race_ethnicities#edit",   # Race and ethnicity (S-REG-20.2): registration demographics, no clinical record
         "lakeraven/ehr/registration/race_ethnicities#update", # Saving race and ethnicity (S-REG-20.2), not disclosure
         "lakeraven/ehr/registration/applications#new",    # The form to record an application for coverage (S-REG-03.3): no clinical record
