@@ -159,7 +159,7 @@ The Kernel Installation and Distribution System ships changes as a **build**: ro
 
 - **Patch names** follow `NAMESPACE*VERSION*PATCH`, for example `LKR*1.0*1`. Install history lives in #9.6 and #9.7.
 - **It changes a live database in place.** There is no automatic rollback; the safety net is a backup.
-- **IHS and the VA ship everything this way.** rpms-ops builds each release image by installing the public KIDS patch ladder in order.
+- **IHS and the VA ship everything this way.** openrpms builds each release image by installing the public KIDS patch ladder in order.
 
 *Ruby:* a gem and a Rails migration in one artifact, applied to a running production database.
 

@@ -4,7 +4,7 @@ module Lakeraven
   module EHR
     # What a scheduler enters to put a patient on a wait list, or to change
     # their entry (rpms-ux S-SCH-10.1, 10.2, 10.4). Comments are not here: no
-    # RPC can file them (rpms-ops#1083).
+    # RPC can file them (openrpms#1083).
     class WaitListAddition
       include ActiveModel::Model
       include ActiveModel::Attributes

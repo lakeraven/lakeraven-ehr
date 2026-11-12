@@ -72,7 +72,7 @@ Post-certification: #258 Real World Testing (annual condition).
 
 ## Parallel, non-blocking
 
-YottaDB M-core fidelity (rpms-ops#283) and the workflow-spec conformance rig
-(rpms-ops#149/#153): ONC certifies this module regardless of the RPMS backend; the
+YottaDB M-core fidelity (openrpms#283) and the workflow-spec conformance rig
+(openrpms#149/#153): ONC certifies this module regardless of the RPMS backend; the
 2026-07-25 portability census (26/197 packages touch IRIS constructs; P1 clinical
 packages clean) means backend choice does not move any row above.

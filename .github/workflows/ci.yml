@@ -192,7 +192,7 @@ jobs:
       VISTA_BROKER: cia
       VISTA_RPC_HOST: 127.0.0.1
       VISTA_RPC_PORT: "9100"
-      # The published demo pair (rpms-ops SEEDPERS).
+      # The published demo pair (openrpms SEEDPERS).
       LIVE_RPMS_ACCESS: PMD123
       LIVE_RPMS_VERIFY: PMD123!!
     steps:
