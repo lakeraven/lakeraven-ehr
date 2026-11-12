@@ -165,7 +165,8 @@
           can_edit: can_edit %>
   <% end %>
 
-  <% if @other_names %>
+  <%# Shown when the site's Ask for OTHER NAMES (#9009061 field 3) is not NO (#981). %>
+  <% if @other_names && registration_settings.ask?(:other_names) %>
     <%= render "lakeraven/ehr/registration/other_names/section",
           dfn: params[:dfn],
           other_names: @other_names,

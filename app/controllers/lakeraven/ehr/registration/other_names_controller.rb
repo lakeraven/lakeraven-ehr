@@ -11,6 +11,8 @@ module Lakeraven
 
         rate_limit only: %i[index create destroy]
 
+        before_action -> { require_site_asks!(:other_names, "other names") }
+
         # GET /registration/patients/:dfn/other_names
         def index
           @other_name = OtherNameEntry.new
