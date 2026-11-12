@@ -1,37 +1,80 @@
 # frozen_string_literal: true
 
+require "cucumber/core/test/result"
+
 # The binding behind `cucumber --profile stack` (#962). A stack run takes its
 # whole binding from VARIABLES, signs on as that one persona, and is ready only
 # when the persona does not hold XUPROGMODE. Anything it cannot confirm leaves
-# it not ready, and the run reports @live scenarios as not run. Reasons are
-# fixed texts and variable names: never a broker message, which could carry
-# the codes.
+# it not ready, and the run reports @live scenarios as not run. A ready run
+# reports a scenario as run only with evidence (see verdict). Reasons are fixed
+# texts, RPC names and variable names: never a broker message, which could
+# carry the codes.
 module LiveStack
   VARIABLES = %w[RPMS_IP RPMS_PORT RPMS_BROKER RPMS_ACCESS RPMS_VERIFY].freeze
   BROKERS = %w[cia xwb].freeze
   PROGRAMMER_KEY = "XUPROGMODE"
+  # Read by the broker client but not part of the binding: a run that carries
+  # it would not be bound by VARIABLES alone.
+  FOREIGN = %w[RPMS_UCI].freeze
+  WATCHED = %i[call_rpc call_rpc_raw call_rpc_global_array create_context].freeze
 
-  Binding = Struct.new(:host, :port, :broker, :access_code, :verify_code) do
+  # The persona's codes leave only through access_code and verify_code.
+  class Binding
+    attr_reader :host, :port, :broker, :access_code, :verify_code
+
+    def initialize(host, port, broker, access_code, verify_code)
+      @host, @port, @broker, @access_code, @verify_code = host, port, broker, access_code, verify_code
+    end
+
     def inspect = "#<LiveStack::Binding #{broker} #{host}:#{port}>"
     alias_method :to_s, :inspect
+    def pretty_print(pp) = pp.text(inspect)
   end
 
-  Status = Struct.new(:reason) do
+  Status = Struct.new(:reason, :persona_duz) do
     def ready? = reason.nil?
   end
 
-  # A broker call refused in the persona's context, recorded by RPC name.
+  Evidence = Data.define(:rpc_count, :reasons)
+
+  # The stack declined a step: the scenario is skipped as not run, not failed.
+  class NotRun < Cucumber::Core::Test::Result::Skipped; end
+
+  # Prepended onto the broker client class. Every call counts as evidence that
+  # the scenario reached the stack; a call the stack would not or could not
+  # answer records a reason and raises NotRun. A routine that ran and failed
+  # (RpcMError) and every other error pass through unchanged.
   module RefusalWatch
-    def call_rpc(rpc_name, *params)
+    DECLINED = {
+      RpmsRpc::Client::RpcRefusedError => "refused in the persona's context",
+      RpmsRpc::Client::RpcNotAvailableError => "not available on the stack",
+      RpmsRpc::Client::ConnectionError => "lost the connection to the stack",
+      RpmsRpc::Client::AuthenticationError => "was not authenticated on the stack"
+    }.freeze
+
+    def call_rpc(rpc_name, *params) = LiveStack.watch(rpc_name) { super }
+    def call_rpc_raw(rpc_name, *params) = LiveStack.watch(rpc_name) { super }
+    def call_rpc_global_array(rpc_name, *params) = LiveStack.watch(rpc_name) { super }
+
+    def create_context(*arguments)
+      LiveStack.count_rpc
       super
-    rescue RpmsRpc::Client::RpcRefusedError
-      LiveStack.record_refusal(rpc_name)
-      raise
+    rescue RpmsRpc::Error
+      option = arguments.first || "the default context"
+      raise LiveStack.not_run("context #{option} could not be created in the persona's context"), cause: nil
+    end
+
+    # A watched method the client itself lacks (XwbClient has no
+    # call_rpc_global_array) stays absent: callers branch on respond_to?.
+    def respond_to?(name, include_all = false)
+      return super unless WATCHED.include?(name.to_sym)
+
+      super && !method(name).super_method.nil?
     end
   end
 
-  REFUSALS = []
-  REFUSALS_LOCK = Mutex.new
+  EVIDENCE = { rpc_count: 0, reasons: [] }
+  EVIDENCE_LOCK = Mutex.new
 
   module_function
 
@@ -60,32 +103,34 @@ module LiveStack
     absent = missing(env)
     return Status.new("missing #{absent.join(', ')}") unless absent.empty?
 
+    foreign = FOREIGN.select { |name| env.key?(name) }
+    return Status.new("#{foreign.join(', ')} set: the binding is #{VARIABLES.join(', ')} alone") unless foreign.empty?
+
     before = RpmsRpc.configuration.client
-    status = Status.new(sign_on_reason(binding(env), connect, authenticate, held_keys))
-    # Fall back to exactly the run without the binding: no client of ours.
-    uninstall if !status.ready? && !RpmsRpc.configuration.client.equal?(before)
+    status = sign_on(binding(env), connect, authenticate, held_keys)
+    restore(before) unless status.ready?
     status
   end
 
-  def sign_on_reason(bound, connect, authenticate, held_keys)
+  def sign_on(bound, connect, authenticate, held_keys)
     begin
       connect.call(bound)
-    rescue RpmsRpc::Error, SystemCallError, IOError
-      return "broker unreachable at RPMS_IP:RPMS_PORT"
+    rescue StandardError
+      return Status.new("broker unreachable at RPMS_IP:RPMS_PORT")
     end
 
     result = authenticate.call(bound.access_code, bound.verify_code)
     unless result.success?
-      return result.error == Lakeraven::EHR::AuthenticationService::CONTEXT_REFUSED ? "context refused" : "sign-on refused"
+      return Status.new(result.error == Lakeraven::EHR::AuthenticationService::CONTEXT_REFUSED ? "context refused" : "sign-on refused")
     end
 
     keys = held_keys.call([ PROGRAMMER_KEY ])
-    return "could not ask whether the persona holds #{PROGRAMMER_KEY}" if keys.nil?
-    return "the persona holds #{PROGRAMMER_KEY}" if keys.include?(PROGRAMMER_KEY)
+    return Status.new("could not ask whether the persona holds #{PROGRAMMER_KEY}") if keys.nil?
+    return Status.new("the persona holds #{PROGRAMMER_KEY}") if keys.include?(PROGRAMMER_KEY)
 
-    nil
-  rescue RpmsRpc::Error, SystemCallError, IOError
-    "sign-on failed"
+    Status.new(nil, result.value[:duz].to_s)
+  rescue StandardError
+    Status.new("sign-on failed")
   end
 
   def connect(bound)
@@ -97,17 +142,60 @@ module LiveStack
     Lakeraven::EHR::AuthenticationService.new.authenticate(access_code: access_code, verify_code: verify_code)
   end
 
-  def uninstall
-    RpmsRpc.configure { |c| c.client = nil }
+  # Fall back to exactly the run without the binding: a client prepare
+  # installed is closed, and the one from before is back.
+  def restore(before)
+    installed = RpmsRpc.configuration.client
+    return if installed.equal?(before)
+
+    begin
+      installed.disconnect if installed.respond_to?(:disconnect)
+    rescue StandardError
+      nil
+    end
+    RpmsRpc.configure { |c| c.client = before }
   end
 
   def not_run_message(status) = "not run: #{status.reason}"
 
-  def record_refusal(rpc_name)
-    REFUSALS_LOCK.synchronize { REFUSALS << rpc_name.to_s }
+  # -- evidence: what a scenario did against the stack ----------------------
+
+  def watch(rpc_name)
+    count_rpc
+    yield
+  rescue *RefusalWatch::DECLINED.keys => e
+    # cause: nil, so the broker's message does not travel with the skip.
+    raise not_run("#{rpc_name} #{RefusalWatch::DECLINED.find { |klass, _| e.is_a?(klass) }.last}"), cause: nil
   end
 
-  def take_refusals
-    REFUSALS_LOCK.synchronize { REFUSALS.dup.tap { REFUSALS.clear } }
+  def count_rpc
+    EVIDENCE_LOCK.synchronize { EVIDENCE[:rpc_count] += 1 }
+  end
+
+  def rpc_count = EVIDENCE_LOCK.synchronize { EVIDENCE[:rpc_count] }
+
+  # Records the reason and answers the NotRun to raise in place of the error.
+  def not_run(reason)
+    EVIDENCE_LOCK.synchronize { EVIDENCE[:reasons] << reason }
+    NotRun.new("not run: #{reason}")
+  end
+
+  def take_evidence
+    EVIDENCE_LOCK.synchronize do
+      Evidence.new(rpc_count: EVIDENCE[:rpc_count], reasons: EVIDENCE[:reasons].dup).tap do
+        EVIDENCE[:rpc_count] = 0
+        EVIDENCE[:reasons].clear
+      end
+    end
+  end
+
+  # nil when the scenario ran against the stack as the persona, else why not.
+  def verdict(evidence:, client:, stack_client:, persona_duz:)
+    return evidence.reasons.first unless evidence.reasons.empty?
+    return "no RPC reached the stack" if evidence.rpc_count.zero?
+    return "the scenario's broker client is not the stack's client" unless client.equal?(stack_client)
+
+    duz = client.duz.to_s
+    "the stack's client is not signed on as the persona" if duz.empty? || duz != persona_duz.to_s
   end
 end

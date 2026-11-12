@@ -247,20 +247,35 @@ if LIVE_RPMS
 
     # The stack persona again, and again without XUPROGMODE. Reasons only,
     # never the broker's message: it could carry the codes.
+    #
+    # Called from an After hook, where cucumber swallows the abort. The abort
+    # is not the guard: a failed re-sign-on leaves the client signed on as
+    # nobody, so the verdict's DUZ check reports every later scenario not run.
     def stack_sign_on!
       result = Lakeraven::EHR::AuthenticationService.new.authenticate(
         access_code: LIVE_STACK_BINDING.access_code, verify_code: LIVE_STACK_BINDING.verify_code
       )
-      abort "LIVE_STACK=1: the persona's sign-on was refused" unless result.success?
+      stack_abort "the persona's sign-on was refused" unless result.success?
       keys = RpmsRpc::Authentication.held_keys([ LiveStack::PROGRAMMER_KEY ])
-      abort "LIVE_STACK=1: the persona holds #{LiveStack::PROGRAMMER_KEY}, or it could not be asked" unless keys == []
+      stack_abort "the persona holds #{LiveStack::PROGRAMMER_KEY}, or it could not be asked" unless keys == []
       result
+    rescue StandardError
+      stack_abort "the persona's sign-on failed"
+    end
+
+    def stack_abort(reason)
+      client = RpmsRpc.configuration.client
+      client.clear_authenticated if client.respond_to?(:clear_authenticated)
+      abort "LIVE_STACK=1: #{reason}"
     end
   end
 
   live_user = LiveRpmsSession.sign_on!.value
   if LIVE_STACK_BINDING
     RpmsRpc.client.class.prepend(LiveStack::RefusalWatch)
+    # The client the persona is signed on through: a scenario counts as run
+    # only on this very object (LiveStack.verdict).
+    LIVE_STACK_CLIENT = RpmsRpc.configuration.client
     warn "[stack] ready: #{LIVE_STACK_BINDING.broker} #{LIVE_STACK_BINDING.host}:#{LIVE_STACK_BINDING.port}"
   else
     settings = Lakeraven::EHR::Engine.rpms_settings
