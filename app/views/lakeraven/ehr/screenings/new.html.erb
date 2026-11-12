@@ -115,10 +115,10 @@
     </div>
   <% end %>
 
-  <% if @result&.errors&.include?(:invalid_encounter) %>
+  <% if @result&.errors&.include?(:invalid_encounter) && !@visits_unreadable %>
     <div class="screening-errors" role="alert">
       <h2>Choose an open visit</h2>
-      <p>The visit that was submitted is not one of this patient&rsquo;s open visits. Nothing has been recorded. Choose one of the visits below.</p>
+      <p>The visit that was submitted is not one of this patient&rsquo;s open visits. Nothing has been recorded.<%= " Choose one of the visits below." if @open_visits.present? %></p>
     </div>
   <% end %>
 

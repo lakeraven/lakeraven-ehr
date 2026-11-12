@@ -176,20 +176,17 @@ module Lakeraven
         @visits_unreadable = true
       end
 
-      # Open (lock explicitly false: an unknown lock is not open), dated,
-      # one row per valid visit IEN, today's first and then newest first.
+      # A visit is offered only if every row for its (valid) IEN is open (lock
+      # explicitly false: an unknown lock is not open) and dated with a real
+      # time. One row per visit, today's first and then newest first.
       def normalise_visits(rows)
         # The gem builds visit times with Time.new in the process zone (see WallClock), so "today" is the process-local date, not the Rails zone's.
         today = Time.now.to_date # rubocop:disable Rails/TimeZone
-        seen = {}
-        rows = Array(rows).select do |row|
-          ien = row[:visit_ien].to_s.strip
-          next false unless row[:locked] == false && row[:datetime].respond_to?(:to_date)
-          next false unless ien.match?(/\A[1-9]\d*\z/) && !seen[ien]
-
-          seen[ien] = true
+        groups = Array(rows).group_by { |row| row[:visit_ien].to_s.strip }.select { |ien, _| ien.match?(/\A[1-9]\d*\z/) }
+        offered = groups.values.filter_map do |group|
+          group.first if group.all? { |row| row[:locked] == false && row[:datetime].is_a?(Time) }
         end
-        rows.sort_by { |row| row[:datetime] }.reverse.partition { |row| row[:datetime].to_date == today }.flatten
+        offered.sort_by { |row| row[:datetime] }.reverse.partition { |row| row[:datetime].to_date == today }.flatten
       end
 
       def offered_visit?(ien)
