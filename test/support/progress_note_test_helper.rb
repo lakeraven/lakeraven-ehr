@@ -15,6 +15,10 @@ require_relative "patient_banner_test_helper"
 # a POST carries the one-time form token its form was given
 # (fetch_note_form_token); with_audit_failing_after_probe lets the pre-RPC
 # audit probe through and fails the request's own audit row.
+#
+# Review round 3 amendment: sign_in_with_keys! signs the mock RPMS connection
+# on as the session's user (sign_rpms_connection_on_as!), since the write
+# runs as the connection's user.
 module ProgressNoteTestHelper
   include PatientBannerTestHelper
 
@@ -169,13 +173,43 @@ module ProgressNoteTestHelper
   # A browser session as sign-on leaves it: a DUZ, the security keys RPMS
   # reported (by their Roles names), and the session's SMART token, which the
   # chart and the patient-context POST read.
+  #
+  # Review round 3: TIU and the e-signature check take the author and the
+  # signer from the RPMS connection's own DUZ, so the request's connection
+  # has to be signed on as the session's user. Signing in signs the test's
+  # RPMS connection (RpmsRpc.client, the mock) on as that user too.
   def sign_in_with_keys!(keys, duz: DUZ, scopes: PatientBannerTestHelper::BANNER_SCOPES)
+    sign_rpms_connection_on_as!(duz)
     @clinician_token = clinician_token(scopes: scopes, duz: duz)
     post "#{MOUNT}/test_session", params: {
       duz: duz, user_type: "provider", security_keys: Array(keys).join(","),
       smart_token: @clinician_token.plaintext_token || @clinician_token.token
     }
     @csrf_token = nil
+  end
+
+  # The DUZ the request's RPMS connection reports: nil signs it off.
+  def sign_rpms_connection_on_as!(duz)
+    client = RpmsRpc.client
+    duz.nil? ? client.clear_authenticated : client.set_authenticated(duz.to_s)
+  end
+
+  # Stands in front of an RPMS connection and answers everything it does,
+  # except #duz: a connection that cannot say who is signed on.
+  class ConnectionWithoutDuz
+    def initialize(client)
+      @client = client
+    end
+
+    def respond_to_missing?(name, include_private = false)
+      name.to_sym != :duz && @client.respond_to?(name, include_private)
+    end
+
+    def method_missing(name, *args, **kwargs, &block)
+      return super if name.to_sym == :duz
+
+      @client.public_send(name, *args, **kwargs, &block)
+    end
   end
 
   # Rails.logger and the controllers' own logger, which is where the request
