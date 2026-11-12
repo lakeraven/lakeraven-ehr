@@ -23,7 +23,7 @@ FileMan `^DIE`/DBS) rather than BPRM's IRIS-SQL stored procedures.
 ## Why the re-grounding is safe (and better)
 
 BPRM's server tier is `BMW.BSF.SP.*` stored procedures over the InterSystems
-SQL wire (see `rpms-ops/docs/BMW_BPRM_CORNER.md`). Its methods fall in four
+SQL wire (see `openrpms/docs/BMW_BPRM_CORNER.md`). Its methods fall in four
 buckets:
 
 | BPRM SP bucket | Count | This twin's disposition |
@@ -80,8 +80,8 @@ enforces HRN uniqueness; that is AG's.
 > "BHDPTRPC provenance". A later revision targeted `VAFC VOA ADD PATIENT`
 > (PATIENT #2) plus a to-be-authored Lakeraven completion shim for the IHS
 > half. That target is dropped: no RPMS context serves `VAFC VOA ADD PATIENT`
-> to a client (it is in no option's RPC multiple; rpms-ops removes, on
-> purpose, the grants and the option that once served it — rpms-ops#499,
+> to a client (it is in no option's RPC multiple; openrpms removes, on
+> purpose, the grants and the option that once served it — openrpms#499,
 > #500, #674), so the shim would have had no context to run under either.
 > The gateway's `BHDPTRPC` wire names stay in place until it calls
 > `RpmsRpc::Registration`.

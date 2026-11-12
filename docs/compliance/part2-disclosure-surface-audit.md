@@ -59,7 +59,7 @@ Postgres table** `lakeraven_ehr_screening_responses` (`screening_response.rb:16-
 notes (rpms-rpc#219, TIU documents) are **not built yet** and are expected to write to
 RPMS. When they do, Part 2 content lands in the shared backend. **Whether that is a
 disclosure depends on the tenancy and access model of the pilot's RPMS instance —
-an infrastructure/config question (cloud-rpms#30, rpms-ops#536), not an engine one.**
+an infrastructure/config question (cloud-rpms#30, openrpms#536), not an engine one.**
 
 ---
 
@@ -101,7 +101,7 @@ marker does not have to be invented — it has to be *derived and respected*.
 
 **"Can separate" ≠ "is separated."** The BH keys and sensitive-record configuration must
 actually be set on the pilot instance and **verified on the live system**, not assumed.
-That is site configuration (rpms-ops#536, an L3 tribe-owned item) plus a live-dispatch
+That is site configuration (openrpms#536, an L3 tribe-owned item) plus a live-dispatch
 proof (rpms-rpc#224), not engine code.
 
 ---
@@ -119,7 +119,7 @@ does not need.**
 **(c) UNKNOWN — must be answered by a human, not inferred from code:**
 1. **Is the RPMS BH separation actually configured and verified on the pilot instance?**
    RPMS *can* segregate BH records by security key; whether it *does* on this instance is
-   site config (rpms-ops#536) and needs a live-dispatch proof (rpms-rpc#224), not an
+   site config (openrpms#536) and needs a live-dispatch proof (rpms-rpc#224), not an
    assumption. *This is the load-bearing unknown — see §2c.*
 2. **Does the clinic "hold itself out as" providing SUD treatment or referral** (the
    §2.11 program test)? A legal/operational question about the service list and marketing,

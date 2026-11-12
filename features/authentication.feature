@@ -6,7 +6,7 @@ Feature: Authentication
   So that I can access the system securely
 
   # Sign-ons use the demo site personas (features/support/rpms_demo_site.rb),
-  # whose access/verify pairs are published with the rpms-ops seed.
+  # whose access/verify pairs are published with the openrpms seed.
   Background:
     Given the authentication service is available
 

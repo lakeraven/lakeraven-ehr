@@ -26,7 +26,7 @@ long-horizon effort. Meanwhile clinics need a usable clinical front end **now**.
 
 RPMS ships a native client suite — **VueCentric** (the RPMS EHR GUI), plus BPRM and
 other components — that speaks to the same backend over the CIA broker. Our YottaDB
-standup already serves the CIA broker (rpms-ops#343); the remaining last-mile is the
+standup already serves the CIA broker (openrpms#343); the remaining last-mile is the
 shared sign-on gate ("Logins prohibited" at login, identical on keyless-IRIS and YDB).
 The engine's parity work (BPRM registration/scheduling digital twin, #412/#413; HTTP
 integration-test parity, #416) exercises the same RPC surface VueCentric uses.
@@ -41,7 +41,7 @@ interim/partial clinical UI in the engine.
 
 The near-term path:
 
-1. **Sign-on lands.** The shared RPMS sign-on gate on the YDB standup (rpms-ops#343 —
+1. **Sign-on lands.** The shared RPMS sign-on gate on the YDB standup (openrpms#343 —
    CIA broker serves connections today; login is blocked at "Logins prohibited") is the
    single blocker. When it lands, VueCentric works against our stack unchanged.
 2. **Parity is proven, not assumed.** The BPRM digital-twin and HTTP-parity work
@@ -101,7 +101,7 @@ migration-debt note stands).
 
 | Phase | Scope | Gate to next |
 |---|---|---|
-| **0 — now** | VueCentric is the clinical UI. Land YDB sign-on (rpms-ops#343); prove reg/sched parity (#412/#413/#416). Engine stays headless. | Sign-on works; parity suite green. |
+| **0 — now** | VueCentric is the clinical UI. Land YDB sign-on (openrpms#343); prove reg/sched parity (#412/#413/#416). Engine stays headless. | Sign-on works; parity suite green. |
 | **1** | Read-only clinical review in the engine: patient search, chart summary (problems, meds, allergies, vitals, labs, immunizations) over the existing FHIR controllers. Host-session auth. | Clinicians can review a chart in the browser; API gaps found are fixed in the FHIR layer, not bypassed. |
 | **2** | Write workflows, in order of demand: scheduling/registration (twin work already proves the RPC path), then documentation (notes + e-signature), then orders/med requests. Each write lands as FHIR-surface capability first, UI second. | Priority workflows usable without VueCentric for those roles. |
 | **3** | SMART app ecosystem: EHR-launch third-party apps from within the UI (launch context already implemented); decommission VueCentric per-site as workflow coverage allows. | VueCentric optional, not required. |
@@ -110,7 +110,7 @@ migration-debt note stands).
 
 - Clinics get a full clinical front end (VueCentric) without waiting on UI development;
   engine roadmap stays focused on the FHIR/RPC surface that everything else builds on.
-- We take a dependency on the native-client sign-on landing (rpms-ops#343) — already a
+- We take a dependency on the native-client sign-on landing (openrpms#343) — already a
   P1 elsewhere; this ADR makes it the formal gate for clinical go-live.
 - The (g)(10) surface becomes load-bearing for our own UI, so API completeness bugs
   surface early and fixes accrue to third-party SMART apps too.
@@ -126,5 +126,5 @@ migration-debt note stands).
 - ADR 0002 — staff UI lives in the engine (placement; extended by this ADR)
 - `config/routes.rb`, `app/controllers/lakeraven/ehr/`, `app/gateways/lakeraven/ehr/`,
   `app/views/layouts/lakeraven/ehr/application.html.erb`
-- rpms-ops#343 (CIA/VueCentric broker on YottaDB; sign-on gate)
+- openrpms#343 (CIA/VueCentric broker on YottaDB; sign-on gate)
 - #412, #413 (BPRM reg/sched digital twin), #416 (HTTP parity tests)
