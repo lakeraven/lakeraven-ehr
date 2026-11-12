@@ -526,14 +526,26 @@ module Lakeraven
         refute_includes response.body, SYNTHETIC_SIGNATURE_CODE
       end
 
-      test "POST says the note was not saved when its text cannot be written, and does not sign" do
+      # Review round 2: the note was created (TIU answered its IEN) before the
+      # text was refused, so it exists in RPMS, unsigned and empty. The page
+      # says so, as a fact, and no longer says "The note was not saved".
+      test "POST says a note was created without its text when its text cannot be written, and does not sign" do
         sign_in_provider!
         @tiu = FakeTiu.new(visits_by_dfn: default_visits, update_text: { success: false, raw: "0" })
 
         post_note
 
         assert_response :unprocessable_entity
-        assert_match(/not saved/i, response.body)
+        refute_match(/not saved/i, response.body)
+        assert_match(/note was created on this visit/i, response.body)
+        assert_match(/without its text/i, response.body)
+        assert_match(/RPMS/, response.body)
+        assert_match(/unsigned/i, response.body)
+        assert_match(/empty/i, response.body)
+        assert_match(/check the chart before writing it again/i, response.body)
+        refute_match(/may (or may not )?have been (started|created|saved)/i, response.body,
+                     "the note exists: said as a fact, not a possibility")
+        assert_select "textarea[name=?]", "note_text", count: 0
         assert_equal 1, @tiu.calls_to(:update_text).size
         assert_empty @tiu.calls_to(:add)
         refute_includes response.body, SYNTHETIC_SIGNATURE_CODE
@@ -558,8 +570,10 @@ module Lakeraven
 
       # -- POST create: a gateway raising ---------------------------------------
 
+      # Review round 2: the signature check raising is no longer in this table.
+      # Nothing has been sent to TIU at that point, so it is not an unknown
+      # write (see "a broker error before any write" below).
       {
-        "the signature check" => [ :validate, -> { RpmsRpc::Error.new(SYNTHETIC_BROKER_MESSAGE) } ],
         "note creation" => [ :create, -> { RpmsRpc::Error.new(SYNTHETIC_BROKER_MESSAGE) } ],
         "the text write" => [ :update_text, -> { IOError.new(SYNTHETIC_BROKER_MESSAGE) } ],
         "signing" => [ :add, -> { IOError.new(SYNTHETIC_BROKER_MESSAGE) } ]
@@ -578,6 +592,44 @@ module Lakeraven
           refute_includes response.body, SYNTHETIC_BROKER_MESSAGE
           refute_includes response.body, SYNTHETIC_SIGNATURE_CODE
           assert_includes @tiu.names, gateway_call
+        end
+      end
+
+      # -- A broker error before any write is not an unknown write (round 2) ----
+
+      {
+        "a broker error" => -> { RpmsRpc::Error.new(SYNTHETIC_BROKER_MESSAGE) },
+        "an IOError" => -> { IOError.new(SYNTHETIC_BROKER_MESSAGE) },
+        "a connection error" => -> { Errno::ECONNRESET.new(SYNTHETIC_BROKER_MESSAGE) }
+      }.each do |label, error|
+        test "POST says the signature code could not be checked and nothing was saved when the signature check raises #{label}" do
+          sign_in_provider!
+          @tiu = FakeTiu.new(visits_by_dfn: default_visits, raises: { validate: error.call })
+          form_token = fetch_form_token
+          AuditEvent.delete_all
+
+          post_note(form_token: form_token)
+
+          refute_equal 500, response.status
+          refute_equal 404, response.status
+          refute response.redirect?, "a code that was not checked is not reported as a signed note"
+          refute_includes response.body, SYNTHETIC_BROKER_MESSAGE
+          refute_includes response.body, SYNTHETIC_SIGNATURE_CODE
+          assert_includes @tiu.names, :validate
+
+          assert_includes [ 503, 422 ], response.status
+          assert_match(/signature code could not be checked/i, response.body)
+          assert_match(/nothing was saved/i, response.body)
+          refute_match(/may or may not/i, response.body)
+          refute_match(/outcome unknown/i, response.body)
+          assert_empty @tiu.tiu_calls, "nothing is sent to TIU"
+          assert_nil flash[:notice]
+
+          rows = patient_audit_rows
+          assert_operator rows.count, :>, 0, "the refusal is audited"
+          refute_includes rows.pluck(:outcome), "8", "not a serious failure: the chart did not change"
+          rows.pluck(:outcome_desc).compact.each { |text| refute_match(/outcome unknown/i, text) }
+          refute_includes AuditEvent.all.map { |event| event.attributes.to_s }.join, SYNTHETIC_BROKER_MESSAGE
         end
       end
 
@@ -919,6 +971,149 @@ module Lakeraven
           refute_includes everything, SYNTHETIC_SIGNATURE_CODE
           refute_includes everything, SYNTHETIC_NOTE_TEXT
         end
+      end
+
+      # == Review round 2 amendments ============================================
+
+      # -- 9. The form token is spent server-side --------------------------------
+      #
+      # The browser session is a cookie the client holds. A token struck from
+      # the session is back in it when an older cookie is presented, so the
+      # claim of a token is recorded in the database (NoteFormClaim). A POST
+      # files a note only with a token this session was issued AND that was
+      # never claimed before, by any request, under any cookie.
+
+      # The browser's cookies and the CSRF token that goes with them.
+      def browser_snapshot
+        { cookies: cookies.to_hash.dup, csrf_token: csrf_token }
+      end
+
+      # Puts the browser back to a snapshot: every cookie it holds now is
+      # dropped and the saved ones are set, so the next request presents the
+      # session cookie as it was then.
+      def restore_browser!(snapshot)
+        forget_browser_cookies!
+        snapshot[:cookies].each { |name, value| cookies[name] = value }
+        @csrf_token = snapshot[:csrf_token]
+        assert_equal snapshot[:cookies], cookies.to_hash, "the saved cookies are the ones the next request sends"
+      end
+
+      def forget_browser_cookies!
+        cookies.to_hash.each_key { |name| cookies.delete(name) }
+        assert_empty cookies.to_hash
+      end
+
+      # Every form rendered in the block is given the same token value: the
+      # way two sessions come to hold one token. The controller draws its
+      # token from SecureRandom.urlsafe_base64.
+      def with_form_tokens_all(value)
+        SecureRandom.define_singleton_method(:urlsafe_base64) { |*| value }
+        yield
+      ensure
+        SecureRandom.singleton_class.send(:remove_method, :urlsafe_base64)
+      end
+
+      def note_form_claims = "Lakeraven::EHR::NoteFormClaim".constantize
+
+      test "a form replayed with the cookie from before its POST makes no RPC and answers 409" do
+        sign_in_provider!
+        form_token = fetch_form_token
+        assert form_token.present?, "the form carries a token"
+        before_post = browser_snapshot
+        later_token = fetch_form_token
+        refute_equal form_token, later_token
+
+        # The restore is real: under the old cookie, a token issued after it
+        # was saved is one this session was never issued.
+        restore_browser!(before_post)
+        never_issued_here = FakeTiu.new(visits_by_dfn: default_visits)
+        post_note(tiu: never_issued_here, form_token: later_token)
+        assert_form_token_refused!(never_issued_here)
+
+        restore_browser!(before_post)
+        post_note(form_token: form_token)
+        assert_redirected_to CHART
+        assert_equal 1, @tiu.calls_to(:create).size
+
+        restore_browser!(before_post)
+        replay = FakeTiu.new(visits_by_dfn: default_visits)
+        post_note(tiu: replay, form_token: form_token)
+
+        assert_empty replay.calls, "no visit read, no signature check, no TIU call"
+        assert_response :conflict
+        assert_form_token_refused!(replay)
+        assert_match(/already (been )?submitted/i, response.body)
+        assert_nil flash[:notice]
+      end
+
+      test "a form whose POST was refused cannot be replayed with the cookie from before that POST" do
+        sign_in_provider!
+        form_token = fetch_form_token
+        before_post = browser_snapshot
+
+        post_note(form_token: form_token, signature_code: "  ")
+        assert_refused_before_any_write!(/signature code/i)
+
+        restore_browser!(before_post)
+        replay = FakeTiu.new(visits_by_dfn: default_visits)
+        post_note(tiu: replay, form_token: form_token)
+
+        assert_empty replay.calls, "no visit read, no signature check, no TIU call"
+        assert_response :conflict
+        assert_form_token_refused!(replay)
+      end
+
+      test "a token claimed in one session cannot be claimed from another session that holds the same token value" do
+        same_token = "SYNTHETIC-SAME-FORM-TOKEN-r2"
+
+        sign_in_provider!
+        first_token = with_form_tokens_all(same_token) { fetch_form_token }
+        first_session = browser_snapshot
+
+        forget_browser_cookies!
+        sign_in_provider!
+        second_token = with_form_tokens_all(same_token) { fetch_form_token }
+        second_session = browser_snapshot
+
+        assert_equal same_token, first_token, "this test fixes the token through SecureRandom.urlsafe_base64"
+        assert_equal first_token, second_token, "both sessions were issued the same token value"
+        refute_equal first_session[:cookies], second_session[:cookies], "two sessions, two cookies"
+
+        post_note(form_token: second_token)
+        assert_redirected_to CHART
+        assert_equal 1, @tiu.calls_to(:create).size
+
+        restore_browser!(first_session)
+        other = FakeTiu.new(visits_by_dfn: default_visits)
+        post_note(tiu: other, form_token: first_token)
+
+        assert_empty other.calls, "no visit read, no signature check, no TIU call"
+        assert_response :conflict
+        assert_form_token_refused!(other)
+      end
+
+      test "a filed note's form token is claimed in the database, and the raw token is not stored" do
+        sign_in_provider!
+        form_token = fetch_form_token
+        claims_before = note_form_claims.count
+
+        post_note(form_token: form_token)
+
+        assert_redirected_to CHART
+        assert_equal claims_before + 1, note_form_claims.count, "one claim for the one form"
+        stored = note_form_claims.all.map { |claim| claim.attributes.values.join(" ") }.join(" ")
+        refute_includes stored, form_token
+      end
+
+      test "a refused POST claims its form token in the database too" do
+        sign_in_provider!
+        form_token = fetch_form_token
+        claims_before = note_form_claims.count
+
+        post_note(form_token: form_token, signature_code: "  ")
+
+        assert_refused_before_any_write!(/signature code/i)
+        assert_equal claims_before + 1, note_form_claims.count
       end
     end
   end
