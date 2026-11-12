@@ -252,6 +252,12 @@ Lakeraven::EHR::Engine.routes.draw do
                                                   constraints: { ien: /\d+/ }
     post "setup/eligibility_modifiers/:ien", to: "setup/eligibility_modifiers#update", as: :setup_eligibility_modifier,
                                               constraints: { ien: /\d+/ }
+    # The site's local patient record flags (lakeraven-ehr#983).
+    get "setup/local_flags", to: "setup/local_flags#index", as: :setup_local_flags
+    get "setup/local_flags/new", to: "setup/local_flags#new", as: :new_setup_local_flag
+    post "setup/local_flags", to: "setup/local_flags#create"
+    get "setup/local_flags/:ien/edit", to: "setup/local_flags#edit", as: :edit_setup_local_flag, constraints: { ien: /\d+/ }
+    post "setup/local_flags/:ien", to: "setup/local_flags#update", as: :setup_local_flag, constraints: { ien: /\d+/ }
   end
 
   # Scheduling (rpms-ux W02): a clinic resource's day, booking into it (S-SCH-01)

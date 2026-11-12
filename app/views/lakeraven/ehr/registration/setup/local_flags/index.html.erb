@@ -1,0 +1,79 @@
+<% page_title "Local flags", "Setup" %>
+
+<%= page_header "Local patient record flags",
+      "Your site's own flags, and how often each assignment is reviewed." do %>
+  <%= link_to "Add a flag",
+        registration_new_setup_local_flag_path,
+        id: "add-local-flag",
+        class: "button-primary" %>
+<% end %>
+
+<%= flash_alert id: "local-flags-alert" %>
+
+<% if flash[:notice].present? %>
+  <%= alert_box :notice,
+        flash[:notice],
+        id: "local-flags-notice" %>
+<% end %>
+
+<% if @withheld_names.any? %>
+  <%= alert_box :notice,
+        "#{@withheld_names.map(&:capitalize).join(', ')} flags are not added or changed here yet.",
+        "A behavioral flag on a patient's banner can reveal treatment to every user, so it waits on the Part 2 decision.",
+        id: "withheld-flag-types" %>
+<% end %>
+
+<section
+  aria-labelledby="local-flag-table-heading"
+  class="card flex flex-col gap-4"
+>
+  <h2
+    id="local-flag-table-heading"
+    class="text-lg font-semibold"
+  >
+    Flags on file
+  </h2>
+  <% if @flags.empty? %>
+    <%= empty_state "No local flags are defined.", id: "no-local-flags" %>
+  <% else %>
+    <table
+      id="local-flag-table"
+      class="data-table"
+    >
+      <caption class="sr-only">Local patient record flags</caption>
+      <thead>
+        <tr>
+          <th scope="col">Flag</th>
+          <th scope="col">Type</th>
+          <th scope="col">Status</th>
+          <th scope="col">Review every (days)</th>
+          <th scope="col">Notice before review (days)</th>
+          <th scope="col"><span class="sr-only">Actions</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        <% @flags.each do |flag| %>
+          <tr data-flag="<%= flag[:ien] %>">
+            <td><%= flag[:name] %></td>
+            <td><%= flag[:type].capitalize %></td>
+            <td><%= flag[:active] ? "Active" : "Inactive" %></td>
+            <td><%= flag[:review_days] %></td>
+            <td><%= flag[:notification_days] %></td>
+            <td>
+              <% unless @withheld_names.include?(flag[:type]) %>
+                <%= link_to "Edit",
+                      registration_edit_setup_local_flag_path(flag[:ien]),
+                      aria: { label: "Edit #{flag[:name]}" } %>
+              <% end %>
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  <% end %>
+</section>
+
+<p class="mt-6">
+  <%= link_to "Back to setup",
+        registration_setup_path %>
+</p>
