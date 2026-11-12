@@ -12,7 +12,7 @@
 # narratives, mixed-case ORWU NEWPERS names). Change a value only after
 # reading it from the pinned build.
 module RpmsDemoSite
-  BUILD = "rpms-ydb 9b5cccd (bcer-9.0, openrpms demo site seed)"
+  BUILD = "rpms-ydb 9b5cccd (bcer-9.0, rpms-ops demo site seed)"
 
   # ORWPT SELECT / ORWPT ID INFO / ORWPT FULLSSN, by DFN.
   PATIENTS = {

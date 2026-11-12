@@ -49,7 +49,7 @@ class LiveRegistrationApplicationsTest < ActionDispatch::IntegrationTest
     taken = applications.map { |a| a[:obtained] }
     day = (1..365).map { |n| Date.current - n }.find { |d| !taken.include?(d) }
     medicaid = RpmsRpc::PatientApplication.types.find { |t| t[:name] == "MEDICAID FORM 100" }
-    assert medicaid, "PATIENT APPLICATION TYPES has no MEDICAID FORM 100 (run openrpms SEEDAPPT)"
+    assert medicaid, "PATIENT APPLICATION TYPES has no MEDICAID FORM 100 (run rpms-ops SEEDAPPT)"
 
     sign_in
     post "#{BASE}/applications", params: { application: { type_ien: medicaid[:ien].to_s, applied_on: day.iso8601,
