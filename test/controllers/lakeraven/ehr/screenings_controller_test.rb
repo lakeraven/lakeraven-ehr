@@ -1760,6 +1760,195 @@ module Lakeraven
         assert_alert(/No open visit.*already checked in.*reload/im)
         assert_alert(/No open visit.*already checked in.*report/im)
       end
+
+      # -- Visit picker, amendment 2 (#1003 review) ------------------------------
+
+      CONFLICTED_VISIT = "2090060"
+      VISIT_REFUSED = /not one of this patient['’]s open visits/i
+      CHOOSE_BELOW = /choose one of the visits below/i
+
+      # 1. VISITLST can return more than one row for a visit. If the rows
+      # disagree, the app does not know the visit is open: any row that is
+      # locked, of unknown lock state, or undated rules the visit out, whatever
+      # order the rows arrive in. (Identical open rows are one open visit:
+      # "two rows for the same visit render one radio".)
+      [ [ "a locked row then an open row", [ { locked: true }, { locked: false } ] ],
+        [ "an open row then a locked row", [ { locked: false }, { locked: true } ] ],
+        [ "an unknown-lock row then an open row", [ { locked: nil }, { locked: false } ] ],
+        [ "an open row then an unknown-lock row", [ { locked: false }, { locked: nil } ] ],
+        [ "an undated row then an open row", [ { undated: true }, {} ] ],
+        [ "an open row then an undated row", [ {}, { undated: true } ] ] ].each do |name, variants|
+        test "a visit returned as #{name} is not offered" do
+          seed_visits(DFN_PARAM, [ visit_row(VISIT, at: today_at(9, 30)), *conflicting_rows(variants) ])
+
+          get "#{BASE}/new", params: { instrument: "phq-9", encounter_ien: CONFLICTED_VISIT }
+
+          assert_response :ok
+          assert_equal [ VISIT ], offered_visit_iens
+          assert_empty checked_visit_iens
+          assert_select "input[name=encounter_ien][value=?]", CONFLICTED_VISIT, count: 0
+          assert_no_match(/Cedar Hollow Primary Care/, response.body)
+        end
+
+        test "a submission naming a visit returned as #{name} is refused" do
+          seed_visits(DFN_PARAM, [ visit_row(VISIT, at: today_at(9, 30)), *conflicting_rows(variants) ])
+
+          submit(encounter_ien: CONFLICTED_VISIT)
+
+          assert_response :unprocessable_entity
+          assert_equal 0, ScreeningResponse.count
+          assert_alert(VISIT_REFUSED)
+          assert_equal [ VISIT ], offered_visit_iens
+          assert_empty checked_visit_iens
+        end
+      end
+
+      test "a patient whose only visit is returned as conflicting rows has no open visit" do
+        seed_visits(DFN_PARAM, conflicting_rows([ { locked: false }, { locked: true } ]))
+
+        get "#{BASE}/new", params: { instrument: "phq-9" }
+
+        assert_response :ok
+        assert_empty offered_visit_iens
+        assert_alert(/No open visit/i)
+      end
+
+      # 2. When the visits cannot be read the app does not know whether the
+      # submitted visit is one of the patient's open visits, and there is
+      # nothing below to choose from: it says only that they could not be read.
+      test "a submitted visit while the visit read raises is refused without claiming the visit is not open" do
+        with_failing(EncounterGateway, :visits, ->(*) { raise RpmsRpc::Error, "broker down" }) do
+          submit
+        end
+
+        assert_response :unprocessable_entity
+        assert_equal 0, ScreeningResponse.count
+        assert_alert(/visits could not be read/i)
+        assert_no_alert(VISIT_REFUSED)
+        assert_no_alert(CHOOSE_BELOW)
+        assert_empty offered_visit_iens
+      end
+
+      test "a submitted visit without an Encounter search scope is refused without claiming the visit is not open" do
+        sign_in(scopes: SCREENING_ONLY_SCOPES)
+        open_patient(1)
+
+        submit
+
+        assert_response :unprocessable_entity
+        assert_equal 0, ScreeningResponse.count
+        assert_alert(/visits could not be read/i)
+        assert_no_alert(VISIT_REFUSED)
+        assert_no_alert(CHOOSE_BELOW)
+        assert_empty offered_visit_iens
+      end
+
+      # 3. "Choose one of the visits below" is only true when there is one.
+      test "a submitted visit when the patient now has no open visit is not told to choose one below" do
+        get "#{BASE}/new", params: { instrument: "phq-9" }
+        assert_equal [ VISIT ], offered_visit_iens
+        seed_visits(DFN_PARAM, [ visit_row(VISIT, at: today_at(9, 30), locked: true) ])
+
+        submit
+
+        assert_response :unprocessable_entity
+        assert_equal 0, ScreeningResponse.count
+        assert_alert(/No open visit/i)
+        assert_no_alert(CHOOSE_BELOW)
+        assert_empty offered_visit_iens
+      end
+
+      # 4. A datetime that is not a time (a raw FileMan string that was never
+      # parsed) cannot be dated. String#to_date exists — and reads
+      # "3261112.0930" as some date — so "responds to to_date" is not the test
+      # of a time. The mock parses whatever is seeded, so the unparsed value is
+      # put on the rows the gateway hands back.
+      UNTIMED_VISIT = "2090043"
+      UNPARSED_DATETIME = "3261112.0930"
+
+      test "a visit whose datetime is not a time, alone, does not break the form and is not offered" do
+        with_untimed_visit([ visit_row(UNTIMED_VISIT, at: today_at(11, 0)) ]) do
+          get "#{BASE}/new", params: { instrument: "phq-9", encounter_ien: UNTIMED_VISIT }
+        end
+
+        assert_response :ok
+        assert_empty offered_visit_iens
+        assert_alert(/No open visit|visits could not be read/i)
+        assert_select "fieldset.screening-item", 9
+      end
+
+      test "a visit whose datetime is not a time is left out and the dated visits are still offered in order" do
+        rows = [
+          visit_row("3001", at: today_at(10, 0, days_ago: 1)),
+          visit_row(UNTIMED_VISIT, at: today_at(11, 0), clinic: "Cedar Hollow Primary Care"),
+          visit_row("3002", at: today_at(8, 15)),
+          visit_row("3004", at: today_at(15, 20))
+        ]
+
+        with_untimed_visit(rows) do
+          get "#{BASE}/new", params: { instrument: "phq-9" }
+        end
+
+        assert_response :ok
+        assert_equal %w[3004 3002 3001], offered_visit_iens
+        assert_no_match(/Cedar Hollow Primary Care/, response.body)
+      end
+
+      test "a submission naming a visit whose datetime is not a time, alone, is refused without an error" do
+        with_untimed_visit([ visit_row(UNTIMED_VISIT, at: today_at(11, 0)) ]) do
+          submit(encounter_ien: UNTIMED_VISIT)
+        end
+
+        assert_response :unprocessable_entity
+        assert_equal 0, ScreeningResponse.count
+        assert_empty offered_visit_iens
+      end
+
+      test "a submission naming a visit whose datetime is not a time is refused" do
+        rows = [ visit_row(VISIT, at: today_at(9, 30)), visit_row(UNTIMED_VISIT, at: today_at(11, 0)) ]
+
+        with_untimed_visit(rows) do
+          submit(encounter_ien: UNTIMED_VISIT)
+        end
+
+        assert_response :unprocessable_entity
+        assert_equal 0, ScreeningResponse.count
+        assert_alert(VISIT_REFUSED)
+        assert_equal [ VISIT ], offered_visit_iens
+      end
+
+      test "a dated visit still saves when another row's datetime is not a time" do
+        rows = [ visit_row(UNTIMED_VISIT, at: today_at(11, 0)), visit_row(VISIT, at: today_at(9, 30)) ]
+
+        with_untimed_visit(rows) do
+          submit
+        end
+
+        assert_response :redirect
+        assert_equal 1, ScreeningResponse.count
+        assert_equal VISIT, ScreeningResponse.last.encounter_ien.to_s
+      end
+
+      # Rows for CONFLICTED_VISIT, one per variant: `locked:` as given (open by
+      # default), `undated: true` for a row with no datetime.
+      def conflicting_rows(variants)
+        variants.map do |variant|
+          visit_row(CONFLICTED_VISIT, at: variant[:undated] ? nil : today_at(11, 0),
+                                      clinic: "Cedar Hollow Primary Care", locked: variant.fetch(:locked, false))
+        end
+      end
+
+      # The gateway's own rows for `rows`, with UNTIMED_VISIT's datetime left
+      # as the unparsed FileMan string instead of a Time.
+      def with_untimed_visit(rows, &block)
+        seed_visits(DFN_PARAM, rows)
+        mapped = EncounterGateway.visits(DFN_PARAM).map do |row|
+          row[:visit_ien].to_s == UNTIMED_VISIT ? row.merge(datetime: UNPARSED_DATETIME) : row
+        end
+        assert_equal [ UNPARSED_DATETIME ], mapped.filter_map { |row| row[:datetime] if row[:datetime].is_a?(String) }
+
+        with_failing(EncounterGateway, :visits, ->(*) { mapped }, &block)
+      end
     end
   end
 end
