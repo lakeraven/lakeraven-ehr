@@ -154,7 +154,8 @@ module Lakeraven
       # One VISITLST row. The fourth piece of the visit string is the visit
       # IEN; a row without it is an appointment pending check-in, not a visit.
       def visit_row(ien, at:, clinic: CLINIC, provider: PROVIDER, provider_ien: 9001, locked: false)
-        fileman = format("%<ymd>s.%<hm>s", ymd: "#{at.year - 1700}#{at.strftime('%m%d')}", hm: at.strftime("%H%M"))
+        # `at: nil` is a row whose FileMan date is blank: the gem yields a nil datetime.
+        fileman = at && format("%<ymd>s.%<hm>s", ymd: "#{at.year - 1700}#{at.strftime('%m%d')}", hm: at.strftime("%H%M"))
         { visit_string: "40;#{fileman};A;#{ien}", location: clinic, category: "AMBULATORY",
           datetime: at, locked: locked, provider_ien: provider_ien, provider: provider }
       end
@@ -196,6 +197,12 @@ module Lakeraven
         texts = css_select("[role=alert]").map { |node| node.text.squish }
         assert texts.any? { |text| text.match?(pattern) },
                "expected a role=alert region matching #{pattern.inspect}; alerts were: #{texts.inspect}"
+      end
+
+      def assert_no_alert(pattern)
+        texts = css_select("[role=alert]").map { |node| node.text.squish }
+        assert texts.none? { |text| text.match?(pattern) },
+               "expected no role=alert region matching #{pattern.inspect}; alerts were: #{texts.inspect}"
       end
 
       # A day shown in any of the usual clinical renderings.
@@ -1454,6 +1461,304 @@ module Lakeraven
         assert_equal 2, visit_radios.length
         assert_select "script:not([data-consent-kiosk-listener])", count: 0
         assert_no_match(/\son[a-z]+=/i, response.body)
+      end
+
+      # -- Visit picker, amendment 1 (#1003 review) ------------------------------
+
+      # 1. Only `locked == false` is open. The gem maps an empty or absent
+      # LOCKED piece to nil: an unknown lock state is not an open visit.
+      test "a visit whose lock state is unknown is not offered" do
+        seed_visits(DFN_PARAM, [
+          visit_row(VISIT, at: today_at(9, 30)),
+          visit_row("2090041", at: today_at(11, 0), clinic: "Cedar Hollow Primary Care", locked: nil)
+        ])
+
+        get "#{BASE}/new", params: { instrument: "phq-9", encounter_ien: "2090041" }
+
+        assert_response :ok
+        assert_equal [ VISIT ], offered_visit_iens
+        assert_empty checked_visit_iens
+        assert_select "input[name=encounter_ien][value=?]", "2090041", count: 0
+        assert_no_match(/Cedar Hollow Primary Care/, response.body)
+      end
+
+      test "a patient whose only visit has an unknown lock state has no open visit" do
+        seed_visits(DFN_PARAM, [ visit_row(VISIT, at: today_at(9, 30), locked: nil) ])
+
+        get "#{BASE}/new", params: { instrument: "phq-9" }
+
+        assert_response :ok
+        assert_empty offered_visit_iens
+        assert_alert(/No open visit/i)
+      end
+
+      test "a visit whose lock state is unknown is refused" do
+        seed_visits(DFN_PARAM, [
+          visit_row(VISIT, at: today_at(9, 30)),
+          visit_row("2090041", at: today_at(11, 0), locked: nil)
+        ])
+
+        submit(encounter_ien: "2090041")
+
+        assert_response :unprocessable_entity
+        assert_equal 0, ScreeningResponse.count
+        assert_alert(/not one of this patient['’]s open visits/i)
+      end
+
+      # 2. The gem yields a nil datetime for a blank or unparseable FileMan
+      # date. Such a row cannot be dated — so cannot be shown as today's or
+      # any day's visit — and it must not take the form down with it.
+      test "a visit with no date, alone, does not break the form and is not offered" do
+        seed_visits(DFN_PARAM, [ visit_row("2090042", at: nil) ])
+
+        get "#{BASE}/new", params: { instrument: "phq-9", encounter_ien: "2090042" }
+
+        assert_response :ok
+        assert_empty offered_visit_iens
+        assert_alert(/No open visit|visits could not be read/i)
+        assert_select "fieldset.screening-item", 9
+      end
+
+      test "a visit with no date is left out and the dated visits are still offered in order" do
+        seed_visits(DFN_PARAM, [
+          visit_row("3001", at: today_at(10, 0, days_ago: 1)),
+          visit_row("2090042", at: nil, clinic: "Cedar Hollow Primary Care"),
+          visit_row("3002", at: today_at(8, 15)),
+          visit_row("3004", at: today_at(15, 20))
+        ])
+
+        get "#{BASE}/new", params: { instrument: "phq-9" }
+
+        assert_response :ok
+        assert_equal %w[3004 3002 3001], offered_visit_iens
+        assert_no_match(/Cedar Hollow Primary Care/, response.body)
+      end
+
+      test "a submission naming a visit with no date, alone, is refused without an error" do
+        seed_visits(DFN_PARAM, [ visit_row("2090042", at: nil) ])
+
+        submit(encounter_ien: "2090042")
+
+        assert_response :unprocessable_entity
+        assert_equal 0, ScreeningResponse.count
+        assert_empty offered_visit_iens
+      end
+
+      test "a submission naming a visit with no date is refused" do
+        seed_visits(DFN_PARAM, [
+          visit_row(VISIT, at: today_at(9, 30)),
+          visit_row("2090042", at: nil)
+        ])
+
+        submit(encounter_ien: "2090042")
+
+        assert_response :unprocessable_entity
+        assert_equal 0, ScreeningResponse.count
+        assert_alert(/not one of this patient['’]s open visits/i)
+        assert_equal [ VISIT ], offered_visit_iens
+      end
+
+      test "a dated visit still saves when another row has no date" do
+        seed_visits(DFN_PARAM, [
+          visit_row("2090042", at: nil),
+          visit_row(VISIT, at: today_at(9, 30))
+        ])
+
+        submit
+
+        assert_response :redirect
+        assert_equal 1, ScreeningResponse.count
+        assert_equal VISIT, ScreeningResponse.last.encounter_ien.to_s
+      end
+
+      # 3. One radio per visit: a repeated row must not repeat the choice, or
+      # the element ids its label binds to.
+      test "two rows for the same visit render one radio" do
+        seed_visits(DFN_PARAM, [
+          visit_row(VISIT, at: today_at(9, 30)),
+          visit_row("2090050", at: today_at(14, 45, days_ago: 3)),
+          visit_row(VISIT, at: today_at(9, 30))
+        ])
+
+        get "#{BASE}/new", params: { instrument: "phq-9", encounter_ien: VISIT }
+
+        assert_response :ok
+        assert_equal [ VISIT, "2090050" ], offered_visit_iens
+        assert_equal [ VISIT ], checked_visit_iens
+        ids = css_select("[id]").map { |node| node["id"] }
+        assert_empty ids.tally.select { |_id, count| count > 1 }.keys, "duplicate element ids on the page"
+      end
+
+      # 4. A visit with no clinic or no provider on file is still a visit the
+      # clinician may need; the label says what is missing instead of trailing
+      # off into an empty separator.
+      test "a visit with no clinic or provider is offered and says what is not recorded" do
+        seed_visits(DFN_PARAM, [
+          visit_row("3101", at: today_at(15, 0), clinic: nil),
+          visit_row("3102", at: today_at(14, 0), provider: nil, provider_ien: nil),
+          visit_row("3103", at: today_at(13, 0), clinic: nil, provider: nil, provider_ien: nil)
+        ])
+
+        get "#{BASE}/new", params: { instrument: "phq-9" }
+
+        assert_response :ok
+        assert_equal %w[3101 3102 3103], offered_visit_iens
+
+        no_clinic = visit_label_text("3101")
+        assert_match(/clinic not recorded/i, no_clinic)
+        assert_includes no_clinic, PROVIDER
+        assert_no_match(/provider not recorded/i, no_clinic)
+
+        no_provider = visit_label_text("3102")
+        assert_match(/provider not recorded/i, no_provider)
+        assert_includes no_provider, CLINIC
+        assert_no_match(/clinic not recorded/i, no_provider)
+
+        neither = visit_label_text("3103")
+        assert_match(/clinic not recorded/i, neither)
+        assert_match(/provider not recorded/i, neither)
+
+        { no_clinic => 15, no_provider => 14, neither => 13 }.each do |label, hour|
+          assert_shows_time label, today_at(hour, 0)
+          assert_no_match(/[·•|]\s*(?:[·•|]|\z)/, label, "the label has an empty separator")
+        end
+      end
+
+      # 5. Listing a patient's visits is a FHIR search: SMART v2 `s` (a v1
+      # `.read` carries it). `r` alone reads one Encounter by id and does not
+      # list them.
+      test "an Encounter read-by-id scope without search does not list the visits" do
+        sign_in(scopes: "#{SCREENING_ONLY_SCOPES} user/Encounter.r")
+        open_patient(1)
+        reads = 0
+        rows = EncounterGateway.visits(DFN_PARAM)
+
+        with_failing(EncounterGateway, :visits, ->(*) { reads += 1; rows }) do
+          get "#{BASE}/new", params: { instrument: "phq-9", encounter_ien: VISIT }
+        end
+
+        assert_response :ok
+        assert_alert(/visits could not be read/i)
+        assert_empty offered_visit_iens
+        assert_equal 0, reads, "a credential that may not search Encounter must not cause a visit read"
+        assert_no_typed_visit_field
+      end
+
+      test "a submission with an Encounter read-by-id scope without search is refused" do
+        sign_in(scopes: "#{SCREENING_ONLY_SCOPES} user/Encounter.r")
+        open_patient(1)
+
+        submit
+
+        assert_response :unprocessable_entity
+        assert_equal 0, ScreeningResponse.count
+        assert_alert(/visits could not be read/i)
+      end
+
+      test "an Encounter search scope alone lists the visits and saves against one" do
+        sign_in(scopes: "#{SCREENING_ONLY_SCOPES} user/Encounter.s")
+        open_patient(1)
+
+        get "#{BASE}/new", params: { instrument: "phq-9" }
+
+        assert_response :ok
+        assert_equal [ VISIT ], offered_visit_iens
+        assert_includes visit_label_text(VISIT), CLINIC
+
+        submit
+
+        assert_response :redirect
+        assert_equal 1, ScreeningResponse.count
+        assert_equal VISIT, ScreeningResponse.last.encounter_ien.to_s
+      end
+
+      # 6. Visit times from rpms-rpc are plain `Time.new(...)` in the server's
+      # process zone — the clinic's wall clock (WallClock). "Today" is therefore
+      # the process-local date, not Date.current in Time.zone. Deterministic on
+      # any host: time is frozen at process-local noon, and Time.zone is set to
+      # whichever zone is on a different calendar date at that instant (one
+      # always exists: zones span UTC-12 to UTC+13). The other visit is dated
+      # on that zone's date, so reading "today" from Time.zone puts it first.
+      test "today is the clinic's wall-clock date, not the date in Time.zone" do
+        now = Time.now
+        local_noon = Time.new(now.year, now.month, now.day, 12, 0, 0)
+        local_date = Date.new(now.year, now.month, now.day)
+        zone = ActiveSupport::TimeZone.all.find { |candidate| local_noon.in_time_zone(candidate).to_date != local_date }
+        assert zone, "no zone is on another date at process-local noon"
+        zone_date = local_noon.in_time_zone(zone).to_date
+
+        travel_to(local_noon) do
+          Time.use_zone(zone) do
+            assert_not_equal local_date, Date.current, "the fixture needs Time.zone on another date"
+            sign_in # the setup credential was minted at the real time
+            open_patient(1)
+            seed_visits(DFN_PARAM, [
+              visit_row("4002", at: Time.new(zone_date.year, zone_date.month, zone_date.day, 9, 0, 0)),
+              visit_row("4001", at: Time.new(local_date.year, local_date.month, local_date.day, 8, 0, 0))
+            ])
+
+            get "#{BASE}/new", params: { instrument: "phq-9" }
+          end
+        end
+
+        assert_response :ok
+        assert_equal %w[4001 4002], offered_visit_iens
+      end
+
+      # 7. "Choose the visit below" is only true when there is one to choose.
+      test "a submission with no visit while the visits cannot be read is not told to choose one" do
+        sign_in(scopes: SCREENING_ONLY_SCOPES)
+        open_patient(1)
+
+        post BASE, params: { instrument: "phq-9", answers: all_answered(PHQ9, 1) }.merge(csrf_param)
+
+        assert_response :unprocessable_entity
+        assert_equal 0, ScreeningResponse.count
+        assert_alert(/visits could not be read/i)
+        assert_no_alert(/Visit required/i)
+        assert_no_alert(/choose the visit/i)
+      end
+
+      test "a submission with no visit while the visit read raises is not told to choose one" do
+        with_failing(EncounterGateway, :visits, ->(*) { raise RpmsRpc::Error, "broker down" }) do
+          post BASE, params: { instrument: "phq-9", answers: all_answered(PHQ9, 1) }.merge(csrf_param)
+        end
+
+        assert_response :unprocessable_entity
+        assert_equal 0, ScreeningResponse.count
+        assert_alert(/visits could not be read/i)
+        assert_no_alert(/Visit required/i)
+        assert_no_alert(/choose the visit/i)
+      end
+
+      [ [ "only a locked visit", ->(test) { [ test.visit_row("2090040", at: test.today_at(11, 0), locked: true) ] } ],
+        [ "no visits at all", ->(_test) { [] } ] ].each do |name, rows|
+        test "a submission with no visit for a patient with #{name} is not told to choose one" do
+          seed_visits(DFN_PARAM, rows.call(self))
+
+          post BASE, params: { instrument: "phq-9", answers: all_answered(PHQ9, 1) }.merge(csrf_param)
+
+          assert_response :unprocessable_entity
+          assert_equal 0, ScreeningResponse.count
+          assert_alert(/No open visit/i)
+          assert_no_alert(/Visit required/i)
+          assert_no_alert(/choose the visit/i)
+        end
+      end
+
+      # 8. An empty list is what a clinic with a check-in that has not reached
+      # the visit file looks like too: the alert says what to do in that case
+      # rather than asserting the patient was never checked in.
+      test "the no-open-visit alert says what to do if the patient has already been checked in" do
+        seed_visits(DFN_PARAM, [])
+
+        get "#{BASE}/new", params: { instrument: "phq-9" }
+
+        assert_response :ok
+        assert_alert(/No open visit.*check/im)
+        assert_alert(/No open visit.*already checked in/im)
+        assert_alert(/No open visit.*already checked in.*reload/im)
+        assert_alert(/No open visit.*already checked in.*report/im)
       end
     end
   end
