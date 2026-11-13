@@ -185,9 +185,9 @@ jobs:
       RAILS_ENV: test
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/lakeraven_ehr_test
       CUCUMBER_PUBLISH_QUIET: "true"
-      # bcer-9.0-20261104-9b5cccd-ydb. features/support/rpms_demo_site.rb is read
+      # bcer-9.0-20261113-3f5487a-ydb. features/support/rpms_demo_site.rb is read
       # from the same build; the run aborts if they disagree.
-      RPMS_IMAGE: ghcr.io/lakeraven/openrpms@sha256:330ac2ebe210658237755c78400576342727779485cbade64aff9c812ba3b2f2
+      RPMS_IMAGE: ghcr.io/lakeraven/openrpms@sha256:223e8fbad609becefddd5f34bc49a3298ffba24253294e48c5d3609c2e23646c
       LIVE_RPMS: "1"
       VISTA_BROKER: cia
       VISTA_RPC_HOST: 127.0.0.1
