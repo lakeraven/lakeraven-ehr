@@ -31,20 +31,24 @@ module Lakeraven
       # filing. Here: that the gateway hands a coded problem to the gem and
       # returns its answer.
       test "add hands a coded problem to RpmsRpc::Problem.add and returns its answer" do
-        with_stub(RpmsRpc::Problem, :add, { success: true, ien: 55 }) do
-          assert_equal({ success: true, ien: 55 }, ConditionGateway.add(1, { icd_code: "E11.9", description: "Type 2 diabetes" }))
+        problem = { icd_code: "E11.9", description: "Type 2 diabetes" }
+        with_recording_stub(RpmsRpc::Problem, :add, { success: true, ien: 55 }) do |calls|
+          assert_equal({ success: true, ien: 55 }, ConditionGateway.add(1, problem))
+          assert_equal [ { args: [ "1", problem ], kwargs: {} } ], calls
         end
       end
 
       test "update hands the change to RpmsRpc::Problem.update and returns its answer" do
-        with_stub(RpmsRpc::Problem, :update, { success: true, ien: 55 }) do
+        with_recording_stub(RpmsRpc::Problem, :update, { success: true, ien: 55 }) do |calls|
           assert_equal({ success: true, ien: 55 }, ConditionGateway.update(1, 55, { status: "I" }))
+          assert_equal [ { args: [ "1", "55", { status: "I" } ], kwargs: {} } ], calls
         end
       end
 
       test "delete hands the reason to RpmsRpc::Problem.delete and returns its answer" do
-        with_stub(RpmsRpc::Problem, :delete, { success: true, ien: 55 }) do
+        with_recording_stub(RpmsRpc::Problem, :delete, { success: true, ien: 55 }) do |calls|
           assert_equal({ success: true, ien: 55 }, ConditionGateway.delete(1, 55, reason: "Entered in error"))
+          assert_equal [ { args: [ "1", "55" ], kwargs: { reason: "Entered in error" } } ], calls
         end
       end
 

@@ -29,8 +29,11 @@ module Lakeraven
       # Here: what the gateway hands it, and what the gem refuses before any RPC.
 
       test "add hands the call to RpmsRpc::Procedure.add and returns its answer" do
-        with_stub(RpmsRpc::Procedure, :add, { success: true, ien: 42 }) do
-          assert_equal({ success: true, ien: 42 }, ProcedureGateway.add(1, 2090061, "99213"))
+        with_recording_stub(RpmsRpc::Procedure, :add, { success: true, ien: 42 }) do |calls|
+          assert_equal({ success: true, ien: 42 },
+            ProcedureGateway.add(1, 2090061, "99213", modifiers: [ "25" ], narrative: "Office visit", quantity: 2))
+          assert_equal [ { args: [ "1", "2090061", "99213" ],
+                           kwargs: { modifiers: [ "25" ], narrative: "Office visit", quantity: 2 } } ], calls
         end
       end
 
