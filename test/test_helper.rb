@@ -242,7 +242,11 @@ else
   # (REGISTRATION PARAMETERS, #980/#981) answers as a site with none set:
   # nothing required beyond the forms' own rules, every section asked. A test
   # that needs a site's settings stubs RegistrationSettingsGateway.current.
-  Lakeraven::EHR::RegistrationSettingsGateway.reader = -> { Lakeraven::EHR::RegistrationSiteSettings.not_on_file }
+  # Guarded so red-before-green can load this helper against the base app
+  # code, where the gateway does not exist yet, and see the new tests fail.
+  if defined?(Lakeraven::EHR::RegistrationSettingsGateway)
+    Lakeraven::EHR::RegistrationSettingsGateway.reader = -> { Lakeraven::EHR::RegistrationSiteSettings.not_on_file }
+  end
 end
 
 # Scripted RPC broker for the BPRM reg/sched/ADT twin gateway tests.
