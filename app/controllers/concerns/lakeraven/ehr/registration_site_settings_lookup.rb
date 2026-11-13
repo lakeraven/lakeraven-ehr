@@ -16,6 +16,16 @@ module Lakeraven
 
       def registration_settings = @registration_settings ||= RegistrationSettingsGateway.current
 
+      # Refuses a section the site has switched off in RPMS (#981), back to
+      # the patient's page. A section is asked when RPMS could not be read or
+      # the site has not answered (RegistrationSiteSettings#ask?).
+      def require_site_asks!(switch, what)
+        return if registration_settings.ask?(switch)
+
+        redirect_to registration_patient_path(params[:dfn]),
+                    alert: "This site does not ask for #{what}: it is turned off in RPMS's registration settings."
+      end
+
       # The status a form refused by its own checks answers with: 503 when the
       # site's required fields could not be read, else 422.
       def refused_form_status(form)

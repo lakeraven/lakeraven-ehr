@@ -48,6 +48,8 @@
         chosen_text: (@current_tribe && @current_tribe[:tribe_ien].to_s == @eligibility.tribe_ien.to_s ? "#{@current_tribe[:tribe_name]}." : "Tribe chosen."),
         error: @eligibility.errors[:tribe_ien].first %>
 
+  <%# Asked when the site's Ask for TRIBAL BLOOD QUANTUM (#9009061 field 1) is not NO (#981). %>
+  <% if registration_settings.ask?(:blood_quantum) %>
   <div class="flex flex-wrap gap-4">
     <%# INDIAN BLOOD QUANTUM and TRIBE QUANTUM, IHS PATIENT (9000001) fields 1110 and 1109. %>
     <% [ [ :blood_quantum, "Indian blood quantum" ], [ :tribe_quantum, "Tribe quantum" ] ].each do |field, label| %>
@@ -63,8 +65,10 @@
       <% end %>
     <% end %>
   </div>
+  <% end %>
 
-  <%# TRIBAL ENROLLMENT NUMBER, IHS PATIENT (9000001) field .07. %>
+  <%# TRIBAL ENROLLMENT NUMBER, IHS PATIENT (9000001) field .07, asked when the site's Ask TRIBAL ENROLLMENT NUMBER (#9009061 field 2) is not NO (#981). %>
+  <% if registration_settings.ask?(:enrollment_number) %>
   <%= form_field :enrollment_number,
         "Enrollment number",
         form: f,
@@ -73,6 +77,7 @@
           value: @eligibility.enrollment_number,
           autocomplete: "off",
           aria: aria %>
+  <% end %>
   <% end %>
 
   <%= f.submit "Save tribe and eligibility",

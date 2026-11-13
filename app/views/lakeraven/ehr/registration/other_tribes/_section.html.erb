@@ -11,9 +11,11 @@
     <h2 id="other-tribes-section-heading">Other tribes and eligibility reasons</h2>
     <% if can_edit %>
       <span class="flex gap-4">
-        <%= link_to "Add or remove other tribes",
-              registration_patient_other_tribes_path(dfn),
-              id: "edit-other-tribes" %>
+        <% if registration_settings.ask?(:other_tribes) %>
+          <%= link_to "Add or remove other tribes",
+                registration_patient_other_tribes_path(dfn),
+                id: "edit-other-tribes" %>
+        <% end %>
         <%= link_to "Add or remove eligibility reasons",
               registration_patient_eligibility_modifiers_path(dfn),
               id: "edit-eligibility-modifiers" %>
@@ -21,7 +23,8 @@
     <% end %>
   </div>
   <dl class="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-2">
-    <%# OTHER TRIBE, 9000001.43. %>
+    <%# OTHER TRIBE, 9000001.43, shown when the site's Ask for OTHER TRIBES (#9009061 field 8) is not NO (#981). %>
+    <% if registration_settings.ask?(:other_tribes) %>
     <dt>Other tribes</dt>
     <dd data-field="other_tribes">
       <% if other_tribes.empty? %>
@@ -35,6 +38,7 @@
         <% end %>
       <% end %>
     </dd>
+    <% end %>
     <%# ELIGIBILITY MODIFIERS, 9000001.03401. %>
     <dt>Eligibility reasons</dt>
     <dd data-field="eligibility_modifiers">
