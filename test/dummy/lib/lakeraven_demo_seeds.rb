@@ -230,14 +230,11 @@ module LakeravenDemoSeeds
           icd_name: "Essential (primary) hypertension", narrative: "HYPERTENSION" } ])
 
     # Immunizations — V IMMUNIZATION through BGOVIMM GET ("DFN^I") drives
-    # Immunization.for_patient; the text summary (BEHOCIR GETTXT) is seeded
-    # too for parity with the RPC surface.
+    # Immunization.for_patient.
     m.seed_keyed_collection(:immunization_list, "1^I",
       [ { record_type: "I", ien: 1, vaccine_display: "COVID-19 Vaccine",
           lot_number: "LOT-ABC", site: "1~Left Deltoid",
           occurrence_datetime: DateTime.new(2026, 1, 15, 9, 0, 0), manufacturer: "Synthetic Bio" } ])
-    m.seed(:immunization_text, "1",
-      "01/15/2026  COVID-19 Vaccine  LOT-ABC  Site: Left Deltoid")
   end
 
   # ORWPS ACTIVE as RPMS sends it: one ~OP header per outpatient order
