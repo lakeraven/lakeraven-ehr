@@ -14,6 +14,7 @@ module Lakeraven
     class LanguageEntry
       include ActiveModel::Model
       include ActiveModel::Attributes
+      include SiteRequiredFields
 
       # #9000001.86 .03 INTREPRETER REQUIRED and .06 ENGLISH PROFICIENCY codes.
       INTERPRETER = { "Y" => "Yes", "N" => "No", "U" => "Unknown" }.freeze
@@ -28,6 +29,16 @@ module Lakeraven
       attr_writer :others
 
       validates :primary_ien, presence: { message: "is required" }
+      # A site may make the preferred language mandatory in RPMS (#980): AG
+      # checks PREFERRED LANGUAGE by name ($$ALTREQ^AGFLDREQ, AGAPIPAT). The
+      # primary language is required on every site, as AG's window asks it.
+      site_required preferred_ien: [ "9000001", "PREFERRED LANGUAGE" ]
+
+      NAMES = { primary_ien: "Primary language", preferred_ien: "Preferred language" }.freeze
+
+      def self.human_attribute_name(attribute, options = {})
+        NAMES.fetch(attribute.to_sym) { super }
+      end
       validates :interpreter, inclusion: { in: INTERPRETER.keys }, allow_blank: true
       validates :proficiency, inclusion: { in: PROFICIENCY.keys }, allow_blank: true
       validate :english_proficiency
