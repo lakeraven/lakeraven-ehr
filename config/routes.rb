@@ -242,6 +242,16 @@ Lakeraven::EHR::Engine.routes.draw do
     get "patients/:dfn/coverage/new", to: "coverages#new", as: :new_patient_coverage, constraints: { dfn: /\d+/ }
     post "patients/:dfn/coverage/new", to: "coverages#new", constraints: { dfn: /\d+/ }
     post "patients/:dfn/coverage", to: "coverages#create", constraints: { dfn: /\d+/ }
+    # The registration tables a site keeps itself (BPRM Settings > Table Maintenance).
+    get "setup", to: "setup/tables#index", as: :setup
+    # Eligibility modifiers for a name change, a legal document or legal sex (lakeraven-ehr#982).
+    get "setup/eligibility_modifiers", to: "setup/eligibility_modifiers#index", as: :setup_eligibility_modifiers
+    get "setup/eligibility_modifiers/new", to: "setup/eligibility_modifiers#new", as: :new_setup_eligibility_modifier
+    post "setup/eligibility_modifiers", to: "setup/eligibility_modifiers#create"
+    get "setup/eligibility_modifiers/:ien/edit", to: "setup/eligibility_modifiers#edit", as: :edit_setup_eligibility_modifier,
+                                                  constraints: { ien: /\d+/ }
+    post "setup/eligibility_modifiers/:ien", to: "setup/eligibility_modifiers#update", as: :setup_eligibility_modifier,
+                                              constraints: { ien: /\d+/ }
   end
 
   # Scheduling (rpms-ux W02): a clinic resource's day, booking into it (S-SCH-01)

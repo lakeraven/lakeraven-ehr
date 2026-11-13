@@ -1,0 +1,29 @@
+<% page_title "Add a modifier", "Setup" %>
+
+<%= page_header "Add an eligibility modifier",
+      "N is proof of a name change, L a legal document, S proof of legal sex." %>
+
+<%= flash_alert id: "eligibility-modifier-alert" %>
+
+<%= form_with url: registration_setup_eligibility_modifiers_path,
+      method: :post,
+      local: true,
+      id: "eligibility-modifier-form",
+      class: "card flex flex-col gap-4" do %>
+  <%= render "name_field", name: @name %>
+  <%= form_field :type, "Type", hint: "The type cannot be changed once the modifier is saved." do |aria| %>
+    <%= select_tag :type,
+          options_for_select(Lakeraven::EHR::RegistrationSetupGateway.modifier_types.map { |type| [ "#{type} (#{Lakeraven::EHR::RegistrationSetupGateway.type_label(type)})", type ] }, @type),
+          include_blank: "Choose a type",
+          id: "type",
+          required: true,
+          aria: aria %>
+  <% end %>
+  <%= submit_tag "Add the modifier",
+        class: "button-primary self-start" %>
+<% end %>
+
+<p class="mt-6">
+  <%= link_to "Back to the modifiers",
+        registration_setup_eligibility_modifiers_path %>
+</p>

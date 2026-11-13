@@ -53,7 +53,14 @@ module Lakeraven
         # Work the facility's referrals: list the ones still pending across
         # patients (#873). RPMS: RCIS's menu key BMCZMENU, or its supervisor
         # and manager keys, the same keys Roles.can_process_chs? reads.
-        "referrals.work" => rule(any: %i[referrals_user referrals_supervisor referrals_manager])
+        "referrals.work" => rule(any: %i[referrals_user referrals_supervisor referrals_manager]),
+        # Open the registration tables a site keeps itself: anyone who may edit one
+        # of them. BPRM: CanAccessSettings, narrowed to the tables lakeraven-ehr has.
+        "registration.setup" => rule(any: %i[registration_manager]),
+        # Add and rename the eligibility modifiers a clerk picks as proof of a name
+        # change, a legal document or legal sex (#982). BPRM:
+        # CanAccessRegistrationTableMaintenance, AGZMGR on AG's menu.
+        "registration.table_maintenance" => rule(any: %i[registration_manager])
       }.freeze
 
       NAMES = TABLE.keys.freeze
