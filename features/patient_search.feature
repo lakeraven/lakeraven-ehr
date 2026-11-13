@@ -3,7 +3,7 @@ Feature: Patient Search and Lookup
   I need to search and retrieve patient information from RPMS
   So that I can provide appropriate care and create referrals
 
-# The demo patients of the pinned RPMS build (rpms-ops demo site seed), as
+# The demo patients of the pinned RPMS build (openrpms demo site seed), as
 # RPMS returns them. The mock is seeded from this table, and a live run
 # (cucumber --profile live) fails if RPMS disagrees with any row.
 Background:

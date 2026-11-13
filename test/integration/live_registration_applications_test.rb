@@ -8,7 +8,7 @@ require "rpms_rpc/api/patient_application"
 # patient applied for Medicaid, then that it was approved, then marks it
 # entered in error, on a real RPMS; FileMan is read back after each step. It
 # WRITES (an application is never deleted), so it runs only against a throwaway
-# container with PATIENT APPLICATION TYPES seeded (rpms-ops SEEDAPPT), and only
+# container with PATIENT APPLICATION TYPES seeded (openrpms SEEDAPPT), and only
 # when asked twice: LIVE_RPMS=1 and LIVE_RPMS_WRITES=1.
 #
 #   LIVE_RPMS=1 LIVE_RPMS_WRITES=1 VISTA_BROKER=cia VISTA_RPC_HOST=127.0.0.1 VISTA_RPC_PORT=9151 \
@@ -49,7 +49,7 @@ class LiveRegistrationApplicationsTest < ActionDispatch::IntegrationTest
     taken = applications.map { |a| a[:obtained] }
     day = (1..365).map { |n| Date.current - n }.find { |d| !taken.include?(d) }
     medicaid = RpmsRpc::PatientApplication.types.find { |t| t[:name] == "MEDICAID FORM 100" }
-    assert medicaid, "PATIENT APPLICATION TYPES has no MEDICAID FORM 100 (run rpms-ops SEEDAPPT)"
+    assert medicaid, "PATIENT APPLICATION TYPES has no MEDICAID FORM 100 (run openrpms SEEDAPPT)"
 
     sign_in
     post "#{BASE}/applications", params: { application: { type_ien: medicaid[:ien].to_s, applied_on: day.iso8601,

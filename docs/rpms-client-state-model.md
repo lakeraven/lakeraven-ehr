@@ -23,7 +23,7 @@ The short version of the recommendation:
 
 - **Browser ↔ web tier:** a standard web session (HttpOnly cookie, the OAuth "backend for frontend" pattern). JWT access tokens are reserved for third-party API clients, where the party that issues a token is not the party that verifies it.
 - **Web tier ↔ RPMS:** one signed-on broker connection per user session, bound at sign-on and never re-bound (ADR 0011). It's stateful because RPMS is.
-- **Later, if wanted:** a stateless identity path into RPMS (a signed assertion that M itself verifies on each call). That is build work in rpms-ops, not something the web tier can invent.
+- **Later, if wanted:** a stateless identity path into RPMS (a signed assertion that M itself verifies on each call). That is build work in openrpms, not something the web tier can invent.
 
 ## 1. The assumptions RPMS makes about a client
 
@@ -179,12 +179,12 @@ Three honest options:
    - key management;
    - a review against Kernel's sign-on, audit and lockout behavior.
 
-   It belongs in rpms-ops as build work, KIDS first.
+   It belongs in openrpms as build work, KIDS first.
 
 ### Recommendation
 
 - **Now:** BFF sessions for browsers, JWT-profile OAuth for API clients, and ADR 0011's per-user connection to RPMS. Each uses the mechanism the standards intend for that hop.
-- **Next:** open the design question for option 3 in rpms-ops, starting with whether IHS has, or would accept, a delegated-identity entry point.
+- **Next:** open the design question for option 3 in openrpms, starting with whether IHS has, or would accept, a delegated-identity entry point.
 - **Always:**
   - identity is bound at the hop where it's verified;
   - it's carried explicitly to the next hop, never taken from ambient state or from client input;

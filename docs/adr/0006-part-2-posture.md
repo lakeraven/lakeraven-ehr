@@ -149,7 +149,7 @@ design, whatever the compliance answer turns out to be:**
    are outside this engine's reach. Whether the RPMS behavioural-health
    package's separation is actually configured on a given instance is site
    configuration plus a live-dispatch proof, never an assumption
-   (rpms-ops#635, rpms-ops#536, rpms-rpc#224).
+   (openrpms#635, openrpms#536, rpms-rpc#224).
 
 ## Consequences
 
@@ -197,6 +197,6 @@ conformance beyond label passthrough.
 - ADR 0001 (no Rails coupling), ADR 0002 (host-configurable policy)
 - #291 (umbrella), #494 / #523 (record-level segmentation), #522 (posture
   enforcement), #532 (disclosure-surface audit — engine egress inventory)
-- rpms-ops#635, rpms-ops#536, rpms-rpc#224 (site configuration and live proof)
+- openrpms#635, openrpms#536, rpms-rpc#224 (site configuration and live proof)
 - `rpms-rpc/lib/rpms_rpc/mappings/stock_vista.rb:660` (`ORWPT SELCHK`),
   `$$GUIPL^AMHUTIL` (BH package screening)

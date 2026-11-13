@@ -12,7 +12,7 @@
 # narratives, mixed-case ORWU NEWPERS names). Change a value only after
 # reading it from the pinned build.
 module RpmsDemoSite
-  BUILD = "rpms-ydb 9b5cccd (bcer-9.0, rpms-ops demo site seed)"
+  BUILD = "rpms-ydb 9b5cccd (bcer-9.0, openrpms demo site seed)"
 
   # ORWPT SELECT / ORWPT ID INFO / ORWPT FULLSSN, by DFN.
   PATIENTS = {
@@ -80,7 +80,7 @@ module RpmsDemoSite
     4 => { ihs_site: "Y", age: "25", default_label: "Am Indian/AK Native" }
   }.freeze
 
-  # The demo site's sign-on personas (rpms-ops SEEDPERS; the pairs are
+  # The demo site's sign-on personas (openrpms SEEDPERS; the pairs are
   # published with the seed). user_type is what the engine resolves from
   # ORWU USERINFO's USRCLS: provider 3, nurse 2, clerk 1, else user.
   PERSONAS = {
