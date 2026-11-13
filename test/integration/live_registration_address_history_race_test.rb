@@ -19,10 +19,14 @@ class LiveRegistrationAddressHistoryRaceTest < ActionDispatch::IntegrationTest
     skip "live writes: set LIVE_RPMS=1 and LIVE_RPMS_WRITES=1 against a throwaway container" unless
       defined?(LIVE_RPMS) && LIVE_RPMS && ENV["LIVE_RPMS_WRITES"] == "1"
     Lakeraven::EHR::LoginThrottle.reset!
-    post "/lakeraven-ehr/login", params: { username: ENV.fetch("LIVE_RPMS_ACCESS"), password: ENV.fetch("LIVE_RPMS_VERIFY") }
+    sign_in
   end
 
   teardown { LiveRpmsSession.sign_on! if defined?(LIVE_RPMS) && LIVE_RPMS && ENV["LIVE_RPMS_WRITES"] == "1" }
+
+  def sign_in
+    post "/lakeraven-ehr/login", params: { username: ENV.fetch("LIVE_RPMS_ACCESS"), password: ENV.fetch("LIVE_RPMS_VERIFY") }
+  end
 
   def fileman(file, iens, fields)
     reply = RpmsRpc.client.with_context("CIAV VUECENTRIC") do
@@ -41,15 +45,29 @@ class LiveRegistrationAddressHistoryRaceTest < ActionDispatch::IntegrationTest
     end
   end
 
+  # The RPMS server's today, as FileMan's DT gives it, read straight from RPMS.
+  def rpms_today
+    RpmsRpc::FilemanDateParser.parse_date(RpmsRpc.client.with_context("CIAV VUECENTRIC") { RpmsRpc::Orwu.fileman_datetime("T") })
+  end
+
   test "S-REG-21.1 a new address is saved and the old one is kept, ended on the date the patient moved" do
     old = fileman("2", "#{ADDRESS_DFN},", ".111;.114;.115;.131")
-    moved = Date.current # not before the date this address began, which an earlier run may have set to today
+    # The day RPMS says it is; the form's default move date (#1065).
+    moved = rpms_today
     # Never what is on file, even when an earlier run did not restore it.
     street = old[".111"] == "11 LIVE HISTORY RD" ? "12 LIVE HISTORY RD" : "11 LIVE HISTORY RD"
-    form = address_form(ADDRESS_DFN)
 
-    patch "/lakeraven-ehr/registration/patients/#{ADDRESS_DFN}/address",
-          params: { address: form.merge("address_line1" => street, "moved_on" => moved.iso8601) }
+    # The app's clock a day ahead of RPMS's, as UTC is during a US site's
+    # evening: the form's default date is still RPMS's today, and RPMS takes it.
+    travel_to(1.day.from_now) do
+      assert_operator Date.current, :>, moved
+      sign_in # a day on, the earlier session has expired
+      form = address_form(ADDRESS_DFN)
+      assert_equal moved.iso8601, form["moved_on"], "the form defaults the move date to RPMS's today"
+
+      patch "/lakeraven-ehr/registration/patients/#{ADDRESS_DFN}/address",
+            params: { address: form.merge("address_line1" => street) }
+    end
 
     assert_redirected_to "/lakeraven-ehr/registration/patients/#{ADDRESS_DFN}"
     assert_equal street, fileman("2", "#{ADDRESS_DFN},", ".111")[".111"]

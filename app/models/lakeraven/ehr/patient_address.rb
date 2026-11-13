@@ -20,8 +20,8 @@ module Lakeraven
 
 FIELDS.each { |field| attribute field, :string }
 # The date the patient moved (S-REG-21.1): RPMS ends the old address on
-# it in PREVIOUS MAIL ADDRESSES and starts the new one from it. Today
-# unless the clerk says otherwise.
+# it in PREVIOUS MAIL ADDRESSES and starts the new one from it. RPMS's today
+# (SiteDate, #1065) unless the clerk says otherwise.
 attribute :moved_on, :date
 # The fields whose change keeps the old address (ADR^AGGUL1 copies these).
 HISTORY_FIELDS = %i[address_line1 address_line2 address_line3 city state zip phone_home].freeze
@@ -60,7 +60,7 @@ EARLIEST_MOVE = Date.new(1871, 1, 1)
       def initialize(attrs = {})
         super
         FIELDS.each { |field| public_send("#{field}=", public_send(field).to_s.strip.squeeze(" ").presence) }
-        self.moved_on ||= Date.current
+        self.moved_on ||= SiteDate.today
         %i[address_line1 address_line2 address_line3 city zip].each do |field|
           public_send("#{field}=", public_send(field)&.upcase)
         end
@@ -81,7 +81,7 @@ EARLIEST_MOVE = Date.new(1871, 1, 1)
       private
 
       def moved_on_in_range
-        if moved_on > Date.current
+        if moved_on > SiteDate.today
           errors.add(:moved_on, "cannot be in the future")
         elsif moved_on < EARLIEST_MOVE
           errors.add(:moved_on, "cannot be before 1871")
