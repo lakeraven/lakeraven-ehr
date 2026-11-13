@@ -16,7 +16,9 @@ require "capybara/cuprite"
 # Screenshots of each step land in DEMO_MODE_EVIDENCE_DIR (default
 # tmp/evidence/demo_mode).
 class DemoModeTest < ActionDispatch::SystemTestCase
-  driven_by :cuprite, screen_size: [ 1280, 900 ], options: { headless: true }
+  # Chrome on a busy CI runner can take longer than Ferrum's 10-second default to
+  # report its websocket URL, which failed this test before it ran a step.
+  driven_by :cuprite, screen_size: [ 1280, 900 ], options: { headless: true, process_timeout: 30 }
 
   BANNER = "Test environment. Synthetic data only. " \
            "Data may be reset at any time; anything you enter can be erased."

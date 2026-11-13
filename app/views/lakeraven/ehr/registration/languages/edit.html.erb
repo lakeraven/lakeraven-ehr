@@ -8,6 +8,9 @@
 
 <%= flash_alert id: "languages-alert" %>
 
+<%= site_settings_unavailable_alert @entry,
+      id: "languages-settings-unavailable" %>
+
 <%= form_errors @entry,
       "The languages were not saved.",
       id: "languages-errors" %>
@@ -82,7 +85,8 @@
                           [ @entry.primary_ien, *@entry.others ].compact.uniq) %>
   <%= lookup_field f,
         :preferred_ien,
-        legend: "Preferred language (optional)",
+        legend: site_field_label(@entry, :preferred_ien, "Preferred language (optional)"),
+        error: @entry.errors[:preferred_ien].first,
         search: :preferred_search,
         search_label: "Language starts with",
         find_label: "Find preferred language",

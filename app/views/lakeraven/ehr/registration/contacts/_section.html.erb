@@ -7,7 +7,9 @@
   class="card mt-6"
 >
   <h2 id="contacts-heading">Emergency contact and next of kin</h2>
+  <%# Next of kin is shown when the site's Ask for NEXT OF KIN (#9009061 field 7) is not NO (#981). %>
   <% Lakeraven::EHR::ContactEntry::KINDS.each do |kind, label| %>
+    <% next if kind == "next_of_kin" && !registration_settings.ask?(:next_of_kin) %>
     <% contact = contacts.fetch(kind.to_sym, {}) %>
     <div
       id="contact-<%= kind.dasherize %>"

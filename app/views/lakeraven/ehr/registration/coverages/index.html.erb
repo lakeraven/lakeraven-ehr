@@ -4,18 +4,22 @@
       ["Medicaid, Medicare and private insurance on file.",
        "A visit is billed to coverage that is in force on the day of the visit."] do %>
   <% if capability?("patient.register") && @policies %>
-    <%= link_to "Add Medicaid",
-          registration_new_patient_coverage_path(params[:dfn], kind: "medicaid"),
-          id: "add-medicaid",
-          class: "button-secondary" %>
+    <% if registration_settings.ask?(:medicaid) %>
+      <%= link_to "Add Medicaid",
+            registration_new_patient_coverage_path(params[:dfn], kind: "medicaid"),
+            id: "add-medicaid",
+            class: "button-secondary" %>
+    <% end %>
     <%= link_to "Add Medicare",
           registration_new_patient_coverage_path(params[:dfn], kind: "medicare"),
           id: "add-medicare",
           class: "button-secondary" %>
-    <%= link_to "Add private insurance",
-          registration_new_patient_coverage_path(params[:dfn], kind: "private"),
-          id: "add-private",
-          class: "button-secondary" %>
+    <% if registration_settings.ask?(:private_insurance) %>
+      <%= link_to "Add private insurance",
+            registration_new_patient_coverage_path(params[:dfn], kind: "private"),
+            id: "add-private",
+            class: "button-secondary" %>
+    <% end %>
   <% end %>
 <% end %>
 

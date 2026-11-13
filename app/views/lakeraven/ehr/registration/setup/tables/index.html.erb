@@ -24,6 +24,16 @@
           The proof a clerk can record for a name change, a legal document or legal sex.
         </p>
       </li>
-    <% end %>
+<% end %>
+<% if capability?("record_flags.define") %>
+  <li>
+    <%= link_to "Local patient record flags",
+          registration_setup_local_flags_path,
+          id: "setup-local-flags" %>
+    <p class="text-sm text-slate-600">
+      Your site's own flags, and how often each assignment is reviewed.
+    </p>
+  </li>
+<% end %>
   </ul>
 </section>

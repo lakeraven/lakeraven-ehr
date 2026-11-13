@@ -13,6 +13,7 @@ module Lakeraven
     class PatientRegistration
       include ActiveModel::Model
       include ActiveModel::Attributes
+      include SiteRequiredFields
 
       EARLIEST_DOB = Date.new(1871, 1, 1)
       # LAST,FIRST MIDDLE, as RPMS files a name: upper-case letters, spaces,
@@ -30,6 +31,17 @@ module Lakeraven
       attribute :no_ssn_reason, :string
       attribute :tribe_ien, :integer
       attribute :community_ien, :integer
+
+      # A site may make the SSN mandatory in RPMS (#980): PATIENT (2) .09,
+      # which AG asks required when the site says so (AG3A). A reason there is
+      # none answers it, since AG then files a pseudo SSN there.
+      site_required ssn: [ "2", "SOCIAL SECURITY NUMBER" ]
+
+      NAMES = { ssn: "Social security number" }.freeze
+
+      def self.human_attribute_name(attribute, options = {})
+        NAMES.fetch(attribute.to_sym) { super }
+      end
 
       validates :name, presence: true
       validates :name, format: { with: NAME_FORMAT, message: "must be LAST,FIRST MIDDLE" }, length: { in: 3..30 }, allow_blank: true
@@ -61,6 +73,10 @@ module Lakeraven
       end
 
       private
+
+      def site_required_blank?(attribute)
+        attribute == :ssn ? ssn.blank? && no_ssn_reason.blank? : super
+      end
 
       def dob_in_range
         return if dob.nil?

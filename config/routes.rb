@@ -252,6 +252,12 @@ Lakeraven::EHR::Engine.routes.draw do
                                                   constraints: { ien: /\d+/ }
     post "setup/eligibility_modifiers/:ien", to: "setup/eligibility_modifiers#update", as: :setup_eligibility_modifier,
                                               constraints: { ien: /\d+/ }
+    # The site's local patient record flags (lakeraven-ehr#983).
+    get "setup/local_flags", to: "setup/local_flags#index", as: :setup_local_flags
+    get "setup/local_flags/new", to: "setup/local_flags#new", as: :new_setup_local_flag
+    post "setup/local_flags", to: "setup/local_flags#create"
+    get "setup/local_flags/:ien/edit", to: "setup/local_flags#edit", as: :edit_setup_local_flag, constraints: { ien: /\d+/ }
+    post "setup/local_flags/:ien", to: "setup/local_flags#update", as: :setup_local_flag, constraints: { ien: /\d+/ }
   end
 
   # Scheduling (rpms-ux W02): a clinic resource's day, booking into it (S-SCH-01)
@@ -279,6 +285,10 @@ Lakeraven::EHR::Engine.routes.draw do
     # The appointments needing action in the scheduler's clinics (S-SCH-13.5, #875).
     get "needing_action", to: "needing_action#index", as: :needing_action
     get "clinics/:id/open_times", to: "open_times#index", as: :clinic_open_times, constraints: { id: /\d+/ }
+    # A clinic's scheduling settings and letters (S-SCH-15); changing them takes SDZSUP.
+    get "clinics/:resource_id/settings", to: "clinic_settings#show", as: :clinic_settings, constraints: { resource_id: /\d+/ }
+    get "clinics/:resource_id/settings/edit", to: "clinic_settings#edit", as: :edit_clinic_settings, constraints: { resource_id: /\d+/ }
+    post "clinics/:resource_id/settings", to: "clinic_settings#update", constraints: { resource_id: /\d+/ }
     get "clinics/:resource_id/hours/new", to: "hours#new", as: :new_clinic_hours, constraints: { resource_id: /\d+/ }
     post "clinics/:resource_id/hours", to: "hours#create", as: :clinic_hours, constraints: { resource_id: /\d+/ }
     get "patients/:dfn/appointments", to: "patient_appointments#index", as: :patient_appointments, constraints: { dfn: /\d+/ }

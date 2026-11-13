@@ -13,6 +13,7 @@ module Lakeraven
     class PatientAddress
       include ActiveModel::Model
       include ActiveModel::Attributes
+      include SiteRequiredFields
 
       FIELDS = %i[address_line1 address_line2 address_line3 city state zip phone_home phone_work phone_other email].freeze
       EMAIL = /\A[^@\s]+@[^@\s]+\.[^@\s]+\z/
@@ -26,6 +27,13 @@ attribute :moved_on, :date
 HISTORY_FIELDS = %i[address_line1 address_line2 address_line3 city state zip phone_home].freeze
 EARLIEST_MOVE = Date.new(1871, 1, 1)
 
+      # The fields a site may make mandatory in RPMS (#980): PATIENT (2) and
+      # IHS PATIENT (9000001) fields, by the label REGISTRATION PARAMETERS lists
+      # them under. AG asks them required when the site says so (AG3A, AGAPIPAT).
+      site_required address_line1: [ "2", "STREET ADDRESS [LINE 1]" ], city: [ "2", "CITY" ], state: [ "2", "STATE" ],
+                    zip: [ "2", "ZIP CODE" ], phone_home: [ "2", "PHONE NUMBER [RESIDENCE]" ],
+                    phone_work: [ "2", "PHONE NUMBER [WORK]" ], email: [ "9000001", "CURRENT EMAIL ADDRESS" ]
+
       validates :address_line1, length: { in: 3..35 }, allow_blank: true
       validates :address_line2, :address_line3, length: { in: 3..30 }, allow_blank: true
       validates :city, length: { in: 2..28 }, allow_blank: true
@@ -36,8 +44,12 @@ EARLIEST_MOVE = Date.new(1871, 1, 1)
       validate :moved_on_in_range
       validates :email, format: { with: EMAIL, message: "must look like name@example.com" }, allow_blank: true
 
+      # The fields in the clerk's words, as the form labels them.
+      NAMES = { moved_on: "Date they moved", address_line1: "Street address", zip: "Zip code", phone_home: "Home phone",
+                phone_work: "Work phone", phone_other: "Other phone", email: "Email" }.freeze
+
       def self.human_attribute_name(attribute, options = {})
-        attribute.to_s == "moved_on" ? "Date they moved" : super
+        NAMES.fetch(attribute.to_sym) { super }
       end
 
       # The form, filled from the record PatientRecordGateway.find returns.

@@ -15,6 +15,7 @@ module Lakeraven
         rate_limit only: %i[edit update]
 
         before_action :load_kind, only: %i[edit update]
+        before_action -> { require_site_asks!(:next_of_kin, "next of kin") }, only: %i[edit update], if: -> { @kind == "next_of_kin" }
 
         # GET or POST /registration/patients/:dfn/contacts/:kind/edit. A POST is a
         # relationship or state look-up, and carries what the clerk typed.
