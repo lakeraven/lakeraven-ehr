@@ -1,5 +1,5 @@
 <%# The test-environment banner's look (#952), in the page's <head>.
-    Its own styles rather than Tailwind classes, so the banner looks the same on pages that do not link the Tailwind build (the standalone chart).
+    Its own styles rather than Tailwind classes, so the banner looks the same on any page that does not link the Tailwind build (the chart-unavailable page).
     Black on yellow, well past WCAG AAA contrast. %>
 <% if demo_mode? %>
   <%= tag.style nonce: content_security_policy_nonce do %>

@@ -57,6 +57,7 @@ module Lakeraven
       include PhiPageCache
 
       include RateLimitable
+      include CapabilityCheck
 
       rate_limit only: :show
 
@@ -124,6 +125,15 @@ module Lakeraven
       # The patient bar offers "Switch patient" to a credential that may read
       # patients (rpms-ux S-CHT-01.9).
       def patient_search_allowed? = can_read?("Patient")
+
+      # The chart renders in the engine layout, like every other page with a
+      # patient open. The layout asks for the banner and for capabilities.
+      # The banner is the chart's own (assign_patient_banner), read from the
+      # same filtered bundle as the page; the layout never reads it again.
+      # capability? comes from CapabilityCheck, as on WebController (ADR 0010).
+      helper_method :patient_banner
+
+      def patient_banner = @patient_banner
 
       private
 
@@ -666,7 +676,7 @@ module Lakeraven
 
         assign_chart_from_bundle(bundle)
         assign_patient_banner
-        render :show, layout: false
+        render :show, layout: "lakeraven/ehr/application"
       end
 
       # The banner and the allergy sections both read the filtered bundle.

@@ -166,8 +166,9 @@ Locals: `patient` (a hash with `:mrn`, `:dob`, `:sex`), `id`.
 
 On a clinical page (the chart, allergy entry, consents, screenings), the patient is shown by `shared/_patient_banner`: name, date of birth, age, sex, record number and allergies.
 The layout renders it for every page with a patient open, so a page never names the patient itself (no "Patient #4" in the heading).
-The chart is a self-contained page that styles the banner inline; everywhere else it is styled by the `banner`, `demoinfo` and `patient-banner__*` utilities in engine.css.
-Change both together, so the patient looks the same on every page.
+The chart renders in the layout too, so the banner is one partial with one set of styles (`banner`, `demoinfo`, `patient-banner__*` in engine.css).
+It shows the patient, then Switch patient, then the allergies as one alert: red, or green when RPMS says none are recorded.
+A page with more to say about allergies fills that alert with `content_for :patient_allergies` (the chart adds reactions, severity and its allergy actions) rather than adding a second one.
 
 ### entry-form, field-row, form-actions
 

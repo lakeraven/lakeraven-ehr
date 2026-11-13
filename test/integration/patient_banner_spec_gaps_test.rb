@@ -359,6 +359,26 @@ class PatientBannerSpecGapsTest < ActionDispatch::IntegrationTest
     end
   end
 
+# The chart is a page like the others: the engine layout's header and nav,
+# then the banner with Switch patient beside the patient, and the allergies
+# once, as the banner's alert (not a second strip below it).
+test "HTML chart has the main nav and shows its allergies once, after Switch patient" do
+  with_demo_clinical_seeds do
+    sign_in_clinician!
+    open_patient_context!(1)
+
+    get "#{MOUNT}/patients/1"
+
+    assert_response :ok
+    doc = Nokogiri::HTML(response.body)
+    assert doc.at_css("header nav[aria-label=Main]"), "Expected the main nav on the chart"
+    assert_equal 1, doc.css("[data-allergies-state]").size, "the chart shows its allergies once"
+    banner_nodes = doc.css("#patient-banner .banner, #switch-patient, #patient-banner [data-allergies-state]")
+    assert_equal [ "banner", "switch-patient", "allergies" ],
+                 banner_nodes.map { |n| n["id"] || (n["data-allergies-state"] ? "allergies" : n["class"]) }
+  end
+end
+
   test "allergy without display text still shows visible label in banner" do
     unnamed = Lakeraven::EHR::AllergyIntolerance.new(
       ien: "code-only-1",
