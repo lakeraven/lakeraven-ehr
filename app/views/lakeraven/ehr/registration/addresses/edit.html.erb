@@ -81,7 +81,7 @@
           error: @address.errors[:moved_on].first do |aria| %>
       <%= f.date_field :moved_on,
             value: @address.moved_on&.iso8601,
-            max: Date.current.iso8601,
+            max: Lakeraven::EHR::SiteDate.today.iso8601,
             aria: aria %>
     <% end %>
   </fieldset>

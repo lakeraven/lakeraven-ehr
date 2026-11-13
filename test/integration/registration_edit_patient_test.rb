@@ -191,6 +191,27 @@ class RegistrationEditPatientTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "S-REG-21.1 the date moved defaults to RPMS's today and may not pass it, when the app's clock is a day ahead (#1065)" do
+    sign_in("registration_menu")
+    rpms_today = Date.current - 1
+    Lakeraven::EHR::SiteDate.reader = -> { rpms_today }
+    with_rpms(saved) do |updates|
+      get "/lakeraven-ehr/registration/patients/#{DFN}/address/edit"
+      assert_select "input[type=date][name='address[moved_on]'][value=?][max=?]", rpms_today.iso8601, rpms_today.iso8601
+
+      patch "/lakeraven-ehr/registration/patients/#{DFN}/address",
+            params: { address: address(city: "Elsewhere", moved_on: Date.current.iso8601) }
+      assert_response :unprocessable_content
+      assert_select "#address-errors", text: /Date they moved cannot be in the future/
+
+      patch "/lakeraven-ehr/registration/patients/#{DFN}/address", params: { address: address(city: "Elsewhere") }
+      assert_redirected_to "/lakeraven-ehr/registration/patients/#{DFN}"
+      assert_equal [ [ DFN, { city: "ELSEWHERE", moved_on: rpms_today } ] ], updates
+    end
+  ensure
+    Lakeraven::EHR::SiteDate.reader = -> { Date.current }
+  end
+
   test "S-REG-21.1 the patient page lists the previous addresses with the dates lived there" do
     sign_in("registration_menu")
     history = [ { ien: 2, changed_on: Date.new(2026, 11, 3), line1: "317 DUNEGRASS ST", line2: "", line3: "", city: "ANYWHERE",
