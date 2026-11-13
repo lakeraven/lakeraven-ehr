@@ -1,0 +1,53 @@
+<%= form_field :name, "Name", id: "local_flag_name", hint: "3 to 30 letters, digits and spaces, starting with a letter.", error: entry.errors[:name].first do |aria| %>
+  <%= text_field_tag "local_flag[name]",
+        entry.name,
+        id: "local_flag_name",
+        required: true,
+        maxlength: 30,
+        autocomplete: "off",
+        aria: aria %>
+<% end %>
+<%= form_field :type_ien, "Type", id: "local_flag_type_ien", error: entry.errors[:type_ien].first do |aria| %>
+  <%= select_tag "local_flag[type_ien]",
+        options_for_select(types.map { |type| [ type[:name].capitalize, type[:ien] ] }, entry.type_ien),
+        include_blank: "Choose a type",
+        id: "local_flag_type_ien",
+        required: true,
+        aria: aria %>
+<% end %>
+<div class="flex items-center gap-2">
+  <%= hidden_field_tag "local_flag[active]",
+        "0",
+        id: nil %>
+  <%= check_box_tag "local_flag[active]",
+        "1",
+        entry.active,
+        id: "local_flag_active" %>
+  <%= label_tag "local_flag_active",
+        "Active" %>
+</div>
+<%= form_field :review_days, "Review frequency (days)", id: "local_flag_review_days", hint: "How often an assignment is reviewed. 0 means no review.", error: entry.errors[:review_days].first do |aria| %>
+  <%= number_field_tag "local_flag[review_days]",
+        entry.review_days,
+        id: "local_flag_review_days",
+        min: 0,
+        max: 9999,
+        required: true,
+        aria: aria %>
+<% end %>
+<%= form_field :notification_days, "Notification (days)", id: "local_flag_notification_days", hint: "How many days before the review date the review group is told. 0 means no notice.", error: entry.errors[:notification_days].first do |aria| %>
+  <%= number_field_tag "local_flag[notification_days]",
+        entry.notification_days,
+        id: "local_flag_notification_days",
+        min: 0,
+        max: 9998,
+        required: true,
+        aria: aria %>
+<% end %>
+<%= form_field :description, "Description", id: "local_flag_description" do |aria| %>
+  <%= text_area_tag "local_flag[description]",
+        entry.description,
+        id: "local_flag_description",
+        rows: 4,
+        aria: aria %>
+<% end %>

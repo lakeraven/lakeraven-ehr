@@ -44,6 +44,14 @@ module Lakeraven
         refute Capabilities.allows?(Roles.symbolize_keys(%w[AGZMENU]), "registration.setup")
       end
 
+      test "#983 only DGPF MANAGER defines local record flags, as BPRM's CanAccessLocalFlagsTableMaintenance" do
+        manager = Roles.symbolize_keys([ "DGPF MANAGER" ])
+        assert Capabilities.allows?(manager, "record_flags.define")
+        assert Capabilities.allows?(manager, "registration.setup")
+        refute Capabilities.allows?(manager, "registration.table_maintenance")
+        refute Capabilities.allows?(Roles.symbolize_keys(%w[AGZMENU AGZMGR]), "record_flags.define")
+      end
+
       test "no keys, unknown keys and programmer mode grant nothing" do
         assert_empty Capabilities.for([])
         assert_empty Capabilities.for(nil)

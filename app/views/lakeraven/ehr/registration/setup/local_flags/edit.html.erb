@@ -1,0 +1,52 @@
+<% page_title "Edit a flag", "Setup" %>
+
+<%= page_header "Edit #{@flag[:name]}",
+      "Unchecking Active inactivates the flag; patients it is assigned to keep their assignments." %>
+
+<%= flash_alert id: "local-flag-alert" %>
+
+<%= form_with url: registration_setup_local_flag_path(@flag[:ien]),
+      method: :post,
+      local: true,
+      id: "local-flag-form",
+      class: "card flex flex-col gap-4" do %>
+  <%= render "fields", entry: @entry, types: @types %>
+  <%= form_field :reason, "Reason for the change", id: "local_flag_reason", error: @entry.errors[:reason].first do |aria| %>
+    <%= text_area_tag "local_flag[reason]",
+          @entry.reason,
+          id: "local_flag_reason",
+          rows: 3,
+          required: true,
+          aria: aria %>
+  <% end %>
+  <%= submit_tag "Save the flag",
+        class: "button-primary self-start" %>
+<% end %>
+
+<section
+  aria-labelledby="local-flag-history-heading"
+  class="card mt-6 flex flex-col gap-3"
+>
+  <h2
+    id="local-flag-history-heading"
+    class="text-lg font-semibold"
+  >
+    History
+  </h2>
+  <ol
+    id="local-flag-history"
+    class="flex flex-col gap-2"
+  >
+    <% @history.reverse_each do |entry| %>
+      <li data-history="<%= entry[:ien] %>">
+        <span class="text-sm text-slate-600"><%= entry[:edited_at]&.strftime("%b %-d, %Y %H:%M") %></span>
+        <%= entry[:reason].join(" ") %>
+      </li>
+    <% end %>
+  </ol>
+</section>
+
+<p class="mt-6">
+  <%= link_to "Back to the flags",
+        registration_setup_local_flags_path %>
+</p>

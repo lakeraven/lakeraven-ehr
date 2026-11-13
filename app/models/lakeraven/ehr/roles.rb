@@ -64,6 +64,9 @@ module Lakeraven
         scheduling_supervisor: "SDZSUP",
         scheduling_registration: "SDZREGMENU", # mini-registration from scheduling
 
+        # Patient record flags (DGPF)
+        record_flags_manager: "DGPF MANAGER", # defines the site's local (Category II) flags
+
         # Behavioral health (AMH)
         behavioral_health_user: "AMHZMENU",
         behavioral_health_manager: "AMHZMGR"

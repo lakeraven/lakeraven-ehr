@@ -107,6 +107,11 @@ module Lakeraven
         "lakeraven/ehr/registration/setup/eligibility_modifiers#create", # Adding a modifier (#982), not disclosure
         "lakeraven/ehr/registration/setup/eligibility_modifiers#edit",   # Renaming a modifier (#982), not disclosure
         "lakeraven/ehr/registration/setup/eligibility_modifiers#update", # Renaming a modifier (#982), not disclosure
+        "lakeraven/ehr/registration/setup/local_flags#index",  # The site's local flag definitions (#983): site setup, no patient or assignment data
+        "lakeraven/ehr/registration/setup/local_flags#new",    # Defining a flag (#983), not disclosure
+        "lakeraven/ehr/registration/setup/local_flags#create", # Defining a flag (#983), not disclosure
+        "lakeraven/ehr/registration/setup/local_flags#edit",   # A flag definition and its edit history (#983): no patient data
+        "lakeraven/ehr/registration/setup/local_flags#update", # Changing a flag definition (#983), not disclosure
         "lakeraven/ehr/registration/race_ethnicities#edit",   # Race and ethnicity (S-REG-20.2): registration demographics, no clinical record
         "lakeraven/ehr/registration/race_ethnicities#update", # Saving race and ethnicity (S-REG-20.2), not disclosure
         "lakeraven/ehr/registration/applications#new",    # The form to record an application for coverage (S-REG-03.3): no clinical record
