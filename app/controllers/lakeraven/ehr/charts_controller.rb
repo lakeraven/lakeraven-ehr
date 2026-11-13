@@ -57,6 +57,7 @@ module Lakeraven
       include PhiPageCache
 
       include RateLimitable
+      include CapabilityCheck
 
       rate_limit only: :show
 
@@ -129,15 +130,10 @@ module Lakeraven
       # patient open. The layout asks for the banner and for capabilities.
       # The banner is the chart's own (assign_patient_banner), read from the
       # same filtered bundle as the page; the layout never reads it again.
-      helper_method :patient_banner, :capability?
+      # capability? comes from CapabilityCheck, as on WebController (ADR 0010).
+      helper_method :patient_banner
 
       def patient_banner = @patient_banner
-
-      # The same question WebController#capability? answers, for the header's
-      # links (ADR 0010).
-      def capability?(name)
-        Capabilities.allows?(Array(session[:security_keys]), name)
-      end
 
       private
 

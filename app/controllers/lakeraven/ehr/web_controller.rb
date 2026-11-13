@@ -20,6 +20,7 @@ module Lakeraven
       include RpmsUserScope
       include PhiPageCache
       include RateLimitable
+      include CapabilityCheck
 
       helper ApplicationHelper
       layout "lakeraven/ehr/application"
@@ -131,18 +132,6 @@ module Lakeraven
       rescue StandardError => e
         Rails.logger.error("Session token revocation failed: #{e.class}")
       end
-
-      def current_security_keys
-        Array(session[:security_keys])
-      end
-
-      # Whether the signed-in user holds the named capability (Capabilities,
-      # ADR 0010), from the keys RPMS reported at sign-on. Views ask the same
-      # question, so a control a user sees is one the server allows.
-      def capability?(name)
-        Capabilities.allows?(current_security_keys, name)
-      end
-      helper_method :capability?
 
       # Refuse the request unless the user holds the capability: the one
       # server-side check every screen's before_action uses.
