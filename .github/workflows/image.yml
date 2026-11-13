@@ -57,7 +57,8 @@ jobs:
   # GitHub's OIDC token assumes a role that trusts this repository's main branch only and may send
   # only the demo's deploy document to the demo's web host. No stored keys.
   # Repository settings: secret DEMO_DEPLOY_ROLE_ARN; variables DEMO_DEPLOY_DOCUMENT and
-  # DEMO_DEPLOY_TARGET (the host's Name tag). Without the secret, the job says so and does nothing.
+  # DEMO_DEPLOY_TARGET (the host's Name tag). Without them the job fails: a push to main that does not reach the
+  # demo is a misconfiguration, not a success (it passed silently for every push until 2026-11-13).
   deploy-demo:
     name: Deploy to the demo
     needs: image
@@ -75,7 +76,9 @@ jobs:
     steps:
       - name: No deploy role configured
         if: env.HAS_ROLE != 'true'
-        run: echo "::notice::DEMO_DEPLOY_ROLE_ARN is not set; the demo was not deployed."
+        run: |
+          echo "::error::DEMO_DEPLOY_ROLE_ARN is not set, so main was not deployed to the demo. Set it, with the variables DEMO_DEPLOY_DOCUMENT and DEMO_DEPLOY_TARGET (cloud-rpms terraform/modules/lakeraven-ehr, Deploy from GitHub)."
+          exit 1
 
       # Two pushes build at once, and the deploy queue keeps their deploys apart but not in order: an
       # older run that reaches this job after a newer one would put the demo back on the older image.
