@@ -284,6 +284,19 @@ Lakeraven::EHR::Engine.routes.draw do
     get "appointments", to: "appointment_lists#index", as: :appointment_list
     # The appointments needing action in the scheduler's clinics (S-SCH-13.5, #875).
     get "needing_action", to: "needing_action#index", as: :needing_action
+    # Table maintenance (S-SCH-17, S-SCH-18): access types (SDZSUP) and resource groups.
+    get "access_types", to: "access_types#index", as: :access_types
+    get "access_types/new", to: "access_types#new", as: :new_access_type
+    post "access_types", to: "access_types#create"
+    get "access_types/:id/edit", to: "access_types#edit", as: :edit_access_type, constraints: { id: /\d+/ }
+    post "access_types/:id", to: "access_types#update", as: :access_type, constraints: { id: /\d+/ }
+    get "resource_groups", to: "resource_groups#index", as: :resource_groups
+    get "resource_groups/new", to: "resource_groups#new", as: :new_resource_group
+    post "resource_groups", to: "resource_groups#create"
+    get "resource_groups/:id", to: "resource_groups#show", as: :resource_group, constraints: { id: /\d+/ }
+    post "resource_groups/:id/members", to: "resource_groups#add_member", as: :resource_group_members, constraints: { id: /\d+/ }
+    post "resource_groups/:id/members/:item_id/remove", to: "resource_groups#remove_member", as: :remove_resource_group_member,
+                                                         constraints: { id: /\d+/, item_id: /\d+/ }
     get "clinics/:id/open_times", to: "open_times#index", as: :clinic_open_times, constraints: { id: /\d+/ }
     # A clinic's scheduling settings and letters (S-SCH-15); changing them takes SDZSUP.
     get "clinics/:resource_id/settings", to: "clinic_settings#show", as: :clinic_settings, constraints: { resource_id: /\d+/ }

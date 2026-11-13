@@ -1,0 +1,60 @@
+<% page_title "Access types | Scheduling" %>
+
+<%= page_header "Access types",
+      "The kinds of time a clinic's hours are divided into." do %>
+  <%= link_to "Add an access type",
+        scheduling_new_access_type_path,
+        id: "new-access-type" %>
+  <%= link_to "Back to scheduling",
+        scheduling_home_path %>
+<% end %>
+
+<% if @notice.present? %>
+  <%= alert_box :notice, @notice, id: "access-type-notice" %>
+<% end %>
+
+<p>
+  An access type that prevents access takes no appointments.
+  Use one to hold time for lunch, a holiday or a meeting.
+</p>
+
+<table
+  id="access-types"
+  class="data-table"
+>
+  <caption class="sr-only">Access types</caption>
+  <thead>
+    <tr>
+      <th scope="col">Name</th>
+      <th scope="col">Colour</th>
+      <th scope="col">Prevents access</th>
+      <th scope="col">Inactive</th>
+      <th scope="col"><span class="sr-only">Actions</span></th>
+    </tr>
+  </thead>
+  <tbody>
+    <% @access_types.each do |type| %>
+      <tr data-access-type="<%= type[:id] %>">
+        <td><%= type[:name] %></td>
+        <td data-color="<%= type[:color] %>">
+          <% if type[:color] %>
+            <span
+              class="inline-block w-4 h-4 align-middle border"
+              style="background-color: <%= type[:color] %>"
+              aria-hidden="true"
+            ></span>
+            <%= type[:color] %>
+          <% else %>
+            None
+          <% end %>
+        </td>
+        <td data-prevent-access="<%= type[:prevent_access] %>"><%= type[:prevent_access] ? "Yes" : "No" %></td>
+        <td data-inactive="<%= type[:inactive] %>"><%= type[:inactive] ? "Yes" : "No" %></td>
+        <td>
+          <%= link_to "Change",
+                scheduling_edit_access_type_path(type[:id]) %>
+        </td>
+      </tr>
+    <% end %>
+  </tbody>
+</table>
