@@ -70,4 +70,8 @@ Rails.application.configure do
   #
   # Skip DNS rebinding protection for the default health check endpoint.
   # config.host_authorization = { exclude: ->(request) { request.path == "/up" } }
+
+  # Disclosure surfaces (#522): none opened. The FHIR API, bulk export and
+  # C-CDA transitions of care answer 404; a host opens one by naming it in
+  # config.x.lakeraven_ehr.open_disclosure_surfaces.
 end

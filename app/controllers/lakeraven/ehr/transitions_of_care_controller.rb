@@ -9,6 +9,11 @@ module Lakeraven
 
       rate_limit only: :create
 
+      disclosure_surface :ccda
+      # A bearer request here is a ccda call, not a fhir_api one: it
+      # restates SmartAuthentication's header-token rule (#522).
+      bearer_disclosure_surface :ccda
+
       # Types in the C-CDA body. A scope named after this controller is not
       # one of them.
       DISCLOSED_TYPES = %w[Patient AllergyIntolerance Condition MedicationRequest].freeze

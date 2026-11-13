@@ -41,4 +41,8 @@ Rails.application.configure do
 
   # Raise error when a before_action's only/except options reference missing actions.
   config.action_controller.raise_on_missing_callback_actions = true
+
+  # Disclosure surfaces (#522): the suite exercises the FHIR API, bulk export
+  # and C-CDA, so all three are open here. A host that names none is closed.
+  config.x.lakeraven_ehr.open_disclosure_surfaces = %i[fhir_api bulk_export ccda]
 end

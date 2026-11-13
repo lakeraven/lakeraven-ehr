@@ -14,7 +14,15 @@ Lakeraven::EHR::Engine.routes.draw do
   # RESTful path: the chart is the human-facing representation of a patient,
   # so it lives at /patients/:dfn (the FHIR API keeps /Patient per convention;
   # that resource also owns the patient_path helper, hence :patient_chart).
-  get "patients/:dfn(.:format)", to: "charts#show", as: :patient_chart, constraints: { dfn: %r{[^/.?]+} }
+  # Disclosure surfaces (#522): the FHIR representation of the chart, and any
+  # chart request carrying a header bearer token, are part of fhir_api, so
+  # while fhir_api is closed they do not match (a plain 404). A browser
+  # session with no bearer header (a proxy's `Basic` header is not one)
+  # always reaches the HTML chart.
+  # ChartsController applies the same rule itself, for host routes.
+  constraints Lakeraven::EHR::DisclosureSurfaces::ChartRouteConstraint.new do
+    get "patients/:dfn(.:format)", to: "charts#show", as: :patient_chart, constraints: { dfn: %r{[^/.?]+} }
+  end
   # Demo-only clickable walk-in visit (the UI counterpart of
   # features/encounter/demo_visit.feature). Gated to dev + CHART_DEMO_OPEN +
   # SPIKE_MOCK_RPC in the controller; 404s everywhere else.
@@ -77,43 +85,67 @@ Lakeraven::EHR::Engine.routes.draw do
   # and Encounter's show, and each raised instead of answering.
   get "metadata", to: "capability_statements#show"
 
+  # Disclosure surfaces (#522, docs/compliance/part2-disclosure-surface-audit.md
+  # §5(a)): each governed group below matches only while the host has opened
+  # its surface in config.x.lakeraven_ehr.open_disclosure_surfaces. Closed (the
+  # default) is a plain 404 before any controller code runs, so no
+  # authentication and no broker call. Each governed controller also refuses
+  # a closed surface itself (DisclosureSurfaceGate), which covers host routes
+  # drawn straight at it. ccda_imports and Measure/$import are FHIR API calls
+  # too, so fhir_api governs them below. Every controller that can
+  # authenticate a header bearer token (SmartAuthentication) also refuses a
+  # bearer request while fhir_api is closed, whatever route reached it.
+  # /metadata, SMART discovery and launch, and OAuth are not governed.
+  #
   # Doorkeeper models (Application, AccessToken) are used directly;
   # routes are NOT mounted here because the engine provides its own
   # BackendServicesController for OAuth token issuance.
-  # No create: registration is AG's, on the front desk's screens (#542).
-  resources :patients, path: "Patient", only: %i[index show], param: :dfn
-  resources :practitioners, path: "Practitioner", only: %i[index show], param: :ien
-  resources :allergy_intolerances, path: "AllergyIntolerance", only: %i[index show]
-  resources :conditions, path: "Condition", only: %i[index show]
-  resources :medication_requests, path: "MedicationRequest", only: %i[index show]
-  resources :observations, path: "Observation", only: %i[index show]
-  resources :encounters, path: "Encounter", only: %i[index show]
-  resources :organizations, path: "Organization", only: %i[show], param: :ien
-  resources :locations, path: "Location", only: %i[index show], param: :ien
-  resources :service_requests, path: "ServiceRequest", only: %i[index show]
-  resources :immunizations, path: "Immunization", only: %i[index show]
-  resources :procedures, path: "Procedure", only: %i[index show]
-  resources :coverage_eligibility_requests, path: "CoverageEligibilityRequest", only: %i[create]
-  resources :measures, path: "Measure", only: %i[index]
-  resources :measure_reports, path: "MeasureReport", only: %i[index]
-  resources :audit_events, path: "AuditEvent", only: %i[index show]
-  resources :value_sets, path: "ValueSet", only: %i[index show] do
-    member do
-      get "$expand", action: :expand
+  constraints Lakeraven::EHR::DisclosureSurfaces::RouteConstraint.new(:fhir_api) do
+    # No create: registration is AG's, on the front desk's screens (#542).
+    resources :patients, path: "Patient", only: %i[index show], param: :dfn
+    resources :practitioners, path: "Practitioner", only: %i[index show], param: :ien
+    resources :allergy_intolerances, path: "AllergyIntolerance", only: %i[index show]
+    resources :conditions, path: "Condition", only: %i[index show]
+    resources :medication_requests, path: "MedicationRequest", only: %i[index show]
+    resources :observations, path: "Observation", only: %i[index show]
+    resources :encounters, path: "Encounter", only: %i[index show]
+    resources :organizations, path: "Organization", only: %i[show], param: :ien
+    resources :locations, path: "Location", only: %i[index show], param: :ien
+    resources :service_requests, path: "ServiceRequest", only: %i[index show]
+    resources :immunizations, path: "Immunization", only: %i[index show]
+    resources :procedures, path: "Procedure", only: %i[index show]
+    resources :coverage_eligibility_requests, path: "CoverageEligibilityRequest", only: %i[create]
+    resources :measures, path: "Measure", only: %i[index]
+    resources :measure_reports, path: "MeasureReport", only: %i[index]
+    resources :audit_events, path: "AuditEvent", only: %i[index show]
+    resources :value_sets, path: "ValueSet", only: %i[index show] do
+      member do
+        get "$expand", action: :expand
+      end
     end
   end
 
-  # Transitions of Care — ONC §170.315(b)(1)
-  resources :transitions_of_care, only: [ :create ]
-  resources :ccda_imports, only: [ :create ]
+  # Transitions of Care — ONC §170.315(b)(1). Outbound C-CDA is the ccda
+  # surface. Inbound ccda_imports is a FHIR API call, so fhir_api: it drops
+  # Part 2 security labels today (#522 Half 2) and must not run while the API
+  # is closed.
+  constraints Lakeraven::EHR::DisclosureSurfaces::RouteConstraint.new(:ccda) do
+    resources :transitions_of_care, only: [ :create ]
+  end
+  constraints Lakeraven::EHR::DisclosureSurfaces::RouteConstraint.new(:fhir_api) do
+    resources :ccda_imports, only: [ :create ]
+  end
 
   # Exports — ONC §170.315(b)(10) + (g)(10)
-  resources :exports, only: [ :create, :show, :destroy ] do
-    # The documented file URL ends in "patient.ndjson". `format: false`
-    # drops the format suffix; the file_name constraint is what lets the
-    # dot through, because "." is still a segment separator without it.
-    resources :files, only: [ :show ], controller: "export_files", param: :file_name,
-      format: false, file_name: %r{[^/]+}
+  # The bulk_export surface: kick-off, status, delete and every file.
+  constraints Lakeraven::EHR::DisclosureSurfaces::RouteConstraint.new(:bulk_export) do
+    resources :exports, only: [ :create, :show, :destroy ] do
+      # The documented file URL ends in "patient.ndjson". `format: false`
+      # drops the format suffix; the file_name constraint is what lets the
+      # dot through, because "." is still a segment separator without it.
+      resources :files, only: [ :show ], controller: "export_files", param: :file_name,
+        format: false, file_name: %r{[^/]+}
+    end
   end
 
   # SMART discovery + EHR Launch. smart/launch is the EHR side: a signed-in
@@ -140,8 +172,10 @@ Lakeraven::EHR::Engine.routes.draw do
     constraints: ->(req) { req.request_parameters["grant_type"] == "authorization_code" }
   post "oauth/token", to: "backend_services#token"
 
-  # Measure $import
-  post "Measure/$import", to: "measures#import"
+  # Measure $import — a FHIR API call, governed by fhir_api (#522).
+  constraints Lakeraven::EHR::DisclosureSurfaces::RouteConstraint.new(:fhir_api) do
+    post "Measure/$import", to: "measures#import"
+  end
 
   # Web UI — login, dashboard (accessibility / ops surface)
   get "login" => "sessions#new", as: :login

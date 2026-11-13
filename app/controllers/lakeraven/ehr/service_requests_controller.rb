@@ -5,6 +5,8 @@ module Lakeraven
     class ServiceRequestsController < ApplicationController
       include PatientScopedRead
 
+      disclosure_surface :fhir_api
+
       private
 
       def patient_resources(dfn)

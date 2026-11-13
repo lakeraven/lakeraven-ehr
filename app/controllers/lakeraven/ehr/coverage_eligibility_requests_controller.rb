@@ -7,6 +7,8 @@ module Lakeraven
 
       rate_limit only: :create
 
+      disclosure_surface :fhir_api
+
       # Returns the patient's coverage, so: read as well as write, and bound
       # to the compartment.
       # The response names the patient and their coverage.

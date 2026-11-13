@@ -117,6 +117,47 @@ Then add this line to the host's `app/assets/tailwind/application.css`:
 The engine's styles cannot restyle the host's own pages.
 They define no theme, and every element default is scoped to `.lr-ehr`, the class the engine layout puts on `<body>`.
 
+### Disclosure surfaces
+
+Three egress paths are closed unless the host opens them by name (#522):
+
+```ruby
+# config/environments/production.rb (or an initializer)
+config.x.lakeraven_ehr.open_disclosure_surfaces = %i[fhir_api]
+```
+
+| Name | Governs |
+| --- | --- |
+| `fhir_api` | The FHIR REST resource routes (`/Patient`, `/Condition`, ... `/ValueSet/:id/$expand`, `/Measure`, `/MeasureReport`, `/AuditEvent`, `/CoverageEligibilityRequest`), the chart's FHIR JSON (`/patients/:dfn.json`, `?_format=json`, `Accept: application/fhir+json`), `/Measure/$import`, the inbound C-CDA import (`POST /ccda_imports`), and any request carrying an `Authorization: Bearer` header to a controller that can authenticate one (the chart, screenings, patient contexts, allergies, consents, the consent kiosk). |
+| `bulk_export` | Bulk export: `/exports` kick-off, status, delete and its files. |
+| `ccda` | Outbound C-CDA: `/transitions_of_care`. |
+
+The default is closed.
+Only an Array opens anything, and only entries naming one of the three (Strings and Symbols alike).
+Names are case-sensitive: `:FHIR_API` or `"Fhir_Api"` opens nothing.
+An absent key, `nil`, `true`, a bare String or Symbol, a Hash, or an unknown name opens nothing.
+The value is read on every request.
+A closed surface answers a bodiless 404 before the rate limiter, before authentication and before any broker call, with no clinical content.
+A client over its rate limit gets the same 404, and no rate-limit audit row is written.
+
+Enforcement is at the controller, not only the router.
+The engine's routes carry routing constraints, and each governed controller also declares its surface (`disclosure_surface :fhir_api`, from `Lakeraven::EHR::DisclosureSurfaceGate`) and refuses a closed one itself.
+So a host route drawn straight at a governed controller (`get "fhir/Patient/:dfn", to: "lakeraven/ehr/patients#show"`) is closed too.
+Both use the same predicate (`DisclosureSurfaces.open?`, and for the chart `ChartRepresentation.fhir_api_request?`).
+The key may be a Symbol or a String, on an `OrderedOptions` or a plain Hash (`{ "open_disclosure_surfaces" => [:fhir_api] }` opens `fhir_api`); the value rules above are unchanged.
+
+The browser surfaces are governed by how they are reached.
+A signed-in browser session reads the HTML chart, screenings, allergies, consents and the consent kiosk whatever is configured.
+A request carrying an `Authorization: Bearer` header (the scheme matched case-insensitively, any token value, valid or not, even alongside a session) to any controller that includes `SmartAuthentication` counts as `fhir_api`, because it hands the same clinical content to a machine client: while `fhir_api` is closed it is a 404 before forgery protection, authentication or any broker call.
+The rule is declared once, by `SmartAuthentication` itself, so a new controller that includes it is covered automatically; the export and transitions-of-care controllers restate it as their own surface (`bearer_disclosure_surface`).
+Any other scheme (a proxy-injected `Authorization: Basic ...`) is not a bearer and falls through to the session, as authentication does.
+
+`Measure/$import` and `ccda_imports` are FHIR API calls and are `fhir_api`: inbound C-CDA ingest drops Part 2 security labels today (#522, Half 2), so it must not run while the API is closed.
+
+Never governed: the browser-session surfaces above, `/metadata`, `/.well-known/smart-configuration`, SMART launch and OAuth.
+Known gap (follow-up): `/metadata` still lists the FHIR resources while `fhir_api` is closed.
+The dummy app opens all three in development and test, and none in production.
+
 ## Contributing
 Contribution directions go here.
 

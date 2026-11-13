@@ -354,8 +354,11 @@
     </div>
 
     <div class="footer">
-      <%= product_name %> &middot; read-only demo chart &middot; synthetic data, no PHI.<br>
-      The same URL returns a FHIR R4 Bundle: append <code>.json</code> or send <code>Accept: application/fhir+json</code>.
+      <%= product_name %> &middot; read-only demo chart &middot; synthetic data, no PHI.
+      <%# Only true while the host has opened the fhir_api disclosure surface (#522). %>
+      <% if Lakeraven::EHR::DisclosureSurfaces.open?(:fhir_api) %>
+        <br>The same URL returns a FHIR R4 Bundle: append <code>.json</code> or send <code>Accept: application/fhir+json</code>.
+      <% end %>
     </div>
   </div>
   <%= render "lakeraven/ehr/shared/consent_kiosk_channel" %>

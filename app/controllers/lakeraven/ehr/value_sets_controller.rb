@@ -4,6 +4,7 @@ module Lakeraven
   module EHR
     class ValueSetsController < ApplicationController
       rate_limit only: %i[index show expand]
+      disclosure_surface :fhir_api
 
       def index
         service = TerminologyService.new

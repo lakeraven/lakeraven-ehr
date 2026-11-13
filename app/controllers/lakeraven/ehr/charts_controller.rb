@@ -57,8 +57,16 @@ module Lakeraven
       include PhiPageCache
 
       include RateLimitable
+      include DisclosureSurfaceGate
 
       rate_limit only: :show
+      # The chart's FHIR representation, and any read carrying a header bearer
+      # token, are fhir_api (#522). The gate refuses them while fhir_api is
+      # closed, ahead of the rate limiter, every callback and authentication.
+      # (The bearer half is also SmartAuthentication's own rule; this one adds
+      # the FHIR representation.) A browser session reads the HTML chart
+      # ungoverned, even behind a proxy that adds a `Basic` header.
+      disclosure_surface :fhir_api, if: :fhir_api_request?
 
       FHIR_CONTENT_TYPE = "application/fhir+json"
 
@@ -319,11 +327,19 @@ module Lakeraven
 
       # -- Content negotiation --------------------------------------------------
 
+      # Shared with the fhir_api disclosure surface (#522), so the request the
+      # chart would answer with FHIR JSON is the request a closed surface refuses.
       def fhir_requested?
-        return true if params[:format].to_s == "json"
-        return true if params[:_format].to_s == "json"
+        ChartRepresentation.fhir_requested?(request)
+      end
 
-        request.headers["Accept"].to_s.include?("application/fhir+json")
+      # -- Disclosure surface (#522) ---------------------------------------------
+
+      # The same rule the engine's chart route constraint applies, so a host
+      # route at this controller (the dummy app's root /patients/:dfn) is
+      # refused exactly where the engine route would not match.
+      def fhir_api_request?
+        ChartRepresentation.fhir_api_request?(request)
       end
 
       # -- Data loading (per-type scope enforced; a mock miss yields []) --------

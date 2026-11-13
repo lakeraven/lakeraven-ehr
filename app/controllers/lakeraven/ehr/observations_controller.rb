@@ -5,6 +5,8 @@ module Lakeraven
     class ObservationsController < ApplicationController
       include PatientScopedRead
 
+      disclosure_surface :fhir_api
+
       # category and code are token parameters: FHIRSearchBundle filters the
       # served resources on them (FHIR::SearchCapabilities), system included.
 

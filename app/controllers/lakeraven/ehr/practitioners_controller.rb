@@ -4,6 +4,7 @@ module Lakeraven
   module EHR
     class PractitionersController < ApplicationController
       rate_limit only: %i[index show]
+      disclosure_surface :fhir_api
 
       def index
         practitioners = if params[:name].present?

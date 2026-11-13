@@ -6,6 +6,12 @@ module Lakeraven
       include SmartAuthentication
       include AuditableClinicalAccess
       include RateLimitable
+      # Each subclass names the disclosure surface it serves (#522), per
+      # controller rather than here: the export and transitions-of-care
+      # controllers (bulk_export and ccda, not fhir_api) share this base.
+      # SmartAuthentication already included the gate and its header-bearer
+      # rule; this include restates the dependency and is a no-op.
+      include DisclosureSurfaceGate
       include FHIRReadEgress
       include FHIRSearchBundle
       include FeatureUnavailableRendering
