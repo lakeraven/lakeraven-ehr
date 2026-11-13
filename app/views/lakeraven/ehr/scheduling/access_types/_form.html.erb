@@ -1,0 +1,42 @@
+<%= flash_alert id: "access-type-alert" %>
+
+<%= form_errors form,
+      "The access type was not saved.",
+      id: "access-type-errors" %>
+
+<%= form_with scope: :access_type,
+      url: form.persisted? ? scheduling_access_type_path(form.id) : scheduling_access_types_path,
+      method: :post,
+      local: true,
+      id: "access-type-form",
+      class: "card flex flex-col gap-4" do |f| %>
+  <%= form_field :name, "Name", form: f, error: form.errors[:name].first, hint: "3 to 30 characters." do |aria| %>
+    <%= f.text_field :name,
+          value: form.name,
+          maxlength: 30,
+          required: true,
+          aria: aria %>
+  <% end %>
+  <%= form_field :color, "Colour", form: f, error: form.errors[:color].first do |aria| %>
+    <%= f.color_field :color,
+          value: form.color,
+          aria: aria %>
+  <% end %>
+  <label class="flex items-center gap-2">
+    <%= f.check_box :prevent_access,
+          checked: form.prevent_access %>
+    Prevent access: blocks of this type take no appointments
+  </label>
+  <label class="flex items-center gap-2">
+    <%= f.check_box :inactive,
+          checked: form.inactive %>
+    Inactive: no longer offered for a clinic's hours
+  </label>
+  <%= f.submit "Save access type",
+        class: "button-primary self-start" %>
+<% end %>
+
+<p>
+  <%= link_to "Back to the access types",
+        scheduling_access_types_path %>
+</p>

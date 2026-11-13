@@ -162,6 +162,17 @@ module Lakeraven
         "lakeraven/ehr/scheduling/clinic_settings#show",   # A clinic's settings, letters and default provider: no patient data
         "lakeraven/ehr/scheduling/clinic_settings#edit",   # The same, as a form
         "lakeraven/ehr/scheduling/clinic_settings#update", # Files a clinic's settings; no patient data
+        "lakeraven/ehr/scheduling/access_types#index",     # Access types: names, colours, flags; no patient data
+        "lakeraven/ehr/scheduling/access_types#new",
+        "lakeraven/ehr/scheduling/access_types#create",
+        "lakeraven/ehr/scheduling/access_types#edit",
+        "lakeraven/ehr/scheduling/access_types#update",
+        "lakeraven/ehr/scheduling/resource_groups#index",  # Group names; no patient data
+        "lakeraven/ehr/scheduling/resource_groups#new",
+        "lakeraven/ehr/scheduling/resource_groups#create",
+        "lakeraven/ehr/scheduling/resource_groups#show",   # A group's clinic days: times and patient names, as the clinic day view (scheduling, not clinical)
+        "lakeraven/ehr/scheduling/resource_groups#add_member",
+        "lakeraven/ehr/scheduling/resource_groups#remove_member",
         "lakeraven/ehr/scheduling/hours#new",            # Clinic hours form: access types, no patient data
         "lakeraven/ehr/scheduling/hours#create",         # Hours entry; a refusal names an appointment time and patient name, no clinical record
         "lakeraven/ehr/pending_referrals#index",         # Pending referrals (#873): date, patient name, status and number; no reason, diagnosis or referred-to; revisit with Part 2 (#494)

@@ -8,6 +8,14 @@
   <%= link_to "Appointments needing action",
         scheduling_needing_action_path,
         id: "needing-action-link" %>
+  <%= link_to "Resource groups",
+        scheduling_resource_groups_path,
+        id: "resource-groups-link" %>
+  <% if capability?("scheduling.supervise") %>
+    <%= link_to "Access types",
+          scheduling_access_types_path,
+          id: "access-types-link" %>
+  <% end %>
 <% end %>
 
 <% if @resources.empty? %>
