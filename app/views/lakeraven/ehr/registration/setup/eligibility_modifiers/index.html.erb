@@ -1,0 +1,68 @@
+<% page_title "Eligibility modifiers", "Setup" %>
+
+<%= page_header "Eligibility modifiers",
+      "The proof a clerk can record for a name change, a legal document or legal sex." do %>
+  <%= link_to "Add a modifier",
+        registration_new_setup_eligibility_modifier_path,
+        id: "add-eligibility-modifier",
+        class: "button-primary" %>
+<% end %>
+
+<%= flash_alert id: "eligibility-modifiers-alert" %>
+
+<% if flash[:notice].present? %>
+  <%= alert_box :notice,
+        flash[:notice],
+        id: "eligibility-modifiers-notice" %>
+<% end %>
+
+<section
+  aria-labelledby="eligibility-modifier-table-heading"
+  class="card flex flex-col gap-4"
+>
+  <h2
+    id="eligibility-modifier-table-heading"
+    class="text-lg font-semibold"
+  >
+    Modifiers on file
+  </h2>
+  <p class="text-sm text-slate-600">
+    Eligibility status reasons and advance directive types are shown for reference.
+    They are not changed here, so nothing on this page changes a patient's eligibility.
+  </p>
+  <table
+    id="eligibility-modifier-table"
+    class="data-table"
+  >
+    <caption class="sr-only">Eligibility modifiers</caption>
+    <thead>
+      <tr>
+        <th scope="col">Modifier</th>
+        <th scope="col">Type</th>
+        <th scope="col">Used for</th>
+        <th scope="col"><span class="sr-only">Actions</span></th>
+      </tr>
+    </thead>
+    <tbody>
+      <% @modifiers.each do |row| %>
+        <tr data-modifier="<%= row[:ien] %>">
+          <td><%= row[:name] %></td>
+          <td><%= row[:type] %></td>
+          <td><%= Lakeraven::EHR::RegistrationSetupGateway.type_label(row[:type]) %></td>
+          <td>
+            <% if row[:legal_document] %>
+              <%= link_to "Edit",
+                    registration_edit_setup_eligibility_modifier_path(row[:ien]),
+                    aria: { label: "Edit #{row[:name]}" } %>
+            <% end %>
+          </td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+</section>
+
+<p class="mt-6">
+  <%= link_to "Back to setup",
+        registration_setup_path %>
+</p>

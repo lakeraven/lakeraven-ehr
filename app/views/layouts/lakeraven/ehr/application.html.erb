@@ -46,6 +46,9 @@
         <% if capability?("referrals.work") && feature_available?(:prc_referrals) %>
           <%= link_to "Referrals", pending_referrals_path %>
         <% end %>
+        <% if capability?("registration.setup") && feature_available?(:bprm_registration) %>
+          <%= link_to "Setup", registration_setup_path %>
+        <% end %>
       </nav>
 
       <div class="flex items-center gap-4 text-sm">

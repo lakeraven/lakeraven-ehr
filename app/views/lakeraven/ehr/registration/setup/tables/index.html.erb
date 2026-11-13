@@ -1,0 +1,29 @@
+<% page_title "Setup", "Registration" %>
+
+<%= page_header "Registration setup",
+      "The tables your site keeps for registration." %>
+
+<section
+  id="setup-tables"
+  aria-labelledby="setup-tables-heading"
+  class="card flex flex-col gap-3"
+>
+  <h2
+    id="setup-tables-heading"
+    class="text-lg font-semibold"
+  >
+    Tables
+  </h2>
+  <ul class="flex flex-col gap-2">
+    <% if capability?("registration.table_maintenance") %>
+      <li>
+        <%= link_to "Eligibility modifiers",
+              registration_setup_eligibility_modifiers_path,
+              id: "setup-eligibility-modifiers" %>
+        <p class="text-sm text-slate-600">
+          The proof a clerk can record for a name change, a legal document or legal sex.
+        </p>
+      </li>
+    <% end %>
+  </ul>
+</section>

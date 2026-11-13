@@ -10,6 +10,12 @@ require_relative "../support/demo_persona_keys"
 # here fails, so a new screen cannot ship ungated.
 class CapabilityRefusalMatrixTest < ActionDispatch::IntegrationTest
   ROUTES = {
+    "GET /registration/setup" => "registration.setup",
+    "GET /registration/setup/eligibility_modifiers" => "registration.table_maintenance",
+    "GET /registration/setup/eligibility_modifiers/new" => "registration.table_maintenance",
+    "POST /registration/setup/eligibility_modifiers" => "registration.table_maintenance",
+    "GET /registration/setup/eligibility_modifiers/:ien/edit" => "registration.table_maintenance",
+    "POST /registration/setup/eligibility_modifiers/:ien" => "registration.table_maintenance",
     "GET /registration/patients" => "registration.search",
     "GET /registration/patients/new" => "patient.register",
     "POST /registration/patients/new" => "patient.register",
