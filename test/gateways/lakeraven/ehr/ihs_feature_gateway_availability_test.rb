@@ -165,8 +165,9 @@ module Lakeraven
 
       test "pcc_screens: ProcedureGateway.add still delegates on rpms" do
         assert_equal :rpms, Lakeraven::EHR.configuration.backend
-        RpmsRpc.client.seed_scalar(:procedure_save, "1", "42")
-        result = ProcedureGateway.add(1, 2090061, "99213")
+        result = with_stub(RpmsRpc::Procedure, :add, { success: true, ien: 42 }) do
+          ProcedureGateway.add(1, 2090061, "99213")
+        end
         assert result[:success]
         assert_equal 42, result[:ien]
       end
