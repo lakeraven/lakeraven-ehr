@@ -40,7 +40,7 @@ module StubHelpers
   ensure
     restore&.call
   end
-  
+
   # Returns the restore proc with_stub runs in ensure. Cucumber stores the
   # same proc and calls it from an After hook (stub_gateway).
   def install_singleton_stub(klass, method_name, value)
