@@ -19,7 +19,7 @@ default: &default
   host: "<%= ENV["VISTA_RPC_HOST"] %>"
   port: <%= ENV.fetch("VISTA_RPC_PORT", 9100) %>
 
-# A local openrpms image: docker run -p 127.0.0.1:9100:9100 ghcr.io/lakeraven/rpms-ydb:$TAG
+# A local openrpms image: docker run -p 127.0.0.1:9100:9100 ghcr.io/lakeraven/openrpms:$TAG
 development:
   <<: *default
   host: "<%= ENV.fetch("VISTA_RPC_HOST", "127.0.0.1") %>"

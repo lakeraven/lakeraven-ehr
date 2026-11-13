@@ -161,7 +161,7 @@ jobs:
     # The @live scenarios, against the RPMS image, as a client would reach it.
     # Not on pull_request: the image is private and this repository is public,
     # so a run must not hand a fork code that can read it.
-    # Dispatch only for now: GITHUB_TOKEN needs Actions access to the rpms-ydb
+    # Dispatch only for now: GITHUB_TOKEN needs Actions access to the openrpms
     # package. With that granted, make this `github.event_name != 'pull_request'`.
     name: Cucumber live (RPMS image)
     if: github.event_name == 'workflow_dispatch'
@@ -187,7 +187,7 @@ jobs:
       CUCUMBER_PUBLISH_QUIET: "true"
       # bcer-9.0-20261104-9b5cccd-ydb. features/support/rpms_demo_site.rb is read
       # from the same build; the run aborts if they disagree.
-      RPMS_IMAGE: ghcr.io/lakeraven/rpms-ydb@sha256:330ac2ebe210658237755c78400576342727779485cbade64aff9c812ba3b2f2
+      RPMS_IMAGE: ghcr.io/lakeraven/openrpms@sha256:330ac2ebe210658237755c78400576342727779485cbade64aff9c812ba3b2f2
       LIVE_RPMS: "1"
       VISTA_BROKER: cia
       VISTA_RPC_HOST: 127.0.0.1
