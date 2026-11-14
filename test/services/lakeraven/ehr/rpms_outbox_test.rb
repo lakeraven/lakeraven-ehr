@@ -12,10 +12,10 @@ module Lakeraven
       PHI_MESSAGE = "TESTPATIENT,SYNTHETIC DFN 999 write refused"
 
       # name, handler script, dispatch rounds, final status, handler calls,
-      # attempts, last_error_class (:any = not pinned)
+      # attempts, last_error_class (nil = none; a delivered row carries none)
       SCENARIOS = [
         [ "delivered once", [ :ok ], 3, "delivered", 1, 1, nil ],
-        [ "transient failure then success", [ :fail, :ok ], 4, "delivered", 2, 2, :any ],
+        [ "transient failure then success", [ :fail, :ok ], 4, "delivered", 2, 2, nil ],
         [ "repeated failure ends dead-lettered", [ :fail ] * 5, 7, "dead", 5, 5, "RuntimeError" ]
       ].freeze
 
@@ -33,7 +33,11 @@ module Lakeraven
           assert_equal status, entry.status
           assert_equal calls, seen.size, "handler call count"
           assert_equal attempts, entry.attempts
-          assert_equal error_class, entry.last_error_class unless error_class == :any
+          if error_class.nil?
+            assert_nil entry.last_error_class
+          else
+            assert_equal error_class, entry.last_error_class
+          end
           assert_not_nil entry.last_attempted_at
           assert_equal status == "delivered", entry.delivered_at.present?
           assert_equal status == "dead", entry.dead_lettered_at.present?
