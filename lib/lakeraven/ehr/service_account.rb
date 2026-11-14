@@ -20,10 +20,16 @@ module Lakeraven
 
         private
 
+        # Credentials the host cannot read (undecryptable, or mis-shaped so
+        # dig raises) are no credentials: the ENV pair decides. Only the
+        # error's class is logged.
         def from_credentials
           credentials = Rails.application.credentials
           pair(credentials.dig(:rpms, :service_account, :access_code),
                credentials.dig(:rpms, :service_account, :verify_code))
+        rescue StandardError => e
+          Rails.logger.warn("[rpms] service-account credentials unreadable: #{e.class.name}")
+          nil
         end
 
         def pair(access_code, verify_code)

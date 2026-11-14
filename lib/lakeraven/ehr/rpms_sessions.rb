@@ -35,9 +35,10 @@ module Lakeraven
       # The app was started with more than one worker process.
       class MultipleProcesses < StandardError; end
 
-      # Serialises a first service-account sign-on, so two concurrent first
-      # requests do not both sign on.
-      SERVICE_SIGNON = Mutex.new
+      # After a refused or failed service-account sign-on, no new one is tried
+      # for this many seconds, process-wide: a wrong code is not sent to RPMS
+      # on every request.
+      SERVICE_SIGNON_BACKOFF = 30
 
       class << self
         # Turned on at boot when config/rpms.yml names a broker. factory makes
@@ -50,7 +51,12 @@ module Lakeraven
             build: ->(_key) { raise SignInAgain, "no RPMS connection for this session" }
           )
           @pool.start_keeper! if keeper
+          @max_sessions = Integer(max_sessions)
           @service_duzes = Concurrent::Map.new
+          # One sign-on lock per service key (per client application), so a
+          # slow broker holds up only that application's first request.
+          @service_signon_locks = Concurrent::Map.new
+          @service_signon_failed_at = nil
         end
 
         def enabled? = !@pool.nil?
@@ -63,34 +69,48 @@ module Lakeraven
         def key_for(token) = "token-#{token.id}"
 
         # The pool key of a Backend Services token's session on the service
-        # account (ADR 0011 §6): the client application and its token, never a
-        # person. Revoking the token releases it (ServiceAccountLeaseRelease).
-        def service_key_for(token) = "system-app-#{token.application_id}-token-#{token.id}"
+        # account (ADR 0011 §6): the client application, never a person. Every
+        # live token of the application shares it, so one application takes one
+        # slot however many tokens it holds; revoking any of them releases it
+        # (ServiceAccountLeaseRelease).
+        def service_key_for(token) = "system-app-#{token.application_id}"
 
         # Run the block with the deployment's service account as RpmsRpc.client,
-        # for a system/ token. Signs a fresh connection on at the token's first
-        # request and leases it after; the keeper ends it once the token has
-        # expired. Every failure fails closed as RpmsRpc::NotConfiguredError,
-        # the 503 of a request with no RPMS connection: no service account
-        # configured, a refused sign-on, a full pool, a lease that is gone or
-        # signed on as someone else. Never another identity's connection.
+        # for a system/ token. The application's first request signs a fresh
+        # connection on and leases it; later ones reuse it, each keeping it for
+        # the token's remaining lifetime. A request that gets no lease (no
+        # service account configured, a refused sign-on or its back-off, a full
+        # pool, a lease that is gone or signed on as someone else) runs with no
+        # RPMS client at all: one that reaches for RPMS fails closed as
+        # RpmsRpc::NotConfiguredError, one that does not answers as ever. Never
+        # another identity's connection, and the block runs exactly once.
         def with_service_account(token, &block)
-          codes = ServiceAccount.codes
-          raise RpmsRpc::NotConfiguredError, "no RPMS service account configured" unless codes
+          key, signed_on = service_lease(token)
+          ran = false
+          result = nil
+          begin
+            if key
+              result = @pool.with_client(key) do |client|
+                next unless service_identity?(key, client)
 
-          key = service_key_for(token)
-          idle_for = token_seconds_left(token)
-          sign_on_service_account(key, codes) unless held?(key)
-          touch(key, idle_for: idle_for)
-          @pool.with_client(key) do |client|
-            assert_service_identity!(key, client)
-            RpmsRpc.with_client(client, &block)
+                # A revocation committed while this request signed on found
+                # nothing to release. Release now: this request, authorised
+                # before it, finishes, and the pool logs the session off when
+                # it checks the client back in, as for any in-flight request.
+                release_service_account_key(key) if signed_on && revoked_now?(token)
+                ran = true
+                RpmsRpc.with_client(client, &block)
+              end
+            end
+          rescue SignInAgain
+            raise if ran # the action's own, never retried
+
+            Rails.logger.warn("[rpms] service-account lease for #{key} ended before use")
           end
-        rescue SignInAgain, RpmsRpc::SessionPool::PoolExhaustedError
-          raise RpmsRpc::NotConfiguredError, "no service-account connection for this token"
+          ran ? result : yield
         end
 
-        # The token was revoked: end its service-account session, if any.
+        # The token was revoked: end its application's service-account session, if any.
         def release_service_account(token) = release_service_account_key(service_key_for(token))
 
         # Hold an authenticated client under the session's key. Raises
@@ -149,65 +169,117 @@ module Lakeraven
           @pool&.shutdown
           @pool = nil
           @factory = nil
+          @max_sessions = nil
           @service_duzes = nil
+          @service_signon_locks = nil
+          @service_signon_failed_at = nil
         end
 
         private
 
-        # The token's remaining lifetime in whole seconds, at least 1: the
-        # service-account session never outlives the token.
-        def token_seconds_left(token)
-          expires_at = token.expires_at
-          raise RpmsRpc::NotConfiguredError, "a non-expiring token gets no service account" unless expires_at
+        # [key, signed_on]: the application's service key with a live lease
+        # kept for the token's remaining lifetime, and whether this request
+        # signed it on. nil when no lease can be had.
+        def service_lease(token)
+          idle_for = token_seconds_left(token)
+          return nil unless idle_for
 
-          [ (expires_at - Time.current).floor, 1 ].max
+          key = service_key_for(token)
+          signed_on = !live?(key)
+          return nil if signed_on && !sign_on_service_account(key)
+
+          [ key, signed_on ] if touch(key, idle_for: idle_for)
         end
 
-        def sign_on_service_account(key, codes)
-          SERVICE_SIGNON.synchronize do
-            return if held?(key)
+        # The token's revocation as the database holds it now, not as this
+        # request loaded it.
+        def revoked_now?(token)
+          Doorkeeper::AccessToken.where(id: token.id).where.not(revoked_at: nil).exists?
+        end
 
-            @service_duzes.each_key { |held_key| @service_duzes.delete(held_key) unless held?(held_key) }
-            client = new_client
-            @service_duzes[key] = service_account_duz(key, client, codes)
-            adopt(key, client)
-          rescue RpmsRpc::SessionPool::SessionOccupiedError
-            client&.disconnect # another sign-on holds the key: use that one
-          rescue RpmsRpc::SessionPool::PoolExhaustedError
-            client&.disconnect
-            @service_duzes.delete(key)
-            Rails.logger.warn("[rpms] service-account sign-on refused for #{key}: session pool full")
-            raise RpmsRpc::NotConfiguredError, "RPMS session pool full"
+        # The token's remaining lifetime in whole seconds, at least 1: the
+        # service-account session never outlives the token. A non-expiring
+        # token gets none.
+        def token_seconds_left(token)
+          expires_at = token.expires_at
+          expires_at && [ (expires_at - Time.current).floor, 1 ].max
+        end
+
+        # Sign a fresh connection on as the service account and hold it under
+        # key. True when a lease is held afterwards. Capacity, the back-off and
+        # the codes are checked first, so a full pool builds no client.
+        def sign_on_service_account(key)
+          @service_signon_locks.compute_if_absent(key) { Mutex.new }.synchronize do
+            return true if held?(key)
+            return false if service_signon_backing_off?
+
+            if @pool.size >= @max_sessions
+              Rails.logger.warn("[rpms] service-account sign-on skipped for #{key}: session pool full")
+              return false
+            end
+
+            codes = ServiceAccount.codes
+            return false unless codes
+
+            adopt_service_account(key, codes)
           end
         end
 
+        def adopt_service_account(key, codes)
+          client = new_client
+          duz = service_account_duz(key, client, codes)
+          return false unless duz
+
+          @service_duzes[key] = duz
+          adopt(key, client)
+          true
+        rescue RpmsRpc::SessionPool::PoolExhaustedError, RpmsRpc::SessionPool::SessionOccupiedError => e
+          @service_duzes.delete(key)
+          safe_disconnect(client)
+          Rails.logger.warn("[rpms] service-account lease refused for #{key}: #{e.class.name}")
+          false
+        end
+
         # Sign the fresh client on with the service account's codes, the way
-        # the configured broker signs a user on; its DUZ, or fail closed.
+        # the configured broker signs a user on; its DUZ, or nil having closed
+        # the connection and started the back-off.
         def service_account_duz(key, client, codes)
           auth = RpmsRpc.with_client(client) { AuthenticationService.new.sign_on(*codes) }
-          duz = auth[:duz].to_s if auth[:success]
+          duz = auth[:duz].to_s if auth[:success] && !auth[:verify_needs_change]
           return duz if duz.present? && duz != "0"
 
           refuse_service_sign_on(key, client, "refused")
         rescue StandardError => e
-          raise if e.is_a?(RpmsRpc::NotConfiguredError)
-
           refuse_service_sign_on(key, client, e.class.name)
         end
 
         def refuse_service_sign_on(key, client, reason)
-          client.disconnect
+          @service_signon_failed_at = Time.current
+          safe_disconnect(client)
           Rails.logger.warn("[rpms] service-account sign-on failed for #{key}: #{reason}")
-          raise RpmsRpc::NotConfiguredError, "service-account sign-on failed"
+          nil
+        end
+
+        def service_signon_backing_off?
+          failed_at = @service_signon_failed_at
+          failed_at.present? && Time.current < failed_at + SERVICE_SIGNON_BACKOFF
+        end
+
+        def safe_disconnect(client)
+          client&.disconnect
+        rescue StandardError => e
+          Rails.logger.warn("[rpms] service-account disconnect failed: #{e.class.name}")
         end
 
         # Every checkout runs as the DUZ the lease signed on as (ADR 0011 §2).
-        def assert_service_identity!(key, client)
+        # One that does not is released, never used.
+        def service_identity?(key, client)
           expected = @service_duzes[key]
-          return if expected && client.duz.to_s == expected
+          return true if expected && client.duz.to_s == expected
 
           release_service_account_key(key)
-          raise RpmsRpc::NotConfiguredError, "service-account connection is not the service account"
+          Rails.logger.warn("[rpms] service-account lease for #{key} is not the service account: released")
+          false
         end
 
         def release_service_account_key(key)

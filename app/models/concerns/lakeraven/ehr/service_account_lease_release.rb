@@ -2,9 +2,10 @@
 
 module Lakeraven
   module EHR
-    # Revoking an access token ends its service-account session (ADR 0011 §4,
-    # §6): RPMS logs the service account's connection for that token off. A
-    # token with no such lease releases nothing. Browser and launch sessions
+    # Revoking an access token ends its application's service-account session
+    # (ADR 0011 §4, §6): RPMS logs off the service account's connection that
+    # every token of the application shares. A token with no such lease
+    # releases nothing. Browser and launch sessions
     # are keyed differently (RpmsSessions.key_for) and released where they end.
     module ServiceAccountLeaseRelease
       extend ActiveSupport::Concern

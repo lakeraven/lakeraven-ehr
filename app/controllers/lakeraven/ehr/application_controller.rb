@@ -70,15 +70,16 @@ module Lakeraven
 
       # A SMART Backend Services token: a client application's own, with no
       # person behind it. Not launched, not a browser session's, no resource
-      # owner, and every scope it carries is system/. Anything naming a user or
-      # a patient is not one, and never rides the service account.
+      # owner, and every scope it carries is system/. Anything else (a user/ or
+      # patient/ scope, openid, launch/..., offline_access) is not one, and
+      # never rides the service account.
       def backend_services_token?
         return false unless current_token && RpmsSessions.enabled?
         return false if current_token.resource_owner_id.present? || launched_authorization ||
                         browser_sso_token?(current_token)
 
         raw = current_token.scopes.to_a.map(&:to_s)
-        return false if raw.any? { |scope| scope.start_with?("patient/", "user/") }
+        return false unless raw.all? { |scope| scope.start_with?("system/") }
 
         scopes = SmartScope.parse_all(raw)
         scopes.any? && scopes.all? { |scope| scope.context == "system" }
