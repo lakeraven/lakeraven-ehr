@@ -102,10 +102,11 @@ module Lakeraven
                 RpmsRpc.with_client(client, &block)
               end
             end
-          rescue SignInAgain
+          rescue SignInAgain, RpmsRpc::SessionPool::PoolExhaustedError => e
             raise if ran # the action's own, never retried
 
-            Rails.logger.warn("[rpms] service-account lease for #{key} ended before use")
+            # Released between touch and checkout (its slot possibly taken).
+            Rails.logger.warn("[rpms] service-account lease for #{key} ended before use: #{e.class.name}")
           end
           ran ? result : yield
         end
@@ -226,7 +227,9 @@ module Lakeraven
         end
 
         def adopt_service_account(key, codes)
-          client = new_client
+          client = build_service_client(key)
+          return false unless client
+
           duz = service_account_duz(key, client, codes)
           return false unless duz
 
@@ -238,6 +241,14 @@ module Lakeraven
           safe_disconnect(client)
           Rails.logger.warn("[rpms] service-account lease refused for #{key}: #{e.class.name}")
           false
+        end
+
+        # A fresh client from the factory, or nil having started the back-off:
+        # a factory that raises is a failed sign-on like any other.
+        def build_service_client(key)
+          new_client
+        rescue StandardError => e
+          refuse_service_sign_on(key, nil, e.class.name)
         end
 
         # Sign the fresh client on with the service account's codes, the way
