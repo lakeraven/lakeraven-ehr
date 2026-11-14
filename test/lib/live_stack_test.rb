@@ -1268,4 +1268,547 @@ class LiveStackTest < ActiveSupport::TestCase
       assert_verdict reason, containing: "not signed on as the persona"
     end
   end
+
+  # -- the real mock is never evidence, whichever way it is read (F1) --------
+
+  MOCK_READS = %i[call_rpc call_rpc_lines call_rpc_global_array].freeze
+  # Seeded by seed_user: a line reply and a record, so every read path has
+  # something to answer with.
+  MOCK_RPCS = [ "XUS GET USER INFO", "ORWU USERINFO" ].freeze
+
+  def seed_mock(mock)
+    mock.seed_user(PERSONA_DUZ, credentials: "synthetic;synthetic", name: "PERSONA,SYNTHETIC", role: :provider)
+    mock
+  end
+
+  # The real RpmsRpc::MockClient under the watch, without prepending onto the
+  # class the rest of the suite shares.
+  def watched_real_mock
+    seed_mock(Class.new(RpmsRpc::MockClient) { prepend LiveStack::MockWatch }.new)
+  end
+
+  def unwatched_real_mock = seed_mock(RpmsRpc::MockClient.new)
+
+  test "the real mock answers every read path as it did, once, and each answer says it was the mock" do
+    MOCK_READS.product(MOCK_RPCS).each do |read, rpc|
+      mock = watched_real_mock
+      expected = unwatched_real_mock.public_send(read, rpc)
+      assert_not_empty expected, "#{read} #{rpc}: the seed answers nothing, so the test proves nothing"
+
+      answer = mock.public_send(read, rpc)
+
+      assert_equal expected, answer, "#{read} #{rpc}: the watched mock answered differently"
+      assert_equal expected.class, answer.class, "#{read} #{rpc}: the watched mock answered with another type"
+      assert_equal [ rpc ], mock.received_calls.map { |call| call[:rpc] }, "#{read} #{rpc}: the mock was not asked once"
+      evidence = LiveStack.take_evidence
+      assert_nothing_counted evidence, "#{read} #{rpc}"
+      assert_equal [ "#{rpc} was answered by the mock, not the stack" ], evidence.reasons, "#{read} #{rpc}"
+    end
+  end
+
+  test "the real mock is not evidence through any read path, even armed and signed on as the persona" do
+    MOCK_READS.each do |read|
+      mock = watched_real_mock
+      mock.set_authenticated(PERSONA_DUZ)
+      LiveStack.arm!(client: mock, persona_duz: PERSONA_DUZ)
+
+      mock.public_send(read, "ORWU USERINFO")
+
+      evidence = LiveStack.take_evidence
+      assert_nothing_counted evidence, read
+      assert_equal [ "ORWU USERINFO was answered by the mock, not the stack" ], evidence.reasons, read
+    end
+  end
+
+  test "a scenario that read from the stack and from the real mock did not run, whichever way it read the mock" do
+    MOCK_READS.each do |read|
+      stack = armed_client
+      stack.call_rpc("ORWU USERINFO")
+      watched_real_mock.public_send(read, "XUS GET USER INFO")
+
+      reason = LiveStack.verdict(evidence: LiveStack.take_evidence, client: stack, stack_client: stack,
+                                 persona_duz: PERSONA_DUZ)
+
+      assert_equal "XUS GET USER INFO was answered by the mock, not the stack", reason, read
+    end
+  end
+
+  # -- a gateway stubbed anywhere is seen (F2) ------------------------------
+
+  STUBBED = "a gateway was stubbed: "
+
+  # A Module class of its own under the watch, so Module itself is untouched.
+  def watched_module_class = Class.new(Module) { prepend LiveStack::StubWatch }
+
+  # A gateway to stub: a module of the watched class with a find of its own.
+  def throwaway_gateway(name = "throwaway<gateway>")
+    watched_module_class.new.tap do |gateway|
+      gateway.set_temporary_name(name)
+      gateway.singleton_class.send(:define_method, :find) { |_ien| :from_the_stack }
+    end
+  end
+
+  test "stub_installed records the module and the method while the watch is armed" do
+    armed_client
+
+    LiveStack.stub_installed(StubHelpers, :find_by_dfn)
+    LiveStack.stub_installed(LiveStackTest, "find")
+
+    evidence = LiveStack.take_evidence
+    assert_equal [ "#{STUBBED}StubHelpers.find_by_dfn", "#{STUBBED}LiveStackTest.find" ], evidence.reasons
+    assert_nothing_counted evidence
+  end
+
+  test "a recorded stub is the verdict, whatever else reached the stack" do
+    stack = armed_client
+    stack.call_rpc("ORWU USERINFO")
+    LiveStack.stub_installed(StubHelpers, :find_by_dfn)
+
+    reason = LiveStack.verdict(evidence: LiveStack.take_evidence, client: stack, stack_client: stack,
+                               persona_duz: PERSONA_DUZ)
+
+    assert_equal "#{STUBBED}StubHelpers.find_by_dfn", reason
+  end
+
+  test "stub_installed records nothing for a receiver that is not a Module" do
+    armed_client
+
+    [ Object.new, "a string", 4321, nil ].each { |receiver| LiveStack.stub_installed(receiver, :find) }
+
+    assert_equal [], LiveStack.take_evidence.reasons
+  end
+
+  test "stub_installed records nothing while the watch is not armed" do
+    LiveStack.stub_installed(StubHelpers, :find_by_dfn)
+
+    assert_equal [], LiveStack.take_evidence.reasons
+  end
+
+  test "stub_installed records nothing inside transparently, and records again after it" do
+    armed_client
+
+    LiveStack.transparently { LiveStack.stub_installed(StubHelpers, :find_by_dfn) }
+    assert_equal [], LiveStack.take_evidence.reasons
+
+    LiveStack.stub_installed(StubHelpers, :find_by_dfn)
+    assert_equal [ "#{STUBBED}StubHelpers.find_by_dfn" ], LiveStack.take_evidence.reasons
+  end
+
+  test "StubWatch is a module that watches define_singleton_method alone" do
+    assert_instance_of Module, LiveStack::StubWatch
+    assert_equal [ :define_singleton_method ], LiveStack::StubWatch.instance_methods(false)
+    assert_equal LiveStack::StubWatch, LiveStack::StubWatch.instance_method(:define_singleton_method).owner
+  end
+
+  test "every singleton method on a watched module is defined exactly as before, and only a replaced one is recorded" do
+    armed_client
+    gateway = throwaway_gateway
+    body = ->(ien) { [ :from_the_body, ien ] }
+
+    with_block = gateway.define_singleton_method(:find) { |ien| [ :from_the_stub, ien ] }
+    assert_equal :find, with_block
+    assert_equal [ :from_the_stub, 7 ], gateway.find(7)
+
+    with_body = gateway.define_singleton_method("lookup", body)
+    assert_equal :lookup, with_body
+    assert_equal [ :from_the_body, 7 ], gateway.lookup(7)
+
+    with_method = gateway.define_singleton_method(:lookup_again, gateway.method(:lookup))
+    assert_equal :lookup_again, with_method
+    assert_equal [ :from_the_body, 7 ], gateway.lookup_again(7)
+
+    # lookup and lookup_again are new: only find replaced a method the gateway
+    # already answered.
+    assert_equal [ "#{STUBBED}throwaway<gateway>.find" ], LiveStack.take_evidence.reasons
+  end
+
+  # Rails defines singleton methods of its own while a scenario runs (model
+  # callbacks at autoload, a view's compiled method container on an anonymous
+  # class). A gateway stub always replaces a method a named module answers.
+  test "a new singleton method on a named watched module is defined and not recorded" do
+    armed_client
+    gateway = throwaway_gateway
+    assert_not gateway.respond_to?(:lookup, true)
+
+    assert_equal :lookup, gateway.define_singleton_method(:lookup) { |_ien| :new }
+
+    assert_equal :new, gateway.lookup(7)
+    assert_equal [], LiveStack.take_evidence.reasons
+  end
+
+  test "replacing a private singleton method on a named watched module is recorded" do
+    armed_client
+    gateway = throwaway_gateway
+    gateway.singleton_class.send(:private, :find)
+
+    gateway.define_singleton_method(:find) { |_ien| :from_the_stub }
+
+    assert_equal [ "#{STUBBED}throwaway<gateway>.find" ], LiveStack.take_evidence.reasons
+  end
+
+  test "replacing a singleton method on an anonymous watched module is defined and not recorded" do
+    armed_client
+    gateway = watched_module_class.new
+    gateway.singleton_class.send(:define_method, :find) { |_ien| :from_the_stack }
+    assert_nil gateway.name
+
+    assert_equal :find, gateway.define_singleton_method(:find) { |_ien| :from_the_stub }
+
+    assert_equal :from_the_stub, gateway.find(7)
+    assert_equal [], LiveStack.take_evidence.reasons
+  end
+
+  test "replacing a method a watched class answers only through inheritance is recorded" do
+    armed_client
+    parent = Class.new { define_singleton_method(:find) { |_ien| :from_the_stack } }
+    gateway = Class.new(parent)
+    gateway.set_temporary_name("throwaway<record>")
+    gateway.singleton_class.prepend(LiveStack::StubWatch)
+    assert_not gateway.singleton_class.instance_methods(false).include?(:find)
+
+    assert_equal :find, gateway.define_singleton_method(:find) { |_ien| :from_the_stub }
+
+    assert_equal :from_the_stub, gateway.find(7)
+    assert_equal :from_the_stack, parent.find(7)
+    assert_equal [ "#{STUBBED}throwaway<record>.find" ], LiveStack.take_evidence.reasons
+  end
+
+  test "a bad define_singleton_method on a watched module raises as it did" do
+    armed_client
+    gateway = throwaway_gateway
+
+    assert_raises(ArgumentError) { gateway.define_singleton_method(:find) }
+    assert_raises(TypeError) { gateway.define_singleton_method(:find, "not a body") }
+    assert_equal :from_the_stack, gateway.find(7)
+  end
+
+  test "a singleton method defined on a watched module while not armed is defined and not recorded" do
+    gateway = throwaway_gateway
+
+    assert_equal :find, gateway.define_singleton_method(:find) { |_ien| :from_the_stub }
+
+    assert_equal :from_the_stub, gateway.find(7)
+    assert_equal [], LiveStack.take_evidence.reasons
+  end
+
+  test "a singleton method defined on a watched module inside transparently is defined and not recorded" do
+    armed_client
+    gateway = throwaway_gateway
+
+    LiveStack.transparently { gateway.define_singleton_method(:find) { |_ien| :from_the_stub } }
+
+    assert_equal :from_the_stub, gateway.find(7)
+    assert_equal [], LiveStack.take_evidence.reasons
+  end
+
+  test "a singleton method defined on a watched object that is not a Module is defined and not recorded" do
+    armed_client
+    plain = Class.new { prepend LiveStack::StubWatch }.new
+
+    assert_equal :find, plain.define_singleton_method(:find) { |_ien| :on_a_plain_object }
+
+    assert_equal :on_a_plain_object, plain.find(7)
+    assert_equal [], LiveStack.take_evidence.reasons
+  end
+
+  test "every StubHelpers stub on a watched module is recorded once, and putting the method back is not" do
+    armed_client
+    gateway = throwaway_gateway
+
+    StubHelpers.with_stub(gateway, :find, :from_with_stub) { assert_equal :from_with_stub, gateway.find(7) }
+    assert_equal :from_the_stack, gateway.find(7)
+    assert_equal [ "#{STUBBED}throwaway<gateway>.find" ], LiveStack.take_evidence.reasons, "with_stub"
+
+    StubHelpers.with_recording_stub(gateway, :find, :from_recording_stub) do |calls|
+      assert_equal :from_recording_stub, gateway.find(7)
+      assert_equal [ { args: [ 7 ], kwargs: {} } ], calls
+    end
+    assert_equal :from_the_stack, gateway.find(7)
+    assert_equal [ "#{STUBBED}throwaway<gateway>.find" ], LiveStack.take_evidence.reasons, "with_recording_stub"
+
+    restore = StubHelpers.install_singleton_stub(gateway, :find, :from_install)
+    assert_equal :from_install, gateway.find(7)
+    restore.call
+    assert_equal :from_the_stack, gateway.find(7)
+    assert_equal [ "#{STUBBED}throwaway<gateway>.find" ], LiveStack.take_evidence.reasons, "install_singleton_stub"
+  end
+
+  # -- the ready wiring is LiveStack's own (F3) -----------------------------
+
+  # Throwaway classes for install!, so nothing global is prepended onto.
+  def throwaway_client_class
+    Class.new do
+      attr_accessor :duz
+
+      define_method(:initialize) { |duz| @duz = duz }
+      define_method(:call_rpc) { |rpc_name, *params| [ rpc_name, *params ] }
+    end
+  end
+
+  def throwaway_mock_class
+    Class.new do
+      MOCK_READS.each { |read| define_method(read) { |rpc_name, *params| [ rpc_name, *params ] } }
+    end
+  end
+
+  def keywords(name) = LiveStack.method(name).parameters.group_by(&:first).transform_values { |all| all.map(&:last) }
+
+  test "install! takes the client and the persona's DUZ, and the classes to watch by default" do
+    assert_equal({ keyreq: %i[client persona_duz], key: %i[mock_class module_class] }, keywords(:install!))
+  end
+
+  test "install! prepends each watch onto the class it is given, and onto nothing else" do
+    client = throwaway_client_class.new(PERSONA_DUZ)
+    mock_class = throwaway_mock_class
+    module_class = Class.new(Module)
+
+    LiveStack.install!(client: client, persona_duz: PERSONA_DUZ, mock_class: mock_class, module_class: module_class)
+
+    assert_includes client.class.ancestors, LiveStack::RefusalWatch
+    assert_includes mock_class.ancestors, LiveStack::MockWatch
+    assert_includes module_class.ancestors, LiveStack::StubWatch
+    assert_not_includes Module.ancestors, LiveStack::StubWatch
+    assert_not_includes Class.ancestors, LiveStack::StubWatch
+    assert_not_includes RpmsRpc::MockClient.ancestors, LiveStack::MockWatch
+  end
+
+  test "install! arms the watch: a call on the client by the persona counts" do
+    client = throwaway_client_class.new(PERSONA_DUZ)
+
+    LiveStack.install!(client: client, persona_duz: 4321, mock_class: throwaway_mock_class,
+                       module_class: Class.new(Module))
+
+    assert_equal [ "ORWU USERINFO", "x" ], client.call_rpc("ORWU USERINFO", "x")
+    evidence = LiveStack.take_evidence
+    assert_equal 1, evidence.rpc_count
+    assert_equal [], evidence.reasons
+
+    throwaway_client_class.new(PERSONA_DUZ).call_rpc("ORWU USERINFO")
+    assert_nothing_counted LiveStack.take_evidence, "a client install! was not given"
+  end
+
+  test "after install! the mock class and the module class are watched" do
+    mock_class = throwaway_mock_class
+    module_class = Class.new(Module)
+    LiveStack.install!(client: throwaway_client_class.new(PERSONA_DUZ), persona_duz: PERSONA_DUZ,
+                       mock_class: mock_class, module_class: module_class)
+
+    MOCK_READS.each do |read|
+      assert_equal [ "ORWU USERINFO" ], mock_class.new.public_send(read, "ORWU USERINFO")
+      assert_equal [ "ORWU USERINFO was answered by the mock, not the stack" ], LiveStack.take_evidence.reasons, read
+    end
+
+    gateway = module_class.new
+    gateway.set_temporary_name("throwaway<gateway>")
+    gateway.singleton_class.send(:define_method, :find) { |_ien| :from_the_stack }
+    gateway.define_singleton_method(:find) { |_ien| :from_the_stub }
+    assert_equal [ "#{STUBBED}throwaway<gateway>.find" ], LiveStack.take_evidence.reasons
+  end
+
+  test "install! is idempotent" do
+    client = throwaway_client_class.new(PERSONA_DUZ)
+    mock_class = throwaway_mock_class
+    module_class = Class.new(Module)
+
+    2.times do
+      LiveStack.install!(client: client, persona_duz: PERSONA_DUZ, mock_class: mock_class, module_class: module_class)
+    end
+
+    assert_equal 1, client.class.ancestors.count(LiveStack::RefusalWatch)
+    assert_equal 1, mock_class.ancestors.count(LiveStack::MockWatch)
+    assert_equal 1, module_class.ancestors.count(LiveStack::StubWatch)
+    client.call_rpc("ORWU USERINFO")
+    mock_class.new.call_rpc("ORWPT LIST ALL")
+    evidence = LiveStack.take_evidence
+    assert_equal 1, evidence.rpc_count
+    assert_equal [ "ORWPT LIST ALL was answered by the mock, not the stack" ], evidence.reasons
+  end
+
+  REFUSED_AGAIN = "the persona's sign-on was refused"
+  HOLDS_KEY = "the persona holds XUPROGMODE, or it could not be asked"
+  FAILED_AGAIN = "the persona's sign-on failed"
+  SIGNED_ON = Result.new(success?: true, value: { duz: 4321 }, error: nil)
+
+  # Runs LiveStack.re_sign_on with recording collaborators. Returns
+  # [result, reason, seen]: seen is, per collaborator call, its name and
+  # arguments, RpmsRpc.client and LiveStack.transparent? at that moment.
+  def re_sign_on(client: SignedOn.new(PERSONA_DUZ), authenticate: nil, held_keys: nil)
+    seen = []
+    authenticate ||= ->(_access, _verify) { SIGNED_ON }
+    held_keys ||= ->(_names) { [] }
+    result, reason = LiveStack.re_sign_on(
+      client: client, binding: LiveStack.binding(full_env),
+      authenticate: lambda { |*arguments|
+        seen << [ :authenticate, arguments, RpmsRpc.client, LiveStack.transparent? ]
+        authenticate.call(*arguments)
+      },
+      held_keys: lambda { |*arguments|
+        seen << [ :held_keys, arguments, RpmsRpc.client, LiveStack.transparent? ]
+        held_keys.call(*arguments)
+      }
+    )
+    [ result, reason, seen ]
+  end
+
+  def assert_outside_re_sign_on(scoped_before)
+    assert_equal false, LiveStack.transparent?, "the watch is still aside"
+    if scoped_before.nil?
+      assert_nil RpmsRpc.scoped_client, "the client is still scoped"
+    else
+      assert_same scoped_before, RpmsRpc.scoped_client
+    end
+    assert_equal [], LiveStack.take_evidence.reasons
+  end
+
+  test "re_sign_on takes the client and the binding, and its collaborators by default" do
+    assert_equal({ keyreq: %i[client binding], key: %i[authenticate held_keys] }, keywords(:re_sign_on))
+  end
+
+  test "re_sign_on of a persona without XUPROGMODE answers the sign-on's result and no reason" do
+    scoped_before = RpmsRpc.scoped_client
+    client = SignedOn.new(PERSONA_DUZ)
+
+    result, reason, seen = re_sign_on(client: client)
+
+    assert_same SIGNED_ON, result
+    assert_nil reason
+    assert_equal [ [ :authenticate, [ ACCESS, VERIFY ] ], [ :held_keys, [ [ "XUPROGMODE" ] ] ] ],
+                 seen.map { |name, arguments, _client, _transparent| [ name, arguments ] }
+    seen.each do |name, _arguments, scoped, transparent|
+      assert_same client, scoped, "#{name} did not run with the client installed"
+      assert_equal true, transparent, "#{name} did not run with the watch aside"
+    end
+    assert_outside_re_sign_on scoped_before
+  end
+
+  test "a refused re-sign-on says so, answers the refusal, and does not ask about XUPROGMODE" do
+    scoped_before = RpmsRpc.scoped_client
+    refused = Result.new(success?: false, value: nil, error: "refused for #{ACCESS};#{VERIFY}")
+
+    result, reason, seen = re_sign_on(authenticate: ->(_access, _verify) { refused })
+
+    assert_same refused, result
+    assert_equal REFUSED_AGAIN, reason
+    assert_equal [ :authenticate ], seen.map(&:first)
+    assert_outside_re_sign_on scoped_before
+  end
+
+  test "a re-sign-on whose XUPROGMODE answer is anything but none says the persona holds it or could not be asked" do
+    [ nil, [ "XUPROGMODE" ], [ "XUPROGMODE", "PROVIDER" ], [ "PROVIDER" ], "", false ].each do |answer|
+      scoped_before = RpmsRpc.scoped_client
+
+      _result, reason, seen = re_sign_on(held_keys: ->(_names) { answer })
+
+      assert_equal HOLDS_KEY, reason, "held_keys answered #{answer.inspect}"
+      assert_equal %i[authenticate held_keys], seen.map(&:first)
+      assert_outside_re_sign_on scoped_before
+    end
+  end
+
+  test "a re-sign-on that raises says it failed, and never the error's message" do
+    leak = "broker said #{ACCESS};#{VERIFY}"
+    [ RuntimeError.new(leak), Client::ConnectionError.new(leak), Client::RpcRefusedError.new(leak) ].each do |error|
+      [ { authenticate: ->(_access, _verify) { raise error } }, { held_keys: ->(_names) { raise error } } ].each do |raising|
+        scoped_before = RpmsRpc.scoped_client
+
+        _result, reason, _seen = re_sign_on(**raising)
+
+        assert_equal FAILED_AGAIN, reason, "#{error.class} from #{raising.keys.first}"
+        assert_no_codes reason
+        assert_outside_re_sign_on scoped_before
+      end
+    end
+  end
+
+  test "an error that is not a StandardError passes through re_sign_on, which still stands down" do
+    scoped_before = RpmsRpc.scoped_client
+    interrupt = Class.new(Exception) # rubocop:disable Lint/InheritException
+
+    assert_raises(interrupt) { re_sign_on(authenticate: ->(_access, _verify) { raise interrupt }) }
+
+    assert_outside_re_sign_on scoped_before
+  end
+
+  test "a re-sign-on's own RPCs on the armed client are no evidence, answered or refused" do
+    client = armed_client
+
+    _result, reason, _seen = re_sign_on(
+      client: client,
+      authenticate: ->(_access, _verify) { client.call_rpc("XUS AV CODE"); SIGNED_ON },
+      held_keys: ->(_names) { client.call_rpc("ORWU NPHASKEY"); [] }
+    )
+    assert_nil reason
+    evidence = LiveStack.take_evidence
+    assert_nothing_counted evidence, "the re-sign-on"
+    assert_equal [], evidence.reasons
+
+    client.raises = Client::RpcRefusedError.new("broker said #{ACCESS};#{VERIFY}")
+    _out, err = capture_io do
+      _result, reason, _seen = re_sign_on(
+        client: client, authenticate: ->(_access, _verify) { client.call_rpc("XUS AV CODE"); SIGNED_ON }
+      )
+    end
+    assert_equal FAILED_AGAIN, reason
+    assert_equal "", err, "the re-sign-on reported a not run of its own"
+    evidence = LiveStack.take_evidence
+    assert_nothing_counted evidence, "the refused re-sign-on"
+    assert_equal [], evidence.reasons
+  end
+
+  test "decline_sign_on! clears the client's identity and raises not run without a cause" do
+    client = Class.new do
+      attr_reader :cleared
+
+      define_method(:clear_authenticated) { @cleared = (@cleared || 0) + 1 }
+    end.new
+    error = nil
+
+    _out, err = capture_io do
+      raise "broker said #{ACCESS};#{VERIFY}"
+    rescue RuntimeError
+      error = assert_raises(LiveStack::NotRun) { LiveStack.decline_sign_on!(client, REFUSED_AGAIN) }
+    end
+
+    assert_equal 1, client.cleared
+    assert_equal "not run: #{REFUSED_AGAIN}", error.message
+    assert_nil error.cause, "the broker's error travels with the skip"
+    assert_not_run error, naming: REFUSED_AGAIN
+    assert_match(/^\[stack\] not run: #{Regexp.escape(REFUSED_AGAIN)}$/, err)
+    assert_no_codes err
+    assert_equal [ REFUSED_AGAIN ], LiveStack.take_evidence.reasons
+  end
+
+  test "decline_sign_on! raises not run for a client that has no identity to clear" do
+    error = nil
+
+    capture_io { error = assert_raises(LiveStack::NotRun) { LiveStack.decline_sign_on!(Object.new, FAILED_AGAIN) } }
+
+    assert_equal "not run: #{FAILED_AGAIN}", error.message
+    assert_nil error.cause
+    assert_equal [ FAILED_AGAIN ], LiveStack.take_evidence.reasons
+  end
+
+  # The ready branch of test/test_helper.rb cannot run without a broker, so
+  # its wiring is checked in the source: it goes through the functions above
+  # (which the broker-free fixture also runs), not through a copy of them.
+  HELPER_CODE = File.read(File.expand_path("../test_helper.rb", __dir__)).gsub(/^\s*#.*$/, "").freeze
+
+  test "test_helper's ready branch installs the watches through LiveStack.install! alone" do
+    ready = HELPER_CODE[/^  if LIVE_STACK_BINDING\n.*?^  else\n/m]
+    assert ready, "test_helper has no `if LIVE_STACK_BINDING` branch under LIVE_RPMS"
+
+    assert_match(/^    LIVE_STACK_CLIENT = RpmsRpc\.configuration\.client$/, ready)
+    assert_match(/^    LiveStack\.install!\(client: LIVE_STACK_CLIENT, persona_duz: LIVE_STACK\.persona_duz\)$/, ready)
+    assert_no_match(/\.prepend\b|LiveStack\.arm!/, ready, "the ready branch still wires a watch by hand")
+  end
+
+  test "test_helper re-signs the persona on through LiveStack.re_sign_on and declines through decline_sign_on!" do
+    session = HELPER_CODE[/^  module LiveRpmsSession\n.*?^  end\n/m]
+    assert session, "test_helper has no LiveRpmsSession"
+
+    assert_match(/LiveStack\.re_sign_on\(client: LIVE_STACK_CLIENT, binding: LIVE_STACK_BINDING\)/, session)
+    assert_match(/LiveStack\.decline_sign_on!\(LIVE_STACK_CLIENT, \w+\)/, session)
+    assert_no_match(/LiveStack\.transparently|RpmsRpc\.with_client|held_keys|clear_authenticated|LiveStack\.not_run/,
+                    session, "the re-sign-on is still done by hand")
+  end
 end

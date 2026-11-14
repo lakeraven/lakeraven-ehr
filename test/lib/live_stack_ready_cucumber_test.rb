@@ -69,4 +69,19 @@ class LiveStackReadyCucumberTest < ActiveSupport::TestCase
   test "a scenario with a stubbed gateway is not run" do
     assert_not_run "A gateway is stubbed", reason: "gateway"
   end
+
+  # Stubbed with a bare define_singleton_method, which @gateway_stubs never
+  # sees: LiveStack::StubWatch on Module is what reports it.
+  test "a scenario with a gateway stubbed bare is not run" do
+    assert_not_run "A gateway is stubbed bare", reason: "a gateway was stubbed: LiveStackReady::ThrowawayGateway.find"
+  end
+
+  # The real RpmsRpc::MockClient, watched by LiveStack.install!'s default.
+  test "a scenario the mock answered through call_rpc_lines is not run" do
+    assert_not_run "The mock answers through its lines", reason: "ORWPT LIST ALL was answered by the mock"
+  end
+
+  test "a scenario the mock answered through call_rpc_global_array is not run" do
+    assert_not_run "The mock answers through its global array", reason: "ORWPT LIST ALL was answered by the mock"
+  end
 end
