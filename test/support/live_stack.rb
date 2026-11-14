@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require "cucumber/core/test/result"
+require "active_support"
+require "active_support/testing/time_helpers"
 
 # The binding behind `cucumber --profile stack` (#962). A stack run takes its
 # whole binding from VARIABLES, signs on as that one persona, and is ready only
@@ -77,7 +79,8 @@ module LiveStack
 
   # Prepended onto the mock client class in a ready stack run: an answer from
   # the mock, through any of its read paths, is never evidence. Each read
-  # records that the mock answered and answers unchanged.
+  # records that the mock answered, whether it returned or raised, and answers
+  # or raises unchanged.
   module MockWatch
     READS = %i[call_rpc call_rpc_lines call_rpc_global_array].freeze
 
@@ -93,13 +96,24 @@ module LiveStack
   # inherited) is a gateway stub, and LiveStack.stub_installed records it. A
   # new method, an anonymous module or an object that is not a Module is not
   # a stub. Defines and answers exactly as unwatched; errors pass through.
+  # The module's name and what it answers are read from Module and Kernel,
+  # never from the module's own overrides.
   module StubWatch
     def define_singleton_method(method_name, *body, &block)
-      replaces = is_a?(Module) && !name.nil? && respond_to?(method_name, true)
+      replaces = LiveStack.replaces?(self, method_name)
       defined = super
       LiveStack.stub_installed(self, method_name) if replaces
       defined
     end
+  end
+
+  # Prepended onto ActiveSupport::Testing::SimpleStubs in a ready stack run:
+  # travel_to, travel and freeze_time move the clock through stub_object and
+  # put it back through unstub_all!, which is not a gateway stub. Each runs
+  # with the watch aside, and answers and raises exactly as unwatched.
+  module TimeStubWatch
+    def stub_object(*arguments, &block) = LiveStack.transparently { super }
+    def unstub_all!(*arguments, &block) = LiveStack.transparently { super }
   end
 
   EVIDENCE = { rpc_count: 0, reasons: [] }
@@ -200,21 +214,33 @@ module LiveStack
   def disarm! = EVIDENCE_LOCK.synchronize { ARMED.clear }
 
   # The ready run's watches: arms the persona's client, and prepends
-  # RefusalWatch onto its class, MockWatch onto the mock and StubWatch onto
-  # Module, each once.
-  def install!(client:, persona_duz:, mock_class: RpmsRpc::MockClient, module_class: Module)
+  # RefusalWatch onto its class, MockWatch onto the mock, StubWatch onto
+  # Module and TimeStubWatch onto SimpleStubs, each once.
+  def install!(client:, persona_duz:, mock_class: RpmsRpc::MockClient, module_class: Module,
+               time_stubs_class: ActiveSupport::Testing::SimpleStubs)
     arm!(client: client, persona_duz: persona_duz)
-    [ [ client.class, RefusalWatch ], [ mock_class, MockWatch ], [ module_class, StubWatch ] ].each do |klass, watch|
+    [ [ client.class, RefusalWatch ], [ mock_class, MockWatch ], [ module_class, StubWatch ],
+      [ time_stubs_class, TimeStubWatch ] ].each do |klass, watch|
       klass.prepend(watch) unless klass.ancestors.include?(watch)
     end
   end
 
+  # Module#name of receiver, whatever receiver answers to name itself.
+  def module_name(receiver) = Module.instance_method(:name).bind_call(receiver)
+
+  # Whether a define_singleton_method of method_name on receiver replaces a
+  # method a named module already answers (its own, private or inherited).
+  def replaces?(receiver, method_name)
+    Module === receiver && !module_name(receiver).nil? &&
+      Kernel.instance_method(:respond_to?).bind_call(receiver, method_name, true)
+  end
+
   # Records a gateway stub on a Module while the watch is armed and not aside.
   def stub_installed(receiver, method_name)
-    return unless receiver.is_a?(Module) && !transparent?
+    return unless Module === receiver && !transparent?
     return if EVIDENCE_LOCK.synchronize { ARMED.empty? }
 
-    record("a gateway was stubbed: #{receiver.name}.#{method_name}")
+    record("a gateway was stubbed: #{module_name(receiver)}.#{method_name}")
   end
 
   # Signs the persona on again through client, with the watch aside (so the
@@ -273,8 +299,8 @@ module LiveStack
     ensure
       Thread.current.thread_variable_set(WATCHING, nil)
       record("the scenario signed on as someone else") if kind == :sign_on
+      record("#{name} was answered by the mock, not the stack") if kind == :mock
     end
-    record("#{name} was answered by the mock, not the stack") if kind == :mock
     witness(client) if kind == :parsed
     answer
   end
