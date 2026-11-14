@@ -4,9 +4,20 @@ require "test_helper"
 
 module Lakeraven
   module EHR
+    # Transactional tests are OFF: dispatch refuses an open transaction, so
+    # the test cleans up its own rows.
     class RpmsOutboxDispatchJobTest < ActiveSupport::TestCase
-      setup { RpmsOutbox.reset_handlers! }
-      teardown { RpmsOutbox.reset_handlers! }
+      self.use_transactional_tests = false
+
+      setup do
+        RpmsOutboxEntry.delete_all
+        RpmsOutbox.reset_handlers!
+      end
+
+      teardown do
+        RpmsOutbox.reset_handlers!
+        RpmsOutboxEntry.delete_all
+      end
 
       test "job uses integrations queue" do
         assert_equal "integrations", RpmsOutboxDispatchJob.new.queue_name
