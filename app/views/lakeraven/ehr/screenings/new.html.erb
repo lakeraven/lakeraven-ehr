@@ -146,8 +146,10 @@
                  <%= "checked" if @encounter_ien == ien %>>
           <label for="<%= input_id %>">
             <%= visit[:datetime].strftime("%b %-d, %Y %H:%M") %>
-            &middot; <%= visit[:location].presence || "Clinic not recorded" %>
-            &middot; <%= visit[:provider].presence || "Provider not recorded" %>
+            <%# "not shown": the record has one and the egress filter withheld it;
+                "not recorded": the record has none. %>
+            &middot; <%= visit[:location].presence || (visit[:location_recorded] ? "Clinic not shown" : "Clinic not recorded") %>
+            &middot; <%= visit[:provider].presence || (visit[:provider_recorded] ? "Provider not shown" : "Provider not recorded") %>
           </label>
         </div>
       <% end %>
