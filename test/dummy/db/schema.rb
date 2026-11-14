@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_03_170000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_14_000000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -213,6 +213,24 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_03_170000) do
     t.string "duz", null: false
     t.string "review_id", null: false
     t.index [ "review_id" ], name: "index_lakeraven_ehr_registration_reviews_on_review_id", unique: true
+  end
+
+  create_table "lakeraven_ehr_rpms_outbox_entries", force: :cascade do |t|
+    t.string "effect", null: false
+    t.string "idempotency_key", null: false
+    t.jsonb "payload", default: {}, null: false
+    t.string "status", default: "pending", null: false
+    t.integer "attempts", default: 0, null: false
+    t.datetime "next_attempt_at", null: false
+    t.datetime "last_attempted_at"
+    t.string "last_error_class"
+    t.datetime "delivered_at"
+    t.datetime "dead_lettered_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "idempotency_key" ], name: "idx_rpms_outbox_idempotency_key", unique: true
+    t.index [ "status", "next_attempt_at" ], name: "idx_rpms_outbox_claim", where: "((status)::text = 'pending'::text)"
+    t.check_constraint "status::text = ANY (ARRAY['pending'::character varying, 'delivering'::character varying, 'delivered'::character varying, 'dead'::character varying]::text[])", name: "chk_rpms_outbox_status"
   end
 
   create_table "lakeraven_ehr_screening_responses", force: :cascade do |t|
