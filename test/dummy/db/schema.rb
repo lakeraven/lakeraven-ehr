@@ -229,7 +229,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_14_000000) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.index [ "idempotency_key" ], name: "idx_rpms_outbox_idempotency_key", unique: true
-    t.index [ "status", "next_attempt_at" ], name: "idx_rpms_outbox_claim"
+    t.index [ "status", "next_attempt_at" ], name: "idx_rpms_outbox_claim", where: "((status)::text = 'pending'::text)"
     t.check_constraint "status::text = ANY (ARRAY['pending'::character varying, 'delivering'::character varying, 'delivered'::character varying, 'dead'::character varying]::text[])", name: "chk_rpms_outbox_status"
   end
 
