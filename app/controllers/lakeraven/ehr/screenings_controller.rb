@@ -80,8 +80,10 @@ module Lakeraven
       end
 
       # The visit is CHOSEN from the patient's open visits (#1003), read from
-      # the same VISITLST list the chart's Encounter read uses. `encounter_ien`
-      # arriving as a query param only preselects a visit that is in that list.
+      # the same VISITLST list the chart's Encounter read uses and offered only
+      # as they come back through the egress seam (load_open_visits).
+      # `encounter_ien` arriving as a query param only preselects a visit that
+      # is in that list.
       def new
         @answers = {}
         load_open_visits
@@ -160,33 +162,118 @@ module Lakeraven
       # only by a credential that may search Encounter. A read that is not
       # permitted or fails is NOT an empty list: @visits_unreadable is set, the
       # form says so, and nothing can be chosen (fail closed, no typed fallback).
-      # Only the error class is logged, never a row.
+      #
+      # The choices are clinical data on a rendered page, so they are read
+      # through the egress seam, as the chart and index/show are: the eligible
+      # rows are shaped as Encounters in one Bundle, the Bundle goes through
+      # filter_fhir_for_egress, and only what comes back is offered and
+      # labelled. An unusable filtered payload means the visits could not be
+      # read. Only the error class is logged, never a row.
       def load_open_visits
         @open_visits = []
         @visits_unreadable = false
-        unless can_read?("Encounter", "s")
-          @visits_unreadable = true
-          return
-        end
+        return @visits_unreadable = true unless can_read?("Encounter", "s")
 
-        @open_visits = normalise_visits(EncounterGateway.visits(@dfn))
+        eligible = normalise_visits(EncounterGateway.visits(@dfn))
+        filtered = filter_fhir_for_egress(visit_bundle(eligible))
+        return @visits_unreadable = true unless filtered
+
+        @open_visits = filtered_visits(filtered, eligible.map { |row| row[:visit_ien].to_s.strip })
       rescue RpmsRpc::Error, IOError, SystemCallError => e
         Rails.logger.warn("[screening] visit list unreadable: #{e.class}")
         @open_visits = []
         @visits_unreadable = true
       end
 
-      # A visit is offered only if every row for its (valid) IEN is open (lock
-      # explicitly false: an unknown lock is not open) and dated with a real
-      # time. One row per visit, today's first and then newest first.
+      # The raw-row gate, before anything is shaped for egress: a visit is
+      # eligible only if every row for its (valid) IEN is open (lock explicitly
+      # false: an unknown lock is not open) and dated with a real time. One
+      # row per visit. These rows are never rendered; only what survives the
+      # egress filter is.
       def normalise_visits(rows)
-        # The gem builds visit times with Time.new in the process zone (see WallClock), so "today" is the process-local date, not the Rails zone's.
-        today = Time.now.to_date # rubocop:disable Rails/TimeZone
         groups = Array(rows).group_by { |row| row[:visit_ien].to_s.strip }.select { |ien, _| ien.match?(/\A[1-9]\d*\z/) }
-        offered = groups.values.filter_map do |group|
+        groups.values.filter_map do |group|
           group.first if group.all? { |row| row[:locked] == false && row[:datetime].is_a?(Time) }
         end
-        offered.sort_by { |row| row[:datetime] }.reverse.partition { |row| row[:datetime].to_date == today }.flatten
+      end
+
+      def visit_bundle(rows)
+        {
+          resourceType: "Bundle",
+          type: "searchset",
+          total: rows.length,
+          entry: rows.map { |row| { resource: visit_encounter(row) } }
+        }
+      end
+
+      # Shaped locally: the FHIR Encounter API output is unchanged. The clinic
+      # and provider names ride as reference displays, so the filter sees them.
+      def visit_encounter(row)
+        resource = Encounter.from_rpms_visit(row, patient_dfn: @dfn).to_fhir
+        add_visit_location(resource, row[:location])
+        add_visit_provider(resource, row[:provider])
+        resource
+      end
+
+      def add_visit_location(resource, name)
+        return if name.blank?
+
+        reference = resource.dig(:location, 0, :location) || {}
+        resource[:location] = [ { location: reference.merge(display: name.to_s) } ]
+      end
+
+      def add_visit_provider(resource, name)
+        return if name.blank?
+
+        reference = resource.dig(:participant, 0, :individual) || {}
+        participants = Array(resource[:participant]).drop(1)
+        resource[:participant] = [ { individual: reference.merge(display: name.to_s) } ] + participants
+      end
+
+      # Only the filtered Encounters whose id is an eligible IEN and whose
+      # period still parses are offered, labelled only from the filtered
+      # displays. An IEN the filter returned more than once with different
+      # content is not offered (fail closed). Today's first (process-local
+      # date: the gem builds visit times with Time.new in the process zone,
+      # see WallClock), then newest first.
+      def filtered_visits(document, eligible_iens)
+        visits = bundle_entry_resources(document).filter_map do |resource|
+          filtered_visit(resource, eligible_iens) if resource_type(resource) == "Encounter"
+        end
+        offered = visits.group_by { |visit| visit[:visit_ien] }.values.filter_map do |group|
+          group.first if group.uniq.one?
+        end
+        sort_visits(offered)
+      end
+
+      def sort_visits(visits)
+        today = Time.now.to_date # rubocop:disable Rails/TimeZone
+        visits.sort_by { |visit| visit[:datetime] }.reverse.partition { |visit| visit[:datetime].to_date == today }.flatten
+      end
+
+      def filtered_visit(resource, eligible_iens)
+        ien = fhir_value(resource, "id").to_s.strip
+        return unless eligible_iens.include?(ien)
+
+        datetime = filtered_visit_time(resource)
+        return if datetime.nil?
+
+        { visit_ien: ien, datetime: datetime, location: visit_display(resource, "location", "location"),
+          provider: visit_display(resource, "participant", "individual") }
+      end
+
+      def filtered_visit_time(resource)
+        start = fhir_value(fhir_value(resource, "period"), "start")
+        return unless start.is_a?(String)
+
+        Time.iso8601(start).localtime
+      rescue ArgumentError
+        nil
+      end
+
+      def visit_display(resource, list_key, reference_key)
+        display = fhir_value(fhir_value(first_fhir(fhir_value(resource, list_key)), reference_key), "display")
+        display.to_s.presence if display.is_a?(String)
       end
 
       def offered_visit?(ien)
