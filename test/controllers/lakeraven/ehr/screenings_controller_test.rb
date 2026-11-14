@@ -2123,7 +2123,9 @@ module Lakeraven
         assert_closed_rows_not_offered
       end
 
-      test "a clinic and provider the egress filter removed are shown as not recorded, never as the raw names" do
+      # The record HAS a clinic and a provider; the filter withheld them. "Not
+      # recorded" would be untrue, so the label says they are not shown.
+      test "a clinic and provider the egress filter removed are shown as not shown, never as not recorded or the raw names" do
         seed_seam_visits
 
         stub_egress_filter(display_stripping_filter) { get "#{BASE}/new", params: { instrument: "phq-9" } }
@@ -2131,8 +2133,9 @@ module Lakeraven
         assert_response :ok
         assert_equal [ VISIT ], offered_visit_iens
         label = visit_label_text(VISIT)
-        assert_match(/clinic not recorded/i, label)
-        assert_match(/provider not recorded/i, label)
+        assert_match(/clinic not shown/i, label)
+        assert_match(/provider not shown/i, label)
+        assert_no_match(/not recorded/i, label)
         assert_not_includes label, CLINIC
         assert_not_includes label, PROVIDER
         assert_no_match(/#{Regexp.escape(CLINIC)}/, response.body)
@@ -2263,6 +2266,304 @@ module Lakeraven
           assert_equal 0, ScreeningResponse.count
           assert_equal [ VISIT ], offered_visit_iens
         end
+      end
+
+      # -- Visits through the egress seam, round 2 (#1003 review) ----------------
+      #
+      # The owner's rule: a filtered payload that is not usable means the
+      # visits could not be read (nothing offered, no typed fallback), and
+      # absence of data never verifies. "No open visit ... check the patient
+      # in" is a statement about the record; it is only true when the record
+      # itself has no eligible open visit, never when the filter's answer was
+      # unusable or withheld every eligible visit.
+
+      SEAM_NEVER_LISTED_VISIT = "2099999"
+      NO_OPEN_VISIT = /No open visit/i
+      NOT_AN_OPEN_VISIT = /not one of this patient['’]s open visits/i
+
+      def seed_two_open_seam_visits
+        seed_seam_visits([
+          visit_row(VISIT, at: today_at(9, 30)),
+          visit_row(SEAM_OTHER_VISIT, at: today_at(14, 45, days_ago: 3), clinic: SEAM_OTHER_CLINIC)
+        ])
+      end
+
+      # Sets a FHIR key on a hash in the key style (string or symbol) it already uses.
+      def fhir_put(hash, key, value)
+        name = hash.key?(key) || hash.keys.first.is_a?(String) ? key : key.to_sym
+        hash.merge(name => value)
+      end
+
+      def bundle_payload?(payload)
+        payload.is_a?(Hash) && fhir_key(payload, "resourceType") == "Bundle"
+      end
+
+      # The Bundle with its entry list replaced by what the block returns for it.
+      def with_bundle_entries(payload)
+        return payload unless bundle_payload?(payload)
+
+        fhir_put(payload, "entry", yield(Array(fhir_key(payload, "entry"))))
+      end
+
+      def entry_encounter(entry)
+        resource = fhir_key(entry, "resource") if entry.is_a?(Hash)
+        resource if resource.is_a?(Hash) && fhir_key(resource, "resourceType") == "Encounter"
+      end
+
+      # Every Encounter in the Bundle replaced by what the block returns for it.
+      def encounter_rewriting_filter(&rewrite)
+        test = self
+        ->(payload) {
+          test.with_bundle_entries(payload) do |entries|
+            entries.map do |entry|
+              encounter = test.entry_encounter(entry)
+              encounter ? test.fhir_put(entry, "resource", rewrite.call(encounter)) : entry
+            end
+          end
+        }
+      end
+
+      def all_encounters_withholding_filter
+        test = self
+        ->(payload) { test.with_bundle_entries(payload) { |entries| entries.reject { |entry| test.entry_encounter(entry) } } }
+      end
+
+      def unparseable_period_filter
+        encounter_rewriting_filter do |encounter|
+          period = fhir_key(encounter, "period")
+          fhir_put(encounter, "period", fhir_put(period.is_a?(Hash) ? period : {}, "start", "not a time"))
+        end
+      end
+
+      def id_changing_filter
+        encounter_rewriting_filter { |encounter| fhir_put(encounter, "id", SEAM_NEVER_LISTED_VISIT) }
+      end
+
+      # Appends a copy of the first Encounter in the Bundle, rewritten by the
+      # block: a filter that returns an Encounter it was not given as it is.
+      def encounter_adding_filter(source_ien: VISIT, &rewrite)
+        test = self
+        ->(payload) {
+          test.with_bundle_entries(payload) do |entries|
+            source = entries.find { |entry| test.encounter_resource?(test.entry_encounter(entry), source_ien) }
+            next entries unless source
+
+            entries + [ test.fhir_put(source, "resource", rewrite.call(test.entry_encounter(source).deep_dup)) ]
+          end
+        }
+      end
+
+      def encounter_added_as(ien)
+        encounter_adding_filter { |encounter| fhir_put(encounter, "id", ien) }
+      end
+
+      # The same eligible IEN a second time, with a different clinic.
+      def duplicating_filter
+        encounter_adding_filter { |encounter| deep_strings(encounter) { |text| text.gsub(CLINIC, REPLACED_CLINIC) } }
+      end
+
+      # A complete, non-safety PHQ-9 with NO visit named, sent while the block
+      # arranges for the visits to be unreadable: refused before the service.
+      def assert_blank_visit_post_refused(filter = nil)
+        before = ScreeningResponse.count
+        post_blank = -> { submit(encounter_ien: "") }
+        assert_service_not_reached do
+          filter ? stub_egress_filter(filter, &post_blank) : post_blank.call
+        end
+
+        assert_response :unprocessable_entity
+        assert_equal before, ScreeningResponse.count, "a screening was stored while the visits could not be read"
+        assert_alert(/visits could not be read/i)
+        assert_no_alert(NO_OPEN_VISIT)
+        assert_no_alert(/Visit required/i)
+        assert_empty offered_visit_iens
+        assert_no_typed_visit_field
+      end
+
+      # 1. A FHIR hash that is not a usable Bundle of Encounters is not an
+      # empty visit list.
+      [ [ "an OperationOutcome", ->(_payload) { { "resourceType" => "OperationOutcome", "issue" => [] } } ],
+        [ "a Bundle with no entry", ->(_payload) { { "resourceType" => "Bundle", "type" => "searchset" } } ],
+        [ "a Bundle whose entry is not a list",
+          ->(_payload) { { "resourceType" => "Bundle", "type" => "searchset", "entry" => "withheld" } } ],
+        [ "a Bundle whose entries are not resources",
+          ->(_payload) { { "resourceType" => "Bundle", "type" => "searchset", "entry" => [ "x" ] } } ],
+        [ "a bare Encounter in place of the Bundle",
+          ->(_payload) { { "resourceType" => "Encounter", "id" => VISIT, "status" => "in-progress" } } ] ].each do |name, filter|
+        test "when the egress filter returns #{name} the form says the visits could not be read, not that there is no open visit" do
+          seed_seam_visits
+
+          stub_egress_filter(filter) { get "#{BASE}/new", params: { instrument: "phq-9" } }
+
+          assert_response :ok
+          assert_visits_unreadable_form
+          assert_no_alert(NO_OPEN_VISIT)
+          assert_closed_rows_not_offered
+        end
+
+        test "when the egress filter returns #{name} a submitted open visit is refused as unreadable before the service" do
+          seed_seam_visits
+
+          assert_visit_post_refused(filter)
+
+          assert_visits_unreadable_form
+          assert_no_alert(NO_OPEN_VISIT)
+          assert_no_alert(NOT_AN_OPEN_VISIT)
+          assert_closed_rows_not_offered
+        end
+      end
+
+      # 2. Eligible open visits exist and none survives the filter: the app
+      # cannot say there is no open visit, nor that the submitted one is not open.
+      [ [ "withholds every Encounter", :all_encounters_withholding_filter ],
+        [ "strips every Encounter's period", :period_stripping_filter ],
+        [ "returns every Encounter with an unparseable period start", :unparseable_period_filter ],
+        [ "changes every Encounter's id to one that was not sent", :id_changing_filter ] ].each do |name, filter|
+        test "when the egress filter #{name} the form says the visits could not be read, not that there is no open visit" do
+          seed_two_open_seam_visits
+
+          stub_egress_filter(send(filter)) { get "#{BASE}/new", params: { instrument: "phq-9" } }
+
+          assert_response :ok
+          assert_visits_unreadable_form
+          assert_no_alert(NO_OPEN_VISIT)
+          assert_no_match(/#{Regexp.escape(SEAM_OTHER_CLINIC)}/, response.body)
+          assert_select "input[name=encounter_ien][value=?]", SEAM_NEVER_LISTED_VISIT, count: 0
+          assert_closed_rows_not_offered
+        end
+
+        test "when the egress filter #{name} a submitted open visit is refused as unreadable before the service" do
+          seed_two_open_seam_visits
+
+          assert_visit_post_refused(send(filter))
+
+          assert_visits_unreadable_form
+          assert_no_alert(NO_OPEN_VISIT)
+          assert_no_alert(NOT_AN_OPEN_VISIT)
+          assert_closed_rows_not_offered
+        end
+      end
+
+      test "a patient with no eligible open visit is still told there is no open visit when the filter returns the empty Bundle" do
+        seed_visits(DFN_PARAM, [ visit_row(SEAM_LOCKED_VISIT, at: today_at(11, 0), clinic: SEAM_CLOSED_CLINIC, locked: true) ])
+
+        stub_egress_filter(->(payload) { payload }) { get "#{BASE}/new", params: { instrument: "phq-9" } }
+
+        assert_response :ok
+        assert_alert(NO_OPEN_VISIT)
+        assert_no_alert(/visits could not be read/i)
+        assert_empty offered_visit_iens
+      end
+
+      # 3. Visits unreadable and no visit submitted: nothing to record
+      # against, so the service is not reached at all.
+      test "a submission with no visit when the egress filter returns nil is refused before the service" do
+        seed_seam_visits
+
+        assert_blank_visit_post_refused(->(_payload) { nil })
+      end
+
+      test "a submission with no visit without an Encounter read scope is refused before the service" do
+        sign_in(scopes: SCREENING_ONLY_SCOPES)
+        open_patient(1)
+
+        assert_blank_visit_post_refused
+      end
+
+      [ [ "RpmsRpc::Error", -> { raise RpmsRpc::Error, "broker down" } ],
+        [ "IOError", -> { raise IOError, "socket closed" } ] ].each do |name, failure|
+        test "a submission with no visit while the visit read raises #{name} is refused before the service" do
+          with_failing(EncounterGateway, :visits, ->(*) { failure.call }) do
+            assert_blank_visit_post_refused
+          end
+
+          assert_no_match(/broker down|socket closed/, response.body)
+        end
+      end
+
+      test "a submission with no visit when the egress filter withholds every Encounter is refused before the service" do
+        seed_two_open_seam_visits
+
+        assert_blank_visit_post_refused(all_encounters_withholding_filter)
+      end
+
+      # 4. The filter narrows; it never widens. An Encounter it adds is not a choice.
+      [ [ "the locked visit", SEAM_LOCKED_VISIT ],
+        [ "the undated visit", SEAM_UNDATED_VISIT ],
+        [ "a visit that was never listed", SEAM_NEVER_LISTED_VISIT ] ].each do |name, ien|
+        test "an Encounter the egress filter adds for #{name} is not offered" do
+          seed_seam_visits
+
+          stub_egress_filter(encounter_added_as(ien)) { get "#{BASE}/new", params: { instrument: "phq-9", encounter_ien: ien } }
+
+          assert_response :ok
+          assert_equal [ VISIT ], offered_visit_iens
+          assert_empty checked_visit_iens
+          assert_no_alert(/visits could not be read/i)
+          assert_closed_rows_not_offered
+        end
+
+        test "a submission naming an Encounter the egress filter adds for #{name} is refused before the service" do
+          seed_seam_visits
+
+          assert_visit_post_refused(encounter_added_as(ien), ien: ien)
+
+          assert_equal [ VISIT ], offered_visit_iens
+          assert_closed_rows_not_offered
+        end
+      end
+
+      test "a visit the egress filter returns twice with differing content is not offered while the other is" do
+        seed_two_open_seam_visits
+
+        stub_egress_filter(duplicating_filter) { get "#{BASE}/new", params: { instrument: "phq-9" } }
+
+        assert_response :ok
+        assert_equal [ SEAM_OTHER_VISIT ], offered_visit_iens
+        assert_includes visit_label_text(SEAM_OTHER_VISIT), SEAM_OTHER_CLINIC
+        assert_no_match(/#{Regexp.escape(REPLACED_CLINIC)}/, response.body)
+        assert_no_match(/#{Regexp.escape(CLINIC)}/, response.body)
+        assert_no_alert(/visits could not be read/i)
+        assert_closed_rows_not_offered
+      end
+
+      test "a submission naming a visit the egress filter returns twice with differing content is refused before the service" do
+        seed_two_open_seam_visits
+
+        assert_visit_post_refused(duplicating_filter)
+
+        assert_equal [ SEAM_OTHER_VISIT ], offered_visit_iens
+        assert_closed_rows_not_offered
+      end
+
+      # 5. "Not recorded" is a statement about the record: it is said only of
+      # a row that has no clinic (provider), never of one the filter withheld.
+      test "a clinic the record does not have stays not recorded while a provider the egress filter removed is not shown" do
+        seed_seam_visits([ visit_row(VISIT, at: today_at(9, 30), clinic: nil) ])
+
+        stub_egress_filter(display_stripping_filter) { get "#{BASE}/new", params: { instrument: "phq-9" } }
+
+        assert_response :ok
+        label = visit_label_text(VISIT)
+        assert_match(/clinic not recorded/i, label)
+        assert_match(/provider not shown/i, label)
+        assert_no_match(/provider not recorded/i, label)
+        assert_no_match(/clinic not shown/i, label)
+        assert_not_includes label, PROVIDER
+      end
+
+      test "a provider the record does not have stays not recorded while a clinic the egress filter removed is not shown" do
+        seed_seam_visits([ visit_row(VISIT, at: today_at(9, 30), provider: nil, provider_ien: nil) ])
+
+        stub_egress_filter(display_stripping_filter) { get "#{BASE}/new", params: { instrument: "phq-9" } }
+
+        assert_response :ok
+        label = visit_label_text(VISIT)
+        assert_match(/provider not recorded/i, label)
+        assert_match(/clinic not shown/i, label)
+        assert_no_match(/clinic not recorded/i, label)
+        assert_no_match(/provider not shown/i, label)
+        assert_not_includes label, CLINIC
       end
     end
   end
