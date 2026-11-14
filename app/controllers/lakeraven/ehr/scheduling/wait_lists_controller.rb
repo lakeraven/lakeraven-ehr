@@ -31,7 +31,7 @@ module Lakeraven
 
         # GET /scheduling/clinics/:resource_id/wait_list/new?q=
         def new
-          @addition = WaitListAddition.new({ "added_on" => Date.today }.merge(addition_params))
+          @addition = WaitListAddition.new({ "added_on" => SiteDate.today }.merge(addition_params))
           render_form(:new, :ok)
         end
 
@@ -59,7 +59,7 @@ module Lakeraven
 
         # GET /scheduling/clinics/:resource_id/wait_list/:entry/removal
         def removal
-          @removal = WaitListRemoval.new(removed_on: Date.today)
+          @removal = WaitListRemoval.new(removed_on: SiteDate.today)
           load_resolutions
         end
 

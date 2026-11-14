@@ -21,14 +21,16 @@ module Lakeraven
             @entry = LanguageEntry.from_rpms(current)
             @names = names_from(current)
           end
+          @entry.site_settings = registration_settings
           load_form
         end
 
         # POST /registration/patients/:dfn/languages
         def update
           build_from_params
+          @entry.site_settings = registration_settings
           load_form
-          return render(:edit, status: :unprocessable_content) unless @entry.valid?
+          return render(:edit, status: refused_form_status(@entry)) unless @entry.valid?
 
           if @entry.needs_preferred_confirmation?
             @confirm_preferred = true

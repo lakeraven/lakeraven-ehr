@@ -6,6 +6,23 @@ module Lakeraven
       # The front desk's shared view pieces (docs/DESIGN-SYSTEM.md).
       include ComponentsHelper
 
+      # A registration field's label, following the site's RPMS mandatory
+      # fields (#980): "(required)" when the site requires it, and no
+      # "(optional)" then.
+      def site_field_label(form, attribute, label)
+        return label unless form.respond_to?(:required_by_site?) && form.required_by_site?(attribute)
+
+        "#{label.delete_suffix(' (optional)')} (required)"
+      end
+
+      # The alert a registration form shows when the site's required fields
+      # could not be read from RPMS (#980). Nothing when they were.
+      def site_settings_unavailable_alert(form, id:)
+        return unless form.respond_to?(:site_settings_unavailable?) && form.site_settings_unavailable?
+
+        alert_box :error, SiteRequiredFields::UNDETERMINED, id: id
+      end
+
       def feature_available?(capability)
         BackendRegistry.current.provides?(capability)
       end

@@ -15,6 +15,7 @@ module Lakeraven
     class PatientDemographics
       include ActiveModel::Model
       include ActiveModel::Attributes
+      include SiteRequiredFields
 
       EARLIEST_DOB = Date.new(1871, 1, 1)
       NAME_FORMAT = /\A[A-Z][A-Z' -]*,[A-Z][A-Z' -]*\z/
@@ -39,6 +40,13 @@ module Lakeraven
       attribute :employment_status, :string
       # A new number only: the number on file is never sent back to the form.
       attribute :ssn, :string
+
+      # The fields a site may make mandatory in RPMS (#980), IHS PATIENT
+      # (9000001) .19 EMPLOYER NAME and .21 EMPLOYMENT STATUS. AG asks the
+      # employer as required only of a patient who works full-time or
+      # part-time (AGED2), and so does this form.
+      site_required employer: [ "9000001", "EMPLOYER NAME" ], employment_status: [ "9000001", "EMPLOYMENT STATUS" ]
+      EMPLOYED = %w[FULL-TIME PART-TIME].freeze
 
       validates :name, presence: true
       validates :name, format: { with: NAME_FORMAT, message: "must be LAST,FIRST MIDDLE" }, length: { in: 3..30 }, allow_blank: true
@@ -81,11 +89,17 @@ module Lakeraven
 
       private
 
+      def site_required_blank?(attribute)
+        return false if attribute == :employer && !EMPLOYED.include?(employment_status)
+
+        super
+      end
+
       def dob_in_range
         return if dob.nil?
 
         errors.add(:dob, "must be after Dec 31, 1870") if dob < EARLIEST_DOB
-        errors.add(:dob, "cannot be in the future") if dob > Date.current
+        errors.add(:dob, "cannot be in the future") if dob > SiteDate.today
       end
     end
   end

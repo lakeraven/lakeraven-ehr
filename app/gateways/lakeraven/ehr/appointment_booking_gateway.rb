@@ -188,13 +188,51 @@ module Lakeraven
         lock_for(resource, date).synchronize do
           clinic_day, = day(resource, date, via: via, setup: setup)
           next book(booking, resource, via: via, access_type: access_type) if clinic_day.room_for?(booking.start_time, booking.length)
-          next Result.new(status: :full, appointment_id: nil, message: nil) unless overbook && overbook_permitted?(clinic_day, booking, resource, overbook, via: via, setup: setup)
+          unless overbook && overbook_permitted?(clinic_day, booking, resource, overbook, via: via, setup: setup)
+            next Result.new(status: :full, appointment_id: nil, message: why_no_room(clinic_day, booking, resource, setup: setup))
+          end
           next Result.new(status: :overbook_offered, appointment_id: nil, message: nil) unless overbook[:confirmed]
 
           booked = book(booking, resource, via: via, access_type: access_type)
           booked.booked? ? mark_overbook(booked, booking, resource, setup: setup) : booked
         end
       end
+
+      # Why a time took no booking, when RPMS says more than "full": the day is
+      # past the clinic's maximum days for future booking (#44 field 2002,
+      # S-SCH-15.6), a holiday the clinic does not schedule on, or the clinic is
+      # inactive; or the time is in a block whose access type prevents access
+      # (BSDX ACCESS TYPE .08, S-SCH-17.2). nil for a time that is simply full
+      # or outside the clinic's hours, or when RPMS cannot say.
+      def self.why_no_room(clinic_day, booking, resource, setup:)
+        date = booking.start_time.to_date
+        on = date.strftime("%b %-d, %Y")
+        case clinic_day.closed
+        when :beyond_booking
+          limit = setup.clinic_rules(resource[:hospital_location_id])&.dig(:max_future_days)
+          last = (Time.now.to_date + limit.to_i).strftime("%b %-d, %Y")
+          "#{resource[:name]} books at most #{limit} #{limit.to_i == 1 ? "day" : "days"} ahead, through #{last}. #{on} is past that limit."
+        when :holiday then "#{on} is a holiday, and #{resource[:name]} does not schedule on holidays."
+        when :inactive then "#{resource[:name]} is inactive on #{on}."
+        else prevented_block_message(clinic_day, booking, setup: setup)
+        end
+      rescue ::RpmsRpc::Error, IOError, SystemCallError => e
+        Rails.logger.error("[scheduling] reading why a time is closed raised #{e.class}")
+        nil
+      end
+      private_class_method :why_no_room
+
+      # A block the clinic's hours list but booking leaves out is one whose
+      # access type prevents access.
+      def self.prevented_block_message(clinic_day, booking, setup:)
+        start = booking.start_time
+        block = clinic_day.listed_blocks.find { |b| b[:start_time] <= start && start < b[:end_time] && !clinic_day.blocks.include?(b) }
+        return nil unless block
+
+        type = Array(setup.access_types).find { |t| t[:id] == block[:access_type_id] }
+        "#{start.strftime('%H:%M')} is in a #{type&.dig(:name) || 'blocked'} block, which takes no appointments."
+      end
+      private_class_method :prevented_block_message
 
       # The overbook rules (rpms-ux S-SCH-01.9 to 01.11), as the Windows
       # scheduler and BPRM apply them. Never on a day the clinic takes no

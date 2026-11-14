@@ -3,6 +3,9 @@
 module Lakeraven
   module EHR
     class ApplicationController < ActionController::API
+      # First: a closed disclosure surface (#968) is refused in #process,
+      # before anything else here runs.
+      include DisclosureSurfaceGate
       include SmartAuthentication
       include AuditableClinicalAccess
       include RateLimitable

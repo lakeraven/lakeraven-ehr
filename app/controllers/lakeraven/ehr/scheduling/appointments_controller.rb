@@ -34,7 +34,7 @@ module Lakeraven
 
           result = AppointmentBookingGateway.book_if_room(@booking, @resource, overbook: overbook_request)
           if result.status == :full
-            flash.now[:alert] = "That time is full or outside the clinic's open hours. Choose another time."
+            flash.now[:alert] = result.message || "That time is full or outside the clinic's open hours. Choose another time."
             render_new(:conflict)
           elsif result.status == :overbook_offered
             @offer_overbook = true

@@ -6,6 +6,9 @@
 
 <%= flash_alert id: "demographics-alert" %>
 
+<%= site_settings_unavailable_alert @demographics,
+      id: "demographics-settings-unavailable" %>
+
 <%= form_errors @demographics,
       "The demographics were not saved.",
       id: "demographics-errors" %>
@@ -69,6 +72,7 @@
       <%= f.select :marital_status,
             options_for_select(@marital_statuses, @demographics.marital_status),
             { include_blank: "Not recorded" },
+            required: @demographics.required_by_site?(:employment_status),
             aria: aria %>
     <% end %>
     <%# RELIGIOUS PREFERENCE, PATIENT (2) field .08. %>
@@ -101,7 +105,11 @@
 
   <div class="flex flex-wrap gap-4">
     <%# EMPLOYER, IHS PATIENT (9000001) field .19. %>
-    <%= form_field :employer, "Employer (optional)", form: f do |aria| %>
+    <%= form_field :employer,
+          site_field_label(@demographics, :employer, "Employer (optional)"),
+          form: f,
+          hint: ("Needed when the patient works full-time or part-time." if @demographics.required_by_site?(:employer)),
+          error: @demographics.errors[:employer].first do |aria| %>
       <%= f.select :employer,
             options_for_select(@employers, @demographics.employer),
             { include_blank: "None" },
@@ -109,7 +117,7 @@
     <% end %>
     <%# EMPLOYMENT STATUS, IHS PATIENT (9000001) field .21. %>
     <%= form_field :employment_status,
-          "Employment status",
+          site_field_label(@demographics, :employment_status, "Employment status"),
           form: f,
           hint: "Needed when there is an employer.",
           error: @demographics.errors[:employment_status].first do |aria| %>

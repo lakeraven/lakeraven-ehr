@@ -14,6 +14,11 @@ module Lakeraven
       # registering (patient.register).
       class CoveragesController < WebController
         include RpmsUnavailableRendering
+        include RegistrationSiteSettingsLookup
+
+        # The coverage kinds a site may stop asking for (#981), and the switch
+        # in REGISTRATION PARAMETERS (#9009061) that does.
+        KIND_SWITCHES = { "medicaid" => [ :medicaid, "Medicaid" ], "private" => [ :private_insurance, "private insurance" ] }.freeze
 
         rate_limit only: %i[index new create]
 
@@ -22,6 +27,7 @@ module Lakeraven
         before_action -> { require_capability!("registration.view") }, only: :index
         before_action -> { require_capability!("patient.register") }, only: %i[new create]
         before_action :load_patient!
+        before_action :require_site_asks_kind!, only: %i[new create]
 
         # GET /registration/patients/:dfn/coverage
         def index
@@ -63,6 +69,11 @@ module Lakeraven
         end
 
         private
+
+        def require_site_asks_kind!
+          switch, what = KIND_SWITCHES[params[:kind].presence || params.dig(:coverage, :kind)]
+          require_site_asks!(switch, what) if switch
+        end
 
         # Registration runs on AG, which only an IHS backend serves (#647).
         def require_bprm_registration!

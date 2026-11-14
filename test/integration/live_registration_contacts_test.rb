@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "test_helper"
+require_relative "../support/live_registration_switches"
 require "rpms_rpc/api/ddr_fileman"
 
 # Live (rpms-ux S-REG-08): the front-desk persona records a patient's
@@ -18,11 +19,18 @@ class LiveRegistrationContactsTest < ActionDispatch::IntegrationTest
   setup do
     skip "live writes: set LIVE_RPMS=1 and LIVE_RPMS_WRITES=1 against a throwaway container" unless
       defined?(LIVE_RPMS) && LIVE_RPMS && ENV["LIVE_RPMS_WRITES"] == "1"
+    # The demo division answers NO to these switches, which hide the section (#981).
+    @registration_switches = LiveRegistrationSwitches.turn_on(:next_of_kin)
     Lakeraven::EHR::LoginThrottle.reset!
     post "/lakeraven-ehr/login", params: { username: ENV.fetch("LIVE_RPMS_ACCESS"), password: ENV.fetch("LIVE_RPMS_VERIFY") }
   end
 
-  teardown { LiveRpmsSession.sign_on! if defined?(LIVE_RPMS) && LIVE_RPMS && ENV["LIVE_RPMS_WRITES"] == "1" }
+  teardown do
+    next unless defined?(LIVE_RPMS) && LIVE_RPMS && ENV["LIVE_RPMS_WRITES"] == "1"
+
+    LiveRegistrationSwitches.put_back(@registration_switches)
+    LiveRpmsSession.sign_on!
+  end
 
   # FileMan's internal values, read over DDR GETS ENTRY DATA as the run's persona.
   def fileman(file, iens, fields)

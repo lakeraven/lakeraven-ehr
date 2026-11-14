@@ -7,7 +7,7 @@ is a proven stand-in for BPRM v4's reg/sched, on either engine. Tracks lakeraven
 
 ## What the two systems actually are
 
-Established from the artifacts, not assumption (`rpms-ops/manifests/clients/bprm-4.00.06.yml`,
+Established from the artifacts, not assumption (`openrpms/manifests/clients/bprm-4.00.06.yml`,
 scanned from 1,040 `.cs` sources; `bprm0400.06.xml`, the IRIS class layer):
 
 | | lakeraven-ehr | BPRM v4 |
@@ -84,7 +84,7 @@ job gated on a `BPRM_E2E=1` env with a reachable BPRM base URL.
 
 ## Sequencing / blockers
 
-- **Blocked on RPMS Kernel sign-on on YDB (rpms-ops#343)** for the live YDB backend arm — RPC
+- **Blocked on RPMS Kernel sign-on on YDB (openrpms#343)** for the live YDB backend arm — RPC
   round-trips can't sign on until that gate is cleared (same `Logins prohibited` gate seen on
   keyless IRIS). **Not** blocked for building Tier-1 engine-parity against IRIS or the
   BPRM-SQL golden capture — those can land first.

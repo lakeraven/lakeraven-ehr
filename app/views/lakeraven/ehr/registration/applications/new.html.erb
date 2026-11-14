@@ -35,7 +35,7 @@
     <%= form_field :applied_on, "Date the patient applied", form: f, error: @entry.errors[:applied_on].first do |aria| %>
       <%= f.date_field :applied_on,
             value: @entry.applied_on,
-            max: Date.current,
+            max: Lakeraven::EHR::SiteDate.today,
             required: true,
             aria: aria %>
     <% end %>

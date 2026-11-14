@@ -96,8 +96,8 @@
                       <%= label_tag "status-on-#{app[:ien]}",
                             "On" %>
                       <%= date_field_tag :status_on,
-                            Date.current,
-                            max: Date.current,
+                            Lakeraven::EHR::SiteDate.today,
+                            max: Lakeraven::EHR::SiteDate.today,
                             id: "status-on-#{app[:ien]}" %>
                     </div>
                     <%= f.submit "Save",

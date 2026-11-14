@@ -1,0 +1,105 @@
+<% page_title "Change settings | #{@resource[:name]}" %>
+
+<%= page_header "Change clinic settings",
+      @settings[:name] %>
+
+<p>
+  Each setting is filed on the clinic's entry in RPMS, where RPMS checks it as its own editor would.
+  The length of appointment must be a multiple of the display increment.
+</p>
+
+<%= flash_alert id: "settings-alert" %>
+
+<% if @result&.status == :refused %>
+  <%= alert_box :error,
+        "RPMS did not accept these settings, so they are unchanged.",
+        "The other settings were saved.",
+        id: "settings-refused" do %>
+    <ul>
+      <% @result.refused.each do |key, message| %>
+        <li data-refused="<%= key %>">
+          <%= Lakeraven::EHR::ClinicSettings::LABELS.fetch(key, key.to_s.humanize) %>: <%= message %>
+        </li>
+      <% end %>
+    </ul>
+  <% end %>
+<% end %>
+
+<%= form_errors @form,
+      "The settings were not saved.",
+      id: "settings-errors" %>
+
+<% labels = Lakeraven::EHR::ClinicSettings::LABELS %>
+<%= form_with scope: :settings,
+      url: scheduling_clinic_settings_path(@resource[:id]),
+      method: :post,
+      local: true,
+      id: "settings-form",
+      class: "card flex flex-col gap-4" do |f| %>
+  <fieldset class="flex flex-wrap gap-4">
+    <legend>General</legend>
+    <%= form_field :abbreviation, labels[:abbreviation], form: f, error: @form.errors[:abbreviation].first do |aria| %>
+      <%= f.text_field :abbreviation,
+            value: @form.abbreviation,
+            maxlength: 7,
+            required: true,
+            aria: aria %>
+    <% end %>
+    <%= form_field :stop_code, labels[:stop_code], form: f, error: @form.errors[:stop_code].first do |aria| %>
+      <%= f.select :stop_code,
+            options_for_select(@clinic_codes.map { |c| [ "#{c[:name]} (#{c[:code]})", c[:id] ] }, @form.stop_code),
+            { include_blank: "Choose a clinic code" },
+            required: true,
+            aria: aria %>
+    <% end %>
+  </fieldset>
+
+  <fieldset class="flex flex-wrap gap-4">
+    <legend>Scheduling</legend>
+    <% %i[length_minutes display_begins overbooks_per_day allowable_no_shows max_future_days no_show_waiting_days].each do |key| %>
+      <%= form_field key, labels[key], form: f, error: @form.errors[key].first do |aria| %>
+        <%= f.number_field key,
+              value: @form.public_send(key),
+              min: 0,
+              aria: aria %>
+      <% end %>
+    <% end %>
+    <%= form_field :increments_per_hour, labels[:increments_per_hour], form: f, error: @form.errors[:increments_per_hour].first do |aria| %>
+      <%= f.select :increments_per_hour,
+            options_for_select(Lakeraven::EHR::ClinicSettings::INCREMENTS.invert.to_a, @form.increments_per_hour),
+            {},
+            aria: aria %>
+    <% end %>
+  </fieldset>
+
+  <fieldset class="flex flex-col gap-2">
+    <legend>Yes or no</legend>
+    <% Lakeraven::EHR::ClinicSettings::FLAGS.each do |key| %>
+      <label class="flex items-center gap-2">
+        <%= f.check_box key,
+              checked: @form.public_send(key) %>
+        <%= labels[key] %>
+      </label>
+    <% end %>
+  </fieldset>
+
+  <fieldset class="flex flex-wrap gap-4">
+    <legend>Letters</legend>
+    <% Lakeraven::EHR::ClinicSettings::LETTERS.each do |key, type| %>
+      <%= form_field key, labels[key], form: f do |aria| %>
+        <%= f.select key,
+              options_for_select(Array(@letters[type]).map { |l| [ l[:name], l[:id] ] }, @form.public_send(key)),
+              { include_blank: "None" },
+              aria: aria %>
+      <% end %>
+    <% end %>
+  </fieldset>
+
+  <%= f.submit "Save settings",
+        class: "button-primary self-start" %>
+<% end %>
+
+<p>
+  <%= link_to "Back to the settings",
+        scheduling_clinic_settings_path(@resource[:id]) %>
+</p>

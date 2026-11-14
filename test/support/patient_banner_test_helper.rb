@@ -266,8 +266,10 @@ module PatientBannerTestHelper
 
   def assert_chart_allergy_strip_incomplete_with_known_names!(*names)
     doc = Nokogiri::HTML(html_response_body)
-    strip = doc.at_css(".allergy-strip")
-    assert strip, "Expected chart allergy strip"
+    # The chart shows its allergies once: the banner's alert, with the chart's detail.
+    strip = doc.at_css("#patient-banner [data-allergies-state]")
+    assert strip, "Expected the chart's allergy alert in the banner"
+    assert_equal 1, doc.css("[data-allergies-state]").size, "the chart shows its allergies once"
     strip_text = strip.text
     assert_match(/incomplete/i, strip_text)
     names.flatten.each do |name|
@@ -292,11 +294,11 @@ module PatientBannerTestHelper
   def assert_chart_patient_banner_sticky!
     body = html_response_body
     banner = patient_banner_node
-    inline_sticky = banner["style"].to_s.match?(/position:\s*sticky/i)
-    page_sticky = body.match?(/#patient-banner[^{]*\{[^}]*position:\s*sticky/i)
-
-    assert inline_sticky || page_sticky,
-           "Expected chart HTML to make #patient-banner position: sticky (inline or in-page CSS)"
+    # The chart renders in the engine layout, so the banner is sticky the
+    # same way as on every other page: the Tailwind class.
+    assert body.include?("tailwind"), "Expected the chart to link the engine's Tailwind build"
+    assert banner["class"].to_s.split.include?("sticky"),
+           "Expected #patient-banner to carry the sticky class on the chart"
   end
 
   def assert_dashboard_and_chart_allergies_not_loaded!

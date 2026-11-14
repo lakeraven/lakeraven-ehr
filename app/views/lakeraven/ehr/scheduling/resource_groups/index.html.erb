@@ -1,0 +1,33 @@
+<% page_title "Resource groups | Scheduling" %>
+
+<%= page_header "Resource groups",
+      "Clinics and other resources whose schedules are seen together." do %>
+  <% if supervisor? %>
+    <%= link_to "Make a group",
+          scheduling_new_resource_group_path,
+          id: "new-resource-group" %>
+  <% end %>
+  <%= link_to "Back to scheduling",
+        scheduling_home_path %>
+<% end %>
+
+<% if @notice.present? %>
+  <%= alert_box :notice, @notice, id: "resource-group-notice" %>
+<% end %>
+
+<% if @groups.empty? %>
+  <%= empty_state "No resource groups yet.",
+        id: "no-resource-groups" %>
+<% else %>
+  <ul
+    id="resource-groups"
+    class="card flex flex-col gap-2"
+  >
+    <% @groups.each do |group| %>
+      <li data-resource-group="<%= group[:id] %>">
+        <%= link_to group[:name], scheduling_resource_group_path(group[:id]) %>
+        <span class="hint">(<%= pluralize(group[:resources].size, "resource") %>)</span>
+      </li>
+    <% end %>
+  </ul>
+<% end %>

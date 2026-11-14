@@ -13,6 +13,7 @@ module Lakeraven
       # registration.view and patient.register.
       class PatientsController < WebController
         include RpmsUnavailableRendering
+        include RegistrationSiteSettingsLookup
 
         # A form submission token: the UUID the form was issued.
         SUBMISSION_ID = /\A\h{8}-\h{4}-\h{4}-\h{4}-\h{12}\z/
@@ -74,6 +75,7 @@ module Lakeraven
         # the clerk is choosing from (tribe_search, community_search).
         def new
           @registration = PatientRegistration.new(registration_params)
+          @registration.site_settings = registration_settings
           load_picklists
           issue_submission
         end
@@ -84,7 +86,8 @@ module Lakeraven
         # The form shown again after any answer carries a new token.
         def create
           @registration = PatientRegistration.new(registration_params)
-          return render_form(:unprocessable_content) unless @registration.valid?
+          @registration.site_settings = registration_settings
+          return render_form(refused_form_status(@registration)) unless @registration.valid?
 
           submission = params[:submission_id].to_s
           unless submission.match?(SUBMISSION_ID)
@@ -106,6 +109,7 @@ module Lakeraven
         # did not review does the registration file with the override.
         def confirm
           @registration = PatientRegistration.new(registration_params)
+          @registration.site_settings = registration_settings
           review = verified_review(@registration)
           unless @registration.valid? && review
             flash.now[:alert] = "The review has expired or does not match these details. Check the possible matches again."

@@ -101,6 +101,17 @@ module Lakeraven
         "lakeraven/ehr/registration/eligibility_modifiers#index",   # The reasons behind an eligibility status (S-REG-07.3): registration data, no clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/registration/eligibility_modifiers#create",  # Adding a reason (S-REG-07.3), not disclosure
         "lakeraven/ehr/registration/eligibility_modifiers#destroy", # Removing a reason (S-REG-07.3), not disclosure
+        "lakeraven/ehr/registration/setup/tables#index",                # The setup tables a user may open (#982): links only, no patient data
+        "lakeraven/ehr/registration/setup/eligibility_modifiers#index",  # The site's eligibility modifier table (#982): site setup, no patient data
+        "lakeraven/ehr/registration/setup/eligibility_modifiers#new",    # Adding a modifier (#982), not disclosure
+        "lakeraven/ehr/registration/setup/eligibility_modifiers#create", # Adding a modifier (#982), not disclosure
+        "lakeraven/ehr/registration/setup/eligibility_modifiers#edit",   # Renaming a modifier (#982), not disclosure
+        "lakeraven/ehr/registration/setup/eligibility_modifiers#update", # Renaming a modifier (#982), not disclosure
+        "lakeraven/ehr/registration/setup/local_flags#index",  # The site's local flag definitions (#983): site setup, no patient or assignment data
+        "lakeraven/ehr/registration/setup/local_flags#new",    # Defining a flag (#983), not disclosure
+        "lakeraven/ehr/registration/setup/local_flags#create", # Defining a flag (#983), not disclosure
+        "lakeraven/ehr/registration/setup/local_flags#edit",   # A flag definition and its edit history (#983): no patient data
+        "lakeraven/ehr/registration/setup/local_flags#update", # Changing a flag definition (#983), not disclosure
         "lakeraven/ehr/registration/race_ethnicities#edit",   # Race and ethnicity (S-REG-20.2): registration demographics, no clinical record
         "lakeraven/ehr/registration/race_ethnicities#update", # Saving race and ethnicity (S-REG-20.2), not disclosure
         "lakeraven/ehr/registration/applications#new",    # The form to record an application for coverage (S-REG-03.3): no clinical record
@@ -148,6 +159,20 @@ module Lakeraven
         "lakeraven/ehr/scheduling/checkouts#undo",       # Undo check-out entry, not disclosure
         "lakeraven/ehr/scheduling/no_shows#create",      # No-show entry, not disclosure
         "lakeraven/ehr/scheduling/no_shows#undo",        # Undo no-show entry, not disclosure
+        "lakeraven/ehr/scheduling/clinic_settings#show",   # A clinic's settings, letters and default provider: no patient data
+        "lakeraven/ehr/scheduling/clinic_settings#edit",   # The same, as a form
+        "lakeraven/ehr/scheduling/clinic_settings#update", # Files a clinic's settings; no patient data
+        "lakeraven/ehr/scheduling/access_types#index",     # Access types: names, colours, flags; no patient data
+        "lakeraven/ehr/scheduling/access_types#new",
+        "lakeraven/ehr/scheduling/access_types#create",
+        "lakeraven/ehr/scheduling/access_types#edit",
+        "lakeraven/ehr/scheduling/access_types#update",
+        "lakeraven/ehr/scheduling/resource_groups#index",  # Group names; no patient data
+        "lakeraven/ehr/scheduling/resource_groups#new",
+        "lakeraven/ehr/scheduling/resource_groups#create",
+        "lakeraven/ehr/scheduling/resource_groups#show",   # A group's clinic days: times and patient names, as the clinic day view (scheduling, not clinical)
+        "lakeraven/ehr/scheduling/resource_groups#add_member",
+        "lakeraven/ehr/scheduling/resource_groups#remove_member",
         "lakeraven/ehr/scheduling/hours#new",            # Clinic hours form: access types, no patient data
         "lakeraven/ehr/scheduling/hours#create",         # Hours entry; a refusal names an appointment time and patient name, no clinical record
         "lakeraven/ehr/pending_referrals#index",         # Pending referrals (#873): date, patient name, status and number; no reason, diagnosis or referred-to; revisit with Part 2 (#494)

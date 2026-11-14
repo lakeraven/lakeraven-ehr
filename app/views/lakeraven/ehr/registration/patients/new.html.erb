@@ -5,6 +5,9 @@
 
 <%= flash_alert %>
 
+<%= site_settings_unavailable_alert @registration,
+      id: "registration-settings-unavailable" %>
+
 <%= form_errors @registration,
       "The registration was not saved.",
       id: "registration-errors" %>
@@ -39,7 +42,11 @@
           aria: aria %>
   <% end %>
 
-  <%= form_field :ssn, "Social security number", form: f do |aria| %>
+  <%= form_field :ssn,
+        site_field_label(@registration, :ssn, "Social security number"),
+        form: f,
+        hint: ("Or give the reason there is none." if @registration.required_by_site?(:ssn)),
+        error: @registration.errors[:ssn].first do |aria| %>
     <%= f.text_field :ssn,
           value: @registration.ssn,
           inputmode: "numeric",

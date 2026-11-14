@@ -7,7 +7,7 @@ App developers: the [FHIR API guide](docs/fhir-api.md) covers endpoints, app reg
 
 ## Development
 
-Rails runs on your machine; RPMS runs in Docker, from a pinned [rpms-ops](https://github.com/lakeraven/rpms-ops) release (`compose.yml`).
+Rails runs on your machine; RPMS runs in Docker, from a pinned [openrpms](https://github.com/lakeraven/openrpms) release (`compose.yml`).
 You need Ruby 4.0 (the version in `.ruby-version`), Docker and PostgreSQL.
 
 Once, log in to the private image registry:
@@ -37,7 +37,7 @@ Sign in at http://localhost:3000/lakeraven-ehr/login as `SYS123` / `RPMS.000`, t
   $ docker volume rm "${COMPOSE_PROJECT_NAME:-lakeraven-ehr}_rpms-data"
   $ docker compose up -d rpms
   ```
-- **Apple Silicon:** a release tag names an arm64 image only when one was gated for it (rpms-ops#802); otherwise Docker runs the amd64 image under emulation, which works but is slower. `docker manifest inspect ghcr.io/lakeraven/rpms-ydb:$RPMS_TAG` lists the platforms a tag carries.
+- **Apple Silicon:** a release tag names an arm64 image only when one was gated for it (openrpms#802); otherwise Docker runs the amd64 image under emulation, which works but is slower. `docker manifest inspect ghcr.io/lakeraven/rpms-ydb:$RPMS_TAG` lists the platforms a tag carries.
 
 ## RPMS backend
 
@@ -68,7 +68,7 @@ Each signed-in user gets an RPMS connection of their own, opened at sign-in and 
 At capacity, sign-in is refused; no one already signed in is signed out to make room.
 The connections live in the process's memory, so run one app process per instance (threads are fine): with more than one Puma worker (`WEB_CONCURRENCY`), the app refuses to boot.
 
-**Local: an rpms-ops release in Docker.**
+**Local: an openrpms release in Docker.**
 `docker compose up -d` runs one ("Development", above); development's defaults point at it.
 
 **A deployed stack.**
@@ -116,6 +116,20 @@ Then add this line to the host's `app/assets/tailwind/application.css`:
 
 The engine's styles cannot restyle the host's own pages.
 They define no theme, and every element default is scoped to `.lr-ehr`, the class the engine layout puts on `<body>`.
+
+## Disclosure surfaces
+
+Every disclosure surface is closed until the host opens it by name (#968):
+
+```ruby
+config.x.lakeraven_ehr.open_disclosure_surfaces = %i[bulk_export]
+```
+
+The names are `fhir_api`, `bulk_export` and `ccda`.
+The setting fails closed: only an Array opens anything, and only its entries that spell a name exactly.
+A bare name, `true`, a Hash or an unknown name opens nothing.
+A closed surface answers a bare 404 before authentication, audit or the action runs.
+Only `bulk_export` (`/exports` and its files) is gated so far.
 
 ## Contributing
 Contribution directions go here.

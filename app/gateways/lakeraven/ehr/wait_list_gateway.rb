@@ -61,7 +61,7 @@ module Lakeraven
           made = reasons("R", via: via).find { |reason| reason[:name] == APPOINTMENT_MADE }
           return Result.new(status: :refused, ien: nil, message: "RPMS has no #{APPOINTMENT_MADE} resolution") unless made
 
-          result_for(via.remove(list: list[:ien], entry: ien.to_i, removed_on: Date.today, resolution: made[:ien]))
+          result_for(via.remove(list: list[:ien], entry: ien.to_i, removed_on: SiteDate.today, resolution: made[:ien]))
         rescue ::RpmsRpc::Error, IOError, SystemCallError => e
           unknown(e)
         end

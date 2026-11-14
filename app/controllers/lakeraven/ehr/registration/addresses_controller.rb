@@ -14,13 +14,15 @@ module Lakeraven
         # GET /registration/patients/:dfn/address/edit
         def edit
           @address = PatientAddress.from_record(@record)
+          @address.site_settings = registration_settings
           render_form(:ok)
         end
 
         # PATCH /registration/patients/:dfn/address
         def update
           @address = PatientAddress.new(address_params)
-          return render_form(:unprocessable_content) unless @address.valid?
+          @address.site_settings = registration_settings
+          return render_form(refused_form_status(@address)) unless @address.valid?
 
           save(@address, PatientAddress.from_record(@record), "Address and phones saved.") do |changes|
             if @address.moves?(changes)
