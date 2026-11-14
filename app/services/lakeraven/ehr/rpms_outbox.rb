@@ -46,37 +46,30 @@ module Lakeraven
           @handlers_lock.synchronize { @handlers.clear }
         end
 
-        # Inserts in the caller's open transaction. A repeated key with the
-        # same effect and payload is a no-op (ON CONFLICT DO NOTHING, which
-        # does not abort the caller's transaction) and returns the row first
-        # written for it; with a different effect or payload it raises
-        # IdempotencyConflict.
+        # Inserts in the caller's open transaction. The payload is validated
+        # before any SQL (see storable?), then written with bound values, so
+        # no error or log line quotes it. The insert runs in a savepoint
+        # (create_or_find_by!), so a duplicate key does not abort the
+        # caller's transaction: a repeated key with the same effect and
+        # payload is a no-op that returns the row first written for it; with
+        # a different effect or payload it raises IdempotencyConflict. Any
+        # other database error propagates as itself.
         def enqueue(effect:, idempotency_key:, payload: {})
           effect = effect.to_s
           raise ArgumentError, "RPMS outbox payload must be a Hash" unless payload.is_a?(Hash)
           raise ArgumentError, "unregistered RPMS outbox effect" unless handler_for(effect)
           raise ArgumentError, "RPMS outbox idempotency_key is required" if idempotency_key.blank?
-          raise ArgumentError, UNSTORABLE if nul?(payload)
+          raise ArgumentError, UNSTORABLE unless storable?(payload)
 
           payload = payload.deep_stringify_keys.as_json
           now = Time.current
-          # The savepoint keeps the caller's transaction usable if the insert
-          # fails; re-raised outside the rescue, so with no SQL cause.
-          failed = false
-          begin
-            RpmsOutboxEntry.transaction(requires_new: true) do
-              RpmsOutboxEntry.insert_all(
-                [ { effect: effect, idempotency_key: idempotency_key, payload: payload,
-                    status: RpmsOutboxEntry::PENDING, attempts: 0, next_attempt_at: now,
-                    created_at: now, updated_at: now } ],
-                unique_by: :idx_rpms_outbox_idempotency_key
-              )
-            end
-          rescue ActiveRecord::StatementInvalid
-            failed = true
+          entry = RpmsOutboxEntry.create_or_find_by!(idempotency_key: idempotency_key) do |row|
+            row.effect = effect
+            row.payload = payload
+            row.status = RpmsOutboxEntry::PENDING
+            row.attempts = 0
+            row.next_attempt_at = now
           end
-          raise ArgumentError, UNSTORABLE if failed
-          entry = RpmsOutboxEntry.find_by!(idempotency_key: idempotency_key)
           unless entry.effect == effect && entry.payload == payload
             raise IdempotencyConflict, "idempotency key already used for a different effect or payload"
           end
@@ -105,16 +98,30 @@ module Lakeraven
 
         def refuse_open_transaction!
           raise TransactionOpen, "RPMS outbox dispatch must run outside a transaction" if
-            RpmsOutboxEntry.connection.transaction_open?
+            RpmsOutboxEntry.with_connection(&:transaction_open?)
         end
 
-        def nul?(value)
+        # Only JSON-safe values: String, Symbol, Integer, finite Float,
+        # true/false/nil and Hash/Array of those, with String or Symbol keys
+        # that stay distinct once stringified. Every string must be valid
+        # UTF-8 (or plain ASCII) without NUL, which jsonb cannot store.
+        def storable?(value)
           case value
-          when Hash then value.any? { |k, v| nul?(k) || nul?(v) }
-          when Array then value.any? { |v| nul?(v) }
-          when String, Symbol then value.to_s.include?("\u0000")
+          when Hash
+            value.keys.map(&:to_s).uniq.size == value.size &&
+              value.all? { |k, v| (k.is_a?(String) || k.is_a?(Symbol)) && storable_string?(k.to_s) && storable?(v) }
+          when Array then value.all? { |v| storable?(v) }
+          when String then storable_string?(value)
+          when Symbol then storable_string?(value.name)
+          when Float then value.finite?
+          when Integer, true, false, nil then true
           else false
           end
+        end
+
+        def storable_string?(string)
+          utf8 = (string.encoding == Encoding::UTF_8 && string.valid_encoding?) || string.ascii_only?
+          utf8 && !string.include?("\u0000")
         end
 
         def error_name(error)
