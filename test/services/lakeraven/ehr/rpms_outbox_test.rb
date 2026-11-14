@@ -220,6 +220,40 @@ module Lakeraven
         assert_empty RpmsOutboxEntry.column_names.grep(/message|backtrace/)
       end
 
+      test "a payload jsonb cannot store is refused without leaking it" do
+        register_script([ :ok ])
+
+        [ { "note" => "TESTPATIENT\u0000SYNTHETIC" }, { "a" => [ { "b" => "TESTPATIENT x\u0000y" } ] } ].each do |payload|
+          error = assert_raises(ArgumentError) { enqueue("key-nul", payload: payload) }
+          assert_not_includes error.message, "TESTPATIENT"
+          assert_nil error.cause
+        end
+        assert_equal 0, RpmsOutboxEntry.count
+      end
+
+      test "a refused payload does not abort the caller's transaction" do
+        register_script([ :ok ])
+
+        ActiveRecord::Base.transaction do
+          assert_raises(ArgumentError) { enqueue("key-nul-txn", payload: { "note" => "TESTPATIENT\u0000SYNTHETIC" }) }
+          assert_equal 0, RpmsOutboxEntry.count
+        end
+      end
+
+      test "a handler that is not callable is refused at registration" do
+        assert_raises(ArgumentError) { RpmsOutbox.register("synthetic.bad", Object.new) }
+      end
+
+      test "an anonymous NotDelivered subclass records its nearest named ancestor" do
+        anonymous = Class.new(RpmsOutbox::NotDelivered)
+        RpmsOutbox.register(EFFECT, ->(_payload, idempotency_key:) { raise anonymous, PHI_MESSAGE })
+        entry = enqueue("key-anonymous")
+
+        assert_equal 1, RpmsOutbox.dispatch
+
+        assert_equal [ "pending", NOT_DELIVERED ], [ entry.reload.status, entry.last_error_class ]
+      end
+
       private
 
       # Registers a handler that follows +script+ call by call and returns
