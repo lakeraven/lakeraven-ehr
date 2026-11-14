@@ -9,9 +9,11 @@ module Lakeraven
     # ADR 0013, decision 6e ("One door, with its real reach"), first slice of #762.
     #
     # The code that opens and holds an RPMS scope is one layer (the door), and
-    # a client-resolving reference anywhere else in the engine's app/ and lib/
-    # fails this test. The scan is by reference over the Prism AST, never a
-    # grep: comments and strings do not match, a call split across lines does,
+    # a client-resolving reference anywhere else in the engine fails this
+    # test. What is scanned: every .rb file under app/ and lib/, and every
+    # .erb template under app/views, compiled to Ruby the way Rails compiles
+    # it. The scan is by reference over the Prism AST, never a grep: comments,
+    # strings and template text do not match, a call split across lines does,
     # and `::RpmsRpc::X.y` is the same reference as `RpmsRpc::X.y`.
     #
     # A reference is client-resolving when it is a call on a gem API module
@@ -27,6 +29,8 @@ module Lakeraven
     class OneDoorTest < ActiveSupport::TestCase
       ROOT = Lakeraven::EHR::Engine.root
       SCANNED_DIRECTORIES = %w[app lib].freeze
+      # ERB templates are executable Ruby too; every .erb under here is scanned.
+      TEMPLATE_DIRECTORY = "app/views"
 
       # The door (6e): files allowed to hold a client-resolving reference.
       # Explicit paths, relative to the engine root. "The console" has no
@@ -84,6 +88,20 @@ module Lakeraven
           new(source, path).tap(&:scan)
         end
 
+        # An ERB template, compiled to Ruby by the implementation and trim
+        # mode Rails' own ERB handler uses, then scanned like any Ruby. Only
+        # code inside `<% %>` and `<%= %>` reaches the AST: template text
+        # becomes a string literal and `<%# %>` comments are dropped. The
+        # compiler keeps every newline, so a hit's line is the template's.
+        # Rails compiles the result as the body of a method (a template may
+        # `yield`, which is not valid at the top level), so it is scanned as
+        # one, opened on the template's first line to keep the lines true.
+        def self.scan_erb(source, path: "(inline erb)")
+          handler = ActionView::Template::Handlers::ERB
+          ruby = handler.erb_implementation.new(source.dup, trim: handler.erb_trim_mode == "-").src
+          scan("def _template(local_assigns, output_buffer, &_); #{ruby}\nend", path: path)
+        end
+
         def initialize(source, path)
           @source = source
           @path = path
@@ -109,7 +127,7 @@ module Lakeraven
           return if node.nil? || @judged.include?(node)
 
           case node
-          when Prism::DefinedNode then return # a constant probe, not a reference
+          when Prism::DefinedNode then return probe(node.value) # judged by what `defined?` evaluates
           when Prism::ConstantPathNode, Prism::ConstantReadNode then return flag_bare_constant(node)
           when Prism::CallNode then visit_call(node)
           when Prism::WhenNode then visit_when(node)
@@ -118,11 +136,46 @@ module Lakeraven
           node.compact_child_nodes.each { |child| walk(child) }
         end
 
+        # The operand of `defined?`, judged by what CRuby evaluates of it
+        # (compile.c, defined_expr0), which is not "nothing":
+        #
+        # - A constant is a probe: looked up, never called. Exempt.
+        # - A call is not made (`defined?(RpmsRpc.client)` only asks whether
+        #   the method exists), but its receiver IS evaluated. A receiver
+        #   that is itself a call is really called, so it is walked as
+        #   ordinary code and judged by every rule, scope openers included:
+        #   `defined?(RpmsRpc.client.object_id)` resolves a client. A constant
+        #   receiver is a probe, not a value. Each argument is checked for
+        #   definedness in turn, which evaluates its receivers the same way,
+        #   so each argument is probed by this same rule.
+        # - Anything else fails closed and is walked as ordinary code: a
+        #   call's block or `&block` argument, any other receiver, and every
+        #   other kind of operand (parentheses, `a && b`, an assignment, a
+        #   literal). CRuby evaluates none of several of these (it answers
+        #   "expression" or "assignment" from the syntax alone), but no
+        #   door-side code needs a gem reference there, so the scan does not
+        #   depend on that.
+        def probe(node)
+          case node
+          when nil, Prism::ConstantReadNode, Prism::ConstantPathNode then nil
+          when Prism::CallNode then probe_call(node)
+          else walk(node)
+          end
+        end
+
+        def probe_call(node)
+          receiver = node.receiver
+          walk(receiver) unless segments(receiver)
+          Array(node.arguments&.arguments).each { |argument| probe(argument) }
+          walk(node.block)
+        end
+
         # A gem constant taken as a value: `via: RpmsRpc::Tribal`, `m =
         # RpmsRpc::Patient`, `in RpmsRpc::MockClient`, `x.class ==
         # RpmsRpc::MockClient`, `RpmsRpc::SessionPool`, the root module
         # itself. Error classes (a last segment ending in `Error`) and pure
-        # parsers are allowed by rule; `defined?(...)` never reaches here.
+        # parsers are allowed by rule; a constant probed by `defined?(...)`
+        # never reaches here.
         def flag_bare_constant(node)
           segs = segments(node)
           hit(node, segs.join("::")) if client_resolving_constant?(segs)
@@ -254,8 +307,7 @@ module Lakeraven
       end
 
       test "no client-resolving reference outside the door" do
-        leaks = scan_engine.reject { |path, _scanner| door?(path) || EXEMPTIONS.key?(path) }
-                           .flat_map { |path, scanner| scanner.hits.map { |line, ref| "#{path}:#{line} #{ref}" } }
+        leaks = leaks_in(scan_engine)
 
         assert_empty leaks,
                      "client-resolving references outside the door (ADR 0013 decision 6e); move each " \
@@ -263,8 +315,7 @@ module Lakeraven
       end
 
       test "with_client and new_client only in RpmsSessions and AuthenticationService" do
-        openers = scan_engine.reject { |path, _scanner| SCOPE_OPENERS.include?(path) }
-                             .flat_map { |path, scanner| scanner.scope_openers.map { |line, ref| "#{path}:#{line} #{ref}" } }
+        openers = scope_openers_in(scan_engine)
 
         assert_empty openers,
                      "RpmsRpc.with_client and RpmsSessions.new_client are permitted only in " \
@@ -330,7 +381,21 @@ module Lakeraven
           "MAX = ::RpmsRpc::Notifications::COMMENT_MAX" => "RpmsRpc::Notifications::COMMENT_MAX",
           "class Foo < RpmsRpc::Client; end" => "RpmsRpc::Client",
           "m = RpmsRpc" => "RpmsRpc",
-          "f(::RpmsRpc)" => "RpmsRpc"
+          "f(::RpmsRpc)" => "RpmsRpc",
+          # a receiver or an argument's receiver that `defined?` evaluates
+          "defined?(RpmsRpc.client.object_id)" => "RpmsRpc.client",
+          "defined?(::RpmsRpc.client.object_id)" => "RpmsRpc.client",
+          "defined?(RpmsRpc.fhir_client.x.y)" => "RpmsRpc.fhir_client",
+          "defined?(RpmsRpc::Patient.brief_header(1).x)" => "RpmsRpc::Patient.brief_header",
+          "defined?(f(RpmsRpc.client.x))" => "RpmsRpc.client",
+          "defined?(x.f(1, RpmsRpc::Patient.brief_header(1).y))" => "RpmsRpc::Patient.brief_header",
+          "defined?(RpmsRpc.configuration.client.x)" => "RpmsRpc.configuration.client",
+          "defined?(BackendRegistry.current.client.x)" => "BackendRegistry.current.client",
+          # fail closed: an operand that is neither a constant nor a call, and a call's block
+          "defined?((RpmsRpc.client))" => "RpmsRpc.client",
+          "defined?(x = RpmsRpc.client)" => "RpmsRpc.client",
+          "defined?(f { RpmsRpc.client })" => "RpmsRpc.client",
+          "defined?(f(&RpmsRpc.client))" => "RpmsRpc.client"
         }.each do |source, expected_ref|
           refs = Scanner.scan(source).hits.map(&:last)
           assert_includes refs, expected_ref, "expected the scanner to flag #{source.inspect}"
@@ -348,7 +413,10 @@ module Lakeraven
           "RpmsRpc::Client === x" => [ "RpmsRpc::Client.===" ],
           "RpmsRpc.configuration.client" => [ "RpmsRpc.configuration.client" ],
           "RpmsRpc.send(:client)" => [ "RpmsRpc.send" ],
-          "def f(via: RpmsRpc::Tribal) = via.enrollment(1)" => [ "RpmsRpc::Tribal" ]
+          "def f(via: RpmsRpc::Tribal) = via.enrollment(1)" => [ "RpmsRpc::Tribal" ],
+          "defined?(RpmsRpc.client.object_id)" => [ "RpmsRpc.client" ],
+          "defined?(RpmsRpc::Patient.brief_header(1).x)" => [ "RpmsRpc::Patient.brief_header" ],
+          "defined?(f(RpmsRpc.client.x))" => [ "RpmsRpc.client" ]
         }.each do |source, expected_refs|
           assert_equal expected_refs, Scanner.scan(source).hits.map(&:last), "expected one hit for #{source.inspect}"
         end
@@ -379,7 +447,21 @@ module Lakeraven
           "defined?(RpmsRpc::MockClient)",
           "defined?(RpmsRpc::SessionPool)",
           "defined?(RpmsRpc)",
+          "defined?(::RpmsRpc::MockClient)",
           "RpmsRpc.respond_to?(:fhir_client)",
+          # `defined?` of a call asks whether the method exists and does not
+          # make the call; a constant receiver or argument is only probed
+          "defined?(RpmsRpc.client)",
+          "defined?(::RpmsRpc.client)",
+          "defined?(RpmsRpc.fhir_client)",
+          "defined?(RpmsRpc::Patient.brief_header(1))",
+          "defined?(RpmsRpc.with_client(c))",
+          "defined?(RpmsSessions.new_client)",
+          "defined?(Lakeraven::EHR::RpmsSessions.new_client)",
+          "defined?(RpmsRpc.configuration.client)",
+          "defined?(f(RpmsRpc::MockClient))",
+          "defined?(f(RpmsRpc.client))",
+          "defined?(x.y.z)",
           # another namespace's RpmsRpc, and settings that are not a client
           "Other::RpmsRpc.client",
           "Other::RpmsRpc::Patient.brief_header(1)",
@@ -409,6 +491,90 @@ module Lakeraven
         end
       end
 
+      test "the scanner flags a scope opener that defined? evaluates" do
+        {
+          "defined?(RpmsSessions.new_client.object_id)" => "RpmsSessions.new_client",
+          "defined?(Lakeraven::EHR::RpmsSessions.new_client.object_id)" => "Lakeraven::EHR::RpmsSessions.new_client",
+          "defined?(RpmsRpc.with_client(c).x)" => "RpmsRpc.with_client",
+          "defined?(f(RpmsSessions.new_client.x))" => "RpmsSessions.new_client"
+        }.each do |source, expected_ref|
+          refs = Scanner.scan(source).scope_openers.map(&:last)
+          assert_equal [ expected_ref ], refs, "expected the scope-opener detector to flag #{source.inspect}"
+        end
+
+        [ "defined?(RpmsSessions.new_client)", "defined?(RpmsRpc.with_client(c))" ].each do |source|
+          assert_empty Scanner.scan(source).scope_openers, "expected no scope opener in #{source.inspect}"
+        end
+      end
+
+      test "the scanner flags client-resolving references in an ERB template" do
+        {
+          "<%= RpmsRpc::Patient.brief_header(dfn) %>" => "RpmsRpc::Patient.brief_header",
+          "<% x = RpmsRpc.client %>" => "RpmsRpc.client",
+          "<%- x = ::RpmsRpc.fhir_client -%>" => "RpmsRpc.fhir_client",
+          "<p><%== RpmsRpc::Tribal.enrollment(dfn) %></p>" => "RpmsRpc::Tribal.enrollment",
+          "<%= render \"row\", via: RpmsRpc::Scheduling %>" => "RpmsRpc::Scheduling",
+          "<% if defined?(RpmsRpc.client.object_id) %>x<% end %>" => "RpmsRpc.client",
+          "<%= tag.div do %><%= BackendRegistry.current.client %><% end %>" => "BackendRegistry.current.client"
+        }.each do |template, expected_ref|
+          refs = Scanner.scan_erb(template).hits.map(&:last)
+          assert_equal [ expected_ref ], refs, "expected the scanner to flag the template #{template.inspect}"
+        end
+
+        template = "<h1>Header</h1>\n<%# a comment\n     over two lines %>\n<p>\n  <%= RpmsRpc::Patient\n        .brief_header(dfn) %>\n</p>\n"
+        assert_equal [ [ 5, "RpmsRpc::Patient.brief_header" ] ], Scanner.scan_erb(template).hits,
+                     "a template hit is reported once, at its line in the template"
+      end
+
+      test "the scanner flags with_client and new_client in an ERB template as scope openers" do
+        {
+          "<% RpmsRpc.with_client(c) do %>\n  <p>x</p>\n<% end %>" => "RpmsRpc.with_client",
+          "<% client = RpmsSessions.new_client %>" => "RpmsSessions.new_client"
+        }.each do |template, expected_ref|
+          refs = Scanner.scan_erb(template).scope_openers.map(&:last)
+          assert_equal [ expected_ref ], refs, "expected a scope opener in the template #{template.inspect}"
+        end
+      end
+
+      test "the scanner leaves ERB comments and template text alone" do
+        [
+          "<%# RpmsRpc::Patient.brief_header(1) %>",
+          "<%#\n  Locals: dfn, rows (RpmsRpc::Patient.brief_header), RpmsRpc.client\n%>\n<p><%= dfn %></p>",
+          "RpmsRpc.client",
+          "<p>RpmsRpc::Patient.brief_header(1) and RpmsRpc.with_client(c) { }</p>",
+          "<%% RpmsRpc.client %>",
+          "<%= \"RpmsRpc.client\" %>",
+          "<% # RpmsRpc.client %>",
+          "<% if defined?(RpmsRpc::MockClient) %>x<% end %>",
+          "<% begin %><%= row %><% rescue RpmsRpc::Error %>x<% end %>",
+          "<main><%= yield %></main>"
+        ].each do |template|
+          scanner = Scanner.scan_erb(template)
+          assert_empty scanner.hits, "expected the scanner not to flag the template #{template.inspect}"
+          assert_empty scanner.scope_openers, "expected no scope opener in the template #{template.inspect}"
+        end
+      end
+
+      test "a template that does not compile to valid Ruby fails the scan" do
+        assert_raises(RuntimeError) { Scanner.scan_erb("<% if x %>", path: "app/views/lakeraven/ehr/x/_y.html.erb") }
+      end
+
+      # The filters the engine-wide tests use, run on a synthetic scan: a
+      # template is outside the door like any other file.
+      test "a direct gem call in a template outside the door fails the leak check" do
+        view = "app/views/lakeraven/ehr/x/_y.html.erb"
+        scans = {
+          view => Scanner.scan_erb("<p>\n  <%= RpmsRpc::Patient.brief_header(dfn) %>\n</p>\n<% RpmsRpc.with_client(c) do %>x<% end %>", path: view),
+          "app/gateways/lakeraven/ehr/x_gateway.rb" => Scanner.scan("RpmsRpc::Patient.brief_header(dfn)"),
+          EXEMPTIONS.keys.first => Scanner.scan("RpmsRpc.client"),
+          SCOPE_OPENERS.first => Scanner.scan("RpmsRpc.with_client(c) { }")
+        }
+
+        assert_equal [ "#{view}:2 RpmsRpc::Patient.brief_header", "#{view}:4 RpmsRpc.with_client" ], leaks_in(scans)
+        assert_equal [ "#{view}:4 RpmsRpc.with_client" ], scope_openers_in(scans)
+        assert_not door?(view), "a template is not inside the door"
+      end
+
       test "the door list names files that exist" do
         (DOOR_FILES + SCOPE_OPENERS).each do |path|
           assert File.file?(ROOT.join(path)), "door entry #{path} is not a file; a rename cannot silently widen the door"
@@ -427,27 +593,58 @@ module Lakeraven
 
       test "the scan sees every ruby file" do
         scanned = scan_engine.keys
-        # Walked independently of the scanner's glob, so the two cannot agree
-        # by construction.
-        expected = SCANNED_DIRECTORIES.flat_map do |dir|
-          found = []
-          Find.find(ROOT.join(dir).to_s) do |path|
-            found << relative(path) if File.file?(path) && File.extname(path) == ".rb"
-          end
-          found
-        end
+        # Walked independently of the scanner's globs, so the two cannot agree
+        # by construction: .rb under app/ and lib/, .erb under app/views.
+        expected = SCANNED_DIRECTORIES.flat_map { |dir| files_under(dir, ".rb") }
+        templates = files_under(TEMPLATE_DIRECTORY, ".erb")
 
         assert_operator scanned.length, :>, 0, "the scan parsed no files"
-        assert_equal expected.sort, scanned.sort
+        assert_operator templates.length, :>, 0, "the walk found no templates under #{TEMPLATE_DIRECTORY}"
+        assert_empty expected & templates, "a file is counted once"
+        assert_equal (expected + templates).sort, scanned.sort
       end
 
       private
 
-      # Every Ruby file under the engine's app/ and lib/, as { relative path => Scanner }.
+      # Every Ruby file under the engine's app/ and lib/ and every ERB
+      # template under app/views, as { relative path => Scanner }.
       def scan_engine
-        @scan_engine ||= SCANNED_DIRECTORIES.flat_map { |dir| Dir[ROOT.join(dir, "**", "*.rb").to_s] }
-                                            .sort
-                                            .to_h { |path| [ relative(path), Scanner.scan(File.read(path), path: path) ] }
+        @scan_engine ||= scan_ruby_files.merge(scan_templates)
+      end
+
+      def scan_ruby_files
+        SCANNED_DIRECTORIES.flat_map { |dir| Dir[ROOT.join(dir, "**", "*.rb").to_s] }
+                           .sort
+                           .to_h { |path| [ relative(path), Scanner.scan(File.read(path), path: path) ] }
+      end
+
+      def scan_templates
+        Dir[ROOT.join(TEMPLATE_DIRECTORY, "**", "*.erb").to_s]
+          .sort
+          .to_h { |path| [ relative(path), Scanner.scan_erb(File.read(path), path: path) ] }
+      end
+
+      # The leak filter: hits in any file that is neither in the door nor
+      # exempt by name, as "path:line ref".
+      def leaks_in(scans)
+        scans.reject { |path, _scanner| door?(path) || EXEMPTIONS.key?(path) }
+             .flat_map { |path, scanner| scanner.hits.map { |line, ref| "#{path}:#{line} #{ref}" } }
+      end
+
+      # Scope openers in any file but the two permitted, as "path:line ref".
+      def scope_openers_in(scans)
+        scans.reject { |path, _scanner| SCOPE_OPENERS.include?(path) }
+             .flat_map { |path, scanner| scanner.scope_openers.map { |line, ref| "#{path}:#{line} #{ref}" } }
+      end
+
+      # Engine-relative paths of the files with this extension under dir,
+      # found by walking the tree, not by the scan's globs.
+      def files_under(dir, extension)
+        found = []
+        Find.find(ROOT.join(dir).to_s) do |path|
+          found << relative(path) if File.file?(path) && File.extname(path) == extension
+        end
+        found
       end
 
       def relative(path)
