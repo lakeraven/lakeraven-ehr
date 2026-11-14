@@ -220,14 +220,59 @@ module Lakeraven
         assert_empty RpmsOutboxEntry.column_names.grep(/message|backtrace/)
       end
 
-      test "a payload jsonb cannot store is refused without leaking it" do
+      # Allowed: String, Symbol, Integer, finite Float, true/false/nil and
+      # Hash/Array of those, with String or Symbol keys. Anything else is
+      # refused before any SQL, so no error text can quote the payload.
+      UNSTORABLE_PAYLOADS = {
+        "a NUL byte" => { "note" => "TESTPATIENT\u0000SYNTHETIC" },
+        "a nested NUL byte" => { "a" => [ { "b" => "TESTPATIENT x\u0000y" } ] },
+        "invalid UTF-8" => { "note" => "TESTPATIENT \xFF".dup.force_encoding("UTF-8") },
+        "a binary string with high bytes" => { "note" => "TESTPATIENT \xC3\xA9".b },
+        "an unsupported value type" => { "note" => Object.new },
+        "a non-finite float" => { "x" => Float::NAN },
+        "keys that collapse once stringified" => { "a" => 1, a: 2 }
+      }.freeze
+
+      UNSTORABLE_PAYLOADS.each do |name, payload|
+        test "a payload with #{name} is refused before any SQL without leaking it" do
+          register_script([ :ok ])
+          statements = []
+          callback = ->(*, sql_event) { statements << sql_event[:sql] unless sql_event[:name] == "SCHEMA" }
+
+          error = ActiveSupport::Notifications.subscribed(callback, "sql.active_record") do
+            assert_raises(ArgumentError) { enqueue("key-unstorable", payload: payload) }
+          end
+
+          assert_not_includes error.message, "TESTPATIENT"
+          assert_not_includes error.detailed_message, "TESTPATIENT"
+          assert_nil error.cause
+          assert_empty statements, "no SQL may run for a refused payload"
+          assert_equal 0, RpmsOutboxEntry.count
+        end
+      end
+
+      test "a database error propagates as itself, not as ArgumentError" do
         register_script([ :ok ])
 
-        [ { "note" => "TESTPATIENT\u0000SYNTHETIC" }, { "a" => [ { "b" => "TESTPATIENT x\u0000y" } ] } ].each do |payload|
-          error = assert_raises(ArgumentError) { enqueue("key-nul", payload: payload) }
-          assert_not_includes error.message, "TESTPATIENT"
-          assert_nil error.cause
+        ActiveRecord::Base.transaction do
+          assert_raises(ActiveRecord::StatementInvalid) { RpmsOutboxEntry.connection.execute("SELECT 1/0") }
+          assert_raises(ActiveRecord::StatementInvalid) { enqueue("key-aborted-txn") }
+          raise ActiveRecord::Rollback
         end
+
+        assert_equal 0, RpmsOutboxEntry.count
+      end
+
+      test "payload values are bound, so a write refusal does not quote them" do
+        register_script([ :ok ])
+
+        error = assert_raises(ActiveRecord::ReadOnlyError) do
+          ActiveRecord::Base.while_preventing_writes do
+            enqueue("key-readonly", payload: { "note" => "TESTPATIENT SYNTHETIC" })
+          end
+        end
+
+        assert_not_includes error.message, "TESTPATIENT"
         assert_equal 0, RpmsOutboxEntry.count
       end
 
