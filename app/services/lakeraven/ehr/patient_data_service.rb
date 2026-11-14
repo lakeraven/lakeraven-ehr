@@ -57,9 +57,14 @@ module Lakeraven
         HealthSummary.generate(dfn, summary_type: type)
       end
 
+      # With PHR available, an Array is a successful read; nil means RPMS
+      # could not provide CCDs (for example, the build has no VistA Imaging).
       def ccds(start_date: 1.year.ago.to_date, end_date: Date.current)
         return [] unless phr_available?
-        Phr.ccds(dfn, start_date: start_date, end_date: end_date)
+
+        ::RpmsRpc::Phr.for_patient(dfn, start_date: start_date, end_date: end_date)
+      rescue ::RpmsRpc::Client::RpcMError
+        nil
       end
 
       def clinical_reminders

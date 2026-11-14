@@ -123,6 +123,10 @@
           class: "button-secondary no-underline" %>
   </div>
 
+  <% if @ccds_unavailable %>
+    <p id="ccd-unavailable" class="empty" role="status">CCD documents are not available on this system.</p>
+  <% end %>
+
   <div class="chart-grid">
     <%# ---- Problem list ---- %>
     <div class="chart-card">
