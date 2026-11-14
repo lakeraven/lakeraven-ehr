@@ -67,7 +67,7 @@ module Lakeraven
       end
 
       test "closing bulk export does not gate a FHIR Patient read" do
-        configure(ABSENT)
+        configure(%i[fhir_api])
         get "/lakeraven-ehr/Patient/1"
         assert_response :unauthorized
       end

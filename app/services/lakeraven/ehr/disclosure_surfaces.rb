@@ -40,6 +40,68 @@ module Lakeraven
 
         value.filter_map { |entry| known_name(entry) }.uniq
       end
+
+      # API routes not yet behind any surface, each with why. C-CDA is the
+      # :ccda surface's own slice (#969); until then a bearer request to
+      # these is still fhir_api (SmartAuthentication's bearer rule).
+      # Not listed, as it is not an API route: the session chart's FHIR JSON
+      # (charts#show as .json for a browser session) is not gated yet; a
+      # later slice.
+      UNGOVERNED_API_ROUTES = {
+        "lakeraven/ehr/ccda_imports#create" => "C-CDA import: gated as :ccda in #969; bearer requests are fhir_api until then",
+        "lakeraven/ehr/transitions_of_care#create" => "C-CDA generation: gated as :ccda in #969; bearer requests are fhir_api until then"
+      }.freeze
+
+      # "controller#action" for every FHIR API route of +route_set+ that no
+      # unconditional disclosure_surface rule covers, less +allow+. An API
+      # route is one to an ApplicationController descendant, or one whose
+      # path has a static segment starting with an uppercase letter or "$". A
+      # FHIR-shaped route whose controller cannot be loaded is reported.
+      def ungated_routes(route_set, allow: UNGOVERNED_API_ROUTES.keys)
+        route_set.routes.filter_map do |route|
+          name = route.defaults[:controller] ? "#{route.defaults[:controller]}##{route.defaults[:action]}" : route.path.spec.to_s
+          klass = route_controller(route.defaults[:controller])
+          api = (klass && klass < ApplicationController) || fhir_path?(route.path.spec.to_s)
+          next unless api && allow.exclude?(name)
+
+          name unless gated?(klass, route.defaults[:action].to_s)
+        end.uniq
+      end
+
+      def fhir_path?(spec)
+        # Any static segment; :params, *globs and the format suffix never match.
+        spec.delete("()").split("/").any? { |segment| segment.match?(/\A[A-Z$]/) }
+      end
+
+      def route_controller(controller)
+        return if controller.blank?
+
+        "#{controller}_controller".camelize.safe_constantize
+      rescue StandardError, LoadError
+        nil
+      end
+
+      def gated?(klass, action)
+        return false unless klass.respond_to?(:disclosure_surface_rules)
+
+        klass.disclosure_surface_rules.any? do |rule|
+          (rule[:only].nil? || rule[:only].include?(action)) && rule.except(:surface, :only).values.none?
+        end
+      end
+
+      # Draws routes only while +surface+ is open, read fresh per request.
+      class RouteConstraint
+        attr_reader :surface
+
+        def initialize(surface)
+          @surface = DisclosureSurfaces.known_name(surface)
+          raise ArgumentError, "unknown disclosure surface: #{surface.inspect}" unless @surface
+        end
+
+        def matches?(_request)
+          DisclosureSurfaces.open?(surface)
+        end
+      end
     end
   end
 end

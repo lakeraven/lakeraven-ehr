@@ -3,6 +3,7 @@
 module Lakeraven
   module EHR
     class LocationsController < ApplicationController
+      disclosure_surface :fhir_api
       rate_limit only: %i[index show]
 
       # US Core's `name` search. `name` is required: RPMS has no list of every

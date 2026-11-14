@@ -3,6 +3,7 @@
 module Lakeraven
   module EHR
     class PractitionersController < ApplicationController
+      disclosure_surface :fhir_api
       rate_limit only: %i[index show]
 
       def index
