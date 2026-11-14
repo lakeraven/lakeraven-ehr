@@ -21,6 +21,7 @@ module Lakeraven
     class AllergiesController < WebController
       include BrowserSmartAuthentication
       include ClinicianPatientContext
+      include AuditLogProbe
 
       ALLERGY_RESOURCE = "AllergyIntolerance"
       USER_CONTEXTS = %w[user].freeze
@@ -220,26 +221,8 @@ module Lakeraven
         end
       end
 
-      def audit_log_writable?
-        AuditEvent.transaction(requires_new: true) do
-          AuditEvent.create!(probe_audit_attributes)
-          raise ActiveRecord::Rollback
-        end
-        true
-      rescue StandardError => error
-        Rails.logger.warn("[allergy] audit log did not accept a row: #{error.class}")
-        false
-      end
-
-      def probe_audit_attributes
-        {
-          event_type: "rest",
-          action: "C",
-          outcome: "0",
-          entity_type: "Patient",
-          entity_identifier: Patient.canonical_dfn(@dfn) || @dfn.to_s
-        }
-      end
+      def audit_probe_log_tag = "allergy"
+      def audit_probe_dfn = @dfn
 
       def allergy_recorded?
         result = AllergyIntoleranceGateway.add(@dfn, @allergy, clinician_duz: current_duz)

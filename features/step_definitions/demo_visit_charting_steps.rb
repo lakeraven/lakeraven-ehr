@@ -47,9 +47,10 @@ class FakeESignatureGateway
     @sign_actions = []
   end
 
+  # Answers as ESignatureGateway does: true or false, never a hash.
   def validate(user_duz, signature_code)
     @validations << { user_duz: user_duz, signature_code: signature_code }
-    { success: @valid, raw: @valid ? "1" : "0^Invalid code" }
+    @valid
   end
 
   def add(note_ien, user_duz, signature_code, action: :sign)

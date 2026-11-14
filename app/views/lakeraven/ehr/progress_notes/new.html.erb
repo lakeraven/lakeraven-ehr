@@ -1,0 +1,74 @@
+<% page_title "Write a progress note" %>
+<%# The patient is in the banner above (shared/_patient_banner), the same
+    one the chart shows, so the page does not name them again.
+    The signature code field never carries a value: a code is not rendered
+    back, whatever happened to the request that carried it. %>
+
+<%= page_header "Write a progress note",
+      "Write the note on one of the patient's open visits and sign it with your electronic signature code." %>
+
+<% if @closing_message %>
+  <%= alert_box :error, @closing_message, id: "progress-note-outcome" %>
+  <p><%= link_to "Back to chart", patient_chart_path(@dfn), class: "button-secondary no-underline" %></p>
+<% elsif @open_visits.nil? %>
+  <%= alert_box :error,
+        "The patient's visits could not be read, so a note cannot be written now. Nothing was saved. Try again shortly.",
+        id: "progress-note-visits-unread" %>
+  <p><%= link_to "Back to chart", patient_chart_path(@dfn), class: "button-secondary no-underline" %></p>
+<% else %>
+  <% if @refusal %>
+    <%= alert_box :error, @refusal, id: "progress-note-refusal" %>
+  <% end %>
+
+  <%# An empty visit list is also what an empty broker reply reads as: the
+      page says only that none was found. %>
+  <% if @open_visits.empty? %>
+    <%= alert_box :notice,
+          "No open visit was found for this patient, and a note is written on an open visit. " \
+          "If the patient has been checked in, RPMS may not have answered: try again, or check the chart.",
+          id: "progress-note-no-open-visit" %>
+    <p><%= link_to "Back to chart", patient_chart_path(@dfn), class: "button-secondary no-underline" %></p>
+  <% else %>
+    <%= form_with url: patient_progress_notes_path(@dfn),
+          method: :post,
+          class: "progress-note-form entry-form" do |f| %>
+      <%# One-time: a POST claims it (NoteFormClaim), so the same form files one note. %>
+      <%= hidden_field_tag "note_form_token", note_form_token, id: nil %>
+      <fieldset>
+        <legend>Visit</legend>
+        <% @open_visits.each do |visit| %>
+          <% ien = visit[:visit_ien].to_s %>
+          <div>
+            <%= radio_button_tag "visit_ien", ien,
+                  selected_visit_ien == ien || @open_visits.one?,
+                  id: "visit_ien_#{ien}",
+                  required: true %>
+            <%= label_tag "visit_ien_#{ien}", visit_label(visit) %>
+          </div>
+        <% end %>
+      </fieldset>
+
+      <%= form_field :note_text, "Note", id: "note_text" do |aria| %>
+        <%= text_area_tag "note_text", @note_text,
+              id: "note_text",
+              rows: 12,
+              required: true,
+              aria: aria %>
+      <% end %>
+
+      <%= form_field :signature_code, "Electronic signature code", id: "signature_code" do |aria| %>
+        <%= password_field_tag "signature_code", nil,
+              id: "signature_code",
+              autocomplete: "off",
+              required: true,
+              class: "sm:max-w-xs",
+              aria: aria %>
+      <% end %>
+
+      <div class="form-actions">
+        <%= f.submit "Sign note", name: nil, class: "button-primary" %>
+        <%= link_to "Back to chart", patient_chart_path(@dfn), class: "button-secondary no-underline" %>
+      </div>
+    <% end %>
+  <% end %>
+<% end %>

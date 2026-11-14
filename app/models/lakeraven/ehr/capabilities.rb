@@ -54,6 +54,13 @@ module Lakeraven
         # patients (#873). RPMS: RCIS's menu key BMCZMENU, or its supervisor
         # and manager keys, the same keys Roles.can_process_chs? reads.
         "referrals.work" => rule(any: %i[referrals_user referrals_supervisor referrals_manager]),
+        # Write a progress note on an open visit from the chart and sign it
+        # with the user's electronic signature code (#1001). The PROVIDER key
+        # marks the clinicians who author notes. Before anything is written,
+        # RPMS is asked whether it accepts the signature code; before the note
+        # is signed, TIU is asked which signing action the author holds on it
+        # (ESignatureGateway.which_action), and only "sign" signs it.
+        "progress_note.write" => rule(any: %i[provider]),
         # Open the registration tables a site keeps itself: anyone who may edit one
         # of them. BPRM: CanAccessSettings, narrowed to the tables lakeraven-ehr has.
         "registration.setup" => rule(any: %i[registration_manager record_flags_manager]),

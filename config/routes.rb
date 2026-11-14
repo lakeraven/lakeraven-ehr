@@ -56,6 +56,13 @@ Lakeraven::EHR::Engine.routes.draw do
   post "patients/:dfn/allergies/no_known_allergies", to: "allergies#no_known_allergies",
     as: :patient_no_known_allergies, constraints: { dfn: /\d+/ }
 
+  # A progress note written and signed from the chart (#1001). The note is
+  # created, written and signed by the POST only.
+  get  "patients/:dfn/notes/new", to: "progress_notes#new", as: :new_patient_progress_note,
+    constraints: { dfn: /\d+/ }
+  post "patients/:dfn/notes", to: "progress_notes#create", as: :patient_progress_notes,
+    constraints: { dfn: /\d+/ }
+
   # In-clinic consent (#793). A signature is immutable, so there is no
   # update or delete route. Revocation is a new row. `new` and `handover`
   # are declared before any `:id` segment.
