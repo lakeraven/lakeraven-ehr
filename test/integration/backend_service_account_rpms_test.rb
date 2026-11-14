@@ -116,6 +116,7 @@ class BackendServiceAccountRpmsTest < ActionDispatch::IntegrationTest
   end
 
   teardown do
+    @restore_touch&.call
     (@saved_env || {}).each { |key, value| value == :missing ? ENV.delete(key) : ENV[key] = value }
     # Later tests get the suite's shared mock back, whatever they include.
     Lakeraven::EHR::RpmsSessions.reset!
@@ -206,6 +207,24 @@ class BackendServiceAccountRpmsTest < ActionDispatch::IntegrationTest
 
   # One real keeper pass. The pool has no public way to run one.
   def keeper_tick = Lakeraven::EHR::RpmsSessions.instance_variable_get(:@pool).keep_alive_tick
+
+  # Run the block once, right after RpmsSessions.touch has returned truthy for
+  # key: the window between a lease's touch and its checkout. touch is wrapped
+  # on the singleton class and put back by @restore_touch (teardown runs it too).
+  def after_service_touch(key, &hook)
+    sessions = Lakeraven::EHR::RpmsSessions
+    original = sessions.method(:touch).unbind
+    @restore_touch = singleton_method_restore(sessions, :touch)
+    sessions.define_singleton_method(:touch) do |touched, **options|
+      original.bind_call(self, touched, **options).tap do |kept|
+        next unless kept && touched == key && hook
+
+        run = hook
+        hook = nil
+        run.call
+      end
+    end
+  end
 
   # Rails.application.credentials whose every read raises, as an undecryptable
   # or mis-shaped credentials file does. Anything else is the real object's.
@@ -631,6 +650,77 @@ class BackendServiceAccountRpmsTest < ActionDispatch::IntegrationTest
     assert_no_rpms_connection("identity mismatch")
     assert_equal used, client.rpcs.size, "nothing ran as the other identity"
     assert client.disconnected
+    refute held?(service_key)
+  end
+
+  # The lease can end between the touch that keeps it and the checkout: a
+  # sibling token of the application is revoked (or the keeper drops it), and
+  # a clinician signing in takes the freed slot of a full pool. The request
+  # then has no RPMS connection; it does not fail on the pool's capacity.
+  test "a lease released and its slot taken between touch and checkout answers 503" do
+    configure_pool(max_sessions: 1)
+    configure_service_account
+    read "/lakeraven-ehr/Patient/1"
+    assert_read_ok "the read that takes the lease"
+    key = service_key
+    assert held?(key)
+    service_rpcs = @clients[0].rpcs.size
+
+    clinician = seeded_client
+    clinician.seed_user(CLINICIAN_DUZ, credentials: "CLIN1;CLIN1!!", name: "CLINICIAN,SYNTHETIC", role: "provider")
+    clinician.authenticate("CLIN1", "CLIN1!!")
+    clinician_key = Lakeraven::EHR::RpmsSessions.key_for(person_token("user", CLINICIAN_DUZ))
+    used = clinician.rpcs.size
+    token = @token
+    injected = 0
+
+    after_service_touch(key) do
+      injected += 1
+      Lakeraven::EHR::RpmsSessions.release_service_account(token)
+      Lakeraven::EHR::RpmsSessions.adopt(clinician_key, clinician)
+    end
+    begin
+      assert_nothing_raised { read "/lakeraven-ehr/Patient/1" }
+    ensure
+      @restore_touch&.call
+    end
+
+    assert_equal 1, injected, "the lease was released right after its touch, once"
+    assert_no_rpms_connection("lease released and the pool filled before checkout")
+    assert_equal used, clinician.rpcs.size, "the clinician's connection received no RPC"
+    assert_empty clinician.rpcs_after_signon
+    assert_equal CLINICIAN_DUZ.to_s, clinician.duz.to_s
+    refute clinician.disconnected
+    assert held?(clinician_key), "the clinician keeps their connection"
+    refute held?(key), "the service-account lease stays released"
+    assert_equal 1, @clients.size, "no second service-account sign-on"
+    assert_equal service_rpcs, @clients[0].rpcs.size, "the released connection served nothing more"
+  end
+
+  # A factory that cannot make a connection (a mis-shaped config/rpms.yml, say)
+  # is a failed sign-on like any other: 503, and the back-off.
+  test "a connection factory that raises answers 503 and is not called again inside the back-off" do
+    built = 0
+    Lakeraven::EHR::RpmsSessions.reset!
+    Lakeraven::EHR::RpmsSessions.configure!(
+      factory: lambda {
+        built += 1
+        raise ArgumentError, "synthetic factory failure"
+      },
+      max_sessions: 4, keeper: false
+    )
+    configure_service_account
+
+    assert_nothing_raised { read "/lakeraven-ehr/Patient/1" }
+
+    assert_no_rpms_connection("factory raising")
+    assert_equal 1, built, "the factory was asked for one connection"
+    refute held?(service_key)
+
+    assert_nothing_raised { read "/lakeraven-ehr/Patient/1" }
+
+    assert_no_rpms_connection("factory raising, inside the back-off")
+    assert_equal 1, built, "the second read inside the back-off builds nothing"
     refute held?(service_key)
   end
 
