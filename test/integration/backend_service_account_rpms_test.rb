@@ -22,7 +22,8 @@ class BackendServiceAccountRpmsTest < ActionDispatch::IntegrationTest
   VERIFY_CODE = "SVCACCT1!!"
   ENV_KEYS = %w[RPMS_SERVICE_ACCESS_CODE RPMS_SERVICE_VERIFY_CODE].freeze
   # Sent before anyone is signed on, so they carry no DUZ by construction.
-  SIGNON_RPCS = [ "XUS SIGNON SETUP", "XUS AV CODE" ].freeze
+  # XUS GET USER INFO is the gem's own read-back inside authenticate, sent before it returns.
+  SIGNON_RPCS = [ "XUS SIGNON SETUP", "XUS AV CODE", "XUS GET USER INFO" ].freeze
   NO_CONNECTION = "This request has no RPMS connection of its own."
   SYSTEM_SCOPES = "system/Patient.rs system/ServiceRequest.rs"
   CLINICIAN_DUZ = 208
