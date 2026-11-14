@@ -79,13 +79,16 @@ module Lakeraven
         @responses = screening_pages(filtered)
       end
 
-      # TODO(#480): `encounter_ien` arrives as a query param and is rendered as
-      # a free-text field because there is no encounter picker in the web UI
-      # yet. The scheduling surface (#480, Sprint 3) supplies it; until then
-      # this is interim, not a finished design. See the note in new.html.erb.
+      # The visit is CHOSEN from the patient's open visits (#1003), read from
+      # the same VISITLST list the chart's Encounter read uses and offered only
+      # as they come back through the egress seam (load_open_visits).
+      # `encounter_ien` arriving as a query param only preselects a visit that
+      # is in that list.
       def new
         @answers = {}
-        @encounter_ien = params[:encounter_ien]
+        load_open_visits
+        @encounter_ien = params[:encounter_ien].to_s.strip.presence
+        @encounter_ien = nil unless offered_visit?(@encounter_ien)
         # Minted when the form is RENDERED: it identifies this submission, so a
         # double-tap or a back-button replay of the same form is one
         # administration, while a second screening later the same day comes
@@ -95,10 +98,19 @@ module Lakeraven
 
       def create
         @answers = submitted_answers
-        @encounter_ien = params[:encounter_ien]
+        load_open_visits
+        @encounter_ien = params[:encounter_ien].to_s.strip.presence
         # Carried through a re-render (an incomplete form, the safety prompt) so
         # that acknowledging and resubmitting is still the SAME submission.
         @submission_token = params[:submission_token].presence
+
+        # The list is read NOW, not remembered from when the form rendered: a
+        # visit locked in between is no longer a choice. A visit that is not
+        # one of the open ones is refused before the service is reached, and
+        # so is every submission while the visits could not be read — with or
+        # without a visit named, there is nothing it can be recorded against.
+        return render_refused_visit if @visits_unreadable
+        return render_refused_visit if @encounter_ien && !offered_visit?(@encounter_ien)
 
         @result = ScreeningEntryService.new(
           instrument: @instrument,
@@ -145,6 +157,172 @@ module Lakeraven
         else
           "Screening recorded."
         end
+      end
+
+      # -- Visit choices (#1003) --------------------------------------------------
+
+      # The patient's OPEN visits, today's first and then newest first. Read
+      # only by a credential that may search Encounter. A read that is not
+      # permitted or fails is NOT an empty list: @visits_unreadable is set, the
+      # form says so, and nothing can be chosen (fail closed, no typed fallback).
+      #
+      # The choices are clinical data on a rendered page, so they are read
+      # through the egress seam, as the chart and index/show are: the eligible
+      # rows are shaped as Encounters in one Bundle, the Bundle goes through
+      # filter_fhir_for_egress, and only what comes back is offered and
+      # labelled. The visits could not be read when the filtered payload is
+      # not a usable Bundle (see usable_visit_bundle?), or when at least one
+      # visit was eligible and none survives the filter: "no open visit" is a
+      # statement about the record, never about what the filter withheld.
+      # Only the error class is logged, never a row.
+      def load_open_visits
+        @open_visits = []
+        @visits_unreadable = false
+        return @visits_unreadable = true unless can_read?("Encounter", "s")
+
+        eligible = normalise_visits(EncounterGateway.visits(@dfn))
+        filtered = filter_fhir_for_egress(visit_bundle(eligible))
+        return @visits_unreadable = true unless usable_visit_bundle?(filtered)
+
+        @open_visits = filtered_visits(filtered, raw_visit_presence(eligible))
+        @visits_unreadable = eligible.any? && @open_visits.empty?
+      rescue RpmsRpc::Error, IOError, SystemCallError => e
+        Rails.logger.warn("[screening] visit list unreadable: #{e.class}")
+        @open_visits = []
+        @visits_unreadable = true
+      end
+
+      # The raw-row gate, before anything is shaped for egress: a visit is
+      # eligible only if every row for its (valid) IEN is open (lock explicitly
+      # false: an unknown lock is not open) and dated with a real time. One
+      # row per visit. These rows are never rendered; only what survives the
+      # egress filter is.
+      def normalise_visits(rows)
+        groups = Array(rows).group_by { |row| row[:visit_ien].to_s.strip }.select { |ien, _| ien.match?(/\A[1-9]\d*\z/) }
+        groups.values.filter_map do |group|
+          group.first if group.all? { |row| row[:locked] == false && row[:datetime].is_a?(Time) }
+        end
+      end
+
+      # Usable only as a Bundle whose entry is a list (possibly empty) of
+      # entries that each carry a resource Hash. Anything else is unreadable.
+      def usable_visit_bundle?(document)
+        return false unless resource_type(document) == "Bundle"
+
+        entries = fhir_value(document, "entry")
+        entries.is_a?(Array) && entries.all? { |entry| fhir_value(entry, "resource").is_a?(Hash) }
+      end
+
+      # Per eligible IEN, whether the RAW row had a clinic / a provider —
+      # booleans only, never the value — so a display the filter withheld is
+      # labelled "not shown" rather than "not recorded".
+      def raw_visit_presence(rows)
+        rows.to_h do |row|
+          [ row[:visit_ien].to_s.strip, { location: row[:location].present?, provider: row[:provider].present? } ]
+        end
+      end
+
+      def visit_bundle(rows)
+        {
+          resourceType: "Bundle",
+          type: "searchset",
+          total: rows.length,
+          entry: rows.map { |row| { resource: visit_encounter(row) } }
+        }
+      end
+
+      # Shaped locally: the FHIR Encounter API output is unchanged. The clinic
+      # and provider names ride as reference displays, so the filter sees them.
+      def visit_encounter(row)
+        resource = Encounter.from_rpms_visit(row, patient_dfn: @dfn).to_fhir
+        add_visit_location(resource, row[:location])
+        add_visit_provider(resource, row[:provider])
+        resource
+      end
+
+      def add_visit_location(resource, name)
+        return if name.blank?
+
+        reference = resource.dig(:location, 0, :location) || {}
+        resource[:location] = [ { location: reference.merge(display: name.to_s) } ]
+      end
+
+      def add_visit_provider(resource, name)
+        return if name.blank?
+
+        reference = resource.dig(:participant, 0, :individual) || {}
+        participants = Array(resource[:participant]).drop(1)
+        resource[:participant] = [ { individual: reference.merge(display: name.to_s) } ] + participants
+      end
+
+      # Only the filtered Encounters whose id is an eligible IEN (a key of
+      # `presence`) and whose period still parses are offered, labelled only
+      # from the filtered displays plus the raw had-a-clinic/provider flags. An IEN the filter returned more than once with different
+      # content is not offered (fail closed). Today's first (process-local
+      # date: the gem builds visit times with Time.new in the process zone,
+      # see WallClock), then newest first.
+      def filtered_visits(document, presence)
+        visits = bundle_entry_resources(document).filter_map do |resource|
+          filtered_visit(resource, presence) if resource_type(resource) == "Encounter"
+        end
+        offered = visits.group_by { |visit| visit[:visit_ien] }.values.filter_map do |group|
+          group.first if group.uniq.one?
+        end
+        sort_visits(offered)
+      end
+
+      def sort_visits(visits)
+        today = Time.now.to_date # rubocop:disable Rails/TimeZone
+        visits.sort_by { |visit| visit[:datetime] }.reverse.partition { |visit| visit[:datetime].to_date == today }.flatten
+      end
+
+      def filtered_visit(resource, presence)
+        ien = fhir_value(resource, "id").to_s.strip
+        return unless presence.key?(ien)
+
+        datetime = filtered_visit_time(resource)
+        return if datetime.nil?
+
+        { visit_ien: ien, datetime: datetime, location: visit_display(resource, "location", "location"),
+          provider: visit_display(resource, "participant", "individual"),
+          location_recorded: presence[ien][:location], provider_recorded: presence[ien][:provider] }
+      end
+
+      def filtered_visit_time(resource)
+        start = fhir_value(fhir_value(resource, "period"), "start")
+        return unless start.is_a?(String)
+
+        Time.iso8601(start).localtime
+      rescue ArgumentError
+        nil
+      end
+
+      def visit_display(resource, list_key, reference_key)
+        display = fhir_value(fhir_value(first_fhir(fhir_value(resource, list_key)), reference_key), "display")
+        display.to_s.presence if display.is_a?(String)
+      end
+
+      def offered_visit?(ien)
+        return false if @visits_unreadable || ien.blank?
+
+        @open_visits.any? { |row| row[:visit_ien].to_s.strip == ien.to_s.strip }
+      end
+
+      # Nothing is stored. The other reasons the service would report
+      # (unanswered items, the safety prompt) are still reported alongside the
+      # visit, by scoring the answers without saving them.
+      def render_refused_visit
+        score = @instrument.score(@answers)
+        safety_required = score.safety_triggered? && !ScreeningEntryService.acknowledged?(params[:safety_acknowledged])
+        reasons = [ :invalid_encounter ]
+        reasons << :incomplete unless score.complete?
+        reasons << :safety_unacknowledged if safety_required
+        @result = ScreeningEntryService::Result.new(
+          success: false, score: score, error: reasons.first, errors: reasons,
+          missing_link_ids: score.missing_link_ids, safety_prompt_required: safety_required
+        )
+        @encounter_ien = nil
+        render :new, status: :unprocessable_entity
       end
 
       # -- Authorization --------------------------------------------------------

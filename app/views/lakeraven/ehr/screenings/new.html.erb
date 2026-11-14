@@ -108,27 +108,53 @@
 
   <%# Every reason the submission was refused is shown, not just the first:
       the visit AND the unanswered items, in one pass. %>
-  <% if @result&.errors&.include?(:missing_encounter) %>
+  <% if @result&.errors&.include?(:missing_encounter) && !@visits_unreadable && @open_visits.any? %>
     <div class="screening-errors" role="alert">
       <h2>Visit required</h2>
-      <p>A screening is recorded against the patient&rsquo;s open visit. Enter the visit number and submit again.</p>
+      <p>A screening is recorded against the patient&rsquo;s open visit. Choose the visit below and submit again.</p>
     </div>
   <% end %>
 
-  <%# TODO(#480): this free-text visit number is INTERIM, not a finished
-      design. There is no encounter picker in the web UI yet, so the clinician
-      retypes a number they can already see elsewhere — error-prone on a
-      tablet, and it lets a screening be attached to the wrong visit. The
-      scheduling surface (#480, Sprint 3) is where the picker comes from;
-      replace this input with it, and keep the free-text path only as a
-      fallback if #480 lands without one. %>
-  <div class="screening-visit">
-    <label for="encounter_ien">Visit (encounter) number</label>
-    <input type="text" id="encounter_ien" name="encounter_ien" inputmode="numeric"
-           value="<%= @encounter_ien %>" required
-           aria-describedby="encounter_ien_hint">
-    <p id="encounter_ien_hint" class="hint">The open encounter this screening is being administered against.</p>
-  </div>
+  <% if @result&.errors&.include?(:invalid_encounter) && !@visits_unreadable %>
+    <div class="screening-errors" role="alert">
+      <h2>Choose an open visit</h2>
+      <p>The visit that was submitted is not one of this patient&rsquo;s open visits. Nothing has been recorded.<%= " Choose one of the visits below." if @open_visits.present? %></p>
+    </div>
+  <% end %>
+
+  <% if @visits_unreadable %>
+    <div class="screening-errors" role="alert">
+      <h2>Visits could not be read</h2>
+      <p>This patient&rsquo;s visits could not be read, so a visit cannot be chosen and no screening can be recorded now. Try again, and report it to support if it keeps happening.</p>
+    </div>
+  <% elsif @open_visits.empty? %>
+    <div class="screening-errors" role="alert">
+      <h2>No open visit</h2>
+      <p>This patient has no open visit. Check the patient in first, then start the screening again. If the patient is already checked in, reload this page, and report it if the visit still does not appear.</p>
+    </div>
+  <% end %>
+
+  <% if @open_visits.any? %>
+    <fieldset class="screening-visit" id="encounter_ien_group" aria-describedby="encounter_ien_hint">
+      <legend>Visit</legend>
+      <p id="encounter_ien_hint" class="hint">Choose the open visit this screening is being administered against.</p>
+      <% @open_visits.each do |visit| %>
+        <% ien = visit[:visit_ien].to_s.strip %>
+        <% input_id = "encounter_ien_#{ien}" %>
+        <div class="screening-visit__choice">
+          <input type="radio" id="<%= input_id %>" name="encounter_ien" value="<%= ien %>"
+                 <%= "checked" if @encounter_ien == ien %>>
+          <label for="<%= input_id %>">
+            <%= visit[:datetime].strftime("%b %-d, %Y %H:%M") %>
+            <%# "not shown": the record has one and the egress filter withheld it;
+                "not recorded": the record has none. %>
+            &middot; <%= visit[:location].presence || (visit[:location_recorded] ? "Clinic not shown" : "Clinic not recorded") %>
+            &middot; <%= visit[:provider].presence || (visit[:provider_recorded] ? "Provider not shown" : "Provider not recorded") %>
+          </label>
+        </div>
+      <% end %>
+    </fieldset>
+  <% end %>
 
   <p class="screening-preamble"><%= @instrument.preamble %></p>
 
