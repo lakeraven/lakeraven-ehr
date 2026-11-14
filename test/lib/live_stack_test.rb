@@ -1718,12 +1718,14 @@ class LiveStackTest < ActiveSupport::TestCase
     mock_class = throwaway_mock_class
     module_class = Class.new(Module)
 
-    LiveStack.install!(client: client, persona_duz: PERSONA_DUZ, mock_class: mock_class, module_class: module_class)
+    LiveStack.install!(client: client, persona_duz: PERSONA_DUZ, mock_class: mock_class, module_class: module_class,
+                       time_stubs_class: Class.new(ActiveSupport::Testing::SimpleStubs))
 
     assert_includes client.class.ancestors, LiveStack::RefusalWatch
     assert_includes mock_class.ancestors, LiveStack::MockWatch
     assert_includes module_class.ancestors, LiveStack::StubWatch
     assert_not_includes Module.ancestors, LiveStack::StubWatch
+    assert_not_includes ActiveSupport::Testing::SimpleStubs.ancestors, LiveStack::TimeStubWatch
     assert_not_includes Class.ancestors, LiveStack::StubWatch
     assert_not_includes RpmsRpc::MockClient.ancestors, LiveStack::MockWatch
   end
@@ -1732,7 +1734,8 @@ class LiveStackTest < ActiveSupport::TestCase
     client = throwaway_client_class.new(PERSONA_DUZ)
 
     LiveStack.install!(client: client, persona_duz: 4321, mock_class: throwaway_mock_class,
-                       module_class: Class.new(Module))
+                       module_class: Class.new(Module),
+                       time_stubs_class: Class.new(ActiveSupport::Testing::SimpleStubs))
 
     assert_equal [ "ORWU USERINFO", "x" ], client.call_rpc("ORWU USERINFO", "x")
     evidence = LiveStack.take_evidence
@@ -1747,7 +1750,8 @@ class LiveStackTest < ActiveSupport::TestCase
     mock_class = throwaway_mock_class
     module_class = Class.new(Module)
     LiveStack.install!(client: throwaway_client_class.new(PERSONA_DUZ), persona_duz: PERSONA_DUZ,
-                       mock_class: mock_class, module_class: module_class)
+                       mock_class: mock_class, module_class: module_class,
+                       time_stubs_class: Class.new(ActiveSupport::Testing::SimpleStubs))
 
     MOCK_READS.each do |read|
       assert_equal [ "ORWU USERINFO" ], mock_class.new.public_send(read, "ORWU USERINFO")
@@ -1767,7 +1771,8 @@ class LiveStackTest < ActiveSupport::TestCase
     module_class = Class.new(Module)
 
     2.times do
-      LiveStack.install!(client: client, persona_duz: PERSONA_DUZ, mock_class: mock_class, module_class: module_class)
+      LiveStack.install!(client: client, persona_duz: PERSONA_DUZ, mock_class: mock_class, module_class: module_class,
+                         time_stubs_class: Class.new(ActiveSupport::Testing::SimpleStubs))
     end
 
     assert_equal 1, client.class.ancestors.count(LiveStack::RefusalWatch)
