@@ -15,7 +15,7 @@ module Lakeraven
         # GET /scheduling/patients/:dfn/appointments?when=
         def index
           @dfn = params[:dfn].to_i
-          @patient = RpmsRpc::Patient.brief_header(@dfn)
+          @patient = PatientGateway.brief_header(@dfn)
           return render(plain: "No such patient", status: :not_found) unless @patient
 
           @when = params[:when].presence_in(WHEN)

@@ -16,6 +16,9 @@ module Lakeraven
     #
     # RPMS answers for the session's own user, so no user is passed.
     class NotificationsGateway
+      # The longest forward comment Kernel takes (XQALFWD).
+      COMMENT_MAX = ::RpmsRpc::Notifications::COMMENT_MAX
+
       # What a write came to. :done when RPMS did it; :refused when RPMS (or
       # the gem, on RPMS's own rules) would not; :unknown
       # when the call failed part way, so it may or may not have happened.

@@ -110,8 +110,7 @@ module Lakeraven
         end
 
         def creates_visit?
-          setup = Array(::RpmsRpc::Scheduling.clinic_setup).find { |c| c[:location_ien].to_i == @resource[:hospital_location_id].to_i }
-          setup&.dig(:create_visit).to_s.upcase == "YES"
+          AppointmentCheckinGateway.creates_visit?(@resource)
         rescue ::RpmsRpc::Error, IOError, SystemCallError
           false
         end

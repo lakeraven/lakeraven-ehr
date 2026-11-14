@@ -2,6 +2,7 @@
 
 require "rpms_rpc/api/patient_profile"
 require "rpms_rpc/api/registration"
+require "rpms_rpc/api/tribal"
 
 module Lakeraven
   module EHR
@@ -71,6 +72,15 @@ module Lakeraven
           result_for(via.remove_alias(dfn.to_i, ien.to_i))
         rescue ::RpmsRpc::Error, IOError, SystemCallError => e
           unknown(e)
+        end
+
+        # The patient's tribe, enrollment and eligibility status as registration
+        # shows them, or nil. The registration screens' ungated read of the
+        # same RPC as TribalEnrollmentGateway.enrollment_details: those screens
+        # never were gated on tribal_enrollment, and moving them under that
+        # capability would be a behaviour change outside this slice.
+        def enrollment(dfn, via: ::RpmsRpc::Tribal)
+          via.enrollment(dfn)
         end
 
         # The patient's other tribes (S-REG-07.2).

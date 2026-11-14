@@ -153,7 +153,7 @@ module Lakeraven
         end
 
         def mock_backend?
-          defined?(RpmsRpc::MockClient) && BackendRegistry.current.client.is_a?(RpmsRpc::MockClient)
+          RpmsClientGateway.mock_backend?
         end
 
         def security

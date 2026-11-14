@@ -1,11 +1,10 @@
 # frozen_string_literal: true
 
-require "rpms_rpc/api/orwu"
-
 module Lakeraven
   module EHR
     # "Today" as RPMS counts it (#1065): the RPMS server's date, FileMan's DT,
-    # read through ORWU DT "T" (RpmsRpc::Orwu). RPMS checks a date against its
+    # read through ORWU DT "T" by SiteDateGateway (the gateway door, ADR 0013
+    # decision 6e; the model makes no RPC itself). RPMS checks a date against its
     # own today ("cannot be in the future"), so a form's default and the
     # engine's own check use the same day. The app server's clock is not that
     # day: it runs in UTC, which is already tomorrow during a US site's
@@ -41,7 +40,7 @@ module Lakeraven
         end
 
         def read_from_rpms
-          ::RpmsRpc::FilemanDateParser.parse_date(::RpmsRpc::Orwu.fileman_datetime("T"))
+          SiteDateGateway.today
         end
       end
     end

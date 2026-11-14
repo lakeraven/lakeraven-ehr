@@ -10,7 +10,7 @@ module Lakeraven
       include ActiveModel::Model
       include ActiveModel::Attributes
 
-      COMMENT_MAX = ::RpmsRpc::Notifications::COMMENT_MAX
+      COMMENT_MAX = NotificationsGateway::COMMENT_MAX
 
       attribute :recipient_duz, :string
       attribute :comment, :string

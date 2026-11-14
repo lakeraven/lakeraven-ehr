@@ -50,7 +50,7 @@ module Lakeraven
 
         # GET /registration/patients/:dfn
         def show
-          @patient = RpmsRpc::Patient.brief_header(params[:dfn].to_i)
+          @patient = PatientGateway.brief_header(params[:dfn])
           @registered_hrn = flash[:registered_hrn]
           return render :not_found, status: :not_found unless @patient
 
@@ -196,7 +196,7 @@ module Lakeraven
         end
 
         def shown_candidate(dfn)
-          header = RpmsRpc::Patient.brief_header(dfn)
+          header = PatientGateway.brief_header(dfn)
           return nil unless header && header[:name].present? && header[:dob].present?
 
           header.merge(dfn: dfn.to_i)

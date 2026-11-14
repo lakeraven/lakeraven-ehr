@@ -77,7 +77,7 @@ module Lakeraven
         def load_chosen
           return if @patients.any? || @booking.patient_dfn.blank?
 
-          @chosen = RpmsRpc::Patient.brief_header(@booking.patient_dfn.to_i)
+          @chosen = PatientGateway.brief_header(@booking.patient_dfn)
         rescue RpmsRpc::Client::RpcError
           @chosen = nil
         end

@@ -69,6 +69,13 @@ module Lakeraven
           @pool.with_client(key) { |client| RpmsRpc.with_client(client, &block) }
         end
 
+        # Whether the configured client, the one used where no user holds a
+        # connection here, has dropped. One that cannot say, or none, has not.
+        def configured_client_closed?
+          client = RpmsRpc.configuration.client
+          client.respond_to?(:connected?) && !client.connected?
+        end
+
         def held?(key) = key.present? && @pool.include?(key)
 
         # Whether the session's connection is held AND still connected. One the

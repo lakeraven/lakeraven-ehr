@@ -104,8 +104,7 @@ module Lakeraven
         # Held AND connected: a connection the broker dropped ends the session.
         return !RpmsSessions.live?(session[:rpms_pool_key]) if RpmsSessions.enabled? && session[:rpms_pool_key].present?
 
-        client = RpmsRpc.configuration.client
-        client.respond_to?(:connected?) && !client.connected?
+        RpmsSessions.configured_client_closed?
       end
 
       def end_session_for_closed_rpms!

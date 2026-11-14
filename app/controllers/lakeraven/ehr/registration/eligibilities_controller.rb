@@ -30,7 +30,7 @@ module Lakeraven
 
         private
 
-        def enrollment = RpmsRpc::Tribal.enrollment(dfn) || {}
+        def enrollment = PatientProfileGateway.enrollment(dfn) || {}
 
         def render_form(status)
           @classifications = PatientRecordGateway.classifications

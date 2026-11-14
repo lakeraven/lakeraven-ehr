@@ -1,0 +1,1427 @@
+# frozen_string_literal: true
+
+require "test_helper"
+require "prism"
+require "find"
+
+module Lakeraven
+  module EHR
+    # ADR 0013, decision 6e ("One door, with its real reach"), first slice of #762.
+    #
+    # The code that opens and holds an RPMS scope is one layer (the door), and
+    # a client-resolving reference anywhere else in the engine fails this
+    # test. What is scanned: every .rb and .rake file under app/ and lib/, and
+    # every .erb template under app/views, compiled to Ruby by Rails' own ERB
+    # handler, with a strict-locals signature (`<%# locals: (...) %>`) placed
+    # in the method's parameter list as Rails places it. Two discovery tests
+    # keep that list complete: a file under app/views that is neither an
+    # .erb nor a named static extension fails (an allow-list: a handler the
+    # host app registers is unknown here), and so does an .erb outside
+    # app/views. The scan is by reference over the Prism AST, never a grep:
+    # comments, strings and template text do not match, a call split across
+    # lines does, and `::RpmsRpc::X.y` and `Object::RpmsRpc::X.y` are the same
+    # reference as `RpmsRpc::X.y`. So is `expr::RpmsRpc::X.y`, fail closed,
+    # because `expr` may be Object. A compound write (`recv.client ||= x`)
+    # and a write target (`recv.client, y = a, b`) are calls like any other,
+    # a constant written as a target (`RpmsRpc::X, y = a, b`) is that
+    # constant, and a receiver in parentheses or a plain `begin ... end`
+    # (`(RpmsRpc.configuration).client`) is the receiver.
+    #
+    # Not seen, by design of a scan by reference: a gem module or client
+    # reached through a value the scan would have to track (a local variable,
+    # `RpmsRpc.itself.client`, `.then`, `instance_eval`, `send` on
+    # RpmsSessions).
+    #
+    # A reference is client-resolving when it is a call on a gem API module
+    # or client class, a client accessor on the root module, the registry or
+    # the gem configuration, reflective dispatch on the root module, or a gem
+    # constant taken as a value (an argument, a default, an assignment, a
+    # pattern, an operand of `==` or `<=`), because a module held in a variable
+    # resolves the client the moment it is called, wherever that happens.
+    # Error classes and pure parsers are allowed everywhere, by rule.
+    #
+    # The scanner lives in this file so that the code under test cannot
+    # change it, and its self-tests on inline source prove it is not vacuous.
+    class OneDoorTest < ActiveSupport::TestCase
+      ROOT = Lakeraven::EHR::Engine.root
+      SCANNED_DIRECTORIES = %w[app lib].freeze
+      # Plain Ruby by either name; rake tasks run in the engine like any code.
+      RUBY_EXTENSIONS = %w[.rb .rake].freeze
+      # ERB templates are executable Ruby too; every .erb under here is scanned.
+      TEMPLATE_DIRECTORY = "app/views"
+      # Registered ActionView handlers that render a file as text and run no
+      # Ruby from it.
+      STATIC_TEMPLATE_HANDLERS = [ ActionView::Template::Handlers::Raw, ActionView::Template::Handlers::Html ].freeze
+      # The only files allowed under app/views besides .erb: an extension
+      # and the reason it runs no Ruby. Every other file fails the test,
+      # whatever the engine's test env has registered: a host app may
+      # register a handler (jbuilder, haml, slim) that this env does not
+      # know, so an unknown extension is executable until it is named here.
+      STATIC_TEMPLATE_EXTENSIONS = {
+        ".html" => "rendered as text by ActionView's Html handler",
+        ".raw" => "rendered as text by ActionView's Raw handler"
+      }.freeze
+
+      # The door (6e): files allowed to hold a client-resolving reference.
+      # Explicit paths, relative to the engine root. "The console" has no
+      # file in app/ or lib/ today, so it is not listed.
+      DOOR_FILES = %w[
+        lib/lakeraven/ehr/rpms_sessions.rb
+        app/controllers/concerns/lakeraven/ehr/rpms_user_scope.rb
+        app/services/lakeraven/ehr/authentication_service.rb
+        app/controllers/lakeraven/ehr/sessions_controller.rb
+        lib/lakeraven/ehr/engine.rb
+      ].freeze
+      DOOR_DIRECTORIES = %w[app/gateways].freeze
+
+      # Narrower than the door (6e): the only two files that may open a scope
+      # or build a client.
+      SCOPE_OPENERS = %w[
+        lib/lakeraven/ehr/rpms_sessions.rb
+        app/services/lakeraven/ehr/authentication_service.rb
+      ].freeze
+
+      # Named exemptions (6e): a path plus its reason, no wildcards. An
+      # exemption applies to that exact path and nothing else, and a file
+      # named here must still hold a hit, so an exemption that outlives its
+      # reference fails the test instead of lingering.
+      EXEMPTIONS = {
+        "app/models/lakeraven/ehr/backend_registry.rb" =>
+          "The rpms backend's client source (#646): gateways get their client through " \
+          "BackendRegistry.current, so the registry's registration resolves RpmsRpc.client " \
+          "by design; ADR 0013 6e lists it, and it is exempt by name, not moved, so that no " \
+          "synonym of RpmsRpc.client exists outside the door."
+      }.freeze
+
+      # The reference scanner. One instance per source string; `hits` are the
+      # client-resolving references, `scope_openers` the with_client/new_client
+      # calls, each as [line, ref]. Every site is reported once.
+      class Scanner
+        TYPE_CHECKS = %i[is_a? kind_of? instance_of?].freeze
+        CLIENT_CLASSES = %w[MockClient CiaClient Client].freeze
+        # Calls on the root module that resolve, build or install a client.
+        # Any other `RpmsRpc.<name>` whose name mentions a client or starts
+        # with `mock` is one too (`scoped_client`, `client_for`, `mock_fhir!`),
+        # so a sibling accessor added to the gem is caught without a change
+        # here. `RpmsRpc.configuration` and `RpmsRpc.respond_to?` are not:
+        # one is a settings object (its client accessors are caught below),
+        # the other a probe, like `defined?`.
+        ROOT_MODULE_CALLS = %i[client fhir_client scoped_client client_for configure mock! mock_fhir! with_client].freeze
+        # Reflective dispatch on the root module reaches any of those by a
+        # name the scan cannot read, so the dispatch itself is the reference.
+        REFLECTIVE_CALLS = %i[send __send__ public_send method public_method singleton_method instance_method const_get].freeze
+        PURE_PARSERS = %w[FilemanDateParser].freeze
+        # A constant path, read (`A::B`) or as a write target (`A::B, y = 1, 2`).
+        CONSTANT_PATH_NODES = [ Prism::ConstantPathNode, Prism::ConstantPathTargetNode ].freeze
+        # A constant by one name, read or as a write target.
+        CONSTANT_NAME_NODES = [ Prism::ConstantReadNode, Prism::ConstantTargetNode ].freeze
+        CONSTANT_NODES = (CONSTANT_PATH_NODES + CONSTANT_NAME_NODES).freeze
+
+        # The source does not parse as Ruby, or a template's strict-locals
+        # signature is one Rails refuses to compile. Nothing was scanned, so
+        # the scan fails rather than report a clean file.
+        ParseError = Class.new(RuntimeError)
+
+        # A template as the Ruby Rails compiles it to: `ruby` is the method
+        # definition, `line_of` maps a Prism node in it to its line in the
+        # template, `strict_locals` says whether the template has a
+        # strict-locals signature.
+        CompiledTemplate = Struct.new(:ruby, :line_of, :strict_locals)
+
+        attr_reader :hits, :scope_openers
+
+        def self.scan(source, path: "(inline)")
+          new(source, path).tap(&:scan)
+        end
+
+        # An ERB template, compiled to Ruby as Rails compiles it, then scanned
+        # like any Ruby. Template text becomes a string literal and a `<%# %>`
+        # comment is dropped, with one exception: the strict-locals magic
+        # comment is not a comment (see compile_erb). A hit's line is its
+        # line in the template.
+        def self.scan_erb(source, path: "(inline erb)")
+          compiled = compile_erb(source, path: path)
+          new(compiled.ruby, path, line_of: compiled.line_of, strict_locals: compiled.strict_locals).tap(&:scan)
+        end
+
+        # What ActionView::Template#compiled_source does, step for step (the
+        # parity self-test compares the two, so a Rails upgrade that changes
+        # either step fails there):
+        #
+        # 1. The strict-locals signature is lifted out of the source by
+        #    ActionView's own STRICT_LOCALS_REGEX (Template#strict_locals!):
+        #    the first `# locals: (...)` that ends a tag or a line, wherever
+        #    it stands. Its text becomes the parameters of the compiled
+        #    method, so a default written there runs at every render. An
+        #    empty signature is `**nil`, and `&_` is added unless the
+        #    signature names a block itself.
+        # 2. The rest goes through the registered ERB handler, which applies
+        #    Rails' ERB implementation, trim mode and encoding tag.
+        # 3. The handler's Ruby is the body of a method (a template may
+        #    `yield`, which is not valid at the top level) that takes
+        #    local_assigns, output_buffer and the signature. The method opens
+        #    as Rails opens it: the parameter list, a newline, then
+        #    `@virtual_path = nil;;` (what Rails emits for a template with no
+        #    virtual path and strict or no locals) and the handler's Ruby on
+        #    that same line. The newline matters: a signature that ends in a
+        #    `#` comment or opens a heredoc swallows what follows it on its
+        #    line and takes its default from the lines below, which are the
+        #    template's code, so it must swallow here exactly what it
+        #    swallows in Rails.
+        #
+        # The signature is deleted from the source exactly as Rails deletes
+        # it (the same regex, the first match, nothing in its place), so the
+        # handler compiles the text Rails compiles. Keeping anything where
+        # the signature stood, even its newlines, would change what parses:
+        # in `<% # note # locals: (a:\n1) %><% x %>` the `# note` comment
+        # runs on over `x` in Rails, and a kept newline would end it early.
+        #
+        # `line_of` gives a node its template line by arithmetic instead.
+        # A node in the method's opening is as far below the signature's
+        # first line as it is in the template. Everything after the opening
+        # is the body, pushed down by the opening's newlines (those inside
+        # the signature, and the one that ends the parameter list). With S
+        # the template line where the deleted text starts and n the
+        # newlines deleted with it, a body line before S is its template
+        # line and a body line after S is n below its template line. Body
+        # line S is the joined line: the template text before the signature
+        # and the text after it, n lines further down, now share it. A node
+        # on it is reported at S, so code that follows a multi-line
+        # signature on the signature's last line is reported up to n lines
+        # early, at the line where the signature starts.
+        #
+        # The body's lines are the handler's, and the handler keeps every
+        # newline of the body but for one known Erubi shape: a `<%# %>`
+        # comment that does not start its line and is followed by a
+        # newline has that newline emitted twice, so every hit below it is
+        # reported one line too high for each such comment.
+        def self.compile_erb(source, path: "(inline erb)")
+          body = source.dup
+          match = ActionView::Template::STRICT_LOCALS_REGEX.match(body)
+          locals = nil
+          signature_line = joined_line = 1
+          deleted_newlines = 0
+          if match
+            locals = match[1].rstrip
+            locals = "**nil" if locals.blank?
+            joined_line += match.pre_match.count("\n")
+            signature_line = joined_line + body[match.begin(0)...match.begin(1)].count("\n")
+            deleted_newlines = match[0].count("\n")
+            body.sub!(ActionView::Template::STRICT_LOCALS_REGEX, "")
+          end
+
+          handler = ActionView::Template.registered_template_handler(:erb)
+          template = ActionView::Template.new(body, path.to_s, handler, locals: [], format: :html)
+          parameters = [ "local_assigns, output_buffer", locals, (locals&.include?("&") ? nil : "&_") ].compact.join(", ")
+          opening = "def _template(#{parameters})\n@virtual_path = nil;;"
+          pushed_down = opening.count("\n")
+          line_of = lambda do |node|
+            line = node.location.start_line
+            if node.location.start_offset < opening.bytesize
+              line + signature_line - 1
+            else
+              body_line = line - pushed_down
+              body_line > joined_line ? body_line + deleted_newlines : body_line
+            end
+          end
+
+          CompiledTemplate.new("#{opening}#{handler.call(template, body)}\nend", line_of, !locals.nil?)
+        end
+
+        def initialize(source, path, line_of: nil, strict_locals: false)
+          @source = source
+          @path = path
+          @line_of = line_of || ->(node) { node.location.start_line }
+          @strict_locals = strict_locals
+          @hits = []
+          @scope_openers = []
+          # Nodes already judged by their parent (a call's constant receiver,
+          # a type check's argument), so the bare-constant rule does not
+          # report the same site a second time.
+          @judged = Set.new.compare_by_identity
+        end
+
+        def scan
+          result = Prism.parse(@source)
+          raise ParseError, "#{@path}: #{result.errors.map(&:message).join('; ')}" if result.failure?
+
+          check_strict_locals(result.value) if @strict_locals
+          walk(result.value)
+          self
+        end
+
+        private
+
+        # Rails compiles a strict-locals signature only when every parameter
+        # is a keyword (Template#compile raises ArgumentError otherwise, and
+        # the template never renders). A signature that adds a positional
+        # parameter is malformed, and the scan fails as it does for a
+        # signature that does not parse.
+        def check_strict_locals(program)
+          parameters = program.statements.body.first.parameters
+          positional = parameters.requireds.drop(2) + parameters.optionals + [ parameters.rest ].compact + parameters.posts
+          return if positional.empty?
+
+          raise ParseError, "#{@path}: strict locals can only be keyword arguments, got #{positional.map(&:slice).join(', ')}"
+        end
+
+        def walk(node)
+          return if node.nil?
+          # A judged constant path is not judged again, but the `expr` of a
+          # judged `expr::Const` is code that runs, and is walked.
+          return walk(path_head(node)) if @judged.include?(node)
+
+          case node
+          when Prism::DefinedNode then return probe(node.value) # judged by what `defined?` evaluates
+          when *CONSTANT_NODES
+            # Ruby evaluates the `expr` of `expr::Const` and looks Const up
+            # in the result, so the path is judged by its names (see
+            # reference_segments) and `expr` is walked as ordinary code. This
+            # covers the path as a write target too: `expr::X = 1` and
+            # `expr::X ||= 1`, whose target is a path node, and a target of
+            # a multiple assignment, a `for` or a `rescue =>`, which is a
+            # target node judged as the path it names.
+            flag_bare_constant(node)
+            return walk(path_head(node))
+          when Prism::CallNode
+            visit_call(node, node.receiver, node.name)
+            flag_type_check(node)
+          when Prism::CallOrWriteNode, Prism::CallAndWriteNode, Prism::CallOperatorWriteNode
+            # `recv.name ||= x` (`&&=`, `+=`) calls `recv.name` first, and
+            # the writer only sometimes: the site is the read.
+            visit_call(node, node.receiver, node.read_name)
+          when Prism::CallTargetNode
+            # A target of a multiple assignment, a `for` or a `rescue =>`
+            # calls the writer, `recv.name=`.
+            visit_call(node, node.receiver, node.name)
+          when Prism::WhenNode then visit_when(node)
+          end
+
+          node.compact_child_nodes.each { |child| walk(child) }
+        end
+
+        # The operand of `defined?`, judged by what CRuby evaluates of it
+        # (compile.c, defined_expr0), which is not "nothing":
+        #
+        # - A static constant path (`A`, `A::B`, `::A::B`) is a probe: looked
+        #   up, never called. Exempt.
+        # - `expr::Const` is not: once `expr` is defined CRuby evaluates it to
+        #   look Const up in the result, so the path is walked as ordinary
+        #   code: `defined?(RpmsRpc.client::FOO)` resolves a client, and
+        #   `defined?(x.class::RpmsRpc)` is flagged like the path anywhere
+        #   else (fail closed: it is no static probe).
+        # - A call is not made (`defined?(RpmsRpc.client)` only asks whether
+        #   the method exists), but its receiver IS evaluated. A receiver
+        #   that is itself a call is really called, so it is walked as
+        #   ordinary code and judged by every rule, scope openers included:
+        #   `defined?(RpmsRpc.client.object_id)` resolves a client. A static
+        #   constant receiver is a probe, not a value. Each argument is checked for
+        #   definedness in turn, which evaluates its receivers the same way,
+        #   so each argument is probed by this same rule.
+        # - Anything else fails closed and is walked as ordinary code: a
+        #   call's block or `&block` argument, any other receiver, and every
+        #   other kind of operand (parentheses, `a && b`, an assignment, a
+        #   literal). CRuby evaluates none of several of these (it answers
+        #   "expression" or "assignment" from the syntax alone), but no
+        #   door-side code needs a gem reference there, so the scan does not
+        #   depend on that.
+        def probe(node)
+          case node
+          when nil, Prism::ConstantReadNode then nil
+          when Prism::ConstantPathNode then walk(node) unless segments(node)
+          when Prism::CallNode then probe_call(node)
+          else walk(node)
+          end
+        end
+
+        def probe_call(node)
+          receiver = node.receiver
+          walk(receiver) unless segments(receiver)
+          Array(node.arguments&.arguments).each { |argument| probe(argument) }
+          walk(node.block)
+        end
+
+        # A gem constant taken as a value: `via: RpmsRpc::Tribal`, `m =
+        # RpmsRpc::Patient`, `in RpmsRpc::MockClient`, `x.class ==
+        # RpmsRpc::MockClient`, `RpmsRpc::SessionPool`, the root module
+        # itself. Error classes (a last segment ending in `Error`) and pure
+        # parsers are allowed by rule. A static path probed by
+        # `defined?(...)` does not reach here. `expr::RpmsRpc::X` does, as
+        # `RpmsRpc::X` (see reference_segments); its `expr` is walked by the
+        # caller. A constant written as a target (`RpmsRpc::Patient, y = a,
+        # b`, `for ::RpmsRpc in list`, `rescue => Object::RpmsRpc`) is judged
+        # by the same names and the same exemptions.
+        def flag_bare_constant(node)
+          segs = reference_segments(node)
+          hit(node, segs.join("::")) if client_resolving_constant?(segs)
+        end
+
+        # A call of `name` on `receiver`, at `node`: a CallNode, or one of
+        # the nodes that make a call without being one (a compound write, a
+        # write target; see walk). All of them are judged by the same rules,
+        # and a receiver in parentheses or a plain `begin ... end` is judged
+        # as the receiver it wraps (see unwrap).
+        def visit_call(node, receiver, name)
+          receiver = unwrap(receiver)
+          receiver_segments = reference_segments(receiver)
+          # A constant receiver is judged with its call, here, not as a value.
+          @judged << receiver if receiver_segments
+
+          if receiver_segments && receiver_segments.first == "RpmsRpc"
+            visit_rpms_rpc_call(node, receiver_segments, name)
+          elsif name == :new_client && receiver_segments&.last == "RpmsSessions"
+            scope_opener(node, "#{receiver_segments.join('::')}.new_client")
+          elsif client_accessor?(name)
+            visit_client_accessor(node, receiver, name)
+          end
+        end
+
+        def visit_rpms_rpc_call(node, receiver_segments, name)
+          ref = "#{receiver_segments.join('::')}.#{name}"
+          if receiver_segments.length == 1
+            hit(node, ref) if root_module_call?(name)
+            scope_opener(node, ref) if name == :with_client
+          elsif client_resolving_constant?(receiver_segments)
+            hit(node, ref)
+          end
+        end
+
+        # A client accessor (`client`, `client=`, `fhir_client`, `fhir_client=`)
+        # on `RpmsRpc.configuration`, or on anything reached from the registry
+        # (`BackendRegistry.current.client`, `BackendRegistry.fetch(:rpms).client`),
+        # whatever namespace prefix the registry carries. `receiver` comes
+        # unwrapped, and its own receiver is unwrapped here. `r =
+        # BackendRegistry.current; r.client` is not seen: the scan is by
+        # reference, and tracking a local variable to its value is out of
+        # its scope.
+        def visit_client_accessor(node, receiver, name)
+          return unless receiver.is_a?(Prism::CallNode)
+
+          inner = reference_segments(unwrap(receiver.receiver))
+          return if inner.nil?
+
+          if receiver.name == :configuration && inner == [ "RpmsRpc" ]
+            hit(node, "RpmsRpc.configuration.#{name}")
+          elsif inner.last == "BackendRegistry"
+            hit(node, "#{inner.join('::')}.#{receiver.name}.#{name}")
+          end
+        end
+
+        # `x.is_a?(RpmsRpc::MockClient)` and friends, named for what they are.
+        # The bare-constant rule would catch the argument anyway (and does,
+        # for `expr::RpmsRpc::MockClient`); this gives the site its name and
+        # judges the argument so it is reported once. `RpmsRpc::Client === x`
+        # is a call on RpmsRpc::Client and is caught by visit_rpms_rpc_call.
+        def flag_type_check(node)
+          return unless TYPE_CHECKS.include?(node.name)
+
+          Array(node.arguments&.arguments).each do |argument|
+            argument = unwrap(argument)
+            segs = segments(argument)
+            next unless client_class?(segs)
+
+            @judged << argument
+            hit(node, "#{node.name}(#{segs.join('::')})")
+          end
+        end
+
+        # `case x when RpmsRpc::Client` is an implicit ===. (`case x in
+        # RpmsRpc::Client` is a pattern, and its constant is a value caught by
+        # the bare-constant rule.)
+        def visit_when(node)
+          node.conditions.each do |condition|
+            condition = unwrap(condition)
+            segs = segments(condition)
+            next unless client_class?(segs)
+
+            @judged << condition
+            hit(condition, "when #{segs.join('::')}")
+          end
+        end
+
+        # What a wrapped expression evaluates: `(expr)` and `begin; expr;
+        # end` are `expr`, however deeply nested, so a receiver or a type
+        # check's argument is judged as what it wraps. Parentheses or a
+        # `begin` that hold several statements, or a `begin` with a rescue,
+        # else or ensure clause, are not one expression: they are returned
+        # as they are, judged as no reference, and walked part by part.
+        def unwrap(node)
+          statements =
+            case node
+            when Prism::ParenthesesNode then node.body
+            when Prism::BeginNode then node.statements unless node.rescue_clause || node.else_clause || node.ensure_clause
+            end
+          return node unless statements.is_a?(Prism::StatementsNode) && statements.body.length == 1
+
+          unwrap(statements.body.first)
+        end
+
+        def root_module_call?(name)
+          ROOT_MODULE_CALLS.include?(name) || REFLECTIVE_CALLS.include?(name) || name.to_s.match?(/client|\Amock/)
+        end
+
+        def client_accessor?(name)
+          name.to_s.include?("client")
+        end
+
+        def client_class?(segs)
+          segs && segs.length == 2 && segs.first == "RpmsRpc" && CLIENT_CLASSES.include?(segs.last)
+        end
+
+        # `RpmsRpc`, or `RpmsRpc::<Const>[::...]`, unless an error class or a
+        # pure parser.
+        def client_resolving_constant?(segs)
+          segs && segs.first == "RpmsRpc" && !error_class?(segs) && !pure_parser?(segs)
+        end
+
+        def error_class?(segs)
+          segs.last.end_with?("Error")
+        end
+
+        def pure_parser?(segs)
+          segs.length > 1 && PURE_PARSERS.include?(segs[1])
+        end
+
+        # The constant path as names, with the prefixes that name the top
+        # level dropped: `::RpmsRpc::A::B`, `Object::RpmsRpc::A::B`,
+        # `::Object::RpmsRpc::A::B` and `RpmsRpc::A::B` are all ["RpmsRpc",
+        # "A", "B"], because a top-level constant is a constant of Object.
+        # `Other::RpmsRpc` keeps its prefix: it is another constant. A
+        # write target (`RpmsRpc::A, y = 1, 2`) is the path it names. nil
+        # for anything that is not a static constant path (`self.class::X`,
+        # `x.y::Z`, a variable, a call).
+        def segments(node)
+          case node
+          when *CONSTANT_NAME_NODES then [ node.name.to_s ]
+          when *CONSTANT_PATH_NODES
+            return [ node.name.to_s ] if node.parent.nil?
+
+            parent = segments(node.parent)
+            return if parent.nil?
+
+            parent == [ "Object" ] ? [ node.name.to_s ] : parent + [ node.name.to_s ]
+          end
+        end
+
+        # The names a reference is judged by. A static path is its segments.
+        # `expr::A::B` has a head the scan cannot read, and that head may be
+        # Object (`String.superclass::RpmsRpc`), so the path fails closed: it
+        # is judged by its names from `RpmsRpc` on when it has that name
+        # after the head (`x.class::Other::RpmsRpc::Patient` is ["RpmsRpc",
+        # "Patient"]), and by all its names otherwise, so that a registry or
+        # RpmsSessions under a dynamic head is still itself. nil for
+        # anything that is not a constant path.
+        def reference_segments(node)
+          static = segments(node)
+          return static if static
+          return unless constant_path?(node)
+
+          names = dynamic_names(node)
+          names.drop(names.index("RpmsRpc") || 0)
+        end
+
+        # The names of a non-static path `expr::A::B` after `expr`: ["A",
+        # "B"]. Every path below a non-static path is non-static too.
+        def dynamic_names(node)
+          parent = node.parent
+          (constant_path?(parent) ? dynamic_names(parent) : []) + [ node.name.to_s ]
+        end
+
+        # The `expr` of `expr::A::B`, which is code that runs; nil for a
+        # static path and for anything that is not a constant path.
+        def path_head(node)
+          return unless constant_path?(node) && segments(node).nil?
+
+          node = node.parent while constant_path?(node)
+          node
+        end
+
+        def constant_path?(node)
+          CONSTANT_PATH_NODES.any? { |type| node.is_a?(type) }
+        end
+
+        def hit(node, ref)
+          @hits << [ @line_of.call(node), ref ]
+        end
+
+        def scope_opener(node, ref)
+          @scope_openers << [ @line_of.call(node), ref ]
+        end
+      end
+
+      test "no client-resolving reference outside the door" do
+        leaks = leaks_in(scan_engine)
+
+        assert_empty leaks,
+                     "client-resolving references outside the door (ADR 0013 decision 6e); move each " \
+                     "behind a gateway or name the path with its reason in EXEMPTIONS:\n  #{leaks.join("\n  ")}"
+      end
+
+      test "with_client and new_client only in RpmsSessions and AuthenticationService" do
+        openers = scope_openers_in(scan_engine)
+
+        assert_empty openers,
+                     "RpmsRpc.with_client and RpmsSessions.new_client are permitted only in " \
+                     "#{SCOPE_OPENERS.join(' and ')} (ADR 0013 decision 6e):\n  #{openers.join("\n  ")}"
+      end
+
+      test "every named exemption still holds a hit" do
+        EXEMPTIONS.each do |path, reason|
+          assert_not_empty scan_engine.fetch(path).hits,
+                           "exemption #{path} is stale: the scan finds no client-resolving reference in it, " \
+                           "so the reason (#{reason}) no longer applies; remove the exemption"
+        end
+      end
+
+      test "the scanner flags every client-resolving form" do
+        {
+          # a call on a gem API module or client class
+          "RpmsRpc::Patient.brief_header(1)" => "RpmsRpc::Patient.brief_header",
+          "::RpmsRpc::Scheduling.clinic_setup" => "RpmsRpc::Scheduling.clinic_setup",
+          "RpmsRpc::Tribal\n  .enrollment(dfn)" => "RpmsRpc::Tribal.enrollment",
+          "RpmsRpc::A::B.m" => "RpmsRpc::A::B.m",
+          "RpmsRpc::SessionPool.new" => "RpmsRpc::SessionPool.new",
+          "RpmsRpc::MockClient.new" => "RpmsRpc::MockClient.new",
+          # the root module's client accessors, their siblings and reflective dispatch
+          "RpmsRpc.client" => "RpmsRpc.client",
+          "RpmsRpc.fhir_client" => "RpmsRpc.fhir_client",
+          "RpmsRpc.scoped_client" => "RpmsRpc.scoped_client",
+          "RpmsRpc.client_for(key)" => "RpmsRpc.client_for",
+          "RpmsRpc.configure { }" => "RpmsRpc.configure",
+          "RpmsRpc.mock!" => "RpmsRpc.mock!",
+          "RpmsRpc.mock_fhir!" => "RpmsRpc.mock_fhir!",
+          "RpmsRpc.with_client(c) { }" => "RpmsRpc.with_client",
+          "RpmsRpc.send(:client)" => "RpmsRpc.send",
+          "RpmsRpc.__send__(:client)" => "RpmsRpc.__send__",
+          "::RpmsRpc.public_send(name)" => "RpmsRpc.public_send",
+          "RpmsRpc.method(:client).call" => "RpmsRpc.method",
+          "RpmsRpc.const_get(:MockClient)" => "RpmsRpc.const_get",
+          # the configuration's client accessors, reads and writes
+          "RpmsRpc.configuration.client" => "RpmsRpc.configuration.client",
+          "RpmsRpc.configuration.client = x" => "RpmsRpc.configuration.client=",
+          "RpmsRpc.configuration.fhir_client" => "RpmsRpc.configuration.fhir_client",
+          "RpmsRpc.configuration.fhir_client = x" => "RpmsRpc.configuration.fhir_client=",
+          # the registry's client, under any prefix and through any lookup
+          "BackendRegistry.current.client" => "BackendRegistry.current.client",
+          "Lakeraven::EHR::BackendRegistry.current.client" => "Lakeraven::EHR::BackendRegistry.current.client",
+          "BackendRegistry.fetch(:rpms).client" => "BackendRegistry.fetch.client",
+          "::Lakeraven::EHR::BackendRegistry.fetch(name).client" => "Lakeraven::EHR::BackendRegistry.fetch.client",
+          # a client class as a type check
+          "x.is_a?(RpmsRpc::MockClient)" => "is_a?(RpmsRpc::MockClient)",
+          "x.kind_of?(::RpmsRpc::CiaClient)" => "kind_of?(RpmsRpc::CiaClient)",
+          "x.instance_of?(RpmsRpc::Client)" => "instance_of?(RpmsRpc::Client)",
+          "RpmsRpc::Client === x" => "RpmsRpc::Client.===",
+          "case x\nwhen RpmsRpc::MockClient then 1\nend" => "when RpmsRpc::MockClient",
+          "case x\nin RpmsRpc::MockClient then 1\nend" => "RpmsRpc::MockClient",
+          "x.class == RpmsRpc::MockClient" => "RpmsRpc::MockClient",
+          "x.class <= RpmsRpc::Client" => "RpmsRpc::Client",
+          # a gem module, client class or the root module taken as a value
+          "pool = RpmsRpc::SessionPool" => "RpmsRpc::SessionPool",
+          "def f(via: ::RpmsRpc::Tribal) = via.enrollment(1)" => "RpmsRpc::Tribal",
+          "m = RpmsRpc::Patient" => "RpmsRpc::Patient",
+          "klass = RpmsRpc::MockClient" => "RpmsRpc::MockClient",
+          "use(RpmsRpc::Scheduling)" => "RpmsRpc::Scheduling",
+          "MAX = ::RpmsRpc::Notifications::COMMENT_MAX" => "RpmsRpc::Notifications::COMMENT_MAX",
+          "class Foo < RpmsRpc::Client; end" => "RpmsRpc::Client",
+          "m = RpmsRpc" => "RpmsRpc",
+          "f(::RpmsRpc)" => "RpmsRpc",
+          # a receiver or an argument's receiver that `defined?` evaluates
+          "defined?(RpmsRpc.client.object_id)" => "RpmsRpc.client",
+          "defined?(::RpmsRpc.client.object_id)" => "RpmsRpc.client",
+          "defined?(RpmsRpc.fhir_client.x.y)" => "RpmsRpc.fhir_client",
+          "defined?(RpmsRpc::Patient.brief_header(1).x)" => "RpmsRpc::Patient.brief_header",
+          "defined?(f(RpmsRpc.client.x))" => "RpmsRpc.client",
+          "defined?(x.f(1, RpmsRpc::Patient.brief_header(1).y))" => "RpmsRpc::Patient.brief_header",
+          "defined?(RpmsRpc.configuration.client.x)" => "RpmsRpc.configuration.client",
+          "defined?(BackendRegistry.current.client.x)" => "BackendRegistry.current.client",
+          # fail closed: an operand that is neither a constant nor a call, and a call's block
+          "defined?((RpmsRpc.client))" => "RpmsRpc.client",
+          "defined?(x = RpmsRpc.client)" => "RpmsRpc.client",
+          "defined?(f { RpmsRpc.client })" => "RpmsRpc.client",
+          "defined?(f(&RpmsRpc.client))" => "RpmsRpc.client",
+          # `expr::Const` evaluates `expr`, in ordinary code, as a write target and under `defined?`
+          "x = RpmsRpc.client::FOO" => "RpmsRpc.client",
+          "RpmsRpc.configuration.client.class::TIMEOUT" => "RpmsRpc.configuration.client",
+          "(RpmsRpc::Patient.brief_header(dfn))::X" => "RpmsRpc::Patient.brief_header",
+          "Foo.new(RpmsRpc.client)::Bar" => "RpmsRpc.client",
+          "RpmsRpc.client::A::B" => "RpmsRpc.client",
+          "RpmsRpc.client::X.y" => "RpmsRpc.client",
+          "RpmsRpc.client::X = 1" => "RpmsRpc.client",
+          "RpmsRpc.client::X ||= 1" => "RpmsRpc.client",
+          "RpmsRpc.client::X &&= 1" => "RpmsRpc.client",
+          "RpmsRpc.client::X += 1" => "RpmsRpc.client",
+          "RpmsRpc.client::X, y = 1, 2" => "RpmsRpc.client",
+          "f(via: RpmsRpc::Patient)::X" => "RpmsRpc::Patient",
+          "defined?(RpmsRpc.client::FOO)" => "RpmsRpc.client",
+          "defined?(RpmsRpc.client::A::B)" => "RpmsRpc.client",
+          "defined?(RpmsRpc.client::X.y)" => "RpmsRpc.client",
+          "defined?(f(RpmsRpc.client::X))" => "RpmsRpc.client",
+          "x.is_a?(RpmsRpc.client::Z)" => "RpmsRpc.client",
+          # `Object::RpmsRpc` is the gem
+          "Object::RpmsRpc.client" => "RpmsRpc.client",
+          "::Object::RpmsRpc.client" => "RpmsRpc.client",
+          "Object::RpmsRpc::Patient.brief_header(1)" => "RpmsRpc::Patient.brief_header",
+          "m = Object::RpmsRpc::Patient" => "RpmsRpc::Patient",
+          "m = ::Object::RpmsRpc" => "RpmsRpc",
+          "Object::RpmsRpc.configuration.client" => "RpmsRpc.configuration.client",
+          "x.is_a?(Object::RpmsRpc::MockClient)" => "is_a?(RpmsRpc::MockClient)",
+          "defined?(Object::RpmsRpc.client.object_id)" => "RpmsRpc.client",
+          # a path with a head the scan cannot read may start at Object, so a
+          # `RpmsRpc` segment after the head is the gem
+          "String.superclass::RpmsRpc.client" => "RpmsRpc.client",
+          "x.class::RpmsRpc::Patient.brief_header(1)" => "RpmsRpc::Patient.brief_header",
+          "m = foo.bar::RpmsRpc" => "RpmsRpc",
+          "defined?(String.superclass::RpmsRpc.client.x)" => "RpmsRpc.client",
+          "use(x.class::RpmsRpc::Scheduling)" => "RpmsRpc::Scheduling",
+          "x.class::RpmsRpc.configuration.client" => "RpmsRpc.configuration.client",
+          "x.class::RpmsRpc.send(:client)" => "RpmsRpc.send",
+          "x.is_a?(y.class::RpmsRpc::MockClient)" => "RpmsRpc::MockClient",
+          "x.class::Other::RpmsRpc.client" => "RpmsRpc.client",
+          "x.class::RpmsRpc::Patient = 1" => "RpmsRpc::Patient",
+          "x.class::BackendRegistry.current.client" => "BackendRegistry.current.client",
+          "RpmsRpc.client::RpmsRpc::Patient.brief_header(1)" => "RpmsRpc::Patient.brief_header",
+          # a compound write reads the accessor first; a write target calls the writer
+          "c = (RpmsRpc.configuration.client ||= nil)" => "RpmsRpc.configuration.client",
+          "RpmsRpc.configuration.client &&= x" => "RpmsRpc.configuration.client",
+          "RpmsRpc.configuration.client += x" => "RpmsRpc.configuration.client",
+          "RpmsRpc.configuration&.fhir_client ||= x" => "RpmsRpc.configuration.fhir_client",
+          "RpmsRpc.configuration.client, y = a, b" => "RpmsRpc.configuration.client=",
+          "y, (RpmsRpc.configuration.fhir_client, z) = a, b" => "RpmsRpc.configuration.fhir_client=",
+          "for RpmsRpc.configuration.client in [x]; end" => "RpmsRpc.configuration.client=",
+          "begin; x; rescue => RpmsRpc.configuration.client; end" => "RpmsRpc.configuration.client=",
+          "BackendRegistry.current.client ||= x" => "BackendRegistry.current.client",
+          "BackendRegistry.current.client, y = a, b" => "BackendRegistry.current.client=",
+          "RpmsRpc.client ||= x" => "RpmsRpc.client",
+          "RpmsRpc.client &&= x" => "RpmsRpc.client",
+          "RpmsRpc.client, y = a, b" => "RpmsRpc.client=",
+          "RpmsRpc::Patient.brief_header ||= x" => "RpmsRpc::Patient.brief_header",
+          "RpmsRpc::Patient.brief_header += x" => "RpmsRpc::Patient.brief_header",
+          "RpmsRpc::Patient.brief_header, y = a, b" => "RpmsRpc::Patient.brief_header=",
+          "defined?(RpmsRpc.client ||= x)" => "RpmsRpc.client",
+          # a receiver in parentheses or a plain `begin ... end` is that receiver
+          "(RpmsRpc.configuration).client" => "RpmsRpc.configuration.client",
+          "(RpmsRpc.configuration).client = x" => "RpmsRpc.configuration.client=",
+          "(RpmsRpc.configuration).client ||= x" => "RpmsRpc.configuration.client",
+          "(RpmsRpc.configuration).client, y = a, b" => "RpmsRpc.configuration.client=",
+          "begin; RpmsRpc.configuration; end.client" => "RpmsRpc.configuration.client",
+          "(RpmsRpc).configuration.fhir_client" => "RpmsRpc.configuration.fhir_client",
+          "((RpmsRpc).configuration).client" => "RpmsRpc.configuration.client",
+          "(BackendRegistry.current).client" => "BackendRegistry.current.client",
+          "(BackendRegistry).current.client" => "BackendRegistry.current.client",
+          "((BackendRegistry.current)).fhir_client" => "BackendRegistry.current.fhir_client",
+          "(BackendRegistry.fetch(:rpms)).client" => "BackendRegistry.fetch.client",
+          "begin\n  Lakeraven::EHR::BackendRegistry\nend.current.client" => "Lakeraven::EHR::BackendRegistry.current.client",
+          "(RpmsRpc).client" => "RpmsRpc.client",
+          "((::RpmsRpc)).send(:client)" => "RpmsRpc.send",
+          "(RpmsRpc).with_client(c) { }" => "RpmsRpc.with_client",
+          "(RpmsRpc::Patient).brief_header(1)" => "RpmsRpc::Patient.brief_header",
+          "begin RpmsRpc::Patient end.brief_header(1)" => "RpmsRpc::Patient.brief_header",
+          "(x.class::RpmsRpc::Tribal).enrollment(1)" => "RpmsRpc::Tribal.enrollment",
+          "(RpmsRpc).client ||= x" => "RpmsRpc.client",
+          "(RpmsRpc::Client) === x" => "RpmsRpc::Client.===",
+          "x.is_a?((RpmsRpc::MockClient))" => "is_a?(RpmsRpc::MockClient)",
+          "case x\nwhen (RpmsRpc::MockClient) then 1\nend" => "when RpmsRpc::MockClient",
+          "defined?((RpmsRpc).client.x)" => "RpmsRpc.client",
+          # parentheses or a `begin` that hold more are not unwrapped, and
+          # every part of them is still read
+          "(a; RpmsRpc.client).x" => "RpmsRpc.client",
+          "(a; RpmsRpc).client" => "RpmsRpc",
+          "begin; RpmsRpc.client; rescue; y; end.x" => "RpmsRpc.client",
+          "begin; RpmsRpc; ensure; y; end.client" => "RpmsRpc",
+          # a constant as a write target (multiple assignment, `for`, `rescue =>`)
+          "RpmsRpc, y = 1, 2" => "RpmsRpc",
+          "Object::RpmsRpc, y = 1, 2" => "RpmsRpc",
+          "::RpmsRpc, y = a, b" => "RpmsRpc",
+          "x.class::RpmsRpc, y = a, b" => "RpmsRpc",
+          "x.class::RpmsRpc::Patient, y = 1, 2" => "RpmsRpc::Patient",
+          "RpmsRpc::Patient, y = 1, 2" => "RpmsRpc::Patient",
+          "y, (z, RpmsRpc::Scheduling) = a, b" => "RpmsRpc::Scheduling",
+          "for ::RpmsRpc in [x]; end" => "RpmsRpc",
+          "for RpmsRpc::Tribal in [x]; end" => "RpmsRpc::Tribal",
+          "begin; x; rescue => Object::RpmsRpc; end" => "RpmsRpc",
+          "begin; x; rescue => RpmsRpc::MockClient; end" => "RpmsRpc::MockClient",
+          "RpmsRpc.client::RpmsRpc::Patient, y = 1, 2" => "RpmsRpc.client"
+        }.each do |source, expected_ref|
+          refs = Scanner.scan(source).hits.map(&:last)
+          assert_includes refs, expected_ref, "expected the scanner to flag #{source.inspect}"
+        end
+
+        split_call = Scanner.scan("x = 1\nRpmsRpc::Tribal\n  .enrollment(dfn)").hits
+        assert_equal [ [ 2, "RpmsRpc::Tribal.enrollment" ] ], split_call, "a split call is reported once, at its first line"
+      end
+
+      test "the scanner reports each site once" do
+        {
+          "RpmsRpc::Patient.brief_header(1)" => [ "RpmsRpc::Patient.brief_header" ],
+          "x.is_a?(RpmsRpc::MockClient)" => [ "is_a?(RpmsRpc::MockClient)" ],
+          "case x\nwhen RpmsRpc::MockClient then 1\nend" => [ "when RpmsRpc::MockClient" ],
+          "RpmsRpc::Client === x" => [ "RpmsRpc::Client.===" ],
+          "RpmsRpc.configuration.client" => [ "RpmsRpc.configuration.client" ],
+          "RpmsRpc.send(:client)" => [ "RpmsRpc.send" ],
+          "def f(via: RpmsRpc::Tribal) = via.enrollment(1)" => [ "RpmsRpc::Tribal" ],
+          "defined?(RpmsRpc.client.object_id)" => [ "RpmsRpc.client" ],
+          "defined?(RpmsRpc::Patient.brief_header(1).x)" => [ "RpmsRpc::Patient.brief_header" ],
+          "defined?(f(RpmsRpc.client.x))" => [ "RpmsRpc.client" ],
+          "x = RpmsRpc.client::FOO" => [ "RpmsRpc.client" ],
+          "RpmsRpc.client::X = 1" => [ "RpmsRpc.client" ],
+          "RpmsRpc.client::X ||= 1" => [ "RpmsRpc.client" ],
+          "defined?(RpmsRpc.client::FOO)" => [ "RpmsRpc.client" ],
+          "defined?(RpmsRpc.client::X.y)" => [ "RpmsRpc.client" ],
+          "x.is_a?(RpmsRpc.client::Z)" => [ "RpmsRpc.client" ],
+          "Object::RpmsRpc.client" => [ "RpmsRpc.client" ],
+          "Object::RpmsRpc::Patient.brief_header(1)" => [ "RpmsRpc::Patient.brief_header" ],
+          "String.superclass::RpmsRpc.client" => [ "RpmsRpc.client" ],
+          "x.class::RpmsRpc::Patient.brief_header(1)" => [ "RpmsRpc::Patient.brief_header" ],
+          "m = foo.bar::RpmsRpc" => [ "RpmsRpc" ],
+          "m = foo.bar::RpmsRpc::A::B" => [ "RpmsRpc::A::B" ],
+          "defined?(String.superclass::RpmsRpc.client.x)" => [ "RpmsRpc.client" ],
+          "x.class::RpmsRpc.configuration.client" => [ "RpmsRpc.configuration.client" ],
+          "RpmsRpc.client::RpmsRpc::Patient.brief_header(1)" => [ "RpmsRpc::Patient.brief_header", "RpmsRpc.client" ],
+          "c = (RpmsRpc.configuration.client ||= nil)" => [ "RpmsRpc.configuration.client" ],
+          "RpmsRpc.configuration.client &&= x" => [ "RpmsRpc.configuration.client" ],
+          "RpmsRpc.configuration.client += x" => [ "RpmsRpc.configuration.client" ],
+          "RpmsRpc.configuration.client, y = a, b" => [ "RpmsRpc.configuration.client=" ],
+          "for RpmsRpc.configuration.client in [x]; end" => [ "RpmsRpc.configuration.client=" ],
+          "begin; x; rescue => RpmsRpc.configuration.client; end" => [ "RpmsRpc.configuration.client=" ],
+          "BackendRegistry.current.client ||= x" => [ "BackendRegistry.current.client" ],
+          "RpmsRpc.client ||= x" => [ "RpmsRpc.client" ],
+          "RpmsRpc.client, y = a, b" => [ "RpmsRpc.client=" ],
+          "RpmsRpc::Patient.brief_header ||= x" => [ "RpmsRpc::Patient.brief_header" ],
+          "(RpmsRpc.configuration).client" => [ "RpmsRpc.configuration.client" ],
+          "(RpmsRpc.configuration).client ||= x" => [ "RpmsRpc.configuration.client" ],
+          "(RpmsRpc.configuration).client, y = a, b" => [ "RpmsRpc.configuration.client=" ],
+          "begin; RpmsRpc.configuration; end.client" => [ "RpmsRpc.configuration.client" ],
+          "((RpmsRpc).configuration).client" => [ "RpmsRpc.configuration.client" ],
+          "(BackendRegistry.current).client" => [ "BackendRegistry.current.client" ],
+          "(BackendRegistry).current.client" => [ "BackendRegistry.current.client" ],
+          "((BackendRegistry.current)).fhir_client" => [ "BackendRegistry.current.fhir_client" ],
+          "(RpmsRpc).client" => [ "RpmsRpc.client" ],
+          "(RpmsRpc).with_client(c) { }" => [ "RpmsRpc.with_client" ],
+          "(RpmsRpc::Patient).brief_header(1)" => [ "RpmsRpc::Patient.brief_header" ],
+          "begin RpmsRpc::Patient end.brief_header(1)" => [ "RpmsRpc::Patient.brief_header" ],
+          "(x.class::RpmsRpc::Tribal).enrollment(1)" => [ "RpmsRpc::Tribal.enrollment" ],
+          "x.is_a?((RpmsRpc::MockClient))" => [ "is_a?(RpmsRpc::MockClient)" ],
+          "case x\nwhen (RpmsRpc::MockClient) then 1\nend" => [ "when RpmsRpc::MockClient" ],
+          "(a; RpmsRpc.client).x" => [ "RpmsRpc.client" ],
+          "(a; RpmsRpc).client" => [ "RpmsRpc" ],
+          "Object::RpmsRpc, y = 1, 2" => [ "RpmsRpc" ],
+          "::RpmsRpc, y = a, b" => [ "RpmsRpc" ],
+          "x.class::RpmsRpc, y = a, b" => [ "RpmsRpc" ],
+          "x.class::RpmsRpc::Patient, y = 1, 2" => [ "RpmsRpc::Patient" ],
+          "RpmsRpc::Patient, y = 1, 2" => [ "RpmsRpc::Patient" ],
+          "for ::RpmsRpc in [x]; end" => [ "RpmsRpc" ],
+          "begin; x; rescue => Object::RpmsRpc; end" => [ "RpmsRpc" ],
+          "RpmsRpc.client::X, y = 1, 2" => [ "RpmsRpc.client" ],
+          "RpmsRpc.client::RpmsRpc::Patient, y = 1, 2" => [ "RpmsRpc::Patient", "RpmsRpc.client" ]
+        }.each do |source, expected_refs|
+          assert_equal expected_refs, Scanner.scan(source).hits.map(&:last), "expected one hit for #{source.inspect}"
+        end
+      end
+
+      test "the scanner leaves error classes, parsers, comments, strings and probes alone" do
+        [
+          # error classes rescued, raised, compared, built or checked
+          "begin\n  x\nrescue RpmsRpc::Client::ConnectionError, RpmsRpc::NotConfiguredError => e\n  e\nend",
+          "rescue_from RpmsRpc::SessionPool::PoolExhaustedError, with: :pool_exhausted",
+          "rescue_from ::RpmsRpc::Error, with: :render_rpms_unavailable",
+          "e.is_a?(::RpmsRpc::Client::RpcRefusedError)",
+          "raise RpmsRpc::Client::RpcError, \"refused\"",
+          "RpmsRpc::Client::ConnectionError.new(\"x\")",
+          "raise RpmsRpc::NotConfiguredError.new(\"x\")",
+          "RpmsRpc::Error === e",
+          "case e\nwhen RpmsRpc::Error then 1\nend",
+          "case e\nin RpmsRpc::Client::RpcError then 1\nend",
+          "class Unreadable < RpmsRpc::Client::RpcError; end",
+          "errors = [ RpmsRpc::Error, RpmsRpc::SessionPool::PoolExhaustedError ]",
+          # pure parsers, called or held
+          "RpmsRpc::FilemanDateParser.parse(x)",
+          "::RpmsRpc::FilemanDateParser.to_fileman(date)",
+          "parser = RpmsRpc::FilemanDateParser",
+          # comments, strings and probes
+          "# RpmsRpc::Patient.brief_header(1)",
+          "\"RpmsRpc.client\"",
+          "defined?(RpmsRpc::MockClient)",
+          "defined?(RpmsRpc::SessionPool)",
+          "defined?(RpmsRpc)",
+          "defined?(::RpmsRpc::MockClient)",
+          "RpmsRpc.respond_to?(:fhir_client)",
+          # `defined?` of a call asks whether the method exists and does not
+          # make the call; a constant receiver or argument is only probed
+          "defined?(RpmsRpc.client)",
+          "defined?(::RpmsRpc.client)",
+          "defined?(RpmsRpc.fhir_client)",
+          "defined?(RpmsRpc::Patient.brief_header(1))",
+          "defined?(RpmsRpc.with_client(c))",
+          "defined?(RpmsSessions.new_client)",
+          "defined?(Lakeraven::EHR::RpmsSessions.new_client)",
+          "defined?(RpmsRpc.configuration.client)",
+          "defined?(f(RpmsRpc::MockClient))",
+          "defined?(f(RpmsRpc.client))",
+          "defined?(x.y.z)",
+          # a constant path, static or not, that reaches no gem reference
+          "Foo::Bar",
+          "defined?(Foo::Bar)",
+          "x.class::Y",
+          "defined?(x.y::Z)",
+          "x.class::Y = 1",
+          "defined?(Object::RpmsRpc::MockClient)",
+          "defined?(Object::RpmsRpc.client)",
+          "rescue_from Object::RpmsRpc::Error, with: :render_rpms_unavailable",
+          "Object::RpmsRpc::FilemanDateParser.parse(x)",
+          # another namespace's RpmsRpc, and settings that are not a client
+          "Other::RpmsRpc.client",
+          "Other::RpmsRpc::Patient.brief_header(1)",
+          "x = Other::RpmsRpc",
+          "Other::Object::RpmsRpc.client",
+          "Object::Other::RpmsRpc.client",
+          "RpmsRpc.configuration.timeout",
+          "RpmsRpc.configuration",
+          # a path with a non-static head: error classes and parsers are still
+          # allowed, and a path that names no RpmsRpc is not the gem
+          "x.class::RpmsRpc::Error",
+          "raise x.class::RpmsRpc::Client::RpcError, \"refused\"",
+          "x.class::RpmsRpc::Error === e",
+          "x.class::RpmsRpc::FilemanDateParser.parse(v)",
+          "x.class::Foo.client",
+          "x.class::Foo::Bar.fhir_client ||= 1",
+          # compound and target forms with no gem receiver
+          "x.client ||= 1",
+          "self.client, y = 1, 2",
+          "x.client += 1",
+          "for x.client in [ 1 ]; end",
+          "begin; x; rescue => e.client; end",
+          "RpmsRpc.configuration.timeout ||= 5",
+          "RpmsRpc.configuration.timeout, y = 1, 2",
+          "Other::RpmsRpc.client ||= x",
+          "RpmsRpc::FilemanDateParser.format ||= x",
+          # wrapped receivers that reach no client
+          "(RpmsRpc.configuration).timeout",
+          "(RpmsRpc).configuration",
+          "(RpmsRpc).respond_to?(:client)",
+          "(x).client",
+          "(x.y).client ||= 1",
+          "begin; x; end.fhir_client",
+          "(Other::RpmsRpc).client",
+          "(Other.current).client",
+          "(RpmsRpc::FilemanDateParser).parse(x)",
+          "(RpmsRpc::Error) === e",
+          "x.is_a?((RpmsRpc::Client::RpcError))",
+          "(a; b).new_client",
+          # constant targets: error classes, parsers and other constants
+          "RpmsRpc::Client::RpcError, y = a, b",
+          "x.class::RpmsRpc::Error, y = a, b",
+          "RpmsRpc::FilemanDateParser, y = a, b",
+          "begin; x; rescue => RpmsRpc::Client::LastError; end",
+          "for RpmsRpc::NotConfiguredError in [ x ]; end",
+          "Foo, y = 1, 2",
+          "Other::RpmsRpc, y = 1, 2",
+          "x.class::Foo::Bar, y = 1, 2",
+          "for Foo::Bar in [ x ]; end"
+        ].each do |source|
+          scanner = Scanner.scan(source)
+          assert_empty scanner.hits, "expected the scanner not to flag #{source.inspect}"
+          assert_empty scanner.scope_openers, "expected no scope opener in #{source.inspect}"
+        end
+      end
+
+      test "the scanner flags with_client and new_client as scope openers" do
+        {
+          "RpmsRpc.with_client(c) {}" => "RpmsRpc.with_client",
+          "::RpmsRpc.with_client(c) { |x| x }" => "RpmsRpc.with_client",
+          "RpmsSessions.new_client" => "RpmsSessions.new_client",
+          "Lakeraven::EHR::RpmsSessions.new_client" => "Lakeraven::EHR::RpmsSessions.new_client",
+          "RpmsSessions.new_client::Foo" => "RpmsSessions.new_client",
+          "RpmsSessions.new_client::X = 1" => "RpmsSessions.new_client",
+          "RpmsRpc.with_client(c) { }::X" => "RpmsRpc.with_client",
+          "Object::RpmsRpc.with_client(c) {}" => "RpmsRpc.with_client",
+          "Object::RpmsSessions.new_client" => "RpmsSessions.new_client",
+          "String.superclass::RpmsRpc.with_client(c) {}" => "RpmsRpc.with_client",
+          "x.class::RpmsSessions.new_client" => "RpmsSessions.new_client",
+          "RpmsRpc.with_client ||= x" => "RpmsRpc.with_client",
+          "RpmsSessions.new_client ||= x" => "RpmsSessions.new_client",
+          "RpmsSessions.new_client += x" => "RpmsSessions.new_client",
+          "(RpmsSessions).new_client" => "RpmsSessions.new_client",
+          "begin RpmsSessions end.new_client" => "RpmsSessions.new_client",
+          "((Lakeraven::EHR::RpmsSessions)).new_client" => "Lakeraven::EHR::RpmsSessions.new_client",
+          "(RpmsRpc).with_client(c) { }" => "RpmsRpc.with_client",
+          "begin; ::RpmsRpc; end.with_client(c) { }" => "RpmsRpc.with_client",
+          "(RpmsSessions).new_client ||= x" => "RpmsSessions.new_client",
+          "(x.class::RpmsSessions).new_client" => "RpmsSessions.new_client"
+        }.each do |source, expected_ref|
+          refs = Scanner.scan(source).scope_openers.map(&:last)
+          assert_equal [ expected_ref ], refs, "expected the scope-opener detector to flag #{source.inspect}"
+        end
+
+        [ "new_client", "self.new_client", "@pool.with_client(key) { |c| c }", "Other.new_client",
+          "x.new_client ||= 1", "@pool.with_client ||= 1", "x.class::Other.new_client",
+          "(Other).new_client", "(x).new_client", "(@pool).with_client(key) { |c| c }",
+          "(a; RpmsSessions).new_client", "begin; RpmsSessions; rescue; x; end.new_client" ].each do |source|
+          assert_empty Scanner.scan(source).scope_openers, "expected no scope opener in #{source.inspect}"
+        end
+      end
+
+      test "the scanner flags a scope opener that defined? evaluates" do
+        {
+          "defined?(RpmsSessions.new_client.object_id)" => "RpmsSessions.new_client",
+          "defined?(Lakeraven::EHR::RpmsSessions.new_client.object_id)" => "Lakeraven::EHR::RpmsSessions.new_client",
+          "defined?(RpmsRpc.with_client(c).x)" => "RpmsRpc.with_client",
+          "defined?(f(RpmsSessions.new_client.x))" => "RpmsSessions.new_client",
+          "defined?(RpmsSessions.new_client::X)" => "RpmsSessions.new_client",
+          "defined?(RpmsRpc.with_client(c)::X)" => "RpmsRpc.with_client"
+        }.each do |source, expected_ref|
+          refs = Scanner.scan(source).scope_openers.map(&:last)
+          assert_equal [ expected_ref ], refs, "expected the scope-opener detector to flag #{source.inspect}"
+        end
+
+        [ "defined?(RpmsSessions.new_client)", "defined?(RpmsRpc.with_client(c))" ].each do |source|
+          assert_empty Scanner.scan(source).scope_openers, "expected no scope opener in #{source.inspect}"
+        end
+      end
+
+      test "the scanner flags client-resolving references in an ERB template" do
+        {
+          "<%= RpmsRpc::Patient.brief_header(dfn) %>" => "RpmsRpc::Patient.brief_header",
+          "<% x = RpmsRpc.client %>" => "RpmsRpc.client",
+          "<%- x = ::RpmsRpc.fhir_client -%>" => "RpmsRpc.fhir_client",
+          "<p><%== RpmsRpc::Tribal.enrollment(dfn) %></p>" => "RpmsRpc::Tribal.enrollment",
+          "<%= render \"row\", via: RpmsRpc::Scheduling %>" => "RpmsRpc::Scheduling",
+          "<% if defined?(RpmsRpc.client.object_id) %>x<% end %>" => "RpmsRpc.client",
+          "<%= tag.div do %><%= BackendRegistry.current.client %><% end %>" => "BackendRegistry.current.client",
+          "<%= RpmsRpc.client::Foo %>" => "RpmsRpc.client",
+          "<%= Object::RpmsRpc::Patient.brief_header(dfn) %>" => "RpmsRpc::Patient.brief_header",
+          # a strict-locals default is code that runs at render
+          "<%# locals: (c: RpmsRpc.client) -%>\n<%= c %>" => "RpmsRpc.client",
+          "<%# locals: (via: RpmsRpc::Patient) %>\n<%= via.brief_header(1) %>" => "RpmsRpc::Patient",
+          "<%# locals: (dfn:, c: RpmsRpc.client::X) %>" => "RpmsRpc.client",
+          "<%# locals: (c: BackendRegistry.current.client, &block) %>x" => "BackendRegistry.current.client",
+          "<% # locals: (c: RpmsRpc.fhir_client) %>x" => "RpmsRpc.fhir_client",
+          "<p>x</p>\n<%#\n  locals: (c: RpmsRpc.client)\n%>" => "RpmsRpc.client",
+          "<%# locals: (c: (RpmsRpc.configuration).client) %>x" => "RpmsRpc.configuration.client",
+          "<%= (BackendRegistry.current).client %>" => "BackendRegistry.current.client",
+          # a signature that swallows the rest of its line (a comment, a
+          # heredoc opener) takes its default from the template's first code
+          "<%# locals: (a: (1 # c) %><% RpmsRpc.client\n)) %>ok" => "RpmsRpc.client",
+          "<%# locals: (a: <<~X) %><% \#{RpmsRpc.client}\nX\n %>ok" => "RpmsRpc.client",
+          "<p>x</p>\n<%# locals: (a: <<~X) %>\n<p><%= a %></p>\n<% \#{RpmsRpc.fhir_client}\nX\n %>" => "RpmsRpc.fhir_client",
+          # Rails deletes the signature, newlines included, so a `#` comment
+          # before it on its line runs on over what follows the signature:
+          # the heredoc opener is commented out and its body is live code
+          "<% # c # locals: (a:\n1) %><% x = <<~Object\n RpmsRpc.client; RpmsSessions.new_client\nObject\n %>" => "RpmsRpc.client",
+          "<p>x</p>\n<% # note # locals: (a:\n  1) %><% y = <<~Object\n  RpmsRpc.fhir_client\nObject\n %>\n<%= a %>" => "RpmsRpc.fhir_client"
+        }.each do |template, expected_ref|
+          refs = Scanner.scan_erb(template).hits.map(&:last)
+          assert_equal [ expected_ref ], refs, "expected the scanner to flag the template #{template.inspect}"
+        end
+
+        template = "<h1>Header</h1>\n<%# a comment\n     over two lines %>\n<p>\n  <%= RpmsRpc::Patient\n        .brief_header(dfn) %>\n</p>\n"
+        assert_equal [ [ 5, "RpmsRpc::Patient.brief_header" ] ], Scanner.scan_erb(template).hits,
+                     "a template hit is reported once, at its line in the template"
+      end
+
+      test "a strict-locals default and the code after it keep their template lines" do
+        {
+          "<%# locals: (c: RpmsRpc.client) -%>\n<%= c %>" => [ [ 1, "RpmsRpc.client" ] ],
+          "<%# locals: (dfn:) %>\n<p>\n  <%= RpmsRpc::Patient.brief_header(dfn) %>\n</p>" => [ [ 3, "RpmsRpc::Patient.brief_header" ] ],
+          "<h1>x</h1>\n\n<%# locals: (c: RpmsRpc.client) %>\n<p>\n<%= RpmsRpc.fhir_client %>" =>
+            [ [ 3, "RpmsRpc.client" ], [ 5, "RpmsRpc.fhir_client" ] ],
+          "<p>x</p>\n<%# locals: (a: 1,\n               c: RpmsRpc.client,\n               d: RpmsRpc.fhir_client) %>\n<p>\n<%= RpmsRpc::Tribal.enrollment(a) %>" =>
+            [ [ 3, "RpmsRpc.client" ], [ 4, "RpmsRpc.fhir_client" ], [ 6, "RpmsRpc::Tribal.enrollment" ] ],
+          "<%= RpmsRpc::Tribal.enrollment(1) %>\n<%#\n\n  locals: (c: RpmsRpc.client)\n%>\n<%= RpmsRpc.fhir_client %>" =>
+            [ [ 4, "RpmsRpc.client" ], [ 1, "RpmsRpc::Tribal.enrollment" ], [ 6, "RpmsRpc.fhir_client" ] ],
+          "<%# locals: (a: (1 # c) %><% RpmsRpc.client\n)) %>ok" => [ [ 1, "RpmsRpc.client" ] ],
+          "<p>x</p>\n<%# locals: (a: (1 # c) %><% RpmsRpc.client\n)) %>\n<%= RpmsRpc.fhir_client %>" =>
+            [ [ 2, "RpmsRpc.client" ], [ 4, "RpmsRpc.fhir_client" ] ],
+          "<p>x</p>\n<%# locals: (a: <<~X) %><% \#{RpmsRpc.client}\nX\n %>\n<%= RpmsRpc.fhir_client %>" =>
+            [ [ 2, "RpmsRpc.client" ], [ 5, "RpmsRpc.fhir_client" ] ],
+          "<p>x</p>\n<%# locals: (a: 1,\n  b: <<~X) %>\n<p>\n<%\n\#{RpmsRpc.client}\nX\n%><%= RpmsRpc.fhir_client %>" =>
+            [ [ 6, "RpmsRpc.client" ], [ 8, "RpmsRpc.fhir_client" ] ],
+          # code before a multi-line signature on its line: the lines below
+          # the signature keep their template lines
+          "<% # c # locals: (a:\n1) %><% x = <<~Object\n RpmsRpc.client; RpmsSessions.new_client\nObject\n %>" => [ [ 3, "RpmsRpc.client" ] ],
+          "<p>x</p>\n<% # note # locals: (a:\n  RpmsRpc.client) %><% y = <<~Object\n  RpmsRpc.fhir_client\nObject\n %>\n<%= a %>" =>
+            [ [ 3, "RpmsRpc.client" ], [ 4, "RpmsRpc.fhir_client" ] ],
+          # the joined line: what follows a multi-line signature on its last
+          # line is reported at the signature's first line
+          "<p>x</p>\n<% y = 1 # locals: (a:\n  1) %><%= RpmsRpc.fhir_client %>\n<%= RpmsRpc.client %>" =>
+            [ [ 2, "RpmsRpc.fhir_client" ], [ 4, "RpmsRpc.client" ] ]
+        }.each do |template, expected_hits|
+          assert_equal expected_hits, Scanner.scan_erb(template).hits, "expected template lines for #{template.inspect}"
+        end
+
+        opener = Scanner.scan_erb("<p>x</p>\n<%# locals: (a: 1,\n  c: RpmsSessions.new_client) %>\n<% RpmsRpc.with_client(c) do %>x<% end %>")
+        assert_equal [ [ 3, "RpmsSessions.new_client" ], [ 4, "RpmsRpc.with_client" ] ], opener.scope_openers
+
+        opener = Scanner.scan_erb("<% # c # locals: (a:\n1) %><% x = <<~Object\n RpmsRpc.client; RpmsSessions.new_client\nObject\n %>")
+        assert_equal [ [ 3, "RpmsSessions.new_client" ] ], opener.scope_openers
+      end
+
+      # scan_erb builds the method Rails builds. Compared on what the scan
+      # depends on, the parsed parameters and the call sites of the body, not
+      # on the text: a Rails upgrade that moves the signature, changes the
+      # handler or stops lifting the magic comment fails here.
+      test "the Ruby scanned for a template is the Ruby ActionView compiles" do
+        assert_equal ActionView::Template::Handlers::ERB, ActionView::Template.registered_template_handler(:erb).class
+        [
+          "<%# locals: (dfn:, can_edit: false, via: Foo::Bar, rows: helper.rows(1)) -%>\n<p><%= dfn %></p>\n<% rows.each do |row| %>\n  <%= render \"row\", row: row, via: via %>\n<% end %>",
+          "<%# locals: () %>\n<p><%= helper(1) %></p>",
+          "<%# locals: (title: \"x\", &block) %>\n<%= tag.div(title, &block) %>",
+          "<%# locals: (a: 1, **rest) %><%= f(a, rest) %>",
+          "<% # locals: (a: g(1)) %>\n<%= f(a) %>",
+          "<p>x</p>\n<%#\n  locals: (a: g(1),\n           b: h(a))\n%>\n<%= f(a, b) -%>\n<%== k %>",
+          "<%# encoding: utf-8 %>\n<%# locals: (a: 1) %>\n<%= f(a) %>",
+          "<%# a comment %>\n<p><%= f(x) %></p>\n<%- if y -%>\n  <%= yield %>\n<%- end -%>\n",
+          "<%# Locals: (a: g(1)) %><%= f(a) %>",
+          "plain text\n",
+          "<%# locals: (a: (1 # c) %><% RpmsRpc.client\n)) %>ok",
+          "<%# locals: (a: <<~X) %><% \#{RpmsRpc.client}\nX\n %>ok",
+          "<p>x</p>\n<%# locals: (a: 1,\n  b: <<~X) %>\n<p>\n<%\n\#{g(a)}\nX\n%><%= f(a, b) %>",
+          "<% # c # locals: (a:\n1) %><% x = <<~Object\n RpmsRpc.client; RpmsSessions.new_client\nObject\n %>",
+          "<p>x</p>\n<% # note # locals: (a:\n  g(1)) %><% y = <<~Object\n  h(a)\nObject\n %>\n<%= a %>",
+          "<% # c # locals: (a:\n1) %><% f(a) %>",
+          "<p>x</p>\n<% y = 1 # locals: (a:\n  1) %><%= f(y) %>\n<%= g(a) %>"
+        ].each do |source|
+          handler = ActionView::Template.registered_template_handler(:erb)
+          rails = ActionView::Template.new(source, "inline.html.erb", handler, locals: [], format: :html).send(:compiled_source)
+          ours = Scanner.compile_erb(source)
+
+          assert_equal method_shape(rails), method_shape(ours.ruby), "scan_erb and ActionView disagree on #{source.inspect}"
+          assert_equal !source.match?(/#\s+locals:/), method_shape(ours.ruby).fetch(:parameters) == [ "local_assigns", "output_buffer", "&_" ],
+                       "expected a strict-locals signature exactly where the template has one: #{source.inspect}"
+        end
+      end
+
+      test "a malformed strict-locals signature fails the scan" do
+        view = "app/views/lakeraven/ehr/x/_y.html.erb"
+        [
+          "<%# locals: (a b) %>\n<%= a %>",
+          "<%# locals: (c: RpmsRpc.client( ) %>",
+          "<%# locals: (a: 1, 2) %>",
+          "<%# locals: (dfn) %>\n<%= dfn %>",
+          "<%# locals: (dfn = RpmsRpc.client) %>",
+          "<%# locals: (*rows) %>"
+        ].each do |template|
+          error = assert_raises(Scanner::ParseError, "expected the scan to refuse #{template.inspect}") do
+            Scanner.scan_erb(template, path: view)
+          end
+          assert_includes error.message, view
+        end
+      end
+
+      test "the scanner flags with_client and new_client in an ERB template as scope openers" do
+        {
+          "<% RpmsRpc.with_client(c) do %>\n  <p>x</p>\n<% end %>" => "RpmsRpc.with_client",
+          "<% client = RpmsSessions.new_client %>" => "RpmsSessions.new_client",
+          "<%# locals: (c: RpmsSessions.new_client) %>x" => "RpmsSessions.new_client",
+          "<% # c # locals: (a:\n1) %><% x = <<~Object\n RpmsRpc.client; RpmsSessions.new_client\nObject\n %>" => "RpmsSessions.new_client",
+          "<%# locals: (c: (RpmsSessions).new_client) %>x" => "RpmsSessions.new_client",
+          "<%= RpmsSessions.new_client::Foo %>" => "RpmsSessions.new_client"
+        }.each do |template, expected_ref|
+          refs = Scanner.scan_erb(template).scope_openers.map(&:last)
+          assert_equal [ expected_ref ], refs, "expected a scope opener in the template #{template.inspect}"
+        end
+      end
+
+      test "the scanner leaves ERB comments and template text alone" do
+        [
+          "<%# RpmsRpc::Patient.brief_header(1) %>",
+          "<%#\n  Locals: dfn, rows (RpmsRpc::Patient.brief_header), RpmsRpc.client\n%>\n<p><%= dfn %></p>",
+          "RpmsRpc.client",
+          "<p>RpmsRpc::Patient.brief_header(1) and RpmsRpc.with_client(c) { }</p>",
+          "<%% RpmsRpc.client %>",
+          "<%= \"RpmsRpc.client\" %>",
+          "<% # RpmsRpc.client %>",
+          "<% if defined?(RpmsRpc::MockClient) %>x<% end %>",
+          "<% begin %><%= row %><% rescue RpmsRpc::Error %>x<% end %>",
+          "<main><%= yield %></main>",
+          # a strict-locals signature whose defaults reach no gem reference
+          "<%# locals: (dfn:, can_edit: false) %>\n<p><%= dfn %></p>",
+          "<%# locals: () %>\n<p>RpmsRpc.client</p>",
+          "<%# locals: (klass: Foo::Bar, error: RpmsRpc::Error, label: \"RpmsRpc.client\") -%>\n<%= klass %>",
+          "<%# locals: (dfn:) %>\n<%# RpmsRpc.client %>\n<%= dfn %>",
+          # a `#` comment before a multi-line signature runs on over the
+          # rest of the signature's last line, as it does in Rails
+          "<% # c # locals: (a:\n1) %><% RpmsRpc.client %>",
+          "<p>x</p>\n<% # c # locals: (a:\n  1) %><% RpmsSessions.new_client %><%= RpmsRpc.with_client(c) { } %>",
+          # not the magic comment: Rails does not lift it, so it stays a comment
+          "<%# Locals: (c: RpmsRpc.client) %>",
+          "<%# locals (c: RpmsRpc.client) %>",
+          "<%# locals: c: RpmsRpc.client %>"
+        ].each do |template|
+          scanner = Scanner.scan_erb(template)
+          assert_empty scanner.hits, "expected the scanner not to flag the template #{template.inspect}"
+          assert_empty scanner.scope_openers, "expected no scope opener in the template #{template.inspect}"
+        end
+      end
+
+      test "a template that does not compile to valid Ruby fails the scan" do
+        assert_raises(RuntimeError) { Scanner.scan_erb("<% if x %>", path: "app/views/lakeraven/ehr/x/_y.html.erb") }
+
+        view = "app/views/lakeraven/ehr/x/_y.html.erb"
+        error = assert_raises(Scanner::ParseError) { Scanner.scan_erb("<% if x %>", path: view) }
+        prism_errors = Prism.parse(Scanner.compile_erb("<% if x %>").ruby).errors.map(&:message)
+
+        assert_not_empty prism_errors, "the template is expected not to parse"
+        assert_equal "#{view}: #{prism_errors.join('; ')}", error.message,
+                     "the failure names the template and carries Prism's parse errors"
+
+        error = assert_raises(Scanner::ParseError) { Scanner.scan("def f(", path: "app/models/x.rb") }
+        assert_operator error.message, :start_with?, "app/models/x.rb: "
+      end
+
+      # The filters the engine-wide tests use, run on a synthetic scan: a
+      # template is outside the door like any other file.
+      test "a direct gem call in a template outside the door fails the leak check" do
+        view = "app/views/lakeraven/ehr/x/_y.html.erb"
+        scans = {
+          view => Scanner.scan_erb("<p>\n  <%= RpmsRpc::Patient.brief_header(dfn) %>\n</p>\n<% RpmsRpc.with_client(c) do %>x<% end %>", path: view),
+          "app/gateways/lakeraven/ehr/x_gateway.rb" => Scanner.scan("RpmsRpc::Patient.brief_header(dfn)"),
+          EXEMPTIONS.keys.first => Scanner.scan("RpmsRpc.client"),
+          SCOPE_OPENERS.first => Scanner.scan("RpmsRpc.with_client(c) { }")
+        }
+
+        assert_equal [ "#{view}:2 RpmsRpc::Patient.brief_header", "#{view}:4 RpmsRpc.with_client" ], leaks_in(scans)
+        assert_equal [ "#{view}:4 RpmsRpc.with_client" ], scope_openers_in(scans)
+        assert_not door?(view), "a template is not inside the door"
+      end
+
+      test "the door list names files that exist" do
+        (DOOR_FILES + SCOPE_OPENERS).each do |path|
+          assert File.file?(ROOT.join(path)), "door entry #{path} is not a file; a rename cannot silently widen the door"
+        end
+        DOOR_DIRECTORIES.each do |path|
+          assert File.directory?(ROOT.join(path)), "door entry #{path} is not a directory"
+        end
+        assert_empty EXEMPTIONS.keys.grep(/[*?{\[]/), "an exemption is a path, not a wildcard"
+        EXEMPTIONS.each do |path, reason|
+          assert File.file?(ROOT.join(path)), "exemption #{path} is not a file"
+          assert_not door?(path), "exemption #{path} is inside the door and needs no exemption"
+          assert_kind_of String, reason, "exemption #{path} has no reason"
+          assert_not reason.strip.empty?, "exemption #{path} has no reason"
+        end
+      end
+
+      test "the scan sees every ruby file" do
+        scanned = scan_engine.keys
+        # Walked independently of the scanner's globs, so the two cannot agree
+        # by construction: .rb and .rake under app/ and lib/, .erb under
+        # app/views.
+        expected = SCANNED_DIRECTORIES.flat_map { |dir| files_under(dir, ".rb") }
+        rake = SCANNED_DIRECTORIES.flat_map { |dir| files_under(dir, ".rake") }
+        templates = files_under(TEMPLATE_DIRECTORY, ".erb")
+
+        assert_operator scanned.length, :>, 0, "the scan parsed no files"
+        assert_operator templates.length, :>, 0, "the walk found no templates under #{TEMPLATE_DIRECTORY}"
+        assert_operator rake.length, :>, 0, "the walk found no rake files under #{SCANNED_DIRECTORIES.join(' or ')}"
+        assert_empty expected & templates, "a file is counted once"
+        assert_empty rake - scanned, "every rake file is scanned"
+        assert_equal (expected + rake + templates).sort, scanned.sort
+      end
+
+      # Completeness of discovery, fail closed: the scan compiles ERB and
+      # nothing else, so a template in any other executable language must not
+      # be addable without this test noticing. An allow-list, not a list of
+      # the handlers this env happens to register (see unscanned_templates).
+      test "every file under app/views is a template the scan covers" do
+        executable = ActionView::Template::Handlers.extensions.map(&:to_s).reject do |extension|
+          handler = ActionView::Template.registered_template_handler(extension)
+          STATIC_TEMPLATE_HANDLERS.any? { |static| handler == static || handler.is_a?(static) }
+        end
+        assert_includes executable, "erb", "ActionView no longer registers an erb handler"
+        assert_operator executable.length, :>, 1, "expected ActionView to register executable handlers besides erb"
+
+        # A static extension is one whose registered handler really is
+        # static, and it has a reason.
+        STATIC_TEMPLATE_EXTENSIONS.each do |extension, reason|
+          handler = ActionView::Template.registered_template_handler(extension.delete_prefix("."))
+          assert STATIC_TEMPLATE_HANDLERS.any? { |static| handler == static || handler.is_a?(static) },
+                 "#{extension} is listed as static, but its registered handler is #{handler.inspect}"
+          assert_not_includes executable, extension.delete_prefix("."), "#{extension} is listed as static, but is executable"
+          assert_predicate reason.to_s.strip, :present?, "static extension #{extension} has no reason"
+        end
+        assert_not_includes STATIC_TEMPLATE_EXTENSIONS.keys, ".erb", "erb is executable"
+
+        files = all_files_under(TEMPLATE_DIRECTORY)
+        assert_operator files.length, :>, 0, "the walk found no files under #{TEMPLATE_DIRECTORY}"
+        unscanned = unscanned_templates(files)
+
+        assert_empty unscanned,
+                     "executable and unscanned: these files under #{TEMPLATE_DIRECTORY} are neither .erb, which the " \
+                     "one-door scan compiles and reads, nor a named static extension " \
+                     "(#{STATIC_TEMPLATE_EXTENSIONS.keys.join(', ')}), so they may run Ruby the scan does not read " \
+                     "(a handler the host app registers counts); write them in ERB or teach the scan their handler:" \
+                     "\n  #{unscanned.join("\n  ")}"
+      end
+
+      test "a template in any language but ERB is rejected, whether or not its handler is registered here" do
+        rejected = %w[
+          app/views/x/_a.json.jbuilder
+          app/views/x/_b.html.haml
+          app/views/x/_c.html.slim
+          app/views/x/_d.xml.builder
+          app/views/x/_e.html.foo
+          app/views/x/_h.html.erb.bak
+          app/views/x/_i.html.ERB
+          app/views/x/erb
+          app/views/x/.keep
+        ]
+        accepted = %w[
+          app/views/x/_f.html.erb
+          app/views/x/g.text.erb
+          app/views/x/_j.html
+          app/views/x/k.raw
+        ]
+
+        assert_equal rejected, unscanned_templates(rejected + accepted)
+        assert_empty unscanned_templates(accepted)
+        assert_empty unscanned_templates([])
+      end
+
+      test "no ERB template lives outside app/views" do
+        stray = SCANNED_DIRECTORIES.flat_map { |dir| files_under(dir, ".erb") }
+                                   .reject { |path| path.start_with?("#{TEMPLATE_DIRECTORY}/") }
+
+        assert_empty stray,
+                     "executable and unscanned: an .erb outside #{TEMPLATE_DIRECTORY} is not scanned by the one-door " \
+                     "test; move it under #{TEMPLATE_DIRECTORY} or add its directory to the scan:\n  #{stray.join("\n  ")}"
+      end
+
+      # Dir's `**` and Find.find do not descend into a symlinked directory,
+      # so code reached through a symlink would be neither scanned nor
+      # rejected by the discovery tests, while Rails loads and renders it.
+      test "no symlink lives under the scanned directories" do
+        symlinks = symlinks_under(ROOT, SCANNED_DIRECTORIES)
+
+        assert_empty symlinks,
+                     "unscanned: the one-door scan does not follow a symlink, so what these reach is not read; " \
+                     "replace each with the real file or directory:\n  #{symlinks.join("\n  ")}"
+      end
+
+      test "a symlinked file or directory under a scanned directory is listed" do
+        Dir.mktmpdir("one-door") do |root|
+          FileUtils.mkdir_p(File.join(root, "app/views/x"))
+          FileUtils.mkdir_p(File.join(root, "lib/x"))
+          FileUtils.mkdir_p(File.join(root, "elsewhere/views"))
+          File.write(File.join(root, "elsewhere/views/_row.html.erb"), "<%= row %>")
+          File.write(File.join(root, "elsewhere/helper.rb"), "x = 1")
+          File.write(File.join(root, "lib/x/real.rb"), "x = 1")
+          File.symlink(File.join(root, "elsewhere/views"), File.join(root, "app/views/x/linked"))
+          File.symlink(File.join(root, "elsewhere/helper.rb"), File.join(root, "lib/x/linked.rb"))
+          File.symlink(File.join(root, "elsewhere"), File.join(root, "outside"))
+
+          assert_equal %w[app/views/x/linked lib/x/linked.rb], symlinks_under(root, %w[app lib])
+          assert_equal %w[lib/x/linked.rb], symlinks_under(root, %w[lib])
+          assert_empty symlinks_under(root, %w[elsewhere])
+          assert_equal %w[outside], symlinks_under(root, %w[outside]), "a scanned directory that is itself a symlink is listed"
+        end
+      end
+
+      private
+
+      # Every Ruby file (.rb, .rake) under the engine's app/ and lib/ and
+      # every ERB template under app/views, as { relative path => Scanner }.
+      def scan_engine
+        @scan_engine ||= scan_ruby_files.merge(scan_templates)
+      end
+
+      def scan_ruby_files
+        SCANNED_DIRECTORIES.product(RUBY_EXTENSIONS)
+                           .flat_map { |dir, extension| Dir[ROOT.join(dir, "**", "*#{extension}").to_s] }
+                           .sort
+                           .to_h { |path| [ relative(path), Scanner.scan(File.read(path), path: path) ] }
+      end
+
+      def scan_templates
+        Dir[ROOT.join(TEMPLATE_DIRECTORY, "**", "*.erb").to_s]
+          .sort
+          .to_h { |path| [ relative(path), Scanner.scan_erb(File.read(path), path: path) ] }
+      end
+
+      # The leak filter: hits in any file that is neither in the door nor
+      # exempt by name, as "path:line ref".
+      def leaks_in(scans)
+        scans.reject { |path, _scanner| door?(path) || EXEMPTIONS.key?(path) }
+             .flat_map { |path, scanner| scanner.hits.map { |line, ref| "#{path}:#{line} #{ref}" } }
+      end
+
+      # Scope openers in any file but the two permitted, as "path:line ref".
+      def scope_openers_in(scans)
+        scans.reject { |path, _scanner| SCOPE_OPENERS.include?(path) }
+             .flat_map { |path, scanner| scanner.scope_openers.map { |line, ref| "#{path}:#{line} #{ref}" } }
+      end
+
+      # Engine-relative paths of the files with this extension under dir,
+      # found by walking the tree, not by the scan's globs.
+      def files_under(dir, extension)
+        found = []
+        Find.find(ROOT.join(dir).to_s) do |path|
+          found << relative(path) if File.file?(path) && File.extname(path) == extension
+        end
+        found
+      end
+
+      # The paths the template scan does not cover: every one that is not
+      # an .erb (scanned) or a named static extension (nothing to scan). By
+      # the last extension, which is the one ActionView picks the handler
+      # by, and case-sensitively, as the scan's own glob is.
+      def unscanned_templates(paths)
+        paths.reject do |path|
+          extension = File.extname(path)
+          extension == ".erb" || STATIC_TEMPLATE_EXTENSIONS.key?(extension)
+        end
+      end
+
+      # Paths, relative to root, of every symlink (to a file or to a
+      # directory) at or under the given directories of root. Find.find
+      # yields a symlink without following it, so what one points at is
+      # neither listed nor needed.
+      def symlinks_under(root, directories)
+        found = []
+        directories.each do |dir|
+          Find.find(File.join(root.to_s, dir)) do |path|
+            found << Pathname.new(path).relative_path_from(Pathname.new(root.to_s)).to_s if File.symlink?(path)
+          end
+        end
+        found.sort
+      end
+
+      def all_files_under(dir)
+        found = []
+        Find.find(ROOT.join(dir).to_s) { |path| found << relative(path) if File.file?(path) }
+        found
+      end
+
+      # The first method definition in a compiled template, as what the scan
+      # depends on: its parameters as source text, and the call sites of its
+      # parameters (a default may hold code the text does not show: a
+      # heredoc's body) and of its body.
+      def method_shape(ruby)
+        result = Prism.parse(ruby)
+        assert result.success?, "expected valid Ruby: #{result.errors.map(&:message).join('; ')}"
+        definition = result.value.statements.body.grep(Prism::DefNode).first
+
+        { parameters: definition.parameters.compact_child_nodes.map { |parameter| parameter.slice.squish },
+          signature_calls: call_sites(definition.parameters), calls: call_sites(definition.body) }
+      end
+
+      # The call sites under a node in order, each as its receiver's source
+      # text and its name.
+      def call_sites(root)
+        calls = []
+        pending = [ root ]
+        while (node = pending.shift)
+          calls << [ node.receiver&.slice, node.name ] if node.is_a?(Prism::CallNode)
+          pending.unshift(*node.compact_child_nodes)
+        end
+        calls
+      end
+
+      def relative(path)
+        Pathname.new(path).relative_path_from(ROOT).to_s
+      end
+
+      def door?(path)
+        DOOR_FILES.include?(path) || DOOR_DIRECTORIES.any? { |dir| path.start_with?("#{dir}/") }
+      end
+    end
+  end
+end

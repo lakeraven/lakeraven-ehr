@@ -78,7 +78,7 @@ module Lakeraven
         helper_method :booking_path
 
         def shown_candidate(dfn)
-          header = RpmsRpc::Patient.brief_header(dfn.to_i)
+          header = PatientGateway.brief_header(dfn)
           header&.merge(dfn: dfn.to_i)
         rescue RpmsRpc::Client::RpcError
           nil
