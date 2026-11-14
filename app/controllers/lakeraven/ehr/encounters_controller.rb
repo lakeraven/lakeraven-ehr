@@ -5,6 +5,7 @@ module Lakeraven
     # A US Core Encounter is a visit, not an appointment: the V files hang
     # from the visit, so the visit is what a diagnosis or a launch names.
     class EncountersController < ApplicationController
+      disclosure_surface :fhir_api
       include PatientScopedRead
 
       private

@@ -3,6 +3,7 @@
 module Lakeraven
   module EHR
     class CoverageEligibilityRequestsController < ApplicationController
+      disclosure_surface :fhir_api
       include PatientCompartment
 
       rate_limit only: :create

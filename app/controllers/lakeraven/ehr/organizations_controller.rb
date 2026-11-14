@@ -3,6 +3,7 @@
 module Lakeraven
   module EHR
     class OrganizationsController < ApplicationController
+      disclosure_surface :fhir_api
       rate_limit only: :show
 
       def show

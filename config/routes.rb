@@ -80,27 +80,35 @@ Lakeraven::EHR::Engine.routes.draw do
   # Doorkeeper models (Application, AccessToken) are used directly;
   # routes are NOT mounted here because the engine provides its own
   # BackendServicesController for OAuth token issuance.
-  # No create: registration is AG's, on the front desk's screens (#542).
-  resources :patients, path: "Patient", only: %i[index show], param: :dfn
-  resources :practitioners, path: "Practitioner", only: %i[index show], param: :ien
-  resources :allergy_intolerances, path: "AllergyIntolerance", only: %i[index show]
-  resources :conditions, path: "Condition", only: %i[index show]
-  resources :medication_requests, path: "MedicationRequest", only: %i[index show]
-  resources :observations, path: "Observation", only: %i[index show]
-  resources :encounters, path: "Encounter", only: %i[index show]
-  resources :organizations, path: "Organization", only: %i[show], param: :ien
-  resources :locations, path: "Location", only: %i[index show], param: :ien
-  resources :service_requests, path: "ServiceRequest", only: %i[index show]
-  resources :immunizations, path: "Immunization", only: %i[index show]
-  resources :procedures, path: "Procedure", only: %i[index show]
-  resources :coverage_eligibility_requests, path: "CoverageEligibilityRequest", only: %i[create]
-  resources :measures, path: "Measure", only: %i[index]
-  resources :measure_reports, path: "MeasureReport", only: %i[index]
-  resources :audit_events, path: "AuditEvent", only: %i[index show]
-  resources :value_sets, path: "ValueSet", only: %i[index show] do
-    member do
-      get "$expand", action: :expand
+  # The FHIR resource API is the :fhir_api disclosure surface (#970): these
+  # routes are not recognised until the host opens it by name, and each
+  # controller refuses a bare 404 on its own for a route drawn around this.
+  constraints Lakeraven::EHR::DisclosureSurfaces::RouteConstraint.new(:fhir_api) do
+    # No create: registration is AG's, on the front desk's screens (#542).
+    resources :patients, path: "Patient", only: %i[index show], param: :dfn
+    resources :practitioners, path: "Practitioner", only: %i[index show], param: :ien
+    resources :allergy_intolerances, path: "AllergyIntolerance", only: %i[index show]
+    resources :conditions, path: "Condition", only: %i[index show]
+    resources :medication_requests, path: "MedicationRequest", only: %i[index show]
+    resources :observations, path: "Observation", only: %i[index show]
+    resources :encounters, path: "Encounter", only: %i[index show]
+    resources :organizations, path: "Organization", only: %i[show], param: :ien
+    resources :locations, path: "Location", only: %i[index show], param: :ien
+    resources :service_requests, path: "ServiceRequest", only: %i[index show]
+    resources :immunizations, path: "Immunization", only: %i[index show]
+    resources :procedures, path: "Procedure", only: %i[index show]
+    resources :coverage_eligibility_requests, path: "CoverageEligibilityRequest", only: %i[create]
+    resources :measures, path: "Measure", only: %i[index]
+    resources :measure_reports, path: "MeasureReport", only: %i[index]
+    resources :audit_events, path: "AuditEvent", only: %i[index show]
+    resources :value_sets, path: "ValueSet", only: %i[index show] do
+      member do
+        get "$expand", action: :expand
+      end
     end
+
+    # Measure $import
+    post "Measure/$import", to: "measures#import"
   end
 
   # Transitions of Care — ONC §170.315(b)(1)
@@ -139,9 +147,6 @@ Lakeraven::EHR::Engine.routes.draw do
   post "oauth/token", to: "smart_tokens#create",
     constraints: ->(req) { req.request_parameters["grant_type"] == "authorization_code" }
   post "oauth/token", to: "backend_services#token"
-
-  # Measure $import
-  post "Measure/$import", to: "measures#import"
 
   # Web UI — login, dashboard (accessibility / ops surface)
   get "login" => "sessions#new", as: :login

@@ -129,7 +129,9 @@ The names are `fhir_api`, `bulk_export` and `ccda`.
 The setting fails closed: only an Array opens anything, and only its entries that spell a name exactly.
 A bare name, `true`, a Hash or an unknown name opens nothing.
 A closed surface answers a bare 404 before authentication, audit or the action runs.
-Only `bulk_export` (`/exports` and its files) is gated so far.
+`bulk_export` gates `/exports` and its files.
+`fhir_api` gates the FHIR resource routes, `Measure/$import`, and any `Authorization: Bearer` request to a SMART-authenticated controller (the chart included); a browser session without a bearer header is untouched.
+`/metadata` and SMART discovery stay open. C-CDA (`ccda`) is still to come.
 
 ## Contributing
 Contribution directions go here.
