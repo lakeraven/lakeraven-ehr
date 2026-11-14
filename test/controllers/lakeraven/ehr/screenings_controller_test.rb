@@ -164,11 +164,12 @@ module Lakeraven
         RpmsRpc.client.seed_keyed_collection(:encounter_visit_list, dfn.to_s, rows)
       end
 
-      # A wall-clock time on a day relative to Date.current, kept to office
-      # hours so no time zone can move it onto a neighbouring date.
+      # A wall-clock time on a day relative to the process-local date, built
+      # the way the gem builds visit times (Time.new in the process zone) and
+      # dated the way the controller's normalise_visits reads "today".
       def today_at(hour, minute = 0, days_ago: 0)
-        day = Date.current - days_ago
-        Time.zone.local(day.year, day.month, day.day, hour, minute)
+        day = Date.today - days_ago # rubocop:disable Rails/Date -- the clinic's wall clock is the process zone, as in normalise_visits
+        Time.new(day.year, day.month, day.day, hour, minute) # rubocop:disable Rails/TimeZone -- the gem builds visit times with Time.new
       end
 
       def visit_radios = css_select("input[type=radio][name=encounter_ien]")
@@ -1948,6 +1949,320 @@ module Lakeraven
         assert_equal [ UNPARSED_DATETIME ], mapped.filter_map { |row| row[:datetime] if row[:datetime].is_a?(String) }
 
         with_failing(EncounterGateway, :visits, ->(*) { mapped }, &block)
+      end
+
+      # -- Visits through the egress seam (#1003 review) -------------------------
+      #
+      # The visit choices are clinical data on a rendered page, so they are
+      # built the way the chart and this controller's index/show build theirs:
+      # the open visits are shaped as Encounter resources in ONE Bundle, the
+      # Bundle goes through filter_fhir_for_egress on GET new AND on POST
+      # create, and only what comes back is offered and labelled. A payload
+      # that comes back unusable means the visits could not be read. The raw
+      # row rules are unchanged: a locked or undated row is never offered,
+      # whatever the filter returns.
+
+      SEAM_OTHER_VISIT = "2090050"
+      SEAM_OTHER_CLINIC = "Cedar Hollow Primary Care"
+      SEAM_LOCKED_VISIT = "2090040"
+      SEAM_UNDATED_VISIT = "2090030"
+      SEAM_CLOSED_CLINIC = "Juniper Flats Walk-In"
+      REPLACED_CLINIC = "Synthetic Substitute Clinic"
+      REPLACED_PROVIDER = "TESTPROVIDER,ZULU"
+
+      # `open_rows` plus one locked row and one undated row, which no filter
+      # result may bring back as a choice.
+      def seed_seam_visits(open_rows = [ visit_row(VISIT, at: today_at(9, 30)) ])
+        seed_visits(DFN_PARAM, open_rows + [
+          visit_row(SEAM_LOCKED_VISIT, at: today_at(11, 0), clinic: SEAM_CLOSED_CLINIC, locked: true),
+          visit_row(SEAM_UNDATED_VISIT, at: nil, clinic: SEAM_CLOSED_CLINIC)
+        ])
+      end
+
+      def assert_closed_rows_not_offered
+        [ SEAM_LOCKED_VISIT, SEAM_UNDATED_VISIT ].each do |ien|
+          assert_select "input[name=encounter_ien][value=?]", ien, count: 0
+        end
+        assert_no_match(/#{Regexp.escape(SEAM_CLOSED_CLINIC)}/, response.body)
+      end
+
+      # A FHIR key read from a hash keyed by strings (JSON) or symbols.
+      def fhir_key(hash, key)
+        hash.key?(key) ? hash[key] : hash[key.to_sym]
+      end
+
+      def deep_strings(value, &block)
+        case value
+        when Hash then value.transform_values { |inner| deep_strings(inner, &block) }
+        when Array then value.map { |inner| deep_strings(inner, &block) }
+        when String then yield(value)
+        else value
+        end
+      end
+
+      def deep_without_key(value, key)
+        case value
+        when Hash
+          value.reject { |name, _| name.to_s == key }.transform_values { |inner| deep_without_key(inner, key) }
+        when Array then value.map { |inner| deep_without_key(inner, key) }
+        else value
+        end
+      end
+
+      def deep_without_encounter_periods(value)
+        case value
+        when Hash
+          walked = value.transform_values { |inner| deep_without_encounter_periods(inner) }
+          fhir_key(walked, "resourceType") == "Encounter" ? walked.reject { |name, _| name.to_s == "period" } : walked
+        when Array then value.map { |inner| deep_without_encounter_periods(inner) }
+        else value
+        end
+      end
+
+      def encounter_resource?(resource, ien)
+        resource.is_a?(Hash) && fhir_key(resource, "resourceType") == "Encounter" &&
+          fhir_key(resource, "id").to_s.include?(ien)
+      end
+
+      # The Encounter resources carried by a Bundle payload (none for anything else).
+      def bundle_encounters(payload)
+        return [] unless payload.is_a?(Hash) && fhir_key(payload, "resourceType") == "Bundle"
+
+        Array(fhir_key(payload, "entry")).filter_map do |entry|
+          resource = fhir_key(entry, "resource") if entry.is_a?(Hash)
+          resource if resource.is_a?(Hash) && fhir_key(resource, "resourceType") == "Encounter"
+        end
+      end
+
+      # The stub's block runs with the filter as `self`, so each filter closes
+      # over the test for its helpers.
+      def renaming_filter
+        test = self
+        ->(payload) {
+          test.deep_strings(payload) { |text| text.gsub(CLINIC, REPLACED_CLINIC).gsub(PROVIDER, REPLACED_PROVIDER) }
+        }
+      end
+
+      def display_stripping_filter
+        test = self
+        ->(payload) { test.deep_without_key(payload, "display") }
+      end
+
+      def period_stripping_filter
+        test = self
+        ->(payload) { test.deep_without_encounter_periods(payload) }
+      end
+
+      def encounter_withholding_filter(ien)
+        test = self
+        ->(payload) {
+          next payload unless payload.is_a?(Hash) && test.fhir_key(payload, "resourceType") == "Bundle"
+
+          entry_key = payload.key?("entry") ? "entry" : :entry
+          kept = Array(payload[entry_key]).reject do |entry|
+            entry.is_a?(Hash) && test.encounter_resource?(test.fhir_key(entry, "resource"), ien)
+          end
+          payload.merge(entry_key => kept)
+        }
+      end
+
+      def recording_filter(seen)
+        ->(payload) {
+          seen << payload
+          payload
+        }
+      end
+
+      # Runs the block with ScreeningEntryService still working, and fails if
+      # the controller built one: a refused visit never reaches the service.
+      def assert_service_not_reached(&block)
+        reached = false
+        with_failing(ScreeningEntryService, :new, ->(**options) {
+          reached = true
+          ScreeningEntryService.allocate.tap { |service| service.send(:initialize, **options) }
+        }, &block)
+        assert_not reached, "ScreeningEntryService was reached for a visit that is not offered"
+      end
+
+      # A complete, non-safety PHQ-9 naming `ien`, refused before the service.
+      def assert_visit_post_refused(filter, ien: VISIT)
+        before = ScreeningResponse.count
+        assert_service_not_reached do
+          stub_egress_filter(filter) { submit(encounter_ien: ien) }
+        end
+
+        assert_response :unprocessable_entity
+        assert_equal before, ScreeningResponse.count, "a screening was stored against a visit that is not offered"
+        assert_select "input[name=encounter_ien][value=?]", ien, count: 0
+        assert_empty checked_visit_iens
+      end
+
+      def assert_visits_unreadable_form
+        assert_alert(/visits could not be read/i)
+        assert_empty offered_visit_iens
+        assert_no_typed_visit_field
+        assert_no_match(/#{Regexp.escape(CLINIC)}/, response.body)
+        assert_no_match(/#{Regexp.escape(PROVIDER)}/, response.body)
+      end
+
+      test "the visit label shows the clinic and provider the egress filter returned, not the raw row's" do
+        seed_seam_visits
+
+        stub_egress_filter(renaming_filter) { get "#{BASE}/new", params: { instrument: "phq-9" } }
+
+        assert_response :ok
+        assert_equal [ VISIT ], offered_visit_iens
+        label = visit_label_text(VISIT)
+        assert_includes label, REPLACED_CLINIC
+        assert_includes label, REPLACED_PROVIDER
+        assert_not_includes label, CLINIC
+        assert_not_includes label, PROVIDER
+        assert_no_match(/#{Regexp.escape(CLINIC)}/, response.body)
+        assert_no_match(/#{Regexp.escape(PROVIDER)}/, response.body)
+        assert_shows_time label, today_at(9, 30)
+        assert_closed_rows_not_offered
+      end
+
+      test "a clinic and provider the egress filter removed are shown as not recorded, never as the raw names" do
+        seed_seam_visits
+
+        stub_egress_filter(display_stripping_filter) { get "#{BASE}/new", params: { instrument: "phq-9" } }
+
+        assert_response :ok
+        assert_equal [ VISIT ], offered_visit_iens
+        label = visit_label_text(VISIT)
+        assert_match(/clinic not recorded/i, label)
+        assert_match(/provider not recorded/i, label)
+        assert_not_includes label, CLINIC
+        assert_not_includes label, PROVIDER
+        assert_no_match(/#{Regexp.escape(CLINIC)}/, response.body)
+        assert_no_match(/#{Regexp.escape(PROVIDER)}/, response.body)
+        assert_shows_time label, today_at(9, 30)
+        assert_closed_rows_not_offered
+      end
+
+      test "a visit whose Encounter the egress filter withholds is not offered while the others are" do
+        seed_seam_visits([
+          visit_row(VISIT, at: today_at(9, 30)),
+          visit_row(SEAM_OTHER_VISIT, at: today_at(14, 45, days_ago: 3), clinic: SEAM_OTHER_CLINIC)
+        ])
+
+        stub_egress_filter(encounter_withholding_filter(VISIT)) { get "#{BASE}/new", params: { instrument: "phq-9" } }
+
+        assert_response :ok
+        assert_equal [ SEAM_OTHER_VISIT ], offered_visit_iens
+        assert_includes visit_label_text(SEAM_OTHER_VISIT), SEAM_OTHER_CLINIC
+        assert_no_match(/#{Regexp.escape(CLINIC)}/, response.body)
+        assert_no_alert(/visits could not be read/i)
+        assert_closed_rows_not_offered
+      end
+
+      test "a submission naming a visit whose Encounter the egress filter withholds is refused before the service" do
+        seed_seam_visits([
+          visit_row(VISIT, at: today_at(9, 30)),
+          visit_row(SEAM_OTHER_VISIT, at: today_at(14, 45, days_ago: 3), clinic: SEAM_OTHER_CLINIC)
+        ])
+
+        assert_visit_post_refused(encounter_withholding_filter(VISIT))
+
+        assert_alert(/not one of this patient['’]s open visits/i)
+        assert_equal [ SEAM_OTHER_VISIT ], offered_visit_iens
+        assert_closed_rows_not_offered
+      end
+
+      [ [ "nil", ->(_payload) { nil } ],
+        [ "a hash that is not a FHIR resource", ->(_payload) { { "foo" => "bar" } } ] ].each do |name, filter|
+        test "when the egress filter returns #{name} the form says the visits could not be read and offers none" do
+          seed_seam_visits
+
+          stub_egress_filter(filter) { get "#{BASE}/new", params: { instrument: "phq-9" } }
+
+          assert_response :ok
+          assert_visits_unreadable_form
+          assert_no_alert(/No open visit/i)
+          assert_closed_rows_not_offered
+        end
+
+        test "when the egress filter returns #{name} a submitted open visit is refused before the service" do
+          seed_seam_visits
+
+          assert_visit_post_refused(filter)
+
+          assert_visits_unreadable_form
+          assert_closed_rows_not_offered
+        end
+      end
+
+      test "a visit whose Encounter comes back from the egress filter without a period is not offered" do
+        seed_seam_visits
+
+        stub_egress_filter(period_stripping_filter) { get "#{BASE}/new", params: { instrument: "phq-9" } }
+
+        assert_response :ok
+        assert_empty offered_visit_iens
+        assert_no_typed_visit_field
+        assert_no_match(/#{Regexp.escape(CLINIC)}/, response.body)
+        assert_closed_rows_not_offered
+      end
+
+      test "a submission naming a visit whose Encounter comes back without a period is refused before the service" do
+        seed_seam_visits
+
+        assert_visit_post_refused(period_stripping_filter)
+
+        assert_empty offered_visit_iens
+        assert_closed_rows_not_offered
+      end
+
+      test "GET new passes the open visits through the egress filter as Encounters in a Bundle" do
+        seed_seam_visits
+        seen = []
+
+        stub_egress_filter(recording_filter(seen)) { get "#{BASE}/new", params: { instrument: "phq-9" } }
+
+        assert_response :ok
+        encounters = seen.flat_map { |payload| bundle_encounters(payload) }
+        assert encounters.any? { |resource| encounter_resource?(resource, VISIT) },
+               "expected the egress filter to receive a Bundle with an Encounter for visit #{VISIT} on GET new; " \
+               "it received #{seen.size} payload(s)"
+        [ SEAM_LOCKED_VISIT, SEAM_UNDATED_VISIT ].each do |ien|
+          assert encounters.none? { |resource| encounter_resource?(resource, ien) },
+                 "visit #{ien} is not open and must not be sent for egress as a choice"
+        end
+        assert_equal [ VISIT ], offered_visit_iens
+        assert_closed_rows_not_offered
+      end
+
+      test "POST create passes the open visits through the egress filter as Encounters in a Bundle" do
+        seed_seam_visits
+        seen = []
+
+        stub_egress_filter(recording_filter(seen)) { submit }
+
+        assert_response :redirect
+        assert_equal 1, ScreeningResponse.count
+        encounters = seen.flat_map { |payload| bundle_encounters(payload) }
+        assert encounters.any? { |resource| encounter_resource?(resource, VISIT) },
+               "expected the egress filter to receive a Bundle with an Encounter for visit #{VISIT} on POST create; " \
+               "it received #{seen.size} payload(s)"
+        [ SEAM_LOCKED_VISIT, SEAM_UNDATED_VISIT ].each do |ien|
+          assert encounters.none? { |resource| encounter_resource?(resource, ien) },
+                 "visit #{ien} is not open and must not be sent for egress as a choice"
+        end
+      end
+
+      test "a locked or undated visit is refused at submission even when the egress filter returns everything" do
+        seed_seam_visits
+
+        [ SEAM_LOCKED_VISIT, SEAM_UNDATED_VISIT ].each do |ien|
+          assert_service_not_reached do
+            stub_egress_filter(->(payload) { payload }) { submit(encounter_ien: ien) }
+          end
+
+          assert_response :unprocessable_entity
+          assert_equal 0, ScreeningResponse.count
+          assert_equal [ VISIT ], offered_visit_iens
+        end
       end
     end
   end
