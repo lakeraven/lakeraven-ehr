@@ -118,9 +118,11 @@
     <%= link_to "Consents",
           patient_consents_path(@patient.dfn),
           class: "button-secondary no-underline" %>
-    <%= link_to "View as FHIR",
-          fhir_url,
-          class: "button-secondary no-underline" %>
+    <% if Lakeraven::EHR::DisclosureSurfaces.open?(:fhir_api) %>
+      <%= link_to "View as FHIR",
+            fhir_url,
+            class: "button-secondary no-underline" %>
+    <% end %>
   </div>
 
   <div class="chart-grid">

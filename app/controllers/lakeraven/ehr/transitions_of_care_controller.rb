@@ -7,6 +7,7 @@ module Lakeraven
     class TransitionsOfCareController < ApplicationController
       include PatientCompartment
 
+      disclosure_surface :ccda
       rate_limit only: :create
 
       # Types in the C-CDA body. A scope named after this controller is not

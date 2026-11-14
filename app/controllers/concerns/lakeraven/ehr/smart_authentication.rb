@@ -30,6 +30,18 @@ module Lakeraven
         attr_reader :current_token
       end
 
+      BEARER_AUTHORIZATION = /\ABearer\s+(.+)\z/i
+
+      # The token of a Bearer Authorization header, else nil. The one
+      # definition of "a bearer header" (ChartRepresentation reads it too).
+      def self.bearer_token(authorization)
+        authorization.to_s[BEARER_AUTHORIZATION, 1]
+      end
+
+      def self.bearer_authorization?(request)
+        !bearer_token(request.headers["Authorization"]).nil?
+      end
+
       def authenticate_smart_token!
         token_string, source = extract_bearer_token
 
@@ -256,17 +268,14 @@ module Lakeraven
       def extract_bearer_token
         # Returns [token_string, :header | :session] — the SOURCE matters, and
         # is what the browser-credential rules below are decided on.
-        auth = request.headers["Authorization"]
-        if auth.present?
-          match = auth.match(/\ABearer\s+(.+)\z/i)
-          # A present-but-non-Bearer header (a proxy-injected `Basic`, say) is
-          # "no bearer token FOUND", not "a header arrived, so refuse" — so it
-          # falls through to the session path below rather than short-circuiting.
-          # Option 3 is preserved: that path is gated on
-          # session_token_fallback_allowed? (false on the FHIR API), so a
-          # non-Bearer header there still refuses.
-          return [ match.captures.first, :header ] if match
-        end
+        header_token = SmartAuthentication.bearer_token(request.headers["Authorization"])
+        # A present-but-non-Bearer header (a proxy-injected `Basic`, say) is
+        # "no bearer token FOUND", not "a header arrived, so refuse" — so it
+        # falls through to the session path below rather than short-circuiting.
+        # Option 3 is preserved: that path is gated on
+        # session_token_fallback_allowed? (false on the FHIR API), so a
+        # non-Bearer header there still refuses.
+        return [ header_token, :header ] if header_token
 
         # Browser session fallback: the sign-on bridge (SessionsController) mints
         # a SMART token and stashes it here, since a browser won't send an

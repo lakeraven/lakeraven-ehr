@@ -8,6 +8,10 @@ module Lakeraven
     class CcdaImportsController < ApplicationController
       include PatientCompartment
 
+      # Inbound C-CDA reconciliation is a bearer FHIR API call and drops Part 2
+      # labels today, so it needs both surfaces open (#969).
+      disclosure_surface :ccda
+      disclosure_surface :fhir_api
       rate_limit only: :create
 
       # The one patient-naming write that had no compartment declaration. It

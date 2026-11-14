@@ -35,6 +35,12 @@ module Lakeraven
     # serializers; only the RPMS data source is mocked (see
     # test/dummy/lib/lakeraven_demo_seeds.rb).
     class ChartsController < ActionController::Base
+      # First: the chart's FHIR form, and any read presenting a bearer token,
+      # is the fhir_api surface (#969), refused in #process ahead of every
+      # callback while closed. A browser session's HTML chart is ungoverned.
+      include DisclosureSurfaceGate
+      disclosure_surface :fhir_api, if: :fhir_api_request?
+
       helper ApplicationHelper
       # The chart reads RPMS on its signed-in user's own connection (ADR 0011).
       include RpmsUserScope
@@ -329,11 +335,13 @@ module Lakeraven
 
       # -- Content negotiation --------------------------------------------------
 
+      # One rule for rendering and gating (ChartRepresentation, #969).
       def fhir_requested?
-        return true if params[:format].to_s == "json"
-        return true if params[:_format].to_s == "json"
+        ChartRepresentation.fhir_requested?(request)
+      end
 
-        request.headers["Accept"].to_s.include?("application/fhir+json")
+      def fhir_api_request?
+        ChartRepresentation.fhir_api_request?(request)
       end
 
       # -- Data loading (per-type scope enforced; a mock miss yields []) --------
