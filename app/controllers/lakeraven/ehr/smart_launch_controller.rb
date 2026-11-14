@@ -15,6 +15,9 @@ module Lakeraven
     # read (ADR 0010), as the chart does. A launch only ever goes to the
     # launch URI the app registered.
     class SmartLaunchController < WebController
+      # SMART App Launch is how an app gets a patient token: fhir_api (#970).
+      include DisclosureSurfaceGate
+      disclosure_surface :fhir_api
       include SmartEndpoints
       include RateLimitable
 

@@ -124,29 +124,36 @@ Lakeraven::EHR::Engine.routes.draw do
       format: false, file_name: %r{[^/]+}
   end
 
-  # SMART discovery + EHR Launch. smart/launch is the EHR side: a signed-in
-  # user opens a patient in a registered app, which is sent to the app's
-  # launch URI with `iss` and `launch` (#839). smart/style is the
-  # smart_style_url a launched token response names.
+  # SMART discovery. smart/style is the smart_style_url a launched token
+  # response names. Both are metadata and stay open.
   get ".well-known/smart-configuration", to: "smart_configuration#show"
-  get "smart/launch", to: "smart_launch#show", as: :smart_launch
-  post "smart/launch", to: "smart_launch#create"
   get "smart/style", to: "smart_styles#show", as: :smart_style, defaults: { format: :json }
 
-  # SMART App Launch authorization code flow (#839). The user signs in with
-  # their own RPMS codes and approves; GET and POST are both served.
-  get "oauth/authorize", to: "smart_authorizations#new", as: :smart_authorization
-  post "oauth/authorize", to: "smart_authorizations#new"
-  get "oauth/authorize/approval", to: "smart_authorizations#show", as: :smart_authorization_approval
-  post "oauth/authorize/approval", to: "smart_authorizations#decide"
-  get "oauth/authorize/patient", to: "smart_authorizations#patient", as: :smart_authorization_patient
-  post "oauth/authorize/patient", to: "smart_authorizations#choose_patient"
+  # SMART EHR Launch and the authorization code flow (#839) hand an app a
+  # patient's token, so they are the :fhir_api surface too (#970). smart/launch
+  # is the EHR side: a signed-in user opens a patient in a registered app,
+  # which is sent to the app's launch URI with `iss` and `launch`. The user
+  # signs in with their own RPMS codes and approves; GET and POST are served.
+  constraints Lakeraven::EHR::DisclosureSurfaces::RouteConstraint.new(:fhir_api) do
+    get "smart/launch", to: "smart_launch#show", as: :smart_launch
+    post "smart/launch", to: "smart_launch#create"
+    get "oauth/authorize", to: "smart_authorizations#new", as: :smart_authorization
+    post "oauth/authorize", to: "smart_authorizations#new"
+    get "oauth/authorize/approval", to: "smart_authorizations#show", as: :smart_authorization_approval
+    post "oauth/authorize/approval", to: "smart_authorizations#decide"
+    get "oauth/authorize/patient", to: "smart_authorizations#patient", as: :smart_authorization_patient
+    post "oauth/authorize/patient", to: "smart_authorizations#choose_patient"
+  end
 
-  # One token endpoint, two grants: the authorization code from a launch, and
-  # Backend Services client_credentials (JWT auth) for everything else.
-  post "oauth/token", to: "smart_tokens#create",
-    constraints: ->(req) { req.request_parameters["grant_type"] == "authorization_code" }
-  post "oauth/token", to: "backend_services#token"
+  # One token endpoint, two grants: the authorization code from a launch
+  # (fhir_api), and Backend Services client_credentials (JWT auth), which
+  # stays open: bulk export depends on it. The backend route never takes an
+  # authorization code, so with fhir_api closed one falls through to a 404.
+  authorization_code = ->(req) { req.request_parameters["grant_type"] == "authorization_code" }
+  constraints Lakeraven::EHR::DisclosureSurfaces::RouteConstraint.new(:fhir_api) do
+    post "oauth/token", to: "smart_tokens#create", constraints: authorization_code
+  end
+  post "oauth/token", to: "backend_services#token", constraints: ->(req) { !authorization_code.call(req) }
 
   # Web UI — login, dashboard (accessibility / ops surface)
   get "login" => "sessions#new", as: :login

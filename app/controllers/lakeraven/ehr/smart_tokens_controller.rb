@@ -17,6 +17,9 @@ module Lakeraven
     #     again elsewhere: the token would have no session to read RPMS on.
     # A used code presented again also revokes the token it bought.
     class SmartTokensController < ActionController::API
+      # SMART App Launch is how an app gets a patient token: fhir_api (#970).
+      include DisclosureSurfaceGate
+      disclosure_surface :fhir_api
       include SmartEndpoints
       include RateLimitable
 

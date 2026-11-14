@@ -44,6 +44,9 @@ module Lakeraven
       # API routes not yet behind any surface, each with why. C-CDA is the
       # :ccda surface's own slice (#969); until then a bearer request to
       # these is still fhir_api (SmartAuthentication's bearer rule).
+      # Not listed, as it is not an API route: the session chart's FHIR JSON
+      # (charts#show as .json for a browser session) is not gated yet; a
+      # later slice.
       UNGOVERNED_API_ROUTES = {
         "lakeraven/ehr/ccda_imports#create" => "C-CDA import: gated as :ccda in #969; bearer requests are fhir_api until then",
         "lakeraven/ehr/transitions_of_care#create" => "C-CDA generation: gated as :ccda in #969; bearer requests are fhir_api until then"
@@ -52,7 +55,7 @@ module Lakeraven
       # "controller#action" for every FHIR API route of +route_set+ that no
       # unconditional disclosure_surface rule covers, less +allow+. An API
       # route is one to an ApplicationController descendant, or one whose
-      # path starts with an uppercase letter or "$" (FHIR's shape). A
+      # path has a static segment starting with an uppercase letter or "$". A
       # FHIR-shaped route whose controller cannot be loaded is reported.
       def ungated_routes(route_set, allow: UNGOVERNED_API_ROUTES.keys)
         route_set.routes.filter_map do |route|
@@ -66,7 +69,8 @@ module Lakeraven
       end
 
       def fhir_path?(spec)
-        spec.delete_prefix("/").match?(/\A[A-Z$]/)
+        # Any static segment; :params, *globs and the format suffix never match.
+        spec.delete("()").split("/").any? { |segment| segment.match?(/\A[A-Z$]/) }
       end
 
       def route_controller(controller)

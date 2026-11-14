@@ -23,6 +23,9 @@ module Lakeraven
     # nobody vouched for, or to an app that asked about another server. Every
     # other error goes back to the app, with its `state`, as OAuth says.
     class SmartAuthorizationsController < WebController
+      # SMART App Launch is how an app gets a patient token: fhir_api (#970).
+      include DisclosureSurfaceGate
+      disclosure_surface :fhir_api
       include SmartEndpoints
 
       # The approve screen and its patient picker sit behind sign-in; a code

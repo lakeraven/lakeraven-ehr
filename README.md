@@ -131,6 +131,7 @@ A bare name, `true`, a Hash or an unknown name opens nothing.
 A closed surface answers a bare 404 before authentication, audit or the action runs.
 `bulk_export` gates `/exports` and its files.
 `fhir_api` gates the FHIR resource routes, `Measure/$import`, and any `Authorization: Bearer` request to a SMART-authenticated controller (the chart included); a browser session without a bearer header is untouched.
+`fhir_api` also gates SMART App Launch: `smart/launch`, `oauth/authorize*` and the authorization-code `oauth/token`. The backend services (client_credentials) token stays open for bulk export.
 `/metadata` and SMART discovery stay open. C-CDA (`ccda`) is still to come.
 
 ## Contributing
