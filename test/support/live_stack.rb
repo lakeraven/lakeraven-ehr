@@ -76,9 +76,30 @@ module LiveStack
   end
 
   # Prepended onto the mock client class in a ready stack run: an answer from
-  # the mock is never evidence.
+  # the mock, through any of its read paths, is never evidence. Each read
+  # records that the mock answered and answers unchanged.
   module MockWatch
-    def call_rpc(rpc_name, *params) = LiveStack.watch(self, rpc_name, :mock) { super }
+    READS = %i[call_rpc call_rpc_lines call_rpc_global_array].freeze
+
+    READS.each do |read|
+      define_method(read) do |rpc_name, *params|
+        LiveStack.watch(self, rpc_name, :mock) { super(rpc_name, *params) }
+      end
+    end
+  end
+
+  # Prepended onto Module in a ready stack run: a define_singleton_method that
+  # replaces a method a named module already answers (its own, private or
+  # inherited) is a gateway stub, and LiveStack.stub_installed records it. A
+  # new method, an anonymous module or an object that is not a Module is not
+  # a stub. Defines and answers exactly as unwatched; errors pass through.
+  module StubWatch
+    def define_singleton_method(method_name, *body, &block)
+      replaces = is_a?(Module) && !name.nil? && respond_to?(method_name, true)
+      defined = super
+      LiveStack.stub_installed(self, method_name) if replaces
+      defined
+    end
   end
 
   EVIDENCE = { rpc_count: 0, reasons: [] }
@@ -177,6 +198,52 @@ module LiveStack
   end
 
   def disarm! = EVIDENCE_LOCK.synchronize { ARMED.clear }
+
+  # The ready run's watches: arms the persona's client, and prepends
+  # RefusalWatch onto its class, MockWatch onto the mock and StubWatch onto
+  # Module, each once.
+  def install!(client:, persona_duz:, mock_class: RpmsRpc::MockClient, module_class: Module)
+    arm!(client: client, persona_duz: persona_duz)
+    [ [ client.class, RefusalWatch ], [ mock_class, MockWatch ], [ module_class, StubWatch ] ].each do |klass, watch|
+      klass.prepend(watch) unless klass.ancestors.include?(watch)
+    end
+  end
+
+  # Records a gateway stub on a Module while the watch is armed and not aside.
+  def stub_installed(receiver, method_name)
+    return unless receiver.is_a?(Module) && !transparent?
+    return if EVIDENCE_LOCK.synchronize { ARMED.empty? }
+
+    record("a gateway was stubbed: #{receiver.name}.#{method_name}")
+  end
+
+  # Signs the persona on again through client, with the watch aside (so the
+  # sign-on's own rescues see the broker's errors as in production), and
+  # checks XUPROGMODE again. Answers [result, reason]: reason is nil, or a
+  # fixed text, never the broker's message.
+  def re_sign_on(client:, binding:, authenticate: method(:authenticate),
+                 held_keys: ->(names) { RpmsRpc::Authentication.held_keys(names) })
+    result = nil
+    reason = transparently do
+      RpmsRpc.with_client(client) do
+        result = authenticate.call(binding.access_code, binding.verify_code)
+        if !result.success? then "the persona's sign-on was refused"
+        elsif held_keys.call([ PROGRAMMER_KEY ]) != []
+          "the persona holds #{PROGRAMMER_KEY}, or it could not be asked"
+        end
+      end
+    rescue StandardError
+      "the persona's sign-on failed"
+    end
+    [ result, reason ]
+  end
+
+  # Clears the client's signed-on identity, so the verdict's DUZ check fails
+  # every later scenario, and skips this one as not run.
+  def decline_sign_on!(client, reason)
+    client.clear_authenticated if client.respond_to?(:clear_authenticated)
+    raise not_run(reason), cause: nil
+  end
 
   # Runs the block with the watch inactive on this thread: calls neither
   # count nor record, and errors propagate as they were raised.
