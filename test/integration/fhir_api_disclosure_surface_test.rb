@@ -26,6 +26,12 @@ module Lakeraven
     class DisclosureProbeGatedController < ApplicationController
       disclosure_surface :fhir_api
     end
+    class DisclosureProbeRaisingController < ActionController::API
+      include DisclosureSurfaceGate
+      disclosure_surface :fhir_api, if: :boom
+      def show = head(:no_content)
+      def boom = raise("boom")
+    end
   end
 end
 
@@ -52,6 +58,17 @@ class FhirApiDisclosureSurfaceTest < ActionDispatch::IntegrationTest
     [ "patient_contexts#create", :post, "#{BASE}/patients/1/context" ]
   ].freeze
   HOST_ROUTES = [ [ :get, "/Patient/1" ], [ :get, "/Observation" ], [ :post, "/Measure/$import" ] ].freeze
+  # SMART App Launch is part of the fhir_api surface: it is how an app gets a patient's token.
+  SMART_LAUNCH_ROUTES = (
+    %w[smart/launch oauth/authorize oauth/authorize/approval oauth/authorize/patient]
+      .flat_map { |path| [ [ :get, path, {} ], [ :post, path, {} ] ] } +
+    [ [ :post, "oauth/token", { grant_type: "authorization_code", code: "junk" } ] ]
+  ).freeze
+  SMART_LAUNCH_CONTROLLERS = %w[smart_launch smart_authorizations smart_tokens].freeze
+  STAYS_OPEN = [
+    [ :get, "metadata", {}, [ 200 ] ], [ :get, ".well-known/smart-configuration", {}, [ 200 ] ],
+    [ :get, "smart/style", {}, [ 200 ] ], [ :post, "oauth/token", { grant_type: "client_credentials" }, [ 400, 401 ] ]
+  ].freeze
   BEARER_ROWS = [
     [ "Bearer abc", true ], [ "bearer abc", true ], [ "BEARER a.b-c", true ], [ nil, false ], [ "", false ],
     [ "Basic dXNlcjpwYXNz", false ], [ "Bearer", false ], [ "Bearer ", false ], [ "Token abc", false ]
@@ -164,11 +181,44 @@ class FhirApiDisclosureSurfaceTest < ActionDispatch::IntegrationTest
     assert_not_equal 404, response.status
   end
 
-  test "discovery stays open with every surface closed" do
+  test "discovery, the launch style and the backend services token stay open with every surface closed" do
     configure(ABSENT)
-    %w[metadata .well-known/smart-configuration].each do |path|
-      get "#{BASE}/#{path}"
-      assert_response :ok, path
+    STAYS_OPEN.each do |verb, path, params, statuses|
+      send(verb, "#{BASE}/#{path}", params: params)
+      assert_includes statuses, response.status, path
+    end
+  end
+
+  [ *CLOSED_CONFIGS.map { |label, value| [ label, value, true ] }, [ "fhir_api", %i[fhir_api], false ] ].each do |label, value, closed|
+    test "the SMART launch flow #{closed ? 'answers 404' : 'is served'} when the config is #{label}" do
+      configure(value)
+      wrong = SMART_LAUNCH_ROUTES.filter_map do |verb, path, params|
+        send(verb, "#{BASE}/#{path}", params: params)
+        "#{verb} #{path} #{response.status}" unless closed ? response.status == 404 && host_answered? : response.status != 404
+      end
+      assert_empty wrong
+    end
+  end
+
+  test "each SMART launch controller declares fhir_api itself for every action routed to it" do
+    routed = EHR::Engine.routes.routes.map { |route| route.defaults.values_at(:controller, :action) }
+      .select { |controller, _| SMART_LAUNCH_CONTROLLERS.include?(controller.to_s.delete_prefix(NS)) }.uniq
+    assert_equal SMART_LAUNCH_CONTROLLERS, routed.map { |controller, _| controller.delete_prefix(NS) }.uniq.sort_by { |c| SMART_LAUNCH_CONTROLLERS.index(c) }
+    undeclared = routed.reject do |controller, action|
+      klass = "#{controller}_controller".camelize.constantize
+      klass.respond_to?(:disclosure_surface_rules) && unconditional_rules(klass, action).any? { |rule| rule[:surface] == :fhir_api }
+    end
+    assert_empty undeclared.map { |pair| pair.join("#") }
+  end
+
+  test "a rule whose predicate raises fails closed, and serves once the surface is open" do
+    with_routing do |set|
+      set.draw { get "Probe", to: "#{NS}disclosure_probe_raising#show" }
+      [ [ ABSENT, 404 ], [ %i[bulk_export ccda], 404 ], [ %i[fhir_api], 204 ] ].each do |value, status|
+        configure(value)
+        get "/Probe"
+        assert_equal [ status, "" ], [ response.status, response.body ], value.inspect
+      end
     end
   end
 
@@ -194,6 +244,10 @@ class FhirApiDisclosureSurfaceTest < ActionDispatch::IntegrationTest
     [ "a controller gating only another action", "Widget/:id", "disclosure_probe_other_action#show", true ],
     [ "an uppercase path on a non-API controller", "Gadget",   "capability_statements#show",         true ],
     [ "a $operation on a non-API controller",    "$probe",     "capability_statements#show",         true ],
+    [ "an uppercase segment after a prefix",     "fhir/Patient/:id", "capability_statements#show",   true ],
+    [ "an uppercase segment after an optional scope", "(:tenant)/Observation", "capability_statements#show", true ],
+    [ "a $operation after a lowercase segment",  "widgets/$probe", "capability_statements#show",     true ],
+    [ "lowercase segments and params only",      "widgets/:id/parts", "capability_statements#show",  false ],
     [ "a controller declaring fhir_api",         "Widget/:id", "disclosure_probe_gated#show",        false ],
     [ "a lowercase path on a non-API controller", "widgets",   "capability_statements#show",         false ]
   ].freeze
