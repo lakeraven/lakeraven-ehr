@@ -63,3 +63,37 @@ When("the mock answers through its global array") do
   RpmsRpc.configuration.client.call_rpc("ORWU USERINFO")
   RpmsRpc::MockClient.new.call_rpc_global_array("ORWPT LIST ALL", "A", 1)
 end
+
+# travel_to stubs Time.now, Date.today and DateTime.now through SimpleStubs:
+# moving the clock is not a gateway stub. The After below puts the clock back.
+World(ActiveSupport::Testing::TimeHelpers)
+
+When("the clock is moved and the persona reads from the stack") do
+  travel_to Time.utc(2001, 2, 3, 4, 5, 6)
+  raise "the clock was not moved" unless Time.now.year == 2001 && Date.today.year == 2001
+
+  RpmsRpc.configuration.client.call_rpc("ORWU USERINFO")
+end
+
+When("the clock is moved and a gateway is stubbed bare") do
+  travel_to Time.utc(2001, 2, 3, 4, 5, 6)
+  @bare_stub_original = LiveStackReady::ThrowawayGateway.singleton_class.instance_method(:find)
+  LiveStackReady::ThrowawayGateway.define_singleton_method(:find) { |_| :from_the_stub }
+  RpmsRpc.configuration.client.call_rpc("ORWU USERINFO")
+end
+
+After do
+  travel_back
+  raise "the clock was not put back" if Time.now.year == 2001
+end
+
+# The real mock refuses a read, the app swallows the refusal, and the persona
+# reads from the stack as well.
+When("the app swallows an error from the mock") do
+  RpmsRpc.configuration.client.call_rpc("ORWU USERINFO")
+  begin
+    LiveStackReady::RefusingMock.new.call_rpc("ORWPT LIST ALL", "A", 1)
+  rescue RpmsRpc::Error
+    nil
+  end
+end

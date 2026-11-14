@@ -1333,6 +1333,86 @@ class LiveStackTest < ActiveSupport::TestCase
     end
   end
 
+  # -- a mock read that raises still reached the mock (R6-3) ----------------
+
+  # The real mock under the watch, whose seeded reply raises what the test
+  # asks: every read path reads through seeded_reply.
+  def raising_real_mock(error)
+    Class.new(RpmsRpc::MockClient) do
+      prepend LiveStack::MockWatch
+
+      define_method(:seeded_reply) { |_rpc_name, *_params| raise error }
+    end.new
+  end
+
+  test "a mock read that raises a broker error raises it unchanged and still says it was the mock, on every read path" do
+    MOCK_READS.each do |read|
+      refusal = Client::RpcRefusedError.new("refused #{ACCESS} #{VERIFY}")
+      mock = raising_real_mock(refusal)
+
+      raised = assert_raises(Client::RpcRefusedError) { mock.public_send(read, "ORWPT LIST ALL", "A", 1) }
+
+      assert_same refusal, raised, "#{read}: the mock's error was replaced"
+      evidence = LiveStack.take_evidence
+      assert_nothing_counted evidence, read
+      assert_equal [ "ORWPT LIST ALL was answered by the mock, not the stack" ], evidence.reasons, read
+      evidence.reasons.each { |reason| assert_no_codes reason }
+    end
+  end
+
+  test "a mock read that raises anything else raises it unchanged and still says it was the mock" do
+    MOCK_READS.each do |read|
+      error = RuntimeError.new("not a broker error")
+      mock = raising_real_mock(error)
+
+      raised = assert_raises(RuntimeError) { mock.public_send(read, "ORWPT LIST ALL") }
+
+      assert_same error, raised, read
+      assert_equal [ "ORWPT LIST ALL was answered by the mock, not the stack" ], LiveStack.take_evidence.reasons, read
+    end
+  end
+
+  test "a mock read that raises is recorded even armed and signed on as the persona" do
+    mock = raising_real_mock(Client::RpcRefusedError.new("refused"))
+    mock.set_authenticated(PERSONA_DUZ)
+    LiveStack.arm!(client: mock, persona_duz: PERSONA_DUZ)
+
+    assert_raises(Client::RpcRefusedError) { mock.call_rpc("ORWU USERINFO") }
+
+    evidence = LiveStack.take_evidence
+    assert_nothing_counted evidence
+    assert_equal [ "ORWU USERINFO was answered by the mock, not the stack" ], evidence.reasons
+  end
+
+  test "a mock read that raises inside transparently records nothing, and the watch decides again after it" do
+    mock = raising_real_mock(Client::RpcRefusedError.new("refused"))
+
+    LiveStack.transparently { assert_raises(Client::RpcRefusedError) { mock.call_rpc("ORWU USERINFO") } }
+    assert_equal [], LiveStack.take_evidence.reasons
+
+    assert_raises(Client::RpcRefusedError) { mock.call_rpc_lines("ORQQAL LIST", 4) }
+    watched_real_mock.call_rpc("ORWU USERINFO")
+    assert_equal [ "ORQQAL LIST was answered by the mock, not the stack",
+                   "ORWU USERINFO was answered by the mock, not the stack" ], LiveStack.take_evidence.reasons
+  end
+
+  test "a scenario that swallowed an error from the mock did not run, whatever the persona read from the stack" do
+    MOCK_READS.each do |read|
+      stack = armed_client
+      stack.call_rpc("ORWU USERINFO")
+      begin
+        raising_real_mock(Client::RpcRefusedError.new("refused")).public_send(read, "ORWPT LIST ALL", "A", 1)
+      rescue RpmsRpc::Error
+        nil
+      end
+
+      evidence = LiveStack.take_evidence
+      assert_equal 1, evidence.rpc_count, "#{read}: the persona's own read was not counted"
+      reason = LiveStack.verdict(evidence: evidence, client: stack, stack_client: stack, persona_duz: PERSONA_DUZ)
+      assert_equal "ORWPT LIST ALL was answered by the mock, not the stack", reason, read
+    end
+  end
+
   # -- a gateway stubbed anywhere is seen (F2) ------------------------------
 
   STUBBED = "a gateway was stubbed: "
@@ -1533,6 +1613,82 @@ class LiveStackTest < ActiveSupport::TestCase
     assert_equal [ "#{STUBBED}throwaway<gateway>.find" ], LiveStack.take_evidence.reasons, "install_singleton_stub"
   end
 
+  # -- the watch never asks the module itself (R6-2) ------------------------
+
+  # A class may answer name and respond_to? in its own way. The watch reads
+  # both from Module and Kernel, so a stub is defined, and named, as unwatched.
+  test "a watched module whose own name takes an argument still defines its singleton methods, under its real name" do
+    armed_client
+    gateway = throwaway_gateway
+    gateway.singleton_class.send(:define_method, :name) { |locale| "a label in #{locale}" }
+
+    assert_equal :find, gateway.define_singleton_method(:find) { |_ien| :from_the_stub }
+    assert_equal :lookup, gateway.define_singleton_method(:lookup) { |_ien| :new }
+
+    assert_equal :from_the_stub, gateway.find(7)
+    assert_equal :new, gateway.lookup(7)
+    assert_equal "a label in en", gateway.name("en")
+    assert_equal [ "#{STUBBED}throwaway<gateway>.find" ], LiveStack.take_evidence.reasons
+  end
+
+  test "a watched module whose own respond_to? raises still defines its singleton methods" do
+    armed_client
+    gateway = throwaway_gateway
+    gateway.singleton_class.send(:define_method, :respond_to?) { |*| raise "respond_to? was asked of the module" }
+
+    assert_equal :find, gateway.define_singleton_method(:find) { |_ien| :from_the_stub }
+    assert_equal :lookup, gateway.define_singleton_method(:lookup) { |_ien| :new }
+
+    assert_equal :from_the_stub, gateway.find(7)
+    assert_equal :new, gateway.lookup(7)
+    assert_equal [ "#{STUBBED}throwaway<gateway>.find" ], LiveStack.take_evidence.reasons
+  end
+
+  test "a watched module whose own respond_to? denies everything is still seen replacing a method" do
+    armed_client
+    gateway = throwaway_gateway
+    gateway.singleton_class.send(:define_method, :respond_to?) { |*| false }
+
+    gateway.define_singleton_method(:find) { |_ien| :from_the_stub }
+
+    assert_equal [ "#{STUBBED}throwaway<gateway>.find" ], LiveStack.take_evidence.reasons
+  end
+
+  test "a replacement on a watched module that overrides name records the module's real name" do
+    armed_client
+    gateway = throwaway_gateway
+    gateway.singleton_class.send(:define_method, :name) { "Another::Name" }
+
+    gateway.define_singleton_method(:find) { |_ien| :from_the_stub }
+
+    assert_equal "Another::Name", gateway.name
+    assert_equal [ "#{STUBBED}throwaway<gateway>.find" ], LiveStack.take_evidence.reasons
+  end
+
+  test "a named watched module that answers name with nil is still a named module" do
+    armed_client
+    gateway = throwaway_gateway
+    gateway.singleton_class.send(:define_method, :name) { nil }
+
+    gateway.define_singleton_method(:find) { |_ien| :from_the_stub }
+
+    assert_equal [ "#{STUBBED}throwaway<gateway>.find" ], LiveStack.take_evidence.reasons
+  end
+
+  test "stub_installed names the module by Module#name, whatever the module answers itself" do
+    armed_client
+    relabelled = throwaway_gateway
+    relabelled.singleton_class.send(:define_method, :name) { "Another::Name" }
+    with_arity = throwaway_gateway("throwaway<record>")
+    with_arity.singleton_class.send(:define_method, :name) { |locale| "a label in #{locale}" }
+
+    LiveStack.stub_installed(relabelled, :find)
+    LiveStack.stub_installed(with_arity, :find)
+
+    assert_equal [ "#{STUBBED}throwaway<gateway>.find", "#{STUBBED}throwaway<record>.find" ],
+                 LiveStack.take_evidence.reasons
+  end
+
   # -- the ready wiring is LiveStack's own (F3) -----------------------------
 
   # Throwaway classes for install!, so nothing global is prepended onto.
@@ -1554,7 +1710,7 @@ class LiveStackTest < ActiveSupport::TestCase
   def keywords(name) = LiveStack.method(name).parameters.group_by(&:first).transform_values { |all| all.map(&:last) }
 
   test "install! takes the client and the persona's DUZ, and the classes to watch by default" do
-    assert_equal({ keyreq: %i[client persona_duz], key: %i[mock_class module_class] }, keywords(:install!))
+    assert_equal({ keyreq: %i[client persona_duz], key: %i[mock_class module_class time_stubs_class] }, keywords(:install!))
   end
 
   test "install! prepends each watch onto the class it is given, and onto nothing else" do
@@ -1622,6 +1778,215 @@ class LiveStackTest < ActiveSupport::TestCase
     evidence = LiveStack.take_evidence
     assert_equal 1, evidence.rpc_count
     assert_equal [ "ORWPT LIST ALL was answered by the mock, not the stack" ], evidence.reasons
+  end
+
+  # -- moving the clock is not a gateway stub (R6-1) ------------------------
+
+  SimpleStubs = ActiveSupport::Testing::SimpleStubs
+
+  # travel_to, travel and freeze_time stub Time.now, Date.today and
+  # DateTime.now through SimpleStubs#stub_object, a define_singleton_method on
+  # a named module. Throwaway subclasses, so the real SimpleStubs is untouched.
+  def watched_time_stubs_class = Class.new(SimpleStubs) { prepend LiveStack::TimeStubWatch }
+
+  # A clock to move: a named module of the watched class that answers now.
+  def throwaway_clock(name = "throwaway<clock>")
+    watched_module_class.new.tap do |clock|
+      clock.set_temporary_name(name)
+      clock.singleton_class.send(:define_method, :now) { :the_real_time }
+    end
+  end
+
+  test "install! takes the time stubs class last, SimpleStubs by default" do
+    assert_equal :time_stubs_class, LiveStack.method(:install!).parameters.last.last
+    source = File.read(File.expand_path("../support/live_stack.rb", __dir__))
+    assert_match(/def install!\([^)]*\btime_stubs_class: ActiveSupport::Testing::SimpleStubs\)/m, source)
+  end
+
+  test "install! prepends TimeStubWatch onto the time stubs class it is given, once" do
+    client = throwaway_client_class.new(PERSONA_DUZ)
+    mock_class = throwaway_mock_class
+    module_class = Class.new(Module)
+    time_stubs_class = Class.new(SimpleStubs)
+
+    2.times do
+      LiveStack.install!(client: client, persona_duz: PERSONA_DUZ, mock_class: mock_class,
+                         module_class: module_class, time_stubs_class: time_stubs_class)
+    end
+
+    assert_equal 1, time_stubs_class.ancestors.count(LiveStack::TimeStubWatch)
+    assert_equal 1, client.class.ancestors.count(LiveStack::RefusalWatch)
+    assert_equal 1, mock_class.ancestors.count(LiveStack::MockWatch)
+    assert_equal 1, module_class.ancestors.count(LiveStack::StubWatch)
+    [ client.class, mock_class, module_class, Module ].each do |other|
+      assert_not_includes other.ancestors, LiveStack::TimeStubWatch
+    end
+  end
+
+  test "after install! a moved clock is no gateway stub, and a stubbed gateway still is" do
+    module_class = Class.new(Module)
+    time_stubs_class = Class.new(SimpleStubs)
+    LiveStack.install!(client: throwaway_client_class.new(PERSONA_DUZ), persona_duz: PERSONA_DUZ,
+                       mock_class: throwaway_mock_class, module_class: module_class,
+                       time_stubs_class: time_stubs_class)
+    clock = module_class.new
+    clock.set_temporary_name("throwaway<clock>")
+    clock.singleton_class.send(:define_method, :now) { :the_real_time }
+    stubs = time_stubs_class.new
+
+    stubs.stub_object(clock, :now) { :the_moved_time }
+    assert_equal :the_moved_time, clock.now
+    stubs.unstub_all!
+    assert_equal :the_real_time, clock.now
+    assert_equal [], LiveStack.take_evidence.reasons
+
+    clock.define_singleton_method(:now) { :stubbed_bare }
+    assert_equal [ "#{STUBBED}throwaway<clock>.now" ], LiveStack.take_evidence.reasons
+  end
+
+  test "TimeStubWatch is a module that watches stub_object and unstub_all! alone" do
+    assert_instance_of Module, LiveStack::TimeStubWatch
+    assert_equal %i[stub_object unstub_all!], LiveStack::TimeStubWatch.instance_methods(false).sort
+  end
+
+  test "a clock moved through watched SimpleStubs is moved and put back as unwatched, and records no reason" do
+    armed_client
+    clock = throwaway_clock
+    stubs = watched_time_stubs_class.new
+    unwatched_clock = throwaway_clock
+    unwatched = Class.new(SimpleStubs).new
+
+    stubbed = stubs.stub_object(clock, :now) { :the_moved_time }
+    expected = LiveStack.transparently { unwatched.stub_object(unwatched_clock, :now) { :the_moved_time } }
+    assert_equal expected, stubbed
+    assert_equal :the_moved_time, clock.now
+    assert stubs.stubbed?
+    assert_equal [], LiveStack.take_evidence.reasons, "moving the clock"
+
+    # Moving it again takes the first stub off and defines another.
+    stubs.stub_object(clock, :now) { :moved_again }
+    assert_equal :moved_again, clock.now
+    assert_equal [], LiveStack.take_evidence.reasons, "moving the clock again"
+
+    assert_equal unwatched.unstub_all!, stubs.unstub_all!
+    assert_equal :the_real_time, clock.now
+    assert_not stubs.stubbed?
+    assert_equal [ :now ], clock.singleton_methods.sort, "a stub's alias was left behind"
+    assert_equal [], LiveStack.take_evidence.reasons, "putting the clock back"
+  end
+
+  # The control: the same stub, through SimpleStubs without the watch, is what
+  # StubWatch reports, so the test above is about TimeStubWatch.
+  test "a clock moved through SimpleStubs without TimeStubWatch is recorded as a gateway stub" do
+    armed_client
+    clock = throwaway_clock
+    stubs = Class.new(SimpleStubs).new
+
+    stubs.stub_object(clock, :now) { :the_moved_time }
+    stubs.unstub_all!
+
+    assert_equal [ "#{STUBBED}throwaway<clock>.now" ], LiveStack.take_evidence.reasons
+  end
+
+  test "a gateway stubbed after the clock was moved, or put back, is still recorded" do
+    armed_client
+    clock = throwaway_clock
+    gateway = throwaway_gateway
+    stubs = watched_time_stubs_class.new
+
+    stubs.stub_object(clock, :now) { :the_moved_time }
+    assert_not LiveStack.transparent?, "the watch stayed aside after stub_object"
+    gateway.define_singleton_method(:find) { |_ien| :from_the_stub }
+    assert_equal [ "#{STUBBED}throwaway<gateway>.find" ], LiveStack.take_evidence.reasons, "after stub_object"
+
+    stubs.unstub_all!
+    assert_not LiveStack.transparent?, "the watch stayed aside after unstub_all!"
+    clock.define_singleton_method(:now) { :stubbed_bare }
+    assert_equal [ "#{STUBBED}throwaway<clock>.now" ], LiveStack.take_evidence.reasons, "after unstub_all!"
+  end
+
+  test "a gateway stubbed inside a moved clock's own stub is recorded: only stub_object itself stands aside" do
+    armed_client
+    clock = throwaway_clock
+    gateway = throwaway_gateway
+    stubs = watched_time_stubs_class.new
+    stubs.stub_object(clock, :now) do
+      gateway.define_singleton_method(:find) { |_ien| :from_the_stub }
+      :the_moved_time
+    end
+
+    assert_equal :the_moved_time, clock.now
+
+    assert_equal [ "#{STUBBED}throwaway<gateway>.find" ], LiveStack.take_evidence.reasons
+  end
+
+  # SimpleStubs whose own two methods say whether the watch stood aside while
+  # they ran, and answer or raise what the test asks.
+  def probing_time_stubs(raises: nil)
+    probe = Class.new(SimpleStubs) do
+      attr_reader :seen
+
+      define_method(:stub_object) do |object, method_name, &block|
+        (@seen ||= []) << [ :stub_object, object, method_name, block, LiveStack.transparent? ]
+        raise raises if raises
+
+        :stub_object_answer
+      end
+
+      define_method(:unstub_all!) do
+        (@seen ||= []) << [ :unstub_all!, LiveStack.transparent? ]
+        raise raises if raises
+
+        :unstub_all_answer
+      end
+    end
+    Class.new(probe) { prepend LiveStack::TimeStubWatch }.new
+  end
+
+  test "TimeStubWatch runs stub_object and unstub_all! with the watch aside, and answers what they answer" do
+    stubs = probing_time_stubs
+    clock = throwaway_clock
+    block = proc { :the_moved_time }
+
+    assert_equal :stub_object_answer, stubs.stub_object(clock, :now, &block)
+    assert_equal :unstub_all_answer, stubs.unstub_all!
+
+    assert_equal [ [ :stub_object, clock, :now, block, true ], [ :unstub_all!, true ] ], stubs.seen
+    assert_not LiveStack.transparent?
+  end
+
+  test "an error raised inside stub_object or unstub_all! is raised unchanged, and the watch is back" do
+    armed_client
+    [ RuntimeError.new("not a stub"), NotImplementedError.new("not a StandardError") ].each do |error|
+      stubs = probing_time_stubs(raises: error)
+
+      raised = assert_raises(error.class) { stubs.stub_object(throwaway_clock, :now) { :the_moved_time } }
+      assert_same error, raised
+      assert_not LiveStack.transparent?, "the watch stayed aside after stub_object raised"
+
+      raised = assert_raises(error.class) { stubs.unstub_all! }
+      assert_same error, raised
+      assert_not LiveStack.transparent?, "the watch stayed aside after unstub_all! raised"
+    end
+    assert_equal [], LiveStack.take_evidence.reasons
+  end
+
+  test "stubbing a method the clock does not answer raises as unwatched, and a later gateway stub is recorded" do
+    armed_client
+    clock = throwaway_clock
+    gateway = throwaway_gateway
+    stubs = watched_time_stubs_class.new
+    expected = assert_raises(NameError) { Class.new(SimpleStubs).new.stub_object(throwaway_clock, :today) { :moved } }
+
+    raised = assert_raises(NameError) { stubs.stub_object(clock, :today) { :moved } }
+
+    assert_equal expected.class, raised.class
+    assert_equal :today, raised.name
+    assert_not clock.respond_to?(:today, true)
+    assert_not LiveStack.transparent?
+    assert_equal [], LiveStack.take_evidence.reasons
+    gateway.define_singleton_method(:find) { |_ien| :from_the_stub }
+    assert_equal [ "#{STUBBED}throwaway<gateway>.find" ], LiveStack.take_evidence.reasons
   end
 
   REFUSED_AGAIN = "the persona's sign-on was refused"

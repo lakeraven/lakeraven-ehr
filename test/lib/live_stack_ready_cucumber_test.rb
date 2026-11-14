@@ -84,4 +84,24 @@ class LiveStackReadyCucumberTest < ActiveSupport::TestCase
   test "a scenario the mock answered through call_rpc_global_array is not run" do
     assert_not_run "The mock answers through its global array", reason: "ORWPT LIST ALL was answered by the mock"
   end
+
+  # travel_to, travel and freeze_time stub Time.now, Date.today and DateTime.now
+  # through ActiveSupport's SimpleStubs, watched by LiveStack.install!'s default.
+  test "a scenario that moved the clock and read from the stack is passed" do
+    output, status = cucumber("The clock is moved")
+
+    assert_equal 0, status.exitstatus, "expected exit 0:\n#{output}"
+    assert_match(/^1 scenario \(1 passed\)$/, output, "expected the one scenario passed:\n#{output}")
+    assert_not_includes output, "not run:"
+  end
+
+  test "a scenario that moved the clock and stubbed a gateway bare is not run, and names the gateway" do
+    assert_not_run "The clock is moved and a gateway is stubbed bare",
+                   reason: "a gateway was stubbed: LiveStackReady::ThrowawayGateway.find"
+  end
+
+  # The mock raised, so it answered nothing, but the scenario still reached it.
+  test "a scenario that swallowed an error from the mock is not run" do
+    assert_not_run "The app swallows an error from the mock", reason: "ORWPT LIST ALL was answered by the mock"
+  end
 end

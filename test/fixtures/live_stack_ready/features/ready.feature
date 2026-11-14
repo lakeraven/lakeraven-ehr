@@ -31,3 +31,12 @@ Feature: A ready stack run reports a scenario as run only with evidence
 
   Scenario: The mock answers through its global array
     When the mock answers through its global array
+
+  Scenario: The clock is moved
+    When the clock is moved and the persona reads from the stack
+
+  Scenario: The clock is moved and a gateway is stubbed bare
+    When the clock is moved and a gateway is stubbed bare
+
+  Scenario: The app swallows an error from the mock
+    When the app swallows an error from the mock
