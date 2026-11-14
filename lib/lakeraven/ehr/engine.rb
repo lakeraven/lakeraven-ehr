@@ -16,6 +16,10 @@ module Lakeraven
           unless Doorkeeper::Application.include?(Lakeraven::EHR::BackendClientRegistration)
             Doorkeeper::Application.include(Lakeraven::EHR::BackendClientRegistration)
           end
+          # Revoking a token releases its service-account session (#996).
+          unless Doorkeeper::AccessToken.include?(Lakeraven::EHR::ServiceAccountLeaseRelease)
+            Doorkeeper::AccessToken.include(Lakeraven::EHR::ServiceAccountLeaseRelease)
+          end
         end
       end
 
