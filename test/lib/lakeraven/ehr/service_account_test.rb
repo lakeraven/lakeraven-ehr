@@ -14,6 +14,14 @@ class LakeravenEhrServiceAccountTest < ActiveSupport::TestCase
     def dig(*keys) = @tree.dig(*keys)
   end
 
+  # Credentials the host cannot read: every read raises.
+  class UnreadableCredentials
+    def initialize(error) = @error = error
+    def dig(*) = raise(@error, "synthetic unreadable credentials")
+  end
+
+  UNREADABLE = [ TypeError, ActiveSupport::MessageEncryptor::InvalidMessage ].freeze
+
   setup do
     @saved_env = ENV_KEYS.to_h { |key| [ key, ENV.key?(key) ? ENV[key] : :missing ] }
     ENV_KEYS.each { |key| ENV.delete(key) }
@@ -25,6 +33,10 @@ class LakeravenEhrServiceAccountTest < ActiveSupport::TestCase
 
   def codes_with_credentials(tree = {})
     with_stub(Rails.application, :credentials, FakeCredentials.new(tree)) { Lakeraven::EHR::ServiceAccount.codes }
+  end
+
+  def codes_with_unreadable_credentials(error)
+    with_stub(Rails.application, :credentials, UnreadableCredentials.new(error)) { Lakeraven::EHR::ServiceAccount.codes }
   end
 
   test "nil when neither credentials nor ENV name a service account" do
@@ -78,5 +90,25 @@ class LakeravenEhrServiceAccountTest < ActiveSupport::TestCase
     tree = { rpms: { service_account: { access_code: "SVCCRED1", verify_code: "" } } }
 
     assert_nil codes_with_credentials(tree)
+  end
+
+  # Credentials that cannot be read are no credentials: the ENV pair decides.
+  UNREADABLE.each do |error|
+    test "credentials that raise #{error.name} fall through to the ENV pair" do
+      ENV["RPMS_SERVICE_ACCESS_CODE"] = "SVCACCT1"
+      ENV["RPMS_SERVICE_VERIFY_CODE"] = "SVCACCT1!!"
+
+      assert_equal [ "SVCACCT1", "SVCACCT1!!" ], codes_with_unreadable_credentials(error)
+    end
+
+    test "nil when credentials raise #{error.name} and ENV names no service account" do
+      assert_nil codes_with_unreadable_credentials(error)
+    end
+
+    test "nil when credentials raise #{error.name} and ENV names only one code" do
+      ENV["RPMS_SERVICE_ACCESS_CODE"] = "SVCACCT1"
+
+      assert_nil codes_with_unreadable_credentials(error)
+    end
   end
 end
