@@ -246,38 +246,14 @@ if LIVE_RPMS
     end
 
     # The stack persona again, and again without XUPROGMODE, for scenarios
-    # that signed on as someone else. Runs with the watch aside, so
-    # AuthenticationService's own rescues see the broker's errors as in
-    # production. Reasons only, never the broker's message: it could carry the
-    # codes.
-    #
-    # Called from an After hook. A failure clears the client's signed-on
-    # identity and raises NotRun, so this scenario is skipped as not run
-    # (an abort would report it failed) and the verdict's DUZ check reports
-    # every later scenario not run. It acts on LIVE_STACK_CLIENT itself,
-    # whatever client the scenario left installed.
+    # that signed on as someone else (LiveStack.re_sign_on). Called from an
+    # After hook: a failure clears LIVE_STACK_CLIENT's identity and raises
+    # NotRun (LiveStack.decline_sign_on!), so this scenario is skipped as not
+    # run and every later one fails the verdict's DUZ check.
     def stack_sign_on!
-      result = nil
-      reason = LiveStack.transparently do
-        RpmsRpc.with_client(LIVE_STACK_CLIENT) do
-          result = Lakeraven::EHR::AuthenticationService.new.authenticate(
-            access_code: LIVE_STACK_BINDING.access_code, verify_code: LIVE_STACK_BINDING.verify_code
-          )
-          if !result.success? then "the persona's sign-on was refused"
-          elsif RpmsRpc::Authentication.held_keys([ LiveStack::PROGRAMMER_KEY ]) != []
-            "the persona holds #{LiveStack::PROGRAMMER_KEY}, or it could not be asked"
-          end
-        end
-      rescue StandardError
-        "the persona's sign-on failed"
-      end
-      stack_decline(reason) if reason
+      result, reason = LiveStack.re_sign_on(client: LIVE_STACK_CLIENT, binding: LIVE_STACK_BINDING)
+      LiveStack.decline_sign_on!(LIVE_STACK_CLIENT, reason) if reason
       result
-    end
-
-    def stack_decline(reason)
-      LIVE_STACK_CLIENT.clear_authenticated if LIVE_STACK_CLIENT.respond_to?(:clear_authenticated)
-      raise LiveStack.not_run(reason), cause: nil
     end
   end
 
@@ -285,11 +261,10 @@ if LIVE_RPMS
     # prepare signed the persona on and checked XUPROGMODE: no second sign-on.
     # The client the persona is signed on through: a call counts as evidence,
     # and a scenario as run, only on this very object (LiveStack.verdict).
+    # install! arms the watch and watches the client, the mock and gateway
+    # stubs.
     LIVE_STACK_CLIENT = RpmsRpc.configuration.client
-    LiveStack.arm!(client: LIVE_STACK_CLIENT, persona_duz: LIVE_STACK.persona_duz)
-    LIVE_STACK_CLIENT.class.prepend(LiveStack::RefusalWatch)
-    # An answer from the mock is never evidence.
-    RpmsRpc::MockClient.prepend(LiveStack::MockWatch)
+    LiveStack.install!(client: LIVE_STACK_CLIENT, persona_duz: LIVE_STACK.persona_duz)
     warn "[stack] ready: #{LIVE_STACK_BINDING.broker} #{LIVE_STACK_BINDING.host}:#{LIVE_STACK_BINDING.port}"
   else
     live_user = LiveRpmsSession.sign_on!.value
