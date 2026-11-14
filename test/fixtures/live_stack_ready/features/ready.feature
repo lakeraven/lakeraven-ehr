@@ -22,3 +22,12 @@ Feature: A ready stack run reports a scenario as run only with evidence
 
   Scenario: A gateway is stubbed
     When a gateway is stubbed
+
+  Scenario: A gateway is stubbed bare
+    When a gateway is stubbed bare
+
+  Scenario: The mock answers through its lines
+    When the mock answers through its lines
+
+  Scenario: The mock answers through its global array
+    When the mock answers through its global array
