@@ -6,7 +6,9 @@
 # the rpms-rpc API the engine uses. On a mock run it is seeded into the mock,
 # so the mock says what RPMS says. On a live run (LIVE_RPMS=1) it is checked
 # against RPMS before the first scenario, and the run aborts on any
-# difference: the fake cannot drift from the backend it stands in for.
+# difference: the fake cannot drift from the backend it stands in for. A ready
+# stack run (LIVE_STACK, #962) skips the check: it signs on as the demo personas,
+# needs the pinned build, and would print the stack's patient rows on a diff.
 #
 # Values are verbatim, including RPMS's own quirks (trailing spaces in problem
 # narratives, mixed-case ORWU NEWPERS names). Change a value only after
@@ -154,7 +156,7 @@ module RpmsDemoSite
   end
 end
 
-if LIVE_RPMS
+if LIVE_RPMS && !LIVE_STACK&.ready?
   diffs = RpmsDemoSite.differences
   abort(<<~MSG) unless diffs.empty?
     LIVE_RPMS=1: RPMS disagrees with features/support/rpms_demo_site.rb (#{RpmsDemoSite::BUILD}).
