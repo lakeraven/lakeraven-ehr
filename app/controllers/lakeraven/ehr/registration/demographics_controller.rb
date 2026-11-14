@@ -11,13 +11,15 @@ module Lakeraven
         # GET /registration/patients/:dfn/demographics/edit
         def edit
           @demographics = PatientDemographics.from_record(@record)
+          @demographics.site_settings = registration_settings
           render_form(:ok)
         end
 
         # PATCH /registration/patients/:dfn/demographics
         def update
           @demographics = PatientDemographics.new(demographics_params)
-          return render_form(:unprocessable_content) unless @demographics.valid?
+          @demographics.site_settings = registration_settings
+          return render_form(refused_form_status(@demographics)) unless @demographics.valid?
 
           save(@demographics, PatientDemographics.from_record(@record), "Demographics saved.")
         end

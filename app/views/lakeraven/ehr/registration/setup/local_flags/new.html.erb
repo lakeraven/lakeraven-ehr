@@ -1,0 +1,21 @@
+<% page_title "Add a flag", "Setup" %>
+
+<%= page_header "Add a local flag",
+      "Flags affect every user who opens the patient, so plan how each one is assigned, reviewed and ended." %>
+
+<%= flash_alert id: "local-flag-alert" %>
+
+<%= form_with url: registration_setup_local_flags_path,
+      method: :post,
+      local: true,
+      id: "local-flag-form",
+      class: "card flex flex-col gap-4" do %>
+  <%= render "fields", entry: @entry, types: @types %>
+  <%= submit_tag "Add the flag",
+        class: "button-primary self-start" %>
+<% end %>
+
+<p class="mt-6">
+  <%= link_to "Back to the flags",
+        registration_setup_local_flags_path %>
+</p>

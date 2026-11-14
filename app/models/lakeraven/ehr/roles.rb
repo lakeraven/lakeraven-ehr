@@ -36,7 +36,7 @@ module Lakeraven
       # build, checked by test/models/lakeraven/ehr/roles_key_names_test.rb
       # against test/fixtures/security_keys/. The names follow the analyst's
       # profiles (rpms-ux docs/product-cycle/profiles.json) and the persona users
-      # the build ships (rpms-ops SEEDPERS); the decision is #578.
+      # the build ships (openrpms SEEDPERS); the decision is #578.
       #
       # No key is decided yet for consults, eligibility verification or dental:
       # those are open questions for the analyst, and until they are answered
@@ -67,6 +67,9 @@ module Lakeraven
         scheduling_user: "SDZMENU",
         scheduling_supervisor: "SDZSUP",
         scheduling_registration: "SDZREGMENU", # mini-registration from scheduling
+
+        # Patient record flags (DGPF)
+        record_flags_manager: "DGPF MANAGER", # defines the site's local (Category II) flags
 
         # Behavioral health (AMH)
         behavioral_health_user: "AMHZMENU",

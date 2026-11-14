@@ -237,10 +237,9 @@
 /* ---------------------------------------------------------------------------
  * The clinical patient banner (shared/_patient_banner).
  *
- * The chart (charts/show) is a self-contained page with its own inline CSS
- * for these classes. Every other page with a patient open (allergy entry,
- * consents, screenings) gets the banner through the layout, styled here to
- * look the same: the patient on a blue card, then their allergies.
+ * Every page with a patient open, the chart included, gets it through the
+ * layout: the patient on a blue card, the controls to change patient, then
+ * their allergies as one alert.
  * ------------------------------------------------------------------------ */
 @utility patient-banner__inner {
   @apply mx-auto flex max-w-5xl flex-col gap-2 px-4 pt-4 pb-2;
@@ -270,17 +269,36 @@
   }
 }
 
-/* Allergies stay in red even when the list is short: they are what a
-   clinician must not miss before writing anything on this chart. */
+/* Allergies are red unless RPMS says none are recorded: they are what a
+   clinician must not miss before writing anything on this chart. An unknown
+   list ("Not loaded") stays red. */
 @utility patient-banner__allergies {
   @apply flex flex-wrap items-center gap-2 rounded-lg border border-l-4 border-red-200 border-l-red-700 bg-red-50 px-4 py-2 text-sm text-red-900;
 
-  & > span:first-child {
-    @apply mr-1 font-bold tracking-wide uppercase;
+  & form {
+    @apply m-0;
   }
+}
 
-  & > span + span {
-    @apply rounded-full border border-red-200 bg-white px-3 py-0.5 font-semibold;
+@utility patient-banner__allergies--none {
+  @apply border-emerald-200 border-l-emerald-700 bg-emerald-50 text-emerald-900;
+}
+
+@utility patient-banner__allergies-label {
+  @apply mr-1 font-bold tracking-wide uppercase;
+}
+
+@utility allergy-chip {
+  @apply inline-flex items-center gap-1.5 rounded-full border border-red-200 bg-white px-3 py-0.5 font-semibold;
+}
+
+/* The chart's allergy actions sit at the end of the alert. */
+@utility patient-banner__allergy-actions {
+  @apply ml-auto flex flex-wrap items-center gap-2;
+
+  & a,
+  & button {
+    @apply min-h-8 rounded-md bg-white px-3 py-1 text-sm font-semibold text-red-900 no-underline shadow-none ring-1 ring-red-300 ring-inset hover:bg-red-100;
   }
 }
 

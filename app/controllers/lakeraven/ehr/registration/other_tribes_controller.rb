@@ -13,6 +13,8 @@ module Lakeraven
 
         rate_limit only: %i[index create destroy]
 
+        before_action -> { require_site_asks!(:other_tribes, "other tribes") }
+
         # GET /registration/patients/:dfn/other_tribes?tribe_search=
         def index
           @entry = OtherTribeEntry.new

@@ -6,6 +6,8 @@ module Lakeraven
       include PatientCompartment
       include ExportOwnership
 
+      # Closed (a bare 404) until the host opens :bulk_export by name (#968).
+      disclosure_surface :bulk_export
       rate_limit only: %i[create show destroy]
 
       # A bulk export IS a read of the patient's record; it needs read scope as

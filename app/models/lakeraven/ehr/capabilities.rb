@@ -60,7 +60,18 @@ module Lakeraven
         # RPMS is asked whether it accepts the signature code; before the note
         # is signed, TIU is asked which signing action the author holds on it
         # (ESignatureGateway.which_action), and only "sign" signs it.
-        "progress_note.write" => rule(any: %i[provider])
+        "progress_note.write" => rule(any: %i[provider]),
+        # Open the registration tables a site keeps itself: anyone who may edit one
+        # of them. BPRM: CanAccessSettings, narrowed to the tables lakeraven-ehr has.
+        "registration.setup" => rule(any: %i[registration_manager record_flags_manager]),
+        # Add and rename the eligibility modifiers a clerk picks as proof of a name
+        # change, a legal document or legal sex (#982). BPRM:
+        # CanAccessRegistrationTableMaintenance, AGZMGR on AG's menu.
+        "registration.table_maintenance" => rule(any: %i[registration_manager]),
+        # Define the site's local (Category II) patient record flags (#983). BPRM:
+        # CanAccessLocalFlagsTableMaintenance, DGPF MANAGER. Assigning a flag to a
+        # patient is another capability (DGPF ASSIGNMENT), not this one.
+        "record_flags.define" => rule(any: %i[record_flags_manager])
       }.freeze
 
       NAMES = TABLE.keys.freeze

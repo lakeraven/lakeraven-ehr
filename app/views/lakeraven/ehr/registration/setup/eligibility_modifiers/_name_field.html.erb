@@ -1,0 +1,10 @@
+<%= form_field :name, "Modifier", hint: "3 to 80 characters. Saved in capitals." do |aria| %>
+  <%= text_field_tag :name,
+        name,
+        id: "name",
+        required: true,
+        minlength: 3,
+        maxlength: 80,
+        autocomplete: "off",
+        aria: aria %>
+<% end %>

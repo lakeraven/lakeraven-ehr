@@ -1,7 +1,9 @@
 <%# Stays on screen while a long chart scrolls, so the clinician can still
     see which patient they are documenting on.
-    One partial on every page with a patient open. The chart styles these
-    classes inline; the layout's pages get them from engine.css. %>
+    One partial on every page with a patient open, the chart included:
+    the patient, the controls to change patient, then their allergies as
+    one alert. A page with more to say about allergies (the chart) fills
+    the alert with content_for :patient_allergies. %>
 <div
   id="patient-banner"
   class="sticky top-0 z-20 bg-slate-50"
@@ -31,24 +33,6 @@
         </div>
       <% end %>
 
-      <% if banner.allergies %>
-        <div
-          class="patient-banner__allergies"
-          data-allergies-state="<%= banner.allergies.state %>"
-        >
-          <span>Allergies</span>
-          <%# Loaded is the names alone. Otherwise #text is "None recorded",
-              "Not loaded", or the known names plus the incomplete-list note. %>
-          <% if banner.allergies.loaded? %>
-            <% banner.allergies.names.each do |name| %>
-              <span><%= name %></span>
-            <% end %>
-          <% else %>
-            <%= banner.allergies.text %>
-          <% end %>
-        </div>
-      <% end %>
-
       <div class="patient-banner__actions">
         <%# Another patient can be found without closing this chart (S-CHT-01.9). %>
         <% if patient_search_allowed? %>
@@ -65,6 +49,32 @@
                 method: :delete %>
         <% end %>
       </div>
+
+      <% if banner.allergies %>
+        <%# Red unless RPMS says the patient has none recorded. "Not loaded"
+            stays red: an unknown list is never a reassurance. %>
+        <div
+          class="patient-banner__allergies<%= " patient-banner__allergies--none" if banner.allergies.none_recorded? %>"
+          data-allergies-state="<%= banner.allergies.state %>"
+          role="note"
+          aria-label="Allergies"
+        >
+          <% if content_for?(:patient_allergies) %>
+            <%= yield :patient_allergies %>
+          <% else %>
+            <span class="patient-banner__allergies-label">Allergies</span>
+            <%# Loaded is the names alone. Otherwise #text is "None recorded",
+                "Not loaded", or the known names plus the incomplete-list note. %>
+            <% if banner.allergies.loaded? %>
+              <% banner.allergies.names.each do |name| %>
+                <span class="allergy-chip"><%= name %></span>
+              <% end %>
+            <% else %>
+              <span><%= banner.allergies.text %></span>
+            <% end %>
+          <% end %>
+        </div>
+      <% end %>
     </div>
   <% end %>
 </div>

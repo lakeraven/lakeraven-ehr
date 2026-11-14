@@ -1,0 +1,27 @@
+<% page_title "Make a resource group | Scheduling" %>
+
+<%= page_header "Make a resource group" %>
+
+<%= flash_alert id: "resource-group-alert" %>
+
+<%= form_with url: scheduling_resource_groups_path,
+      method: :post,
+      local: true,
+      id: "resource-group-form",
+      class: "card flex flex-col gap-4" do %>
+  <%= form_field :name, "Name", hint: "3 to 30 characters." do |aria| %>
+    <%= text_field_tag :name,
+          @name,
+          id: "name",
+          maxlength: 30,
+          required: true,
+          aria: aria %>
+  <% end %>
+  <%= submit_tag "Make group",
+        class: "button-primary self-start" %>
+<% end %>
+
+<p>
+  <%= link_to "Back to the groups",
+        scheduling_resource_groups_path %>
+</p>

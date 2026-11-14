@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "test_helper"
+require_relative "../support/live_registration_switches"
 
 # Live (rpms-ux S-REG-07.1): the registration persona records a patient's tribe,
 # blood quantum and eligibility on a real RPMS, and FileMan confirms IHS PATIENT
@@ -16,11 +17,18 @@ class LiveRegistrationEligibilityTest < ActionDispatch::IntegrationTest
   setup do
     skip "live writes: set LIVE_RPMS=1 and LIVE_RPMS_WRITES=1 against a throwaway container" unless
       defined?(LIVE_RPMS) && LIVE_RPMS && ENV["LIVE_RPMS_WRITES"] == "1"
+    # The demo division answers NO to these switches, which hide the section (#981).
+    @registration_switches = LiveRegistrationSwitches.turn_on(:blood_quantum, :enrollment_number)
     Lakeraven::EHR::LoginThrottle.reset!
     post "/lakeraven-ehr/login", params: { username: "PREG123", password: "PREG123!!" }
   end
 
-  teardown { LiveRpmsSession.sign_on! if defined?(LIVE_RPMS) && LIVE_RPMS && ENV["LIVE_RPMS_WRITES"] == "1" }
+  teardown do
+    next unless defined?(LIVE_RPMS) && LIVE_RPMS && ENV["LIVE_RPMS_WRITES"] == "1"
+
+    LiveRegistrationSwitches.put_back(@registration_switches)
+    LiveRpmsSession.sign_on!
+  end
 
   def path = "/lakeraven-ehr/registration/patients/#{DFN}/eligibility"
 

@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# The SECURITY KEYs and options the build gives each demo persona user (rpms-ops
+# The SECURITY KEYs and options the build gives each demo persona user (openrpms
 # SEEDPERS, from the analyst's profiles in rpms-ux profiles.json). Used by
 # PersonaScopesTest (no RPC) and LivePersonaScopesTest (a real RPMS).
 module DemoPersonaKeys

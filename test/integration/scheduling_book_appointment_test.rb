@@ -24,8 +24,8 @@ class SchedulingBookAppointmentTest < ActionDispatch::IntegrationTest
   end
 
   # Stands in for RpmsRpc::Scheduling and the patient selection; records bookings.
-  def with_rpms(appointments: [], book: ->(_args) { { success: true, appointment_id: 9 } }, setup: {})
-    blocks = [ { start_time: at(0, 1), end_time: at(8), slots: 0 }, { start_time: at(8), end_time: at(17), slots: 4 } ]
+  def with_rpms(appointments: [], book: ->(_args) { { success: true, appointment_id: 9 } }, setup: {}, blocks: nil)
+    blocks ||= [ { start_time: at(0, 1), end_time: at(8), slots: 0 }, { start_time: at(8), end_time: at(17), slots: 4 } ]
     log = (@booked ||= [])
     sched = RpmsRpc::Scheduling.singleton_class
     patient = RpmsRpc::Patient.singleton_class
@@ -227,4 +227,34 @@ test "S-SCH-01.13 SDZSUP books on a clinic that prohibits access" do
     assert_response :redirect
   end
 end
+
+  test "S-SCH-15.6 a booking past the clinic's maximum days for future booking is refused and names the limit" do
+    sign_in("scheduling_user")
+    far = Date.today + 40
+    far += 1 while far.saturday? || far.sunday?
+    rules = { id: 3, display_begins: nil, schedule_on_holidays: false, max_future_days: 30, prohibit_access: false,
+              privileged_users: [], inactivate_date: nil, reactivate_date: nil }
+    with_rpms(setup: { rules: rules }) do
+      post "/lakeraven-ehr/scheduling/clinics/2/appointments", params: book_params(start: "#{far.iso8601}T09:00")
+
+      assert_response :conflict
+      assert_select ".alert", text: /books at most 30 days ahead, through #{(Date.today + 30).strftime('%b %-d, %Y')}/
+    end
+
+    assert_empty booked
+  end
+
+  test "S-SCH-17.2 a time in a block whose access type prevents access is refused and names the access type" do
+    sign_in("scheduling_user")
+    lunch = { id: 6, name: "LUNCH", inactive: false, prevent_access: true }
+    blocks = [ { start_time: at(8), end_time: at(12), slots: 4, access_type_id: 1 }, { start_time: at(12), end_time: at(13), slots: 4, access_type_id: 6 } ]
+    with_rpms(blocks: blocks, setup: { access_types: [ SchedulingSetupStubs::GENERAL, lunch ] }) do
+      post "/lakeraven-ehr/scheduling/clinics/2/appointments", params: book_params(start: "2026-10-28T12:15")
+
+      assert_response :conflict
+      assert_select ".alert", text: /12:15 is in a LUNCH block, which takes no appointments/
+    end
+
+    assert_empty booked
+  end
 end

@@ -13,6 +13,7 @@ module Lakeraven
       # render as it is; until that page has it, the section is its own page.
       class PatientSectionController < WebController
         include RpmsUnavailableRendering
+        include RegistrationSiteSettingsLookup
 
         before_action :require_bprm_registration!
         before_action :require_authentication

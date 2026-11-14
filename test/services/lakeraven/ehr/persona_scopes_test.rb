@@ -6,7 +6,7 @@ require_relative "../../../support/demo_persona_keys"
 module Lakeraven
   module EHR
     # What each demo persona may do, from the SECURITY KEYs and options the build
-    # gives it (rpms-ops SEEDPERS, from the analyst's profiles). The chart comes
+    # gives it (openrpms SEEDPERS, from the analyst's profiles). The chart comes
     # from the option RPMS opens VueCentric's chart with, CIAV VUECENTRIC; what a
     # persona may change comes from its keys. No RPC: the sets are fixed here, as
     # the build files them.

@@ -238,6 +238,14 @@ if LIVE_RPMS
   warn "[live] RPMS #{settings[:broker]} #{settings[:host]}:#{settings[:port]} signed on as #{live_user.inspect[0, 120]}"
 else
   RpmsRpc.mock!(&BASELINE_MOCK_SEEDS)
+  # The mock broker has no division, so the registration settings read
+  # (REGISTRATION PARAMETERS, #980/#981) answers as a site with none set:
+  # nothing required beyond the forms' own rules, every section asked. A test
+  # that needs a site's settings stubs RegistrationSettingsGateway.current.
+  Lakeraven::EHR::RegistrationSettingsGateway.reader = -> { Lakeraven::EHR::RegistrationSiteSettings.not_on_file }
+  # The mock broker has no server clock, so RPMS's today (ORWU DT, #1065) is
+  # the app's. A test that needs the site a day behind sets SiteDate.reader.
+  Lakeraven::EHR::SiteDate.reader = -> { Date.current }
 end
 
 # Scripted RPC broker for the BPRM reg/sched/ADT twin gateway tests.

@@ -39,8 +39,17 @@ module Lakeraven
           render :edit, status: status
         end
 
+        # A field the site does not ask for (#981) keeps what RPMS holds: the
+        # form does not show it, so nothing the clerk sends changes it.
         def eligibility_params
-          params.fetch(:eligibility, {}).permit(*PatientEligibility::UPDATE_NAMES.keys).to_h
+          permitted = params.fetch(:eligibility, {}).permit(*PatientEligibility::UPDATE_NAMES.keys).to_h
+          hidden = []
+          hidden += %w[blood_quantum tribe_quantum] unless registration_settings.ask?(:blood_quantum)
+          hidden << "enrollment_number" unless registration_settings.ask?(:enrollment_number)
+          return permitted if hidden.empty?
+
+          current = PatientEligibility.from_enrollment(enrollment)
+          permitted.except(*hidden).merge(hidden.to_h { |field| [ field, current.public_send(field) ] })
         end
       end
     end

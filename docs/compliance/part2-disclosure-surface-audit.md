@@ -22,7 +22,7 @@ such. **Absence of evidence is called out as UNKNOWN rather than reported as abs
 | # | Path | Content it can carry | Gate today | Reachable in Phase 1? | Disable-able for Phase 1? |
 |---|---|---|---|---|---|
 | 1 | **HTML chart UI** — `charts#show`, `screenings#index/show/new`, `demo_visits` (`config/routes.rb:13,17,24,37,39,40`) | Full chart as rendered to the clinician, incl. PHQ-9/GAD-7 items | Session auth + `SessionScopePolicy`; audited via `AuditableClinicalAccess` | **Yes — this IS the therapist's workflow** | **No.** Must stay on |
-| 2 | **Bulk EHI export** — `POST/GET/DELETE /exports`, `GET /exports/:id/files/:name` (`routes.rb:76-78`) | **Widest path.** `Patient, AllergyIntolerance, Condition, MedicationRequest, Observation` + audit CSV + configuration + manifest (`ehi_export_service.rb:17-21,29-37`) | `create` → write scope (`exports_controller.rb:27`); `show/destroy/files` → `authorize_export_owner!` (`:15`, `export_files_controller.rb:12`), **fail-closed as of #528** | Yes, if a token has the scope | **Yes** — no Phase 1 therapist workflow needs it |
+| 2 | **Bulk EHI export** — `POST/GET/DELETE /exports`, `GET /exports/:id/files/:name` (`routes.rb:76-78`) | **Widest path.** `Patient, AllergyIntolerance, Condition, MedicationRequest, Observation` + audit CSV + configuration + manifest (`ehi_export_service.rb:17-21,29-37`) | `create` → write scope (`exports_controller.rb:27`); `show/destroy/files` → `authorize_export_owner!` (`:15`, `export_files_controller.rb:12`), **fail-closed as of #528**; closed (404) unless the host opens `bulk_export` (#968) | Only if the host opens it | **Yes** — no Phase 1 therapist workflow needs it |
 | 3 | **C-CDA / transitions of care** — `POST /transitions_of_care` (`routes.rb:72`) | `Patient, AllergyIntolerance, Condition, MedicationRequest` (`transitions_of_care_controller.rb:14-15`) | `discloses_clinical_data` + write scope | Only if a referral-out flow is used | **Yes** — interop is out of Phase 1 scope |
 | 4 | **FHIR REST read API** — ~20 resource types (`routes.rb:45-67`) incl. `Condition`, `Observation`, `DiagnosticReport`, `CarePlan`, `Encounter`, `AuditEvent` | Per-type record content | SMART scopes, verb-aware + compartment-aware + deny-by-default (#528) | Yes, for any issued token | **Mostly** — the therapist uses the HTML UI, not the API |
 | 5 | **SMART launch / discovery** — `.well-known/smart-configuration`, `smart/launch` (`routes.rb:81-82`) | No record content (metadata only) | Public by design | Yes | Keep (metadata only) |
@@ -59,7 +59,7 @@ Postgres table** `lakeraven_ehr_screening_responses` (`screening_response.rb:16-
 notes (rpms-rpc#219, TIU documents) are **not built yet** and are expected to write to
 RPMS. When they do, Part 2 content lands in the shared backend. **Whether that is a
 disclosure depends on the tenancy and access model of the pilot's RPMS instance —
-an infrastructure/config question (cloud-rpms#30, rpms-ops#536), not an engine one.**
+an infrastructure/config question (cloud-rpms#30, openrpms#536), not an engine one.**
 
 ---
 
@@ -101,7 +101,7 @@ marker does not have to be invented — it has to be *derived and respected*.
 
 **"Can separate" ≠ "is separated."** The BH keys and sensitive-record configuration must
 actually be set on the pilot instance and **verified on the live system**, not assumed.
-That is site configuration (rpms-ops#536, an L3 tribe-owned item) plus a live-dispatch
+That is site configuration (openrpms#536, an L3 tribe-owned item) plus a live-dispatch
 proof (rpms-rpc#224), not engine code.
 
 ---
@@ -119,7 +119,7 @@ does not need.**
 **(c) UNKNOWN — must be answered by a human, not inferred from code:**
 1. **Is the RPMS BH separation actually configured and verified on the pilot instance?**
    RPMS *can* segregate BH records by security key; whether it *does* on this instance is
-   site config (rpms-ops#536) and needs a live-dispatch proof (rpms-rpc#224), not an
+   site config (openrpms#536) and needs a live-dispatch proof (rpms-rpc#224), not an
    assumption. *This is the load-bearing unknown — see §2c.*
 2. **Does the clinic "hold itself out as" providing SUD treatment or referral** (the
    §2.11 program test)? A legal/operational question about the service list and marketing,

@@ -6,7 +6,7 @@ require_relative "../../../support/demo_persona_keys"
 module Lakeraven
   module EHR
     # The capabilities each demo persona holds, from the keys the build gives it
-    # (DemoPersonaKeys, rpms-ops SEEDPERS), read through Roles' symbolic names as
+    # (DemoPersonaKeys, openrpms SEEDPERS), read through Roles' symbolic names as
     # sign-on reads them.
     class CapabilitiesTest < ActiveSupport::TestCase
       def for_persona(persona) = Capabilities.for(Roles.symbolize_keys(DemoPersonaKeys::BY_PERSONA.fetch(persona)))
@@ -35,6 +35,22 @@ module Lakeraven
         refute Capabilities.allows?(%w[scheduling_user], "patient.quick_register")
         refute Capabilities.allows?(%w[scheduling_supervisor], "patient.quick_register")
         refute Capabilities.allows?(%w[scheduling_registration registration_view_only], "patient.quick_register")
+      end
+
+      test "#982 only the registration manager key keeps the eligibility modifier table, as BPRM's AGZMGR" do
+        manager = Roles.symbolize_keys(%w[AGZMENU AGZMGR])
+        assert Capabilities.allows?(manager, "registration.table_maintenance")
+        assert Capabilities.allows?(manager, "registration.setup")
+        refute Capabilities.allows?(Roles.symbolize_keys(%w[AGZMENU]), "registration.table_maintenance")
+        refute Capabilities.allows?(Roles.symbolize_keys(%w[AGZMENU]), "registration.setup")
+      end
+
+      test "#983 only DGPF MANAGER defines local record flags, as BPRM's CanAccessLocalFlagsTableMaintenance" do
+        manager = Roles.symbolize_keys([ "DGPF MANAGER" ])
+        assert Capabilities.allows?(manager, "record_flags.define")
+        assert Capabilities.allows?(manager, "registration.setup")
+        refute Capabilities.allows?(manager, "registration.table_maintenance")
+        refute Capabilities.allows?(Roles.symbolize_keys(%w[AGZMENU AGZMGR]), "record_flags.define")
       end
 
       test "no keys, unknown keys and programmer mode grant nothing" do

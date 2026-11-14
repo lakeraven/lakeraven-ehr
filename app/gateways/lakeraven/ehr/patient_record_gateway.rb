@@ -65,7 +65,7 @@ module Lakeraven
       # An address change that keeps the old address (S-REG-21.1): AG's
       # Address window, then the replaced address into PREVIOUS MAIL ADDRESSES
       # with the date the patient moved, under one AG edit lock
-      # (RpmsRpc::Registration.change_address, rpms-ops#1055). attrs as for update.
+      # (RpmsRpc::Registration.change_address, openrpms#1055). attrs as for update.
       def self.change_address(dfn, attrs, moved_on:, via: ::RpmsRpc::Registration)
         return Result.new(status: :saved, field: nil, message: nil) if attrs.empty?
 

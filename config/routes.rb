@@ -249,6 +249,22 @@ Lakeraven::EHR::Engine.routes.draw do
     get "patients/:dfn/coverage/new", to: "coverages#new", as: :new_patient_coverage, constraints: { dfn: /\d+/ }
     post "patients/:dfn/coverage/new", to: "coverages#new", constraints: { dfn: /\d+/ }
     post "patients/:dfn/coverage", to: "coverages#create", constraints: { dfn: /\d+/ }
+    # The registration tables a site keeps itself (BPRM Settings > Table Maintenance).
+    get "setup", to: "setup/tables#index", as: :setup
+    # Eligibility modifiers for a name change, a legal document or legal sex (lakeraven-ehr#982).
+    get "setup/eligibility_modifiers", to: "setup/eligibility_modifiers#index", as: :setup_eligibility_modifiers
+    get "setup/eligibility_modifiers/new", to: "setup/eligibility_modifiers#new", as: :new_setup_eligibility_modifier
+    post "setup/eligibility_modifiers", to: "setup/eligibility_modifiers#create"
+    get "setup/eligibility_modifiers/:ien/edit", to: "setup/eligibility_modifiers#edit", as: :edit_setup_eligibility_modifier,
+                                                  constraints: { ien: /\d+/ }
+    post "setup/eligibility_modifiers/:ien", to: "setup/eligibility_modifiers#update", as: :setup_eligibility_modifier,
+                                              constraints: { ien: /\d+/ }
+    # The site's local patient record flags (lakeraven-ehr#983).
+    get "setup/local_flags", to: "setup/local_flags#index", as: :setup_local_flags
+    get "setup/local_flags/new", to: "setup/local_flags#new", as: :new_setup_local_flag
+    post "setup/local_flags", to: "setup/local_flags#create"
+    get "setup/local_flags/:ien/edit", to: "setup/local_flags#edit", as: :edit_setup_local_flag, constraints: { ien: /\d+/ }
+    post "setup/local_flags/:ien", to: "setup/local_flags#update", as: :setup_local_flag, constraints: { ien: /\d+/ }
   end
 
   # Scheduling (rpms-ux W02): a clinic resource's day, booking into it (S-SCH-01)
@@ -275,7 +291,24 @@ Lakeraven::EHR::Engine.routes.draw do
     get "appointments", to: "appointment_lists#index", as: :appointment_list
     # The appointments needing action in the scheduler's clinics (S-SCH-13.5, #875).
     get "needing_action", to: "needing_action#index", as: :needing_action
+    # Table maintenance (S-SCH-17, S-SCH-18): access types (SDZSUP) and resource groups.
+    get "access_types", to: "access_types#index", as: :access_types
+    get "access_types/new", to: "access_types#new", as: :new_access_type
+    post "access_types", to: "access_types#create"
+    get "access_types/:id/edit", to: "access_types#edit", as: :edit_access_type, constraints: { id: /\d+/ }
+    post "access_types/:id", to: "access_types#update", as: :access_type, constraints: { id: /\d+/ }
+    get "resource_groups", to: "resource_groups#index", as: :resource_groups
+    get "resource_groups/new", to: "resource_groups#new", as: :new_resource_group
+    post "resource_groups", to: "resource_groups#create"
+    get "resource_groups/:id", to: "resource_groups#show", as: :resource_group, constraints: { id: /\d+/ }
+    post "resource_groups/:id/members", to: "resource_groups#add_member", as: :resource_group_members, constraints: { id: /\d+/ }
+    post "resource_groups/:id/members/:item_id/remove", to: "resource_groups#remove_member", as: :remove_resource_group_member,
+                                                         constraints: { id: /\d+/, item_id: /\d+/ }
     get "clinics/:id/open_times", to: "open_times#index", as: :clinic_open_times, constraints: { id: /\d+/ }
+    # A clinic's scheduling settings and letters (S-SCH-15); changing them takes SDZSUP.
+    get "clinics/:resource_id/settings", to: "clinic_settings#show", as: :clinic_settings, constraints: { resource_id: /\d+/ }
+    get "clinics/:resource_id/settings/edit", to: "clinic_settings#edit", as: :edit_clinic_settings, constraints: { resource_id: /\d+/ }
+    post "clinics/:resource_id/settings", to: "clinic_settings#update", constraints: { resource_id: /\d+/ }
     get "clinics/:resource_id/hours/new", to: "hours#new", as: :new_clinic_hours, constraints: { resource_id: /\d+/ }
     post "clinics/:resource_id/hours", to: "hours#create", as: :clinic_hours, constraints: { resource_id: /\d+/ }
     get "patients/:dfn/appointments", to: "patient_appointments#index", as: :patient_appointments, constraints: { dfn: /\d+/ }
