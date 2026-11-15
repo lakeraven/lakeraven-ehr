@@ -36,6 +36,12 @@ class FakeProgressNoteGateway
     @text_updates << { note_ien: note_ien, text: text }
     { success: true, raw: "1" }
   end
+
+  # The text most recently written for this note, or nil if none was.
+  def fetch_text(note_ien)
+    update = @text_updates.reverse.find { |u| u[:note_ien].to_s == note_ien.to_s }
+    update && update[:text]
+  end
 end
 
 class FakeESignatureGateway

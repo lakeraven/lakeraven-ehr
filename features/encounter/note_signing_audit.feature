@@ -1,0 +1,64 @@
+@app @note_signing_audit
+Feature: Signing a progress note is audited
+  As a compliance officer
+  I need every attempt to sign a progress note to leave an append-only audit record
+  So that who signed which note, for which patient, and what text they signed can be shown later
+
+  Background:
+    Given a patient with DFN 8791
+    And a demo visit with IEN 2090061
+    And I am the authoring provider with DUZ 2843
+
+  Scenario: Signing a note writes one audit event
+    Given a created progress note
+    When the provider signs the note with signature code "SIGSECRET42"
+    Then the note signing should succeed
+    And exactly one note signing audit event should be recorded
+    And the audit event type should be "application"
+    And the audit event action should be "E"
+    And the audit event agent should be "2843"
+    And the audit event should be successful
+    And the note signing audit event should identify the signed note
+    And the note signing audit event should name patient 8791
+    And the note signing audit event should not contain "SIGSECRET42"
+
+  Scenario: A wrong signature code is audited as a refusal
+    Given a created progress note
+    And the signature code will fail validation
+    When the provider signs the note with signature code "SIGSECRET42"
+    Then the note signing should fail with :invalid_signature_code
+    And no sign action should reach the e-signature gateway
+    And exactly one note signing audit event should be recorded
+    And the audit event action should be "E"
+    And the audit event agent should be "2843"
+    And the audit event should be a minor failure
+    And the note signing audit event should identify the signed note
+    And the note signing audit event should name patient 8791
+    And the note signing audit event should give the reason "invalid_signature_code"
+    And the note signing audit event should not contain "SIGSECRET42"
+
+  Scenario: Signing with no note is audited as a refusal
+    When the provider signs the note with signature code "SIGSECRET42"
+    Then the note signing should fail with :no_note
+    And exactly one note signing audit event should be recorded
+    And the audit event agent should be "2843"
+    And the audit event should be a minor failure
+    And the note signing audit event should identify no note
+    And the note signing audit event should give the reason "no_note"
+    And the note signing audit event should not contain "SIGSECRET42"
+
+  Scenario: The signing audit event cannot be updated or deleted
+    Given a created progress note
+    When the provider signs the note with signature code "SIGSECRET42"
+    Then exactly one note signing audit event should be recorded
+    And the note signing audit event cannot be updated
+    And the note signing audit event cannot be deleted
+
+  Scenario: The audit event holds a hash of the signed text
+    Given a created progress note
+    When the provider signs the note with signature code "SIGSECRET42"
+    Then exactly one note signing audit event should be recorded
+    And the note signing audit event should hold the SHA-256 of the signed note text
+    And the note signing audit event should not contain the note text
+    When the note text is later changed to "Demo note text, altered after signing."
+    Then the recorded hash should no longer match the note text
