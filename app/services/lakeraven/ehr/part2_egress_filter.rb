@@ -6,13 +6,16 @@ module Lakeraven
     #
     # Callers pass the payload they are about to send: C-CDA sections, a
     # FHIR resource or Bundle hash, or an export String (NDJSON, CSV, JSON).
-    # Every resource whose meta.security has a Part 2 code, and every
-    # resource that holds one at any depth, leaves with the NORDSCLCD
-    # refrain coding and exactly one current notice extension
-    # (Part2RedisclosureNotice). It returns nil (refuse) when a label sits
-    # where it cannot be noticed: elsewhere in meta, outside a resource
-    # (C-CDA rows, non-FHIR lines), in a multi-line JSON document. It also
-    # returns nil for invalid encoding and on any error (fail closed).
+    # Every resource with a Part 2 code in a meta.security or securityLabel
+    # Coding, and every resource that holds one at any depth, leaves with
+    # the NORDSCLCD refrain coding and exactly one current notice extension
+    # (Part2RedisclosureNotice). Codes match case-insensitively, ignoring
+    # surrounding Unicode space and format characters. It returns nil
+    # (refuse) when a label sits where it cannot be noticed: elsewhere in
+    # meta or the Coding, outside a resource (non-FHIR lines), anywhere in
+    # a top-level Hash that is not a resource (C-CDA sections), in a
+    # multi-line JSON document. It also returns nil for invalid encoding
+    # and on any error (fail closed).
     # Unlabelled payloads come back unchanged; the input is never mutated.
     # It does not classify unlabelled records; keeping labels on ingest is #908.
     class Part2EgressFilter
@@ -21,8 +24,11 @@ module Lakeraven
 
       BOM = "﻿"
       SHORT_CODES = Part2RedisclosureNotice::PART2_CODES - %w[42CFRPart2]
-      TEXT_LABEL = Regexp.union(/42cfrpart2/i, /\b(?:#{SHORT_CODES.join('|')})\b/)
-      private_constant :BOM, :SHORT_CODES, :TEXT_LABEL
+      TEXT_LABEL = Regexp.union(/42cfrpart2/i, /\b(?:#{SHORT_CODES.join('|')})\b/i)
+      PADDING = /\A[[:space:]\p{Cf}]+|[[:space:]\p{Cf}]+\z/
+      CODE_KEYS = [ "code", :code ].freeze
+      TEXT_KEYS = [ "display", :display ].freeze
+      private_constant :BOM, :SHORT_CODES, :TEXT_LABEL, :PADDING, :CODE_KEYS, :TEXT_KEYS
 
       def self.call(payload)
         result = new.send(:filter, payload)
@@ -34,12 +40,16 @@ module Lakeraven
       private
 
       def filter(payload)
-        payload.is_a?(String) ? filter_string(payload) : walk(payload)
+        return filter_string(payload) if payload.is_a?(String)
+        # A Hash that is not a resource (C-CDA sections) cannot carry the notice.
+        raise Refused if payload.is_a?(Hash) && !resource?(payload) && !walk(payload).equal?(payload)
+
+        walk(payload)
       end
 
       def filter_string(text)
         raise Refused unless text.valid_encoding?
-        return filter_lines(text) unless text.chomp.include?("\n")
+        return filter_lines(text) if text.lines.count { |line| !line.strip.empty? } <= 1
 
         document = parse_json(text.delete_prefix(BOM))
         return filter_lines(text) if document.nil?
@@ -97,24 +107,53 @@ module Lakeraven
         outer = @labelled
         @labelled = false
         meta_key = key_for(resource, "meta")
-        children = rebuild(resource, resource.to_h { |key, value| [ key, key == meta_key ? value : walk_pair(key, value) ] })
-        noticed = @labelled || labelled_meta?(resource[meta_key])
+        label_key = key_for(resource, "securityLabel")
+        children = rebuild(resource, resource.to_h { |key, value| [ key, [ meta_key, label_key ].include?(key) ? value : walk_pair(key, value) ] })
+        noticed = labelled_meta?(resource[meta_key]) | labelled_security_label?(resource[label_key]) | @labelled
         @labelled = outer || noticed
         return children unless noticed
 
         children.merge(meta_key => noticed_meta(resource[meta_key], meta_key.is_a?(Symbol)))
       end
 
-      # Whether a flat Coding in meta.security has a Part 2 code. A Part 2
-      # code anywhere else in meta cannot be noticed: refuse.
+      # Whether a Coding in meta.security has a Part 2 code. A Part 2 code
+      # anywhere else in meta cannot be noticed: refuse.
       def labelled_meta?(meta)
-        security_key = meta.is_a?(Hash) && key_for(meta, "security")
-        security = security_key && meta[security_key]
-        codings = security.is_a?(Array) ? security.select { |item| item.is_a?(Hash) } : []
-        elsewhere = codings.empty? ? meta : meta.merge(security_key => security.map { |item| item.is_a?(Hash) ? item.except("code", :code) : item })
-        raise Refused if part2_anywhere?(elsewhere)
+        labelled_in?(meta, "security")
+      end
 
-        codings.any? { |coding| part2?(coding.key?("code") ? coding["code"] : coding[:code]) }
+      # Whether a CodeableConcept in securityLabel has a Part 2 Coding.
+      def labelled_security_label?(labels)
+        return labelled_codings?(labels) unless labels.is_a?(Array)
+
+        labels.map { |label| labelled_in?(label, "coding") }.any?
+      end
+
+      # Whether the Codings under hash[name] are labelled; a Part 2 code
+      # anywhere else in `hash` refuses.
+      def labelled_in?(hash, name)
+        key = hash.is_a?(Hash) && key_for(hash, name)
+        return labelled_codings?(hash) unless key && hash[key].is_a?(Array)
+
+        labelled_codings?(hash[key]) | labelled_codings?(hash.except(key))
+      end
+
+      # `codings` an Array: whether a Coding in it has a Part 2 code (in
+      # either code key; display is text). Anything else: refuse if it
+      # holds a Part 2 code, since that cannot be a label.
+      def labelled_codings?(codings)
+        raise Refused unless codings.is_a?(Array) || !part2_anywhere?(codings)
+        return false unless codings.is_a?(Array)
+
+        codings.map do |coding|
+          raise Refused if !coding.is_a?(Hash) && part2_anywhere?(coding)
+          next false unless coding.is_a?(Hash)
+
+          codes = coding.values_at(*CODE_KEYS)
+          raise Refused if part2_anywhere?(coding.except(*CODE_KEYS, *TEXT_KEYS)) || codes.any? { |code| code.is_a?(Enumerable) && part2_anywhere?(code) }
+
+          codes.any? { |code| part2?(code) }
+        end.any?
       end
 
       def noticed_meta(meta, symbols)
@@ -147,7 +186,7 @@ module Lakeraven
       end
 
       def part2?(code)
-        value = code.to_s.strip
+        value = code.to_s.gsub(PADDING, "")
         Part2RedisclosureNotice::PART2_CODES.any? { |part2| part2.casecmp?(value) }
       end
 
