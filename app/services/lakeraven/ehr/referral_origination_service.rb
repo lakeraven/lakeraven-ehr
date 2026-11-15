@@ -27,13 +27,8 @@ module Lakeraven
       end
 
       def originate(patient_dfn:, provider_ien:, params:)
-        refused = refused_keys(params)
-        if refused.any?
-          return OriginationResult.new(
-            success: false, service_request: nil,
-            errors: [ "Structured referral types are not offered; refused params: #{refused.join(', ')}" ]
-          )
-        end
+        refusal = refusal_for(params)
+        return OriginationResult.new(success: false, service_request: nil, errors: [ refusal ]) if refusal
 
         sr = ServiceRequest.new(
           patient_dfn: patient_dfn.to_i,
@@ -61,13 +56,41 @@ module Lakeraven
 
       private
 
-      # #905: fail closed on any key outside the declared origination fields.
-      # Keys are read without to_h/permit so unpermitted Parameters work too.
-      def refused_keys(params)
-        return [] if params.nil?
+      # A refused key is echoed only when it looks like a field name.
+      FIELD_NAME = /\A[a-z][a-z0-9_]{0,39}\z/i
+
+      # #905: fail closed on anything but plain text under the declared
+      # origination fields. Keys are read without to_h/permit so unpermitted
+      # Parameters work too. Values are never inspected beyond their type.
+      def refusal_for(params)
+        return if params.nil?
+        return refusal_message([ [ "params", "not a set of named fields" ] ]) unless hash_like?(params)
 
         accepted = ReferralSurfaces::ORIGINATION_FIELDS.map(&:to_s)
-        params.keys.map(&:to_s).uniq - accepted
+        names = params.keys.map(&:to_s)
+        problems = names.tally.map do |name, count|
+          if count > 1 then [ name, "ambiguous" ]
+          elsif !accepted.include?(name) then [ name, "not accepted" ]
+          elsif !text_or_nil?(field(params, name.to_sym)) then [ name, "not text" ]
+          end
+        end.compact
+        refusal_message(problems) if problems.any?
+      end
+
+      def refusal_message(problems)
+        shown, hidden = problems.partition { |name, _| name.match?(FIELD_NAME) }
+        refused = shown.map { |name, why| "#{name} (#{why})" }
+        refused << "#{hidden.size} other key(s)" if hidden.any?
+        "Structured referral types are not offered; origination accepts only " \
+          "#{ReferralSurfaces::ORIGINATION_FIELDS.join(', ')} as text; refused: #{refused.join(', ')}"
+      end
+
+      def hash_like?(params)
+        params.is_a?(Hash) || params.is_a?(ActionController::Parameters)
+      end
+
+      def text_or_nil?(value)
+        value.nil? || value.is_a?(String)
       end
 
       def field(params, name)

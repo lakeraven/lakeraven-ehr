@@ -8,9 +8,12 @@ module Lakeraven
     # hold itself out as offering SUD referral for treatment, so no referral
     # surface may offer or advertise a structured SUD path. Any new referral
     # surface must be declared here and shown (in referral_surfaces_test) to
-    # offer no SUD path. Free text is never inspected or refused.
+    # offer no SUD path. Free text is never inspected or refused. The
+    # dashboard is declared because it renders the pending-referral count.
     module ReferralSurfaces
-      ROUTES = %w[service_requests#index service_requests#show pending_referrals#index].freeze
+      ROUTES = %w[
+        service_requests#index service_requests#show pending_referrals#index dashboards#show
+      ].freeze
 
       OFFERED_CODINGS = [ ServiceRequest::PATIENT_REFERRAL ].freeze
 
