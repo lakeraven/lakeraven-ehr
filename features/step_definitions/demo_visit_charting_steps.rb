@@ -64,7 +64,14 @@ class FakeProgressNoteGateway
   # TIU appends the signature block when the sign action files. Called by
   # FakeESignatureGateway#add.
   def file_signature(note_ien)
+    @before_filing&.call(note_ien)
     @signed << note_ien.to_s
+  end
+
+  # A hook run when the sign action arrives, before the signature block is
+  # appended: the window between the signer's read and filing.
+  def before_filing(&hook)
+    @before_filing = hook
   end
 
   def signed?(note_ien) = @signed.include?(note_ien.to_s)

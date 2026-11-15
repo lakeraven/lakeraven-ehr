@@ -82,6 +82,17 @@ Feature: Signing a progress note is audited
     Then the signed rows alone should still reproduce the content hash
     But the record hash should no longer match the current note body
 
+  Scenario: A note changed between the signer's read and filing is recorded as a mismatch
+    Given a created progress note
+    And the note text will be changed to "Demo note text, altered before filing." between the signer's read and filing
+    When the provider signs the note with signature code "SIGSECRET42"
+    Then the note signing should succeed
+    And exactly one note signing audit event should be recorded
+    And the audit event should be successful
+    And the note signing audit event should identify the signed note
+    And the note signing audit event should record that the filed note does not match what was signed
+    And the note signing audit event should not contain "SIGSECRET42"
+
   Scenario: The hash still matches after TIU changes the header and appends the signature
     When the provider creates a progress note with title 8927 and text:
       """

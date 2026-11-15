@@ -221,3 +221,28 @@ end
 Then("the record hash should no longer match the re-read note body") do
   refute_equal note_signing_record_hash, note_signing_verifier_hash(@reread_body)
 end
+
+# The body changes when the sign action runs, before the signature rows are
+# appended: after the signer's read, before filing.
+Given("the note text will be changed to {string} between the signer's read and filing") do |text|
+  @signed_rows = note_signing_written_rows
+  refute_nil @signed_rows
+  refute_equal @signed_rows, text.split("\n", -1)
+  @note_gateway.before_filing do |note_ien|
+    written = @note_gateway.update_text(note_ien, text)
+    assert written[:success]
+  end
+end
+
+# The filed note does not start with the rows that were signed, so the event
+# records the signature and a marker that never verifies.
+Then("the note signing audit event should record that the filed note does not match what was signed") do
+  desc = @audit_event.outcome_desc.to_s
+  refute_equal @signed_rows, note_signing_body_rows.first(@signed_rows.size),
+    "the scenario did not change the note before filing"
+  assert_equal "progress_note_signed; patient #{@dfn}; " \
+               "content-sha256 #{Digest::SHA256.hexdigest(@signed_rows.join("\n"))}; " \
+               "content-rows #{@signed_rows.size}; record-sha256 mismatch", desc
+  refute_match(/record-sha256 [0-9a-f]{64}/, desc)
+  refute_match(/record-rows/, desc)
+end

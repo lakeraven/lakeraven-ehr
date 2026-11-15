@@ -39,6 +39,8 @@ module Lakeraven
       # SHA-256 of nothing and of an empty row list's join: an absent record
       # must never be written as either.
       EMPTY_HASH = Digest::SHA256.hexdigest("")
+      # A String whose bytes are not valid in its encoding: not a body row.
+      INVALID_ENCODING_ROW = "S: ok \xFF row".dup.force_encoding("UTF-8").freeze
 
       # Raised by the fakes. The message carries the signature code so a row
       # that copied the exception message would leak it.
@@ -195,6 +197,52 @@ module Lakeraven
                      "the first content-rows rows alone do not show the append"
       end
 
+      # -- the filed record must start with what was signed -------------------
+
+      # The rows signed are the n pre-sign rows. A filed body whose first n
+      # rows are not exactly those rows is not the signed note with a
+      # signature block after it: the text changed between the signer's read
+      # and filing. The signature happened, so the row is still a success, but
+      # it ends "record-sha256 mismatch", a marker that never verifies.
+      {
+        "an edited signed row" => [ "EDITED", "b", "", "/es/ SYNTHETIC" ],
+        "fewer rows than were signed" => [ "a" ]
+      }.each do |label, post_sign|
+        test "a filed record with #{label} writes the success event, with record-sha256 mismatch" do
+          @note_gateway = FakeNoteGateway.new(rows: [ "a", "b" ], post_sign: post_sign)
+
+          result = nil
+          event = audit_event_for { result = assert_nothing_raised { sign } }
+
+          assert result.success?, "the signature happened, so sign succeeds: #{result.error.inspect}"
+          assert_equal NOTE_IEN, result.note_ien
+          assert_equal 1, @esig_gateway.sign_actions.size
+          assert_equal 2, @note_gateway.fetches.size
+          assert_equal "0", event.outcome
+          assert_equal "#{content_desc([ "a", "b" ])}; record-sha256 mismatch", event.outcome_desc
+          assert event.outcome_desc.end_with?("; content-rows 2; record-sha256 mismatch")
+          refute_match(/record-sha256 [0-9a-f]{64}/, event.outcome_desc)
+          refute_match(/record-rows/, event.outcome_desc)
+          refute_leaks event, Digest::SHA256.hexdigest(post_sign.join("\n"))
+          refute_leaks event, SIGNATURE_CODE
+        end
+      end
+
+      test "a filed record that starts with the signed rows, then the signature block, records a normal record hash" do
+        filed = [ "a", "b", "", "/es/ SYNTHETIC" ]
+        @note_gateway = FakeNoteGateway.new(rows: [ "a", "b" ], post_sign: filed)
+
+        event = audit_event_for do
+          result = sign
+          assert result.success?, "signing failed: #{result.error.inspect}"
+        end
+
+        assert_equal "0", event.outcome
+        assert_equal success_desc([ "a", "b" ], filed), event.outcome_desc
+        assert event.outcome_desc.end_with?("; record-sha256 #{Digest::SHA256.hexdigest(filed.join("\n"))}; record-rows 4")
+        refute_match(/mismatch/, event.outcome_desc)
+      end
+
       # -- the post-sign read can fail; the signature already happened -------
 
       {
@@ -203,7 +251,8 @@ module Lakeraven
         "a body of blank rows" => [ "", "  " ],
         "a String, not rows" => NOTE_BODY,
         "rows that are not all Strings" => [ "S: Synthetic row.", 7 ],
-        "a row holding a line feed" => [ "S: Synthetic row.\nP: Synthetic smuggled row." ]
+        "a row holding a line feed" => [ "S: Synthetic row.\nP: Synthetic smuggled row." ],
+        "a row with invalid encoding" => [ "S: Synthetic row.", INVALID_ENCODING_ROW ]
       }.each do |label, post_sign|
         test "a post-sign read returning #{label} still writes the success event, with record-sha256 unavailable" do
           @note_gateway = FakeNoteGateway.new(rows: NOTE_ROWS.dup, post_sign: post_sign)
@@ -368,7 +417,9 @@ module Lakeraven
         # different bodies would hash alike.
         "a body with a line feed inside a row" => [ "S: Synthetic row.\nP: Synthetic smuggled row." ],
         "a body with a carriage return inside a row" => [ "S: Synthetic row.\rP: Synthetic smuggled row." ],
-        "a body with a CRLF ending a row" => [ "S: Synthetic row.\r\n", "P: Synthetic plan." ]
+        "a body with a CRLF ending a row" => [ "S: Synthetic row.\r\n", "P: Synthetic plan." ],
+        # Bytes that are not text cannot be shown, compared or re-read alike.
+        "a body with a row of invalid encoding" => [ "S: Synthetic row.", INVALID_ENCODING_ROW ]
       }.each do |label, body|
         test "#{label} is not signed: note_text_unavailable" do
           @note_gateway.rows = body
