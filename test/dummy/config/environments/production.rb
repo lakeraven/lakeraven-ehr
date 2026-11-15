@@ -70,4 +70,7 @@ Rails.application.configure do
   #
   # Skip DNS rebinding protection for the default health check endpoint.
   # config.host_authorization = { exclude: ->(request) { request.path == "/up" } }
+
+  # Disclosure surfaces (#968) stay closed unless named here, e.g.
+  # config.x.lakeraven_ehr.open_disclosure_surfaces = %i[bulk_export]
 end

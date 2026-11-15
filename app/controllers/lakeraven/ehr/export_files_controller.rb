@@ -5,6 +5,8 @@ module Lakeraven
     class ExportFilesController < ApplicationController
       include ExportOwnership
 
+      # Closed (a bare 404) until the host opens :bulk_export by name (#968).
+      disclosure_surface :bulk_export
       rate_limit only: :show
 
       # This endpoint serves the export's actual BYTES — one patient's whole
