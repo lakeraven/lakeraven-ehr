@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "csv"
+
 module Lakeraven
   module EHR
     # Egress seam for a disclosing response (42 CFR § 2.32).
@@ -12,10 +14,13 @@ module Lakeraven
     # (Part2RedisclosureNotice). Codes match case-insensitively, ignoring
     # surrounding Unicode space and format characters. It returns nil
     # (refuse) when a label sits where it cannot be noticed: elsewhere in
-    # meta or the Coding, outside a resource (non-FHIR lines), anywhere in
-    # a top-level Hash that is not a resource (C-CDA sections), in a
-    # multi-line JSON document. It also returns nil for invalid encoding
-    # and on any error (fail closed).
+    # meta or the Coding, under security or securityLabel outside a
+    # resource, anywhere in a top-level Hash that is not a resource (C-CDA
+    # sections), in a labelled multi-line JSON document. A line that is
+    # not a resource refuses on 42CFRPart2 anywhere, or on a Part 2 code
+    # as a whole CSV field or JSON String leaf; prose mentioning a short
+    # code passes. It also refuses a line that opens like JSON and does
+    # not parse, invalid encoding, and any error (fail closed).
     # Unlabelled payloads come back unchanged; the input is never mutated.
     # It does not classify unlabelled records; keeping labels on ingest is #908.
     class Part2EgressFilter
@@ -23,12 +28,12 @@ module Lakeraven
       private_constant :Refused
 
       BOM = "﻿"
-      SHORT_CODES = Part2RedisclosureNotice::PART2_CODES - %w[42CFRPart2]
-      TEXT_LABEL = Regexp.union(/42cfrpart2/i, /\b(?:#{SHORT_CODES.join('|')})\b/i)
       PADDING = /\A[[:space:]\p{Cf}]+|[[:space:]\p{Cf}]+\z/
+      FIELD_PADDING = /\A[[:space:]\p{Cf}"]+|[[:space:]\p{Cf}"]+\z/
       CODE_KEYS = [ "code", :code ].freeze
       TEXT_KEYS = [ "display", :display ].freeze
-      private_constant :BOM, :SHORT_CODES, :TEXT_LABEL, :PADDING, :CODE_KEYS, :TEXT_KEYS
+      LABEL_KEYS = %w[security securityLabel].freeze
+      private_constant :BOM, :PADDING, :FIELD_PADDING, :CODE_KEYS, :TEXT_KEYS, :LABEL_KEYS
 
       def self.call(payload)
         result = new.send(:filter, payload)
@@ -66,16 +71,25 @@ module Lakeraven
       end
 
       def filter_line(line)
-        parsed = parse_json(line.delete_prefix(BOM))
+        body = line.delete_prefix(BOM)
+        parsed = parse_json(body)
         if resource?(parsed)
           result = walk(parsed)
           return result.equal?(parsed) ? line : result.to_json
         end
         # Not a resource line, so a label inside it has nowhere to be noticed.
-        raise Refused if parsed.nil? ? line.match?(TEXT_LABEL) : line.match?(/42cfrpart2/i)
+        raise Refused if parsed.nil? && body.match?(/\A[[:space:]]*[{\[]/)
+        raise Refused if line.match?(/42cfrpart2/i)
+        raise Refused if parsed.nil? ? csv_fields(body).any? { |field| part2?(field.to_s.gsub(FIELD_PADDING, "")) } : part2_anywhere?(parsed)
         raise Refused unless walk(parsed).equal?(parsed)
 
         line
+      end
+
+      def csv_fields(line)
+        CSV.parse_line(line) || []
+      rescue CSV::MalformedCSVError
+        line.split(",")
       end
 
       def parse_json(text)
@@ -96,9 +110,9 @@ module Lakeraven
         rebuild(hash, hash.to_h { |key, value| [ key, walk_pair(key, value) ] })
       end
 
-      # A Part 2 code under a security key outside a resource's meta.
+      # A Part 2 code under a label key outside a resource's own labels.
       def walk_pair(key, value)
-        raise Refused if key.to_s == "security" && part2_anywhere?(value)
+        raise Refused if LABEL_KEYS.include?(key.to_s) && part2_anywhere?(value)
 
         walk(value)
       end

@@ -127,9 +127,9 @@ module Lakeraven
       end
 
       # Hash: the Hash itself. Model: its to_fhir, which must be a Hash.
+      # An item with no to_fhir cannot be shown unlabelled: refuse.
       def fhir_form(item)
         return item if item.is_a?(Hash)
-        return unless item.respond_to?(:to_fhir)
 
         form = item.to_fhir
         form.is_a?(Hash) ? form : raise(FhirFormUnavailable)
