@@ -24,11 +24,32 @@ module Lakeraven
         assert_includes text, "42 CFR 2.31"
       end
 
+      test "notice TEXT is the whole 2.32(a)(1) paragraph, word for word" do
+        # The one place the paragraph is written out in the tests. It guards
+        # the constant against a dropped or altered clause.
+        expected = "This record which has been disclosed to you is protected by Federal confidentiality rules " \
+          "(42 CFR part 2). These rules prohibit you from using or disclosing this record, or testimony that " \
+          "describes the information contained in this record, in any civil, criminal, administrative, or " \
+          "legislative proceedings by any Federal, State, or local authority, against the patient, unless " \
+          "authorized by the consent of the patient, except as provided at 42 CFR 2.12(c)(5) or as authorized " \
+          "by a court in accordance with 42 CFR 2.64 or 2.65. In addition, the Federal rules prohibit you from " \
+          "making any other use or disclosure of this record unless at least one of the following applies: " \
+          "(i) Further use or disclosure is expressly permitted by the written consent of the individual whose " \
+          "information is being disclosed in this record or as otherwise permitted by 42 CFR part 2. (ii) You " \
+          "are a covered entity or business associate and have received the record for treatment, payment, or " \
+          "health care operations, or (iii) You have received the record from a covered entity or business " \
+          "associate as permitted by 45 CFR part 164, subparts A and E. A general authorization for the release " \
+          "of medical or other information is NOT sufficient to meet the required elements of written consent " \
+          "to further use or redisclose the record (see 42 CFR 2.31)."
+
+        assert_equal expected, Part2RedisclosureNotice::TEXT
+      end
+
       test "notice constants name the extension, the refrain policy and the Part 2 codes" do
         assert_equal "https://lakeraven.com/fhir/StructureDefinition/part2-redisclosure-notice",
           Part2RedisclosureNotice::EXTENSION_URL
         assert_equal({ "system" => ACT_CODE, "code" => "NORDSCLCD" }, Part2RedisclosureNotice::REFRAIN)
-        assert_equal %w[42CFRPart2 ETH SUD], Part2RedisclosureNotice::PART2_CODES
+        assert_equal %w[42CFRPart2 ETH SUD ETHUD OPIOIDUD], Part2RedisclosureNotice::PART2_CODES
       end
 
       # --- rule 1: unlabelled input is returned equal ----------------------
@@ -132,7 +153,7 @@ module Lakeraven
         assert_equal resource.deep_stringify_keys, without_notice(result)
       end
 
-      %w[42CFRPart2 ETH SUD].each do |code|
+      %w[42CFRPart2 ETH SUD ETHUD OPIOIDUD].each do |code|
         test "a meta.security code of #{code} with no system counts as Part 2" do
           resource = condition("meta" => { "security" => [ { "code" => code } ] })
 
@@ -141,6 +162,47 @@ module Lakeraven
           assert_noticed result
           assert_equal resource, without_notice(result)
         end
+      end
+
+      # Matching is fail-closed normalised: to_s, strip, compare without case.
+      {
+        "lower-case 42cfrpart2" => "42cfrpart2",
+        "SUD with trailing space" => "SUD ",
+        "ETH with surrounding whitespace" => " ETH\t",
+        "Symbol :ETH" => :ETH,
+        "lower-case ethud" => "ethud",
+        "mixed-case OpioidUD" => "OpioidUD"
+      }.each do |name, code|
+        test "a meta.security code written as #{name} counts as Part 2" do
+          resource = condition("meta" => { "security" => [ { "code" => code } ] })
+
+          result = Part2EgressFilter.call(resource)
+
+          assert_noticed result
+          assert_equal resource["meta"]["security"], result["meta"]["security"].first(1),
+            "the label itself is left as it was written"
+        end
+      end
+
+      test "a symbol-keyed meta.security code in another case counts as Part 2" do
+        resource = { resourceType: "Condition", id: "syn-1", meta: { security: [ { code: "sud" } ] } }
+
+        assert_noticed Part2EgressFilter.call(resource)
+      end
+
+      test "a normalised label in a Bundle entry notices the entry and the Bundle" do
+        bundle = bundle_of(entry(condition("meta" => { "security" => [ { "code" => "opioidud " } ] }), mode: "match"))
+
+        result = Part2EgressFilter.call(bundle)
+
+        assert_noticed result
+        assert_noticed result["entry"][0]["resource"]
+      end
+
+      test "a normalised label in a C-CDA row is refused" do
+        row = { code: "SYN-1", display: "Synthetic", code_system: nil, security: [ { code: "42cfrpart2" } ] }
+
+        assert_nil Part2EgressFilter.call(ccda_sections(conditions: [ row ]))
       end
 
       test "every labelled entry of a Bundle is noticed, match and include alike" do
@@ -194,6 +256,98 @@ module Lakeraven
         assert_equal contained, without_notice(result["contained"][0])
         assert_equal plain_contained, result["contained"][1]
         assert_equal resource.except("contained", "meta"), result.except("contained", "meta")
+      end
+
+      test "a resource that contains a labelled resource is itself noticed" do
+        # FHIR dom-5: a contained resource may not carry a security label,
+        # so the notice has to be on the container that leaves.
+        contained = { "resourceType" => "Observation", "id" => "syn-contained", "meta" => { "security" => [ PART2_LABEL ] } }
+        resource = condition("contained" => [ contained, { "resourceType" => "Practitioner", "id" => "syn-pr" } ])
+
+        result = Part2EgressFilter.call(resource)
+
+        assert_noticed result, "the container of a labelled resource must carry the notice"
+        assert_equal 1, refrain_count(result)
+        assert_equal 1, notice_count(result)
+        assert_equal resource.except("contained"), without_notice(result).except("contained")
+      end
+
+      test "a container that already has meta keeps it and is noticed" do
+        contained = { "resourceType" => "Observation", "id" => "syn-contained", "meta" => { "security" => [ { "code" => "SUD" } ] } }
+        resource = condition("meta" => { "versionId" => "2", "security" => [ UNRELATED_LABEL ] }, "contained" => [ contained ])
+
+        result = Part2EgressFilter.call(resource)
+
+        assert_noticed result
+        assert_equal resource["meta"], without_notice(result)["meta"]
+      end
+
+      test "a symbol-keyed container of a labelled resource is noticed" do
+        resource = {
+          resourceType: "Condition", id: "syn-1",
+          contained: [ { resourceType: "Observation", id: "syn-contained", meta: { security: [ { code: "ETH" } ] } } ]
+        }
+
+        assert_noticed Part2EgressFilter.call(resource)
+      end
+
+      test "a container with only unlabelled contained resources is not noticed" do
+        resource = condition("contained" => [ { "resourceType" => "Practitioner", "id" => "syn-pr" } ])
+
+        result = Part2EgressFilter.call(resource)
+
+        assert_equal resource, result
+        refute_noticed result
+      end
+
+      test "a Bundle entry that contains a labelled resource is itself noticed" do
+        contained = { "resourceType" => "Observation", "id" => "syn-contained", "meta" => { "security" => [ PART2_LABEL ] } }
+        bundle = bundle_of(entry(condition("contained" => [ contained ]), mode: "match"), entry(condition("id" => "syn-2"), mode: "match"))
+
+        result = Part2EgressFilter.call(bundle)
+
+        assert_noticed result
+        assert_noticed result["entry"][0]["resource"]
+        refute_noticed result["entry"][1]["resource"]
+      end
+
+      test "a Parameters resource whose parameter resource is labelled is noticed" do
+        labelled = condition("meta" => { "security" => [ PART2_LABEL ] })
+        parameters = {
+          "resourceType" => "Parameters", "id" => "syn-params",
+          "parameter" => [
+            { "name" => "synthetic-flag", "valueBoolean" => true },
+            { "name" => "synthetic-resource", "resource" => labelled }
+          ]
+        }
+
+        result = Part2EgressFilter.call(parameters)
+
+        assert_noticed result, "a Parameters that carries a labelled resource must carry the notice"
+        assert_noticed result["parameter"][1]["resource"]
+        assert_equal labelled, without_notice(result["parameter"][1]["resource"])
+        assert_equal parameters["parameter"][0], result["parameter"][0]
+      end
+
+      test "a Parameters resource with no labelled resource is not noticed" do
+        parameters = {
+          "resourceType" => "Parameters", "id" => "syn-params",
+          "parameter" => [ { "name" => "synthetic-resource", "resource" => condition } ]
+        }
+
+        result = Part2EgressFilter.call(parameters)
+
+        assert_equal parameters, result
+        refute_noticed result
+      end
+
+      test "an NDJSON line whose resource contains a labelled resource is noticed" do
+        contained = { "resourceType" => "Observation", "id" => "syn-contained", "meta" => { "security" => [ { "code" => "SUD" } ] } }
+        ndjson = "#{condition('contained' => [ contained ]).to_json}\n"
+
+        result = Part2EgressFilter.call(ndjson)
+
+        assert_noticed JSON.parse(result.lines.first)
       end
 
       # --- rule 3: the Bundle itself carries the notice ---------------------
@@ -332,6 +486,50 @@ module Lakeraven
         assert_equal 2, result["meta"]["extension"].size
       end
 
+      test "a stale notice extension is replaced by the current notice" do
+        stale = { "url" => Part2RedisclosureNotice::EXTENSION_URL, "valueString" => "Synthetic out-of-date notice" }
+        other = { "url" => "https://example.test/fhir/StructureDefinition/synthetic", "valueString" => "x" }
+        resource = condition("meta" => { "security" => [ PART2_LABEL ], "extension" => [ other, stale ] })
+
+        result = Part2EgressFilter.call(resource)
+        with_url = result["meta"]["extension"].select { |ext| ext["url"] == Part2RedisclosureNotice::EXTENSION_URL }
+
+        assert_equal 1, with_url.size, "exactly one extension entry for the notice URL"
+        assert_equal Part2RedisclosureNotice::TEXT, with_url.first["valueString"]
+        assert_noticed result
+        assert_includes result["meta"]["extension"], other
+        assert_equal stale, resource["meta"]["extension"][1], "the input keeps its stale entry"
+      end
+
+      test "a symbol-keyed stale notice extension is replaced by the current notice" do
+        resource = {
+          resourceType: "Condition", id: "syn-1",
+          meta: {
+            security: [ { code: "42CFRPart2" } ],
+            extension: [ { url: Part2RedisclosureNotice::EXTENSION_URL, valueString: "Synthetic out-of-date notice" } ]
+          }
+        }
+
+        result = Part2EgressFilter.call(resource).deep_stringify_keys
+        with_url = result["meta"]["extension"].select { |ext| ext["url"] == Part2RedisclosureNotice::EXTENSION_URL }
+
+        assert_equal 1, with_url.size
+        assert_equal Part2RedisclosureNotice::TEXT, with_url.first["valueString"]
+      end
+
+      test "several stale notice entries collapse to the one current notice" do
+        stale = ->(text) { { "url" => Part2RedisclosureNotice::EXTENSION_URL, "valueString" => text } }
+        resource = condition(
+          "meta" => { "security" => [ PART2_LABEL ], "extension" => [ stale.("Synthetic old A"), stale.("Synthetic old B") ] }
+        )
+
+        result = Part2EgressFilter.call(resource)
+        with_url = result["meta"]["extension"].select { |ext| ext["url"] == Part2RedisclosureNotice::EXTENSION_URL }
+
+        assert_equal [ Part2RedisclosureNotice::TEXT ], with_url.map { |ext| ext["valueString"] }
+        assert_equal result, Part2EgressFilter.call(result)
+      end
+
       # --- rule 6: the caller's input is never mutated ----------------------
 
       test "the input is not mutated for any payload shape" do
@@ -423,7 +621,7 @@ module Lakeraven
         assert_nil Part2EgressFilter.call(sections)
       end
 
-      %w[42CFRPart2 ETH SUD].each do |code|
+      %w[42CFRPart2 ETH SUD ETHUD OPIOIDUD].each do |code|
         %i[allergies conditions medications].each do |list|
           test "C-CDA sections with a #{code} label in #{list} are refused" do
             row = { code: "SYN-1", display: "Synthetic", code_system: nil, security: [ { code: code } ] }
@@ -464,7 +662,198 @@ module Lakeraven
         assert_nil Part2EgressFilter.call(ndjson)
       end
 
+      # --- a label inside meta that is malformed or misplaced refuses -------
+
+      MISPLACED_META = {
+        "a CodeableConcept in meta.security" => { "security" => [ { "coding" => [ { "code" => "SUD" } ] } ] },
+        "a nested Array in meta.security" => { "security" => [ [ { "code" => "SUD" } ] ] },
+        "a Part 2 code in meta.tag" => { "tag" => [ { "code" => "42CFRPart2" } ] },
+        "a Part 2 valueCoding in meta.extension" => { "extension" => [ { "url" => "x", "valueCoding" => { "code" => "ETH" } } ] },
+        "a normalised Part 2 code in meta.tag" => { "tag" => [ { "code" => "opioidud " } ] },
+        "a misplaced code beside a proper label" => { "security" => [ { "code" => "42CFRPart2" } ], "tag" => [ { "code" => "ETHUD" } ] }
+      }.freeze
+
+      MISPLACED_META.each do |name, meta|
+        test "#{name} is refused" do
+          assert_nil Part2EgressFilter.call(condition("meta" => meta))
+        end
+
+        test "#{name} is refused in a Bundle entry" do
+          bundle = bundle_of(entry(condition, mode: "match"), entry(condition("id" => "syn-2", "meta" => meta), mode: "include"))
+
+          assert_nil Part2EgressFilter.call(bundle)
+        end
+
+        test "#{name} is refused on an NDJSON line" do
+          ndjson = "#{condition.to_json}\n#{condition('meta' => meta).to_json}\n"
+
+          assert_nil Part2EgressFilter.call(ndjson)
+        end
+      end
+
+      test "a symbol-keyed Part 2 code in meta.tag is refused" do
+        resource = { resourceType: "Condition", id: "syn-1", meta: { tag: [ { code: "SUD" } ] } }
+
+        assert_nil Part2EgressFilter.call(resource)
+      end
+
+      test "the notice extension already in meta is not a misplaced label" do
+        once = Part2EgressFilter.call(condition("meta" => { "security" => [ PART2_LABEL ] }))
+
+        assert_equal once, Part2EgressFilter.call(once)
+      end
+
+      test "meta.tag and meta.extension with no Part 2 code are left alone" do
+        resource = condition(
+          "meta" => {
+            "tag" => [ { "code" => "syn" } ],
+            "extension" => [ { "url" => "x", "valueCoding" => { "code" => "N" } } ],
+            "security" => [ UNRELATED_LABEL ]
+          }
+        )
+
+        assert_equal resource, Part2EgressFilter.call(resource)
+      end
+
+      # --- a String that is one JSON document over several lines ------------
+
+      test "an unlabelled pretty-printed JSON document is returned byte-identical" do
+        text = JSON.pretty_generate(export_manifest)
+
+        result = Part2EgressFilter.call(text)
+
+        assert_operator text.lines.size, :>, 1
+        assert_equal text, result
+        assert_equal text.bytes, result.bytes
+      end
+
+      test "an unlabelled pretty-printed JSON document with a trailing newline is returned byte-identical" do
+        text = "#{JSON.pretty_generate(export_manifest('security' => [ UNRELATED_LABEL ]))}\n"
+
+        assert_equal text.bytes, Part2EgressFilter.call(text).bytes
+      end
+
+      %w[ETH SUD ETHUD OPIOIDUD 42CFRPart2].each do |code|
+        test "a pretty-printed JSON document with a #{code} security label is refused" do
+          text = JSON.pretty_generate(export_manifest("security" => [ { "system" => ACT_CODE, "code" => code } ]))
+
+          assert_nil Part2EgressFilter.call(text)
+        end
+      end
+
+      test "a pretty-printed JSON document that holds an ETH-labelled resource is refused" do
+        labelled = condition("meta" => { "security" => [ { "code" => "ETH" } ] })
+        text = JSON.pretty_generate(export_manifest("output" => [ { "type" => "Condition", "resource" => labelled } ]))
+
+        assert_nil Part2EgressFilter.call(text)
+      end
+
+      test "a pretty-printed JSON document that holds a SUD-labelled resource deep inside is refused" do
+        labelled = { "resourceType" => "Observation", "id" => "syn-obs", "meta" => { "security" => [ { "code" => "SUD" } ] } }
+        text = JSON.pretty_generate(export_manifest("extension" => { "items" => [ { "detail" => [ labelled ] } ] }))
+
+        assert_nil Part2EgressFilter.call(text)
+      end
+
+      test "a pretty-printed JSON document with a normalised label is refused" do
+        text = JSON.pretty_generate(export_manifest("security" => [ { "code" => "sud " } ]))
+
+        assert_nil Part2EgressFilter.call(text)
+      end
+
+      test "a pretty-printed JSON document with a Part 2 code in a resource's meta.tag is refused" do
+        misplaced = condition("meta" => { "tag" => [ { "code" => "SUD" } ] })
+        text = JSON.pretty_generate(export_manifest("output" => [ { "resource" => misplaced } ]))
+
+        assert_nil Part2EgressFilter.call(text)
+      end
+
+      # --- lines that are not JSON -------------------------------------------
+
+      %w[ETH SUD ETHUD OPIOIDUD].each do |code|
+        test "a CSV row with #{code} as a whole word is refused" do
+          csv = "id,event_type,action,detail\n1,rest,R,plain\n2,rest,R,label #{code} applied\n"
+
+          assert_nil Part2EgressFilter.call(csv)
+        end
+
+        test "a CSV row with #{code} as a whole field is refused" do
+          csv = "id,event_type,action,detail\n2,rest,R,#{code}\n"
+
+          assert_nil Part2EgressFilter.call(csv)
+        end
+      end
+
+      test "a CSV row that names 42CFRPart2 in another case is refused" do
+        [ "42cfrpart2", "42CFRPART2", "x42CfrPart2y" ].each do |spelling|
+          csv = "id,event_type,action,detail\n2,rest,R,#{spelling}\n"
+
+          assert_nil Part2EgressFilter.call(csv), "#{spelling} in a CSV row must refuse"
+        end
+      end
+
+      test "a CSV row whose words only contain the letters of a short code is unchanged" do
+        csv = "id,event_type,action,detail\n" \
+          "1,rest,R,METHOD PSEUDO Sudden\n" \
+          "2,rest,R,eth sud Eth Sud ethud opioidud\n" \
+          "3,rest,R,ETHANOL SUDS METHADONE_SUDX XETH\n"
+
+        result = Part2EgressFilter.call(csv)
+
+        assert_equal csv, result
+        assert_equal csv.bytes, result.bytes
+      end
+
+      test "a byte order mark does not hide a labelled NDJSON line" do
+        [ { "code" => "SUD" }, { "code" => "ETH" }, PART2_LABEL ].each do |label|
+          labelled = condition("meta" => { "security" => [ label ] })
+          ndjson = "\uFEFF#{labelled.to_json}\n"
+
+          result = Part2EgressFilter.call(ndjson)
+
+          refute_equal ndjson, result, "a BOM-prefixed labelled line (#{label['code']}) must not leave unchanged"
+          next if result.nil?
+
+          assert_noticed JSON.parse(result.lines.first.delete_prefix("\uFEFF"))
+        end
+      end
+
+      test "a byte order mark before a later labelled line does not hide it" do
+        labelled = condition("meta" => { "security" => [ { "code" => "SUD" } ] })
+        ndjson = "#{condition.to_json}\n\uFEFF#{labelled.to_json}\n"
+
+        result = Part2EgressFilter.call(ndjson)
+
+        refute_equal ndjson, result
+        assert_noticed JSON.parse(result.lines[1].delete_prefix("\uFEFF")) unless result.nil?
+      end
+
+      test "a String with invalid UTF-8 bytes is refused and does not raise" do
+        [
+          "id,event_type\n1,\xFF\xFE\n",
+          "#{condition.to_json}\n\xC3\x28\n",
+          "\xFF"
+        ].each do |text|
+          bad = text.dup.force_encoding(Encoding::UTF_8)
+          refute bad.valid_encoding?, "test data must be invalid UTF-8"
+
+          result = nil
+          assert_nothing_raised { result = Part2EgressFilter.call(bad) }
+          assert_nil result, "invalid UTF-8 cannot be examined, so it must not leave"
+        end
+      end
+
       private
+
+      def export_manifest(overrides = {})
+        {
+          "transactionTime" => "2026-01-01T00:00:00Z",
+          "request" => "https://example.test/lakeraven-ehr/$export",
+          "requiresAccessToken" => true,
+          "output" => [ { "type" => "Condition", "url" => "https://example.test/files/syn-1.ndjson" } ],
+          "error" => []
+        }.merge(overrides)
+      end
 
       def condition(overrides = {})
         {

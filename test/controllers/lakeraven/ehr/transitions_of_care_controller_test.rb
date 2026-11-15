@@ -205,7 +205,91 @@ module Lakeraven
         assert_includes response.body, "ZZZ-UNLABELLED-CONDITION-DISPLAY"
       end
 
+      # The label has to come from the model, not from a test wrapper: the
+      # rows the controller builds keep the security labels of what
+      # Condition.for_patient returned, and the REAL filter refuses them.
+      test "C-CDA is refused when a condition model's to_fhir carries a Part 2 label" do
+        labelled = SyntheticCondition.new(
+          "F10.20", "ZZZ-MODEL-PART2-DISPLAY", "http://hl7.org/fhir/sid/icd-10-cm",
+          [ { "system" => "http://terminology.hl7.org/CodeSystem/v3-ActCode", "code" => "42CFRPart2" } ]
+        )
+        plain = SyntheticCondition.new("ZZZ-PLAIN", "ZZZ-MODEL-PLAIN-DISPLAY", nil, nil)
+
+        stub_condition_rows([ plain, labelled ]) do
+          post "/lakeraven-ehr/transitions_of_care",
+            params: { patient_dfn: "1" }, headers: @headers
+        end
+
+        assert_response :service_unavailable
+        refute_includes response.body, "ClinicalDocument"
+        refute_includes response.body, "ZZZ-MODEL-PART2-DISPLAY"
+        refute_includes response.body, "ZZZ-MODEL-PLAIN-DISPLAY"
+        refute_includes response.body, "F10.20"
+      end
+
+      test "C-CDA is refused when a condition model's to_fhir carries a SUD sensitivity label" do
+        labelled = SyntheticCondition.new("F11.20", "ZZZ-MODEL-SUD-DISPLAY", nil, [ { "code" => "SUD" } ])
+
+        stub_condition_rows([ labelled ]) do
+          post "/lakeraven-ehr/transitions_of_care",
+            params: { patient_dfn: "1" }, headers: @headers
+        end
+
+        assert_response :service_unavailable
+        refute_includes response.body, "ClinicalDocument"
+        refute_includes response.body, "ZZZ-MODEL-SUD-DISPLAY"
+      end
+
+      test "C-CDA is refused when a condition Hash row carries a security label" do
+        row = { code: "F10.20", display: "ZZZ-HASH-PART2-DISPLAY", code_system: nil, security: [ { code: "SUD" } ] }
+
+        stub_condition_rows([ row ]) do
+          post "/lakeraven-ehr/transitions_of_care",
+            params: { patient_dfn: "1" }, headers: @headers
+        end
+
+        assert_response :service_unavailable
+        refute_includes response.body, "ClinicalDocument"
+        refute_includes response.body, "ZZZ-HASH-PART2-DISPLAY"
+      end
+
+      test "C-CDA renders a condition model whose to_fhir has no security label" do
+        plain = SyntheticCondition.new("ZZZ-PLAIN", "ZZZ-MODEL-PLAIN-DISPLAY", nil, nil)
+        hash_row = { code: "ZZZ-HASH", display: "ZZZ-HASH-PLAIN-DISPLAY", code_system: nil }
+
+        stub_condition_rows([ plain, hash_row ]) do
+          post "/lakeraven-ehr/transitions_of_care",
+            params: { patient_dfn: "1" }, headers: @headers
+        end
+
+        assert_response :created
+        assert_includes response.body, "ClinicalDocument"
+        assert_includes response.body, "ZZZ-MODEL-PLAIN-DISPLAY"
+        assert_includes response.body, "ZZZ-HASH-PLAIN-DISPLAY"
+      end
+
       private
+
+      # A model-like condition: what the controller reads (code, display,
+      # code_system) plus to_fhir, whose meta.security holds the labels the
+      # record was stored with. Synthetic values only.
+      SyntheticCondition = Struct.new(:code, :display, :code_system, :security) do
+        def to_fhir
+          resource = { "resourceType" => "Condition", "id" => "syn-#{code}", "code" => { "text" => display } }
+          security ? resource.merge("meta" => { "security" => security }) : resource
+        end
+      end
+
+      # Condition.for_patient returns `rows` for the block. The real
+      # Part2EgressFilter runs: it is not stubbed here.
+      def stub_condition_rows(rows)
+        model = Condition.singleton_class
+        original = model.instance_method(:for_patient)
+        model.define_method(:for_patient) { |*| rows }
+        yield
+      ensure
+        model.define_method(:for_patient, original)
+      end
 
       # Runs the REAL Part2EgressFilter.call on the sections after `prepare`
       # has changed them, so the test sees what the real filter decides.

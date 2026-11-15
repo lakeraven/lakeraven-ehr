@@ -924,13 +924,33 @@ module Lakeraven
       # non-HTML wired endpoint is driven with its own payload labelled Part 2
       # on the way into the REAL filter. The response is the notice on every
       # labelled resource, or a 503 with no clinical content.
+      #
+      # The HTML rows (the screenings pages; the chart page has its own tests
+      # above) are excluded from that claim, and are named for what they do
+      # prove. A page shown to the program's own workforce is a USE of the
+      # record inside the program, not a redisclosure to an outside
+      # recipient, so § 2.32 does not require the page to render the notice
+      # and these tests do not look for it in the HTML. They assert only on
+      # the filter output: the view is handed noticed data, or the filter
+      # refused and nothing is rendered.
       WIRED_ENDPOINTS.each do |endpoint|
         test_name = endpoint[:name] || endpoint[:path]
+        # Known when the test is named, before a dynamic path is built: the
+        # HTML rows are the browser-session ones. Checked against the path
+        # inside the test, so a row that is named wrongly fails.
+        html_row = endpoint[:session_auth] ? true : false
+        claim = if html_row
+          "Part 2-labelled payload: HTML use path hands the view only noticed or refused data for"
+        else
+          "Part 2-labelled payload leaves noticed or not at all for"
+        end
 
-        test "Part 2-labelled payload leaves noticed or not at all for #{endpoint[:method].to_s.upcase} #{test_name}" do
+        test "#{claim} #{endpoint[:method].to_s.upcase} #{test_name}" do
           instance_exec(&endpoint[:setup]) if endpoint[:setup]
           path = endpoint[:dynamic_path] ? instance_exec(&endpoint[:dynamic_path]) : endpoint[:path]
           is_html = path.include?("/patients/") && !path.end_with?(".json")
+          assert_equal html_row, is_html,
+            "#{test_name}: the test name says #{html_row ? 'HTML use' : 'redisclosure'} but the path #{path} says otherwise"
 
           results = []
           with_part2_labelled_egress(results) do
@@ -939,8 +959,9 @@ module Lakeraven
 
           refute_empty results, "#{test_name} did not hand a payload to Part2EgressFilter"
           if is_html
-            # An HTML page has no FHIR body to read back. What the view is
-            # given is what the real filter returned: noticed, or nothing.
+            # Workforce use, not a redisclosure (see above): the page is not
+            # required to show the notice. What the view is given is what
+            # the real filter returned: noticed, or nothing.
             assert_part2_html_noticed_or_refused(test_name, results)
           else
             assert_part2_noticed_or_refused(test_name, ndjson: test_name == "exports file show")
