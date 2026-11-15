@@ -61,7 +61,7 @@ module Lakeraven
       # Parameters work too. Values are never inspected beyond their type.
       def refusal_for(params)
         return if params.nil?
-        return refusal_message([ [ "params", "not a set of named fields" ] ]) unless hash_like?(params)
+        return refusal_text("params are not a set of named fields") unless hash_like?(params)
 
         accepted = ReferralSurfaces::ORIGINATION_FIELDS.map(&:to_s)
         names = params.keys.map(&:to_s)
@@ -80,8 +80,12 @@ module Lakeraven
         shown, hidden = problems.partition { |name, _| ServiceRequest.attribute_names.include?(name) }
         refused = shown.map { |name, why| "#{name} (#{why})" }
         refused << "#{hidden.size} other key(s)" if hidden.any?
+        refusal_text("refused: #{refused.join(', ')}")
+      end
+
+      def refusal_text(reason)
         "Structured referral types are not offered; origination accepts only " \
-          "#{ReferralSurfaces::ORIGINATION_FIELDS.join(', ')} as text; refused: #{refused.join(', ')}"
+          "#{ReferralSurfaces::ORIGINATION_FIELDS.join(', ')} as text; #{reason}"
       end
 
       def hash_like?(params)
