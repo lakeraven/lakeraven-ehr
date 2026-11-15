@@ -79,8 +79,11 @@ module Lakeraven
         @adapter.request_change(transmission_id, pharmacy_ncpdpid: pharmacy_ncpdpid, new_medication: new_medication)
       end
 
+      # Refused for every change id (#904): the medication a pharmacy change
+      # proposes cannot be read from a change id here, so it cannot be shown
+      # not to be MAT/MOUD. The adapter is never called.
       def approve_change(change_id, provider_duz:)
-        @adapter.approve_change(change_id)
+        Eprescribing::TransmissionResult.failure(MatMoudMedication::REFUSAL)
       end
 
       def deny_change(change_id, provider_duz:, reason: nil)
