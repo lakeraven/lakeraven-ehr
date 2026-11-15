@@ -13,6 +13,10 @@ module Lakeraven
       end
 
       def transmit(order, provider_duz:)
+        unless MatMoudMedication.orderable?(order.medication_display)
+          return Eprescribing::TransmissionResult.failure(MatMoudMedication::REFUSAL)
+        end
+
         validate_for_transmission!(order)
 
         result = @adapter.send_prescription(order)
@@ -68,6 +72,10 @@ module Lakeraven
       end
 
       def request_change(transmission_id, pharmacy_ncpdpid:, new_medication:)
+        unless MatMoudMedication.orderable?(change_medication_text(new_medication))
+          return Eprescribing::TransmissionResult.failure(MatMoudMedication::REFUSAL)
+        end
+
         @adapter.request_change(transmission_id, pharmacy_ncpdpid: pharmacy_ncpdpid, new_medication: new_medication)
       end
 
@@ -80,6 +88,14 @@ module Lakeraven
       end
 
       private
+
+      # The adapter is given either the medication text or a { code:, display: }
+      # hash; NcpdpScriptGenerator sends new_medication[:display] as the
+      # DrugDescription, so that is the text read. Any other shape yields no
+      # text and is refused.
+      def change_medication_text(new_medication)
+        new_medication.is_a?(Hash) ? new_medication[:display] : new_medication
+      end
 
       def validate_for_transmission!(order)
         raise PrescriptionNotActiveError, "Order status must be active for transmission" if order.status == "cancelled"

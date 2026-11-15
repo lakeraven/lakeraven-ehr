@@ -12,6 +12,7 @@ module Lakeraven
           errors << "Provider is required" if provider_duz.blank?
           errors << "Medication is required" if medication.blank?
           return OrderResult.failure(errors) if errors.any?
+          return OrderResult.failure(MatMoudMedication::REFUSAL) unless MatMoudMedication.orderable?(medication)
 
           order = MedicationRequest.new(
             ien: generate_order_id,
@@ -93,6 +94,10 @@ module Lakeraven
         end
 
         def sign_order(order, provider_duz:, transmit: true)
+          if order.is_a?(MedicationRequest) && !MatMoudMedication.orderable?(order.medication_display)
+            return OrderResult.failure(MatMoudMedication::REFUSAL)
+          end
+
           if order.is_a?(MedicationRequest)
             order.status = "active"
             order.intent = "order"
