@@ -72,16 +72,23 @@ module Lakeraven
         assert_equal "pending", result.status
       end
 
-      test "approve_change changes status to approved" do
+      # December MH-only posture (#904): the medication a pharmacy change
+      # proposes cannot be read from a change id, so it cannot be shown not to
+      # be MAT/MOUD, and approving a change is refused outright.
+      test "approve_change is refused in the MH-only build (#904)" do
         change = @service.request_change(
           @tx.transmission_id,
           pharmacy_ncpdpid: "1234567",
           new_medication: { code: "197885", display: "Lisinopril 20 MG" }
         )
+        assert change.success?, change.errors.inspect
+
         result = @service.approve_change(change.transmission_id, provider_duz: "789")
 
-        assert result.success?
-        assert_equal "approved", result.status
+        assert_not result.success?
+        assert(result.errors.any? { |e| e.match?(%r{MAT/MOUD}i) }, result.errors.inspect)
+        assert_not_equal "approved", result.status
+        assert_equal "pending", @adapter.check_status(change.transmission_id).status
       end
 
       test "deny_change changes status to denied" do
