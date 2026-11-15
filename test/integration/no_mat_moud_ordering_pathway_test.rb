@@ -1,0 +1,77 @@
+# frozen_string_literal: true
+
+require "test_helper"
+
+# #904 posture guard (slice of #522, 42 CFR Part 2): the December build has no
+# route, screen or API that lets staff place an order, so none can order
+# MAT/MOUD. Each test here goes red if an ordering pathway is re-added.
+# Documenting substance use (notes, problems, screenings) is not ordering and
+# is deliberately not matched.
+class NoMatMoudOrderingPathwayTest < ActionDispatch::IntegrationTest
+  ENGINE = "/lakeraven-ehr"
+  ORDERING = /medication|order|prescri|erx|cpoe|ServiceRequest|MedicationDispense|MedicationAdministration|NutritionOrder|DeviceRequest/i
+  ORDER_TYPES = %w[MedicationRequest ServiceRequest MedicationDispense MedicationAdministration NutritionOrder DeviceRequest].freeze
+  WRITE_INTERACTIONS = %w[create update patch delete].freeze
+  ORDER_WRITE_RPCS = [ "ORWDX SAVE", "ORWDXC ACCEPT", "ORWDX SEND", "ORWDXA", "ORWDPS" ].freeze
+  ORDER_WRITE_CALLS = [
+    /\bOrder\s*\.\s*(?:save|check|sign_and_release)\b/,
+    /\b(?:via|default_provider)\s*\.\s*(?:save|check|sign_and_release)\b/
+  ].freeze
+
+  test "no route outside GET/HEAD reaches a medication or order surface" do
+    offending = Lakeraven::EHR::Engine.routes.routes.select do |route|
+      verbs = route.verb.to_s.split("|")
+      writes = verbs.empty? || (verbs - %w[GET HEAD]).any?
+      writes && (route.path.spec.to_s.match?(ORDERING) || route.defaults[:controller].to_s.match?(ORDERING))
+    end
+
+    assert_empty offending.map { |r| "#{r.verb} #{r.path.spec} => #{r.defaults[:controller]}##{r.defaults[:action]}" },
+      "ordering write routes are not offered in the December build"
+  end
+
+  %w[MedicationRequest MedicationRequest/1 ServiceRequest ServiceRequest/1].each do |path|
+    %i[post put patch delete].each do |verb|
+      test "#{verb.upcase} /#{path} is not routable" do
+        begin
+          public_send(verb, "#{ENGINE}/#{path}", params: { resourceType: path.split("/").first }, as: :json)
+        rescue ActionController::RoutingError
+          next
+        end
+        assert_response :not_found
+      end
+    end
+  end
+
+  test "CapabilityStatement declares no write interaction for any order resource" do
+    statement = Lakeraven::EHR::FHIR::CapabilityStatement
+    document = statement.call(base_url: "https://ehr.example.test#{ENGINE}", token_endpoint: "https://ehr.example.test/oauth/token")
+    served = document[:rest].flat_map { |rest| rest[:resource] }.to_h do |resource|
+      [ resource[:type], resource[:interaction].map { |i| i[:code] } ]
+    end
+
+    ORDER_TYPES.each do |type|
+      declared = Array(statement::RESOURCES.dig(type, :interactions)) | Array(served[type])
+      assert_empty declared & WRITE_INTERACTIONS, "#{type} must stay read-only"
+    end
+  end
+
+  test "no source file names an order-write RPC or calls an RpmsRpc::Order write method" do
+    root = Lakeraven::EHR::Engine.root
+    files = Dir[root.join("{app,lib}/**/*.{rb,erb,rake}").to_s]
+    assert_operator files.size, :>, 100, "source scan found too few files to be trusted"
+
+    hits = files.flat_map do |file|
+      File.readlines(file).each_with_index.filter_map do |line, index|
+        next unless ORDER_WRITE_RPCS.any? { |rpc| line.include?(rpc) } || ORDER_WRITE_CALLS.any? { |call| line.match?(call) }
+
+        "#{file.delete_prefix("#{root}/")}:#{index + 1}: #{line.strip}"
+      end
+    end
+
+    assert_empty hits, "order writes (ORWDX SAVE / ORWDXC ACCEPT / ORWDX SEND) are not offered"
+  end
+
+  test "OrderGateway exposes only the read side of RpmsRpc::Order" do
+    assert_equal %i[default_provider list unsigned_for_patient], Lakeraven::EHR::OrderGateway.singleton_methods(false).sort
+  end
+end
