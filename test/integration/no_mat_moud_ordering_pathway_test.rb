@@ -9,10 +9,17 @@ require "test_helper"
 # is deliberately not matched.
 class NoMatMoudOrderingPathwayTest < ActionDispatch::IntegrationTest
   ENGINE = "/lakeraven-ehr"
-  ORDERING = /medication|order|prescri|erx|cpoe|ServiceRequest|MedicationDispense|MedicationAdministration|NutritionOrder|DeviceRequest/i
+  ORDERING = /medication|order|prescri|erx|cpoe|ServiceRequest|MedicationDispense|MedicationAdministration|NutritionOrder|DeviceRequest|\brx\b|\bmeds?\b|refill|pharmac|dispens|script/i
   ORDER_TYPES = %w[MedicationRequest ServiceRequest MedicationDispense MedicationAdministration NutritionOrder DeviceRequest].freeze
   WRITE_INTERACTIONS = %w[create update patch delete].freeze
   ORDER_WRITE_RPCS = [ "ORWDX SAVE", "ORWDXC ACCEPT", "ORWDX SEND", "ORWDXA", "ORWDPS" ].freeze
+  # Any quoted RPC name in the CPRS/RPMS order-write and outpatient-pharmacy families.
+  ORDER_WRITE_RPC_NAME = /["'](?:ORWDX|ORWDPS|ORWOR1 SIG|APSP|BEHORX|PSO)[A-Z0-9 ]*["']/
+  ORDERING_SERVICE_REFERENCE = /CpoeService|EprescribingService|Eprescribing::|NcpdpScriptGenerator|send_prescription|sign_and_release/
+  ENTRY_LAYERS = "{app/controllers,app/jobs,app/views,app/helpers,app/channels,app/mailers,lib,config}/**/*.{rb,erb,rake,yml}"
+  EPRESCRIBING_ADAPTER_FILES = %w[base_adapter eprescribing_adapter_factory mock_adapter not_configured_adapter transmission_result].freeze
+  CPOE_SERVICE_API = %i[cancel_order create_imaging_order create_lab_order create_medication_order sign_order].freeze
+  EPRESCRIBING_SERVICE_API = %i[approve_change approve_refill cancel check_status deny_change deny_refill request_change request_refill transmit].freeze
   ORDER_WRITE_CALLS = [
     /\bOrder\s*\.\s*(?:save|check|sign_and_release)\b/,
     /\b(?:via|default_provider)\s*\.\s*(?:save|check|sign_and_release)\b/
@@ -62,13 +69,40 @@ class NoMatMoudOrderingPathwayTest < ActionDispatch::IntegrationTest
 
     hits = files.flat_map do |file|
       File.readlines(file).each_with_index.filter_map do |line, index|
-        next unless ORDER_WRITE_RPCS.any? { |rpc| line.include?(rpc) } || ORDER_WRITE_CALLS.any? { |call| line.match?(call) }
+        next unless ORDER_WRITE_RPCS.any? { |rpc| line.include?(rpc) } || line.match?(ORDER_WRITE_RPC_NAME) ||
+          ORDER_WRITE_CALLS.any? { |call| line.match?(call) }
 
         "#{file.delete_prefix("#{root}/")}:#{index + 1}: #{line.strip}"
       end
     end
 
     assert_empty hits, "order writes (ORWDX SAVE / ORWDXC ACCEPT / ORWDX SEND) are not offered"
+  end
+
+  test "no production entry layer reaches the ordering services" do
+    root = Lakeraven::EHR::Engine.root
+    files = Dir[root.join(ENTRY_LAYERS).to_s]
+    assert_operator files.size, :>, 100, "entry-layer scan found too few files to be trusted"
+
+    hits = files.flat_map do |file|
+      File.readlines(file).each_with_index.filter_map do |line, index|
+        "#{file.delete_prefix("#{root}/")}:#{index + 1}: #{line.strip}" if line.match?(ORDERING_SERVICE_REFERENCE)
+      end
+    end
+
+    assert_empty hits, "controllers, jobs, views, helpers, lib and config must not reach CPOE or e-prescribing"
+  end
+
+  test "the e-prescribing adapters are exactly the known set" do
+    adapters = Dir[Lakeraven::EHR::Engine.root.join("app/services/lakeraven/ehr/eprescribing/*.rb").to_s]
+
+    assert_equal EPRESCRIBING_ADAPTER_FILES, adapters.map { |file| File.basename(file, ".rb") }.sort,
+      "a pharmacy adapter was added or removed: re-review the MAT/MOUD refusals (#904) before changing this list"
+  end
+
+  test "the ordering services' public API is pinned" do
+    assert_equal CPOE_SERVICE_API, Lakeraven::EHR::CpoeService.singleton_class.public_instance_methods(false).sort
+    assert_equal EPRESCRIBING_SERVICE_API, Lakeraven::EHR::EprescribingService.public_instance_methods(false).sort
   end
 
   test "OrderGateway exposes only the read side of RpmsRpc::Order" do

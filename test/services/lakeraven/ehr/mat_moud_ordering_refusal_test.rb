@@ -11,7 +11,7 @@ module Lakeraven
 
       # Counts every call that would reach a pharmacy.
       class SpyAdapter < Eprescribing::MockAdapter
-        attr_reader :sent, :changes
+        attr_reader :sent, :changes, :approved
 
         def send_prescription(order)
           (@sent ||= []) << order
@@ -20,6 +20,11 @@ module Lakeraven
 
         def request_change(transmission_id, **options)
           (@changes ||= []) << options
+          super
+        end
+
+        def approve_change(change_id)
+          (@approved ||= []) << change_id
           super
         end
       end
@@ -140,6 +145,25 @@ module Lakeraven
 
         assert result.success?, result.errors.inspect
         assert_equal 1, @adapter.changes.size
+      end
+
+      # Amendment 1: the medication behind a pharmacy change id cannot be read
+      # here, so approving one is refused whatever the id.
+      test "approve_change refuses every change id without calling the adapter" do
+        sent = @erx.transmit(medication_order("Lisinopril 10mg"), provider_duz: "789")
+        change = @erx.request_change(sent.transmission_id, pharmacy_ncpdpid: "1234567", new_medication: "Lisinopril 20mg")
+        assert change.success?, change.errors.inspect
+
+        [ change.transmission_id, "change-unknown", "", nil ].each do |change_id|
+          audits_before = AuditEvent.count
+          result = @erx.approve_change(change_id, provider_duz: "789")
+
+          assert_kind_of Eprescribing::TransmissionResult, result
+          refute result.success?, "#{change_id.inspect} must not be approved"
+          assert(result.errors.any? { |e| e.match?(REFUSAL) }, result.errors.inspect)
+          assert_equal audits_before, AuditEvent.count
+        end
+        assert_nil @adapter.approved, "adapter approve_change must never be called"
       end
 
       private

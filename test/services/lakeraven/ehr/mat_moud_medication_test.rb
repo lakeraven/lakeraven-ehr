@@ -46,6 +46,49 @@ module Lakeraven
           assert_equal :unclassified, MatMoudMedication.classify(value), value.inspect
         end
       end
+
+      # --- Amendment 1 -------------------------------------------------------
+
+      test "a letter outside ASCII a-z after NFKC and downcasing is :unclassified, never :not_mat_moud" do
+        [ "meth\u0430done 10 mg", "M\u00E9thadone", "bupren\u043Erphine 8 mg", "Sertralina espa\u00F1ola" ].each do |text|
+          assert_equal :unclassified, MatMoudMedication.classify(text), text.inspect
+        end
+      end
+
+      test "fullwidth letters NFKC-normalise to ASCII and are still read" do
+        assert_equal :mat_moud, MatMoudMedication.classify("\uFF33\uFF35\uFF22\uFF2F\uFF38\uFF2F\uFF2E\uFF25")
+      end
+
+      test "strings that cannot be read as UTF-8 text are :unclassified and do not raise" do
+        [ "methadone\xFF", "Suboxone".encode("UTF-16LE") ].each do |text|
+          result = begin
+            MatMoudMedication.classify(text)
+          rescue StandardError => e
+            flunk "#{text.inspect} raised #{e.class}: #{e.message}"
+          end
+          assert_equal :unclassified, result, text.inspect
+        end
+      end
+
+      test "short brand names match only as whole words" do
+        [ "Ensure via G-tube TID", "Lithium (abbreviated titration)", "Placenta previa iron" ].each do |text|
+          assert_equal :not_mat_moud, MatMoudMedication.classify(text), text.inspect
+        end
+        [ "Revia 50 mg", "REVIA", "Depade 50mg" ].each do |text|
+          assert_equal :mat_moud, MatMoudMedication.classify(text), text.inspect
+        end
+      end
+
+      [ "buprenorphin 8 mg", "buprenorfina", "methadon 10mg", "metadona", "naltrexon", "Suboxon film", "Cassipa",
+        "levomethadyl acetate", "LAAM", "BUP 8mg SL", "bup/nx 8-2 film", "Trexan" ].each do |text|
+        test "name variant #{text.inspect} is :mat_moud" do
+          assert_equal :mat_moud, MatMoudMedication.classify(text)
+        end
+      end
+
+      test "bupropion is an antidepressant and does not match the bup word stem" do
+        assert_equal :not_mat_moud, MatMoudMedication.classify("Bupropion XL 150 mg")
+      end
     end
   end
 end
