@@ -13,9 +13,8 @@ module Lakeraven
       end
 
       def transmit(order, provider_duz:)
-        unless MatMoudMedication.orderable?(order.medication_display)
-          return Eprescribing::TransmissionResult.failure(MatMoudMedication::REFUSAL)
-        end
+        refusal = MatMoudMedication.refusal_for(order.medication_display)
+        return Eprescribing::TransmissionResult.failure(refusal) if refusal
 
         validate_for_transmission!(order)
 
@@ -72,9 +71,8 @@ module Lakeraven
       end
 
       def request_change(transmission_id, pharmacy_ncpdpid:, new_medication:)
-        unless MatMoudMedication.orderable?(change_medication_text(new_medication))
-          return Eprescribing::TransmissionResult.failure(MatMoudMedication::REFUSAL)
-        end
+        refusal = MatMoudMedication.refusal_for(change_medication_text(new_medication))
+        return Eprescribing::TransmissionResult.failure(refusal) if refusal
 
         @adapter.request_change(transmission_id, pharmacy_ncpdpid: pharmacy_ncpdpid, new_medication: new_medication)
       end
