@@ -12,9 +12,11 @@ module Lakeraven
     # security_code — an unknown label counts as Part 2.
     class Part2Posture
       def self.part2?(record_type:, record_id:, content:)
-        return true if record_type.blank? || record_id.to_s.blank?
-        return true if labelled?(record_type.to_s, record_id.to_s)
+        key = Part2Label.normalized_key(record_type: record_type, record_id: record_id)
+        return true if key.values.any?(&:blank?)
+        return true if labelled?(key)
 
+        # classify never raises: unreadable or blank content is :unclassified.
         SudContentSuspicion.classify(content) != :not_suspected
       end
 
@@ -22,8 +24,8 @@ module Lakeraven
       # gives no reason to call the record clean, so it fails closed to
       # Part 2. Anything else is a bug and is left to surface rather than
       # being silently swallowed.
-      def self.labelled?(record_type, record_id)
-        Part2Label.exists?(record_type: record_type, record_id: record_id) ? true : false
+      def self.labelled?(key)
+        Part2Label.exists?(key) ? true : false
       rescue ActiveRecord::ActiveRecordError
         true
       end

@@ -23,20 +23,45 @@ module Lakeraven
       validates :patient_dfn, :record_type, :record_id, :security_code, presence: true
       validates :record_id, uniqueness: { scope: :record_type }
 
+      # The ONE normalisation of a record's identifiers, used by both the
+      # write (mark!) and the read (Part2Posture.part2?), so a label written
+      # for " 70001" or "TIU_NOTE" is found for "70001" / "tiu_note".
+      def self.normalized_key(record_type:, record_id:)
+        { record_type: record_type.to_s.strip.downcase, record_id: record_id.to_s.strip }
+      end
+
       # Labels a record as Part 2. Idempotent: an existing row for the
       # record is left as it is (whatever its code) and counts as success.
       # Blank inputs raise ActiveRecord::RecordInvalid and write nothing.
+      #
+      # A concurrent writer may commit the same record between the lookup
+      # and the insert. The insert runs in a savepoint, so a unique-index
+      # refusal rolls back only the savepoint and never aborts the caller's
+      # PostgreSQL transaction; that refusal, or a uniqueness-only
+      # validation failure, means the record is already labelled, and the
+      # existing row is returned.
       def self.mark!(patient_dfn:, record_type:, record_id:)
-        attributes = { record_type: record_type.to_s, record_id: record_id.to_s }
-        existing = find_by(attributes)
+        key = normalized_key(record_type: record_type, record_id: record_id)
+        existing = find_by(key)
         return existing if existing
 
-        create!(attributes.merge(patient_dfn: patient_dfn.to_s, security_code: PART2_SECURITY_CODE))
-      rescue ActiveRecord::RecordNotUnique
-        # A concurrent writer labelled the same record between the lookup
-        # and the insert. The row exists, which is what was asked for.
-        find_by!(attributes)
+        begin
+          transaction(requires_new: true) do
+            create!(key.merge(patient_dfn: patient_dfn.to_s, security_code: PART2_SECURITY_CODE))
+          end
+        rescue ActiveRecord::RecordNotUnique
+          find_by!(key)
+        rescue ActiveRecord::RecordInvalid => e
+          raise unless only_taken?(e.record)
+
+          find_by!(key)
+        end
       end
+
+      def self.only_taken?(record)
+        record.errors.of_kind?(:record_id, :taken) && record.errors.size == 1
+      end
+      private_class_method :only_taken?
     end
   end
 end

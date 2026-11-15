@@ -66,10 +66,14 @@ module Lakeraven
       private
 
       # Labels before the text is written, so the label never trails the
-      # content. Only database errors are rescued: the note must not be
-      # blocked by a label write, and Part2Posture fails closed for it.
+      # content. classify never raises (blank or unreadable text is
+      # :unclassified and labelled). A note the gateway gave no IEN cannot be
+      # labelled, so it is never reported as :labelled. Only database errors
+      # are rescued: the note must not be blocked by a label write, and
+      # Part2Posture fails closed for it.
       def label_part2(note_ien, text)
         return :not_suspected if SudContentSuspicion.classify(text) == :not_suspected
+        return :label_failed if note_ien.to_s.strip.empty?
 
         Part2Label.mark!(patient_dfn: @dfn.to_s, record_type: PART2_RECORD_TYPE, record_id: note_ien.to_s)
         :labelled
