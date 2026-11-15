@@ -161,6 +161,13 @@ module Lakeraven
           assert_kind_of Eprescribing::TransmissionResult, result
           refute result.success?, "#{change_id.inspect} must not be approved"
           assert(result.errors.any? { |e| e.match?(REFUSAL) }, result.errors.inspect)
+          # Amendment 4: say why. Nothing was ordered here, so the bare
+          # "MAT/MOUD ordering is not offered" message would mislead; the
+          # error names the pharmacy change that was not approved.
+          assert_equal 1, result.errors.size, result.errors.inspect
+          refute_includes result.errors, MatMoudMedication::REFUSAL, "approve_change needs its own message"
+          refute_includes result.errors, MatMoudMedication::UNREADABLE, "nothing was typed, so nothing was unreadable"
+          assert_match(/change/i, result.errors.first)
           assert_equal audits_before, AuditEvent.count
         end
         assert_nil @adapter.approved, "adapter approve_change must never be called"
@@ -252,6 +259,132 @@ module Lakeraven
         refute_match UNREADABLE, result.errors.first
       end
 
+      # --- Amendment 4: the sig is read too -----------------------------------
+      # The dosage instruction is free text that NcpdpScriptGenerator sends to
+      # the pharmacy as SigText and Directions, so it is classified with the
+      # same rule as the medication text. A nil or blank sig is allowed (for
+      # this field only); any other sig must be :not_mat_moud.
+      #
+      # Helper pinned: MatMoudMedication.refusal_for_order(medication_text,
+      # sig_text) returns the first non-nil refusal, medication first.
+
+      test "refusal_for_order is nil when the medication is orderable and the sig is blank or orderable" do
+        [ nil, "", "   ", "\t\n", "take 1 tab daily", "Take as directed" ].each do |sig|
+          assert_nil MatMoudMedication.refusal_for_order("Sertraline 50 mg tablet", sig), sig.inspect
+        end
+      end
+
+      test "refusal_for_order refuses a MAT/MOUD name or unreadable text in the sig" do
+        [ "METHADONE 40 mg by mouth daily", "Suboxone 8 mg SL daily", "1 tab daily (naltrexone)" ].each do |sig|
+          assert_equal MatMoudMedication::REFUSAL, MatMoudMedication.refusal_for_order("oral solution 10 mg/mL", sig), sig.inspect
+        end
+        [ "Take \u00BD tab", "meth\u0430done 40 mg daily", "take 1 tab\xFF", 40, [ "take 1 tab daily" ] ].each do |sig|
+          assert_equal MatMoudMedication::UNREADABLE, MatMoudMedication.refusal_for_order("Sertraline 50 mg tablet", sig), sig.inspect
+        end
+      end
+
+      test "refusal_for_order reads the medication first and never allows a blank medication" do
+        assert_equal MatMoudMedication::REFUSAL, MatMoudMedication.refusal_for_order("Methadone 10 mg tablet", nil)
+        assert_equal MatMoudMedication::REFUSAL, MatMoudMedication.refusal_for_order("Methadone 10 mg tablet", "Take \u00BD tab")
+        assert_equal MatMoudMedication::UNREADABLE, MatMoudMedication.refusal_for_order("Caf\u00E9 med 10 mg", "methadone 40 mg daily")
+        [ nil, "", "   " ].each do |medication|
+          assert_equal MatMoudMedication::UNREADABLE, MatMoudMedication.refusal_for_order(medication, "take 1 tab daily"),
+            medication.inspect
+          assert_equal MatMoudMedication::UNREADABLE, MatMoudMedication.refusal_for_order(medication, nil), medication.inspect
+        end
+      end
+
+      test "create_medication_order refuses a MAT/MOUD name in the dosage with no order, no audit event and no interaction check" do
+        consulted = []
+        replace_new(DrugInteractionService) { consulted << :check; raise "DrugInteractionService must not be consulted" }
+        audits_before = AuditEvent.count
+
+        result = begin
+          CpoeService.create_medication_order(patient_dfn: "12345", provider_duz: "789", medication: "oral solution 10 mg/mL",
+            dosage: "METHADONE 40 mg by mouth daily")
+        rescue RuntimeError
+          flunk "a MAT/MOUD sig was not refused before the interaction check"
+        end
+
+        refute result.success?, "a MAT/MOUD name in the sig must be refused"
+        assert_nil result.order
+        assert_equal [ MatMoudMedication::REFUSAL ], result.errors
+        assert_equal audits_before, AuditEvent.count
+        assert_empty consulted
+      end
+
+      test "create_medication_order says an unreadable dosage could not be read" do
+        audits_before = AuditEvent.count
+        result = CpoeService.create_medication_order(patient_dfn: "12345", provider_duz: "789", medication: "Sertraline 50 mg tablet",
+          dosage: "Take \u00BD tab")
+
+        refute result.success?
+        assert_nil result.order
+        assert_equal 1, result.errors.size, result.errors.inspect
+        assert_match UNREADABLE, result.errors.first
+        assert_match REFUSAL, result.errors.first
+        refute_equal MatMoudMedication::REFUSAL, result.errors.first
+        assert_equal audits_before, AuditEvent.count
+      end
+
+      test "create_medication_order still accepts an ordinary medication with an ordinary, blank or missing dosage" do
+        [ { dosage: "take 1 tab daily" }, { dosage: "" }, { dosage: nil }, {} ].each do |options|
+          result = CpoeService.create_medication_order(patient_dfn: "12345", provider_duz: "789",
+            medication: "Sertraline 50 mg tablet", **options)
+
+          assert result.success?, "#{options.inspect}: #{result.errors.inspect}"
+          assert_equal "draft", result.order.status
+          assert_equal "Sertraline 50 mg tablet", result.order.medication_display
+        end
+      end
+
+      test "sign_order refuses a MedicationRequest whose dosage instruction names MAT/MOUD or cannot be read" do
+        spy = SpyEprescribingService.new
+        replace_new(EprescribingService) { spy }
+
+        { "Suboxone 8 mg SL daily" => MatMoudMedication::REFUSAL, "Take \u00BD tab" => MatMoudMedication::UNREADABLE }.each do |sig, message|
+          order = medication_order("oral film", status: "draft", intent: "plan", dosage: sig)
+          audits_before = AuditEvent.count
+          result = CpoeService.sign_order(order, provider_duz: "789")
+
+          refute result.success?, "#{sig.inspect} must not sign"
+          assert_equal [ message ], result.errors
+          assert_equal "draft", order.status
+          assert_equal "plan", order.intent
+          assert_equal audits_before, AuditEvent.count
+        end
+        assert_nil spy.transmitted, "EprescribingService must never be asked to transmit"
+      end
+
+      test "sign_order still signs an ordinary medication with a blank or missing dosage instruction" do
+        [ nil, "", "take 1 tab daily" ].each do |sig|
+          med = medication_order("Lisinopril 10mg", status: "draft", intent: "plan", dosage: sig)
+          assert CpoeService.sign_order(med, provider_duz: "789", transmit: false).success?, sig.inspect
+          assert_equal "active", med.status
+        end
+      end
+
+      test "transmit refuses an active order whose dosage instruction names MAT/MOUD or cannot be read, without calling the adapter" do
+        { "methadone 40 mg daily" => MatMoudMedication::REFUSAL, "Take \u00BD tab" => MatMoudMedication::UNREADABLE }.each do |sig, message|
+          audits_before = AuditEvent.count
+          result = @erx.transmit(medication_order("oral solution 10 mg/mL", dosage: sig), provider_duz: "789")
+
+          assert_kind_of Eprescribing::TransmissionResult, result
+          refute result.success?, "#{sig.inspect} must not transmit"
+          assert_equal [ message ], result.errors
+          assert_equal audits_before, AuditEvent.count
+        end
+        assert_nil @adapter.sent, "send_prescription must never be called"
+      end
+
+      test "transmit still sends an ordinary active order with a blank or missing dosage instruction" do
+        [ nil, "", "take 1 tab daily" ].each do |sig|
+          result = @erx.transmit(medication_order("Lisinopril 10mg", dosage: sig), provider_duz: "789")
+          assert result.success?, "#{sig.inspect}: #{result.errors.inspect}"
+        end
+        assert_equal 3, @adapter.sent.size
+      end
+
       private
 
       def replace_new(klass, &block)
@@ -259,11 +392,11 @@ module Lakeraven
         @restore << klass
       end
 
-      def medication_order(display, status: "active", intent: "order")
+      def medication_order(display, status: "active", intent: "order", dosage: "Take as directed")
         MedicationRequest.new(
           ien: "med-#{SecureRandom.hex(4)}", patient_dfn: "12345", requester_duz: "789",
           medication_display: display, status: status, intent: intent,
-          dosage_instruction: "Take as directed", authored_on: Time.current
+          dosage_instruction: dosage, authored_on: Time.current
         )
       end
     end

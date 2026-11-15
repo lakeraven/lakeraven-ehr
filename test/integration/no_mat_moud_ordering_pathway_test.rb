@@ -33,9 +33,24 @@ class NoMatMoudOrderingPathwayTest < ActionDispatch::IntegrationTest
   EPRESCRIBING_ADAPTER_FILES = %w[base_adapter eprescribing_adapter_factory mock_adapter not_configured_adapter transmission_result].freeze
   CPOE_SERVICE_API = %i[cancel_order create_imaging_order create_lab_order create_medication_order sign_order].freeze
   EPRESCRIBING_SERVICE_API = %i[approve_change approve_refill cancel check_status deny_change deny_refill request_change request_refill transmit].freeze
+  # Amendment 4: every file in app/, lib/ and config/ that names OrderGateway.
+  # default_provider hands out ::RpmsRpc::Order, whose save, check and
+  # sign_and_release are order writes, so a new caller of the gateway is a
+  # decision to re-review (#904).
+  ORDER_GATEWAY_REFERENCE = /\bOrderGateway\b/
+  ORDER_GATEWAY_FILES = %w[app/gateways/lakeraven/ehr/order_gateway.rb].freeze
+  ORDER_GATEWAY_API = %i[list unsigned_for_patient].freeze
+  ORDER_WRITE_METHODS = "(?:save|check|sign_and_release)"
+  # Matched against every line of every file scanned (no per-file scoping:
+  # none of these has a false hit today). A bare `.save(` is deliberately NOT
+  # matched on arbitrary receivers — ActiveRecord saves are everywhere.
   ORDER_WRITE_CALLS = [
-    /\bOrder\s*\.\s*(?:save|check|sign_and_release)\b/,
-    /\b(?:via|default_provider)\s*\.\s*(?:save|check|sign_and_release)\b/
+    /\bOrder\s*&?\.\s*#{ORDER_WRITE_METHODS}\b/,
+    /\b(?:via|default_provider)\s*&?\.\s*#{ORDER_WRITE_METHODS}\b/,
+    # Safe navigation on any receiver: provider&.save(...)
+    /&\.\s*#{ORDER_WRITE_METHODS}\b/,
+    # Dynamic dispatch on any receiver: send(:save, ...), public_send("check"), __send__ :sign_and_release
+    /\b(?:public_send|send|__send__)\b\s*\(?\s*(?::|["']|:["'])#{ORDER_WRITE_METHODS}\b/
   ].freeze
 
   test "no route outside GET/HEAD reaches a medication or order surface" do
@@ -123,8 +138,54 @@ class NoMatMoudOrderingPathwayTest < ActionDispatch::IntegrationTest
     assert_equal EPRESCRIBING_SERVICE_API, Lakeraven::EHR::EprescribingService.public_instance_methods(false).sort
   end
 
+  # Amendment 4: default_provider returns ::RpmsRpc::Order itself, so while it
+  # is public any caller can write an order through
+  # OrderGateway.default_provider.save(...) without naming RpmsRpc::Order.
   test "OrderGateway exposes only the read side of RpmsRpc::Order" do
-    assert_equal %i[default_provider list unsigned_for_patient], Lakeraven::EHR::OrderGateway.singleton_methods(false).sort
+    gateway = Lakeraven::EHR::OrderGateway
+
+    assert_equal ORDER_GATEWAY_API, gateway.singleton_class.public_instance_methods(false).sort
+    refute_respond_to gateway, :default_provider, "default_provider hands out RpmsRpc::Order and must not be public"
+    assert_empty gateway.singleton_class.public_instance_methods(false) & %i[save check sign_and_release]
+  end
+
+  test "OrderGateway still reads through RpmsRpc::Order by default" do
+    assert_equal "RpmsRpc::Order", Lakeraven::EHR::OrderGateway.send(:default_provider).name
+  end
+
+  test "only OrderGateway itself names OrderGateway anywhere in app, lib or config" do
+    hits = source_references(ORDER_GATEWAY_REFERENCE)
+
+    assert_equal ORDER_GATEWAY_FILES, hits.keys.sort & ORDER_GATEWAY_FILES,
+      "an allowed file no longer names OrderGateway: remove it from ORDER_GATEWAY_FILES"
+    assert_empty hits.except(*ORDER_GATEWAY_FILES).values.flatten,
+      "a new caller of OrderGateway can reach RpmsRpc::Order: re-review the MAT/MOUD refusals (#904) before adding it"
+  end
+
+  test "the order-write call patterns catch direct, safe-navigation and dynamic dispatch and spare ordinary saves" do
+    caught = [
+      "::RpmsRpc::Order.save(dfn, fields)", "RpmsRpc::Order.sign_and_release(ien)", "Order . check(dfn)",
+      "Order&.save(dfn)", "via.save(dfn, fields)", "via&.check(dfn)", "default_provider.sign_and_release(ien)",
+      "provider&.save(dfn, fields)", "provider&.check(dfn)", "orders&.sign_and_release(ien)", "provider &. save(dfn)",
+      "provider.public_send(:save, dfn)", "provider.send(:save, dfn)", "provider.__send__(:save, dfn)",
+      "provider.public_send(:check, dfn)", "provider.send(:check, dfn)", "provider.__send__(:check, dfn)",
+      "provider.public_send(:sign_and_release, ien)", "provider.send(:sign_and_release, ien)",
+      "provider.__send__(:sign_and_release, ien)", "provider&.public_send(:save, dfn)", "send(:save, dfn)",
+      "provider.send :save, dfn", "provider.public_send(\"save\", dfn)", "provider.send('check', dfn)",
+      "provider.send(:\"sign_and_release\", ien)"
+    ]
+    caught.each do |line|
+      assert(ORDER_WRITE_CALLS.any? { |call| line.match?(call) }, "#{line.inspect} must be caught as an order write")
+    end
+
+    spared = [
+      "record.save(validate: false)", "record.save!", "appointment.save", "user&.saved_changes", "order.checked_at",
+      "record.send(:save_draft)", "record.public_send(:checked?)", "via.list(dfn.to_s, filter: filter)",
+      "via.unsigned_for_patient(dfn.to_s)", "CheckIn.check(patient)", "send(:default_provider)"
+    ]
+    spared.each do |line|
+      refute(ORDER_WRITE_CALLS.any? { |call| line.match?(call) }, "#{line.inspect} is not an order write")
+    end
   end
 
   private

@@ -87,6 +87,10 @@ module Lakeraven
 
         assert_not result.success?
         assert(result.errors.any? { |e| e.match?(%r{MAT/MOUD}i) }, result.errors.inspect)
+        # The error says a pharmacy change was not approved, and why — not the
+        # bare "MAT/MOUD ordering is not offered" message.
+        assert(result.errors.any? { |e| e.match?(%r{MAT/MOUD}i) && e.match?(/change/i) }, result.errors.inspect)
+        assert_not_includes result.errors, MatMoudMedication::REFUSAL
         assert_not_equal "approved", result.status
         assert_equal "pending", @adapter.check_status(change.transmission_id).status
       end

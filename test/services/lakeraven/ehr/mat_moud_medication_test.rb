@@ -145,6 +145,42 @@ module Lakeraven
         assert_equal :mat_moud, MatMoudMedication.classify("Butrans 10 µg/hr patch")
       end
 
+      # --- Amendment 4: the micro sign is a dose unit, nothing else ----------
+      # µ (U+00B5) / μ (U+03BC) is read as "mc" ONLY when it is preceded by a
+      # digit, or by whitespace that follows a digit, AND is immediately
+      # followed by an ASCII g or l of either case ("50µg", "50 µg",
+      # "100 μL"). Anywhere else it is not a dose unit and makes the text
+      # :unclassified: read as "mc" inside a word it would split a name
+      # ("methaµdone" reads as "methamcdone", "reµvia" as "remcvia").
+
+      {
+        "U+00B5 micro sign inside methadone" => "metha\u00B5done",
+        "U+03BC Greek mu inside methadone" => "metha\u03BCdone",
+        "U+00B5 micro sign inside revia" => "re\u00B5via 50 mg",
+        "U+00B5 micro sign alone" => "\u00B5",
+        "U+03BC Greek mu alone" => "\u03BC",
+        "U+00B5 micro sign not after a digit" => "Levothyroxine \u00B5g 50",
+        "U+03BC Greek mu not after a digit" => "Levothyroxine \u03BCg 50",
+        "U+00B5 micro sign not followed by g or l" => "50 \u00B5x",
+        "U+00B5 micro sign at the end of the text" => "Levothyroxine 50 \u00B5",
+        "U+00B5 micro sign followed by a space before g" => "Levothyroxine 50 \u00B5 g",
+        "U+00B5 micro sign after a letter" => "Levothyroxine50mg\u00B5g"
+      }.each do |label, text|
+        test "#{label} is not a dose unit and makes the text :unclassified" do
+          assert_equal :unclassified, MatMoudMedication.classify(text), text.inspect
+        end
+      end
+
+      test "the micro sign and Greek mu after a dose number and before g or l are still read as mc" do
+        [ "Levothyroxine 50\u00B5g", "Levothyroxine 50 \u00B5g", "Levothyroxine 50 \u00B5G", "Clonidine 100 \u03BCg",
+          "Vitamin B12 100 \u03BCL", "Vitamin B12 100\u00B5l", "Levothyroxine 50\t\u00B5g" ].each do |text|
+          assert_equal :not_mat_moud, MatMoudMedication.classify(text), text.inspect
+        end
+        [ "Butrans 10 \u00B5g/hr patch", "Butrans 10\u03BCg/hr patch", "methadone 50 \u00B5g" ].each do |text|
+          assert_equal :mat_moud, MatMoudMedication.classify(text), text.inspect
+        end
+      end
+
       test "tab, LF and CR are ordinary whitespace" do
         assert_equal :not_mat_moud, MatMoudMedication.classify("Sertraline 50 mg\ttablet\n")
         assert_equal :not_mat_moud, MatMoudMedication.classify("Sertraline 50 mg\r\ntablet")
