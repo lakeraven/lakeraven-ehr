@@ -106,12 +106,27 @@ module Lakeraven
         []
       end
 
+      # The row keeps the item's security labels so the filter can refuse
+      # a labelled one. The C-CDA models are built without them.
       def coded_row(item, code_key, display_key, system_key)
-        {
+        row = {
           code: item_value(item, code_key),
           display: item_value(item, display_key),
           code_system: system_key ? item_value(item, system_key) : nil
         }
+        security = item_security(item)
+        security.nil? ? row : row.merge(security: security)
+      end
+
+      # Hash: its :security. Model: meta.security of its FHIR form (or the
+      # whole meta when that is not a Hash, so the filter still sees it).
+      def item_security(item)
+        return item[:security] || item["security"] if item.is_a?(Hash)
+        return unless item.respond_to?(:to_fhir)
+
+        resource = item.to_fhir
+        meta = resource.is_a?(Hash) ? resource["meta"] || resource[:meta] : nil
+        meta.is_a?(Hash) ? meta["security"] || meta[:security] : meta
       end
 
       def item_value(item, key)

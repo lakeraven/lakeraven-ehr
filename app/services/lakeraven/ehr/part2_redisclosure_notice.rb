@@ -27,9 +27,10 @@ module Lakeraven
       # HL7 refrain policy: no redisclosure without a consent directive.
       REFRAIN = { "system" => "http://terminology.hl7.org/CodeSystem/v3-ActCode", "code" => "NORDSCLCD" }.freeze
 
-      # Privacy law 42CFRPart2 and the substance-use sensitivity codes. A
-      # sensitivity label alone counts as Part 2 (fail closed).
-      PART2_CODES = %w[42CFRPart2 ETH SUD].freeze
+      # Privacy law 42CFRPart2 and the v3-ActCode substance-use sensitivity
+      # codes (ETHUD alcohol, OPIOIDUD opioid). A sensitivity label alone
+      # counts as Part 2 (fail closed). Matched stripped and without case.
+      PART2_CODES = %w[42CFRPart2 ETH SUD ETHUD OPIOIDUD].freeze
 
       EXTENSION = { "url" => EXTENSION_URL, "valueString" => TEXT }.freeze
     end

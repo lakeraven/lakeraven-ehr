@@ -2,40 +2,51 @@
 
 module Lakeraven
   module EHR
-    # Egress seam for a disclosing response.
+    # Egress seam for a disclosing response (42 CFR § 2.32).
     #
-    # Callers pass the payload they are about to send: C-CDA sections
-    # (TransitionsOfCareController), a FHIR resource or Bundle hash, or
-    # an export file (String: NDJSON, CSV, or JSON). TransitionsOfCareController
-    # serializes sections and does not build a document when the return
-    # value is not a sections hash. FHIR and NDJSON callers render the
-    # return value, and refuse when it is nil or not usable for that
-    # response.
-    #
-    # What this method does (42 CFR § 2.32): every FHIR resource whose
-    # meta.security has a Part 2 code leaves with the NORDSCLCD refrain
-    # coding and the redisclosure notice extension (Part2RedisclosureNotice),
-    # and so does a Bundle that holds one. NDJSON is handled line by line.
-    # It returns nil (refuse) when a labelled resource's meta cannot carry
-    # the notice, or when a Part 2 label sits where it cannot be noticed
-    # (C-CDA rows, non-FHIR lines). Unlabelled payloads come back unchanged
-    # and the input is never mutated. It does not classify unlabelled
-    # records; keeping labels on ingest is #908.
+    # Callers pass the payload they are about to send: C-CDA sections, a
+    # FHIR resource or Bundle hash, or an export String (NDJSON, CSV, JSON).
+    # Every resource whose meta.security has a Part 2 code, and every
+    # resource that holds one at any depth, leaves with the NORDSCLCD
+    # refrain coding and exactly one current notice extension
+    # (Part2RedisclosureNotice). It returns nil (refuse) when a label sits
+    # where it cannot be noticed: elsewhere in meta, outside a resource
+    # (C-CDA rows, non-FHIR lines), in a multi-line JSON document. It also
+    # returns nil for invalid encoding and on any error (fail closed).
+    # Unlabelled payloads come back unchanged; the input is never mutated.
+    # It does not classify unlabelled records; keeping labels on ingest is #908.
     class Part2EgressFilter
       Refused = Class.new(StandardError)
       private_constant :Refused
 
+      BOM = "﻿"
+      SHORT_CODES = Part2RedisclosureNotice::PART2_CODES - %w[42CFRPart2]
+      TEXT_LABEL = Regexp.union(/42cfrpart2/i, /\b(?:#{SHORT_CODES.join('|')})\b/)
+      private_constant :BOM, :SHORT_CODES, :TEXT_LABEL
+
       def self.call(payload)
         result = new.send(:filter, payload)
         result.equal?(payload) ? payload : result.deep_dup
-      rescue Refused
+      rescue StandardError
         nil
       end
 
       private
 
       def filter(payload)
-        payload.is_a?(String) ? filter_lines(payload) : walk(payload)
+        payload.is_a?(String) ? filter_string(payload) : walk(payload)
+      end
+
+      def filter_string(text)
+        raise Refused unless text.valid_encoding?
+        return filter_lines(text) unless text.chomp.include?("\n")
+
+        document = parse_json(text.delete_prefix(BOM))
+        return filter_lines(text) if document.nil?
+        # Pretty JSON is not re-serialised: a labelled document is refused.
+        raise Refused unless walk(document).equal?(document)
+
+        text
       end
 
       def filter_lines(text)
@@ -45,20 +56,20 @@ module Lakeraven
       end
 
       def filter_line(line)
-        parsed = parse_json(line)
+        parsed = parse_json(line.delete_prefix(BOM))
         if resource?(parsed)
           result = walk(parsed)
-          return result == parsed ? line : result.to_json
+          return result.equal?(parsed) ? line : result.to_json
         end
-        raise Refused if line.include?("42CFRPart2")
         # Not a resource line, so a label inside it has nowhere to be noticed.
-        raise Refused unless walk(parsed) == parsed
+        raise Refused if parsed.nil? ? line.match?(TEXT_LABEL) : line.match?(/42cfrpart2/i)
+        raise Refused unless walk(parsed).equal?(parsed)
 
         line
       end
 
-      def parse_json(line)
-        JSON.parse(line)
+      def parse_json(text)
+        JSON.parse(text)
       rescue JSON::ParserError
         nil
       end
@@ -77,7 +88,7 @@ module Lakeraven
 
       # A Part 2 code under a security key outside a resource's meta.
       def walk_pair(key, value)
-        raise Refused if key.to_s == "security" && part2_code?(value)
+        raise Refused if key.to_s == "security" && part2_anywhere?(value)
 
         walk(value)
       end
@@ -87,30 +98,23 @@ module Lakeraven
         @labelled = false
         meta_key = key_for(resource, "meta")
         children = rebuild(resource, resource.to_h { |key, value| [ key, key == meta_key ? value : walk_pair(key, value) ] })
-        inner = @labelled
-        own = labelled_meta?(resource[meta_key])
-        @labelled = outer || inner || own
-        return children unless own || (inner && bundle?(resource))
+        noticed = @labelled || labelled_meta?(resource[meta_key])
+        @labelled = outer || noticed
+        return children unless noticed
 
         children.merge(meta_key => noticed_meta(resource[meta_key], meta_key.is_a?(Symbol)))
       end
 
-      # Whether meta.security holds a Part 2 code. A label anywhere else in
-      # meta, or in a meta that is not a Hash, cannot be noticed: refuse.
+      # Whether a flat Coding in meta.security has a Part 2 code. A Part 2
+      # code anywhere else in meta cannot be noticed: refuse.
       def labelled_meta?(meta)
-        unless meta.is_a?(Hash)
-          raise Refused unless walk(meta) == meta
+        security_key = meta.is_a?(Hash) && key_for(meta, "security")
+        security = security_key && meta[security_key]
+        codings = security.is_a?(Array) ? security.select { |item| item.is_a?(Hash) } : []
+        elsewhere = codings.empty? ? meta : meta.merge(security_key => security.map { |item| item.is_a?(Hash) ? item.except("code", :code) : item })
+        raise Refused if part2_anywhere?(elsewhere)
 
-          return false
-        end
-
-        security_key = key_for(meta, "security")
-        meta.each { |key, value| raise Refused unless key == security_key || walk_pair(key, value) == value }
-        security = meta[security_key]
-        return part2_code?(security) if security.is_a?(Array)
-        raise Refused if part2_code?(security)
-
-        false
+        codings.any? { |coding| part2?(coding.key?("code") ? coding["code"] : coding[:code]) }
       end
 
       def noticed_meta(meta, symbols)
@@ -124,21 +128,27 @@ module Lakeraven
         raise Refused unless security.is_a?(Array) && extensions.is_a?(Array)
 
         refrain = Part2RedisclosureNotice::REFRAIN
-        notice = Part2RedisclosureNotice::EXTENSION
         has_refrain = security.any? { |c| c.is_a?(Hash) && c.stringify_keys.slice("system", "code") == refrain }
-        has_notice = extensions.any? { |e| e.is_a?(Hash) && e.stringify_keys == notice }
+        current = extensions.reject { |e| e.is_a?(Hash) && (e["url"] || e[:url]) == Part2RedisclosureNotice::EXTENSION_URL }
         meta.merge(
           security_key => security + (has_refrain ? [] : [ styled(refrain, symbols) ]),
-          extension_key => extensions + (has_notice ? [] : [ styled(notice, symbols) ])
+          extension_key => current + [ styled(Part2RedisclosureNotice::EXTENSION, symbols) ]
         )
       end
 
-      def part2_code?(value)
-        codings = value.is_a?(Hash) ? [ value ] : Array(value)
-        codings.any? do |coding|
-          coding.is_a?(Hash) &&
-            Part2RedisclosureNotice::PART2_CODES.include?(coding["code"] || coding[:code])
+      # Any value at any depth that is a Part 2 code. The notice extension
+      # never matches: its url and text are not codes.
+      def part2_anywhere?(node)
+        case node
+        when Hash then node.each_value.any? { |value| part2_anywhere?(value) }
+        when Array then node.any? { |value| part2_anywhere?(value) }
+        else part2?(node)
         end
+      end
+
+      def part2?(code)
+        value = code.to_s.strip
+        Part2RedisclosureNotice::PART2_CODES.any? { |part2| part2.casecmp?(value) }
       end
 
       def resource?(value)
@@ -158,10 +168,6 @@ module Lakeraven
 
       def styled(hash, symbols)
         symbols ? hash.symbolize_keys : hash.dup
-      end
-
-      def bundle?(resource)
-        (resource["resourceType"] || resource[:resourceType]) == "Bundle"
       end
 
       # `values` (same shape as `original`), or `original` itself when no
