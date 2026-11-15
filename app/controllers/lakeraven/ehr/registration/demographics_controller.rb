@@ -12,19 +12,35 @@ module Lakeraven
         def edit
           @demographics = PatientDemographics.from_record(@record)
           @demographics.site_settings = registration_settings
+          @dob_restricted = dob_restricted?
           render_form(:ok)
         end
 
         # PATCH /registration/patients/:dfn/demographics
         def update
-          @demographics = PatientDemographics.new(demographics_params)
+          attributes = demographics_params
+          @dob_restricted = dob_restricted?
+          attributes[:dob] = @record[:dob] if @dob_restricted && !attributes.key?(:dob)
+          @demographics = PatientDemographics.new(attributes)
           @demographics.site_settings = registration_settings
-          return render_form(refused_form_status(@demographics)) unless @demographics.valid?
+          valid = @demographics.valid?
+          if @dob_restricted && @demographics.dob != @record[:dob]
+            @dob_error = "Date of birth can only be changed by a registration manager"
+            @demographics.errors.add(:base, @dob_error)
+            note_audit_denial("date of birth change refused: registration manager required")
+            @demographics.dob = @record[:dob]
+            return render_form(:unprocessable_content)
+          end
+          return render_form(refused_form_status(@demographics)) unless valid
 
           save(@demographics, PatientDemographics.from_record(@record), "Demographics saved.")
         end
 
         private
+
+        def dob_restricted?
+          registration_settings.limited_dob_editing? && !capability?("patient.correct_dob")
+        end
 
         def render_form(status)
           @marital_statuses = PatientRecordGateway.choices(:marital_status)

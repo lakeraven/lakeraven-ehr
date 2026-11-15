@@ -34,6 +34,8 @@ module Lakeraven
         # BPRM gates both on one policy, CanEditPatients: AGZMENU or AGZMGR, and
         # not AGZVIEWONLY.
         "patient.register" => rule(any: %i[registration_menu registration_manager], deny: %i[registration_view_only]),
+        # Correct an existing date of birth when the facility limits editing (#981).
+        "patient.correct_dob" => rule(any: %i[registration_manager], deny: %i[registration_view_only]),
         # Open scheduling: resources whose BSDX rights let the user see them.
         # BPRM: CanAccessScheduling.
         "scheduling.open" => rule(any: %i[scheduling_user scheduling_supervisor]),
