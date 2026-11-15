@@ -89,6 +89,67 @@ module Lakeraven
       test "bupropion is an antidepressant and does not match the bup word stem" do
         assert_equal :not_mat_moud, MatMoudMedication.classify("Bupropion XL 150 mg")
       end
+
+      # --- Amendment 3 -------------------------------------------------------
+      # Rule: a non-ASCII character is accepted only when its NFKC form is
+      # exactly one printable ASCII character (fullwidth, mathematical bold).
+      # The micro sign U+00B5 and Greek mu U+03BC are read as "mc" (dose
+      # units). Every other non-ASCII character — symbol, emoji, trademark
+      # sign, dash, soft hyphen, zero-width space, combining mark, accented
+      # letter — makes the text :unclassified, as does an ASCII control
+      # character other than tab, LF and CR.
+
+      {
+        "U+212E estimated symbol for e" => "m℮thadone 10 mg",
+        "U+1F170 negative squared A" => "meth\u{1F170}done",
+        "U+1F17F negative squared P" => "bu\u{1F17F}renorphine 8 mg SL",
+        "U+25CB white circle for o" => "methad○ne",
+        "U+3007 ideographic zero for o" => "methad〇ne",
+        "U+2202 partial differential for a" => "meth∂done",
+        "U+2223 divides for l" => "vivitro∣",
+        "U+1F1F2 regional indicator M" => "\u{1F1F2}ethadone",
+        "U+2122 trademark after Revia" => "Revia™ 50 mg",
+        "U+2122 trademark after LAAM" => "LAAM™",
+        "U+00AD soft hyphen inside revia" => "re­via 50 mg",
+        "U+200B zero-width space inside revia" => "re​via",
+        "U+2014 em dash in an ordinary order" => "Sertraline 50 mg — daily",
+        "U+0000 NUL inside methadone" => "metha\u0000done"
+      }.each do |label, text|
+        test "#{label} makes the text :unclassified" do
+          assert_equal :unclassified, MatMoudMedication.classify(text), text.inspect
+        end
+      end
+
+      test "other symbols, combining marks and control characters are :unclassified, never :not_mat_moud" do
+        [ "Sertraline 50 mg®", "Sertraline ½ tablet", "Sertraline 50 mg – daily", "Sertraliné 50 mg",
+          "Sertraline \u{1F48A}", "Sertraline\u0007 50 mg", "Sertraline\u001B[0m", "Sertraline\u007F" ].each do |text|
+          assert_equal :unclassified, MatMoudMedication.classify(text), text.inspect
+        end
+      end
+
+      test "mathematical bold letters NFKC-normalise to ASCII and are still read" do
+        bold = "\u{1D40C}\u{1D41E}\u{1D42D}\u{1D421}\u{1D41A}\u{1D41D}\u{1D428}\u{1D427}\u{1D41E}"
+        assert_equal "Methadone", bold.unicode_normalize(:nfkc)
+        assert_equal :mat_moud, MatMoudMedication.classify(bold)
+      end
+
+      [ "ORLAAM", "Metadol 10 mg" ].each do |text|
+        test "brand name #{text.inspect} is :mat_moud" do
+          assert_equal :mat_moud, MatMoudMedication.classify(text)
+        end
+      end
+
+      test "the micro sign and Greek mu are read as mc dose units" do
+        assert_equal :not_mat_moud, MatMoudMedication.classify("Levothyroxine 50 µg")
+        assert_equal :not_mat_moud, MatMoudMedication.classify("Clonidine 100 μg")
+        assert_equal :mat_moud, MatMoudMedication.classify("Butrans 10 µg/hr patch")
+      end
+
+      test "tab, LF and CR are ordinary whitespace" do
+        assert_equal :not_mat_moud, MatMoudMedication.classify("Sertraline 50 mg\ttablet\n")
+        assert_equal :not_mat_moud, MatMoudMedication.classify("Sertraline 50 mg\r\ntablet")
+        assert_equal :mat_moud, MatMoudMedication.classify("methadone\t10 mg\r\n")
+      end
     end
   end
 end

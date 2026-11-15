@@ -16,7 +16,20 @@ class NoMatMoudOrderingPathwayTest < ActionDispatch::IntegrationTest
   # Any quoted RPC name in the CPRS/RPMS order-write and outpatient-pharmacy families.
   ORDER_WRITE_RPC_NAME = /["'](?:ORWDX|ORWDPS|ORWOR1 SIG|APSP|BEHORX|PSO)[A-Z0-9 ]*["']/
   ORDERING_SERVICE_REFERENCE = /CpoeService|EprescribingService|Eprescribing::|NcpdpScriptGenerator|send_prescription|sign_and_release/
-  ENTRY_LAYERS = "{app/controllers,app/jobs,app/views,app/helpers,app/channels,app/mailers,lib,config}/**/*.{rb,erb,rake,yml}"
+  # Amendment 3: every file under app/, lib/ and config/ is scanned. These
+  # are exactly the files that name the ordering services today — no globs.
+  # Adding a file here is a decision to open an ordering pathway: re-review
+  # the MAT/MOUD refusals (#904) first.
+  ORDERING_SERVICE_FILES = %w[
+    app/services/lakeraven/ehr/cpoe_service.rb
+    app/services/lakeraven/ehr/eprescribing/base_adapter.rb
+    app/services/lakeraven/ehr/eprescribing/mock_adapter.rb
+    app/services/lakeraven/ehr/eprescribing/not_configured_adapter.rb
+    app/services/lakeraven/ehr/eprescribing_service.rb
+    app/services/lakeraven/ehr/ncpdp_script_generator.rb
+  ].freeze
+  RPMS_ORDER_REFERENCE = %r{RpmsRpc::Order\b|rpms_rpc/api/order}
+  RPMS_ORDER_FILES = %w[app/gateways/lakeraven/ehr/order_gateway.rb].freeze
   EPRESCRIBING_ADAPTER_FILES = %w[base_adapter eprescribing_adapter_factory mock_adapter not_configured_adapter transmission_result].freeze
   CPOE_SERVICE_API = %i[cancel_order create_imaging_order create_lab_order create_medication_order sign_order].freeze
   EPRESCRIBING_SERVICE_API = %i[approve_change approve_refill cancel check_status deny_change deny_refill request_change request_refill transmit].freeze
@@ -79,18 +92,23 @@ class NoMatMoudOrderingPathwayTest < ActionDispatch::IntegrationTest
     assert_empty hits, "order writes (ORWDX SAVE / ORWDXC ACCEPT / ORWDX SEND) are not offered"
   end
 
-  test "no production entry layer reaches the ordering services" do
-    root = Lakeraven::EHR::Engine.root
-    files = Dir[root.join(ENTRY_LAYERS).to_s]
-    assert_operator files.size, :>, 100, "entry-layer scan found too few files to be trusted"
+  test "only the ordering services themselves name CPOE or e-prescribing anywhere in app, lib or config" do
+    hits = source_references(ORDERING_SERVICE_REFERENCE)
 
-    hits = files.flat_map do |file|
-      File.readlines(file).each_with_index.filter_map do |line, index|
-        "#{file.delete_prefix("#{root}/")}:#{index + 1}: #{line.strip}" if line.match?(ORDERING_SERVICE_REFERENCE)
-      end
-    end
+    assert_equal ORDERING_SERVICE_FILES, hits.keys.sort & ORDERING_SERVICE_FILES,
+      "an allowed file no longer names the ordering services: remove it from ORDERING_SERVICE_FILES"
+    assert_empty hits.except(*ORDERING_SERVICE_FILES).values.flatten,
+      "only the ordering services may name CpoeService, EprescribingService, Eprescribing::, NcpdpScriptGenerator, " \
+      "send_prescription or sign_and_release (#904)"
+  end
 
-    assert_empty hits, "controllers, jobs, views, helpers, lib and config must not reach CPOE or e-prescribing"
+  test "only OrderGateway names RpmsRpc::Order anywhere in app, lib or config" do
+    hits = source_references(RPMS_ORDER_REFERENCE)
+
+    assert_equal RPMS_ORDER_FILES, hits.keys.sort & RPMS_ORDER_FILES,
+      "an allowed file no longer names RpmsRpc::Order: remove it from RPMS_ORDER_FILES"
+    assert_empty hits.except(*RPMS_ORDER_FILES).values.flatten,
+      "RpmsRpc::Order (the order-write API) may be reached only through OrderGateway (#904)"
   end
 
   test "the e-prescribing adapters are exactly the known set" do
@@ -107,5 +125,25 @@ class NoMatMoudOrderingPathwayTest < ActionDispatch::IntegrationTest
 
   test "OrderGateway exposes only the read side of RpmsRpc::Order" do
     assert_equal %i[default_provider list unsigned_for_patient], Lakeraven::EHR::OrderGateway.singleton_methods(false).sort
+  end
+
+  private
+
+  # { "relative/path" => [ "relative/path:line: text", ... ] } for every file
+  # under app/ and lib/ (rb, erb, rake) and every file under config/ with a
+  # line matching pattern.
+  def source_references(pattern)
+    root = Lakeraven::EHR::Engine.root
+    files = Dir[root.join("{app,lib}/**/*.{rb,erb,rake}").to_s] + Dir[root.join("config/**/*").to_s].select { |f| File.file?(f) }
+    assert_operator files.size, :>, 100, "source scan found too few files to be trusted"
+    assert(files.any? { |f| f.start_with?(root.join("config").to_s) }, "source scan found no config files")
+
+    files.uniq.each_with_object({}) do |file, hits|
+      relative = file.delete_prefix("#{root}/")
+      lines = File.readlines(file, encoding: "UTF-8").each_with_index.filter_map do |line, index|
+        "#{relative}:#{index + 1}: #{line.strip}" if line.scrub.match?(pattern)
+      end
+      hits[relative] = lines if lines.any?
+    end
   end
 end

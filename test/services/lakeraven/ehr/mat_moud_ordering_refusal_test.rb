@@ -166,6 +166,92 @@ module Lakeraven
         assert_nil @adapter.approved, "adapter approve_change must never be called"
       end
 
+      # --- Amendment 3: say why ---------------------------------------------
+      # Unreadable text and a readable MAT/MOUD name are both refused, with
+      # different messages, so staff can tell "we do not offer this" from "we
+      # could not read what you typed".
+      UNREADABLE = /could not be read/i
+
+      test "refusal_for is nil for orderable text, not-offered for MAT/MOUD and could-not-be-read for unreadable text" do
+        [ "Sertraline 50 mg tablet", "Lisinopril 10mg" ].each do |text|
+          assert_nil MatMoudMedication.refusal_for(text), text.inspect
+        end
+
+        [ "Buprenorphine 8 mg SL tablet", "SUBOXONE", "Revia 50 mg" ].each do |text|
+          message = MatMoudMedication.refusal_for(text)
+          assert_equal MatMoudMedication::REFUSAL, message, text.inspect
+          assert_match(/not offered/i, message)
+          refute_match UNREADABLE, message, "a readable MAT/MOUD name is not an unreadable one"
+        end
+
+        [ nil, "", "   ", 12_345, "Café med 10 mg", "methаdone 10 mg", "methadone\xFF" ].each do |text|
+          message = MatMoudMedication.refusal_for(text)
+          assert_kind_of String, message, text.inspect
+          assert_match REFUSAL, message, text.inspect
+          assert_match UNREADABLE, message, text.inspect
+          refute_equal MatMoudMedication::REFUSAL, message, "unreadable text gets its own message"
+        end
+      end
+
+      test "create_medication_order says an unreadable medication could not be read" do
+        medication = "Café med 10 mg"
+        audits_before = AuditEvent.count
+        result = CpoeService.create_medication_order(patient_dfn: "12345", provider_duz: "789", medication: medication)
+
+        refute result.success?
+        assert_nil result.order
+        assert_equal [ MatMoudMedication.refusal_for(medication) ], result.errors
+        assert_match UNREADABLE, result.errors.first
+        assert_match REFUSAL, result.errors.first
+        assert_equal audits_before, AuditEvent.count
+      end
+
+      test "create_medication_order says a readable MAT/MOUD name is not offered, not unreadable" do
+        result = CpoeService.create_medication_order(patient_dfn: "12345", provider_duz: "789", medication: "Vivitrol 380 mg IM")
+
+        refute result.success?
+        assert_equal [ MatMoudMedication::REFUSAL ], result.errors
+        refute_match UNREADABLE, result.errors.first
+      end
+
+      test "transmit says an order with no medication text could not be read" do
+        result = @erx.transmit(medication_order(nil), provider_duz: "789")
+
+        refute result.success?
+        assert_equal [ MatMoudMedication.refusal_for(nil) ], result.errors
+        assert_match UNREADABLE, result.errors.first
+        assert_match REFUSAL, result.errors.first
+        assert_nil @adapter.sent, "send_prescription must never be called"
+      end
+
+      test "transmit says a readable MAT/MOUD order is not offered, not unreadable" do
+        result = @erx.transmit(medication_order("Methadone 10 mg tablet"), provider_duz: "789")
+
+        refute result.success?
+        assert_equal [ MatMoudMedication::REFUSAL ], result.errors
+        refute_match UNREADABLE, result.errors.first
+      end
+
+      test "request_change says a missing new_medication could not be read" do
+        sent = @erx.transmit(medication_order("Lisinopril 10mg"), provider_duz: "789")
+        result = @erx.request_change(sent.transmission_id, pharmacy_ncpdpid: "1234567", new_medication: nil)
+
+        refute result.success?
+        assert_equal [ MatMoudMedication.refusal_for(nil) ], result.errors
+        assert_match UNREADABLE, result.errors.first
+        assert_match REFUSAL, result.errors.first
+        assert_nil @adapter.changes, "adapter request_change must never be called"
+      end
+
+      test "request_change says a readable MAT/MOUD new_medication is not offered, not unreadable" do
+        sent = @erx.transmit(medication_order("Lisinopril 10mg"), provider_duz: "789")
+        result = @erx.request_change(sent.transmission_id, pharmacy_ncpdpid: "1234567", new_medication: "Antabuse 250 mg")
+
+        refute result.success?
+        assert_equal [ MatMoudMedication::REFUSAL ], result.errors
+        refute_match UNREADABLE, result.errors.first
+      end
+
       private
 
       def replace_new(klass, &block)
