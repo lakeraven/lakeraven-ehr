@@ -969,6 +969,48 @@ module Lakeraven
         end
       end
 
+      # The proof above accepts a 503, so a filter that refused everything
+      # would pass it. These rows have nothing in them that calls for a
+      # refusal: a labelled read, search and export file must be SERVED, with
+      # the notice on them.
+      PART2_SERVED_ROWS = [ "/lakeraven-ehr/Patient/1", "/lakeraven-ehr/Condition", "exports file show" ].freeze
+
+      PART2_SERVED_ROWS.each do |row|
+        test "Part 2-labelled payload is served with the notice, not refused, for GET #{row}" do
+          endpoint = WIRED_ENDPOINTS.find { |candidate| (candidate[:name] || candidate[:path]) == row && candidate[:method] == :get }
+          assert endpoint, "#{row} is no longer a WIRED_ENDPOINTS row; name its replacement here"
+          instance_exec(&endpoint[:setup]) if endpoint[:setup]
+          path = endpoint[:dynamic_path] ? instance_exec(&endpoint[:dynamic_path]) : endpoint[:path]
+          ndjson = row == "exports file show"
+
+          results = []
+          with_part2_labelled_egress(results) { request_wired_endpoint(endpoint, path) }
+
+          refute_empty results, "#{row} did not hand a payload to Part2EgressFilter"
+          refute results.any?(&:nil?), "#{row}: the filter refused a labelled payload it can notice"
+          assert_response :ok, "#{row}: a labelled payload must be served with the notice. Body: #{response.body[0, 300]}"
+          resources = ndjson ? part2_ndjson_resources(response.body) : [ JSON.parse(response.body) ]
+          refute_empty resources, "#{row}: the response has no resource in it"
+          labelled = resources.flat_map { |resource| part2_labelled_resources(resource) }
+          refute_empty labelled, "#{row}: the response has no Part 2-labelled resource, so the label was lost"
+          labelled.each { |resource| assert_part2_noticed(resource, row) }
+          if ndjson
+            assert_equal resources.size, labelled.size, "#{row}: every line was labelled, so every line is noticed"
+          else
+            assert_part2_noticed(resources.first, row)
+          end
+        end
+      end
+
+      test "the Part 2 test helper matches a label the way the filter does" do
+        [ "42cfrpart2", "SUD ", " eth", "\u00A0SUD", "ETHUD\u200B", "\uFEFFOPIOIDUD", :ETH ].each do |code|
+          assert part2_labelled?({ "meta" => { "security" => [ { "code" => code } ] } }), "#{code.inspect} is a Part 2 label"
+        end
+        [ "N", "SUDS", "METH", nil, "" ].each do |code|
+          refute part2_labelled?({ "meta" => { "security" => [ { "code" => code } ] } }), "#{code.inspect} is not a Part 2 label"
+        end
+      end
+
       test "Part 2 notice survives _elements subsetting of a search Bundle" do
         results = []
         with_part2_labelled_egress(results) do
@@ -1130,9 +1172,17 @@ module Lakeraven
 
       def part2_labelled?(resource)
         security = resource.dig("meta", "security")
-        Array(security).any? do |coding|
-          coding.is_a?(Hash) && Part2RedisclosureNotice::PART2_CODES.include?(coding["code"])
-        end
+        Array(security).any? { |coding| coding.is_a?(Hash) && part2_code?(coding["code"]) }
+      end
+
+      # The filter's own rule: the code as text, with whitespace (Unicode
+      # spaces and zero-width characters included) taken off both ends,
+      # compared without regard to case.
+      PART2_PADDING = /\A[[:space:]\u200B\u200C\u200D\u2060\uFEFF]+|[[:space:]\u200B\u200C\u200D\u2060\uFEFF]+\z/
+
+      def part2_code?(code)
+        value = code.to_s.gsub(PART2_PADDING, "")
+        Part2RedisclosureNotice::PART2_CODES.any? { |part2| part2.casecmp?(value) }
       end
 
       def assert_part2_noticed(resource, row)

@@ -792,10 +792,15 @@ module Lakeraven
         end
       end
 
+      # Round 2, a deliberate strengthening: this test used to expect the
+      # lower-case words `eth`, `sud`, `ethud` and `opioidud` to pass
+      # unchanged. The short codes now match without regard to case, so those
+      # rows refuse (see "short codes in text match without regard to case"
+      # below). What stays unchanged is a word that only CONTAINS the letters.
       test "a CSV row whose words only contain the letters of a short code is unchanged" do
         csv = "id,event_type,action,detail\n" \
           "1,rest,R,METHOD PSEUDO Sudden\n" \
-          "2,rest,R,eth sud Eth Sud ethud opioidud\n" \
+          "2,rest,R,method pseudo sudden ethanol suds\n" \
           "3,rest,R,ETHANOL SUDS METHADONE_SUDX XETH\n"
 
         result = Part2EgressFilter.call(csv)
@@ -843,6 +848,378 @@ module Lakeraven
         end
       end
 
+      # === round 2 ==========================================================
+
+      # --- a sections-shaped Hash cannot carry the notice --------------------
+
+      # The C-CDA is built from a Hash that is not a FHIR resource. The
+      # notice has nowhere to go in that document, so a resource inside the
+      # Hash that the FHIR path would notice (or refuse) refuses the whole.
+      LABELLED_FOR_SECTIONS = {
+        "a 42CFRPart2 label" => { "meta" => { "security" => [ PART2_LABEL ] } },
+        "a SUD label" => { "meta" => { "security" => [ { "code" => "SUD" } ] } },
+        "a label on a contained resource" => {
+          "contained" => [ { "resourceType" => "Observation", "id" => "syn-c", "meta" => { "security" => [ { "code" => "ETH" } ] } } ]
+        }
+      }.freeze
+
+      LABELLED_FOR_SECTIONS.each do |name, overrides|
+        test "C-CDA sections whose condition row holds a resource with #{name} are refused" do
+          row = { code: "SYN-1", display: "Synthetic", code_system: nil, fhir: condition(overrides) }
+
+          assert_nil Part2EgressFilter.call(ccda_sections(conditions: [ row ]))
+        end
+
+        test "C-CDA sections whose patient holds a resource with #{name} are refused" do
+          patient = ccda_sections[:patient].merge(fhir: condition(overrides).merge("resourceType" => "Patient"))
+
+          assert_nil Part2EgressFilter.call(ccda_sections(patient: patient))
+        end
+
+        test "a non-resource Hash holding a resource with #{name} under any key is refused" do
+          [ :fhir, "source", :anything_at_all ].each do |key|
+            assert_nil Part2EgressFilter.call({ key => condition(overrides) }), "under #{key.inspect}"
+            assert_nil Part2EgressFilter.call({ rows: [ { nested: { key => condition(overrides) } } ] }), "deep under #{key.inspect}"
+          end
+        end
+      end
+
+      test "C-CDA sections holding a symbol-keyed labelled resource are refused" do
+        resource = { resourceType: "AllergyIntolerance", id: "syn-1", meta: { security: [ { code: "42CFRPart2" } ] } }
+        row = { code: "SYN-A", display: "Synthetic allergen", code_system: nil, fhir: resource }
+
+        assert_nil Part2EgressFilter.call(ccda_sections(allergies: [ row ]))
+      end
+
+      test "C-CDA sections holding a resource the FHIR path would refuse are refused" do
+        row = { code: "SYN-M", display: "Synthetic medication", code_system: nil,
+                fhir: condition("meta" => { "tag" => [ { "code" => "SUD" } ] }) }
+
+        assert_nil Part2EgressFilter.call(ccda_sections(medications: [ row ]))
+      end
+
+      test "C-CDA sections holding only unlabelled resources are returned equal" do
+        patient = ccda_sections[:patient].merge(fhir: { "resourceType" => "Patient", "id" => "syn-pt" })
+        sections = ccda_sections(
+          patient: patient,
+          conditions: [
+            { code: "E11.9", display: "Synthetic condition", code_system: nil,
+              fhir: condition("meta" => { "security" => [ UNRELATED_LABEL ] }) },
+            { code: "SYN-2", display: "Synthetic two", code_system: nil,
+              fhir: condition("contained" => [ { "resourceType" => "Observation", "id" => "syn-c" } ]) }
+          ]
+        )
+        before = sections.deep_dup
+
+        result = Part2EgressFilter.call(sections)
+
+        assert_equal before, result
+        assert_equal before, sections, "the input must not be mutated"
+      end
+
+      test "a labelled resource at the top level is still noticed, not refused" do
+        # The refusal is for a Hash that is not a resource. A resource, and
+        # a Bundle of them, carry the notice themselves.
+        assert_noticed Part2EgressFilter.call(condition("meta" => { "security" => [ PART2_LABEL ] }))
+        bundle = bundle_of(entry(condition("meta" => { "security" => [ PART2_LABEL ] }), mode: "match"))
+        assert_noticed Part2EgressFilter.call(bundle)
+      end
+
+      # --- short codes in text match without regard to case ------------------
+
+      %w[sud eth ethud opioidud Sud Eth EthUD OpioidUD].each do |code|
+        test "a CSV row with #{code} as a whole field in another case is refused" do
+          assert_nil Part2EgressFilter.call("id,detail\nx,#{code}\n")
+        end
+
+        test "a CSV row with #{code} as a whole word in another case is refused" do
+          assert_nil Part2EgressFilter.call("id,event_type,action,detail\n2,rest,R,label #{code} applied\n")
+        end
+      end
+
+      test "a text line that is not JSON and names a short code in lower case is refused" do
+        assert_nil Part2EgressFilter.call("#{condition.to_json}\nnot json sud\n")
+      end
+
+      # --- DocumentReference.securityLabel -----------------------------------
+
+      test "a Part 2 code in securityLabel labels the resource and it is noticed" do
+        [ "42CFRPart2", "ETH", "SUD", "ETHUD", "OPIOIDUD", "sud " ].each do |code|
+          resource = document_reference("securityLabel" => [ { "coding" => [ { "system" => ACT_CODE, "code" => code } ] } ])
+          before = resource.deep_dup
+
+          result = Part2EgressFilter.call(resource)
+
+          assert_noticed result, "securityLabel #{code.inspect} must bring the notice"
+          assert_equal before.except("meta"), result.except("meta"), "every other element is unchanged"
+          assert_equal before, resource, "the input must not be mutated"
+        end
+      end
+
+      test "a Part 2 code in a later coding of a later securityLabel is noticed" do
+        resource = document_reference(
+          "securityLabel" => [
+            { "coding" => [ UNRELATED_LABEL ] },
+            { "coding" => [ UNRELATED_LABEL, { "code" => "SUD" } ], "text" => "Synthetic" }
+          ]
+        )
+
+        assert_noticed Part2EgressFilter.call(resource)
+      end
+
+      test "a symbol-keyed securityLabel with a Part 2 code is noticed" do
+        resource = { resourceType: "DocumentReference", id: "syn-doc", status: "current",
+                     securityLabel: [ { coding: [ { code: "42CFRPart2" } ] } ] }
+
+        result = Part2EgressFilter.call(resource)
+
+        assert_noticed result
+        assert_equal resource.except(:meta), result.except(:meta)
+      end
+
+      test "a securityLabel-labelled resource keeps its meta and gets one notice" do
+        resource = document_reference(
+          "meta" => { "versionId" => "3", "security" => [ UNRELATED_LABEL ] },
+          "securityLabel" => [ { "coding" => [ { "code" => "ETH" } ] } ]
+        )
+
+        result = Part2EgressFilter.call(resource)
+
+        assert_noticed result
+        assert_equal "3", result["meta"]["versionId"]
+        assert_includes result["meta"]["security"], UNRELATED_LABEL
+        assert_equal 1, notice_count(result)
+        assert_equal result, Part2EgressFilter.call(result), "idempotent"
+      end
+
+      test "a securityLabel with no Part 2 code is returned equal and not noticed" do
+        resource = document_reference("securityLabel" => [ { "coding" => [ UNRELATED_LABEL ], "text" => "Synthetic" } ])
+
+        result = Part2EgressFilter.call(resource)
+
+        assert_equal resource, result
+        refute_noticed result
+      end
+
+      MALFORMED_SECURITY_LABEL = {
+        "a single CodeableConcept" => { "coding" => [ { "code" => "SUD" } ] },
+        "a single Coding" => { "code" => "42CFRPart2" },
+        "a bare String" => "ETH"
+      }.freeze
+
+      MALFORMED_SECURITY_LABEL.each do |name, value|
+        test "a securityLabel that is #{name}, not an Array, holding a Part 2 code is refused" do
+          assert_nil Part2EgressFilter.call(document_reference("securityLabel" => value))
+        end
+      end
+
+      test "a symbol-keyed securityLabel that is not an Array and holds a Part 2 code is refused" do
+        resource = { resourceType: "DocumentReference", id: "syn-doc", securityLabel: { coding: [ { code: "SUD" } ] } }
+
+        assert_nil Part2EgressFilter.call(resource)
+      end
+
+      test "a Part 2 securityLabel on a Bundle entry notices the entry and the Bundle" do
+        labelled = document_reference("securityLabel" => [ { "coding" => [ { "code" => "SUD" } ] } ])
+        bundle = bundle_of(entry(condition, mode: "match"), entry(labelled, mode: "include"))
+
+        result = Part2EgressFilter.call(bundle)
+
+        assert_noticed result, "the Bundle carries the notice for the entry"
+        assert_noticed result["entry"][1]["resource"]
+        refute_noticed result["entry"][0]["resource"]
+      end
+
+      test "a Part 2 securityLabel on an NDJSON line is noticed" do
+        labelled = document_reference("securityLabel" => [ { "coding" => [ { "code" => "42CFRPart2" } ] } ])
+        ndjson = "#{condition.to_json}\n#{labelled.to_json}\n"
+
+        result = Part2EgressFilter.call(ndjson)
+
+        assert_kind_of String, result
+        assert_equal condition.to_json, result.lines[0].chomp
+        assert_noticed JSON.parse(result.lines[1])
+      end
+
+      test "C-CDA sections holding a securityLabel-labelled resource are refused" do
+        row = { code: "SYN-1", display: "Synthetic", code_system: nil,
+                fhir: document_reference("securityLabel" => [ { "coding" => [ { "code" => "SUD" } ] } ]) }
+
+        assert_nil Part2EgressFilter.call(ccda_sections(conditions: [ row ]))
+      end
+
+      # --- the shape of a meta.security Coding -------------------------------
+
+      NON_SCALAR_CODES = {
+        "a Hash" => { "value" => "SUD" },
+        "a symbol-keyed Hash" => { value: "42CFRPart2" },
+        "an Array" => [ "ETH" ],
+        "a nested Array" => [ [ "OPIOIDUD" ] ],
+        "an Array of Hashes" => [ { "code" => "sud " } ]
+      }.freeze
+
+      NON_SCALAR_CODES.each do |name, code|
+        test "a meta.security code that is #{name} holding a Part 2 value is refused" do
+          assert_nil Part2EgressFilter.call(condition("meta" => { "security" => [ { "system" => ACT_CODE, "code" => code } ] }))
+        end
+
+        test "a symbol-keyed meta.security code that is #{name} holding a Part 2 value is refused" do
+          resource = { resourceType: "Condition", id: "syn-1", meta: { security: [ { code: code } ] } }
+
+          assert_nil Part2EgressFilter.call(resource)
+        end
+      end
+
+      test "a meta.security code that is a Hash or Array with no Part 2 value is left alone" do
+        resource = condition("meta" => { "security" => [ { "code" => { "value" => "N" } }, { "code" => [ "R" ] } ] })
+
+        assert_equal resource, Part2EgressFilter.call(resource)
+      end
+
+      test "a Coding with both code keys is labelled when either is a Part 2 code" do
+        [
+          { "code" => "N", :code => "SUD" },
+          { "code" => "SUD", :code => "N" },
+          { :code => "42CFRPart2", "code" => "R" },
+          { "code" => nil, :code => "ETH" },
+          { "code" => "", :code => "ethud" }
+        ].each do |coding|
+          resource = condition("meta" => { "security" => [ coding ] })
+
+          result = Part2EgressFilter.call(resource)
+
+          assert_noticed result, "#{coding.inspect} must count as a Part 2 label"
+          assert_includes result["meta"]["security"], coding, "the original coding is kept"
+        end
+      end
+
+      UNICODE_PADDING = {
+        "U+00A0 no-break space" => " ",
+        "U+200B zero width space" => "​",
+        "U+FEFF zero width no-break space" => "﻿",
+        "U+2003 em space" => " ",
+        "U+3000 ideographic space" => "　"
+      }.freeze
+
+      UNICODE_PADDING.each do |name, pad|
+        test "a meta.security code padded with #{name} counts as Part 2" do
+          [ "#{pad}SUD", "SUD#{pad}", "#{pad}42CFRPart2#{pad}", " #{pad} eth #{pad} " ].each do |code|
+            result = Part2EgressFilter.call(condition("meta" => { "security" => [ { "code" => code } ] }))
+
+            assert_noticed result, "#{code.inspect} must count as a Part 2 label"
+          end
+        end
+
+        test "a Bundle entry code padded with #{name} notices the entry and the Bundle" do
+          labelled = condition("id" => "syn-2", "meta" => { "security" => [ { "code" => "ETHUD#{pad}" } ] })
+
+          result = Part2EgressFilter.call(bundle_of(entry(condition, mode: "match"), entry(labelled, mode: "match")))
+
+          assert_noticed result
+          assert_noticed result["entry"][1]["resource"]
+        end
+
+        test "a C-CDA row code padded with #{name} is refused" do
+          row = { code: "SYN-1", display: "Synthetic", code_system: nil, security: [ { code: "#{pad}SUD#{pad}" } ] }
+
+          assert_nil Part2EgressFilter.call(ccda_sections(conditions: [ row ]))
+        end
+      end
+
+      test "a code that only contains a Part 2 code inside other letters is not a label" do
+        resource = condition("meta" => { "security" => [ { "code" => "X​SUD" }, { "code" => "SUDS" } ] })
+
+        assert_equal resource, Part2EgressFilter.call(resource)
+      end
+
+      # --- display is text, not a label ---------------------------------------
+
+      test "a Coding whose display echoes its Part 2 code is noticed, not refused" do
+        %w[ETH SUD 42CFRPart2 ETHUD OPIOIDUD].each do |code|
+          coding = { "system" => ACT_CODE, "code" => code, "display" => code }
+          resource = condition("meta" => { "security" => [ coding ] })
+
+          result = Part2EgressFilter.call(resource)
+
+          assert_noticed result, "display #{code} beside code #{code} is the same label, not a misplaced one"
+          assert_includes result["meta"]["security"], coding
+        end
+      end
+
+      test "a symbol-keyed Coding whose display echoes its Part 2 code is noticed" do
+        resource = { resourceType: "Condition", id: "syn-1", meta: { security: [ { code: "ETH", display: "ETH" } ] } }
+
+        assert_noticed Part2EgressFilter.call(resource)
+      end
+
+      test "a Bundle entry and an NDJSON line whose display echoes the code are noticed" do
+        labelled = condition("id" => "syn-2", "meta" => { "security" => [ { "code" => "SUD", "display" => "SUD" } ] })
+
+        bundle = Part2EgressFilter.call(bundle_of(entry(labelled, mode: "match")))
+        assert_noticed bundle
+        assert_noticed bundle["entry"][0]["resource"]
+
+        ndjson = Part2EgressFilter.call("#{labelled.to_json}\n")
+        assert_kind_of String, ndjson
+        assert_noticed JSON.parse(ndjson)
+      end
+
+      test "a display that names a Part 2 code beside another code is not a label and not refused" do
+        # No existing test asserted otherwise. display is human text.
+        [ { "code" => "N", "display" => "SUD" }, { code: "N", display: "ETH" },
+          { "system" => ACT_CODE, "code" => "R", "display" => "42CFRPart2" } ].each do |coding|
+          resource = condition("meta" => { "security" => [ coding ] })
+
+          result = Part2EgressFilter.call(resource)
+
+          assert_equal resource, result, "#{coding.inspect} must leave the resource as it was"
+          refute_noticed result
+        end
+      end
+
+      # --- one labelled NDJSON line with blank lines around it ----------------
+
+      test "a single labelled NDJSON line followed by a blank line is noticed" do
+        labelled = condition("meta" => { "security" => [ PART2_LABEL ] })
+        noticed = Part2EgressFilter.call(labelled)
+
+        result = Part2EgressFilter.call("#{labelled.to_json}\n\n")
+
+        assert_equal "#{noticed.to_json}\n\n", result
+      end
+
+      test "a single labelled NDJSON line after a blank line is noticed" do
+        labelled = condition("meta" => { "security" => [ { "code" => "SUD" } ] })
+        noticed = Part2EgressFilter.call(labelled)
+
+        result = Part2EgressFilter.call("\n#{labelled.to_json}\n")
+
+        assert_equal "\n#{noticed.to_json}\n", result
+      end
+
+      test "a single labelled NDJSON line between several blank lines is noticed" do
+        labelled = condition("meta" => { "security" => [ PART2_LABEL ] })
+        noticed = Part2EgressFilter.call(labelled)
+
+        assert_equal "\n\n#{noticed.to_json}\n\n\n", Part2EgressFilter.call("\n\n#{labelled.to_json}\n\n\n")
+        assert_equal "#{noticed.to_json}\n\n\n", Part2EgressFilter.call("#{labelled.to_json}\n\n\n")
+      end
+
+      test "a single unlabelled NDJSON line with blank lines is returned byte-identical" do
+        [ "#{condition.to_json}\n\n", "\n#{condition.to_json}\n" ].each do |ndjson|
+          result = Part2EgressFilter.call(ndjson)
+
+          assert_equal ndjson.bytes, result.bytes
+        end
+      end
+
+      test "a single labelled NDJSON line with blank lines that cannot carry the notice is refused" do
+        labelled = condition("meta" => { "security" => [ PART2_LABEL ], "extension" => "not an array" })
+
+        assert_nil Part2EgressFilter.call("#{labelled.to_json}\n\n")
+        assert_nil Part2EgressFilter.call("\n#{labelled.to_json}\n")
+      end
+
       private
 
       def export_manifest(overrides = {})
@@ -852,6 +1229,14 @@ module Lakeraven
           "requiresAccessToken" => true,
           "output" => [ { "type" => "Condition", "url" => "https://example.test/files/syn-1.ndjson" } ],
           "error" => []
+        }.merge(overrides)
+      end
+
+      def document_reference(overrides = {})
+        {
+          "resourceType" => "DocumentReference", "id" => "syn-doc", "status" => "current",
+          "subject" => { "reference" => "Patient/syn-pt" },
+          "content" => [ { "attachment" => { "contentType" => "text/plain", "title" => "Synthetic note" } } ]
         }.merge(overrides)
       end
 
