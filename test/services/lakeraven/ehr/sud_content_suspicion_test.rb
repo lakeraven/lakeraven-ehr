@@ -189,6 +189,142 @@ module Lakeraven
         end
       end
 
+      # --- vocabulary gaps found in review (#906 round 3) ---
+      # Bare "drug(s)" and "substance(s)", dependence in a use context,
+      # DSM-style "<class> use disorder" names, and more everyday and brand
+      # names. Over-labelling is the fail-closed direction.
+
+      ROUND3_SUSPECTED = [
+        # bare drug / substance
+        "Pt admits to using drugs.", "uses street drugs", "drug problem",
+        "drug screen positive", "using substances again", "IV drug use",
+        # dependence in a use context
+        "substance dependence", "substance-induced mood disorder", "chemical dependency",
+        # DSM-style names
+        "stimulant use disorder, moderate", "sedative use disorder", "inhalant use",
+        "hallucinogen use",
+        # substances and medications
+        "opium", "tramadol", "Klonopin", "Valium", "Ativan", "Dilaudid", "MDMA",
+        "ecstasy", "LSD", "whiskey",
+        # everyday wording
+        "hangover", "hung over", "twelve-step", "SUDs", "in recovery from alcohol",
+        "got high last night", "nonalcoholic beer"
+      ].freeze
+
+      ROUND3_SUSPECTED.each do |text|
+        test "the round 3 text #{text.inspect} is suspected" do
+          assert_equal :suspected, SudContentSuspicion.classify(text)
+        end
+
+        test "the round 3 text #{text.inspect} inside a sentence is suspected" do
+          assert_equal :suspected,
+            SudContentSuspicion.classify("Session note: #{text}; discussed with client.")
+        end
+      end
+
+      # Guards: the round 3 terms must not over-match these. "independent"
+      # is not "dependence", and "highly" is not "got high".
+      ROUND3_NOT_SUSPECTED = [
+        "Client feels highly motivated",
+        "independent living skills reviewed",
+        "Client is a teacher (AAA member)",
+        "Z71.3 dietary counselling",
+        "F3210"
+      ].freeze
+
+      ROUND3_NOT_SUSPECTED.each do |text|
+        test "the round 3 guard text #{text.inspect} is not suspected" do
+          assert_equal :not_suspected, SudContentSuspicion.classify(text)
+        end
+      end
+
+      # --- separators and invisible characters (#906 round 3) ---
+      # A term or a code is still a term or a code when its words are joined
+      # by an underscore or any dash, when an invisible character sits inside
+      # it, or when it is written in fullwidth forms.
+
+      SEPARATOR_SUSPECTED = {
+        "an underscore inside a phrase" => "substance_use: yes",
+        "an underscore before a term" => "hx_alcohol: positive",
+        "an underscore inside a code" => "F10_20",
+        "an en dash inside a phrase" => "substance–use disorder",
+        "a non-breaking hyphen inside a phrase" => "substance‑use",
+        "a soft hyphen inside a term" => "alco­hol",
+        "a zero-width space inside a term" => "alco​hol",
+        "a fullwidth term" => "ａｌｃｏｈｏｌ",
+        "a fullwidth code" => "Dx Ｆ１０.20"
+      }.freeze
+
+      SEPARATOR_SUSPECTED.each do |name, text|
+        test "#{name} is suspected" do
+          assert_equal :suspected, SudContentSuspicion.classify(text)
+        end
+
+        test "#{name} inside a sentence is suspected" do
+          assert_equal :suspected,
+            SudContentSuspicion.classify("Session note: #{text}; discussed with client.")
+        end
+      end
+
+      # --- no readable content: :unclassified (#906 round 3) ---
+      # Text with no letter or digit in it says nothing about what the record
+      # holds. It is absence of data, not evidence of cleanliness.
+
+      NO_READABLE_CONTENT = {
+        "a zero-width space only" => "​",
+        "a byte-order mark only" => "﻿",
+        "a NUL only" => "\u0000",
+        "a full stop only" => ".",
+        "dashes only" => "--",
+        "spaces and invisible characters only" => " ​ ﻿ "
+      }.freeze
+
+      NO_READABLE_CONTENT.each do |name, text|
+        test "#{name} is unclassified" do
+          result = nil
+          assert_nothing_raised { result = SudContentSuspicion.classify(text) }
+          assert_equal :unclassified, result
+        end
+      end
+
+      [ "ok", "Seen." ].each do |text|
+        test "the short clean text #{text.inspect} is not suspected" do
+          assert_equal :not_suspected, SudContentSuspicion.classify(text)
+        end
+      end
+
+      # --- classify never raises on a String (#906 round 3) ---
+
+      # Makes every regex match issued from sud_content_suspicion.rb raise
+      # Regexp::TimeoutError for the block, however many patterns there are
+      # and whichever match method is used. Matches issued from anywhere else
+      # are untouched. Yields an Array that collects one entry per raise.
+      REGEX_MATCH_METHODS = %i[match? match =~ === scan index].freeze
+
+      def with_sud_regex_timeout
+        fired = []
+        trace = TracePoint.new(:c_call) do |tp|
+          next unless REGEX_MATCH_METHODS.include?(tp.method_id)
+          next unless tp.defined_class == Regexp || tp.defined_class == String
+          next unless tp.path.to_s.end_with?("sud_content_suspicion.rb")
+
+          fired << tp.method_id
+          raise Regexp::TimeoutError, "synthetic: regex match timed out"
+        end
+        trace.enable { yield fired }
+      end
+
+      [ "Discussed sleep hygiene and work stress; PHQ-9 reviewed.", "heroin" ].each do |text|
+        test "a regex timeout while reading #{text.inspect} is unclassified and does not raise" do
+          with_sud_regex_timeout do |fired|
+            result = nil
+            assert_nothing_raised { result = SudContentSuspicion.classify(text) }
+            assert_equal :unclassified, result
+            refute_empty fired, "the synthetic regex timeout never fired"
+          end
+        end
+      end
+
       # --- clean text: :not_suspected ---
 
       test "an ordinary mental-health note is not suspected" do

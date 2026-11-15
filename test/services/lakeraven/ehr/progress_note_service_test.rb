@@ -61,6 +61,40 @@ module Lakeraven
         restore&.call
       end
 
+      # Makes every regex match issued from sud_content_suspicion.rb raise
+      # Regexp::TimeoutError for the block, however many patterns there are
+      # and whichever match method is used. Matches issued from anywhere else
+      # (ActiveRecord, the logger) are untouched. Yields an Array that
+      # collects one entry per raise.
+      REGEX_MATCH_METHODS = %i[match? match =~ === scan index].freeze
+
+      def with_sud_regex_timeout
+        fired = []
+        trace = TracePoint.new(:c_call) do |tp|
+          next unless REGEX_MATCH_METHODS.include?(tp.method_id)
+          next unless tp.defined_class == Regexp || tp.defined_class == String
+          next unless tp.path.to_s.end_with?("sud_content_suspicion.rb")
+
+          fired << tp.method_id
+          raise Regexp::TimeoutError, "synthetic: regex match timed out"
+        end
+        trace.enable { yield fired }
+      end
+
+      # Swaps Rails.logger for one that writes "SEVERITY message" lines to a
+      # StringIO for the block, and puts the original back after.
+      def with_captured_log
+        original = Rails.logger
+        io = StringIO.new
+        logger = ActiveSupport::Logger.new(io)
+        logger.level = Logger::DEBUG
+        logger.formatter = proc { |severity, _time, _progname, message| "#{severity} #{message}\n" }
+        Rails.logger = logger
+        yield io
+      ensure
+        Rails.logger = original
+      end
+
       # --- SUD content is labelled, not blocked ---
 
       test "substance-use text is not blocked: the gateway receives the exact text" do
@@ -225,6 +259,85 @@ module Lakeraven
         assert_equal :label_failed, result.part2_label
         assert_equal true,
           Part2Posture.part2?(record_type: "tiu_note", record_id: result.note_ien, content: SUD_TEXT)
+      end
+
+      # --- a failed label write is not silent (#906 round 3) ---
+      # The warning names the error class and the note, so the gap can be
+      # found and repaired. It never carries the note text.
+
+      test "a failing label write logs a warning naming the error class and the note ien, without the note text" do
+        svc = service(FakeNoteGateway.new)
+        result = nil
+        logged = nil
+
+        with_captured_log do |io|
+          with_raising_stub(Part2Label, :mark!, ActiveRecord::StatementInvalid.new("synthetic: label write failed")) do
+            result = svc.create(title_ien: TITLE_IEN, text: SUD_TEXT)
+          end
+          logged = io.string
+        end
+
+        assert result.success?
+        assert_equal :label_failed, result.part2_label
+
+        warnings = logged.lines.select { |line| line.start_with?("WARN") }
+        named = warnings.select { |line| line.include?("ActiveRecord::StatementInvalid") && line.include?(NOTE_IEN.to_s) }
+        refute_empty named,
+          "expected a WARN line naming ActiveRecord::StatementInvalid and note #{NOTE_IEN}; logged: #{warnings.length} WARN line(s)"
+        refute_includes logged, SUD_TEXT
+        refute_includes logged, "drinking nightly"
+      end
+
+      test "a successful label write logs no warning" do
+        logged = nil
+
+        with_captured_log do |io|
+          service(FakeNoteGateway.new).create(title_ien: TITLE_IEN, text: SUD_TEXT)
+          logged = io.string
+        end
+
+        assert_empty logged.lines.select { |line| line.start_with?("WARN") }
+        refute_includes logged, SUD_TEXT
+      end
+
+      # --- the text cannot be classified in time (#906 round 3) ---
+      # A regex timeout must not stop the note or escape as an exception:
+      # the note is labelled and written exactly as given.
+
+      test "a regex timeout while reading the text labels the note and still writes it" do
+        gateway = FakeNoteGateway.new
+        result = nil
+
+        with_sud_regex_timeout do |fired|
+          assert_nothing_raised do
+            result = service(gateway).create(title_ien: TITLE_IEN, text: CLEAN_TEXT)
+          end
+          refute_empty fired, "the synthetic regex timeout never fired"
+        end
+
+        assert result.success?
+        assert_equal %i[create update_text], gateway.methods_called
+        assert_equal [ NOTE_IEN, CLEAN_TEXT ], gateway.calls[1][:args]
+        assert_equal :labelled, result.part2_label
+        assert_equal 1, note_labels.count
+        assert_equal true, gateway.label_present_at_update_text
+      end
+
+      # --- text the pattern used to miss is labelled (#906 round 3) ---
+
+      { "invisible characters only" => "\u200B",
+        "an underscore-joined phrase" => "substance_use: yes",
+        "a bare drug mention" => "Pt admits to using drugs." }.each do |name, text|
+        test "text that is #{name} is labelled and still written" do
+          gateway = FakeNoteGateway.new
+
+          result = service(gateway).create(title_ien: TITLE_IEN, text: text)
+
+          assert result.success?
+          assert_equal [ NOTE_IEN, text ], gateway.calls[1][:args]
+          assert_equal :labelled, result.part2_label
+          assert_equal 1, note_labels.count
+        end
       end
 
       # --- existing failure paths write no label ---

@@ -32,6 +32,26 @@ module Lakeraven
         restore&.call
       end
 
+      # Makes every regex match issued from sud_content_suspicion.rb raise
+      # Regexp::TimeoutError for the block, however many patterns there are
+      # and whichever match method is used. Matches issued from anywhere else
+      # (ActiveRecord, the logger) are untouched. Yields an Array that
+      # collects one entry per raise.
+      REGEX_MATCH_METHODS = %i[match? match =~ === scan index].freeze
+
+      def with_sud_regex_timeout
+        fired = []
+        trace = TracePoint.new(:c_call) do |tp|
+          next unless REGEX_MATCH_METHODS.include?(tp.method_id)
+          next unless tp.defined_class == Regexp || tp.defined_class == String
+          next unless tp.path.to_s.end_with?("sud_content_suspicion.rb")
+
+          fired << tp.method_id
+          raise Regexp::TimeoutError, "synthetic: regex match timed out"
+        end
+        trace.enable { yield fired }
+      end
+
       # --- a label exists ---
 
       test "a 42CFRPart2 label makes a record Part 2 even when its content is clean" do
@@ -179,6 +199,68 @@ module Lakeraven
           assert_equal false, Part2Posture.part2?(**RECORD, content: CLEAN)
           assert_operator calls.length, :>=, 1, "Part2Label.exists? was not consulted"
         end
+      end
+
+      # --- content with nothing readable in it (#906 round 3) ---
+      # Invisible characters and bare punctuation are absence of data, not
+      # evidence the record is clean.
+
+      { "a byte-order mark only" => "\uFEFF",
+        "a zero-width space only" => "\u200B",
+        "a full stop only" => "." }.each do |name, content|
+        test "unlabelled content that is #{name} is Part 2" do
+          assert_equal 0, Part2Label.count
+          assert_equal true, Part2Posture.part2?(**RECORD, content: content)
+        end
+      end
+
+      test "unlabelled short clean content with letters is still not Part 2" do
+        assert_equal 0, Part2Label.count
+        assert_equal false, Part2Posture.part2?(**RECORD, content: "Seen.")
+      end
+
+      # --- unlabelled content written to dodge the pattern (#906 round 3) ---
+
+      { "an underscore-joined phrase" => "substance_use: yes",
+        "a zero-width space inside a term" => "alco\u200Bhol",
+        "a bare drug mention" => "Pt admits to using drugs." }.each do |name, content|
+        test "unlabelled content with #{name} is Part 2" do
+          assert_equal 0, Part2Label.count
+          assert_equal true, Part2Posture.part2?(**RECORD, content: content)
+        end
+      end
+
+      # --- the content cannot be classified in time: fail closed (#906 round 3) ---
+
+      test "a regex timeout while reading unlabelled clean content is Part 2 and does not raise" do
+        assert_equal 0, Part2Label.count
+
+        with_sud_regex_timeout do |fired|
+          result = nil
+          assert_nothing_raised { result = Part2Posture.part2?(**RECORD, content: CLEAN) }
+          assert_equal true, result
+          refute_empty fired, "the synthetic regex timeout never fired"
+        end
+      end
+
+      # --- an id the database cannot take: fail closed (#906 round 3) ---
+      # PostgreSQL refuses a NUL byte in a string, so the label lookup for
+      # such an id cannot succeed. That is no reason to call the record clean.
+
+      test "a record_id carrying a NUL byte is Part 2 and does not raise" do
+        result = nil
+        assert_nothing_raised do
+          result = Part2Posture.part2?(record_type: "tiu_note", record_id: "7\u00001", content: "Seen.")
+        end
+        assert_equal true, result
+      end
+
+      test "a record_type carrying a NUL byte is Part 2 and does not raise" do
+        result = nil
+        assert_nothing_raised do
+          result = Part2Posture.part2?(record_type: "tiu\u0000note", record_id: "70001", content: "Seen.")
+        end
+        assert_equal true, result
       end
 
       # --- shape ---
