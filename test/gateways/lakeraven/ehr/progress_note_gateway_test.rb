@@ -223,31 +223,77 @@ module Lakeraven
         assert_equal [], fetch_body_of(tiu_text(body: []))
       end
 
-      # THE KEY PROPERTY: signing changes the header and appends a signature
-      # block, yet the first n body rows, and so their hash, are unchanged.
-      test "the body rows recorded at signing are still the first rows of the signed note" do
-        unsigned = fetch_body_of(tiu_text(status: "UNSIGNED"))
-        recorded_rows = unsigned.size
-        recorded_hash = Digest::SHA256.hexdigest(unsigned.join("\n"))
+      # The header separator is the first row that is empty AFTER STRIP: a
+      # row of spaces separates like an empty one.
+      test "fetch_body treats a whitespace-only row as the header separator" do
+        text = [ "     URGENCY:          STATUS: UNSIGNED", " ", "A", "", "B" ].join("\r")
 
-        signed_text = tiu_text(status: "COMPLETED", signature: SIGNATURE_BLOCK)
+        assert_equal [ "A", "", "B" ], fetch_body_of(text)
+      end
+
+      test "fetch_body separates at a whitespace-only row that comes before an empty one" do
+        text = (tiu_header(status: "UNSIGNED") + [ "   \t" ] + BODY_ROWS + [ "", "P: Synthetic later paragraph." ]).join("\r")
+
+        assert_equal BODY_ROWS + [ "", "P: Synthetic later paragraph." ], fetch_body_of(text)
+      end
+
+      test "fetch_body returns nil for a header with no blank or whitespace-only row" do
+        assert_nil fetch_body_of(tiu_header(status: "UNSIGNED").join("\r"))
+      end
+
+      # What the signing audit records and what a verifier does with it
+      # (#960). content is the body read before signing; record is the body
+      # read after it, signature block included. The verifier hashes ALL the
+      # rows of a later read and compares them with the record hash.
+      def body_hash(rows) = Digest::SHA256.hexdigest(rows.join("\n"))
+
+      def signed_text(body: BODY_ROWS, signature: SIGNATURE_BLOCK)
+        tiu_text(status: "COMPLETED", body: body, signature: signature)
+      end
+
+      test "signing changes the header and appends a signature block after the unchanged body rows" do
+        unsigned = fetch_body_of(tiu_text(status: "UNSIGNED"))
+
         refute_includes signed_text, "STATUS: UNSIGNED"
-        refute_equal tiu_text(status: "UNSIGNED"), signed_text
         signed = fetch_body_of(signed_text)
 
         assert_equal BODY_ROWS + SIGNATURE_BLOCK, signed
-        assert_equal unsigned, signed.first(recorded_rows)
-        assert_equal recorded_hash, Digest::SHA256.hexdigest(signed.first(recorded_rows).join("\n"))
+        assert_equal unsigned, signed.first(unsigned.size)
+        refute_equal body_hash(unsigned), body_hash(signed), "the record hash is not the content hash"
       end
 
-      test "a signed note whose body was altered no longer reproduces the recorded hash" do
-        unsigned = fetch_body_of(tiu_text(status: "UNSIGNED"))
-        recorded_hash = Digest::SHA256.hexdigest(unsigned.join("\n"))
+      test "an unchanged signed note re-read later reproduces the record hash over all its rows" do
+        record_hash = body_hash(fetch_body_of(signed_text))
+
+        assert_equal record_hash, body_hash(fetch_body_of(signed_text))
+        assert_equal record_hash, body_hash(fetch_body_of(signed_text.tr("\r", "\n")))
+      end
+
+      # The append-blind check: hashing only the first content-rows rows
+      # passes this note. Hashing all rows against the record hash does not.
+      test "rows appended after signing no longer reproduce the record hash" do
+        content = fetch_body_of(tiu_text(status: "UNSIGNED"))
+        record_hash = body_hash(fetch_body_of(signed_text))
+
+        appended = fetch_body_of(signed_text(signature: SIGNATURE_BLOCK + [ "Addendum: synthetic row appended later." ]))
+
+        assert_equal body_hash(content), body_hash(appended.first(content.size)),
+                     "the first content-rows rows alone do not show the append"
+        refute_equal record_hash, body_hash(appended)
+      end
+
+      test "a signed note whose body was altered no longer reproduces the record hash" do
+        record_hash = body_hash(fetch_body_of(signed_text))
 
         altered = [ BODY_ROWS.first, "P: Synthetic plan, altered after signing." ]
-        signed = fetch_body_of(tiu_text(status: "COMPLETED", body: altered, signature: SIGNATURE_BLOCK))
 
-        refute_equal recorded_hash, Digest::SHA256.hexdigest(signed.first(unsigned.size).join("\n"))
+        refute_equal record_hash, body_hash(fetch_body_of(signed_text(body: altered)))
+      end
+
+      test "a signed note that lost a row no longer reproduces the record hash" do
+        record_hash = body_hash(fetch_body_of(signed_text))
+
+        refute_equal record_hash, body_hash(fetch_body_of(signed_text(signature: SIGNATURE_BLOCK[0..-2])))
       end
 
       # --- default_provider ---

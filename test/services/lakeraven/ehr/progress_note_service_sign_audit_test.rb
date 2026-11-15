@@ -9,6 +9,12 @@ module Lakeraven
     # append-only AuditEvent per call, on every path, carrying a hash of the
     # signed note body and never the signature code or the text itself.
     #
+    # The success row carries two hashes. content-sha256 is of the body rows
+    # read BEFORE the sign action: what was signed. record-sha256 is of ALL
+    # the body rows read again AFTER it: the note as filed, signature block
+    # included. A verifier re-reads the body and compares the hash of all its
+    # rows with record-sha256, so an appended, removed or edited row shows.
+    #
     # The fakes model the production gateways: ESignatureGateway.validate
     # returns a Boolean (the demo and Cucumber fakes return a Hash, and both
     # are accepted), and the note gateway's fetch_body returns the body rows
@@ -26,6 +32,13 @@ module Lakeraven
       ].freeze
       NOTE_BODY = NOTE_ROWS.join("\n")
       NOTE_HASH = Digest::SHA256.hexdigest(NOTE_BODY)
+      # The body as TIU returns it once signed: the same rows, then the
+      # signature block.
+      SIGNED_ROWS = (NOTE_ROWS + [ "", "/es/ SYNTHETIC PROVIDER" ]).freeze
+      SIGNED_HASH = Digest::SHA256.hexdigest(SIGNED_ROWS.join("\n"))
+      # SHA-256 of nothing and of an empty row list's join: an absent record
+      # must never be written as either.
+      EMPTY_HASH = Digest::SHA256.hexdigest("")
 
       # Raised by the fakes. The message carries the signature code so a row
       # that copied the exception message would leak it.
@@ -35,13 +48,22 @@ module Lakeraven
       # Models ProgressNoteGateway: fetch_body returns the body rows. There is
       # deliberately no fetch_text, so a service that hashes the whole TIU
       # display (header and signature block included) fails here.
+      #
+      # The first fetch_body of a gateway is the pre-sign read and returns
+      # +rows+. Every later one is the post-sign read: it returns +post_sign+
+      # when that was given (nil included), else +rows+ again, and raises
+      # +post_sign_error+ when that was given.
       class FakeNoteGateway
+        SAME = Object.new.freeze
+
         attr_reader :fetches
         attr_accessor :rows
 
-        def initialize(rows: nil, error: nil)
+        def initialize(rows: nil, error: nil, post_sign: SAME, post_sign_error: nil)
           @rows = rows
           @error = error
+          @post_sign = post_sign
+          @post_sign_error = post_sign_error
           @fetches = []
         end
 
@@ -55,8 +77,11 @@ module Lakeraven
         def fetch_body(note_ien)
           @fetches << note_ien
           raise @error if @error
+          return @rows if @fetches.size == 1
 
-          @rows
+          raise @post_sign_error if @post_sign_error
+
+          @post_sign.equal?(SAME) ? @rows : @post_sign
         end
       end
 
@@ -93,7 +118,9 @@ module Lakeraven
         @esig_gateway = FakeESignatureGateway.new
       end
 
+      # reset clears every attribute, inside_audited_request included.
       teardown do
+        AuditContext.inside_audited_request = nil
         AuditContext.reset
       end
 
@@ -119,25 +146,108 @@ module Lakeraven
         assert_equal NOTE_IEN.to_s, event.entity_id.to_s
       end
 
-      test "the success event names the patient, the SHA-256 of the body rows and the row count" do
-        event = audit_event_for { sign }
+      test "the success event names the patient, then the signed body and the filed record, each as a SHA-256 and a row count" do
+        @note_gateway = FakeNoteGateway.new(rows: NOTE_ROWS.dup, post_sign: SIGNED_ROWS.dup)
 
-        assert_equal "progress_note_signed; patient #{DFN}; content-sha256 #{NOTE_HASH}; content-rows 3",
+        event = audit_event_for do
+          result = sign
+          assert result.success?, "signing failed: #{result.error.inspect}"
+        end
+
+        assert_equal "progress_note_signed; patient #{DFN}; content-sha256 #{NOTE_HASH}; content-rows 3; " \
+                     "record-sha256 #{SIGNED_HASH}; record-rows 5",
                      event.outcome_desc
-        assert_equal success_desc(NOTE_ROWS), event.outcome_desc
-        assert_match(/content-sha256 [0-9a-f]{64}; content-rows \d+\z/, event.outcome_desc)
+        assert_equal success_desc(NOTE_ROWS, SIGNED_ROWS), event.outcome_desc
+        assert_match(/content-sha256 [0-9a-f]{64}; content-rows \d+; record-sha256 [0-9a-f]{64}; record-rows \d+\z/,
+                     event.outcome_desc)
+        refute_equal content_hash(event), record_hash(event)
       end
 
-      test "the note body is read through fetch_body for the note being signed" do
+      test "a body that signing does not change records the same hash and count twice" do
+        event = audit_event_for { sign }
+
+        assert_equal "progress_note_signed; patient #{DFN}; content-sha256 #{NOTE_HASH}; content-rows 3; " \
+                     "record-sha256 #{NOTE_HASH}; record-rows 3",
+                     event.outcome_desc
+      end
+
+      test "the body is read exactly twice on success: before the sign action and after it" do
         sign
 
-        assert_equal [ NOTE_IEN.to_s ], @note_gateway.fetches.map(&:to_s)
+        assert_equal [ NOTE_IEN.to_s, NOTE_IEN.to_s ], @note_gateway.fetches.map(&:to_s)
+        assert_equal 1, @esig_gateway.sign_actions.size
+      end
+
+      # THE DEFECT: a verifier that hashed only the first content-rows rows
+      # passed a note with rows appended after signing. The record hash is of
+      # every row, so an appended, removed or edited row no longer matches.
+      test "the record hash covers every filed row, so a later append, removal or edit is detected" do
+        @note_gateway = FakeNoteGateway.new(rows: NOTE_ROWS.dup, post_sign: SIGNED_ROWS.dup)
+        event = audit_event_for { sign }
+        verify = ->(rows) { Digest::SHA256.hexdigest(rows.join("\n")) == record_hash(event) }
+
+        assert verify.call(SIGNED_ROWS), "an unchanged signed note must verify"
+        refute verify.call(SIGNED_ROWS + [ "Addendum: synthetic row appended after signing." ])
+        refute verify.call(SIGNED_ROWS[0..-2])
+        refute verify.call([ "S: Synthetic row edited after signing." ] + SIGNED_ROWS.drop(1))
+        assert_equal content_hash(event),
+                     Digest::SHA256.hexdigest((SIGNED_ROWS + [ "appended" ]).first(content_rows(event)).join("\n")),
+                     "the first content-rows rows alone do not show the append"
+      end
+
+      # -- the post-sign read can fail; the signature already happened -------
+
+      {
+        "nil" => nil,
+        "an empty body" => [],
+        "a body of blank rows" => [ "", "  " ],
+        "a String, not rows" => NOTE_BODY,
+        "rows that are not all Strings" => [ "S: Synthetic row.", 7 ],
+        "a row holding a line feed" => [ "S: Synthetic row.\nP: Synthetic smuggled row." ]
+      }.each do |label, post_sign|
+        test "a post-sign read returning #{label} still writes the success event, with record-sha256 unavailable" do
+          @note_gateway = FakeNoteGateway.new(rows: NOTE_ROWS.dup, post_sign: post_sign)
+
+          result = nil
+          event = audit_event_for { result = assert_nothing_raised { sign } }
+
+          assert result.success?, "the signature happened, so sign succeeds: #{result.error.inspect}"
+          assert_equal NOTE_IEN, result.note_ien
+          assert_equal 1, @esig_gateway.sign_actions.size
+          assert_equal 2, @note_gateway.fetches.size
+          assert_equal "0", event.outcome
+          assert_equal unavailable_desc(NOTE_ROWS), event.outcome_desc
+          assert event.outcome_desc.end_with?("; content-rows 3; record-sha256 unavailable")
+          refute_match(/record-rows/, event.outcome_desc)
+          refute_leaks event, EMPTY_HASH
+          refute_leaks event, SIGNATURE_CODE
+        end
+      end
+
+      test "a post-sign read that raises still writes the success event and does not raise" do
+        boom = GatewayDown.new(GATEWAY_DOWN_MESSAGE)
+        @note_gateway = FakeNoteGateway.new(rows: NOTE_ROWS.dup, post_sign_error: boom)
+
+        result = nil
+        event = audit_event_for { result = assert_nothing_raised { sign } }
+
+        assert result.success?, "the signature happened, so sign succeeds: #{result.error.inspect}"
+        assert_equal NOTE_IEN, result.note_ien
+        assert_equal 1, @esig_gateway.sign_actions.size
+        assert_equal 2, @note_gateway.fetches.size
+        assert_equal "0", event.outcome
+        assert_equal unavailable_desc(NOTE_ROWS), event.outcome_desc
+        refute_match(/record-rows/, event.outcome_desc)
+        refute_leaks event, GATEWAY_DOWN_MESSAGE
+        refute_leaks event, "GatewayDown"
+        refute_leaks event, EMPTY_HASH
+        refute_leaks event, SIGNATURE_CODE
       end
 
       test "the recorded hash is of the fetched body, so a different body gives a different hash and count" do
         first = audit_event_for { sign }
 
-        @note_gateway.rows = NOTE_ROWS + [ "Addendum: synthetic late change." ]
+        @note_gateway = FakeNoteGateway.new(rows: NOTE_ROWS + [ "Addendum: synthetic late change." ])
         second = audit_event_for { sign }
 
         assert_equal success_desc(@note_gateway.rows), second.outcome_desc
@@ -217,6 +327,7 @@ module Lakeraven
         end
 
         assert_empty @esig_gateway.sign_actions
+        assert_empty @note_gateway.fetches, "a refused code never reads the body"
         assert_equal "4", event.outcome
         assert_equal "E", event.action
         assert_equal "application", event.event_type
@@ -252,7 +363,12 @@ module Lakeraven
         "a body of blank rows" => [ "", "  " ],
         "a body that is a String, not rows" => NOTE_BODY,
         "a body that is a Hash" => { success: false, raw: nil },
-        "a body whose rows are not all Strings" => [ "S: Synthetic row.", 7 ]
+        "a body whose rows are not all Strings" => [ "S: Synthetic row.", 7 ],
+        # A row holding a row separator makes the "\n" join ambiguous: two
+        # different bodies would hash alike.
+        "a body with a line feed inside a row" => [ "S: Synthetic row.\nP: Synthetic smuggled row." ],
+        "a body with a carriage return inside a row" => [ "S: Synthetic row.\rP: Synthetic smuggled row." ],
+        "a body with a CRLF ending a row" => [ "S: Synthetic row.\r\n", "P: Synthetic plan." ]
       }.each do |label, body|
         test "#{label} is not signed: note_text_unavailable" do
           @note_gateway.rows = body
@@ -283,6 +399,8 @@ module Lakeraven
           assert_equal :gateway_error, result.error
         end
 
+        assert_equal [ NOTE_IEN.to_s ], @note_gateway.fetches.map(&:to_s),
+                     "a sign action that failed filed nothing, so there is no record to read back"
         assert_equal "8", event.outcome
         assert_equal NOTE_IEN.to_s, event.entity_identifier
         assert_equal refusal_desc(:gateway_error), event.outcome_desc
@@ -367,9 +485,11 @@ module Lakeraven
         end
 
         assert_equal 1, @esig_gateway.sign_actions.size
+        assert_equal [ NOTE_IEN.to_s ], @note_gateway.fetches.map(&:to_s)
         assert_equal "8", event.outcome
         assert_equal NOTE_IEN.to_s, event.entity_identifier
         assert_equal refusal_desc(:sign_outcome_unknown), event.outcome_desc
+        refute_match(/sha256/i, event.outcome_desc)
         refute_leaks event, GATEWAY_DOWN_MESSAGE
         refute_leaks event, SIGNATURE_CODE
       end
@@ -429,6 +549,134 @@ module Lakeraven
 
         event = audit_event_for do
           assert sign.success?
+        end
+
+        assert_equal "Practitioner", event.agent_who_type
+        assert_equal AUTHOR_DUZ.to_s, event.agent_who_identifier
+      end
+
+      # Only agent_who_type, agent_who_identifier and agent_name pass from the
+      # resolver to the row. Anything else it returns could overwrite the
+      # outcome or raise on an unknown column.
+      test "extra keys from the resolver do not change a success event or make it raise" do
+        AuditContext.agent_resolver = -> { resolved_agent_with_extras }
+
+        event = audit_event_for do
+          result = assert_nothing_raised { sign }
+          assert result.success?, "signing failed: #{result.error.inspect}"
+        end
+
+        assert_equal "0", event.outcome
+        assert_equal success_desc(NOTE_ROWS), event.outcome_desc
+        assert_equal "Practitioner", event.agent_who_type
+        assert_equal AUTHOR_DUZ.to_s, event.agent_who_identifier
+        assert_equal "PROVIDER,SYNTHETIC", event.agent_name
+        assert_equal "E", event.action
+        assert_equal "DocumentReference", event.entity_type
+        assert_equal NOTE_IEN.to_s, event.entity_identifier
+      end
+
+      test "extra keys from the resolver do not turn a refusal into a success" do
+        AuditContext.agent_resolver = -> { resolved_agent_with_extras }
+        @esig_gateway = FakeESignatureGateway.new(validation: false)
+
+        event = audit_event_for do
+          result = assert_nothing_raised { sign }
+          assert_equal :invalid_signature_code, result.error
+        end
+
+        assert_equal "4", event.outcome
+        assert_equal refusal_desc(:invalid_signature_code), event.outcome_desc
+        assert_equal "Practitioner", event.agent_who_type
+        assert_equal AUTHOR_DUZ.to_s, event.agent_who_identifier
+        assert_equal "PROVIDER,SYNTHETIC", event.agent_name
+        assert_equal "E", event.action
+        assert_equal NOTE_IEN.to_s, event.entity_identifier
+      end
+
+      # Inside an audited request the actor is known or the request is not
+      # trusted: the author is assumed only where there is no request at all.
+      test "an unattributed sign inside an audited request is refused before validation" do
+        AuditContext.inside_audited_request = true
+        assert_nil AuditContext.agent_attributes[:agent_who_identifier]
+
+        event = audit_event_for do
+          result = sign
+          refute result.success?
+          assert_equal :actor_mismatch, result.error
+        end
+
+        assert_empty @esig_gateway.validations
+        assert_empty @esig_gateway.sign_actions
+        assert_empty @note_gateway.fetches
+        assert_equal "4", event.outcome
+        assert_equal "Unknown", event.agent_who_type
+        assert_nil event.agent_who_identifier
+        assert_equal NOTE_IEN.to_s, event.entity_identifier
+        assert_equal refusal_desc(:actor_mismatch), event.outcome_desc
+        refute_leaks event, SIGNATURE_CODE
+      end
+
+      test "a resolver with no identifier inside an audited request is refused the same way" do
+        AuditContext.inside_audited_request = true
+        AuditContext.agent_resolver = -> { { agent_who_type: "Practitioner", agent_who_identifier: nil } }
+
+        event = audit_event_for do
+          assert_equal :actor_mismatch, sign.error
+        end
+
+        assert_empty @esig_gateway.validations
+        assert_empty @esig_gateway.sign_actions
+        assert_equal "4", event.outcome
+        assert_equal "Unknown", event.agent_who_type
+        assert_nil event.agent_who_identifier
+      end
+
+      test "an attributed author inside an audited request signs normally" do
+        AuditContext.inside_audited_request = true
+        AuditContext.agent_resolver = -> { { agent_who_type: "Practitioner", agent_who_identifier: AUTHOR_DUZ.to_s } }
+
+        event = audit_event_for do
+          result = sign
+          assert result.success?, "signing failed: #{result.error.inspect}"
+        end
+
+        assert_equal "0", event.outcome
+        assert_equal AUTHOR_DUZ.to_s, event.agent_who_identifier
+      end
+
+      # -- the author must be a DUZ ------------------------------------------
+
+      {
+        "a nil author" => nil,
+        "an author carrying statement syntax" => "12; DROP"
+      }.each do |label, bad_duz|
+        test "#{label} is invalid input, refused before validation, with an Unknown agent" do
+          event = audit_event_for do
+            result = assert_nothing_raised { sign(author_duz: bad_duz) }
+            refute result.success?
+            assert_equal :invalid_input, result.error
+          end
+
+          assert_empty @esig_gateway.validations
+          assert_empty @esig_gateway.sign_actions
+          assert_empty @note_gateway.fetches
+          assert_equal "4", event.outcome
+          assert_equal "Unknown", event.agent_who_type
+          assert_nil event.agent_who_identifier
+          assert_equal refusal_desc(:invalid_input), event.outcome_desc
+          unless bad_duz.nil?
+            refute_leaks event, bad_duz
+            refute_leaks event, "DROP"
+          end
+          refute_leaks event, SIGNATURE_CODE
+        end
+      end
+
+      test "a digit-string author signs like the Integer form" do
+        event = audit_event_for do
+          result = sign(author_duz: AUTHOR_DUZ.to_s)
+          assert result.success?, "signing failed: #{result.error.inspect}"
         end
 
         assert_equal "Practitioner", event.agent_who_type
@@ -535,18 +783,36 @@ module Lakeraven
 
       private
 
-      def service(dfn: DFN)
+      def service(dfn: DFN, author_duz: AUTHOR_DUZ)
         ProgressNoteService.new(
-          dfn: dfn, visit_ien: VISIT_IEN, author_duz: AUTHOR_DUZ,
+          dfn: dfn, visit_ien: VISIT_IEN, author_duz: author_duz,
           gateway: @note_gateway, esignature_gateway: @esig_gateway
         )
       end
 
-      def sign(note_ien: NOTE_IEN, signature_code: SIGNATURE_CODE, dfn: DFN)
-        service(dfn: dfn).sign(note_ien: note_ien, signature_code: signature_code)
+      def sign(note_ien: NOTE_IEN, signature_code: SIGNATURE_CODE, dfn: DFN, author_duz: AUTHOR_DUZ)
+        service(dfn: dfn, author_duz: author_duz).sign(note_ien: note_ien, signature_code: signature_code)
       end
 
-      def success_desc(rows, dfn: DFN)
+      # The author, attributed, with keys no resolver should be able to pass
+      # through to the row.
+      def resolved_agent_with_extras
+        { agent_who_type: "Practitioner", agent_who_identifier: AUTHOR_DUZ.to_s, agent_name: "PROVIDER,SYNTHETIC",
+          outcome: "0", outcome_desc: "x", bogus: 1 }
+      end
+
+      # +rows+ is the body read before signing; +record_rows+ the body read
+      # after it, the same rows unless the fake was told otherwise.
+      def success_desc(rows, record_rows = rows, dfn: DFN)
+        "#{content_desc(rows, dfn: dfn)}; " \
+          "record-sha256 #{Digest::SHA256.hexdigest(record_rows.join("\n"))}; record-rows #{record_rows.size}"
+      end
+
+      def unavailable_desc(rows, dfn: DFN)
+        "#{content_desc(rows, dfn: dfn)}; record-sha256 unavailable"
+      end
+
+      def content_desc(rows, dfn: DFN)
         "progress_note_signed; patient #{dfn}; " \
           "content-sha256 #{Digest::SHA256.hexdigest(rows.join("\n"))}; content-rows #{rows.size}"
       end
@@ -569,7 +835,11 @@ module Lakeraven
       end
 
       def content_rows(event)
-        event.outcome_desc[/content-rows (\d+)\z/, 1]&.to_i
+        event.outcome_desc[/content-rows (\d+)(;|\z)/, 1]&.to_i
+      end
+
+      def record_hash(event)
+        event.outcome_desc[/record-sha256 ([0-9a-f]{64})/, 1]
       end
 
       def refute_leaks(event, secret)

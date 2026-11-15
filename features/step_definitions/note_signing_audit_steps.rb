@@ -6,6 +6,11 @@ require "digest"
 # The note and signing steps themselves are the existing ones in
 # demo_visit_charting_steps.rb; these only read the AuditEvent the signing
 # is expected to leave.
+#
+# The success row holds two hashes. content-sha256 is of the body rows the
+# provider signed. record-sha256 is of ALL the body rows read again after the
+# sign action, signature block included: the note as filed. A verifier
+# re-reads the body and compares the hash of all its rows with record-sha256.
 
 Before("@note_signing_audit") do
   Lakeraven::EHR::AuditEvent.delete_all
@@ -34,27 +39,40 @@ def note_signing_tiu_header(status)
   ]
 end
 
-NOTE_SIGNING_SIGNATURE_BLOCK = [ "", "/es/ PROVIDER,SYNTHETIC", "Signed: 11/15/2026 10:00" ].freeze
-
-# The body rows the fake note gateway currently holds for the note.
+# The body rows the fake note gateway currently holds for the note: once
+# signed, the written rows, the signature block and anything appended since.
 def note_signing_body_rows
   @note_gateway.fetch_body(@note_result.note_ien)
 end
 
-def note_signing_recorded_hash
-  @audit_event.outcome_desc.to_s[/content-sha256 ([0-9a-f]{64})/, 1]
+# The rows the provider wrote, which are the rows that were signed.
+def note_signing_written_rows
+  @note_gateway.written_rows(@note_result.note_ien)
 end
 
-def note_signing_recorded_rows
-  @audit_event.outcome_desc.to_s[/content-rows (\d+)\z/, 1]&.to_i
+def note_signing_content_hash
+  @audit_event.outcome_desc.to_s[/; content-sha256 ([0-9a-f]{64});/, 1]
 end
 
-# What a later verifier does: the first n body rows, joined with "\n".
+def note_signing_content_rows
+  @audit_event.outcome_desc.to_s[/; content-rows (\d+);/, 1]&.to_i
+end
+
+def note_signing_record_hash
+  @audit_event.outcome_desc.to_s[/; record-sha256 ([0-9a-f]{64});/, 1]
+end
+
+def note_signing_record_rows
+  @audit_event.outcome_desc.to_s[/; record-rows (\d+)\z/, 1]&.to_i
+end
+
+# What a later verifier does: ALL the body rows, joined with "\n", compared
+# with the record hash. Not the first n rows: that check is blind to appends.
 def note_signing_verifier_hash(rows)
-  count = note_signing_recorded_rows
-  refute_nil count, "the audit event records no content-rows count: #{@audit_event.outcome_desc.inspect}"
+  refute_nil note_signing_record_hash,
+    "the audit event records no record-sha256: #{@audit_event.outcome_desc.inspect}"
   refute_nil rows, "the note body could not be read"
-  Digest::SHA256.hexdigest(rows.first(count).join("\n"))
+  Digest::SHA256.hexdigest(rows.join("\n"))
 end
 
 Then("exactly one note signing audit event should be recorded") do
@@ -115,12 +133,29 @@ Then("the note signing audit event cannot be deleted") do
 end
 
 Then("the note signing audit event should hold the SHA-256 and row count of the signed note body") do
+  rows = note_signing_written_rows
+  refute_nil rows
+  assert_match(/\Aprogress_note_signed; patient \d+; content-sha256 [0-9a-f]{64}; content-rows \d+(;|\z)/,
+               @audit_event.outcome_desc.to_s)
+  assert_equal rows.size, @audit_event.outcome_desc.to_s[/; content-rows (\d+)(;|\z)/, 1]&.to_i
+  assert_equal Digest::SHA256.hexdigest(rows.join("\n")),
+               @audit_event.outcome_desc.to_s[/; content-sha256 ([0-9a-f]{64})(;|\z)/, 1]
+end
+
+Then("the note signing audit event should hold the SHA-256 and row count of the note as filed") do
   rows = note_signing_body_rows
   refute_nil rows
-  assert_match(/\Aprogress_note_signed; /, @audit_event.outcome_desc.to_s)
-  assert_match(/; content-sha256 [0-9a-f]{64}; content-rows \d+\z/, @audit_event.outcome_desc.to_s)
-  assert_equal rows.size, note_signing_recorded_rows
-  assert_equal Digest::SHA256.hexdigest(rows.join("\n")), note_signing_recorded_hash
+  assert_match(/; content-rows \d+; record-sha256 [0-9a-f]{64}; record-rows \d+\z/, @audit_event.outcome_desc.to_s)
+  assert_equal rows.size, note_signing_record_rows
+  assert_equal Digest::SHA256.hexdigest(rows.join("\n")), note_signing_record_hash
+end
+
+# The fake files the signature block on signing, as TIU does, so the record
+# is more than the signed text and its hash differs from the content hash.
+Then("the note as filed should include the signature block") do
+  assert_equal note_signing_written_rows + FakeProgressNoteGateway::SIGNATURE_ROWS, note_signing_body_rows
+  assert_operator note_signing_record_rows, :>, note_signing_content_rows
+  refute_equal note_signing_content_hash, note_signing_record_hash
 end
 
 When("the note text is later changed to {string}") do |text|
@@ -133,22 +168,38 @@ When("the note text is later changed to:") do |text|
   assert written[:success]
 end
 
-# Re-hashes the body the gateway holds NOW, the way a verifier would, so
-# this fails if the text was not in fact changed.
-Then("the recorded hash should match the current note body") do
-  assert_equal note_signing_recorded_hash, note_signing_verifier_hash(note_signing_body_rows)
+When("a row {string} is appended to the signed note") do |row|
+  assert @note_gateway.signed?(@note_result.note_ien), "the note was not signed"
+  before = note_signing_body_rows
+  @note_gateway.append_row(@note_result.note_ien, row)
+  assert_equal before + [ row ], note_signing_body_rows
 end
 
-Then("the recorded hash should no longer match the current note body") do
-  refute_nil note_signing_recorded_hash
-  refute_equal note_signing_recorded_hash, note_signing_verifier_hash(note_signing_body_rows)
+# The check this issue replaced: hashing only the first content-rows rows.
+# It still passes after an append, which is why it is not the verifier.
+Then("the signed rows alone should still reproduce the content hash") do
+  count = note_signing_content_rows
+  refute_nil count, "the audit event records no content-rows count: #{@audit_event.outcome_desc.inspect}"
+  assert_equal note_signing_content_hash,
+               Digest::SHA256.hexdigest(note_signing_body_rows.first(count).join("\n"))
+end
+
+# Re-hashes ALL the rows the gateway holds NOW, the way a verifier would, so
+# this fails if the note was not in fact changed.
+Then("the record hash should match the current note body") do
+  assert_equal note_signing_record_hash, note_signing_verifier_hash(note_signing_body_rows)
+end
+
+Then("the record hash should no longer match the current note body") do
+  refute_equal note_signing_record_hash, note_signing_verifier_hash(note_signing_body_rows)
 end
 
 # The re-read goes through the production gateway's parsing: the fake API
-# returns a TIU display built from a header, a body and a signature block.
+# returns a TIU display built from a header and the signed note's body rows,
+# which already end with the signature block the fake filed on signing.
 When("TIU later returns the signed note with a {string} header and a signature block") do |status|
-  text = (note_signing_tiu_header(status) + [ "" ] + note_signing_body_rows +
-          NOTE_SIGNING_SIGNATURE_BLOCK).join("\r") + "\r"
+  assert @note_gateway.signed?(@note_result.note_ien), "the note was not signed"
+  text = (note_signing_tiu_header(status) + [ "" ] + note_signing_body_rows).join("\r") + "\r"
   @reread_text = text
   @reread_body = Lakeraven::EHR::ProgressNoteGateway.fetch_body(
     @note_result.note_ien, via: FakeTiuRecordTextApi.new(text)
@@ -159,15 +210,14 @@ Then("the re-read note should differ from the body alone") do
   assert_includes @reread_text, "STATUS: COMPLETED"
   assert_includes @reread_text, "/es/ PROVIDER,SYNTHETIC"
   refute_nil @reread_body
-  assert_operator @reread_body.size, :>, note_signing_recorded_rows,
+  assert_operator @reread_body.size, :>, note_signing_written_rows.size,
     "the signature block should follow the body rows"
 end
 
-Then("the recorded hash should match the re-read note body") do
-  assert_equal note_signing_recorded_hash, note_signing_verifier_hash(@reread_body)
+Then("the record hash should match the re-read note body") do
+  assert_equal note_signing_record_hash, note_signing_verifier_hash(@reread_body)
 end
 
-Then("the recorded hash should no longer match the re-read note body") do
-  refute_nil note_signing_recorded_hash
-  refute_equal note_signing_recorded_hash, note_signing_verifier_hash(@reread_body)
+Then("the record hash should no longer match the re-read note body") do
+  refute_equal note_signing_record_hash, note_signing_verifier_hash(@reread_body)
 end
