@@ -975,16 +975,27 @@ module Lakeraven
       # the notice on them.
       PART2_SERVED_ROWS = [ "/lakeraven-ehr/Patient/1", "/lakeraven-ehr/Condition", "exports file show" ].freeze
 
-      PART2_SERVED_ROWS.each do |row|
-        test "Part 2-labelled payload is served with the notice, not refused, for GET #{row}" do
+      # The same rows again with the sensitivity code alone and no system
+      # (`{ "code" => "SUD" }`): a label that is not 42CFRPart2 is served
+      # with the notice at the endpoint too, not only in the filter's tests.
+      PART2_SERVED_LABELS = {
+        "Part 2-labelled" => nil,
+        "SUD-labelled (code only, no system)" => { "code" => "SUD" }.freeze
+      }.freeze
+
+      PART2_SERVED_ROWS.product(PART2_SERVED_LABELS.to_a).each do |row, (label_name, label)|
+        test "#{label_name} payload is served with the notice, not refused, for GET #{row}" do
           endpoint = WIRED_ENDPOINTS.find { |candidate| (candidate[:name] || candidate[:path]) == row && candidate[:method] == :get }
           assert endpoint, "#{row} is no longer a WIRED_ENDPOINTS row; name its replacement here"
           instance_exec(&endpoint[:setup]) if endpoint[:setup]
+          # A search with a match in it, so the label is on an entry and not
+          # only on an empty Bundle.
+          RpmsRpc.client.seed_keyed_collection(:problem_list, "1", [ { ien: 7, status: "A", icd_code: "E11.9", description: "Diabetes" } ]) if label
           path = endpoint[:dynamic_path] ? instance_exec(&endpoint[:dynamic_path]) : endpoint[:path]
           ndjson = row == "exports file show"
 
           results = []
-          with_part2_labelled_egress(results) { request_wired_endpoint(endpoint, path) }
+          with_part2_labelled_egress(results, label: label || PART2_TEST_LABEL) { request_wired_endpoint(endpoint, path) }
 
           refute_empty results, "#{row} did not hand a payload to Part2EgressFilter"
           refute results.any?(&:nil?), "#{row}: the filter refused a labelled payload it can notice"
@@ -994,6 +1005,13 @@ module Lakeraven
           labelled = resources.flat_map { |resource| part2_labelled_resources(resource) }
           refute_empty labelled, "#{row}: the response has no Part 2-labelled resource, so the label was lost"
           labelled.each { |resource| assert_part2_noticed(resource, row) }
+          if label
+            carried = labelled.reject { |resource| resource["resourceType"] == "Bundle" }
+            refute_empty carried, "#{row}: no resource in the response carries the #{label.inspect} label"
+            carried.each do |resource|
+              assert_includes resource.dig("meta", "security"), label, "#{row}: the label itself must still be on the resource"
+            end
+          end
           if ndjson
             assert_equal resources.size, labelled.size, "#{row}: every line was labelled, so every line is noticed"
           else
@@ -1012,13 +1030,29 @@ module Lakeraven
       end
 
       test "Part 2 notice survives _elements subsetting of a search Bundle" do
+        # A search with a match in it: an empty Bundle has no entry to subset.
+        RpmsRpc.client.seed_keyed_collection(:problem_list, "1", [ { ien: 7, status: "A", icd_code: "E11.9", description: "Diabetes" } ])
         results = []
         with_part2_labelled_egress(results) do
           get "/lakeraven-ehr/Condition", params: { patient: "1", _elements: "code" }, headers: @headers
         end
 
         refute_empty results, "Condition search did not hand a payload to Part2EgressFilter"
-        assert_part2_noticed_or_refused("Condition search with _elements", ndjson: false)
+        # Survival, not refusal: a 503 here would prove nothing about
+        # _elements. The subsetted Bundle is served, and it and every entry
+        # still carry the notice.
+        refute results.any?(&:nil?), "the filter refused a labelled search Bundle it can notice"
+        assert_response :ok, "a labelled _elements search must be served with the notice. Body: #{response.body[0, 300]}"
+        bundle = JSON.parse(response.body)
+        assert_equal "Bundle", bundle["resourceType"]
+        assert_part2_noticed(bundle, "Condition search with _elements")
+        entries = Array(bundle["entry"]).filter_map { |entry| entry["resource"] }
+        refute_empty entries, "the _elements search returned no entry, so survival on an entry cannot be proved"
+        entries.each do |resource|
+          assert part2_labelled?(resource), "#{resource['resourceType']}/#{resource['id']}: the Part 2 label was lost in _elements subsetting"
+          assert_part2_noticed(resource, "Condition search with _elements")
+          refute resource.key?("clinicalStatus"), "_elements=code was not applied, so this proves nothing about subsetting"
+        end
       end
 
       private
@@ -1051,7 +1085,8 @@ module Lakeraven
       # Labels every FHIR resource in the payload as Part 2, then runs the
       # REAL Part2EgressFilter.call on it. `results` collects what the real
       # filter returned.
-      def with_part2_labelled_egress(results = [], &block)
+      def with_part2_labelled_egress(results = [], label: PART2_TEST_LABEL, &block)
+        @part2_test_label = label
         real = Part2EgressFilter.singleton_class.instance_method(:call).bind(Part2EgressFilter)
         test = self # define_method runs the lambda with the filter class as self
         stub_egress_filter(->(payload) {
@@ -1093,7 +1128,8 @@ module Lakeraven
 
         symbols = resource.key?(:resourceType)
         key = ->(name) { symbols ? name.to_sym : name }
-        label = symbols ? PART2_TEST_LABEL.transform_keys(&:to_sym) : PART2_TEST_LABEL.dup
+        test_label = @part2_test_label || PART2_TEST_LABEL
+        label = symbols ? test_label.transform_keys(&:to_sym) : test_label.dup
 
         labelled = resource.dup
         meta = labelled[key.("meta")].is_a?(Hash) ? labelled[key.("meta")].dup : {}

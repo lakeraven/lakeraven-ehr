@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "test_helper"
+require "csv"
 
 module Lakeraven
   module EHR
@@ -771,10 +772,21 @@ module Lakeraven
       # --- lines that are not JSON -------------------------------------------
 
       %w[ETH SUD ETHUD OPIOIDUD].each do |code|
-        test "a CSV row with #{code} as a whole word is refused" do
+        test "a CSV row with #{code} as a word inside a longer field is unchanged" do
+          # Round 3, a deliberate narrowing: this test used to expect a refusal.
+          # A short code that is only a word inside a longer CSV field no
+          # longer refuses. The audit CSV Description is free text (recipient
+          # names, access reasons), so the word match refused the whole
+          # 45 CFR 170.315(b)(10) audit export with a permanent 503 for exactly
+          # the Part 2 population. The audit log is not a carrier of security
+          # labels. A short code that IS a whole field still refuses, and
+          # 42CFRPart2 itself still refuses anywhere in the line.
           csv = "id,event_type,action,detail\n1,rest,R,plain\n2,rest,R,label #{code} applied\n"
 
-          assert_nil Part2EgressFilter.call(csv)
+          result = Part2EgressFilter.call(csv)
+
+          assert_equal csv, result
+          assert_equal csv.bytes, result.bytes
         end
 
         test "a CSV row with #{code} as a whole field is refused" do
@@ -932,13 +944,34 @@ module Lakeraven
           assert_nil Part2EgressFilter.call("id,detail\nx,#{code}\n")
         end
 
-        test "a CSV row with #{code} as a whole word in another case is refused" do
-          assert_nil Part2EgressFilter.call("id,event_type,action,detail\n2,rest,R,label #{code} applied\n")
+        test "a CSV row with #{code} as a word inside a longer field in another case is unchanged" do
+          # Round 3, a deliberate narrowing: this test used to expect a refusal.
+          # A short code that is only a word inside a longer CSV field no
+          # longer refuses. The audit CSV Description is free text (recipient
+          # names, access reasons), so the word match refused the whole
+          # 45 CFR 170.315(b)(10) audit export with a permanent 503 for exactly
+          # the Part 2 population. The audit log is not a carrier of security
+          # labels. A short code that IS a whole field still refuses, and
+          # 42CFRPart2 itself still refuses anywhere in the line.
+          csv = "id,event_type,action,detail\n2,rest,R,label #{code} applied\n"
+
+          assert_equal csv, Part2EgressFilter.call(csv)
         end
       end
 
-      test "a text line that is not JSON and names a short code in lower case is refused" do
-        assert_nil Part2EgressFilter.call("#{condition.to_json}\nnot json sud\n")
+      test "a text line that is not JSON and names a short code as a word in prose is unchanged" do
+        # Round 3, a deliberate narrowing: this test used to expect a refusal.
+        # A short code that is only a word inside a longer CSV field no
+        # longer refuses. The audit CSV Description is free text (recipient
+        # names, access reasons), so the word match refused the whole
+        # 45 CFR 170.315(b)(10) audit export with a permanent 503 for exactly
+        # the Part 2 population. The audit log is not a carrier of security
+        # labels. A short code that IS a whole field still refuses, and
+        # 42CFRPart2 itself still refuses anywhere in the line.
+        text = "#{condition.to_json}\nnot json sud\n"
+
+        assert_equal text, Part2EgressFilter.call(text)
+        assert_nil Part2EgressFilter.call("#{condition.to_json}\nnot json,sud\n"), "a whole field still refuses"
       end
 
       # --- DocumentReference.securityLabel -----------------------------------
@@ -1220,7 +1253,199 @@ module Lakeraven
         assert_nil Part2EgressFilter.call("\n#{labelled.to_json}\n")
       end
 
+      # --- round 3: a short code is a whole CSV field, not a word in prose ----
+      #
+      # A line that is not a FHIR resource refuses when it holds 42CFRPart2
+      # anywhere (any case), or when one of its CSV fields, with surrounding
+      # quotes and Unicode whitespace taken off, IS one of ETH, SUD, ETHUD,
+      # OPIOIDUD (any case). The line is read with Ruby's CSV; a line CSV
+      # cannot read is split on commas.
+
+      AUDIT_PROSE = [
+        "PHI disclosed to County SUD Clinic for treatment",
+        "Emergency access (break-glass): SUD crisis",
+        "consent scope sud-counseling signed"
+      ].freeze
+
+      test "a realistic audit CSV whose Description names SUD in prose is returned byte-identical" do
+        csv = audit_csv(AUDIT_PROSE)
+
+        result = Part2EgressFilter.call(csv)
+
+        assert_equal csv, result, "free text in the audit Description must not refuse the audit export"
+        assert_equal csv.bytes, result.bytes
+      end
+
+      AUDIT_PROSE.each do |description|
+        test "an audit CSV row described as #{description.inspect} is returned byte-identical" do
+          csv = audit_csv([ description ])
+
+          assert_equal csv, Part2EgressFilter.call(csv)
+        end
+      end
+
+      test "an audit CSV whose quoted Description holds a comma and a short code in prose is unchanged" do
+        csv = audit_csv([ "Disclosed to Synthetic Clinic, ETH and SUD programme, for treatment" ])
+        assert_includes csv, '"Disclosed to Synthetic Clinic, ETH and SUD programme, for treatment"'
+
+        assert_equal csv, Part2EgressFilter.call(csv)
+      end
+
+      test "an audit CSV whose Description is a short code and nothing else is refused" do
+        %w[SUD eth Ethud OPIOIDUD].each do |code|
+          assert_nil Part2EgressFilter.call(audit_csv([ "plain", code ])), "a Description that is #{code} must refuse"
+        end
+      end
+
+      test "an audit CSV whose Description names 42CFRPart2 in prose is refused" do
+        [ "Record labelled 42CFRPart2 disclosed", "label 42cfrpart2", "x42CfrPart2y" ].each do |description|
+          assert_nil Part2EgressFilter.call(audit_csv([ description ])), "#{description.inspect} must refuse"
+        end
+      end
+
+      {
+        "x,sud" => "a lower-case whole field",
+        '1,"ETH"' => "a quoted whole field",
+        "a,SUD" => "a whole field",
+        "a, SUD ,b" => "a field padded with spaces",
+        'a," SUD "' => "a quoted field padded with spaces",
+        "a, sud​,b" => "a field padded with Unicode whitespace",
+        "SUD,a" => "a first field",
+        "ETHUD" => "a line that is one field",
+        '"OpioidUD",1' => "a quoted first field in mixed case",
+        'a,"SUD' => "a field of a line CSV cannot read (unclosed quote)",
+        'x "y" z,eth' => "a field of a line CSV cannot read (stray quotes)"
+      }.each do |line, what|
+        test "a short code that is #{what} is refused" do
+          assert_nil Part2EgressFilter.call("id,detail\n#{line}\n"), "#{line.inspect} must refuse"
+          assert_nil Part2EgressFilter.call("#{condition.to_json}\n#{line}\n"), "#{line.inspect} beside an NDJSON line must refuse"
+        end
+      end
+
+      # --- round 3: a JSON line that is not a resource gets the text rule -----
+
+      test "a JSON string line that is a Part 2 code is refused" do
+        assert_nil Part2EgressFilter.call("a,b\n\"SUD\"\n")
+        assert_nil Part2EgressFilter.call("a,b\n\" eth \"\n")
+      end
+
+      test "a JSON object line that is not a resource and has a Part 2 code under code is refused" do
+        assert_nil Part2EgressFilter.call("{\"code\":\"SUD\"}\n{\"resourceType\":\"Patient\"}\n")
+        assert_nil Part2EgressFilter.call("{\"a\":{\"code\":\"ethud\"}}\n{\"resourceType\":\"Patient\"}\n")
+        assert_nil Part2EgressFilter.call("{\"code\":[\"N\",\"OPIOIDUD\"]}\n{\"resourceType\":\"Patient\"}\n")
+      end
+
+      test "a JSON line that is not a resource and has a Part 2 code as a String leaf is refused" do
+        assert_nil Part2EgressFilter.call("[\"N\",\"SUD\"]\n{\"resourceType\":\"Patient\"}\n")
+        assert_nil Part2EgressFilter.call("{\"label\":\"ETH\"}\n{\"resourceType\":\"Patient\"}\n")
+        assert_nil Part2EgressFilter.call("{\"a\":[{\"b\":\"sud \"}]}\n")
+      end
+
+      test "a JSON line that is not a resource and names 42CFRPart2 is refused" do
+        assert_nil Part2EgressFilter.call("{\"x\":\"42CFRPart2\"}")
+        assert_nil Part2EgressFilter.call("{\"x\":\"42CFRPart2\"}\n{\"resourceType\":\"Patient\"}\n")
+        assert_nil Part2EgressFilter.call("{\"x\":\"label 42cfrpart2 applied\"}\n")
+      end
+
+      test "a JSON line that is not a resource and holds no Part 2 code is unchanged" do
+        text = "{\"note\":\"County SUD Clinic\",\"code\":\"N\",\"n\":1}\n\"plain\"\n[1,\"METHOD\"]\n{\"resourceType\":\"Patient\"}\n"
+
+        assert_equal text, Part2EgressFilter.call(text)
+      end
+
+      # --- round 3: a line that looks like JSON and does not parse refuses ----
+
+      {
+        "nested deeper than the parser reads" => ("[" * 150) + ("]" * 150),
+        "an object nested deeper than the parser reads" => ('{"a":' * 150) + "1" + ("}" * 150),
+        "holding NaN" => '{"resourceType":"Observation","id":"syn-o","valueQuantity":{"value":NaN}}',
+        "ending in a trailing comma" => '{"resourceType":"Condition","id":"syn-1",}',
+        "an array ending in a trailing comma" => "[1,2,]",
+        "cut short" => '{"resourceType":"Condition","id":"syn-1"'
+      }.each do |what, line|
+        test "a line that opens like JSON and does not parse (#{what}) is refused" do
+          assert_raises(JSON::ParserError, "test data must not parse") { JSON.parse(line) }
+
+          assert_nil Part2EgressFilter.call(line)
+          assert_nil Part2EgressFilter.call("#{line}\n")
+          assert_nil Part2EgressFilter.call("#{condition.to_json}\n#{line}\n")
+          assert_nil Part2EgressFilter.call("﻿#{line}\n"), "after a byte order mark"
+          assert_nil Part2EgressFilter.call("#{condition.to_json}\n  \t#{line}\n"), "after leading whitespace"
+        end
+      end
+
+      test "a labelled line that opens like JSON and does not parse is refused" do
+        deep = ("[" * 150) + { "resourceType" => "Condition", "meta" => { "security" => [ { "code" => "SUD" } ] } }.to_json + ("]" * 150)
+        nan = '{"resourceType":"Condition","id":"syn-1","meta":{"security":[{"code":"SUD"}]},"x":NaN}'
+        comma = '{"resourceType":"Condition","id":"syn-1","meta":{"security":[{"code":"ETH"}]},}'
+
+        [ deep, nan, comma ].each do |line|
+          assert_nil Part2EgressFilter.call("#{line}\n")
+          assert_nil Part2EgressFilter.call("#{condition.to_json}\n#{line}\n")
+        end
+      end
+
+      test "a line that is not JSON and does not open with a brace or bracket is still unchanged" do
+        text = "id,detail\n1,plain {not json}\n2,[bracketed] note\n"
+
+        assert_equal text, Part2EgressFilter.call(text)
+      end
+
+      # --- round 3: securityLabel outside a resource refuses like security ----
+
+      test "a Part 2 securityLabel in a Hash that is not a resource is refused" do
+        assert_nil Part2EgressFilter.call({ "data" => { "securityLabel" => [ { "coding" => [ { "code" => "SUD" } ] } ] } })
+        assert_nil Part2EgressFilter.call({ data: { securityLabel: [ { coding: [ { code: "eth " } ] } ] } })
+        assert_nil Part2EgressFilter.call({ "data" => { "securityLabel" => { "code" => "42CFRPart2" } } })
+      end
+
+      test "a securityLabel with no Part 2 code in a Hash that is not a resource is returned equal" do
+        payload = { "data" => { "securityLabel" => [ { "coding" => [ UNRELATED_LABEL ] } ] } }
+
+        assert_equal payload, Part2EgressFilter.call(payload)
+      end
+
+      test "a Bundle entry resource with no resourceType and a Part 2 securityLabel is refused" do
+        typeless = { "id" => "syn-doc", "status" => "current", "securityLabel" => [ { "coding" => [ { "system" => ACT_CODE, "code" => "SUD" } ] } ] }
+        bundle = bundle_of(entry(condition, mode: "match"), { "fullUrl" => "https://example.test/x/syn-doc", "resource" => typeless })
+
+        assert_nil Part2EgressFilter.call(bundle)
+        assert_nil Part2EgressFilter.call(bundle.deep_symbolize_keys)
+      end
+
+      test "an NDJSON line that is not a resource and has a Part 2 securityLabel is refused" do
+        line = { "id" => "syn-doc", "securityLabel" => [ { "coding" => [ { "code" => "OPIOIDUD" } ] } ] }.to_json
+
+        assert_nil Part2EgressFilter.call("#{condition.to_json}\n#{line}\n")
+      end
+
+      test "a pretty-printed JSON document with a Part 2 securityLabel outside a resource is refused" do
+        text = JSON.pretty_generate(export_manifest("extension" => { "securityLabel" => [ { "coding" => [ { "code" => "ETH" } ] } ] }))
+
+        assert_nil Part2EgressFilter.call(text)
+      end
+
+      test "C-CDA sections with a row whose securityLabel holds a Part 2 code are refused" do
+        [
+          { code: "F10.20", display: "Synthetic condition", securityLabel: [ { coding: [ { code: "SUD" } ] } ] },
+          { code: "F10.20", display: "Synthetic condition", "securityLabel" => [ { "coding" => [ { "code" => "42cfrpart2" } ] } ] },
+          { code: "F10.20", display: "Synthetic condition", code_system: nil,
+            fhir: { code: "F10.20", display: "Synthetic condition", securityLabel: [ { coding: [ { code: "ETHUD" } ] } ] } }
+        ].each do |row|
+          assert_nil Part2EgressFilter.call(ccda_sections(conditions: [ row ])), "#{row.inspect[0, 120]} must refuse"
+        end
+      end
+
       private
+
+      # The audit_log.csv of an EHI export: the service's own header, then a
+      # row per Description. Synthetic values only.
+      def audit_csv(descriptions)
+        rows = descriptions.each_with_index.map do |description, index|
+          CSV.generate_line([ "2026-01-0#{index + 1}T00:00:00Z", "rest", "R", "0", "Patient", "syn-pt", description ])
+        end
+        "#{EhiExportService.audit_csv_header_line}\n#{rows.join}"
+      end
 
       def export_manifest(overrides = {})
         {

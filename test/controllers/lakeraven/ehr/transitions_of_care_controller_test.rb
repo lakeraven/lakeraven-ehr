@@ -455,6 +455,72 @@ module Lakeraven
           "the C-CDA must be the one built from code and display alone"
       end
 
+      # --- round 3 -----------------------------------------------------------
+
+      # securityLabel outside a resource refuses like `security`: a Hash row
+      # has no resourceType, so nothing in it can carry the notice.
+      test "C-CDA is refused when a condition Hash row carries a Part 2 securityLabel" do
+        [
+          { code: "F10.20", display: "ZZZ-HASH-SECLABEL-DISPLAY", securityLabel: [ { coding: [ { code: "SUD" } ] } ] },
+          { code: "F10.20", display: "ZZZ-HASH-SECLABEL-DISPLAY", "securityLabel" => [ { "coding" => [ { "code" => "42CFRPart2" } ] } ] }
+        ].each do |row|
+          plain = { code: "ZZZ-PLAIN", display: "ZZZ-HASH-SECLABEL-PLAIN-DISPLAY", code_system: nil }
+
+          stub_for_patient(Condition, [ plain, row ]) do
+            post "/lakeraven-ehr/transitions_of_care", params: { patient_dfn: "1" }, headers: @headers
+          end
+
+          assert_ccda_refused("ZZZ-HASH-SECLABEL-DISPLAY", "ZZZ-HASH-SECLABEL-PLAIN-DISPLAY", "F10.20")
+        end
+      end
+
+      test "C-CDA is refused when an allergy or medication Hash row carries a Part 2 securityLabel" do
+        { AllergyIntolerance => { allergen_code: "ZZZ-A", allergen: "ZZZ-ALLERGY-SECLABEL-DISPLAY" },
+          MedicationRequest => { medication_code: "ZZZ-M", medication_display: "ZZZ-MEDICATION-SECLABEL-DISPLAY" } }.each do |model, row|
+          stub_for_patient(model, [ row.merge(securityLabel: [ { coding: [ { code: "ETH" } ] } ]) ]) do
+            post "/lakeraven-ehr/transitions_of_care", params: { patient_dfn: "1" }, headers: @headers
+          end
+
+          assert_ccda_refused("ZZZ-ALLERGY-SECLABEL-DISPLAY", "ZZZ-MEDICATION-SECLABEL-DISPLAY")
+        end
+      end
+
+      test "C-CDA renders a Hash row whose securityLabel has no Part 2 code" do
+        row = { code: "ZZZ-C", display: "ZZZ-HASH-SECLABEL-N-DISPLAY", securityLabel: [ { coding: [ { code: "N" } ] } ] }
+
+        stub_for_patient(Condition, [ row ]) do
+          post "/lakeraven-ehr/transitions_of_care", params: { patient_dfn: "1" }, headers: @headers
+        end
+
+        assert_response :created
+        assert_includes response.body, "ZZZ-HASH-SECLABEL-N-DISPLAY"
+        refute_includes response.body, "securityLabel"
+      end
+
+      # An item with no FHIR form (not a Hash, no to_fhir) has nowhere a
+      # label could be read from. It cannot be shown to the filter, so it
+      # cannot be shown to be unlabelled: the document is refused.
+      FormlessRecord = Struct.new(:code, :display, :code_system) do
+        alias_method :allergen_code, :code
+        alias_method :allergen, :display
+        alias_method :medication_code, :code
+        alias_method :medication_display, :display
+      end
+
+      { "condition" => Condition, "allergy" => AllergyIntolerance, "medication" => MedicationRequest }.each do |name, model|
+        test "C-CDA is refused when an item of the #{name} list has no FHIR form" do
+          formless = FormlessRecord.new("ZZZ-NOFORM", "ZZZ-NOFORM-DISPLAY", nil)
+          refute formless.respond_to?(:to_fhir), "test data must have no to_fhir"
+          plain = SyntheticRecord.new("ZZZ-PLAIN", "ZZZ-NOFORM-PLAIN-DISPLAY", { "resourceType" => "Condition", "id" => "syn-plain" })
+
+          stub_for_patient(model, [ plain, formless ]) do
+            post "/lakeraven-ehr/transitions_of_care", params: { patient_dfn: "1" }, headers: @headers
+          end
+
+          assert_ccda_refused("ZZZ-NOFORM-DISPLAY", "ZZZ-NOFORM-PLAIN-DISPLAY", "ZZZ-NOFORM")
+        end
+      end
+
       private
 
       # A model-like record for any of the three C-CDA lists: the readers
