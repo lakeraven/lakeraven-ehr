@@ -13,7 +13,7 @@ module Lakeraven
       end
 
       def transmit(order, provider_duz:)
-        refusal = MatMoudMedication.refusal_for(order.medication_display)
+        refusal = MatMoudMedication.refusal_for_order(order.medication_display, order.dosage_instruction)
         return Eprescribing::TransmissionResult.failure(refusal) if refusal
 
         validate_for_transmission!(order)
@@ -79,9 +79,10 @@ module Lakeraven
 
       # Refused for every change id (#904): the medication a pharmacy change
       # proposes cannot be read from a change id here, so it cannot be shown
-      # not to be MAT/MOUD. The adapter is never called.
+      # not to be MAT/MOUD. The adapter is never called, and the error names the
+      # change that was not approved rather than claiming an order was refused.
       def approve_change(change_id, provider_duz:)
-        Eprescribing::TransmissionResult.failure(MatMoudMedication::REFUSAL)
+        Eprescribing::TransmissionResult.failure(MatMoudMedication::CHANGE_APPROVAL_REFUSAL)
       end
 
       def deny_change(change_id, provider_duz:, reason: nil)

@@ -16,8 +16,11 @@ module Lakeraven
     # is (or converts to) valid UTF-8, and is read character by character:
     # - an ASCII control character other than tab, LF and CR makes the text
     #   :unclassified;
-    # - the micro sign (U+00B5) and Greek mu (U+03BC) are read as "mc" (dose
-    #   units such as "50 µg");
+    # - the micro sign (U+00B5) and Greek mu (U+03BC) are read as "mc" ONLY
+    #   as a dose unit: preceded by a digit, or by whitespace that follows a
+    #   digit, and immediately followed by g, G, l or L ("50µg", "50 µg",
+    #   "100 μL"). Anywhere else the text is :unclassified — read as "mc"
+    #   inside a word it would split a name ("methaµdone");
     # - any other non-ASCII character is accepted only when its NFKC form is
     #   exactly one printable ASCII character (fullwidth and mathematical
     #   letters), and is read as that character. Anything else — a symbol,
@@ -99,9 +102,29 @@ module Lakeraven
         end
       end
 
+      # The refusal for an order: the medication text is read first, then the
+      # sig. The sig is free text the NewRx sends to the pharmacy as SigText
+      # and Directions, so it is read with the same rule — except that a nil
+      # sig, or a String sig that is blank after stripping, is allowed (no
+      # sig names nothing). The medication itself is never allowed blank.
+      def self.refusal_for_order(medication_text, sig_text)
+        refusal = refusal_for(medication_text)
+        return refusal if refusal
+        return nil if sig_text.nil?
+        return nil if blank_string?(sig_text)
+
+        refusal_for(sig_text)
+      end
+
+      # Returned by approve_change for every change id: nothing was ordered,
+      # so REFUSAL would mislead; this names the pharmacy change not approved.
+      CHANGE_APPROVAL_REFUSAL = "Approving a pharmacy change is not offered in this build: " \
+                                "the proposed medication cannot be shown not to be MAT/MOUD"
+
       DISALLOWED_CONTROL = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/
       MICRO_SIGNS = [ "\u00B5", "\u03BC" ].freeze
-      private_constant :DISALLOWED_CONTROL, :MICRO_SIGNS
+      DOSE_UNIT_AFTER_MICRO = /\A[gGlL]/
+      private_constant :DISALLOWED_CONTROL, :MICRO_SIGNS, :DOSE_UNIT_AFTER_MICRO
 
       # Downcased pure-ASCII text read as described above, or nil when the
       # value is not a String, cannot be read as UTF-8, or contains a
@@ -122,10 +145,13 @@ module Lakeraven
         return nil if utf8.match?(DISALLOWED_CONTROL)
 
         read = +""
-        utf8.each_char do |char|
+        chars = utf8.each_char.to_a
+        chars.each_with_index do |char, index|
           if char.ascii_only?
             read << char
           elsif MICRO_SIGNS.include?(char)
+            return nil unless micro_dose_unit?(chars, index)
+
             read << "mc"
           else
             ascii = char.unicode_normalize(:nfkc)
@@ -139,6 +165,27 @@ module Lakeraven
         nil
       end
       private_class_method :readable_text
+
+      # A micro sign at chars[index] is a dose unit when the next character is
+      # g/G/l/L and the character before it is a digit, or is whitespace that
+      # itself follows a digit.
+      def self.micro_dose_unit?(chars, index)
+        return false unless chars[index + 1]&.match?(DOSE_UNIT_AFTER_MICRO)
+
+        before = index - 1
+        before -= 1 if before >= 0 && chars[before].match?(/\A\s\z/)
+        before >= 0 && chars[before].match?(/\A[0-9]\z/)
+      end
+      private_class_method :micro_dose_unit?
+
+      # True for a String that is empty after stripping. Text that cannot even
+      # be stripped (invalid bytes) is not blank.
+      def self.blank_string?(value)
+        value.is_a?(String) && value.strip.empty?
+      rescue EncodingError, ArgumentError
+        false
+      end
+      private_class_method :blank_string?
     end
   end
 end
