@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "test_helper"
+require_relative "../../../support/sud_words"
 
 module Lakeraven
   module EHR
@@ -11,11 +12,7 @@ module Lakeraven
     class ReferralSurfacesTest < ActiveSupport::TestCase
       include IhsFeatureAvailabilityTestHelper
 
-      # Matched against the text as written and against the text with
-      # CamelCase and snake_case opened into words (SudReferral, sud_program).
-      SUD_WORDS = /substance|\bSUDs?\b|addiction|MOUD|\bMAT\b|opioid|alcohol|detox|methadone|buprenorphine|naloxone|
-                   suboxone|narcotic|drug|rehab|recovery|SBIRT|\bAOD\b|withdrawal[\s-]*management|
-                   chemical[\s-]*dependency/ix
+      SUD_WORDS = SudWords::SUD_WORDS
       ROUTE_SEGMENT_BREAK = %r{[/.()\-_:$]}
 
       # What makes a route a referral surface: what its controller touches, or
@@ -28,30 +25,16 @@ module Lakeraven
         lakeraven/ehr/service_requests#index lakeraven/ehr/service_requests#show
       ].freeze
 
-      # The declared surfaces that render HTML, and so can offer a form control.
+      # The declared surfaces that render HTML. What they render is checked on
+      # the rendered page: test/integration/referral_surfaces_rendered_test.rb.
       HTML_SURFACES = %w[lakeraven/ehr/dashboards lakeraven/ehr/pending_referrals].freeze
       LAYOUT = "app/views/layouts/lakeraven/ehr/application.html.erb"
       COMPONENTS_HELPER = "app/helpers/lakeraven/ehr/components_helper.rb"
-
-      # The only form controls a declared surface may render: the
-      # pending-referrals date window and its submit. Anything else fails.
-      ALLOWED_CONTROL_NAMES = %w[from to submit].freeze
+      HELPERS = "app/helpers/lakeraven/ehr/*.rb"
+      RouteLike = Struct.new(:path, :defaults, :name, :verb)
+      PathLike = Struct.new(:spec)
 
       ERB_COMMENT = /<%#.*?%>/m
-      RAW_CONTROL = /<(select|option|input|textarea|datalist|button)\b([^>]*)/i
-      RAW_NAME = /\bname\s*=\s*["']?([^"'\s>]+)/i
-      # Rails form helpers and this repo's input components (ComponentsHelper).
-      HELPER_CONTROL = /
-        (?<![\w:"'#-])
-        (\w*_field(?:_tag)?|\w*select(?:_tag)?|radio_button\w*|collection_radio_buttons|check_box\w*|
-         collection_check_boxes|text_area\w*|choice_list|submit_tag|submit|button_tag|button_to)
-        (?![\w:=-])
-      /x
-      BUTTON_HELPERS = %w[button_tag button_to].freeze
-      SUBMIT_HELPERS = %w[submit submit_tag].freeze
-      FORM_FIRST_HELPERS = %w[choice_list lookup_field].freeze
-      LITERAL = /(?::(\w+)|["']([^"']+)["'])/
-      CARRIES_A_VALUE = /\b(params|name|value):\s*(?!nil)/
       LITERAL_RENDER = /\brender[\s(]+(?:partial:\s*)?["']([^"']+)["']/
       ANY_RENDER = /\brender\b(?![\w:])/
 
@@ -97,25 +80,39 @@ module Lakeraven
       end
 
       test "a same-named controller in another namespace is not a declared surface" do
-        assert_not_includes DECLARED_ROUTES, "pending_referrals#index"
-        assert_not_includes DECLARED_ROUTES, "other/pending_referrals#index"
-        engine_routes.each { |route| assert_equal route.defaults[:controller].to_s, endpoint(route).split("#").first }
+        assert declared?(route_like("/referrals/pending(.:format)", "lakeraven/ehr/pending_referrals", "index")),
+               "the comparison declares nothing: the guard is looking at nothing"
+        assert_not declared?(route_like("/other/referrals/pending(.:format)", "lakeraven/ehr/other/pending_referrals", "index"))
+        assert_not declared?(route_like("/referrals/pending(.:format)", "pending_referrals", "index"))
+        assert_not declared?(route_like("/referrals/pending(.:format)", "lakeraven/ehr/pending_referrals", "create"))
       end
 
       test "every route to a declared referral surface is read-only" do
-        declared = engine_routes.select { |route| ReferralSurfaces::ROUTES.include?(endpoint(route)) }
+        declared = engine_routes.select { |route| declared?(route) }
         writes = declared.reject { |route| route.verb == "GET" }.map { |route| "#{route.verb} #{route.path.spec}" }
 
         assert_not_empty declared
         assert_empty writes, "a declared referral surface takes a write verb: #{writes.inspect}"
       end
 
-      test "no engine route path names an SUD workflow" do
-        paths = engine_routes.map { |route| route.path.spec.to_s }
-        named = paths.filter_map { |path| "#{path}: #{sud_route_hits(path).join(', ')}" if sud_route_hits(path).any? }
+      test "no engine route names an SUD workflow in its path, controller, action or name" do
+        named = engine_routes.filter_map do |route|
+          hits = route_sud_hits(route)
+          "#{route.name} #{route.path.spec} #{endpoint(route)}: #{hits.join(', ')}" if hits.any?
+        end
 
-        assert_not_empty paths
-        assert_empty named, "engine route paths that name an SUD path: #{named.inspect}"
+        assert_not_empty engine_routes
+        assert_empty named, "engine routes that name an SUD path: #{named.inspect}"
+      end
+
+      test "the route check reads the controller, the action and the route name, not only the path" do
+        clean = route_like("/referrals/pending(.:format)", "lakeraven/ehr/pending_referrals", "index", "pending_referrals")
+
+        assert_empty route_sud_hits(clean)
+        assert_not_empty route_sud_hits(route_like("/referrals/kind/:id", "lakeraven/ehr/sud_referrals", "index"))
+        assert_not_empty route_sud_hits(route_like("/referrals/kind/:id", "lakeraven/ehr/referrals", "refer_to_mat"))
+        assert_not_empty route_sud_hits(route_like("/referrals/kind/:id", "lakeraven/ehr/referrals", "index", "sudreferral"))
+        assert_not_empty route_sud_hits(route_like("/referrals/oud-program", "lakeraven/ehr/referrals", "index"))
       end
 
       test "the route path check reads the words of a path" do
@@ -123,6 +120,7 @@ module Lakeraven
           /referrals/sud(.:format) /patients/:dfn/mat-referral(.:format) /SubstanceUseReferral(.:format)
           /SudReferral(.:format) /referrals/sud_program(.:format) /drug-referrals /referrals/rehab
           /recovery_referrals /SBIRT/$refer /aod/referrals /withdrawal-management /ChemicalDependency(.:format)
+          /sudreferral /matreferral(.:format) /referrals/oud /aud-treatment /referrals/asam/:level /sober-living
         ].each { |path| assert_not_empty sud_route_hits(path), "#{path} names an SUD path" }
 
         %w[/referrals/pending(.:format) /Measure/$import(.:format) /patients/:dfn/formats /sudo/audit].each do |path|
@@ -134,10 +132,17 @@ module Lakeraven
         [
           "SudReferral", "sud_program", "SUDs", "class SUDReferralForm", "mat_referral", "AodProgram",
           "withdrawal_management", "WithdrawalManagement", "chemical-dependency", "chemical_dependency",
-          "drug court", "rehabilitation", "recovery support", "SBIRT", "suboxone", "narcotic"
+          "drug court", "rehabilitation", "recovery support", "SBIRT", "suboxone", "narcotic",
+          "OUD", "AUD", "opiate", "ASAM", "naltrexone", "Vivitrol", "heroin", "fentanyl", "sober", "sobriety",
+          "opioid use disorder", "AlcoholUseDisorder", "use_disorder", "addict", "addicted", "chemical dependence",
+          "ChemicalDependence", "intoxication", "sudreferral", "matreferral", "SUDREFERRAL", "sudprogram",
+          "oudtreatment", "sudintake", "sud-referral", "MAT referral", "OudProgram"
         ].each { |text| assert_not_empty sud_hits(text), "#{text} names an SUD path" }
 
-        [ "format", "pseudonym", "sudo", "material", "ServiceRequest", "pending_referrals" ].each do |text|
+        [
+          "format", "pseudonym", "sudo", "material", "ServiceRequest", "pending_referrals", "audit", "audience",
+          "loud", "cloud program", "formatreferral", "matter", "automatic", "disorder", "use", "depend"
+        ].each do |text|
           assert_empty sud_hits(text), "#{text} names no SUD path"
         end
       end
@@ -153,38 +158,20 @@ module Lakeraven
                      "declared referral surfaces render templates this guard does not inspect: #{with_views.inspect}"
       end
 
-      test "the declared surfaces' controllers, templates, partials and layout name no SUD path" do
+      test "the declared surfaces' controllers, templates, partials, layout and helpers name no SUD path" do
         controllers = (declared_controllers | HTML_SURFACES).map { |name| controller_source(name) }
         rendered = HTML_SURFACES.flat_map { |name| rendered_files(name) }.uniq
+        layout = with_partials([ engine_file(LAYOUT) ])
+        helpers = Engine.root.glob(HELPERS)
 
         assert_not_empty controllers
+        assert_operator layout.size, :>, 1, "the layout's own partials were not found"
+        assert_includes helpers, engine_file(COMPONENTS_HELPER)
         HTML_SURFACES.each { |name| assert_not_empty templates_for(name), "no templates found for #{name}" }
-        (controllers + rendered + [ engine_file(LAYOUT) ]).each do |file|
+        (controllers + rendered + layout + helpers).uniq.each do |file|
           assert_predicate file, :file?, "#{file} is missing: the guard is looking at nothing"
           assert_empty sud_hits(file.read), "#{relative(file)} names an SUD path"
         end
-      end
-
-      test "every form control a declared surface renders is on the allowlist" do
-        HTML_SURFACES.each do |name|
-          files = rendered_files(name)
-
-          assert_not_empty files, "no templates found for #{name}"
-          offered = files.flat_map do |file|
-            disallowed_controls(file.read).map { |control| "#{relative(file)}: #{control}" }
-          end
-
-          assert_empty offered, "#{name} renders form controls that are not on the allowlist " \
-                                "(#{ALLOWED_CONTROL_NAMES.join(', ')}): #{offered.inspect}"
-        end
-      end
-
-      test "the pending-referrals window is the from and to date fields and a submit" do
-        controls = templates_for("lakeraven/ehr/pending_referrals").flat_map { |file| controls_in(file.read) }
-
-        assert_equal [ "date_field_tag from", "date_field_tag to", "form_field from", "form_field to", "submit_tag submit" ],
-                     controls.sort
-        assert_empty templates_for("lakeraven/ehr/dashboards").flat_map { |file| controls_in(file.read) }
       end
 
       test "the shared partials a declared surface renders are read too" do
@@ -217,59 +204,6 @@ module Lakeraven
           assert_equal source.scan(ANY_RENDER).size, source.scan(LITERAL_RENDER).size,
                        "#{relative(file)} renders something this guard cannot resolve to a file"
         end
-      end
-
-      test "the control detector sees HTML, form helpers and input components" do
-        {
-          %(<%= f.select :type, kinds %>) => "select type",
-          %(f.select :type, ...) => "select type",
-          %(<select name=referral_type>) => "select referral_type",
-          %(<select name="referral_type">) => "select referral_type",
-          %(<option value="sud">Substance use</option>) => "option (unnamed)",
-          %(<input type="radio" name="referral[category]">) => "input referral[category]",
-          %(<textarea name='notes'></textarea>) => "textarea notes",
-          %(<datalist id="kinds">) => "datalist (unnamed)",
-          %(<button name="referral_type" value="sud">) => "button referral_type",
-          %(<%= f.radio_button :kind, "sud" %>) => "radio_button kind",
-          %(<%= select_tag "referral[program_id]" %>) => "select_tag referral[program_id]",
-          %(<%= options_for_select(ReferralKinds::ALL) %>) => "options_for_select (unnamed)",
-          %(<%= f.collection_select :program_id, programs, :id, :name %>) => "collection_select program_id",
-          %(<%= form.text_field "specialty" %>) => "text_field specialty",
-          %(<%= f.check_box :sud %>) => "check_box sud",
-          %(<%= f.text_area(:reason) %>) => "text_area reason",
-          %(<%= hidden_field_tag :referral_type, "sud" %>) => "hidden_field_tag referral_type",
-          %(<%= form_field :kind, "Kind" do |aria| %>) => "form_field kind",
-          %(<%= choice_list f, :kind, legend: "Kind", choices: kinds %>) => "choice_list kind",
-          %(<%= lookup_field(f, :program, legend: "Program") %>) => "lookup_field program",
-          %(<%= button_to "Refer", referrals_path, params: { kind: "sud" } %>) => "button_to (carries a value)",
-          %(<%= submit_tag "Refer", name: "referral_type", value: "sud" %>) => "submit_tag referral_type"
-        }.each do |source, control|
-          assert_includes controls_in(source), control, source
-          assert_includes disallowed_controls(source), control, source
-        end
-      end
-
-      test "the control detector allows the date window and ignores what is not a control" do
-        window = <<~ERB
-          <%= form_with url: pending_referrals_path, method: :get, local: true, id: "referral-window" do %>
-            <%= form_field :from, "Initiated from", error: @window_error do |aria| %>
-              <%= date_field_tag :from, @window&.begin || @from, id: "from", aria: aria %>
-            <% end %>
-            <%= form_field :to, "Initiated to" do |aria| %>
-              <%= date_field_tag :to, @window&.end || @to, id: "to", aria: aria %>
-            <% end %>
-            <%= submit_tag "Show referrals", name: nil, class: "button-secondary" %>
-          <% end %>
-        ERB
-
-        assert_equal 5, controls_in(window).size
-        assert_empty disallowed_controls(window)
-        assert_empty disallowed_controls(%(<input type="submit" value="Show referrals">))
-        assert_empty controls_in(%(<%# A label, its input and a select (ComponentsHelper#form_field). %>))
-        assert_empty controls_in(%(<% open = @referrals.select { |r| r[:status] == "A" } %><%= label_tag field_id, label %>))
-        assert_empty controls_in(%(<%= button_to patient_context_path(referral[:patient_dfn]), method: :post do %>))
-        assert_empty controls_in(%(<div class="form-field"><p id="<%= field_id %>">Select a date.</p></div>))
-        assert_equal [ "date_field_tag referral[from]" ], disallowed_controls(%(<%= date_field_tag "referral[from]" %>))
       end
 
       # =========================================================================
@@ -436,6 +370,14 @@ module Lakeraven
         assert_refused_shape originate("Counseling")
       end
 
+      test "origination says params that are not a Hash are not a set of named fields" do
+        errors = Array(originate("Counseling").errors).join(" ")
+
+        assert_match(/not a set of named fields/, errors)
+        assert_no_match(/other key/, errors, "the reason must not be hidden behind a count of keys")
+        assert_no_match(/Counseling/, errors, "what was sent is never echoed")
+      end
+
       test "origination refuses params that are an Array of pairs, without raising" do
         assert_refused_shape originate([ [ :service_requested, "Counseling" ], [ :urgency, "ROUTINE" ] ])
       end
@@ -552,80 +494,35 @@ module Lakeraven
         source.file? && source.read.match?(REFERRAL_SOURCE)
       end
 
-      # Text opened into words: CamelCase and snake_case boundaries become spaces.
-      def words(text)
-        text.to_s.gsub(/([a-z\d])([A-Z])/, '\1 \2').gsub(/([A-Z]+)([A-Z][a-z])/, '\1 \2').tr("_", " ")
-      end
-
-      # The SUD words in a text, as written or once opened into words.
       def sud_hits(text)
-        (text.to_s.scan(SUD_WORDS) + words(text).scan(SUD_WORDS)).uniq
+        SudWords.hits(text)
       end
 
       def sud_route_hits(path)
-        sud_hits(path.split(ROUTE_SEGMENT_BREAK).join(" "))
+        sud_hits(path.to_s.split(ROUTE_SEGMENT_BREAK).join(" "))
       end
 
-      # Every form control a template source offers, as "<helper or tag> <name>".
-      def controls_in(source)
-        source = source.gsub(ERB_COMMENT, "")
-        raw_controls(source) + helper_controls(source)
+      # The SUD words in a route's path, controller, action or name.
+      def route_sud_hits(route)
+        [ route.path.spec, route.defaults[:controller], route.defaults[:action], route.name ].flat_map do |part|
+          sud_route_hits(part)
+        end.uniq
       end
 
-      def disallowed_controls(source)
-        controls_in(source).reject { |control| ALLOWED_CONTROL_NAMES.include?(control.split(" ", 2).last) }
-      end
-
-      def raw_controls(source)
-        source.scan(RAW_CONTROL).filter_map do |tag, attributes|
-          name = attributes[RAW_NAME, 1]
-          name ||= "submit" if tag.casecmp?("input") && attributes.match?(/\btype\s*=\s*["']?submit\b/i)
-          next if tag.casecmp?("button") && name.nil?
-
-          "#{tag.downcase} #{name || '(unnamed)'}"
-        end
-      end
-
-      def helper_controls(source)
-        controls = []
-        source.scan(HELPER_CONTROL) do |(helper)|
-          control = helper_control(helper, Regexp.last_match.pre_match[-1], Regexp.last_match.post_match[/\A.*?(?=%>|\z)/m])
-          controls << control if control
-        end
-        controls
-      end
-
-      def helper_control(helper, before, arguments)
-        if BUTTON_HELPERS.include?(helper)
-          "#{helper} (carries a value)" if arguments.match?(CARRIES_A_VALUE)
-        elsif SUBMIT_HELPERS.include?(helper)
-          submit_control(helper, before, arguments)
-        else
-          named_control(helper, arguments)
-        end
-      end
-
-      # A bare `submit` is a control only on a form builder (f.submit).
-      def submit_control(helper, before, arguments)
-        return if helper == "submit" && before != "."
-
-        "#{helper} #{arguments[/\bname:\s*#{LITERAL}/, 1] || arguments[/\bname:\s*#{LITERAL}/, 2] || 'submit'}"
-      end
-
-      # The control's name is its first literal argument; an input component
-      # takes the form first. Enumerable#select takes no literal and is no control.
-      def named_control(helper, arguments)
-        skip_form = FORM_FIRST_HELPERS.include?(helper) ? /[a-z_]\w*\s*,\s*/ : //
-        named = arguments.match(/\A[\s(]*#{skip_form}#{LITERAL}/)
-        return if named.nil? && (helper == "select" || !arguments.match?(/\A[\s(]/))
-
-        "#{helper} #{named ? named[1] || named[2] : '(unnamed)'}"
+      # Whether a route is a declared referral surface: by its full
+      # controller path and action, never by the controller's name alone.
+      def declared?(route)
+        ReferralSurfaces::ROUTES.include?(endpoint(route))
       end
 
       # A surface's templates and, transitively, every partial they render by
       # name or through a ComponentsHelper helper.
       def rendered_files(name)
-        files = templates_for(name)
+        with_partials(templates_for(name))
+      end
+
+      def with_partials(files)
+        files = files.dup
         files.each do |file|
           next unless file.file?
 
@@ -656,6 +553,12 @@ module Lakeraven
             [ helper, (direct[helper] + called.flat_map { |other| direct[other] }).uniq ]
           end
         end
+      end
+
+      # A stand-in for a route: what the declared comparison and the SUD
+      # route check read of one.
+      def route_like(path, controller, action, name = nil)
+        RouteLike.new(PathLike.new(path), { controller: controller, action: action }, name, "GET")
       end
 
       def codings_in(node)
