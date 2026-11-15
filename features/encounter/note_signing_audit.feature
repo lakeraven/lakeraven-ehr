@@ -54,11 +54,33 @@ Feature: Signing a progress note is audited
     And the note signing audit event cannot be updated
     And the note signing audit event cannot be deleted
 
-  Scenario: The audit event holds a hash of the signed text
+  Scenario: The audit event holds a hash of the signed note body
     Given a created progress note
     When the provider signs the note with signature code "SIGSECRET42"
     Then exactly one note signing audit event should be recorded
-    And the note signing audit event should hold the SHA-256 of the signed note text
+    And the note signing audit event should hold the SHA-256 and row count of the signed note body
     And the note signing audit event should not contain the note text
+    And the recorded hash should match the current note body
     When the note text is later changed to "Demo note text, altered after signing."
-    Then the recorded hash should no longer match the note text
+    Then the recorded hash should no longer match the current note body
+
+  Scenario: The hash still matches after TIU changes the header and appends the signature
+    When the provider creates a progress note with title 8927 and text:
+      """
+      S: Synthetic cough for two days.
+      P: Synthetic plan: fluids and rest.
+      """
+    And the provider signs the note with signature code "SIGSECRET42"
+    Then the note signing should succeed
+    And exactly one note signing audit event should be recorded
+    And the note signing audit event should hold the SHA-256 and row count of the signed note body
+    When TIU later returns the signed note with a "COMPLETED" header and a signature block
+    Then the re-read note should differ from the body alone
+    And the recorded hash should match the re-read note body
+    When the note text is later changed to:
+      """
+      S: Synthetic cough for two days.
+      P: Synthetic plan, altered after signing.
+      """
+    And TIU later returns the signed note with a "COMPLETED" header and a signature block
+    Then the recorded hash should no longer match the re-read note body

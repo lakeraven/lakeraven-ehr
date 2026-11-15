@@ -37,10 +37,12 @@ class FakeProgressNoteGateway
     { success: true, raw: "1" }
   end
 
-  # The text most recently written for this note, or nil if none was.
-  def fetch_text(note_ien)
+  # Models ProgressNoteGateway.fetch_body: the body rows of the text most
+  # recently written for this note, or nil if none was. There is no
+  # fetch_text here: the signing audit hashes the body, not the TIU display.
+  def fetch_body(note_ien)
     update = @text_updates.reverse.find { |u| u[:note_ien].to_s == note_ien.to_s }
-    update && update[:text]
+    update && update[:text].to_s.split("\n", -1)
   end
 end
 

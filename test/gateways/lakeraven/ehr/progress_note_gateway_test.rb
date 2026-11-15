@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "test_helper"
+require "digest"
 
 # Tests for ProgressNoteGateway — TIU progress note create, list, fetch,
 # edit, lock. Signing lives in ESignatureGateway, not here.
@@ -132,6 +133,121 @@ module Lakeraven
 
         assert_equal({ success: true, raw: "0" }, result)
         assert_equal [ "1001", "S: revised note text" ], fake.calls.first[:args]
+      end
+
+      # --- fetch_body (lakeraven-ehr#960) ---
+      #
+      # TIU GET RECORD TEXT returns a display: header rows, ONE blank row, the
+      # body rows, and, once the note is signed, a signature block after the
+      # body. Only the body is evidence of what was signed. The layout follows
+      # the gem's live capture (tiu-get-record-text.yml); the text is synthetic.
+
+      BODY_ROWS = [
+        "S: Synthetic cough for two days, no fever.",
+        "P: Synthetic plan: fluids and rest; return if worse."
+      ].freeze
+
+      def tiu_header(status:)
+        [
+          " LOCAL TITLE: Synthetic Clinic Note                                 ",
+          "STANDARD TITLE: SYNTHETIC OUTPATIENT NOTE                           ",
+          "DATE OF NOTE: NOV 15, 2026@09:30:00  ENTRY DATE: NOV 15, 2026@09:30:00      ",
+          "      AUTHOR: PROVIDER,SYNTHETIC   EXP COSIGNER:                           ",
+          "     URGENCY:                            STATUS: #{status}                      "
+        ]
+      end
+
+      SIGNATURE_BLOCK = [ "", "/es/ PROVIDER,SYNTHETIC", "Signed: 11/15/2026 10:00" ].freeze
+
+      # The wire shape: rows separated by +separator+, with a trailing one.
+      def tiu_text(status: "UNSIGNED", body: BODY_ROWS, signature: [], separator: "\r")
+        (tiu_header(status: status) + [ "" ] + body + signature).join(separator) + separator
+      end
+
+      def fetch_body_of(text)
+        ProgressNoteGateway.fetch_body(1001, via: FakeProgressNoteAPI.new(returns: { fetch_text: text }))
+      end
+
+      test "fetch_body returns nil when no provider is available" do
+        assert_nil ProgressNoteGateway.fetch_body(1001, via: nil)
+      end
+
+      test "fetch_body reads the text through fetch_text with the note IEN as a string" do
+        fake = FakeProgressNoteAPI.new(returns: { fetch_text: tiu_text })
+
+        ProgressNoteGateway.fetch_body(1001, via: fake)
+
+        assert_equal [ { method: :fetch_text, args: [ "1001" ] } ], fake.calls
+      end
+
+      test "fetch_body returns exactly the body rows of the capture-shaped text" do
+        text = tiu_text
+        assert text.end_with?("\r"), "the capture ends with a row separator"
+        assert_includes text, "STATUS: UNSIGNED"
+
+        assert_equal BODY_ROWS, fetch_body_of(text)
+      end
+
+      test "fetch_body returns nil for nil text" do
+        assert_nil fetch_body_of(nil)
+      end
+
+      test "fetch_body returns nil for text with no blank row: an unrecognised shape is not evidence" do
+        text = (tiu_header(status: "UNSIGNED") + BODY_ROWS).join("\r")
+
+        assert_nil fetch_body_of(text)
+      end
+
+      test "fetch_body returns nil for body-only text with no header blank" do
+        assert_nil fetch_body_of("S: Synthetic body with no header.")
+      end
+
+      test "fetch_body splits on CRLF and LF as well as CR" do
+        assert_equal BODY_ROWS, fetch_body_of(tiu_text(separator: "\r\n"))
+        assert_equal BODY_ROWS, fetch_body_of(tiu_text(separator: "\n"))
+      end
+
+      test "fetch_body splits only at the first blank row and keeps blank rows inside the body" do
+        body = [ "S: Synthetic first paragraph.", "", "P: Synthetic second paragraph." ]
+
+        assert_equal body, fetch_body_of(tiu_text(body: body))
+      end
+
+      test "fetch_body drops trailing empty rows" do
+        text = tiu_text + "\r\r"
+
+        assert_equal BODY_ROWS, fetch_body_of(text)
+      end
+
+      test "fetch_body returns an empty body when nothing follows the header blank" do
+        assert_equal [], fetch_body_of(tiu_text(body: []))
+      end
+
+      # THE KEY PROPERTY: signing changes the header and appends a signature
+      # block, yet the first n body rows, and so their hash, are unchanged.
+      test "the body rows recorded at signing are still the first rows of the signed note" do
+        unsigned = fetch_body_of(tiu_text(status: "UNSIGNED"))
+        recorded_rows = unsigned.size
+        recorded_hash = Digest::SHA256.hexdigest(unsigned.join("\n"))
+
+        signed_text = tiu_text(status: "COMPLETED", signature: SIGNATURE_BLOCK)
+        refute_includes signed_text, "STATUS: UNSIGNED"
+        refute_equal tiu_text(status: "UNSIGNED"), signed_text
+        signed = fetch_body_of(signed_text)
+
+        assert_equal BODY_ROWS + SIGNATURE_BLOCK, signed
+        assert_equal unsigned, signed.first(recorded_rows)
+        assert_equal recorded_hash, Digest::SHA256.hexdigest(signed.first(recorded_rows).join("\n"))
+      end
+
+      test "a signed note whose body was altered no longer reproduces the recorded hash" do
+        unsigned = fetch_body_of(tiu_text(status: "UNSIGNED"))
+        recorded_hash = Digest::SHA256.hexdigest(unsigned.join("\n"))
+
+        altered = [ BODY_ROWS.first, "P: Synthetic plan, altered after signing." ]
+        signed = fetch_body_of(tiu_text(status: "COMPLETED", body: altered, signature: SIGNATURE_BLOCK))
+
+        refute_equal recorded_hash, Digest::SHA256.hexdigest(signed.first(unsigned.size).join("\n"))
       end
 
       # --- default_provider ---
