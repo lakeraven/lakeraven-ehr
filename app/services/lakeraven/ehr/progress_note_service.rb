@@ -19,10 +19,15 @@ module Lakeraven
     # followed by its row count. content-sha256 is of the body read before
     # the sign action: what was signed. record-sha256 is of ALL the body
     # rows read again after it, signature block included: the note as filed.
-    # A verifier re-reads the body and needs an exact match of the hash of
-    # all its rows with record-sha256, so an appended, removed or edited row
-    # shows. If that post-sign read fails, the row still records the
-    # signature and ends "record-sha256 unavailable", which never verifies.
+    # The filed record must begin with exactly the signed rows; if it does
+    # not, the row still records the signature and ends "record-sha256
+    # mismatch", which never verifies. A verifier re-reads the body and needs
+    # an exact match of the hash of all its rows with record-sha256, so an
+    # appended, removed or edited row shows; a record mismatch means the note
+    # changed since filing. Comparing content-sha256 with the hash of the
+    # first content-rows rows tells an append from an edit. If that post-sign
+    # read fails, the row still records the signature and ends
+    # "record-sha256 unavailable", which never verifies.
     # The TIU header is not covered by either hash.
     #
     # It fails closed: a row that cannot be written raises. The residual: if
@@ -95,7 +100,7 @@ module Lakeraven
         record_sign_audit!(note_id, outcome: "0", agent: agent,
                            desc: "progress_note_signed; patient #{@dfn}; " \
                                  "content-sha256 #{body_digest(rows)}; content-rows #{rows.size}; " \
-                                 "#{filed_record(note_ien)}")
+                                 "#{filed_record(note_ien, rows)}")
         Result.new(success: true, note_ien: note_ien, raw: raw)
       end
 
@@ -133,10 +138,14 @@ module Lakeraven
         end
       end
 
-      # A row holding CR or LF would make the "\n" join ambiguous.
+      # A row must be a String of valid encoding; a row holding CR or LF
+      # would make the "\n" join ambiguous.
       def body_rows?(rows)
-        rows.is_a?(Array) && rows.all? { |row| row.is_a?(String) && !row.match?(/[\r\n]/) } &&
-          rows.any?(&:present?)
+        rows.is_a?(Array) && rows.all? { |row| body_row?(row) } && rows.any?(&:present?)
+      end
+
+      def body_row?(row)
+        row.is_a?(String) && row.valid_encoding? && !row.match?(/[\r\n]/)
       end
 
       def body_digest(rows) = Digest::SHA256.hexdigest(rows.join("\n"))
@@ -144,10 +153,12 @@ module Lakeraven
       # The note as filed, read again after the sign action. The signature
       # already happened, so a read that fails or returns no valid body is
       # recorded as unavailable rather than raised; its message is never
-      # written.
-      def filed_record(note_ien)
+      # written. A filed body that does not begin with the signed rows is a
+      # mismatch.
+      def filed_record(note_ien, signed)
         rows = @gateway.fetch_body(note_ien)
         return "record-sha256 unavailable" unless body_rows?(rows)
+        return "record-sha256 mismatch" unless rows.first(signed.size) == signed
 
         "record-sha256 #{body_digest(rows)}; record-rows #{rows.size}"
       rescue StandardError => e
