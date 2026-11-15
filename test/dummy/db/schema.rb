@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_03_170000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_15_000000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -158,6 +158,16 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_03_170000) do
     t.string "patient_dfn"
     t.datetime "updated_at", null: false
     t.index [ "launch_token" ], name: "index_lakeraven_ehr_launch_contexts_on_launch_token", unique: true
+  end
+
+  create_table "lakeraven_ehr_part2_labels", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "patient_dfn", null: false
+    t.string "record_id", null: false
+    t.string "record_type", null: false
+    t.string "security_code", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "record_type", "record_id" ], name: "index_lakeraven_ehr_part2_labels_on_record_type_and_record_id", unique: true
   end
 
   create_table "lakeraven_ehr_patient_supplements", force: :cascade do |t|

@@ -6,8 +6,17 @@ module Lakeraven
     # text, and signs it. Signing validates the user's electronic signature
     # code before any sign action reaches the record — an invalid code
     # never touches the note.
+    #
+    # 42 CFR Part 2 (#906, slice of #522): substance-use content in a note is
+    # LABELLED, never blocked. Once the gateway has given the note its IEN,
+    # and before the text is written, text that SudContentSuspicion reads as
+    # :suspected or :unclassified gets a Part2Label row. A failed label write
+    # does not stop the note (part2_label is :label_failed); read-time
+    # Part2Posture still treats an unlabelled suspected note as Part 2.
     class ProgressNoteService
-      Result = Struct.new(:success, :note_ien, :error, :raw, keyword_init: true) do
+      PART2_RECORD_TYPE = Part2Label::TIU_NOTE
+
+      Result = Struct.new(:success, :note_ien, :error, :raw, :part2_label, keyword_init: true) do
         def success? = success
       end
 
@@ -31,10 +40,14 @@ module Lakeraven
         return failure(:gateway_error, raw: created) unless created.is_a?(Hash) && created[:success]
 
         note_ien = created[:ien]
-        written = @gateway.update_text(note_ien, text)
-        return failure(:gateway_error, raw: written) unless written.is_a?(Hash) && written[:success]
+        part2_label = label_part2(note_ien, text)
 
-        Result.new(success: true, note_ien: note_ien, raw: written)
+        written = @gateway.update_text(note_ien, text)
+        unless written.is_a?(Hash) && written[:success]
+          return failure(:gateway_error, raw: written, part2_label: part2_label)
+        end
+
+        Result.new(success: true, note_ien: note_ien, raw: written, part2_label: part2_label)
       end
 
       def sign(note_ien:, signature_code:)
@@ -52,8 +65,20 @@ module Lakeraven
 
       private
 
-      def failure(reason, raw: nil)
-        Result.new(success: false, error: reason, raw: raw)
+      # Labels before the text is written, so the label never trails the
+      # content. Only database errors are rescued: the note must not be
+      # blocked by a label write, and Part2Posture fails closed for it.
+      def label_part2(note_ien, text)
+        return :not_suspected if SudContentSuspicion.classify(text) == :not_suspected
+
+        Part2Label.mark!(patient_dfn: @dfn.to_s, record_type: PART2_RECORD_TYPE, record_id: note_ien.to_s)
+        :labelled
+      rescue ActiveRecord::ActiveRecordError
+        :label_failed
+      end
+
+      def failure(reason, raw: nil, part2_label: nil)
+        Result.new(success: false, error: reason, raw: raw, part2_label: part2_label)
       end
     end
   end
