@@ -27,12 +27,20 @@ module Lakeraven
       end
 
       def originate(patient_dfn:, provider_ien:, params:)
+        refused = refused_keys(params)
+        if refused.any?
+          return OriginationResult.new(
+            success: false, service_request: nil,
+            errors: [ "Structured referral types are not offered; refused params: #{refused.join(', ')}" ]
+          )
+        end
+
         sr = ServiceRequest.new(
           patient_dfn: patient_dfn.to_i,
           requesting_provider_ien: provider_ien.to_i,
-          service_requested: params[:service_requested],
-          urgency: params[:urgency],
-          reason_for_referral: params[:reason_for_referral],
+          service_requested: field(params, :service_requested),
+          urgency: field(params, :urgency),
+          reason_for_referral: field(params, :reason_for_referral),
           status: "draft"
         )
 
@@ -52,6 +60,22 @@ module Lakeraven
       end
 
       private
+
+      # #905: fail closed on any key outside the declared origination fields.
+      # Keys are read without to_h/permit so unpermitted Parameters work too.
+      def refused_keys(params)
+        return [] if params.nil?
+
+        accepted = ReferralSurfaces::ORIGINATION_FIELDS.map(&:to_s)
+        params.keys.map(&:to_s).uniq - accepted
+      end
+
+      def field(params, name)
+        return nil if params.nil?
+
+        value = params[name]
+        value.nil? ? params[name.to_s] : value
+      end
 
       def check_enrollment(patient_dfn)
         return nil unless @enrollment_checker
