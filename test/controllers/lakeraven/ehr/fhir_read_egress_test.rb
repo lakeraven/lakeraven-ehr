@@ -920,6 +920,44 @@ module Lakeraven
         end
       end
 
+      # 42 CFR § 2.32 (#909): no redisclosure path can omit the notice. Every
+      # non-HTML wired endpoint is driven with its own payload labelled Part 2
+      # on the way into the REAL filter. The response is the notice on every
+      # labelled resource, or a 503 with no clinical content.
+      WIRED_ENDPOINTS.each do |endpoint|
+        test_name = endpoint[:name] || endpoint[:path]
+
+        test "Part 2-labelled payload leaves noticed or not at all for #{endpoint[:method].to_s.upcase} #{test_name}" do
+          instance_exec(&endpoint[:setup]) if endpoint[:setup]
+          path = endpoint[:dynamic_path] ? instance_exec(&endpoint[:dynamic_path]) : endpoint[:path]
+          is_html = path.include?("/patients/") && !path.end_with?(".json")
+
+          results = []
+          with_part2_labelled_egress(results) do
+            request_wired_endpoint(endpoint, path)
+          end
+
+          refute_empty results, "#{test_name} did not hand a payload to Part2EgressFilter"
+          if is_html
+            # An HTML page has no FHIR body to read back. What the view is
+            # given is what the real filter returned: noticed, or nothing.
+            assert_part2_html_noticed_or_refused(test_name, results)
+          else
+            assert_part2_noticed_or_refused(test_name, ndjson: test_name == "exports file show")
+          end
+        end
+      end
+
+      test "Part 2 notice survives _elements subsetting of a search Bundle" do
+        results = []
+        with_part2_labelled_egress(results) do
+          get "/lakeraven-ehr/Condition", params: { patient: "1", _elements: "code" }, headers: @headers
+        end
+
+        refute_empty results, "Condition search did not hand a payload to Part2EgressFilter"
+        assert_part2_noticed_or_refused("Condition search with _elements", ndjson: false)
+      end
+
       private
 
       # session_auth rows (screenings) authenticate through the browser session
@@ -931,6 +969,164 @@ module Lakeraven
         yield
       ensure
         filter.define_method(:call, original)
+      end
+
+      PART2_TEST_LABEL = {
+        "system" => "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+        "code" => "42CFRPart2"
+      }.freeze
+
+      def request_wired_endpoint(endpoint, path)
+        if endpoint[:method] == :post
+          post path, params: endpoint[:params],
+            headers: @headers.merge("Content-Type" => endpoint[:content_type] || "application/x-www-form-urlencoded")
+        else
+          get path, params: endpoint[:params], headers: (endpoint[:session_auth] ? {} : @headers)
+        end
+      end
+
+      # Labels every FHIR resource in the payload as Part 2, then runs the
+      # REAL Part2EgressFilter.call on it. `results` collects what the real
+      # filter returned.
+      def with_part2_labelled_egress(results = [], &block)
+        real = Part2EgressFilter.singleton_class.instance_method(:call).bind(Part2EgressFilter)
+        test = self # define_method runs the lambda with the filter class as self
+        stub_egress_filter(->(payload) {
+          result = real.call(test.send(:part2_label_payload, payload))
+          results << result
+          result
+        }, &block)
+      end
+
+      def part2_label_payload(payload)
+        case payload
+        when Hash then part2_label_resource(payload)
+        when String then payload.each_line.map { |line| part2_label_ndjson_line(line) }.join
+        else payload
+        end
+      end
+
+      def part2_label_ndjson_line(line)
+        parsed = JSON.parse(line)
+        return line unless fhir_resource_hash?(parsed)
+
+        part2_label_resource(parsed).to_json + (line.end_with?("\n") ? "\n" : "")
+      rescue JSON::ParserError
+        line
+      end
+
+      def fhir_resource_hash?(value)
+        return false unless value.is_a?(Hash)
+
+        type = value["resourceType"] || value[:resourceType]
+        type.is_a?(String) && !type.empty?
+      end
+
+      # The resource and each Bundle entry resource, in the key style
+      # (string or symbol) the payload already uses. The caller's hash is
+      # left alone.
+      def part2_label_resource(resource)
+        return resource unless fhir_resource_hash?(resource)
+
+        symbols = resource.key?(:resourceType)
+        key = ->(name) { symbols ? name.to_sym : name }
+        label = symbols ? PART2_TEST_LABEL.transform_keys(&:to_sym) : PART2_TEST_LABEL.dup
+
+        labelled = resource.dup
+        meta = labelled[key.("meta")].is_a?(Hash) ? labelled[key.("meta")].dup : {}
+        meta[key.("security")] = Array(meta[key.("security")]) + [ label ]
+        labelled[key.("meta")] = meta
+
+        entries = labelled[key.("entry")]
+        if entries.is_a?(Array)
+          labelled[key.("entry")] = entries.map do |entry|
+            next entry unless entry.is_a?(Hash)
+
+            entry_key = entry.key?(:resource) ? :resource : "resource"
+            entry.merge(entry_key => part2_label_resource(entry[entry_key]))
+          end
+        end
+        labelled
+      end
+
+      # A success whose every labelled resource is noticed, or a 503 with no
+      # clinical content. A success with no labelled resource in it means the
+      # label was lost on the way out, which is a failure too.
+      def assert_part2_noticed_or_refused(row, ndjson:)
+        if response.status == 503
+          assert_part2_refusal_has_no_clinical_content(ndjson: ndjson)
+          return
+        end
+
+        assert_response :success, "#{row}: expected success or 503, got #{response.status}. Body: #{response.body[0, 300]}"
+        resources = ndjson ? part2_ndjson_resources(response.body) : [ JSON.parse(response.body) ]
+        labelled = resources.flat_map { |resource| part2_labelled_resources(resource) }
+        refute_empty labelled, "#{row}: the response has no Part 2-labelled resource, so the notice cannot be proved"
+        labelled.each { |resource| assert_part2_noticed(resource, row) }
+      end
+
+      def assert_part2_html_noticed_or_refused(row, results)
+        if results.any?(&:nil?)
+          assert_response :service_unavailable, "#{row}: the filter refused, so the page must not render"
+          return
+        end
+
+        results.each do |result|
+          labelled = part2_labelled_resources(result.deep_stringify_keys)
+          refute_empty labelled, "#{row}: the filter returned no Part 2-labelled resource, so the notice cannot be proved"
+          labelled.each { |resource| assert_part2_noticed(resource, row) }
+        end
+      end
+
+      def assert_part2_refusal_has_no_clinical_content(ndjson:)
+        if ndjson
+          refute_includes response.body, "resourceType"
+        else
+          body = JSON.parse(response.body)
+          assert_equal "OperationOutcome", body["resourceType"]
+          refute body.key?("entry")
+          refute_includes response.body, "Anderson"
+        end
+      end
+
+      def part2_ndjson_resources(body)
+        body.each_line.map(&:strip).reject(&:empty?).map { |line| JSON.parse(line) }
+      end
+
+      # Every resource in the response whose meta.security holds a Part 2
+      # code: the resource itself, Bundle entries, and contained resources.
+      # A Bundle that holds one counts as well, since the Bundle carries the
+      # notice for what is inside it.
+      def part2_labelled_resources(resource)
+        return [] unless fhir_resource_hash?(resource)
+
+        nested = Array(resource["entry"]).filter_map { |entry| entry["resource"] if entry.is_a?(Hash) } +
+          Array(resource["contained"])
+        inner = nested.flat_map { |child| part2_labelled_resources(child) }
+        own = part2_labelled?(resource) || (resource["resourceType"] == "Bundle" && inner.any?)
+        (own ? [ resource ] : []) + inner
+      end
+
+      def part2_labelled?(resource)
+        security = resource.dig("meta", "security")
+        Array(security).any? do |coding|
+          coding.is_a?(Hash) && Part2RedisclosureNotice::PART2_CODES.include?(coding["code"])
+        end
+      end
+
+      def assert_part2_noticed(resource, row)
+        meta = resource["meta"].is_a?(Hash) ? resource["meta"] : {}
+        where = "#{row}: #{resource['resourceType']}/#{resource['id']}"
+        refrain = Part2RedisclosureNotice::REFRAIN
+        notice = {
+          "url" => Part2RedisclosureNotice::EXTENSION_URL,
+          "valueString" => Part2RedisclosureNotice::TEXT
+        }
+
+        assert Array(meta["security"]).any? { |coding| coding.is_a?(Hash) && coding.slice("system", "code") == refrain },
+          "#{where} is Part 2-labelled and left without the NORDSCLCD refrain coding"
+        assert_includes Array(meta["extension"]), notice,
+          "#{where} is Part 2-labelled and left without the 2.32 notice"
       end
     end
   end

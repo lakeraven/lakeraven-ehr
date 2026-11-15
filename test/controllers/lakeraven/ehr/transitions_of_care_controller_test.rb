@@ -170,7 +170,49 @@ module Lakeraven
         assert_refuses_egress_patient_mismatch(rewritten_dfn: nil)
       end
 
+      # 42 CFR § 2.32 (#909): the C-CDA path cannot carry the redisclosure
+      # notice, so a Part 2-labelled row must not leave through it.
+      test "C-CDA is refused when a condition row carries a Part 2 label" do
+        displays = []
+        with_real_egress_filter(->(sections) {
+          labelled = { code: "F10.20", display: "ZZZ-PART2-CONDITION-DISPLAY", code_system: nil,
+                       security: [ { code: "42CFRPart2" } ] }
+          displays.concat(sections[:conditions].filter_map { |row| row[:display].presence })
+          sections.merge(conditions: sections[:conditions] + [ labelled ])
+        }) do
+          post "/lakeraven-ehr/transitions_of_care",
+            params: { patient_dfn: "1" }, headers: @headers
+        end
+
+        assert_response :service_unavailable
+        refute_includes response.body, "ClinicalDocument"
+        refute_includes response.body, "ZZZ-PART2-CONDITION-DISPLAY"
+        refute_includes response.body, "F10.20"
+        displays.each { |display| refute_includes response.body, display.to_s }
+      end
+
+      test "C-CDA with no Part 2 label still renders through the real egress filter" do
+        with_real_egress_filter(->(sections) {
+          plain = { code: "ZZZ-UNLABELLED", display: "ZZZ-UNLABELLED-CONDITION-DISPLAY", code_system: nil }
+          sections.merge(conditions: sections[:conditions] + [ plain ])
+        }) do
+          post "/lakeraven-ehr/transitions_of_care",
+            params: { patient_dfn: "1" }, headers: @headers
+        end
+
+        assert_response :created
+        assert_includes response.body, "ClinicalDocument"
+        assert_includes response.body, "ZZZ-UNLABELLED-CONDITION-DISPLAY"
+      end
+
       private
+
+      # Runs the REAL Part2EgressFilter.call on the sections after `prepare`
+      # has changed them, so the test sees what the real filter decides.
+      def with_real_egress_filter(prepare, &block)
+        real = Part2EgressFilter.singleton_class.instance_method(:call).bind(Part2EgressFilter)
+        stub_egress_filter(->(sections) { real.call(prepare.call(sections)) }, &block)
+      end
 
       def assert_refuses_egress_patient_mismatch(rewritten_dfn:, request_dfn: "1")
         stub_egress_filter(->(sections) {
