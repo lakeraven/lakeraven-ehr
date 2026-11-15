@@ -10,10 +10,24 @@ module Lakeraven
     # never touches the note.
     #
     # Every sign call writes exactly one append-only AuditEvent (#960), on
-    # every path, and fails closed: if the row cannot be written, the
-    # exception propagates. On success the row holds a SHA-256 of the note
-    # text that was signed; the signature code and the text never reach it.
+    # every path, including a gateway that raises (the row is written, then
+    # the same exception is re-raised). The signature code, the note text
+    # and exception messages never reach the row.
+    #
+    # On success the row holds a SHA-256 of the note BODY rows, as
+    # ProgressNoteGateway.fetch_body returns them, joined with "\n", and the
+    # row count. The TIU header and the signature block TIU appends on
+    # signing are not covered: a verifier re-reads the body and hashes its
+    # first content-rows rows.
+    #
+    # It fails closed: a row that cannot be written raises. The residual: if
+    # the success row fails after the sign action, the RPMS signature stands
+    # and the exception surfaces to the caller.
     class ProgressNoteService
+      # Serious failures ("8"): gateway errors, raised gateway calls and a
+      # sign whose outcome is unknown. Every other refusal is minor ("4").
+      SERIOUS_REASONS = %i[gateway_error gateway_exception sign_outcome_unknown].freeze
+
       Result = Struct.new(:success, :note_ien, :error, :raw, keyword_init: true) do
         def success? = success
       end
@@ -45,46 +59,108 @@ module Lakeraven
       end
 
       def sign(note_ien:, signature_code:)
-        return refuse_sign!(note_ien, :no_note) if note_ien.nil?
+        agent = sign_agent
+        note_id = identifier(note_ien)
+        return refuse_sign!(note_id, :invalid_input, agent: agent) if identifier(@dfn).nil?
+        return refuse_sign!(nil, :no_note, agent: agent) if note_ien.nil?
+        return refuse_sign!(nil, :invalid_input, agent: agent) if note_id.nil?
+        return refuse_sign!(note_id, :actor_mismatch, agent: agent) unless author_agent?(agent)
 
-        validation = @esignature_gateway.validate(@author_duz, signature_code)
-        return refuse_sign!(note_ien, :gateway_error, raw: validation) unless validation.is_a?(Hash)
-        return refuse_sign!(note_ien, :invalid_signature_code, raw: validation) unless validation[:success]
+        validation = audit_exception(note_id, :gateway_exception, agent: agent) do
+          @esignature_gateway.validate(@author_duz, signature_code)
+        end
+        valid = signature_valid?(validation)
+        return refuse_sign!(note_id, :gateway_error, agent: agent, raw: validation) if valid.nil?
+        return refuse_sign!(note_id, :invalid_signature_code, agent: agent, raw: validation) unless valid
 
-        # We never sign what we cannot hash.
-        text = @gateway.fetch_text(note_ien)
-        return refuse_sign!(note_ien, :note_text_unavailable) unless text.is_a?(String)
+        # We never sign what we cannot hash, and an empty body never verifies.
+        rows = audit_exception(note_id, :gateway_exception, agent: agent) { @gateway.fetch_body(note_ien) }
+        return refuse_sign!(note_id, :note_text_unavailable, agent: agent) unless body_rows?(rows)
 
-        raw = @esignature_gateway.add(note_ien, @author_duz, signature_code, action: :sign)
-        return refuse_sign!(note_ien, :gateway_error, raw: raw) unless raw.is_a?(Hash) && raw[:success]
+        # The RPC may have filed before it raised, so the row does not claim
+        # the note is unsigned.
+        raw = audit_exception(note_id, :sign_outcome_unknown, agent: agent) do
+          @esignature_gateway.add(note_ien, @author_duz, signature_code, action: :sign)
+        end
+        return refuse_sign!(note_id, :gateway_error, agent: agent, raw: raw) unless raw.is_a?(Hash) && raw[:success]
 
-        record_sign_audit!(note_ien, outcome: "0",
-                           desc: "progress_note_signed; patient #{@dfn}; content-sha256 #{Digest::SHA256.hexdigest(text)}")
+        record_sign_audit!(note_id, outcome: "0", agent: agent,
+                           desc: "progress_note_signed; patient #{@dfn}; " \
+                                 "content-sha256 #{Digest::SHA256.hexdigest(rows.join("\n"))}; " \
+                                 "content-rows #{rows.size}")
         Result.new(success: true, note_ien: note_ien, raw: raw)
       end
 
       private
 
-      # Gateway errors are serious failures ("8"); every other refusal is
-      # a minor failure ("4").
-      def refuse_sign!(note_ien, reason, raw: nil)
-        record_sign_audit!(note_ien, outcome: reason == :gateway_error ? "8" : "4",
-                           desc: "progress_note_sign_refused; patient #{@dfn}; reason #{reason}")
+      # The value as a String when it is all digits, else nil, so a
+      # malformed identifier never reaches the row.
+      def identifier(value)
+        id = value.to_s
+        id.match?(AuditEvent::PATIENT_IDENTIFIER_PATTERN) ? id : nil
+      end
+
+      # The attributed identity when AuditContext has one, else the author.
+      def sign_agent
+        attributed = AuditContext.agent_attributes
+        return attributed unless attributed[:agent_who_identifier].nil?
+
+        { agent_who_type: "Practitioner", agent_who_identifier: @author_duz.to_s }
+      end
+
+      def author_agent?(agent)
+        agent[:agent_who_type] == "Practitioner" && agent[:agent_who_identifier].to_s == @author_duz.to_s
+      end
+
+      # Production ESignatureGateway.validate returns a Boolean; the demo
+      # and test fakes return a Hash. True or false, or nil for a reply of
+      # any other shape.
+      def signature_valid?(validation)
+        case validation
+        when true, false then validation
+        when Hash then validation[:success] ? true : false
+        end
+      end
+
+      def body_rows?(rows)
+        rows.is_a?(Array) && rows.all?(String) && rows.any?(&:present?)
+      end
+
+      # A gateway that raises still leaves its one row ("8"), and the caller
+      # gets the same exception. The message is never written: it may carry
+      # the signature code. If that row cannot be written either, the
+      # original exception is the news, so the audit failure is logged by
+      # class name and the original surfaces.
+      def audit_exception(note_id, reason, agent:)
+        yield
+      rescue StandardError => e
+        begin
+          refuse_sign!(note_id, reason, agent: agent)
+        rescue StandardError => audit_error
+          Rails.logger.error("[audit] could not record a #{reason} note signing " \
+                             "after #{e.class.name}: #{audit_error.class.name}")
+        end
+        raise e
+      end
+
+      def refuse_sign!(note_id, reason, agent:, raw: nil)
+        patient = identifier(@dfn) || "none"
+        record_sign_audit!(note_id, outcome: SERIOUS_REASONS.include?(reason) ? "8" : "4", agent: agent,
+                           desc: "progress_note_sign_refused; patient #{patient}; reason #{reason}")
         failure(reason, raw: raw)
       end
 
-      # Attributes are resolved here, on the calling thread, before
-      # create_detached! may hand the write to another thread. Never rescued:
-      # a sign that cannot be audited raises.
-      def record_sign_audit!(note_ien, outcome:, desc:)
-        note_id = note_ien&.to_s
+      # Attributes are resolved on the calling thread (the agent before the
+      # call, the rest here) before create_detached! may hand the write to
+      # another thread. Never rescued here: a sign that cannot be audited
+      # raises.
+      def record_sign_audit!(note_id, outcome:, desc:, agent:)
         AuditEvent.create_detached!(
           event_type: "application",
           action: "E",
           outcome: outcome,
           outcome_desc: desc,
-          agent_who_type: "Practitioner",
-          agent_who_identifier: @author_duz.to_s,
+          **agent,
           entity_type: "DocumentReference",
           entity_identifier: note_id,
           entity_id: note_id,

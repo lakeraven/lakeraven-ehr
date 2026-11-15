@@ -29,6 +29,25 @@ module Lakeraven
         via.fetch_text(note_ien.to_s)
       end
 
+      # The body rows of the note, or nil. TIU GET RECORD TEXT returns a
+      # display: header rows, ONE blank row, then the body. The header
+      # changes on signing (STATUS: UNSIGNED becomes COMPLETED) and TIU
+      # appends a signature block after the body, so only the body rows are
+      # stable evidence of what was signed. Text with no blank row is an
+      # unrecognised shape, not evidence, so it gives nil.
+      def self.fetch_body(note_ien, via: default_provider)
+        text = fetch_text(note_ien, via: via)
+        return nil unless text.is_a?(String)
+
+        rows = text.split(/\r\n|\r|\n/, -1)
+        header_end = rows.index("")
+        return nil if header_end.nil?
+
+        body = rows.drop(header_end + 1)
+        body.pop while body.last == ""
+        body
+      end
+
       # TIU AUTHORIZATION, TIU LOCK RECORD and TIU UNLOCK RECORD act as the
       # signed-on user (CANDO^TIUSRVA, LOCK^TIUSRVP), so none takes a user.
       def self.authorize(note_ien, action: ::RpmsRpc::ProgressNote::EDIT_RECORD, via: default_provider)
