@@ -56,9 +56,6 @@ module Lakeraven
 
       private
 
-      # A refused key is echoed only when it looks like a field name.
-      FIELD_NAME = /\A[a-z][a-z0-9_]{0,39}\z/i
-
       # #905: fail closed on anything but plain text under the declared
       # origination fields. Keys are read without to_h/permit so unpermitted
       # Parameters work too. Values are never inspected beyond their type.
@@ -77,8 +74,10 @@ module Lakeraven
         refusal_message(problems) if problems.any?
       end
 
+      # A refused key is echoed only when it is a ServiceRequest attribute
+      # name; every other key is counted, never echoed.
       def refusal_message(problems)
-        shown, hidden = problems.partition { |name, _| name.match?(FIELD_NAME) }
+        shown, hidden = problems.partition { |name, _| ServiceRequest.attribute_names.include?(name) }
         refused = shown.map { |name, why| "#{name} (#{why})" }
         refused << "#{hidden.size} other key(s)" if hidden.any?
         "Structured referral types are not offered; origination accepts only " \
@@ -93,11 +92,13 @@ module Lakeraven
         value.nil? || value.is_a?(String)
       end
 
+      # Reads a value only for a key actually present, so a Hash default or
+      # default proc never supplies one.
       def field(params, name)
         return nil if params.nil?
 
-        value = params[name]
-        value.nil? ? params[name.to_s] : value
+        [ name.to_sym, name.to_s ].each { |key| return params[key] if params.key?(key) }
+        nil
       end
 
       def check_enrollment(patient_dfn)

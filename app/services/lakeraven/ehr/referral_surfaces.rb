@@ -10,9 +10,12 @@ module Lakeraven
     # surface must be declared here and shown (in referral_surfaces_test) to
     # offer no SUD path. Free text is never inspected or refused. The
     # dashboard is declared because it renders the pending-referral count.
+    # Routes are named by full controller path, so a same-named controller in
+    # another namespace is never mistaken for a declared surface.
     module ReferralSurfaces
       ROUTES = %w[
-        service_requests#index service_requests#show pending_referrals#index dashboards#show
+        lakeraven/ehr/dashboards#show lakeraven/ehr/pending_referrals#index
+        lakeraven/ehr/service_requests#index lakeraven/ehr/service_requests#show
       ].freeze
 
       OFFERED_CODINGS = [ ServiceRequest::PATIENT_REFERRAL ].freeze
