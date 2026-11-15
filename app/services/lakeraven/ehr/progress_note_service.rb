@@ -14,11 +14,16 @@ module Lakeraven
     # the same exception is re-raised). The signature code, the note text
     # and exception messages never reach the row.
     #
-    # On success the row holds a SHA-256 of the note BODY rows, as
-    # ProgressNoteGateway.fetch_body returns them, joined with "\n", and the
-    # row count. The TIU header and the signature block TIU appends on
-    # signing are not covered: a verifier re-reads the body and hashes its
-    # first content-rows rows.
+    # On success the row holds two SHA-256 hashes of note BODY rows, as
+    # ProgressNoteGateway.fetch_body returns them, each joined with "\n" and
+    # followed by its row count. content-sha256 is of the body read before
+    # the sign action: what was signed. record-sha256 is of ALL the body
+    # rows read again after it, signature block included: the note as filed.
+    # A verifier re-reads the body and needs an exact match of the hash of
+    # all its rows with record-sha256, so an appended, removed or edited row
+    # shows. If that post-sign read fails, the row still records the
+    # signature and ends "record-sha256 unavailable", which never verifies.
+    # The TIU header is not covered by either hash.
     #
     # It fails closed: a row that cannot be written raises. The residual: if
     # the success row fails after the sign action, the RPMS signature stands
@@ -27,6 +32,8 @@ module Lakeraven
       # Serious failures ("8"): gateway errors, raised gateway calls and a
       # sign whose outcome is unknown. Every other refusal is minor ("4").
       SERIOUS_REASONS = %i[gateway_error gateway_exception sign_outcome_unknown].freeze
+      # The only AuditContext attributes that reach the row.
+      AGENT_ATTRIBUTES = %i[agent_who_type agent_who_identifier agent_name].freeze
 
       Result = Struct.new(:success, :note_ien, :error, :raw, keyword_init: true) do
         def success? = success
@@ -64,6 +71,7 @@ module Lakeraven
         return refuse_sign!(note_id, :invalid_input, agent: agent) if identifier(@dfn).nil?
         return refuse_sign!(nil, :no_note, agent: agent) if note_ien.nil?
         return refuse_sign!(nil, :invalid_input, agent: agent) if note_id.nil?
+        return refuse_sign!(note_id, :invalid_input, agent: agent) if identifier(@author_duz).nil?
         return refuse_sign!(note_id, :actor_mismatch, agent: agent) unless author_agent?(agent)
 
         validation = audit_exception(note_id, :gateway_exception, agent: agent) do
@@ -86,8 +94,8 @@ module Lakeraven
 
         record_sign_audit!(note_id, outcome: "0", agent: agent,
                            desc: "progress_note_signed; patient #{@dfn}; " \
-                                 "content-sha256 #{Digest::SHA256.hexdigest(rows.join("\n"))}; " \
-                                 "content-rows #{rows.size}")
+                                 "content-sha256 #{body_digest(rows)}; content-rows #{rows.size}; " \
+                                 "#{filed_record(note_ien)}")
         Result.new(success: true, note_ien: note_ien, raw: raw)
       end
 
@@ -100,10 +108,13 @@ module Lakeraven
         id.match?(AuditEvent::PATIENT_IDENTIFIER_PATTERN) ? id : nil
       end
 
-      # The attributed identity when AuditContext has one, else the author.
+      # The attributed identity when AuditContext has one. Unattributed, the
+      # author is assumed only outside an audited request and only when the
+      # author is a DUZ; otherwise the agent stays Unknown.
       def sign_agent
-        attributed = AuditContext.agent_attributes
+        attributed = AuditContext.agent_attributes.slice(*AGENT_ATTRIBUTES)
         return attributed unless attributed[:agent_who_identifier].nil?
+        return attributed if AuditContext.inside_audited_request? || identifier(@author_duz).nil?
 
         { agent_who_type: "Practitioner", agent_who_identifier: @author_duz.to_s }
       end
@@ -122,8 +133,26 @@ module Lakeraven
         end
       end
 
+      # A row holding CR or LF would make the "\n" join ambiguous.
       def body_rows?(rows)
-        rows.is_a?(Array) && rows.all?(String) && rows.any?(&:present?)
+        rows.is_a?(Array) && rows.all? { |row| row.is_a?(String) && !row.match?(/[\r\n]/) } &&
+          rows.any?(&:present?)
+      end
+
+      def body_digest(rows) = Digest::SHA256.hexdigest(rows.join("\n"))
+
+      # The note as filed, read again after the sign action. The signature
+      # already happened, so a read that fails or returns no valid body is
+      # recorded as unavailable rather than raised; its message is never
+      # written.
+      def filed_record(note_ien)
+        rows = @gateway.fetch_body(note_ien)
+        return "record-sha256 unavailable" unless body_rows?(rows)
+
+        "record-sha256 #{body_digest(rows)}; record-rows #{rows.size}"
+      rescue StandardError => e
+        Rails.logger.error("[audit] could not re-read a signed note body: #{e.class.name}")
+        "record-sha256 unavailable"
       end
 
       # A gateway that raises still leaves its one row ("8"), and the caller

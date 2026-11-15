@@ -47,7 +47,7 @@ module Lakeraven
 
         # The stored text as body rows, the shape ProgressNoteGateway.fetch_body
         # returns: no TIU header or signature block in the demo.
-        def fetch_body(note_ien) = @texts[note_ien.to_s]&.split("\n")
+        def fetch_body(note_ien) = @texts[note_ien.to_s]&.split(/\r\n|\r|\n/)
       end
 
       class DemoESignatureGateway
