@@ -10,10 +10,14 @@ module Lakeraven
     # succeeds, there is no label row at all, and the content reads
     # :not_suspected. ANY label row means Part 2, whatever its
     # security_code — an unknown label counts as Part 2.
+    #
+    # An id that cannot be looked up (blank, or carrying a NUL byte, which
+    # PostgreSQL refuses in a string) is Part 2 without a query: a lookup
+    # that cannot succeed is no reason to call the record clean.
     class Part2Posture
       def self.part2?(record_type:, record_id:, content:)
         key = Part2Label.normalized_key(record_type: record_type, record_id: record_id)
-        return true if key.values.any?(&:blank?)
+        return true unless Part2Label.storable_key?(key)
         return true if labelled?(key)
 
         # classify never raises: unreadable or blank content is :unclassified.

@@ -70,14 +70,18 @@ module Lakeraven
       # :unclassified and labelled). A note the gateway gave no IEN cannot be
       # labelled, so it is never reported as :labelled. Only database errors
       # are rescued: the note must not be blocked by a label write, and
-      # Part2Posture fails closed for it.
+      # Part2Posture fails closed for it. The failure is logged so the gap
+      # can be found and repaired: the error class and the note IEN only,
+      # never the note text or the exception message (which can carry SQL
+      # with bound values).
       def label_part2(note_ien, text)
         return :not_suspected if SudContentSuspicion.classify(text) == :not_suspected
         return :label_failed if note_ien.to_s.strip.empty?
 
         Part2Label.mark!(patient_dfn: @dfn.to_s, record_type: PART2_RECORD_TYPE, record_id: note_ien.to_s)
         :labelled
-      rescue ActiveRecord::ActiveRecordError
+      rescue ActiveRecord::ActiveRecordError => e
+        Rails.logger.warn("Part 2 label write failed (#{e.class.name}) for tiu note #{note_ien}")
         :label_failed
       end
 

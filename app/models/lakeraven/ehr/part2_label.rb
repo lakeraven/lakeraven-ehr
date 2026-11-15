@@ -30,9 +30,21 @@ module Lakeraven
         { record_type: record_type.to_s.strip.downcase, record_id: record_id.to_s.strip }
       end
 
+      # PostgreSQL refuses a NUL byte in a string, so a value carrying one
+      # can be neither stored nor looked up.
+      NUL = "\u0000"
+
+      # Whether a normalized key can be stored and looked up: every value
+      # present and free of NUL bytes. Part2Posture asks this before
+      # querying; mark! refuses a key that fails it.
+      def self.storable_key?(key)
+        key.values.none? { |value| value.blank? || value.include?(NUL) }
+      end
+
       # Labels a record as Part 2. Idempotent: an existing row for the
       # record is left as it is (whatever its code) and counts as success.
-      # Blank inputs raise ActiveRecord::RecordInvalid and write nothing.
+      # Blank inputs, or inputs carrying a NUL byte, raise
+      # ActiveRecord::RecordInvalid and write nothing.
       #
       # A concurrent writer may commit the same record between the lookup
       # and the insert. The insert runs in a savepoint, so a unique-index
@@ -42,6 +54,7 @@ module Lakeraven
       # existing row is returned.
       def self.mark!(patient_dfn:, record_type:, record_id:)
         key = normalized_key(record_type: record_type, record_id: record_id)
+        refuse_nul!(key.merge(patient_dfn: patient_dfn.to_s))
         existing = find_by(key)
         return existing if existing
 
@@ -57,6 +70,19 @@ module Lakeraven
           find_by!(key)
         end
       end
+
+      # Raises ActiveRecord::RecordInvalid, before any query, when a value
+      # carries a NUL byte: the database would refuse it with an
+      # ArgumentError rather than a database error.
+      def self.refuse_nul!(attributes)
+        with_nul = attributes.select { |_name, value| value.include?(NUL) }.keys
+        return if with_nul.empty?
+
+        record = new(attributes)
+        with_nul.each { |name| record.errors.add(name, :invalid, message: "contains a NUL byte") }
+        raise ActiveRecord::RecordInvalid, record
+      end
+      private_class_method :refuse_nul!
 
       def self.only_taken?(record)
         record.errors.of_kind?(:record_id, :taken) && record.errors.size == 1
