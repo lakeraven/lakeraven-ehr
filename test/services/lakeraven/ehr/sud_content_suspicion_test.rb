@@ -27,14 +27,41 @@ module Lakeraven
         assert_equal :unclassified, SudContentSuspicion.classify([ "Discussed sleep hygiene." ])
       end
 
-      # --- empty text: :not_suspected ---
+      # --- blank text: :unclassified ---
+      # Absence of data never verifies a record as clean: a blank note says
+      # nothing about what the record holds.
 
-      test "an empty String is not suspected" do
-        assert_equal :not_suspected, SudContentSuspicion.classify("")
+      test "an empty String is unclassified" do
+        assert_equal :unclassified, SudContentSuspicion.classify("")
       end
 
-      test "a whitespace-only String is not suspected" do
-        assert_equal :not_suspected, SudContentSuspicion.classify("  \n\t ")
+      test "a whitespace-only String is unclassified" do
+        assert_equal :unclassified, SudContentSuspicion.classify("  \n\t ")
+      end
+
+      # --- text that cannot be read: :unclassified, never an exception ---
+
+      # A String tagged UTF-8 that carries a byte sequence that is not UTF-8.
+      def invalid_utf8_text
+        "Pt seen today, caf\xE9".dup.force_encoding("UTF-8")
+      end
+
+      test "a String with an invalid byte sequence is unclassified and does not raise" do
+        text = invalid_utf8_text
+        refute text.valid_encoding?, "the synthetic text should be invalid UTF-8"
+
+        result = nil
+        assert_nothing_raised { result = SudContentSuspicion.classify(text) }
+        assert_equal :unclassified, result
+      end
+
+      test "a String in a non-ASCII-compatible encoding is unclassified and does not raise" do
+        text = "sleep hygiene".encode("UTF-16LE")
+        refute text.encoding.ascii_compatible?, "the synthetic text should not be ASCII-compatible"
+
+        result = nil
+        assert_nothing_raised { result = SudContentSuspicion.classify(text) }
+        assert_equal :unclassified, result
       end
 
       # --- vocabulary: :suspected ---
@@ -105,6 +132,61 @@ module Lakeraven
 
       test "an F19 code is suspected" do
         assert_equal :suspected, SudContentSuspicion.classify("Carried forward: F19.20.")
+      end
+
+      # --- vocabulary and pattern gaps found in review (#906 round 2) ---
+
+      GAP_SUSPECTED = [
+        # phrasing variants
+        "substance-use disorder", "substance\u00A0use", "polysubstance abuse",
+        "substance misuse", "drug misuse", "drug-seeking behaviour",
+        "illicit drugs", "recreational drug use",
+        # everyday wording
+        "clean and sober 6 months", "drank heavily", "in rehab", "binge episodes",
+        "blackout last weekend", "hungover at session",
+        # abbreviations, as whole words
+        "hx SUD", "OUD", "AUD in remission", "IVDU", "THC positive",
+        "DUI last year", "UDS positive", "attends AA weekly", "12-step program",
+        "narcotics anonymous",
+        # substances and medications
+        "oxycodone", "hydrocodone", "Percocet", "morphine", "benzos",
+        "benzodiazepine", "Xanax", "amphetamine", "ketamine", "kratom", "weed",
+        "beer", "wine", "vodka", "liquor", "Subutex", "Vivitrol", "Antabuse",
+        "disulfiram",
+        # codes written in the text: undotted F10-F19, and the Z71.4/Z71.5
+        # counselling codes Icd10CmSubstanceUseRange already reads as substance use
+        "F1120", "f1010", "Z71.41", "Z71.51"
+      ].freeze
+
+      GAP_SUSPECTED.each do |text|
+        test "the gap text #{text.inspect} is suspected" do
+          assert_equal :suspected, SudContentSuspicion.classify(text)
+        end
+
+        test "the gap text #{text.inspect} inside a sentence is suspected" do
+          assert_equal :suspected,
+            SudContentSuspicion.classify("Session note: #{text}, discussed with client.")
+        end
+      end
+
+      %w[sud oud aud ivdu thc dui uds].each do |abbreviation|
+        test "the abbreviation #{abbreviation.inspect} matches in lower case" do
+          assert_equal :suspected, SudContentSuspicion.classify("hx #{abbreviation} noted")
+        end
+      end
+
+      # Guards against the new terms over-matching.
+      GAP_NOT_SUSPECTED = [
+        "Reviewed methodology of the worksheet",
+        "Discussed sleep hygiene and work stress; PHQ-9 reviewed.",
+        "Dx F32.1 noted", "F20.0", "F3210", "Z71.3 dietary counselling",
+        "Mattress shopping", "Client is a teacher (AAA member)"
+      ].freeze
+
+      GAP_NOT_SUSPECTED.each do |text|
+        test "the guard text #{text.inspect} is not suspected" do
+          assert_equal :not_suspected, SudContentSuspicion.classify(text)
+        end
       end
 
       # --- clean text: :not_suspected ---

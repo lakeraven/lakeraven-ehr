@@ -103,6 +103,56 @@ module Lakeraven
         assert_equal DFN.to_s, note_labels.first.patient_dfn
       end
 
+      # Blank text is absence of data, not evidence the note is clean.
+      test "blank text is labelled and still written" do
+        gateway = FakeNoteGateway.new
+
+        result = service(gateway).create(title_ien: TITLE_IEN, text: "")
+
+        assert result.success?
+        assert_equal %i[create update_text], gateway.methods_called
+        assert_equal [ NOTE_IEN, "" ], gateway.calls[1][:args]
+        assert_equal :labelled, result.part2_label
+        assert_equal 1, note_labels.count
+        assert_equal "42CFRPart2", note_labels.first.security_code
+      end
+
+      # Text that cannot be read must not stop the note or escape as an
+      # exception: it is labelled and written exactly as given.
+      test "text with an invalid byte sequence is labelled and still written" do
+        gateway = FakeNoteGateway.new
+        text = "Pt seen today, caf\xE9".dup.force_encoding("UTF-8")
+        refute text.valid_encoding?
+        result = nil
+
+        assert_nothing_raised do
+          result = service(gateway).create(title_ien: TITLE_IEN, text: text)
+        end
+
+        assert result.success?
+        assert_equal %i[create update_text], gateway.methods_called
+        assert_equal NOTE_IEN, gateway.calls[1][:args][0]
+        assert_same text, gateway.calls[1][:args][1]
+        assert_equal :labelled, result.part2_label
+        assert_equal 1, note_labels.count
+      end
+
+      test "text in a non-ASCII-compatible encoding is labelled and still written" do
+        gateway = FakeNoteGateway.new
+        text = "sleep hygiene".encode("UTF-16LE")
+        result = nil
+
+        assert_nothing_raised do
+          result = service(gateway).create(title_ien: TITLE_IEN, text: text)
+        end
+
+        assert result.success?
+        assert_equal %i[create update_text], gateway.methods_called
+        assert_same text, gateway.calls[1][:args][1]
+        assert_equal :labelled, result.part2_label
+        assert_equal 1, note_labels.count
+      end
+
       test "a string dfn is stored as given" do
         result = service(FakeNoteGateway.new, dfn: "9001").create(title_ien: TITLE_IEN, text: SUD_TEXT)
 

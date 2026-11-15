@@ -78,6 +78,37 @@ module Lakeraven
         assert_equal true, Part2Posture.part2?(**RECORD, content: { text: CLEAN })
       end
 
+      # Blank content is absence of data, not evidence the record is clean.
+      test "unlabelled empty content is Part 2" do
+        assert_equal 0, Part2Label.count
+        assert_equal true, Part2Posture.part2?(**RECORD, content: "")
+      end
+
+      test "unlabelled whitespace-only content is Part 2" do
+        assert_equal 0, Part2Label.count
+        assert_equal true, Part2Posture.part2?(**RECORD, content: " \n")
+      end
+
+      # Content that cannot be read is Part 2, and reading it does not raise.
+      test "unlabelled content with an invalid byte sequence is Part 2 and does not raise" do
+        content = "Pt seen today, caf\xE9".dup.force_encoding("UTF-8")
+        refute content.valid_encoding?
+        assert_equal 0, Part2Label.count
+
+        result = nil
+        assert_nothing_raised { result = Part2Posture.part2?(**RECORD, content: content) }
+        assert_equal true, result
+      end
+
+      test "unlabelled content in a non-ASCII-compatible encoding is Part 2 and does not raise" do
+        content = "sleep hygiene".encode("UTF-16LE")
+        assert_equal 0, Part2Label.count
+
+        result = nil
+        assert_nothing_raised { result = Part2Posture.part2?(**RECORD, content: content) }
+        assert_equal true, result
+      end
+
       test "unlabelled clean content is not Part 2 - the only false case" do
         assert_equal 0, Part2Label.count
         assert_equal false, Part2Posture.part2?(**RECORD, content: CLEAN)
@@ -94,6 +125,22 @@ module Lakeraven
         Part2Label.mark!(patient_dfn: "9001", record_type: "tiu_note", record_id: "70001")
 
         assert_equal true, Part2Posture.part2?(record_type: "tiu_note", record_id: 70001, content: CLEAN)
+      end
+
+      # --- the lookup normalises ids the same way the write does ---
+      # Surrounding whitespace is stripped from record_type and record_id,
+      # and record_type is case-insensitive (stored lower-case).
+
+      { "a leading space in record_id" => { record_type: "tiu_note", record_id: " 70003" },
+        "a trailing newline in record_id" => { record_type: "tiu_note", record_id: "70003\n" },
+        "an upper-case record_type" => { record_type: "TIU_NOTE", record_id: "70003" },
+        "a trailing space in record_type" => { record_type: "tiu_note ", record_id: "70003" } }.each do |name, record|
+        test "#{name} still finds the label" do
+          Part2Label.mark!(patient_dfn: "9001", record_type: "tiu_note", record_id: "70003")
+          assert_equal 1, Part2Label.where(record_type: "tiu_note", record_id: "70003").count
+
+          assert_equal true, Part2Posture.part2?(**record, content: CLEAN)
+        end
       end
 
       # --- the record cannot be looked up: fail closed ---
