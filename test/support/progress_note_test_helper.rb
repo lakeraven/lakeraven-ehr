@@ -136,6 +136,23 @@ module ProgressNoteTestHelper
     with_fake_tiu(fake) { post path, params: params }
   end
 
+  # The audit probe (the request's first AuditEvent.create!) succeeds; every
+  # later insert raises. This is the audit log failing after TIU was written.
+  def with_audit_failing_after_probe
+    calls = 0
+    audit_model = Lakeraven::EHR::AuditEvent
+    original = audit_model.method(:create!)
+    audit_model.define_singleton_method(:create!) do |*args, **kwargs|
+      calls += 1
+      raise ActiveRecord::StatementInvalid, "audit down" if calls > 1
+
+      original.call(*args, **kwargs)
+    end
+    yield
+  ensure
+    audit_model.singleton_class.send(:remove_method, :create!)
+  end
+
   # The title is read from ENV when the configuration is built, so each
   # setting builds a new configuration. restore_progress_note_title! puts
   # both back.
@@ -193,5 +210,21 @@ module ProgressNoteTestHelper
 
       @client.public_send(name, *args, **kwargs, &block)
     end
+  end
+
+  # Rails.logger and the controllers' own logger, which is where the request
+  # parameters are written.
+  def capture_request_logs
+    io = StringIO.new
+    logger = ActiveSupport::Logger.new(io)
+    rails_was = Rails.logger
+    controller_was = ActionController::Base.logger
+    Rails.logger = logger
+    ActionController::Base.logger = logger
+    yield
+    io.string
+  ensure
+    Rails.logger = rails_was
+    ActionController::Base.logger = controller_was
   end
 end

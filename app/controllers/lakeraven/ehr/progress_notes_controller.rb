@@ -39,15 +39,19 @@ module Lakeraven
     #
     # A TIU write is an RPC. It cannot join the audit transaction, so the
     # action proves the audit log takes a row before any RPC (AuditLogProbe).
-    # A broker or connection error from the signature check, before any
-    # write, means the code could not be checked and nothing was saved. Once
-    # a write was sent, anything that raises leaves the outcome unknown: the
-    # page says to check the chart, and never shows the raised message, which
-    # can carry broker text. A missing RPMS connection after the note was
-    # created is an unknown outcome as well; before any write it ends the
-    # session (RpmsUserScope). An empty reply to note creation, to its text
-    # write or to signing is an unknown outcome too: only a reply that says
-    # something is a refusal. The signature code is never rendered back.
+    # If the request's own audit row then fails, the page says what is in
+    # RPMS and that it must not be entered again; the claim was committed on
+    # its own, so the form still cannot be replayed. A broker or connection
+    # error from the signature check, before any write, means the code could
+    # not be checked and nothing was saved. Once a write was sent, anything
+    # that raises leaves the outcome unknown: the page says to check the
+    # chart, and never shows the raised message, which can carry broker
+    # text. A missing RPMS connection after the note was created is an
+    # unknown outcome as well; before any write it ends the session
+    # (RpmsUserScope). An empty reply to note creation, to its text write or
+    # to signing is an unknown outcome too: only a reply that says something
+    # is a refusal. The signature code is never rendered back, logged or
+    # audited.
     class ProgressNotesController < WebController
       include BrowserSmartAuthentication
       include ClinicianPatientContext
@@ -64,6 +68,33 @@ module Lakeraven
       FORM_TOKEN_SESSION_KEY = :progress_note_form_tokens
       FORM_TOKEN_FIELD = "note_form_token"
       FORM_TOKEN_LIMIT = 5
+      # What the audit row says happened to the note. Never the code or the
+      # text.
+      NOTE_OUTCOME_NOTES = {
+        signed: "progress note signed",
+        unsigned: "progress note saved unsigned",
+        sign_not_permitted: "progress note saved unsigned: TIU did not confirm this user may sign it",
+        text_not_written: "progress note text not written",
+        not_created: "progress note not created",
+        code_not_accepted: "signature code not accepted or not confirmed by RPMS; nothing written",
+        code_unchecked: "signature code check failed",
+        unknown: "progress note outcome unknown",
+        form_token_refused: "progress note form already submitted or expired",
+        connection_not_author: "progress note refused: the RPMS connection is not signed on as the author; " \
+                               "nothing written",
+        no_open_visit: "no open visit found; nothing written",
+        visits_unread: "patient visits could not be read; nothing written"
+      }.freeze
+      # Refusals that end in a 5xx page although nothing was written: the
+      # chart did not change, so the audit row is not a serious failure.
+      NOTHING_WRITTEN_OUTCOMES = %i[visits_unread].freeze
+      # What is in RPMS for each outcome, when the audit row fails after it:
+      # :written and :empty (a note without its text) are certain, :maybe is
+      # possible.
+      WRITE_OUTCOMES = {
+        signed: :written, unsigned: :written, sign_not_permitted: :written,
+        text_not_written: :empty, unknown: :maybe
+      }.freeze
 
       rate_limit only: %i[new create]
 
@@ -190,12 +221,94 @@ module Lakeraven
         render :new, status: :conflict
       end
 
+      # -- Audit failure after an RPC --------------------------------------
+
+      # The shared refusal is right when nothing was sent to TIU. A note
+      # that is in RPMS must not be entered again; one that may be there has
+      # to be looked for in the chart first.
+      def render_unrecorded_access_denial
+        case unaudited_write_outcome
+        when :written
+          log_unaudited_note("recorded in RPMS")
+          render plain: unaudited_written_message, status: :service_unavailable
+        when :empty
+          log_unaudited_note("created without its text")
+          render plain: unaudited_empty_message, status: :service_unavailable
+        when :maybe
+          log_unaudited_note("outcome unknown")
+          render plain: unaudited_maybe_message, status: :service_unavailable
+        else
+          super
+        end
+      end
+
+      # Nothing reached TIU unless a write was sent.
+      def unaudited_write_outcome
+        WRITE_OUTCOMES[@note_outcome] if @note_service&.write_sent?
+      end
+
+      # Remember the class, then let the concern refuse the access. The
+      # message is not logged: it can carry database or broker text.
+      def record_audit_event!(detached: false)
+        super(detached: detached)
+      rescue StandardError => error
+        @note_audit_error = error
+        raise
+      end
+
+      def log_unaudited_note(what)
+        Rails.logger.error(
+          "ERROR [progress_note] #{what}; this access could not be audited: #{@note_audit_error&.class}"
+        )
+      end
+
+      def unaudited_written_message
+        state = @note_outcome == :signed ? "signed and saved" : "saved unsigned"
+        "Service Unavailable: This progress note was #{state} in RPMS, but this access could not be audited. " \
+          "It must not be entered again. Check the chart."
+      end
+
+      # The note exists: TIU answered its IEN before the text was refused.
+      def unaudited_empty_message
+        "Service Unavailable: A progress note was created on this visit without its text. " \
+          "It was started in RPMS and is unsigned and empty, but this access could not be audited. " \
+          "Check the chart before writing it again: a note written now may duplicate it."
+      end
+
+      def unaudited_maybe_message
+        "Service Unavailable: This progress note may have been saved or signed in RPMS. " \
+          "The outcome is unknown, and this access could not be audited. " \
+          "Check the chart before writing it again."
+      end
+
       # -- Audit ------------------------------------------------------------
 
       def fhir_resource_type = "Patient"
 
       def direct_audit_identifier
         Patient.canonical_dfn(route_param(:dfn)) || route_param(:dfn) || super
+      end
+
+      # An unknown outcome is a serious failure: the chart may have changed.
+      # A refusal before any write is not, whatever the page's status.
+      def audit_outcome
+        return "8" if @note_outcome == :unknown
+        return "4" if NOTHING_WRITTEN_OUTCOMES.include?(@note_outcome)
+
+        super
+      end
+
+      def audit_outcome_desc
+        [ super, NOTE_OUTCOME_NOTES[@note_outcome], filed_note_description ].compact.join("; ").presence
+      end
+
+      # The note and the visit a TIU write was sent for, by IEN only.
+      def filed_note_description
+        return unless @note_service&.write_sent?
+
+        note = canonical_ien(@note_service.created_note_ien)
+        visit = canonical_ien(@visit && @visit[:visit_ien])
+        [ ("note #{note}" if note), ("on visit #{visit}" if visit) ].compact.join(" ").presence
       end
 
       # -- The RPMS connection's user ---------------------------------------
