@@ -18,7 +18,7 @@ module Lakeraven
 
         # GET /scheduling/clinics/:resource_id/walk_ins/new
         def new
-          @walk_in = build(at: Time.now.strftime("%Y-%m-%dT%H:%M"))
+          @walk_in = build(at: SiteTime.now.strftime("%Y-%m-%dT%H:%M"))
           load_lists
         end
 
@@ -47,7 +47,7 @@ module Lakeraven
             flash[:notice] = "Walk-in booked and checked in at #{@walk_in.time.strftime('%H:%M')}."
             flash[:alert] = result.message if result.message
             flash[:booked_id] = result.appointment_id
-            redirect_to scheduling_clinic_path(@resource[:id], date: Date.today.iso8601)
+            redirect_to scheduling_clinic_path(@resource[:id], date: SiteTime.today.iso8601)
           else
             flash.now[:alert] = alert_for(result)
             render :new, status: status_for(result)
