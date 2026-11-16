@@ -531,6 +531,65 @@ module Lakeraven
         assert_equal 0, AuditEvent.count
       end
 
+      # -- POST create: failures once TIU is reached ----------------------------
+
+      test "POST says the note was not saved when TIU refuses to create it, and does not sign" do
+        sign_in_provider!
+        @tiu = FakeTiu.new(visits_by_dfn: default_visits, create: { success: false, ien: nil, raw: "0^refused" })
+
+        post_note
+
+        assert_response :unprocessable_entity
+        assert_match(/not saved/i, response.body)
+        assert_equal 1, @tiu.calls_to(:create).size
+        assert_empty @tiu.calls_to(:update_text)
+        assert_empty @tiu.calls_to(:add)
+        assert_includes css_select("textarea[name='note_text']").text, SYNTHETIC_NOTE_TEXT
+        refute_includes response.body, SYNTHETIC_SIGNATURE_CODE
+      end
+
+      # Review round 2: the note was created (TIU answered its IEN) before the
+      # text was refused, so it exists in RPMS, unsigned and empty. The page
+      # says so, as a fact, and no longer says "The note was not saved".
+      test "POST says a note was created without its text when its text cannot be written, and does not sign" do
+        sign_in_provider!
+        @tiu = FakeTiu.new(visits_by_dfn: default_visits, update_text: { success: false, raw: "0" })
+
+        post_note
+
+        assert_response :unprocessable_entity
+        refute_match(/not saved/i, response.body)
+        assert_match(/note was created on this visit/i, response.body)
+        assert_match(/without its text/i, response.body)
+        assert_match(/RPMS/, response.body)
+        assert_match(/unsigned/i, response.body)
+        assert_match(/empty/i, response.body)
+        assert_match(/check the chart before writing it again/i, response.body)
+        refute_match(/may (or may not )?have been (started|created|saved)/i, response.body,
+                     "the note exists: said as a fact, not a possibility")
+        assert_select "textarea[name=?]", "note_text", count: 0
+        assert_equal 1, @tiu.calls_to(:update_text).size
+        assert_empty @tiu.calls_to(:add)
+        refute_includes response.body, SYNTHETIC_SIGNATURE_CODE
+      end
+
+      test "POST says the note is saved unsigned and must be signed when signing fails" do
+        sign_in_provider!
+        @tiu = FakeTiu.new(visits_by_dfn: default_visits, add: { success: false, raw: "89250005^refused" })
+
+        post_note
+
+        assert_response :unprocessable_entity
+        assert_equal %i[create update_text add], @tiu.tiu_calls.map(&:first)
+        assert_match(/unsigned/i, response.body)
+        assert_match(/saved/i, response.body)
+        assert_match(/must be signed|needs to be signed|sign it/i, response.body)
+        refute_match(/not saved|nothing was saved|was not created/i, response.body)
+        refute_match(/note (was |has been )?signed\b/i, response.body)
+        assert_nil flash[:notice]
+        refute_includes response.body, SYNTHETIC_SIGNATURE_CODE
+      end
+
       # -- POST create: a gateway raising ---------------------------------------
 
       # Review round 2: the signature check raising is no longer in this table.
@@ -558,6 +617,44 @@ module Lakeraven
         end
       end
 
+      # -- A broker error before any write is not an unknown write (round 2) ----
+
+      {
+        "a broker error" => -> { RpmsRpc::Error.new(SYNTHETIC_BROKER_MESSAGE) },
+        "an IOError" => -> { IOError.new(SYNTHETIC_BROKER_MESSAGE) },
+        "a connection error" => -> { Errno::ECONNRESET.new(SYNTHETIC_BROKER_MESSAGE) }
+      }.each do |label, error|
+        test "POST says the signature code could not be checked and nothing was saved when the signature check raises #{label}" do
+          sign_in_provider!
+          @tiu = FakeTiu.new(visits_by_dfn: default_visits, raises: { validate: error.call })
+          form_token = fetch_form_token
+          AuditEvent.delete_all
+
+          post_note(form_token: form_token)
+
+          refute_equal 500, response.status
+          refute_equal 404, response.status
+          refute response.redirect?, "a code that was not checked is not reported as a signed note"
+          refute_includes response.body, SYNTHETIC_BROKER_MESSAGE
+          refute_includes response.body, SYNTHETIC_SIGNATURE_CODE
+          assert_includes @tiu.names, :validate
+
+          assert_includes [ 503, 422 ], response.status
+          assert_match(/signature code could not be checked/i, response.body)
+          assert_match(/nothing was saved/i, response.body)
+          refute_match(/may or may not/i, response.body)
+          refute_match(/outcome unknown/i, response.body)
+          assert_empty @tiu.tiu_calls, "nothing is sent to TIU"
+          assert_nil flash[:notice]
+
+          rows = patient_audit_rows
+          assert_operator rows.count, :>, 0, "the refusal is audited"
+          refute_includes rows.pluck(:outcome), "8", "not a serious failure: the chart did not change"
+          rows.pluck(:outcome_desc).compact.each { |text| refute_match(/outcome unknown/i, text) }
+          refute_includes AuditEvent.all.map { |event| event.attributes.to_s }.join, SYNTHETIC_BROKER_MESSAGE
+        end
+      end
+
       # -- 3. A session with no RPMS connection of its own ----------------------
 
       def assert_session_ended_and_sent_to_sign_in!
@@ -575,6 +672,113 @@ module Lakeraven
         get_new(tiu)
 
         assert_session_ended_and_sent_to_sign_in!
+      end
+
+      test "POST ends the session and sends the browser to sign in when the visit read has no RPMS connection" do
+        sign_in_provider!
+        @tiu = FakeTiu.new(visits_by_dfn: default_visits, raises: { visits: RpmsRpc::NotConfiguredError.new("no client") })
+
+        post_note
+
+        assert_empty @tiu.write_side_calls
+        assert_session_ended_and_sent_to_sign_in!
+      end
+
+      test "POST ends the session and sends the browser to sign in when the signature check has no RPMS connection" do
+        sign_in_provider!
+        @tiu = FakeTiu.new(visits_by_dfn: default_visits,
+                           raises: { validate: RpmsRpc::NotConfiguredError.new("no client") })
+
+        post_note
+
+        assert_empty @tiu.tiu_calls, "no TIU write is attempted"
+        assert_session_ended_and_sent_to_sign_in!
+      end
+
+      # -- 4. An empty reply is not a definite outcome --------------------------
+
+      test "POST says the outcome is unknown when note creation answers nothing, and not saved only when RPMS refuses it" do
+        sign_in_provider!
+        refused = FakeTiu.new(visits_by_dfn: default_visits,
+                              create: { success: false, ien: 0, raw: "0^title is inactive" })
+
+        post_note(tiu: refused)
+
+        assert_response :unprocessable_entity
+        assert_match(/not saved/i, response.body)
+        refute_includes response.body, "title is inactive"
+        assert_note_form_shown!
+
+        empty = FakeTiu.new(visits_by_dfn: default_visits, create: { success: false, ien: nil, raw: nil })
+        form_token = fetch_form_token
+        AuditEvent.delete_all
+
+        post_note(tiu: empty, form_token: form_token)
+
+        assert_equal 1, empty.calls_to(:create).size
+        assert_empty empty.calls_to(:update_text)
+        assert_empty empty.calls_to(:add)
+        assert_outcome_unknown_page!
+        refute_match(/did not create/i, response.body)
+        assert_includes patient_audit_rows.pluck(:outcome), "8"
+      end
+
+      test "POST says the outcome is unknown when signing answers nothing, and saved unsigned only when RPMS refuses it" do
+        sign_in_provider!
+        refused = FakeTiu.new(visits_by_dfn: default_visits, add: { success: false, raw: "89250005^refused" })
+
+        post_note(tiu: refused)
+
+        assert_response :unprocessable_entity
+        assert_match(/saved unsigned/i, response.body)
+        refute_includes response.body, "89250005"
+
+        empty = FakeTiu.new(visits_by_dfn: default_visits, add: { success: false, raw: nil })
+        form_token = fetch_form_token
+        AuditEvent.delete_all
+
+        post_note(tiu: empty, form_token: form_token)
+
+        assert_equal 1, empty.calls_to(:add).size
+        assert_outcome_unknown_page!
+        refute_match(/is saved unsigned/i, response.body)
+        assert_includes patient_audit_rows.pluck(:outcome), "8"
+      end
+
+      # -- 5. TIU says which signing action the author holds --------------------
+
+      test "POST asks TIU which signing action the author holds on the note, after its text and before signing" do
+        sign_in_provider!
+
+        post_note
+
+        assert_redirected_to CHART
+        assert_equal %i[validate create update_text which_action add], @tiu.write_side_calls.map(&:first)
+        asked = @tiu.calls_to(:which_action)
+        assert_equal 1, asked.size
+        assert_equal [ NOTE_IEN.to_s, DUZ ], asked.first[1].map(&:to_s)
+      end
+
+      { "cosign" => :cosign, "nothing" => nil, "an action that is not sign" => :addend }.each do |label, answer|
+        test "POST does not sign, and says RPMS did not confirm this user may sign the note, when TIU answers #{label}" do
+          sign_in_provider!
+          @tiu = FakeTiu.new(visits_by_dfn: default_visits, which_action: answer)
+
+          post_note
+
+          assert_equal 1, @tiu.calls_to(:which_action).size
+          assert_empty @tiu.calls_to(:add), "the code is not sent to sign a note this user may not sign"
+          assert_response :unprocessable_entity
+          assert_match(/saved unsigned/i, response.body)
+          assert_match(/visit/i, response.body)
+          # Review round 3: no answer is also what an empty broker reply reads as.
+          assert_match(/RPMS did not confirm that you may sign it/i, response.body)
+          refute_match(/RPMS does not (let|allow)/i, response.body)
+          refute_match(/not saved|nothing was saved|was not created/i, response.body)
+          assert_select "textarea[name=?]", "note_text", count: 0
+          assert_nil flash[:notice]
+          refute_includes response.body, SYNTHETIC_SIGNATURE_CODE
+        end
       end
 
       # -- 6. One submission per form -------------------------------------------
@@ -923,6 +1127,61 @@ module Lakeraven
 
         assert_response :ok
         assert_note_form_shown!
+      end
+
+      # -- 11. An empty reply to the text write is an unknown outcome ------------
+
+      def assert_created_without_text_page!
+        assert_response :unprocessable_entity
+        assert_match(/note was created on this visit/i, response.body)
+        assert_match(/without its text/i, response.body)
+        assert_match(/unsigned/i, response.body)
+        assert_match(/check the chart before writing it again/i, response.body)
+        assert_select "textarea[name=?]", "note_text", count: 0
+      end
+
+      test "POST says the outcome is unknown when the text write answers nothing, and created without its text only when it was refused" do
+        sign_in_provider!
+        refused = FakeTiu.new(visits_by_dfn: default_visits,
+                              update_text: { success: false, raw: "0^0^0^refused" })
+
+        post_note(tiu: refused)
+
+        assert_created_without_text_page!
+        assert_empty refused.calls_to(:add)
+
+        never_sent = FakeTiu.new(visits_by_dfn: default_visits,
+                                 update_text: { success: false, raw: nil, error: "note text is not valid UTF-8" })
+
+        post_note(tiu: never_sent)
+
+        assert_created_without_text_page!
+        assert_empty never_sent.calls_to(:add)
+
+        empty = FakeTiu.new(visits_by_dfn: default_visits, update_text: { success: false, raw: nil })
+        form_token = fetch_form_token
+        AuditEvent.delete_all
+
+        post_note(tiu: empty, form_token: form_token)
+
+        assert_equal 1, empty.calls_to(:update_text).size
+        assert_empty empty.calls_to(:which_action)
+        assert_empty empty.calls_to(:add), "a note whose text may not be there is not signed"
+        assert_outcome_unknown_page!
+        refute_match(/unsigned and empty/i, response.body)
+        refute_match(/without its text/i, response.body)
+        assert_includes patient_audit_rows.pluck(:outcome), "8"
+      end
+
+      test "POST says the outcome is unknown when the text write answers a blank reply" do
+        sign_in_provider!
+        @tiu = FakeTiu.new(visits_by_dfn: default_visits, update_text: { success: false, raw: "  " })
+
+        post_note
+
+        assert_empty @tiu.calls_to(:add)
+        assert_outcome_unknown_page!
+        refute_match(/without its text/i, response.body)
       end
     end
   end

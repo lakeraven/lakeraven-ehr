@@ -39,9 +39,15 @@ module Lakeraven
     #
     # A TIU write is an RPC. It cannot join the audit transaction, so the
     # action proves the audit log takes a row before any RPC (AuditLogProbe).
-    # Anything raised while the note is filed leaves the outcome unknown: the
+    # A broker or connection error from the signature check, before any
+    # write, means the code could not be checked and nothing was saved. Once
+    # a write was sent, anything that raises leaves the outcome unknown: the
     # page says to check the chart, and never shows the raised message, which
-    # can carry broker text. The signature code is never rendered back.
+    # can carry broker text. A missing RPMS connection after the note was
+    # created is an unknown outcome as well; before any write it ends the
+    # session (RpmsUserScope). An empty reply to note creation, to its text
+    # write or to signing is an unknown outcome too: only a reply that says
+    # something is a refusal. The signature code is never rendered back.
     class ProgressNotesController < WebController
       include BrowserSmartAuthentication
       include ClinicianPatientContext
@@ -285,19 +291,38 @@ module Lakeraven
       def file_note(signature_code)
         result = run_note_sequence(signature_code)
         return render_outcome_unknown if result.nil?
+        return render_signature_unchecked if result == :signature_check_raised
 
         result.success? ? note_signed : render_note_failure(result)
       end
 
       # The e-signature check and the TIU sequence; nil when the outcome is
-      # unknown: anything raised leaves the chart unknown. Class only in the
-      # log line.
+      # unknown; :signature_check_raised when the check raised a broker or
+      # connection error before any write (nothing was saved). Anything else
+      # raised before a write is a fault and goes on. Once a write was sent,
+      # anything raised (NotImplementedError too) leaves the chart unknown.
+      # A missing RPMS connection goes on to RpmsUserScope until the note is
+      # created; after that, the note is in RPMS and its outcome is unknown.
+      # Class only in the log line.
       def run_note_sequence(signature_code)
         @note_service = ProgressNoteService.new(
           dfn: @dfn, visit_ien: canonical_ien(@visit[:visit_ien]), author_duz: current_duz
         )
         @note_service.create_and_sign(title_ien: note_title_ien, text: @note_text, signature_code: signature_code)
+      rescue ::RpmsRpc::NotConfiguredError => error
+        raise if @note_service&.created_note_ien.nil?
+
+        Rails.logger.error("[progress_note] no RPMS connection after the note was created; outcome unknown: " \
+                           "#{error.class}")
+        nil
       rescue StandardError, NotImplementedError => error
+        unless @note_service&.write_sent?
+          raise unless UNKNOWN_OUTCOME_ERRORS.any? { |known| error.is_a?(known) }
+
+          Rails.logger.error("[progress_note] signature check raised #{error.class}; nothing written")
+          return :signature_check_raised
+        end
+
         Rails.logger.error("[progress_note] create outcome unknown: #{error.class}")
         nil
       end
@@ -307,13 +332,29 @@ module Lakeraven
         redirect_to patient_chart_path(@dfn), notice: "Progress note signed."
       end
 
-      # A refusal of the signature code says so. Any other failure is
-      # reported as an unknown outcome until each step's page says what RPMS
-      # established.
       def render_note_failure(result)
-        return render_signature_refusal(result) if result.stage == :signature_check
+        return render_outcome_unknown if empty_reply?(result)
 
-        render_outcome_unknown
+        case result.stage
+        when :signature_check then render_signature_refusal(result)
+        when :create then render_not_created
+        when :text then render_text_not_written
+        when :sign_action then render_sign_not_permitted
+        else render_saved_unsigned
+        end
+      end
+
+      # A note creation, text write or signing that RPMS answered with
+      # nothing: it is not a refusal, so the outcome is unknown. A text write
+      # refused before it was sent says why (:error), and is a refusal.
+      def empty_reply?(result)
+        return false unless result.error == :gateway_error && %i[create text sign].include?(result.stage)
+
+        reply = result.raw
+        return true unless reply.is_a?(Hash)
+        return false if result.stage == :text && reply[:error].present?
+
+        reply[:raw].to_s.strip.empty?
       end
 
       def render_signature_refusal(result)
@@ -324,11 +365,42 @@ module Lakeraven
                             "Nothing was saved.")
       end
 
-      # RPMS gave no answer to the check, before anything was written: a
-      # refusal, not an unknown outcome.
+      # RPMS gave no answer to the check (or raised), before anything was
+      # written: a refusal, not an unknown outcome.
       def render_signature_unchecked
         @note_outcome = :code_unchecked
         render_note_refused("The electronic signature code could not be checked. Nothing was saved.")
+      end
+
+      def render_not_created
+        @note_outcome = :not_created
+        render_note_refused("The note was not saved. RPMS did not create it.")
+      end
+
+      # TIU created the note (it answered its IEN), then refused its text:
+      # the note exists, unsigned and empty. The form is not offered again:
+      # the chart has to be checked first.
+      def render_text_not_written
+        @note_outcome = :text_not_written
+        @closing_message = "A note was created on this visit without its text. It is in RPMS, unsigned and empty. " \
+                           "Check the chart before writing it again."
+        render :new, status: :unprocessable_entity
+      end
+
+      def render_saved_unsigned
+        @note_outcome = :unsigned
+        @closing_message = "The note is saved unsigned on this visit. It must be signed."
+        render :new, status: :unprocessable_entity
+      end
+
+      # TIU did not answer "sign" as the author's action on the note (it
+      # answered a cosignature, another action, or nothing, which is also
+      # what an empty reply reads as), so the code was not sent.
+      def render_sign_not_permitted
+        @note_outcome = :sign_not_permitted
+        @closing_message = "The note is saved unsigned on this visit. RPMS did not confirm that you may sign it, " \
+                           "so it was not signed. Check the chart for who must sign it."
+        render :new, status: :unprocessable_entity
       end
 
       def render_outcome_unknown
