@@ -28,7 +28,7 @@
               <% unless provider[:default] %>
                 <%= button_to "Set as default", scheduling_default_clinic_provider_path(@resource[:id], provider[:id]), method: :post %>
               <% end %>
-              <%= button_to scheduling_clinic_provider_path(@resource[:id], provider[:id]), method: :delete do %>
+              <%= form_with url: scheduling_clinic_provider_path(@resource[:id], provider[:id]), method: :delete, local: true do %>
                 <label>
                   <%= check_box_tag :confirm_removal, "1", false, required: true, id: "confirm-removal-#{provider[:id]}" %>
                   Confirm removal of <%= provider[:name] %>

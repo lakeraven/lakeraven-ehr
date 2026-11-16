@@ -48,7 +48,7 @@ class SchedulingClinicProvidersTest < ActionDispatch::IntegrationTest
         }
       }
     }
-    stubs.each { |klass, methods| methods.each_key { |m| klass.alias_method( :"__#{m}", m) } }
+    stubs.each { |klass, methods| methods.each_key { |m| klass.alias_method(:"__#{m}", m) } }
     stubs.each { |klass, methods| methods.each { |m, body| klass.define_method(m, &body) } }
     yield
   ensure
