@@ -33,8 +33,8 @@ module Lakeraven
         return if at.blank?
         return errors.add(:at, "is not a time") unless time
 
-        errors.add(:at, "must be today: a walk-in is for a patient at the window") unless time.to_date == Date.today
-        errors.add(:at, "cannot be in the future") if time > Time.now
+        errors.add(:at, "must be today: a walk-in is for a patient at the window") unless time.to_date == SiteTime.today
+        errors.add(:at, "cannot be in the future") if time > SiteTime.now
       end
     end
   end

@@ -19,7 +19,7 @@
         id: "previous-week",
         class: "button-secondary no-underline" %>
   <%= link_to "This week",
-        scheduling_clinic_week_path(@resource[:id], date: Date.today.iso8601),
+        scheduling_clinic_week_path(@resource[:id], date: Lakeraven::EHR::SiteTime.today.iso8601),
         id: "this-week",
         class: "button-secondary no-underline" %>
   <%= link_to "Next week",
@@ -44,7 +44,7 @@
 
 <p class="flex flex-wrap gap-4">
   <%= link_to "Find an open time",
-        scheduling_clinic_open_times_path(@resource[:id], from: [ week.monday, Date.today ].max.iso8601),
+        scheduling_clinic_open_times_path(@resource[:id], from: [ week.monday, Lakeraven::EHR::SiteTime.today ].max.iso8601),
         id: "find-open-time" %>
   <% if can_set_hours?(@resource) %>
     <%= link_to "Set the clinic's hours",
@@ -79,7 +79,7 @@
           <th
             scope="col"
             data-date="<%= date.iso8601 %>"
-            class="<%= date == Date.today ? 'bg-blue-50' : '' %>"
+            class="<%= date == Lakeraven::EHR::SiteTime.today ? 'bg-blue-50' : '' %>"
           >
             <%= link_to scheduling_clinic_path(@resource[:id], date: date.iso8601),
                   class: "block" do %>

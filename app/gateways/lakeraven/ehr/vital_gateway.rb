@@ -23,10 +23,12 @@ module Lakeraven
       end
 
       # Bulk save of measurements against an open visit. provider_duz is
-      # required (matches the underlying RPC contract).
+      # required (matches the underlying RPC contract). taken_at is filed as
+      # each measurement's date/time: pass the site's clock (SiteTime.now),
+      # since the gem's default is this process's clock.
       # Delegates to RpmsRpc::Vital.add.
-      def self.add(dfn, visit_string, measurements, provider_duz:)
-        RpmsRpc::Vital.add(dfn, visit_string, measurements, provider_duz: provider_duz)
+      def self.add(dfn, visit_string, measurements, provider_duz:, taken_at: nil)
+        RpmsRpc::Vital.add(dfn, visit_string, measurements, provider_duz: provider_duz, taken_at: taken_at)
       end
     end
   end

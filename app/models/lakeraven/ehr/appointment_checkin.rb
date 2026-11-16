@@ -30,7 +30,7 @@ module Lakeraven
         return errors.add(:at, "is not a time") unless time
 
         errors.add(:at, "must be on the appointment's day") if appointment && time.to_date != appointment[:start_time].to_date
-        errors.add(:at, "cannot be in the future") if time > Time.now
+        errors.add(:at, "cannot be in the future") if time > SiteTime.now
       end
     end
   end

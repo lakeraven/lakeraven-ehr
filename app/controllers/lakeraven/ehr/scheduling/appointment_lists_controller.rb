@@ -29,7 +29,7 @@ module Lakeraven
         private
 
         def range
-          today = Date.today
+          today = SiteTime.today
           case @when
           when "today" then today..today
           when "future" then (today + 1)..(today + REACH_DAYS)

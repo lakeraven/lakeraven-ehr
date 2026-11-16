@@ -20,7 +20,7 @@ module Lakeraven
       # The user's notifications (rpms-ux S-SGN-02.1), linking to their list.
       # Shown to a user who may read the chart, as the list is (#874).
       def show
-        @today = Date.today
+        @today = SiteTime.today
         @clinic_counts = todays_clinic_counts if schedules?
         @needing_action = needing_action_count if schedules?
         @notification_count = notification_count if patient_search_allowed?

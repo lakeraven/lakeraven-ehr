@@ -20,7 +20,7 @@ module Lakeraven
 
         # GET /scheduling/clinics/:resource_id/appointments/:appointment_id/checkout?date=
         def new
-          @checkout = build(at: Time.now.strftime("%Y-%m-%dT%H:%M"))
+          @checkout = build(at: SiteTime.now.strftime("%Y-%m-%dT%H:%M"))
         end
 
         # POST /scheduling/clinics/:resource_id/appointments/:appointment_id/checkout

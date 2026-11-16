@@ -99,7 +99,7 @@ module Lakeraven
         return if dob.nil?
 
         errors.add(:dob, "must be after Dec 31, 1870") if dob < EARLIEST_DOB
-        errors.add(:dob, "cannot be in the future") if dob > SiteDate.today
+        errors.add(:dob, "cannot be in the future") if dob > SiteTime.today
       end
     end
   end
