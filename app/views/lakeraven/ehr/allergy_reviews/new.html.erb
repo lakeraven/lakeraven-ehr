@@ -1,0 +1,47 @@
+<% page_title "Mark allergies reviewed" %>
+
+<%= page_header "Mark allergies reviewed",
+      "Review the allergies in the banner with the patient, then record the review on one of the patient's open visits." %>
+
+<% if @refusal %>
+  <%= alert_box :error, @refusal, id: "allergy-review-refusal" %>
+<% end %>
+
+<% if @open_visits.nil? %>
+  <%= alert_box :error,
+        "The patient's visits could not be read, so nothing can be recorded now. Try again shortly.",
+        id: "allergy-review-visits-unread" %>
+<% elsif @open_visits.empty? %>
+  <%= alert_box :notice,
+        "No open visit was found for this patient. " \
+        "If the patient has been checked in, RPMS may not have answered: try again, or check the chart.",
+        id: "allergy-review-no-open-visit" %>
+<% else %>
+  <%= form_with url: patient_allergy_reviews_path(@dfn),
+        method: :post,
+        class: "entry-form" do |f| %>
+    <fieldset>
+      <legend>Visit</legend>
+      <% @open_visits.each do |visit| %>
+        <% ien = visit[:visit_ien].to_s %>
+        <div>
+          <%= radio_button_tag "visit_ien", ien,
+                @visit_ien == ien || @open_visits.one?,
+                id: "visit_ien_#{ien}",
+                required: true %>
+          <%= label_tag "visit_ien_#{ien}", visit_label(visit) %>
+        </div>
+      <% end %>
+    </fieldset>
+
+    <div class="form-actions">
+      <%= f.submit "Mark reviewed", name: nil, class: "button-primary" %>
+    </div>
+  <% end %>
+<% end %>
+
+<p>
+  <%= link_to "Back to chart",
+        patient_chart_path(@dfn),
+        class: "button-secondary no-underline" %>
+</p>

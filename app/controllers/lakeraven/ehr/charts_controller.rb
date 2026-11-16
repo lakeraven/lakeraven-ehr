@@ -126,6 +126,12 @@ module Lakeraven
       # patients (rpms-ux S-CHT-01.9).
       def patient_search_allowed? = can_read?("Patient")
 
+      # The chart links to the patient's screenings for a credential that may
+      # read them: the check ScreeningsController makes on a read (rpms-ux
+      # S-VIS-09.1).
+      def screenings_allowed? = can_read?(ScreeningsController::SCREENING_RESOURCE)
+      helper_method :screenings_allowed?
+
       # The chart renders in the engine layout, like every other page with a
       # patient open. The layout asks for the banner and for capabilities.
       # The banner is the chart's own (assign_patient_banner), read from the
