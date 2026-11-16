@@ -18,8 +18,8 @@ module Lakeraven
       #   [ { ien:, name:, label: } ]
       # +name+ is the symptom RPMS files (the preferred name when a synonym
       # matched); +label+ is what matched, with the preferred name beside a
-      # synonym. ORWDAL32 SYMPTOMS walks the B index from the entry AFTER its
-      # FROM (ORWDAL32.m SYMPTOMS), so FROM is the text with its last letter
+      # synonym. RpmsRpc::Symptom.search walks the catalog from the entry
+      # AFTER the text it is given (rpms-rpc#259), so that text is this one with its last letter
       # stepped back one, the list-box idiom; the page it returns is cut to
       # the names that start with the text.
       def self.starting_with(text, via: default_provider)

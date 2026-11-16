@@ -4,8 +4,8 @@ require "rpms_rpc/api/allergen"
 
 module Lakeraven
   module EHR
-    # Allergen lookup for allergy entry (#1109). Wraps RpmsRpc::Allergen
-    # (ORWDAL32 ALLERGY MATCH): each match carries the agent and the RPMS
+    # Allergen lookup for allergy entry (#1109). Wraps RpmsRpc::Allergen,
+    # RPMS's allergen search: each match carries the agent and the RPMS
     # pointer RpmsRpc::Allergy.save files, so a clinician never types one.
     class AllergenGateway
       # Matches for +text+, as RpmsRpc::Allergen.search gives them. A reply

@@ -23,7 +23,7 @@
     <legend>What the patient reacts to</legend>
 
     <%# GMRAGNT: the agent and its variable pointer, as RPMS's allergen
-        search (ORWDAL32 ALLERGY MATCH) gives them. %>
+        search (RpmsRpc::Allergen.search) gives them. %>
     <%= lookup_field f,
           :agent_choice,
           legend: "Allergen",
@@ -107,7 +107,7 @@
     <legend>Reaction (optional)</legend>
 
     <%# GMRASYMP(n) = "ien^text^FileMan date": the symptom from the
-        SIGN/SYMPTOMS catalog (ORWDAL32 SYMPTOMS), its date converted on submit. %>
+        SIGN/SYMPTOMS catalog (RpmsRpc::Symptom.search), its date converted on submit. %>
     <%= lookup_field f,
           :symptom_choice,
           legend: "Symptom",
