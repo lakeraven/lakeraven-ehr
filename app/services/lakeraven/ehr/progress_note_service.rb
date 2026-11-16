@@ -7,7 +7,9 @@ module Lakeraven
     # code before any sign action reaches the record — an invalid code
     # never touches the note.
     class ProgressNoteService
-      Result = Struct.new(:success, :note_ien, :error, :raw, keyword_init: true) do
+      # stage names the step a failure happened at: :create (no note) or
+      # :text (a note may exist without its text).
+      Result = Struct.new(:success, :note_ien, :error, :raw, :stage, keyword_init: true) do
         def success? = success
       end
 
@@ -21,18 +23,30 @@ module Lakeraven
         @author_duz = author_duz
         @gateway = gateway
         @esignature_gateway = esignature_gateway
+        @write_sent = false
       end
 
-      def create(title_ien:, text:)
-        return failure(:invalid_input) if @dfn.nil? || @visit_ien.nil?
-        return failure(:missing_title) if title_ien.nil?
+      # The note created by this service, once TIU answered with its IEN.
+      attr_reader :created_note_ien
 
+      # Whether a TIU write (note creation) has been sent. Once it has, a
+      # raised call leaves the chart in an unknown state.
+      def write_sent? = @write_sent
+
+      def create(title_ien:, text:)
+        return failure(:invalid_input, stage: :create) if @dfn.nil? || @visit_ien.nil?
+        return failure(:missing_title, stage: :create) if title_ien.nil?
+
+        @write_sent = true
         created = @gateway.create(@dfn, @visit_ien, title_ien)
-        return failure(:gateway_error, raw: created) unless created.is_a?(Hash) && created[:success]
+        return failure(:gateway_error, raw: created, stage: :create) unless created.is_a?(Hash) && created[:success]
 
         note_ien = created[:ien]
+        @created_note_ien = note_ien
         written = @gateway.update_text(note_ien, text)
-        return failure(:gateway_error, raw: written) unless written.is_a?(Hash) && written[:success]
+        unless written.is_a?(Hash) && written[:success]
+          return failure(:gateway_error, raw: written, stage: :text, note_ien: note_ien)
+        end
 
         Result.new(success: true, note_ien: note_ien, raw: written)
       end
@@ -52,8 +66,8 @@ module Lakeraven
 
       private
 
-      def failure(reason, raw: nil)
-        Result.new(success: false, error: reason, raw: raw)
+      def failure(reason, raw: nil, stage: nil, note_ien: nil)
+        Result.new(success: false, error: reason, raw: raw, stage: stage, note_ien: note_ien)
       end
     end
   end
