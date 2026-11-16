@@ -103,12 +103,12 @@ module Lakeraven
       # the range (SchedulingSetup: the clinic's #44 rules, the holidays, the
       # access types that prevent access), as a function from a date to
       # ClinicDay's closed:, prevented: and opens_hour:. A resource with no
-      # clinic has no rules. Today is the server's local date, as BSDX times are.
+      # clinic has no rules. Today is the site's (SiteTime), as BSDX times are.
       def self.rules_for(resource, from, to, setup:)
         rules = setup.clinic_rules(resource[:hospital_location_id])
         holidays = Array(setup.holidays(start_date: from, end_date: to)).map { |h| h[:date] }
         prevented = Array(setup.access_types).select { |t| t[:prevent_access] }.map { |t| t[:id] }
-        today = Time.now.to_date
+        today = SiteTime.today
         ->(date) { { closed: ClinicDay.closed_on(date, rules: rules, holidays: holidays, today: today), prevented: prevented, opens_hour: rules&.dig(:display_begins) } }
       end
       private_class_method :rules_for
@@ -138,9 +138,9 @@ module Lakeraven
       # (BSDAMR2: no status, or NO ACTION TAKEN). BSDX ALL APPOINTMENTS names the
       # resources with a past appointment not cancelled or a no-show, and only
       # those resources' days are read (BSDX CREATE APPT SCHEDULE), each row
-      # with its resource as :clinic. now is the server's local time, as BSDX
+      # with its resource as :clinic. now is the site's clock (SiteTime), as BSDX
       # times are.
-      def self.needing_action(resources, window, now: Time.now, via: ::RpmsRpc::Scheduling)
+      def self.needing_action(resources, window, now: SiteTime.now, via: ::RpmsRpc::Scheduling)
         booked = Array(via.all_appointments(start_date: window.begin, end_date: window.end))
         names = booked.select { |a| a[:start_time] < now }.to_set { |a| a[:resource_name] }
         resources.select { |r| names.include?(r[:name]) }.flat_map do |resource|
@@ -210,7 +210,7 @@ module Lakeraven
         case clinic_day.closed
         when :beyond_booking
           limit = setup.clinic_rules(resource[:hospital_location_id])&.dig(:max_future_days)
-          last = (Time.now.to_date + limit.to_i).strftime("%b %-d, %Y")
+          last = (SiteTime.today + limit.to_i).strftime("%b %-d, %Y")
           "#{resource[:name]} books at most #{limit} #{limit.to_i == 1 ? "day" : "days"} ahead, through #{last}. #{on} is past that limit."
         when :holiday then "#{on} is a holiday, and #{resource[:name]} does not schedule on holidays."
         when :inactive then "#{resource[:name]} is inactive on #{on}."
