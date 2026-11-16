@@ -47,6 +47,13 @@ module Lakeraven
         orders_release: "ORELSE",  # releases orders (nurse)
         orders_enter: "OREMAS",    # enters orders for signature (clerk, medical assistant)
 
+        # Charting on a visit (VueCentric's BGO components: triage, vitals,
+        # allergies reviewed). Each component asks BGOUTL CHKSEC for these
+        # three and edits only for PROVIDER or BGOZ CAC, never BGOZ VIEW ONLY.
+        provider: "PROVIDER",
+        charting_coordinator: "BGOZ CAC",
+        charting_view_only: "BGOZ VIEW ONLY",
+
         # Referred care (RCIS, BMC)
         referrals_user: "BMCZMENU",
         referrals_supervisor: "BMCZSUPERVISOR",

@@ -126,6 +126,11 @@
     <%= link_to "View as FHIR",
           fhir_url,
           class: "button-secondary no-underline" %>
+    <% if capability?("visit.chart") %>
+      <%= link_to "Record chief complaint",
+            new_patient_chief_complaint_path(@patient.dfn),
+            class: "button-secondary no-underline" %>
+    <% end %>
   </div>
 
   <div class="chart-grid">
