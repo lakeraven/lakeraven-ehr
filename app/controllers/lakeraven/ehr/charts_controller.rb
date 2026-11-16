@@ -245,7 +245,7 @@ module Lakeraven
 
       def render_chart_backend_failure_html
         @patient_banner = PatientBanner.empty
-        render :unavailable, layout: false, status: :service_unavailable
+        render :unavailable, layout: "lakeraven/ehr/application", status: :service_unavailable
       end
 
       # -- Authentication / authorization (fail closed) -------------------------

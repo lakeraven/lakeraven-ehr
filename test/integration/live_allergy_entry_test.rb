@@ -32,42 +32,70 @@ class LiveAllergyEntryTest < ActionDispatch::IntegrationTest
   end
 
   test "S-TRI-04.2 the nurse records an allergy the patient reports, and RPMS holds it in PATIENT ALLERGIES" do
-    agent = unused_agent
     sign_in("PRN123", "PRN123!!")
     open_chart(PATIENT)
     assert_select "a[href='/lakeraven-ehr/patients/#{PATIENT}/allergies/new']", text: "Record an allergy"
     get "/lakeraven-ehr/patients/#{PATIENT}/allergies/new"
     assert_response :ok
+    %w[allergy[agent_pointer] allergy[originated_at] allergy[symptoms][][ien]].each do |name|
+      assert_select "input[name=?]", name, { count: 0 }, "the form asks for no RPMS value (#{name})"
+    end
 
-    now = RpmsRpc::FilemanDateParser.format_datetime(Lakeraven::EHR::SiteTime.now)
+    # Search for the allergen and pick one RPMS offers that the patient has no entry for yet.
+    agent_choice = unused_allergen_choice
+    agent, pointer = agent_choice.split("^", 2).reverse
+    # Search the symptom catalog and pick RASH.
+    get "/lakeraven-ehr/patients/#{PATIENT}/allergies/new", params: { symptom_search: "RAS" }
+    symptom_choice = css_select("input[type=radio][name='allergy[symptom_choice]']").map { |i| i["value"] }.find { |v| v.end_with?("^RASH") }
+    flunk "Find symptom RAS offered no RASH" unless symptom_choice
+
+    # The pickers' values, on the site's clock.
+    entered = Lakeraven::EHR::SiteTime.now - 3600
+    reaction_day = Lakeraven::EHR::SiteTime.today - 2
     post "/lakeraven-ehr/patients/#{PATIENT}/allergies", params: { authenticity_token: csrf, allergy: {
-      agent: agent[:name], agent_pointer: agent[:pointer], type: "D", nature: "A", originated_at: now,
-      observed_or_historical: "h"
+      agent_choice: agent_choice, type: "D", nature: "A", observed_or_historical: "h",
+      originated_on: entered.strftime("%Y-%m-%dT%H:%M"), reaction_on: reaction_day.iso8601,
+      symptom_choice: symptom_choice, symptom_on: reaction_day.iso8601
     } }
     assert_response :redirect, css_select("[role='alert']").map(&:text).join(" ").squish
     follow_redirect!
     assert_match "Allergy recorded.", response.body
 
     LiveRpmsSession.sign_on!
-    row = ciav { RpmsRpc::Allergy.for_patient(PATIENT) }.find { |r| r[:allergen].to_s.casecmp?(agent[:name]) }
-    flunk "ORQQAL LIST for #{PATIENT} lists no #{agent[:name]}" unless row
-    fields = ciav { RpmsRpc::DdrFileman.gets_entry(file: "120.8", iens: "#{row[:ien]},", fields: ".01;.02;5;3.1", flags: "IE") }[:fields]
+    row = ciav { RpmsRpc::Allergy.for_patient(PATIENT) }.find { |r| r[:allergen].to_s.casecmp?(agent) }
+    flunk "ORQQAL LIST for #{PATIENT} lists no #{agent}" unless row
+    fields = ciav { RpmsRpc::DdrFileman.gets_entry(file: "120.8", iens: "#{row[:ien]},", fields: ".01;.02;1;3.1;4;5", flags: "IE") }[:fields]
     warn "[live S-TRI-04.2] #120.8 #{row[:ien]}: #{fields.inspect}"
     assert_equal PATIENT.to_s, fields.dig(".01", :internal), "the patient"
-    assert_equal agent[:name], fields.dig(".02", :external), "the reactant"
+    assert_equal agent, fields.dig(".02", :external), "the reactant, as the search named it"
+    assert_equal pointer, fields.dig("1", :internal), "the allergen's pointer, as the search gave it"
+    assert_equal RpmsRpc::FilemanDateParser.format_datetime(entered), fields.dig("4", :internal).to_s.ljust(12, "0"),
+                 "the entry time picked, on the site's clock"
     assert_equal NURSE_DUZ, fields.dig("5", :internal), "originated by PROFILE,RN"
     assert_equal "D", fields.dig("3.1", :internal), "a drug allergy"
+    reaction = ciav { RpmsRpc::DdrFileman.gets_entry(file: "120.81", iens: "1,#{row[:ien]},", fields: ".01;3", flags: "IE") }
+    warn "[live S-TRI-04.2] #120.81 1,#{row[:ien]}: #{reaction.inspect}"
+    assert_equal symptom_choice.split("^").first, reaction[:fields].dig(".01", :internal), "the symptom picked"
+    assert_equal RpmsRpc::FilemanDateParser.format_date(reaction_day), reaction[:fields].dig("3", :internal).to_s[0, 7],
+                 "the symptom date picked"
   end
 
   private
 
-  # A GMR ALLERGIES (#120.82) agent the patient has no entry for yet.
-  def unused_agent
+  # A match from the form's own allergen search that the patient has no
+  # entry for yet. Searches a few starting texts, through the app.
+  def unused_allergen_choice
     LiveRpmsSession.sign_on!
     on_file = ciav { RpmsRpc::Allergy.for_patient(PATIENT) }.map { |r| r[:allergen].to_s.upcase }
-    entry = ciav { RpmsRpc::DdrFileman.lister(file: "120.82", fields: ".01", flags: "IP", max: "200") }[:entries]
-            .find { |e| e[:pieces].first.to_s.present? && !on_file.include?(e[:pieces].first.to_s.upcase) }
-    flunk "no unused #120.82 agent for #{PATIENT}" unless entry
-    { name: entry[:pieces].first.to_s, pointer: "#{entry[:ien]};GMRD(120.82," }
+    sign_in("PRN123", "PRN123!!")
+    open_chart(PATIENT)
+    %w[AMOXICILLIN AMPICILLIN CEPHALEXIN DOXYCYCLINE ERYTHROMYCIN TETRACYCLINE].each do |text|
+      get "/lakeraven-ehr/patients/#{PATIENT}/allergies/new", params: { allergen_search: text }
+      assert_response :ok
+      choice = css_select("input[type=radio][name='allergy[agent_choice]']").map { |i| i["value"] }
+                 .find { |value| value.include?(";PSNDF(50.6,^") && !on_file.include?(value.split("^", 2).last.upcase) }
+      return choice if choice
+    end
+    flunk "no allergen from the form's search that #{PATIENT} does not already have"
   end
 end
