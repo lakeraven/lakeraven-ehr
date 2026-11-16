@@ -12,12 +12,24 @@ module Lakeraven
     # a title the form does not exist.
     #
     # Each rendered form carries a one-time token. The session lists the
-    # last few tokens it was given, per patient.
+    # last few tokens it was given, per patient, and a POST must bring one of
+    # them. The token is then claimed in the database (NoteFormClaim) before
+    # any RPC, whatever happens next: the session is a cookie the client
+    # holds, so an older copy of it still lists the token, but a claim is
+    # made once, by one request, under any cookie. A token that was not
+    # issued to this session, or was claimed before, is refused with 409.
     #
     # The POST re-reads the patient's visits and files the note only on one
     # of that patient's open visits: a visit RPMS reports as not locked
     # (locked: false). An empty visit list is also what an empty broker reply
     # reads as, so the page says only that no open visit was found.
+    #
+    # TIU and the e-signature check take the author and the signer from the
+    # RPMS connection's own DUZ, never from a parameter. So before the code
+    # is checked or anything is written, the request's connection
+    # (RpmsRpc.client) must report the author's DUZ; a connection signed on
+    # as nobody, as someone else, or that cannot say, is refused (403) and
+    # nothing is sent. The visit read is not gated.
     #
     # The signature code is checked with RPMS before anything is written,
     # so a code RPMS does not accept (or answers false for) creates no note.
@@ -44,6 +56,7 @@ module Lakeraven
       # many at once (the oldest is dropped). Whether a token was spent is in
       # NoteFormClaim, not here.
       FORM_TOKEN_SESSION_KEY = :progress_note_form_tokens
+      FORM_TOKEN_FIELD = "note_form_token"
       FORM_TOKEN_LIMIT = 5
 
       rate_limit only: %i[new create]
@@ -66,11 +79,14 @@ module Lakeraven
       end
 
       def create
+        return render_form_token_refused unless form_token_issued?
         return if audit_unwritable?
+        return render_form_token_refused unless NoteFormClaim.claim!(params[FORM_TOKEN_FIELD])
 
         @note_text = string_param(:note_text)
         @open_visits = read_open_visits
         return render_visits_unread if @open_visits.nil?
+        return render_connection_not_author unless connection_signed_on_as_author?
         return render_no_open_visit if @open_visits.empty?
 
         refusal = input_refusal
@@ -143,11 +159,30 @@ module Lakeraven
         token
       end
 
+      # Whether the posted token is one this session was given for this
+      # patient. Whether it was already spent is the claim's to say.
+      def form_token_issued?
+        posted = params[FORM_TOKEN_FIELD]
+        return false unless posted.is_a?(String) && posted.present?
+
+        wanted = form_token_entry(posted)
+        stored_form_tokens.any? { |entry| ActiveSupport::SecurityUtils.secure_compare(entry, wanted) }
+      end
+
       def stored_form_tokens
         Array(session[FORM_TOKEN_SESSION_KEY]).grep(String)
       end
 
       def form_token_entry(token) = "#{@dfn}:#{token}"
+
+      def render_form_token_refused
+        @note_outcome = :form_token_refused
+        note_audit_denial("progress note form token refused")
+        @closing_message = "This form was already submitted or has expired. This submission sent nothing to RPMS, " \
+                           "but an earlier submission of this form may have filed the note. " \
+                           "Check the chart before writing the note again."
+        render :new, status: :conflict
+      end
 
       # -- Audit ------------------------------------------------------------
 
@@ -155,6 +190,33 @@ module Lakeraven
 
       def direct_audit_identifier
         Patient.canonical_dfn(route_param(:dfn)) || route_param(:dfn) || super
+      end
+
+      # -- The RPMS connection's user ---------------------------------------
+
+      # Whether the request's RPMS connection reports the author's DUZ. TIU
+      # and the e-signature check sign as that connection's user, so a note
+      # filed on any other connection would not be the author's. A request
+      # with no RPMS connection of its own goes on to RpmsUserScope; anything
+      # else raised while asking is not a confirmation. Class only in the log.
+      def connection_signed_on_as_author?
+        client = ::RpmsRpc.client
+        return false unless client.respond_to?(:duz)
+
+        connected = canonical_ien(client.duz)
+        !connected.nil? && connected == canonical_ien(current_duz)
+      rescue ::RpmsRpc::NotConfiguredError
+        raise
+      rescue StandardError => error
+        Rails.logger.error("[progress_note] RPMS connection user could not be read: #{error.class}")
+        false
+      end
+
+      def render_connection_not_author
+        @note_outcome = :connection_not_author
+        @closing_message = "This note cannot be filed: the RPMS connection is not signed on as you. " \
+                           "Nothing was saved. Sign in again, then write the note."
+        render :new, status: :forbidden
       end
 
       # -- Visits -----------------------------------------------------------
