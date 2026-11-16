@@ -1,0 +1,31 @@
+<%# The patient's advance directive (rpms-ux S-REG-17), a section of the
+    patient's registration page: the newest entry on file.
+    Locals: dfn, directives (RpmsRpc::Registration.advance_directives, newest first), can_edit. %>
+<% latest = directives.first %>
+<section
+  id="advance-directives-section"
+  aria-labelledby="advance-directives-section-heading"
+  class="card mt-6"
+>
+  <div class="flex items-baseline justify-between gap-4">
+    <h2 id="advance-directives-section-heading">Advance directives</h2>
+    <% if can_edit %>
+      <%= link_to (latest ? "Record, change or remove" : "Record an answer"),
+            registration_patient_advance_directives_path(dfn),
+            id: "edit-advance-directives" %>
+    <% end %>
+  </div>
+  <dl class="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-2">
+    <%# DATE OF ENTRY multiple, ADVANCE DIRECTIVE (9000040.11): the newest entry. %>
+    <dt>Advance directive</dt>
+    <dd data-field="advance_directive">
+      <% if latest.nil? %>
+        None on file
+      <% elsif latest[:directive] %>
+        Yes, <%= latest[:type] %>, <%= latest[:entered_on] %>
+      <% else %>
+        No (<%= latest[:reason] %>), <%= latest[:entered_on] %>
+      <% end %>
+    </dd>
+  </dl>
+</section>
