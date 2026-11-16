@@ -6,7 +6,7 @@ module Lakeraven
     # (rpms-ux S-TRI-02.1 to .3). RPMS checks each value (BEHOVM VALIDATE) and
     # files them (BEHOVM SAVE), the RPCs VueCentric's vitals entry uses, into
     # V MEASUREMENT (#9000010.01) on the visit, as the connection's signed-on
-    # user. A value RPMS refuses is shown with RPMS's reason and nothing is
+    # user, at the site's time (SiteTime), not the app host's clock. A value RPMS refuses is shown with RPMS's reason and nothing is
     # filed. The app keeps nothing.
     class VitalsController < WebController
       include VisitCharting
@@ -69,7 +69,7 @@ module Lakeraven
         visit_string = ::RpmsRpc::Encounter.visit_string(visit[:location_ien], visit[:datetime], visit[:service_category],
                                                          visit_ien: canonical_ien(visit[:visit_ien]))
         result = VitalsEntryService.new(dfn: @dfn, visit_string: visit_string, measurements: measurements,
-                                        provider_duz: current_duz, gateway: VitalGateway).save
+                                        provider_duz: current_duz, taken_at: SiteTime.now, gateway: VitalGateway).save
         @write_outcome = result.success? ? :written : :nothing_written
         return redirect_to(patient_chart_path(@dfn), notice: "Vitals recorded on the visit.") if result.success?
 

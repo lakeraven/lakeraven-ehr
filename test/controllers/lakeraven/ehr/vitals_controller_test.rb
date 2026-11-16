@@ -48,6 +48,18 @@ module Lakeraven
         assert_equal DUZ, saves.first[:kwargs][:provider_duz].to_s, "as the signed-on user"
       end
 
+      test "S-TRI-02.1 the vitals are filed at the site's time, not the app host's UTC clock" do
+        # 21:30 on Sunday Nov 15 Pacific is already Monday 05:30 in UTC.
+        site_now = Time.new(2026, 11, 15, 21, 30, 0, "-08:00")
+        Lakeraven::EHR::SiteTime.reader = -> { site_now }
+        travel_to Time.utc(2026, 11, 16, 5, 30) do
+          saves = post_vitals({ "WT" => "169" })
+          assert_equal site_now, saves.first[:kwargs][:taken_at], "the time sent is the site's"
+        end
+      ensure
+        Lakeraven::EHR::SiteTime.reader = -> { Time.now }
+      end
+
       test "S-TRI-02.2 a value RPMS refuses shows RPMS's reason and files nothing" do
         saves = post_vitals({ "BP" => "400/80" }, validation: BP_400)
 

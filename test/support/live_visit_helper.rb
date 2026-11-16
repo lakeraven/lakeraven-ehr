@@ -10,6 +10,9 @@ module LiveVisitHelper
 
   def live_writes? = defined?(LIVE_RPMS) && LIVE_RPMS && ENV["LIVE_RPMS_WRITES"] == "1"
 
+  # The site's date, from RPMS's clock (SiteTime): the app host's may differ.
+  def site_today = Lakeraven::EHR::SiteTime.today
+
   def ciav(&) = RpmsRpc.client.with_context("CIAV VUECENTRIC", &)
 
   def csrf = css_select("meta[name='csrf-token']").first&.[]("content")
@@ -36,10 +39,10 @@ module LiveVisitHelper
     hloc = resource[:hospital_location_id]
     before = newest_visit(dfn, hloc)
     path = "/lakeraven-ehr/scheduling/clinics/#{resource[:id]}/appointments/#{book_today(dfn)}"
-    get "#{path}/checkin", params: { date: Date.today.iso8601, provider_search: "PROFILE" }
+    get "#{path}/checkin", params: { date: site_today.iso8601, provider_search: "PROFILE" }
     provider = css_select("#checkin-form label[data-provider]").find { |l| l.text.upcase.include?("PROFILE,MD") }["data-provider"]
-    post "#{path}/checkin", params: { date: Date.today.iso8601, authenticity_token: csrf,
-                                      checkin: { at: (Time.now - 600).strftime("%Y-%m-%dT%H:%M"), provider_ien: provider } }
+    post "#{path}/checkin", params: { date: site_today.iso8601, authenticity_token: csrf,
+                                      checkin: { at: (Lakeraven::EHR::SiteTime.now - 600).strftime("%Y-%m-%dT%H:%M"), provider_ien: provider } }
     assert_response :redirect, "checked in: #{response.status} #{css_select("[role='alert']").map(&:text).join(' ').squish}"
     visit = newest_visit(dfn, hloc)
     assert visit && visit != before, "the check-in filed a new visit at #{CLINIC}"
@@ -48,7 +51,7 @@ module LiveVisitHelper
 
   # Booked as setup through BSDX, earlier today. Answers the appointment id.
   def book_today(dfn)
-    today = Date.today
+    today = site_today
     20.times do
       start = Time.new(today.year, today.month, today.day, 7 + rand(3), [ 0, 15, 30, 45 ].sample)
       reply = RpmsRpc::Scheduling.add_appointment(patient_dfn: dfn, resource: CLINIC, start_time: start,

@@ -9,7 +9,7 @@ require_relative "../support/live_visit_helper"
 # back on that visit; a blood pressure of 400 is refused with RPMS's reason. It
 # WRITES, so it runs only against a throwaway container and only when asked twice:
 #
-#   TZ=UTC LIVE_RPMS=1 LIVE_RPMS_WRITES=1 VISTA_BROKER=cia VISTA_RPC_HOST=127.0.0.1 VISTA_RPC_PORT=9100 \
+#   LIVE_RPMS=1 LIVE_RPMS_WRITES=1 VISTA_BROKER=cia VISTA_RPC_HOST=127.0.0.1 VISTA_RPC_PORT=9100 \
 #   LIVE_RPMS_ACCESS=PMA123 LIVE_RPMS_VERIFY='PMA123!!' \
 #   bin/rails test test/integration/live_vitals_test.rb
 class LiveVitalsTest < ActionDispatch::IntegrationTest
@@ -55,7 +55,12 @@ class LiveVitalsTest < ActionDispatch::IntegrationTest
     bmi, typed = filed.partition { |m| m[:type] == "BMI" }
     assert_equal entered.sort, typed.map { |m| [ m[:type], m[:value] ] }.sort
     assert_equal 1, bmi.size, "RPMS filed the BMI it derived"
-    row = ciav { RpmsRpc::DdrFileman.gets_entry(file: "9000010.01", iens: "#{filed.first[:measurement_ien]},", fields: ".02;.03;1204", flags: "I") }[:fields]
+    row = ciav { RpmsRpc::DdrFileman.gets_entry(file: "9000010.01", iens: "#{filed.first[:measurement_ien]},", fields: ".02;.03;1201;1204", flags: "I") }[:fields]
+    visit_at = ciav { RpmsRpc::DdrFileman.gets_entry(file: "9000010", iens: "#{visit_ien},", fields: ".01", flags: "I") }[:fields].dig(".01", :internal).to_s
+    taken_at = row.dig("1201", :internal).to_s
+    warn "[live S-TRI-02] visit at #{visit_at}, measurements taken at #{taken_at}"
+    assert_equal visit_at.to_i, taken_at.to_i, "taken on the visit's date, on the site's clock"
+    assert_operator taken_at.to_f, :>=, visit_at.to_f, "taken after the check-in, not before it"
     assert_equal [ PATIENT.to_s, visit_ien, MEDICAL_ASSISTANT_DUZ ], %w[.02 .03 1204].map { |f| row.dig(f, :internal).to_s },
                  "patient, the check-in's visit, and PROFILE,MA as the encounter provider"
   end
