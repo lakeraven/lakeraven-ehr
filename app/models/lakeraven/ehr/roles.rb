@@ -42,6 +42,10 @@ module Lakeraven
       # those are open questions for the analyst, and until they are answered
       # nobody holds those capabilities.
       KEY_NAMES = {
+        # TIU: the RPMS PROVIDER key, held by the clinicians who author and
+        # sign progress notes (#1001).
+        provider: "PROVIDER",
+
         # Order entry: every clinician who works in the chart holds one.
         orders_sign: "ORES",       # signs orders (physician, prescriber)
         orders_release: "ORELSE",  # releases orders (nurse)
