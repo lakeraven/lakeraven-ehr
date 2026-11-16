@@ -62,6 +62,12 @@ Lakeraven::EHR::Engine.routes.draw do
   post "patients/:dfn/chief_complaints", to: "chief_complaints#create", as: :patient_chief_complaints,
     constraints: { dfn: /\d+/ }
 
+  # That the allergies were reviewed on an open visit (rpms-ux S-TRI-04.1). RPMS files it.
+  get  "patients/:dfn/allergy_reviews/new", to: "allergy_reviews#new", as: :new_patient_allergy_review,
+    constraints: { dfn: /\d+/ }
+  post "patients/:dfn/allergy_reviews", to: "allergy_reviews#create", as: :patient_allergy_reviews,
+    constraints: { dfn: /\d+/ }
+
   # Vitals on an open visit (rpms-ux S-TRI-02). RPMS checks and files them.
   get  "patients/:dfn/vitals/new", to: "vitals#new", as: :new_patient_vitals, constraints: { dfn: /\d+/ }
   post "patients/:dfn/vitals", to: "vitals#create", as: :patient_vitals, constraints: { dfn: /\d+/ }
