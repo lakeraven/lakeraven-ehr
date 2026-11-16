@@ -28,7 +28,7 @@ module Lakeraven
       private
 
       def not_in_the_future
-        errors.add(:applied_on, "cannot be in the future") if applied_on && applied_on > SiteDate.today
+        errors.add(:applied_on, "cannot be in the future") if applied_on && applied_on > SiteTime.today
       end
 
       def submitted_after_applied

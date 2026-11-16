@@ -42,14 +42,19 @@ module Lakeraven
       # those are open questions for the analyst, and until they are answered
       # nobody holds those capabilities.
       KEY_NAMES = {
-        # TIU: the RPMS PROVIDER key, held by the clinicians who author and
-        # sign progress notes (#1001).
-        provider: "PROVIDER",
-
         # Order entry: every clinician who works in the chart holds one.
         orders_sign: "ORES",       # signs orders (physician, prescriber)
         orders_release: "ORELSE",  # releases orders (nurse)
         orders_enter: "OREMAS",    # enters orders for signature (clerk, medical assistant)
+
+        # Charting on a visit (VueCentric's BGO components: triage, vitals,
+        # allergies reviewed). Each component asks BGOUTL CHKSEC for these
+        # three and edits only for PROVIDER or BGOZ CAC, never BGOZ VIEW ONLY.
+        # PROVIDER also marks the clinicians who author and sign progress
+        # notes (#1001).
+        provider: "PROVIDER",
+        charting_coordinator: "BGOZ CAC",
+        charting_view_only: "BGOZ VIEW ONLY",
 
         # Referred care (RCIS, BMC)
         referrals_user: "BMCZMENU",

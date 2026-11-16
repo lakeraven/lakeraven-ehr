@@ -18,7 +18,7 @@ module Lakeraven
 
         # GET /registration/patients/:dfn/applications/new
         def new
-          @entry = ApplicationEntry.new(applied_on: SiteDate.today, submitted_on: SiteDate.today)
+          @entry = ApplicationEntry.new(applied_on: SiteTime.today, submitted_on: SiteTime.today)
           load_types
         end
 
@@ -41,7 +41,7 @@ module Lakeraven
         def update
           status = params[:status].to_s
           date = parse_date(params[:status_on])
-          unless OUTCOMES.key?(status) && date && date <= SiteDate.today
+          unless OUTCOMES.key?(status) && date && date <= SiteTime.today
             return redirect_to(registration_patient_coverage_path(@dfn, anchor: "applications-section"),
                                alert: "Choose what happened to the application and a date that is not in the future.")
           end
