@@ -127,6 +127,9 @@
           fhir_url,
           class: "button-secondary no-underline" %>
     <% if capability?("visit.chart") %>
+      <%= link_to "Take vitals",
+            new_patient_vitals_path(@patient.dfn),
+            class: "button-secondary no-underline" %>
       <%= link_to "Mark allergies reviewed",
             new_patient_allergy_review_path(@patient.dfn),
             class: "button-secondary no-underline" %>
