@@ -4,6 +4,7 @@ require "test_helper"
 require_relative "../../../dummy/lib/lakeraven_demo_seeds"
 require_relative "../../../support/allergy_write_test_helper"
 require_relative "../../../support/demo_persona_keys"
+require_relative "../../../support/captured_allergy_lookup_replies"
 
 module Lakeraven
   module EHR
@@ -11,6 +12,7 @@ module Lakeraven
     # patient-context story as ScreeningsController (#486).
     class AllergiesControllerTest < ActionDispatch::IntegrationTest
       include AllergyWriteTestHelper
+      include CapturedAllergyLookupReplies
 
       DFN = "3"
       BASE = "/lakeraven-ehr/patients/#{DFN}/allergies"
@@ -152,7 +154,122 @@ module Lakeraven
 
         assert_response :ok
         assert_select "form[action=?]", BASE
-        assert_select "input[name=?]", "allergy[agent]"
+        assert_select "input[name=?]", "allergen_search"
+      end
+
+      # -- Search and pickers, not RPMS values (#1109) ------------------------
+
+      test "S-TRI-04.2 the form asks for no RPMS pointer, FileMan date or symptom number" do
+        get "#{BASE}/new"
+
+        assert_select "input[name=?]", "allergen_search"
+        assert_select "input[name=?]", "symptom_search"
+        assert_select "input[type=datetime-local][name=?]", "allergy[originated_on]"
+        assert_select "input[type=date][name=?]", "allergy[reaction_on]"
+        assert_select "input[type=date][name=?]", "allergy[symptom_on]"
+        %w[allergy[agent] allergy[agent_pointer] allergy[originated_at] allergy[reaction_date]
+           allergy[symptoms][][ien] allergy[symptoms][][date]].each do |name|
+          assert_select "input[name=?]", name, count: 0
+        end
+        assert_no_match(/FileMan|GMRD\(|RPMS pointer/, response.body)
+      end
+
+      test "the entry time starts at the site's now and no picker goes past it" do
+        site_now = Time.new(2026, 11, 10, 14, 30, 0)
+        SiteTime.reader = -> { site_now }
+        SiteTime.reset
+
+        get "#{BASE}/new"
+
+        assert_select "input[name='allergy[originated_on]'][value=?][max=?]", "2026-11-10T14:30", "2026-11-10T14:30:00"
+        assert_select "input[name='allergy[reaction_on]'][max=?]", "2026-11-10"
+      ensure
+        SiteTime.reader = -> { Time.now }
+        SiteTime.reset
+      end
+
+      test "S-TRI-04.2 Find allergen lists RPMS's matches, each carrying the agent and its pointer" do
+        seed_allergy_lookups!
+
+        get "#{BASE}/new", params: { allergen_search: "STRAWB", allergy: { nature: "A" } }
+
+        assert_response :ok
+        values = css_select("input[type=radio][name='allergy[agent_choice]']").map { |i| i["value"] }
+        assert_equal [ "6;GMRD(120.82,^STRAWBERRIES" ], values, "the synonym match is the same allergen, offered once"
+        assert_select "label[data-allergen='6;GMRD(120.82,']", text: /STRAWBERRIES/
+        assert_select "select[name='allergy[nature]'] option[selected][value=?]", "A"
+        assert_equal [ { rpc: "ORWDAL32 ALLERGY MATCH", params: [ "STRAWB" ] } ],
+                     RpmsRpc.client.received_calls.select { |c| c[:rpc] == "ORWDAL32 ALLERGY MATCH" }.map { |c| c.slice(:rpc, :params) }
+      end
+
+      test "Find symptom lists the catalog's symptoms that start with the text" do
+        seed_allergy_lookups!
+
+        get "#{BASE}/new", params: { symptom_search: "ras" }
+
+        values = css_select("input[type=radio][name='allergy[symptom_choice]']").map { |i| i["value"] }
+        assert_equal [ "133^RASH" ], values
+      end
+
+      test "S-TRI-04.2 the chosen allergen, the picked dates and the chosen symptom reach ORWDAL32 SAVE ALLERGY as RPMS's values" do
+        seed_allergy_lookups!
+        site_now = Time.new(2026, 11, 10, 15, 0, 0)
+        SiteTime.reader = -> { site_now }
+        SiteTime.reset
+
+        post BASE, params: { authenticity_token: csrf_token, allergy: {
+          agent_choice: "6;GMRD(120.82,^STRAWBERRIES", type: "F", nature: "A",
+          observed_or_historical: "o", originated_on: "2026-11-10T14:30", reaction_on: "2026-11-08",
+          severity: "2", symptom_choice: "133^RASH", symptom_on: "2026-11-09", comments: [ "" ]
+        } }
+
+        save = RpmsRpc.client.received_calls.find { |c| c[:rpc] == "ORWDAL32 SAVE ALLERGY" }
+        assert save, "the allergy reached RPMS"
+        _new_entry, dfn, edited = save[:params]
+        assert_equal DFN, dfn.to_s
+        assert_equal "STRAWBERRIES^6;GMRD(120.82,", edited["GMRAGNT"]
+        assert_equal "3261110.1430", edited["GMRAORDT"]
+        assert_equal "3261108", edited["GMRARDT"]
+        assert_equal "133^RASH^3261109", edited[[ "GMRASYMP", 1 ]]
+        assert_equal DUZ.to_s, edited["GMRAORIG"]
+        assert_equal [ "STRAWBERRIES" ], RpmsRpc.client.received_calls
+          .select { |c| c[:rpc] == "ORWDAL32 ALLERGY MATCH" }.map { |c| c[:params].first },
+          "the choice was checked against RPMS's own search first"
+      ensure
+        SiteTime.reader = -> { Time.now }
+        SiteTime.reset
+      end
+
+      test "a date later than the site's now is refused before RPMS is asked" do
+        seed_allergy_lookups!
+        site_now = Time.new(2026, 11, 10, 15, 0, 0)
+        SiteTime.reader = -> { site_now }
+        SiteTime.reset
+
+        post BASE, params: { authenticity_token: csrf_token, allergy: {
+          agent_choice: "6;GMRD(120.82,^STRAWBERRIES", type: "F", nature: "A",
+          observed_or_historical: "h", originated_on: "2026-11-10T15:30"
+        } }
+
+        assert_response :unprocessable_entity
+        assert_match "later than now at this site", response.body
+        assert_empty RpmsRpc.client.received_calls.select { |c| c[:rpc] == "ORWDAL32 SAVE ALLERGY" }
+      ensure
+        SiteTime.reader = -> { Time.now }
+        SiteTime.reset
+      end
+
+      test "an allergen RPMS's search does not offer is not filed" do
+        seed_allergy_lookups!
+
+        post BASE, params: { authenticity_token: csrf_token, allergy: {
+          agent_choice: "125;GMRD(120.82,^STRAWBERRIES", type: "F", nature: "A",
+          observed_or_historical: "h", originated_on: 1.hour.ago.strftime("%Y-%m-%dT%H:%M")
+        } }
+
+        assert_response :unprocessable_entity
+        assert_match "no longer offers the chosen allergen", response.body
+        assert_empty RpmsRpc.client.received_calls.select { |c| c[:rpc] == "ORWDAL32 SAVE ALLERGY" }
       end
 
       # The page names its patient with the chart's own banner, not a
