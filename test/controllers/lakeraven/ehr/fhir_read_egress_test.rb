@@ -511,8 +511,8 @@ module Lakeraven
           get "/lakeraven-ehr/patients/1", headers: @headers
           assert_response :success
           html = Nokogiri::HTML(response.body)
-          vital_div = html.css(".vital").find { |div| div.at_css(".lbl")&.text == "Body Temperature" }
-          html_unit = vital_div.at_css(".val .u")&.text
+          vital_div = html.css("[data-vital]").find { |div| div.at_css("dt")&.text == "Body Temperature" }
+          html_unit = vital_div.at_css("[data-vital-unit]")&.text
 
           assert_equal fhir_unit.to_s, html_unit.to_s, "Expected HTML chart unit to match FHIR JSON unit"
         ensure
