@@ -9,10 +9,10 @@ module Lakeraven
     module PendingReferralWindow
       MONTHS = 12
 
-      def self.default(today = Date.today) = (today << MONTHS)..today
+      def self.default(today = SiteTime.today) = (today << MONTHS)..today
 
       # [window, error] from the list's from and to parameters; see DateWindow.
-      def self.parse(from, to, today: Date.today)
+      def self.parse(from, to, today: SiteTime.today)
         DateWindow.parse(from, to, default: default(today), today: today)
       end
     end

@@ -54,6 +54,12 @@ module Lakeraven
         "lakeraven/ehr/allergies#no_known_allergies", # Session-authenticated clinician entry/write surface (#644); discloses no stored clinical data
         "lakeraven/ehr/progress_notes#new",    # Session-authenticated note entry (#1001): the open visits' date, time and location, no stored note or clinical record; revisit with Part 2 (#494)
         "lakeraven/ehr/progress_notes#create", # Session-authenticated note write and sign (#1001); answers with the form or a redirect, not disclosure
+        "lakeraven/ehr/chief_complaints#new",    # Session-authenticated chief complaint entry (S-TRI-07.1): the open visits' date, time and location; discloses no stored clinical data
+        "lakeraven/ehr/chief_complaints#create", # Session-authenticated chief complaint write (S-TRI-07.1); answers with the form or a redirect, not disclosure
+        "lakeraven/ehr/allergy_reviews#new",    # Session-authenticated allergy review (S-TRI-04.1): the open visits' date, time and location; discloses no stored clinical data
+        "lakeraven/ehr/allergy_reviews#create", # Session-authenticated allergy review write (S-TRI-04.1); answers with the form or a redirect, not disclosure
+        "lakeraven/ehr/vitals#new",    # Session-authenticated vitals entry (S-TRI-02): the open visits' date, time and location; discloses no stored clinical data
+        "lakeraven/ehr/vitals#create", # Session-authenticated vitals write (S-TRI-02); answers with the form, RPMS's reason for a refused value, or a redirect
         # In-clinic consent (#793). HTML for the chart and the locked tablet,
         # not a FHIR read. The list shows title, version, and status. The
         # kiosk shows the template plus the patient's name and date of birth.

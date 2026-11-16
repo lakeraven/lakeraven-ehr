@@ -4,7 +4,7 @@
 <div class="page-header">
   <h1><%= @instrument.title %></h1>
   <p>Patient #<%= @dfn %> &middot;
-     <%= @response.effective_at.strftime("%b %-d, %Y at %H:%M") %>
+     <%= Lakeraven::EHR::SiteTime.local(@response.effective_at).strftime("%b %-d, %Y at %H:%M") %>
      <% if @response.encounter_ien.present? %>
        &middot; visit <%= @response.encounter_ien %>
      <% end %>
