@@ -50,6 +50,12 @@ module Lakeraven
         # keys may not. The registration clerk may still start a handover (the
         # CIAV VUECENTRIC user/Consent.c scope is unchanged).
         "consent.revoke" => rule(any: %i[orders_sign orders_release]),
+        # Chart on one of the patient's open visits: the chief complaint
+        # (rpms-ux S-TRI-07.1). VueCentric's BGO components edit for PROVIDER
+        # or BGOZ CAC and are read-only under BGOZ VIEW ONLY (BGOUTL CHKSEC,
+        # seen in a medical assistant's trace). The medical assistant, nurse
+        # and provider personas hold PROVIDER.
+        "visit.chart" => rule(any: %i[provider charting_coordinator], deny: %i[charting_view_only]),
         # Work the facility's referrals: list the ones still pending across
         # patients (#873). RPMS: RCIS's menu key BMCZMENU, or its supervisor
         # and manager keys, the same keys Roles.can_process_chs? reads.
