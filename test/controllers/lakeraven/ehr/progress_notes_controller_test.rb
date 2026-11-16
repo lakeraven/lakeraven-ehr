@@ -54,8 +54,38 @@ module Lakeraven
         open_patient_context!(open) if open
       end
 
+      def note_params(extra = {})
+        { visit_ien: OPEN_VISIT_IEN.to_s, note_text: SYNTHETIC_NOTE_TEXT,
+          signature_code: SYNTHETIC_SIGNATURE_CODE }.merge(extra)
+      end
+
       def get_new(tiu = @tiu)
         with_fake_tiu(tiu) { get NEW }
+      end
+
+      # A POST carries the one-time token of a form (review round 1). By
+      # default the form is fetched first; `form_token:` posts a given token,
+      # and nil posts none.
+      def post_note(tiu: nil, form_token: :fetch, **extra)
+        post_progress_note(BASE, new_path: NEW, dfn: DFN, fake: tiu || @tiu,
+                                 params: note_params(extra), form_token: form_token)
+      end
+
+      def fetch_form_token = fetch_note_form_token(NEW, dfn: DFN)
+
+      def patient_audit_rows
+        AuditEvent.where(entity_type: "Patient", entity_identifier: DFN)
+      end
+
+      def assert_outcome_unknown_page!
+        assert_response :service_unavailable
+        assert_match(/unknown/i, response.body)
+        assert_match(/check the chart/i, response.body)
+        assert_select "textarea[name=?]", "note_text", count: 0
+        assert_select "input[name=?]", "signature_code", count: 0
+        refute_includes response.body, SYNTHETIC_BROKER_MESSAGE
+        refute_includes response.body, SYNTHETIC_SIGNATURE_CODE
+        assert_nil flash[:notice]
       end
 
       # Review round 3: an empty visit list is also what an empty broker reply
@@ -71,6 +101,20 @@ module Lakeraven
         assert_select "textarea[name=?]", "note_text", count: 0
         assert_select "input[name=?]", "signature_code", count: 0
         assert_select "input[name=?]", "visit_ien", count: 0
+      end
+
+      def with_broken_audit
+        singleton = AuditEvent.singleton_class
+        AuditEvent.define_singleton_method(:create!) { |*| raise ActiveRecord::StatementInvalid, "audit down" }
+        yield
+      ensure
+        singleton.send(:remove_method, :create!)
+      end
+
+      def assert_refused_before_any_write!(reason)
+        assert_response :unprocessable_entity
+        assert_match(reason, response.body)
+        assert_empty @tiu.write_side_calls, "nothing reaches the e-signature check or TIU"
       end
 
       def assert_note_form_shown!
@@ -117,6 +161,13 @@ module Lakeraven
         assert_empty @tiu.calls
       end
 
+      test "POST without a session redirects to the login page and writes nothing" do
+        post_note
+
+        assert_redirected_to LOGIN
+        assert_empty @tiu.calls
+      end
+
       test "GET new without the PROVIDER key is forbidden and reads nothing" do
         sign_in_with_keys!(NON_PROVIDER_KEYS)
         open_patient_context!(DFN)
@@ -128,6 +179,16 @@ module Lakeraven
         assert_select "textarea[name=?]", "note_text", count: 0
       end
 
+      test "POST without the PROVIDER key is forbidden and writes nothing" do
+        sign_in_with_keys!(NON_PROVIDER_KEYS)
+        open_patient_context!(DFN)
+
+        post_note
+
+        assert_response :forbidden
+        assert_empty @tiu.calls
+      end
+
       test "GET new for a patient whose record is not open in the session is forbidden" do
         sign_in_provider!(open: OTHER_DFN)
 
@@ -136,6 +197,16 @@ module Lakeraven
         assert_response :forbidden
         assert_select "form[action=?]", "#{CHART}/context"
         assert_select "textarea[name=?]", "note_text", count: 0
+        assert_empty @tiu.calls
+      end
+
+      test "POST for a patient whose record is not open in the session is forbidden and writes nothing" do
+        sign_in_provider!(open: OTHER_DFN)
+
+        post_note
+
+        assert_response :forbidden
+        assert_select "form[action=?]", "#{CHART}/context"
         assert_empty @tiu.calls
       end
 
@@ -150,6 +221,34 @@ module Lakeraven
 
         assert_response :not_found
         assert_empty unconfigured.calls
+      end
+
+      test "POST answers 404 and writes nothing when no note title is configured" do
+        sign_in_provider!
+        get_new
+        assert_response :ok, "available while the title is configured"
+
+        configure_progress_note_title!(nil)
+        unconfigured = FakeTiu.new(visits_by_dfn: default_visits)
+        post_note(tiu: unconfigured)
+
+        assert_response :not_found
+        assert_empty unconfigured.calls
+      end
+
+      test "POST without a valid CSRF token is refused and writes nothing" do
+        sign_in_provider!
+
+        with_fake_tiu(@tiu) { post BASE, params: note_params }
+        assert_includes [ 403, 422 ], response.status, "no token"
+        assert_empty @tiu.calls
+
+        with_fake_tiu(@tiu) { post BASE, params: note_params.merge(authenticity_token: "forged-token") }
+        assert_includes [ 403, 422 ], response.status, "a forged token"
+        assert_empty @tiu.calls
+
+        post_note
+        assert_redirected_to CHART, "the same post with the session's token is accepted"
       end
 
       # -- GET new --------------------------------------------------------------
@@ -233,6 +332,217 @@ module Lakeraven
         assert_select "input[name=?]", "signature_code", count: 0
       end
 
+      # -- POST create: success -------------------------------------------------
+
+      test "POST creates the note on the visit under the configured title, writes its text and signs it" do
+        sign_in_provider!
+
+        post_note
+
+        assert_redirected_to CHART
+        assert_match(/note/i, flash[:notice].to_s)
+        assert_match(/signed/i, flash[:notice].to_s)
+        refute_match(/unsigned|not signed/i, flash[:notice].to_s)
+
+        creates = @tiu.calls_to(:create)
+        assert_equal 1, creates.size
+        assert_equal [ DFN, OPEN_VISIT_IEN.to_s, TITLE_IEN.to_s ], creates.first[1].map(&:to_s)
+
+        texts = @tiu.calls_to(:update_text)
+        assert_equal 1, texts.size
+        assert_equal NOTE_IEN.to_s, texts.first[1][0].to_s
+        assert_equal SYNTHETIC_NOTE_TEXT, texts.first[1][1]
+
+        signs = @tiu.calls_to(:add)
+        assert_equal 1, signs.size
+        assert_equal [ NOTE_IEN.to_s, DUZ, SYNTHETIC_SIGNATURE_CODE ], signs.first[1].map(&:to_s)
+        assert_equal :sign, signs.first[2].fetch(:action, :sign)
+      end
+
+      test "POST validates the signature code before the note is created, then creates, writes and signs in order" do
+        sign_in_provider!
+
+        post_note
+
+        assert_redirected_to CHART
+        names = @tiu.write_side_calls.map(&:first)
+        assert_equal :validate, names.first, "the code is checked before anything is written"
+        assert_equal %i[create update_text which_action add], names - [ :validate ]
+        validation = @tiu.calls_to(:validate).first
+        assert_equal [ DUZ, SYNTHETIC_SIGNATURE_CODE ], validation[1].map(&:to_s)
+      end
+
+      test "POST re-reads the patient's visits at POST time" do
+        sign_in_provider!
+
+        post_note
+
+        assert_redirected_to CHART
+        assert_includes @tiu.calls_to(:visits).map { |call| call[1].first.to_s }, DFN
+        assert_operator @tiu.names.index(:visits), :<, @tiu.names.index(:create)
+      end
+
+      test "POST files the note as the session's user, whatever DUZ the request names" do
+        sign_in_provider!
+
+        post_note(author_duz: "777", duz: "777", user_duz: "777")
+
+        assert_redirected_to CHART
+        assert_equal [ DUZ ], @tiu.calls_to(:validate).map { |call| call[1][0].to_s }.uniq
+        assert_equal [ DUZ ], @tiu.calls_to(:add).map { |call| call[1][1].to_s }
+      end
+
+      test "a signed note leaves an audit row for the patient under the acting user" do
+        sign_in_provider!
+        form_token = fetch_form_token
+        AuditEvent.delete_all
+
+        post_note(form_token: form_token)
+
+        assert_redirected_to CHART
+        assert AuditEvent.exists?(entity_type: "Patient", entity_identifier: DFN),
+               "an AuditEvent row for Patient/#{DFN}"
+      end
+
+      # -- POST create: refused before anything is written ----------------------
+
+      test "POST naming a locked visit is refused and nothing is written" do
+        sign_in_provider!
+
+        post_note(visit_ien: LOCKED_VISIT_IEN.to_s)
+
+        assert_refused_before_any_write!(/visit/i)
+      end
+
+      test "POST naming another patient's open visit is refused and nothing is written" do
+        sign_in_provider!
+
+        post_note(visit_ien: OTHER_PATIENT_VISIT_IEN.to_s)
+
+        assert_refused_before_any_write!(/visit/i)
+      end
+
+      test "POST naming a visit that does not exist is refused and nothing is written" do
+        sign_in_provider!
+
+        post_note(visit_ien: "999999")
+
+        assert_refused_before_any_write!(/visit/i)
+      end
+
+      test "POST naming no visit is refused and nothing is written" do
+        sign_in_provider!
+
+        post_note(visit_ien: "")
+
+        assert_refused_before_any_write!(/visit/i)
+      end
+
+      test "POST is refused when the visit was locked after the form was shown" do
+        sign_in_provider!
+        get_new
+        assert_select "input[name=?][value=?]", "visit_ien", OPEN_VISIT_IEN.to_s
+
+        @tiu = FakeTiu.new(visits_by_dfn: { DFN => [ open_visit_row.merge(locked: true) ] })
+        post_note
+
+        assert_refused_before_any_write!(/visit/i)
+      end
+
+      test "POST is not a 500 when the visit read raises, and nothing is written" do
+        sign_in_provider!
+        @tiu = FakeTiu.new(visits_by_dfn: default_visits,
+                           raises: { visits: RpmsRpc::Error.new(SYNTHETIC_BROKER_MESSAGE) })
+
+        post_note
+
+        refute_equal 500, response.status
+        refute_equal 404, response.status
+        refute response.redirect?
+        assert_match(/could not be read|unknown/i, response.body)
+        refute_includes response.body, SYNTHETIC_BROKER_MESSAGE
+        refute_includes response.body, SYNTHETIC_SIGNATURE_CODE
+        assert_empty @tiu.write_side_calls
+      end
+
+      test "POST with only whitespace for the note text is refused and nothing is written" do
+        sign_in_provider!
+
+        post_note(note_text: " \n\t  ")
+
+        assert_refused_before_any_write!(/note/i)
+        assert_note_form_shown!
+      end
+
+      test "POST with a blank signature code is refused, nothing is written, and the note text is kept" do
+        sign_in_provider!
+
+        post_note(signature_code: "  ")
+
+        assert_refused_before_any_write!(/signature code/i)
+        assert_note_form_shown!
+        assert_includes css_select("textarea[name='note_text']").text, SYNTHETIC_NOTE_TEXT
+      end
+
+      test "POST with a signature code that is not accepted creates no note" do
+        sign_in_provider!
+        @tiu = FakeTiu.new(visits_by_dfn: default_visits, validate: false)
+
+        post_note
+
+        assert_response :unprocessable_entity
+        assert_match(/signature code/i, response.body)
+        # Review round 3: false is also what an empty broker reply reads as.
+        assert_match(/not accepted or could not be confirmed by RPMS/i, response.body)
+        assert_match(/nothing was saved/i, response.body)
+        refute_match(/was not accepted\./i, response.body, "not stated as RPMS's reason alone")
+        assert_equal 1, @tiu.calls_to(:validate).size
+        assert_empty @tiu.tiu_calls, "no note is created, written or signed"
+        assert_note_form_shown!
+        assert_includes css_select("textarea[name='note_text']").text, SYNTHETIC_NOTE_TEXT
+        refute_includes response.body, SYNTHETIC_SIGNATURE_CODE
+        assert css_select("input[name='signature_code']").first["value"].blank?
+      end
+
+      test "POST sends nothing to TIU when the audit log cannot accept a row" do
+        sign_in_provider!
+        form_token = fetch_form_token
+        AuditEvent.delete_all
+
+        with_broken_audit { post_note(form_token: form_token) }
+
+        assert_response :service_unavailable
+        assert_empty @tiu.tiu_calls
+        assert_equal 0, AuditEvent.count
+      end
+
+      # -- POST create: a gateway raising ---------------------------------------
+
+      # Review round 2: the signature check raising is no longer in this table.
+      # Nothing has been sent to TIU at that point, so it is not an unknown
+      # write (see "a broker error before any write" below).
+      {
+        "note creation" => [ :create, -> { RpmsRpc::Error.new(SYNTHETIC_BROKER_MESSAGE) } ],
+        "the text write" => [ :update_text, -> { IOError.new(SYNTHETIC_BROKER_MESSAGE) } ],
+        "signing" => [ :add, -> { IOError.new(SYNTHETIC_BROKER_MESSAGE) } ]
+      }.each do |step, (gateway_call, error)|
+        test "POST says the outcome is unknown and to check the chart when #{step} raises" do
+          sign_in_provider!
+          @tiu = FakeTiu.new(visits_by_dfn: default_visits, raises: { gateway_call => error.call })
+
+          post_note
+
+          refute_equal 500, response.status
+          refute_equal 404, response.status
+          refute response.redirect?, "an unknown outcome is not reported as a signed note"
+          assert_match(/unknown/i, response.body)
+          assert_match(/check the chart/i, response.body)
+          refute_includes response.body, SYNTHETIC_BROKER_MESSAGE
+          refute_includes response.body, SYNTHETIC_SIGNATURE_CODE
+          assert_includes @tiu.names, gateway_call
+        end
+      end
+
       # -- 3. A session with no RPMS connection of its own ----------------------
 
       def assert_session_ended_and_sent_to_sign_in!
@@ -293,6 +603,17 @@ module Lakeraven
         assert_response :ok
         assert_match(/no open visit/i, response.body)
         assert_no_open_visit_page!
+      end
+
+      %w[503 504].each do |visit_ien|
+        test "POST naming visit #{visit_ien}, whose lock state RPMS did not state, is refused and nothing is written" do
+          sign_in_provider!
+          @tiu = FakeTiu.new(visits_by_dfn: { DFN => [ open_visit_row, *visit_rows_of_unstated_lock ] })
+
+          post_note(visit_ien: visit_ien)
+
+          assert_refused_before_any_write!(/visit/i)
+        end
       end
     end
   end

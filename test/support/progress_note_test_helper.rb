@@ -126,6 +126,16 @@ module ProgressNoteTestHelper
     note_form_token_in_page
   end
 
+  # POSTs a note the way a browser does: with the token of a form it was
+  # shown. `form_token: :fetch` GETs the form first; any other value is
+  # posted as given, and nil posts no token at all.
+  def post_progress_note(path, new_path:, dfn:, fake:, params:, form_token: :fetch)
+    token = form_token == :fetch ? fetch_note_form_token(new_path, dfn: dfn) : form_token
+    params = params.merge(FORM_TOKEN_FIELD => token) unless token.nil?
+    params = params.merge(authenticity_token: csrf_token)
+    with_fake_tiu(fake) { post path, params: params }
+  end
+
   # The title is read from ENV when the configuration is built, so each
   # setting builds a new configuration. restore_progress_note_title! puts
   # both back.

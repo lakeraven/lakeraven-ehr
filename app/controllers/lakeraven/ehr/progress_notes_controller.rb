@@ -14,13 +14,26 @@ module Lakeraven
     # Each rendered form carries a one-time token. The session lists the
     # last few tokens it was given, per patient.
     #
-    # The form offers only the patient's open visits: a visit RPMS reports as
-    # not locked (locked: false). An empty visit list is also what an empty
-    # broker reply reads as, so the page says only that no open visit was
-    # found.
+    # The POST re-reads the patient's visits and files the note only on one
+    # of that patient's open visits: a visit RPMS reports as not locked
+    # (locked: false). An empty visit list is also what an empty broker reply
+    # reads as, so the page says only that no open visit was found.
+    #
+    # The signature code is checked with RPMS before anything is written,
+    # so a code RPMS does not accept (or answers false for) creates no note.
+    # Then the note is created and its text written. TIU is asked which
+    # signing action the author holds on the note, and only "sign" signs it;
+    # any other answer, none included, leaves it saved unsigned.
+    #
+    # A TIU write is an RPC. It cannot join the audit transaction, so the
+    # action proves the audit log takes a row before any RPC (AuditLogProbe).
+    # Anything raised while the note is filed leaves the outcome unknown: the
+    # page says to check the chart, and never shows the raised message, which
+    # can carry broker text. The signature code is never rendered back.
     class ProgressNotesController < WebController
       include BrowserSmartAuthentication
       include ClinicianPatientContext
+      include AuditLogProbe
 
       CAPABILITY = "progress_note.write"
       # The failures that leave the outcome of a TIU or e-signature RPC
@@ -35,6 +48,9 @@ module Lakeraven
 
       rate_limit only: %i[new create]
 
+      # Forgery protection runs first and raises. A signed-in browser gets
+      # the cross-site refusal; a browser with no session goes to sign in.
+      rescue_from ActionController::InvalidAuthenticityToken, with: :reject_forged_note
       before_action :require_authentication
       before_action :authenticate_smart_token!
       before_action -> { require_capability!(CAPABILITY) }
@@ -49,10 +65,18 @@ module Lakeraven
         @open_visits = read_open_visits
       end
 
-      # Filing arrives with the next slice of #1001. Until then a POST that
-      # passes the form's gates is answered as not found and sends nothing.
       def create
-        head :not_found
+        return if audit_unwritable?
+
+        @note_text = string_param(:note_text)
+        @open_visits = read_open_visits
+        return render_visits_unread if @open_visits.nil?
+        return render_no_open_visit if @open_visits.empty?
+
+        refusal = input_refusal
+        return render_note_refused(refusal) if refusal
+
+        file_note(params_signature_code)
       end
 
       private
@@ -85,6 +109,24 @@ module Lakeraven
         render_forbidden("Writing a progress note requires a clinician sign-on")
         false
       end
+
+      def reject_forged_note
+        if session[:duz].present?
+          head :unprocessable_entity
+        else
+          redirect_to login_path, alert: "Please sign in"
+        end
+      end
+
+      def audit_unwritable?
+        return false if audit_log_writable?
+
+        render_unrecorded_access_denial
+        true
+      end
+
+      def audit_probe_log_tag = "progress_note"
+      def audit_probe_dfn = @dfn
 
       # -- One-time form token ---------------------------------------------
 
@@ -131,6 +173,13 @@ module Lakeraven
         nil
       end
 
+      def chosen_visit
+        posted = canonical_ien(params[:visit_ien])
+        return unless posted
+
+        @open_visits.find { |row| canonical_ien(row[:visit_ien]) == posted }
+      end
+
       # A positive integer, as a string without leading zeros, or nil.
       def canonical_ien(value)
         text = value.to_s
@@ -149,6 +198,99 @@ module Lakeraven
         when_seen = row[:datetime]
         stamp = when_seen.respond_to?(:strftime) ? when_seen.strftime("%b %-d, %Y %-l:%M %p") : when_seen.to_s
         [ stamp.presence, row[:location].to_s.presence || "Unknown location" ].compact.join(" · ")
+      end
+
+      # -- Input ------------------------------------------------------------
+
+      def string_param(key)
+        value = params[key]
+        value.is_a?(String) ? value : ""
+      end
+
+      def params_signature_code = string_param(:signature_code)
+
+      def input_refusal
+        @visit = chosen_visit
+        return "Choose one of this patient's open visits for the note." unless @visit
+        return "Write the note before signing it." if @note_text.strip.empty?
+        return "Enter your electronic signature code to sign the note." if params_signature_code.strip.empty?
+
+        nil
+      end
+
+      # -- Filing -----------------------------------------------------------
+
+      def file_note(signature_code)
+        result = run_note_sequence(signature_code)
+        return render_outcome_unknown if result.nil?
+
+        result.success? ? note_signed : render_note_failure(result)
+      end
+
+      # The e-signature check and the TIU sequence; nil when the outcome is
+      # unknown: anything raised leaves the chart unknown. Class only in the
+      # log line.
+      def run_note_sequence(signature_code)
+        @note_service = ProgressNoteService.new(
+          dfn: @dfn, visit_ien: canonical_ien(@visit[:visit_ien]), author_duz: current_duz
+        )
+        @note_service.create_and_sign(title_ien: note_title_ien, text: @note_text, signature_code: signature_code)
+      rescue StandardError, NotImplementedError => error
+        Rails.logger.error("[progress_note] create outcome unknown: #{error.class}")
+        nil
+      end
+
+      def note_signed
+        @note_outcome = :signed
+        redirect_to patient_chart_path(@dfn), notice: "Progress note signed."
+      end
+
+      # A refusal of the signature code says so. Any other failure is
+      # reported as an unknown outcome until each step's page says what RPMS
+      # established.
+      def render_note_failure(result)
+        return render_signature_refusal(result) if result.stage == :signature_check
+
+        render_outcome_unknown
+      end
+
+      def render_signature_refusal(result)
+        return render_signature_unchecked unless result.error == :invalid_signature_code
+
+        @note_outcome = :code_not_accepted
+        render_note_refused("The electronic signature code was not accepted or could not be confirmed by RPMS. " \
+                            "Nothing was saved.")
+      end
+
+      # RPMS gave no answer to the check, before anything was written: a
+      # refusal, not an unknown outcome.
+      def render_signature_unchecked
+        @note_outcome = :code_unchecked
+        render_note_refused("The electronic signature code could not be checked. Nothing was saved.")
+      end
+
+      def render_outcome_unknown
+        @note_outcome = :unknown
+        @closing_message = "Outcome unknown — check the chart before trying again. " \
+                           "The note may or may not have been saved or signed."
+        render :new, status: :service_unavailable
+      end
+
+      def render_visits_unread
+        @note_outcome = :visits_unread
+        render :new, status: :service_unavailable
+      end
+
+      # RPMS listed no open visit: none was found, which an empty reply
+      # also reads as. The view says so and offers no form.
+      def render_no_open_visit
+        @note_outcome = :no_open_visit
+        render :new, status: :unprocessable_entity
+      end
+
+      def render_note_refused(message)
+        @refusal = message
+        render :new, status: :unprocessable_entity
       end
     end
   end
