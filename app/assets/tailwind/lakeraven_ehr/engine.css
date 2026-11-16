@@ -226,6 +226,28 @@
   @apply bg-amber-50 text-amber-900 ring-amber-200;
 }
 
+/* A severity, mildest to most severe: an allergy reaction's, or a
+   screening's band. Moderately severe reads apart from both neighbours. */
+@utility status-badge--minimal {
+  @apply bg-slate-100 text-slate-800 ring-slate-300;
+}
+
+@utility status-badge--mild {
+  @apply bg-blue-50 text-blue-900 ring-blue-200;
+}
+
+@utility status-badge--moderate {
+  @apply bg-amber-50 text-amber-900 ring-amber-200;
+}
+
+@utility status-badge--moderately-severe {
+  @apply bg-orange-50 text-orange-900 ring-orange-300;
+}
+
+@utility status-badge--severe {
+  @apply bg-red-50 text-red-900 ring-red-200;
+}
+
 @utility empty-state {
   @apply my-4 text-slate-600;
 }
@@ -294,14 +316,10 @@
   @apply inline-flex items-center gap-1.5 rounded-full border border-red-200 bg-white px-3 py-0.5 font-semibold;
 }
 
-/* The chart's allergy actions sit at the end of the alert. */
+/* The chart's allergy actions sit at the end of the alert, as the app's
+   secondary buttons (button-secondary on each). */
 @utility patient-banner__allergy-actions {
   @apply ml-auto flex flex-wrap items-center gap-2;
-
-  & a,
-  & button {
-    @apply min-h-8 rounded-md bg-white px-3 py-1 text-sm font-semibold text-red-900 no-underline shadow-none ring-1 ring-red-300 ring-inset hover:bg-red-100;
-  }
 }
 
 @utility patient-banner__actions {

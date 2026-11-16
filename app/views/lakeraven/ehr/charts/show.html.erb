@@ -4,72 +4,15 @@
   banner (shared/_patient_banner), so the chart looks like the rest of the app.
   The banner's allergy alert carries the chart's fuller allergy detail
   (content_for :patient_allergies below), so allergies show once.
-  The sections keep their own CSS, scoped to .chart-page so it cannot restyle
-  the header or the banner.
+  The sections are built from the design-system pieces (docs/DESIGN-SYSTEM.md):
+  page_header, alert_box, card, data-table, status_badge and empty_state, with
+  no CSS of the chart's own (#1111).
 %>
 <%
   vital_labels = Lakeraven::EHR::Observation::VITAL_TYPE_MAP
   fhir_url = url_for(dfn: @patient.dfn, format: "json", only_path: true)
 %>
 <% page_title "Patient chart" %>
-
-<% content_for :head do %>
-  <%= tag.style nonce: content_security_policy_nonce do %>
-    .chart-page{
-      /* --muted/--line darkened for projector contrast (washed-out rooms) */
-      --ink:#0f172a; --muted:#475569; --line:#cbd5e1;
-      --card:#ffffff; --brand:#0e5a8a; --brand-dark:#0b4a72;
-      --danger:#b91c1c; --danger-bg:#fef2f2;
-      --ok:#047857; --ok-bg:#ecfdf5; --warn:#b45309; --warn-bg:#fffbeb;
-      color:var(--ink);font-size:15px;line-height:1.5}
-
-    .chart-page .flash.notice{color:var(--ok);background:var(--ok-bg);border:1px solid #a7f3d0;
-      border-radius:10px;padding:10px 14px;margin:0 0 12px;font-weight:600}
-
-    /* Grid + cards */
-    .chart-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px}
-    @media(max-width:820px){.chart-grid{grid-template-columns:1fr}}
-    .chart-card{background:var(--card);border:1px solid var(--line);border-radius:12px;
-      box-shadow:0 1px 2px rgba(15,23,42,.04);overflow:hidden}
-    .chart-card.span{grid-column:1 / -1}
-    .chart-card__head{display:flex;align-items:center;justify-content:space-between;
-      padding:13px 16px;border-bottom:1px solid var(--line);background:#fbfdff}
-    .chart-card__head h2{margin:0;font-size:14.5px;font-weight:700;letter-spacing:.2px}
-    .chart-page .count{background:#eef4f9;color:var(--brand-dark);border-radius:999px;padding:2px 9px;
-      font-size:12px;font-weight:700;font-variant-numeric:tabular-nums}
-    .chart-card__body{padding:6px 16px 14px}
-
-    .chart-page table{width:100%;border-collapse:collapse}
-    .chart-page th,.chart-page td{text-align:left;padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:top}
-    .chart-page th{font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700}
-    .chart-page td{font-size:14px}
-    .chart-page tbody tr:nth-child(even) td{background:#f8fafc}
-    .chart-page tr:last-child td{border-bottom:none}
-    .chart-page .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;color:var(--muted)}
-
-    .chart-page .badge{display:inline-block;border-radius:999px;padding:2px 9px;font-size:11px;font-weight:700;
-      text-transform:capitalize}
-    .chart-page .badge.active{background:var(--ok-bg);color:var(--ok)}
-    .chart-page .badge.inactive,.chart-page .badge.unknown{background:#f1f5f9;color:var(--muted)}
-    .chart-page .badge.sev-severe{background:var(--danger-bg);color:var(--danger)}
-    .chart-page .badge.sev-moderate{background:var(--warn-bg);color:var(--warn)}
-    .chart-page .badge.sev-mild{background:#eff6ff;color:#1d4ed8}
-    /* Screening severity bands (#474). `sev-moderately-severe` needs its own
-       rule: class matching is per-token, so `.sev-moderate` does NOT match it,
-       and it must read as distinct from both neighbouring bands. */
-    .chart-page .badge.sev-minimal{background:#f1f5f9;color:var(--muted)}
-    .chart-page .badge.sev-moderately-severe{background:#ffedd5;color:#c2410c}
-    .chart-page .empty{color:var(--muted);font-size:13px;padding:10px 2px;margin:0}
-
-    .chart-page .vitals{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:8px 2px}
-    @media(max-width:640px){.chart-page .vitals{grid-template-columns:repeat(2,1fr)}}
-    .chart-page .vital{border:1px solid var(--line);border-radius:10px;padding:11px 12px;background:#fbfdff}
-    .chart-page .vital .lbl{font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:700}
-    .chart-page .vital .val{font-size:23px;font-weight:700;margin-top:3px;font-variant-numeric:tabular-nums}
-    .chart-page .vital .val .u{font-size:12px;color:var(--muted);font-weight:500;margin-left:3px}
-
-  <% end %>
-<% end %>
 
 <%# ---- The banner's allergy alert, with the chart's detail. A fetch error or
       a withheld list is "Not loaded", never "No Known Allergies". Names that
@@ -98,223 +41,368 @@
   <% if capability?("allergy.record") %>
     <div class="patient-banner__allergy-actions">
       <%= link_to "Record an allergy",
-            new_patient_allergy_path(@patient.dfn) %>
+            new_patient_allergy_path(@patient.dfn),
+            class: "button-secondary no-underline" %>
       <%= button_to "No known allergies",
             patient_no_known_allergies_path(@patient.dfn),
-            method: :post %>
+            method: :post,
+            class: "button-secondary" %>
     </div>
   <% end %>
 <% end %>
 
-<div class="chart-page">
-  <%# The page's one h1. The banner names the patient without a heading
-      (#1113). %>
-  <%= page_header "Patient chart" %>
+<%# The page's one h1. The banner names the patient without a heading
+    (#1113). The actions are the chart's ways into other flows. %>
+<%= page_header "Patient chart" do %>
+  <% if screenings_allowed? %>
+    <%= link_to "Screenings",
+          patient_screenings_path(@patient.dfn),
+          class: "button-secondary no-underline" %>
+  <% end %>
+  <%= link_to "Consents",
+        patient_consents_path(@patient.dfn),
+        class: "button-secondary no-underline" %>
+  <%= link_to "View as FHIR",
+        fhir_url,
+        class: "button-secondary no-underline" %>
+  <% if capability?("visit.chart") %>
+    <%= link_to "Take vitals",
+          new_patient_vitals_path(@patient.dfn),
+          class: "button-secondary no-underline" %>
+    <%= link_to "Mark allergies reviewed",
+          new_patient_allergy_review_path(@patient.dfn),
+          class: "button-secondary no-underline" %>
+    <%= link_to "Record chief complaint",
+          new_patient_chief_complaint_path(@patient.dfn),
+          class: "button-secondary no-underline" %>
+  <% end %>
+<% end %>
 
-  <% if flash[:notice].present? %>
-    <p
-      class="flash notice"
-      role="status"
+<% if flash[:notice].present? %>
+  <%= alert_box :notice, flash[:notice], id: "chart-notice" %>
+<% end %>
+
+<div class="grid gap-4 md:grid-cols-2">
+  <%# ---- Problem list ---- %>
+  <section
+    id="chart-problems"
+    class="card"
+    aria-labelledby="chart-problems-heading"
+  >
+    <h2
+      id="chart-problems-heading"
+      class="mt-0"
     >
-      <%= flash[:notice] %>
-    </p>
+      Problem list
+      <span class="font-normal text-slate-600">(<%= @conditions.length %>)</span>
+    </h2>
+    <% if @conditions.any? %>
+      <table
+        id="chart-problems-table"
+        class="data-table"
+      >
+        <caption class="sr-only">Problem list</caption>
+        <thead>
+          <tr>
+            <th scope="col">Problem</th>
+            <th scope="col">ICD-10</th>
+            <th scope="col">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% @conditions.each do |c| %>
+            <% status = c.clinical_status.presence %>
+            <tr>
+              <td><%= c.display %></td>
+              <td class="tabular-nums"><%= c.code %></td>
+              <td><%= status_badge status || "unknown", (status || "unknown").upcase_first %></td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    <% else %>
+      <%= empty_state "No active problems recorded." %>
+    <% end %>
+  </section>
+
+  <%# ---- Medications ---- %>
+  <section
+    id="chart-medications"
+    class="card"
+    aria-labelledby="chart-medications-heading"
+  >
+    <h2
+      id="chart-medications-heading"
+      class="mt-0"
+    >
+      Medications
+      <span class="font-normal text-slate-600">(<%= @medications.length %>)</span>
+    </h2>
+    <% if @medications.any? %>
+      <table
+        id="chart-medications-table"
+        class="data-table"
+      >
+        <caption class="sr-only">Medications</caption>
+        <thead>
+          <tr>
+            <th scope="col">Medication</th>
+            <th scope="col">Sig</th>
+            <th scope="col">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% @medications.each do |m| %>
+            <%# The order's status as RPMS reports it (#628); its colour is
+                active, unknown, or inactive for any other status. %>
+            <% med_status = m.status.presence || "unknown" %>
+            <% med_tone = %w[active unknown].include?(med_status) ? med_status : "inactive" %>
+            <tr>
+              <td><%= m.medication_display %></td>
+              <td><%= m.dosage_instruction %></td>
+              <td><%= status_badge med_tone, med_status.upcase_first %></td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    <% else %>
+      <%= empty_state "No active medications." %>
+    <% end %>
+  </section>
+
+  <%# ---- Vitals ---- %>
+  <section
+    id="chart-vitals"
+    class="card md:col-span-2"
+    aria-labelledby="chart-vitals-heading"
+  >
+    <h2
+      id="chart-vitals-heading"
+      class="mt-0"
+    >
+      Vital signs
+      <span class="font-normal text-slate-600">(<%= @vitals.length %>)</span>
+    </h2>
+    <% if @vitals.any? %>
+      <dl class="m-0 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <% @vitals.each do |v| %>
+          <div
+            class="rounded-md border border-slate-200 px-3 py-2"
+            data-vital="<%= v[:type] %>"
+          >
+            <dt class="text-sm font-semibold text-slate-600"><%= vital_labels.dig(v[:type], :display) || v[:type] %></dt>
+            <dd class="m-0 text-xl font-semibold tabular-nums">
+              <span data-vital-value><%= v[:value] %></span>
+              <span
+                class="text-sm font-normal text-slate-600"
+                data-vital-unit
+              ><%= v[:units] %></span>
+            </dd>
+          </div>
+        <% end %>
+      </dl>
+    <% else %>
+      <%= empty_state "No vitals recorded." %>
+    <% end %>
+  </section>
+
+  <%# ---- Behavioral health screenings (#474), trended scores ---- %>
+  <section
+    id="chart-screenings"
+    class="card md:col-span-2"
+    aria-labelledby="chart-screenings-heading"
+  >
+    <h2
+      id="chart-screenings-heading"
+      class="mt-0"
+    >
+      Behavioral health screenings
+      <span class="font-normal text-slate-600">(<%= @screenings.length %>)</span>
+    </h2>
+    <% if @screenings.any? %>
+      <table
+        id="chart-screenings-table"
+        class="data-table"
+      >
+        <caption class="sr-only">Behavioral health screenings</caption>
+        <thead>
+          <tr>
+            <th scope="col">Date</th>
+            <th scope="col">Instrument</th>
+            <th scope="col">Score</th>
+            <th scope="col">Severity</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% @screenings.each do |s| %>
+            <tr>
+              <td class="tabular-nums"><%= s.effective_at.strftime("%b %-d, %Y") %></td>
+              <td><%= s.instrument.short_title %></td>
+              <td class="tabular-nums"><%= s.total_score %> / <%= s.instrument.max_score %></td>
+              <%# The badge's key is the WHOLE band ("moderately severe"), never its first word. %>
+              <td><%= status_badge s.severity_band, s.severity_band.to_s.upcase_first %></td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    <% else %>
+      <%= empty_state "No screenings recorded." %>
+    <% end %>
+  </section>
+
+  <%# ---- Allergies (detail). The count and the body read AllergyListStatus,
+        so a name that passed egress stays in the table when the list is
+        incomplete. ---- %>
+  <section
+    id="chart-allergies"
+    class="card"
+    aria-labelledby="chart-allergies-heading"
+  >
+    <h2
+      id="chart-allergies-heading"
+      class="mt-0"
+    >
+      Allergies
+      <span class="font-normal text-slate-600">(<%= @allergy_list_status.count_label %>)</span>
+    </h2>
+    <% unless @allergy_list_status.loaded? %>
+      <%= empty_state @allergy_list_status.text %>
+    <% end %>
+    <% if @allergy_list_status.loaded? || @allergies.any? %>
+      <table
+        id="chart-allergies-table"
+        class="data-table"
+      >
+        <caption class="sr-only">Allergies</caption>
+        <thead>
+          <tr>
+            <th scope="col">Allergen</th>
+            <th scope="col">Reaction</th>
+            <th scope="col">Severity</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% @allergies.each do |a| %>
+            <tr>
+              <td><%= a.display_allergen %></td>
+              <td><%= a.reaction %></td>
+              <td>
+                <% if a.severity.present? %>
+                  <%= status_badge a.severity.to_s.downcase, a.severity.to_s.upcase_first %>
+                <% else %>
+                  Not recorded
+                <% end %>
+              </td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    <% end %>
+  </section>
+
+  <%# ---- Immunizations (IHS-only, #647) ---- %>
+  <% if feature_available?(:ihs_immunization) %>
+    <section
+      id="chart-immunizations"
+      class="card"
+      aria-labelledby="chart-immunizations-heading"
+    >
+      <h2
+        id="chart-immunizations-heading"
+        class="mt-0"
+      >
+        Immunizations
+        <% unless @immunizations_load_failed %>
+          <span class="font-normal text-slate-600">(<%= @immunizations.length %>)</span>
+        <% end %>
+      </h2>
+      <% if @immunizations_load_failed %>
+        <%= empty_state "Immunizations could not be loaded." %>
+      <% elsif @immunizations.any? %>
+        <table
+          id="chart-immunizations-table"
+          class="data-table"
+        >
+          <caption class="sr-only">Immunizations</caption>
+          <thead>
+            <tr>
+              <th scope="col">Vaccine</th>
+              <th scope="col">Date</th>
+              <th scope="col">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% @immunizations.each do |i| %>
+              <tr>
+                <td><%= i.vaccine_display %></td>
+                <td class="tabular-nums"><%= i.occurrence_datetime&.strftime("%b %-d, %Y") %></td>
+                <td><%= status_badge(%w[completed active].include?(i.status) ? "active" : "inactive", i.status.to_s.upcase_first) %></td>
+              </tr>
+            <% end %>
+          </tbody>
+        </table>
+      <% else %>
+        <%= empty_state "No immunizations on file." %>
+      <% end %>
+    </section>
   <% end %>
 
-  <div class="form-actions">
-    <% if screenings_allowed? %>
-      <%= link_to "Screenings",
-            patient_screenings_path(@patient.dfn),
-            class: "button-secondary no-underline" %>
-    <% end %>
-    <%= link_to "Consents",
-          patient_consents_path(@patient.dfn),
-          class: "button-secondary no-underline" %>
-    <%= link_to "View as FHIR",
-          fhir_url,
-          class: "button-secondary no-underline" %>
-    <% if capability?("visit.chart") %>
-      <%= link_to "Take vitals",
-            new_patient_vitals_path(@patient.dfn),
-            class: "button-secondary no-underline" %>
-      <%= link_to "Mark allergies reviewed",
-            new_patient_allergy_review_path(@patient.dfn),
-            class: "button-secondary no-underline" %>
-      <%= link_to "Record chief complaint",
-            new_patient_chief_complaint_path(@patient.dfn),
-            class: "button-secondary no-underline" %>
-    <% end %>
-  </div>
-
-  <div class="chart-grid">
-    <%# ---- Problem list ---- %>
-    <div class="chart-card">
-      <div class="chart-card__head"><h2>Problem List</h2><span class="count"><%= @conditions.length %></span></div>
-      <div class="chart-card__body">
-        <% if @conditions.any? %>
-          <table>
-            <thead><tr><th>Problem</th><th>ICD-10</th><th>Status</th></tr></thead>
-            <tbody>
-              <% @conditions.each do |c| %>
-                <tr>
-                  <td><%= c.display %></td>
-                  <td class="mono"><%= c.code %></td>
-                  <td><span class="badge <%= c.clinical_status.presence || "unknown" %>"><%= c.clinical_status.presence || "Unknown" %></span></td>
-                </tr>
-              <% end %>
-            </tbody>
-          </table>
-        <% else %>
-          <p class="empty">No active problems recorded.</p>
-        <% end %>
-      </div>
-    </div>
-
-    <%# ---- Medications ---- %>
-    <div class="chart-card">
-      <div class="chart-card__head"><h2>Medications</h2><span class="count"><%= @medications.length %></span></div>
-      <div class="chart-card__body">
-        <% if @medications.any? %>
-          <table>
-            <thead><tr><th>Medication</th><th>Sig</th><th>Status</th></tr></thead>
-            <tbody>
-              <% @medications.each do |m| %>
-                <tr>
-                  <td><%= m.medication_display %></td>
-                  <td><%= m.dosage_instruction %></td>
-                  <% med_status = m.status.presence || "unknown" %>
-                  <% med_badge = med_status == "active" ? "active" : (med_status == "unknown" ? "unknown" : "inactive") %>
-                  <td><span class="badge <%= med_badge %>"><%= med_status == "unknown" ? "Unknown" : med_status %></span></td>
-                </tr>
-              <% end %>
-            </tbody>
-          </table>
-        <% else %>
-          <p class="empty">No active medications.</p>
-        <% end %>
-      </div>
-    </div>
-
-    <%# ---- Vitals ---- %>
-    <div class="chart-card span">
-      <div class="chart-card__head"><h2>Vital Signs</h2><span class="count"><%= @vitals.length %></span></div>
-      <div class="chart-card__body">
-        <% if @vitals.any? %>
-          <div class="vitals">
-            <% @vitals.each do |v| %>
-              <% label = vital_labels.dig(v[:type], :display) || v[:type] %>
-              <div class="vital">
-                <div class="lbl"><%= label %></div>
-                <div class="val"><%= v[:value] %><span class="u"><%= v[:units] %></span></div>
-              </div>
-            <% end %>
-          </div>
-        <% else %>
-          <p class="empty">No vitals recorded.</p>
-        <% end %>
-      </div>
-    </div>
-
-    <%# ---- Behavioral health screenings (#474) — trended scores ---- %>
-    <div class="chart-card span">
-      <div class="chart-card__head"><h2>Behavioral Health Screenings</h2><span class="count"><%= @screenings.length %></span></div>
-      <div class="chart-card__body">
-        <% if @screenings.any? %>
-          <table>
-            <thead><tr><th>Date</th><th>Instrument</th><th>Score</th><th>Severity</th></tr></thead>
-            <tbody>
-              <% @screenings.each do |s| %>
-                <tr>
-                  <td class="mono"><%= s.effective_at.strftime("%b %-d, %Y") %></td>
-                  <td><%= s.instrument.short_title %></td>
-                  <td class="mono"><%= s.total_score %> / <%= s.instrument.max_score %></td>
-                  <td><span class="badge <%= "sev-#{s.severity_slug}" %>"><%= s.severity_band %></span></td>
-                </tr>
-              <% end %>
-            </tbody>
-          </table>
-        <% else %>
-          <p class="empty">No screenings recorded.</p>
-        <% end %>
-      </div>
-    </div>
-
-    <%# ---- Allergies (detail). The count and the body read AllergyListStatus,
-          so a name that passed egress stays in the table when the list is
-          incomplete. ---- %>
-    <div class="chart-card">
-      <div class="chart-card__head"><h2>Allergies</h2><span class="count"><%= @allergy_list_status.count_label %></span></div>
-      <div class="chart-card__body">
-        <% unless @allergy_list_status.loaded? %>
-          <p class="empty"><%= @allergy_list_status.text %></p>
-        <% end %>
-        <% if @allergy_list_status.loaded? || @allergies.any? %>
-          <table>
-            <thead><tr><th>Allergen</th><th>Reaction</th><th>Severity</th></tr></thead>
-            <tbody>
-              <% @allergies.each do |a| %>
-                <tr>
-                  <td><%= a.display_allergen %></td>
-                  <td><%= a.reaction %></td>
-                  <td><span class="badge <%= a.severity.present? ? "sev-#{a.severity.to_s.downcase}" : "inactive" %>"><%= a.severity.presence || "—" %></span></td>
-                </tr>
-              <% end %>
-            </tbody>
-          </table>
-        <% end %>
-      </div>
-    </div>
-
-    <%# ---- Immunizations (IHS-only, #647) ---- %>
-    <% if feature_available?(:ihs_immunization) %>
-      <div class="chart-card">
-        <div class="chart-card__head"><h2>Immunizations</h2><% unless @immunizations_load_failed %><span class="count"><%= @immunizations.length %></span><% end %></div>
-        <div class="chart-card__body">
-          <% if @immunizations_load_failed %>
-            <p class="empty">Immunizations could not be loaded.</p>
-          <% elsif @immunizations.any? %>
-            <table>
-              <thead><tr><th>Vaccine</th><th>Date</th><th>Status</th></tr></thead>
-              <tbody>
-                <% @immunizations.each do |i| %>
-                  <tr>
-                    <td><%= i.vaccine_display %></td>
-                    <td class="mono"><%= i.occurrence_datetime&.strftime("%b %-d, %Y") %></td>
-                    <td><span class="badge <%= %w[completed active].include?(i.status) ? "active" : "inactive" %>"><%= i.status %></span></td>
-                  </tr>
-                <% end %>
-              </tbody>
-            </table>
-          <% else %>
-            <p class="empty">No immunizations on file.</p>
+  <%# ---- Encounters and appointments ---- %>
+  <section
+    id="chart-encounters"
+    class="card md:col-span-2"
+    aria-labelledby="chart-encounters-heading"
+  >
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <h2
+        id="chart-encounters-heading"
+        class="my-0"
+      >
+        Encounters &amp; Appointments
+        <span class="font-normal text-slate-600">(<%= @encounters.length %>)</span>
+      </h2>
+      <% if @progress_note_link || @demo_visit_link %>
+        <div class="form-actions">
+          <% if @progress_note_link %>
+            <%= link_to "Write note",
+                  new_patient_progress_note_path(@patient.dfn),
+                  class: "button-primary no-underline" %>
+          <% end %>
+          <% if @demo_visit_link %>
+            <%= link_to "+ New visit",
+                  new_patient_visit_path(@patient.dfn),
+                  class: "button-secondary no-underline" %>
           <% end %>
         </div>
-      </div>
-    <% end %>
-
-    <%# ---- Encounters / Appointments ---- %>
-    <div class="chart-card span">
-      <div class="chart-card__head"><h2>Encounters &amp; Appointments</h2><span class="count"><%= @encounters.length %></span><% if @progress_note_link %><a href="<%= new_patient_progress_note_path(@patient.dfn) %>" style="margin-left:auto;background:#047857;color:#fff;font-weight:700;font-size:13px;line-height:1;text-decoration:none;border-radius:8px;padding:8px 13px">Write note</a><% end %><% if @demo_visit_link %><a href="<%= new_patient_visit_path(@patient.dfn) %>" style="margin-left:<%= @progress_note_link ? "8px" : "auto" %>;background:#047857;color:#fff;font-weight:700;font-size:13px;line-height:1;text-decoration:none;border-radius:8px;padding:8px 13px">+ New visit</a><% end %></div>
-      <div class="chart-card__body">
-        <% if @encounters.any? %>
-          <table>
-            <thead><tr><th>Date</th><th>Location</th><th>Class</th><th>Status</th></tr></thead>
-            <tbody>
-              <% @encounters.each do |e| %>
-                <tr>
-                  <td class="mono"><%= e[:datetime].respond_to?(:strftime) ? e[:datetime].strftime("%b %-d, %Y") : e[:datetime] %></td>
-                  <td><%= e[:location].presence || "—" %></td>
-                  <td>Ambulatory</td>
-                  <td><span class="badge inactive"><%= e[:status].to_s.titleize %></span></td>
-                </tr>
-              <% end %>
-            </tbody>
-          </table>
-        <% else %>
-          <p class="empty">No encounters or upcoming appointments.</p>
-        <% end %>
-      </div>
+      <% end %>
     </div>
-  </div>
-
-
+    <% if @encounters.any? %>
+      <table
+        id="chart-encounters-table"
+        class="data-table"
+      >
+        <caption class="sr-only">Encounters and appointments</caption>
+        <thead>
+          <tr>
+            <th scope="col">Date</th>
+            <th scope="col">Location</th>
+            <th scope="col">Class</th>
+            <th scope="col">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% @encounters.each do |e| %>
+            <tr>
+              <td class="tabular-nums"><%= e[:datetime].respond_to?(:strftime) ? e[:datetime].strftime("%b %-d, %Y") : e[:datetime] %></td>
+              <td><%= e[:location].presence || "Not recorded" %></td>
+              <td>Ambulatory</td>
+              <td><%= status_badge e[:status].to_s.downcase, e[:status].to_s.titleize %></td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    <% else %>
+      <%= empty_state "No encounters or upcoming appointments." %>
+    <% end %>
+  </section>
 </div>
