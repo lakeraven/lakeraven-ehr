@@ -20,7 +20,7 @@ module Lakeraven
 
         # GET /scheduling/clinics/:resource_id/appointments/:appointment_id/checkin?date=&provider_search=
         def new
-          @checkin = build(at: Time.now.strftime("%Y-%m-%dT%H:%M"))
+          @checkin = build(at: SiteTime.now.strftime("%Y-%m-%dT%H:%M"))
           @providers = providers
           @coverage = coverage_standing
           @stops = stops

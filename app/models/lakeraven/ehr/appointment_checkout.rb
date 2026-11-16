@@ -24,7 +24,7 @@ module Lakeraven
       # to now when it is a few minutes ahead.
       def time
         entered = WallClock.parse(at)
-        entered && [ entered, Time.now ].min
+        entered && [ entered, SiteTime.now ].min
       end
 
       private
@@ -34,7 +34,7 @@ module Lakeraven
 
         entered = WallClock.parse(at)
         return errors.add(:at, "is not a time") unless entered
-        return errors.add(:at, "cannot be more than 5 minutes from now") if entered > Time.now + LEEWAY
+        return errors.add(:at, "cannot be more than 5 minutes from now") if entered > SiteTime.now + LEEWAY
 
         errors.add(:at, "cannot be before the appointment's day") if appointment && entered.to_date < appointment[:start_time].to_date
         checked_in = appointment&.dig(:checkin_time)
