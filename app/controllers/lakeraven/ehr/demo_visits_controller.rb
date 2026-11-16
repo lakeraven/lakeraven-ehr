@@ -194,10 +194,7 @@ module Lakeraven
       end
 
       def require_demo_mode!
-        demo = Rails.env.development? &&
-          ENV["CHART_DEMO_OPEN"] == "1" &&
-          ENV["SPIKE_MOCK_RPC"] == "1"
-        head :not_found unless demo
+        head :not_found unless LocalChartDemo.open?
       end
 
       def visit_state(dfn)
