@@ -50,6 +50,8 @@ module Lakeraven
         # Charting on a visit (VueCentric's BGO components: triage, vitals,
         # allergies reviewed). Each component asks BGOUTL CHKSEC for these
         # three and edits only for PROVIDER or BGOZ CAC, never BGOZ VIEW ONLY.
+        # PROVIDER also marks the clinicians who author and sign progress
+        # notes (#1001).
         provider: "PROVIDER",
         charting_coordinator: "BGOZ CAC",
         charting_view_only: "BGOZ VIEW ONLY",
