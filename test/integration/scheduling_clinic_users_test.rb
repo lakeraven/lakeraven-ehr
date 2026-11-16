@@ -193,6 +193,56 @@ class SchedulingClinicUsersTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "malformed directory collections and rows are unavailable rather than an empty or partial list" do
+    sign_in
+    replies = [ {}, "no directory", [ nil ], [ "not a user" ],
+                [ USERS.first, USERS.last.merge(id: nil) ],
+                [ USERS.first.merge(name: nil) ] ]
+    replies.each do |reply|
+      with_directory(users: reply) do
+        get PATH
+
+        assert_response :service_unavailable
+        assert_select "#clinic-users tbody tr", count: 0
+        assert_select "#clinic-users-empty, #clinic-users-no-matches", count: 0
+      end
+    end
+  end
+
+  test "an unknown right is unavailable rather than displayed as No" do
+    sign_in
+    %i[overbook modify_schedule modify_appointments master_overbook].each do |right|
+      [ nil, "false", 0 ].each do |unknown|
+        with_directory(users: [ USERS.first.merge(right => unknown) ]) do
+          get PATH
+
+          assert_response :service_unavailable
+          assert_select "#clinic-users tbody tr", count: 0
+          assert_select "#clinic-users-empty, #clinic-users-no-matches", count: 0
+        end
+      end
+    end
+  end
+
+  test "a subsequent request reads the current directory rather than a saved snapshot" do
+    sign_in
+    users = [ USERS.first.dup ]
+    with_directory(users: users) do
+      get PATH
+
+      assert_response :success
+      assert_select "#clinic-users tr[data-user='90'] td", text: "ZULU,SCHEDULER"
+
+      users.replace([ USERS.last.merge(name: "CURRENT,MANAGER") ])
+      get PATH
+
+      assert_response :success
+      assert_select "#clinic-users tr[data-user='90']", count: 0
+      assert_select "#clinic-users tr[data-user='32'] td", text: "CURRENT,MANAGER"
+    end
+    assert_equal [ 5, 5 ], @directory_reads
+  end
+
   test "RPMS names and search terms are escaped in the HTML" do
     sign_in
     malicious_name = "<script>alert('user')</script>"
