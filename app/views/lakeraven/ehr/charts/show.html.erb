@@ -95,13 +95,15 @@
       </span>
     <% end %>
   <% end %>
-  <div class="patient-banner__allergy-actions">
-    <%= link_to "Record an allergy",
-          new_patient_allergy_path(@patient.dfn) %>
-    <%= button_to "No known allergies",
-          patient_no_known_allergies_path(@patient.dfn),
-          method: :post %>
-  </div>
+  <% if capability?("allergy.record") %>
+    <div class="patient-banner__allergy-actions">
+      <%= link_to "Record an allergy",
+            new_patient_allergy_path(@patient.dfn) %>
+      <%= button_to "No known allergies",
+            patient_no_known_allergies_path(@patient.dfn),
+            method: :post %>
+    </div>
+  <% end %>
 <% end %>
 
 <div class="chart-page">

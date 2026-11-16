@@ -56,6 +56,12 @@ module Lakeraven
         # seen in a medical assistant's trace). The medical assistant, nurse
         # and provider personas hold PROVIDER.
         "visit.chart" => rule(any: %i[provider charting_coordinator], deny: %i[charting_view_only]),
+        # Record an allergy, or no known allergies, for the patient (rpms-ux
+        # S-TRI-04.2): the same keys as charting on a visit, as VueCentric's
+        # charting components check them. The provider, nurse and medical
+        # assistant personas hold PROVIDER. Sign-on mints no AllergyIntolerance
+        # write scope, so this is what lets a clinician record one.
+        "allergy.record" => rule(any: %i[provider charting_coordinator], deny: %i[charting_view_only]),
         # Work the facility's referrals: list the ones still pending across
         # patients (#873). RPMS: RCIS's menu key BMCZMENU, or its supervisor
         # and manager keys, the same keys Roles.can_process_chs? reads.

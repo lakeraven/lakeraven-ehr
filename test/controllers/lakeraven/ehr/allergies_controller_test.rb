@@ -3,6 +3,7 @@
 require "test_helper"
 require_relative "../../../dummy/lib/lakeraven_demo_seeds"
 require_relative "../../../support/allergy_write_test_helper"
+require_relative "../../../support/demo_persona_keys"
 
 module Lakeraven
   module EHR
@@ -15,6 +16,9 @@ module Lakeraven
       BASE = "/lakeraven-ehr/patients/#{DFN}/allergies"
       NKA_PATH = "/lakeraven-ehr/patients/#{DFN}/allergies/no_known_allergies"
       CHART = "/lakeraven-ehr/patients/#{DFN}"
+      MEDICAL_ASSISTANT_KEYS = %w[provider orders_enter].freeze
+      # What sign-on mints for the medical assistant: the chart option's reads, no write scope.
+      MEDICAL_ASSISTANT_SCOPES = SessionScopePolicy.scope_string(security_keys: MEDICAL_ASSISTANT_KEYS, options: [ "CIAV VUECENTRIC" ])
 
       setup do
         @forgery_was = ActionController::Base.allow_forgery_protection
@@ -22,7 +26,7 @@ module Lakeraven
         Lakeraven::EHR::AuditEvent.delete_all
         @demo_original_client = RpmsRpc.configuration.client
         RpmsRpc.mock! { |m| LakeravenDemoSeeds.seed(m) }
-        sign_in_clinician!(scopes: WRITE_SCOPES)
+        sign_in_clinician!(scopes: WRITE_SCOPES, keys: MEDICAL_ASSISTANT_KEYS)
         open_patient_context!(DFN)
         @tracker = TrackingAllergyGateway.new
       end
@@ -91,18 +95,43 @@ module Lakeraven
 
       # -- Chart entry points ---------------------------------------------------
 
-      test "chart shows link to record an allergy and POST form for no known allergies" do
-        setup_chart_bearer!
-        get CHART, headers: @chart_headers
+      test "S-TRI-04.2 the provider, nurse and medical assistant personas, each holding PROVIDER, are offered allergy entry and record an allergy with the scopes sign-on mints" do
+        %w[PROFILE,MD PROFILE,RN PROFILE,MA].each do |persona|
+          keys = Roles.symbolize_keys(DemoPersonaKeys::BY_PERSONA.fetch(persona)).map(&:to_s)
+          scopes = SessionScopePolicy.scope_string(security_keys: keys, options: DemoPersonaKeys::OPTIONS_BY_PERSONA.fetch(persona))
+          refute_includes scopes, "AllergyIntolerance.write", "#{persona}: sign-on mints no allergy write scope"
+          sign_in_clinician!(scopes: scopes, keys: keys)
+          open_patient_context!(DFN)
+          get CHART
 
-        assert_response :ok
-        assert_select "a[href=?]", "#{MOUNT}/patients/#{DFN}/allergies/new", text: /record.*allergy/i
-        assert_select "form[action=?][method=post]", NKA_PATH
-        nka_forms = css_select("form[action='#{NKA_PATH}'][method=post]")
-        submits = nka_forms.flat_map { |form| form.css("input[type=submit], button[type=submit]") }
-        assert submits.any? { |node| (node["value"] || node.text).match?(/no known allergies/i) },
-               "expected NKA form submit control labeled No known allergies"
-        assert_select "a[href=?]", NKA_PATH, count: 0
+          assert_response :ok
+          assert_select "a[href=?]", "#{MOUNT}/patients/#{DFN}/allergies/new", { text: /record.*allergy/i }, persona
+          assert_select "form[action=?][method=post]", NKA_PATH
+          submits = css_select("form[action='#{NKA_PATH}'] input[type=submit], form[action='#{NKA_PATH}'] button[type=submit]")
+          assert submits.any? { |node| (node["value"] || node.text).match?(/no known allergies/i) }, persona
+          assert_select "a[href=?]", NKA_PATH, count: 0
+          calls_before = @tracker.add_calls.length
+          post_allergy
+          assert_redirected_to CHART, persona
+          assert_equal calls_before + 1, @tracker.add_calls.length, persona
+        end
+      end
+
+      test "S-TRI-04.2 a view-only or keyless sign-on is not offered allergy entry, and its writes are refused" do
+        [ %w[provider charting_view_only], %w[orders_enter] ].each do |keys|
+          sign_in_clinician!(scopes: MEDICAL_ASSISTANT_SCOPES, keys: keys)
+          open_patient_context!(DFN)
+          get CHART
+          assert_select "a[href=?]", "#{MOUNT}/patients/#{DFN}/allergies/new", { count: 0 }, keys.inspect
+          assert_select "form[action=?]", NKA_PATH, { count: 0 }, keys.inspect
+
+          post_allergy
+          assert_response :forbidden, keys.inspect
+          post_nka
+          assert_response :forbidden, keys.inspect
+        end
+        assert_empty @tracker.add_calls
+        assert_empty @tracker.nka_calls
       end
 
       test "GET no known allergies path does not record NKA" do
@@ -221,18 +250,6 @@ module Lakeraven
         end
 
         assert_response :unauthorized
-        assert_empty @tracker.add_calls
-      end
-
-      test "token without allergy write scope refuses create" do
-        sign_in_clinician!(scopes: READ_SCOPES)
-        open_patient_context!(DFN)
-
-        with_tracking_allergy_gateway(@tracker) do
-          post BASE, params: allergy_form_params.merge(authenticity_token: csrf_token)
-        end
-
-        assert_response :forbidden
         assert_empty @tracker.add_calls
       end
 
