@@ -247,10 +247,12 @@
 
 @utility banner {
   @apply flex flex-wrap items-center gap-x-7 gap-y-2 rounded-xl bg-linear-to-b from-sky-800 to-sky-900 px-5 py-4 text-white shadow-lg;
+}
 
-  & h1 {
-    @apply m-0 text-2xl font-bold tracking-tight text-white;
-  }
+/* The patient's name: the banner's largest text, but not a heading. The
+   page below has its own one h1 (#1113). */
+@utility patient-banner__name {
+  @apply m-0 text-2xl font-bold tracking-tight text-white;
 }
 
 @utility demoinfo {

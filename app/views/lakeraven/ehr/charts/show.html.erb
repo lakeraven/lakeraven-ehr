@@ -107,6 +107,10 @@
 <% end %>
 
 <div class="chart-page">
+  <%# The page's one h1. The banner names the patient without a heading
+      (#1113). %>
+  <%= page_header "Patient chart" %>
+
   <% if flash[:notice].present? %>
     <p
       class="flash notice"
