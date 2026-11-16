@@ -62,6 +62,10 @@ Lakeraven::EHR::Engine.routes.draw do
   post "patients/:dfn/chief_complaints", to: "chief_complaints#create", as: :patient_chief_complaints,
     constraints: { dfn: /\d+/ }
 
+  # Vitals on an open visit (rpms-ux S-TRI-02). RPMS checks and files them.
+  get  "patients/:dfn/vitals/new", to: "vitals#new", as: :new_patient_vitals, constraints: { dfn: /\d+/ }
+  post "patients/:dfn/vitals", to: "vitals#create", as: :patient_vitals, constraints: { dfn: /\d+/ }
+
   # In-clinic consent (#793). A signature is immutable, so there is no
   # update or delete route. Revocation is a new row. `new` and `handover`
   # are declared before any `:id` segment.
