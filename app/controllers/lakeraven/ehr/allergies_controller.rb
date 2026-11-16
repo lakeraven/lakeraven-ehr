@@ -23,7 +23,6 @@ module Lakeraven
       include ClinicianPatientContext
 
       ALLERGY_RESOURCE = "AllergyIntolerance"
-      USER_CONTEXTS = %w[user].freeze
       SCALAR_FIELDS = %w[
         agent agent_pointer type nature originated_at
         observed_or_historical reaction_date severity
@@ -92,12 +91,13 @@ module Lakeraven
         false
       end
 
+      # Reading takes the token's AllergyIntolerance read. Recording takes that
+      # read and the "allergy.record" capability, from the keys RPMS reported
+      # at sign-on (PROVIDER or BGOZ CAC, never BGOZ VIEW ONLY): sign-on mints
+      # no AllergyIntolerance write scope (S-TRI-04.2). The entry form is
+      # offered on the same terms.
       def allergy_scope_permitted?
-        if request.get?
-          can_read?(ALLERGY_RESOURCE)
-        else
-          scope_permits?(ALLERGY_RESOURCE, write_permission, contexts: USER_CONTEXTS)
-        end
+        can_read?(ALLERGY_RESOURCE) && capability?("allergy.record")
       end
 
       def enforce_token_patient_context! = authorize_patient_context!(params[:dfn])
