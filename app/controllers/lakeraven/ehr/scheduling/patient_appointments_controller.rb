@@ -27,9 +27,9 @@ module Lakeraven
 
         def in_when?(date)
           case @when
-          when "today" then date == Date.today
-          when "past" then date && date < Date.today
-          when "future" then date && date > Date.today
+          when "today" then date == SiteTime.today
+          when "past" then date && date < SiteTime.today
+          when "future" then date && date > SiteTime.today
           else true
           end
         end

@@ -9,12 +9,15 @@ module Lakeraven
 
       # Gateway is constructor-injected so tests can pass an explicit fake
       # without mutating shared global state. Default is the production gateway.
-      def initialize(dfn:, visit_string:, measurements:, provider_duz: nil,
+      # taken_at: when the measurements were taken, on the site's clock
+      # (SiteTime.now); omitted, the gateway's default.
+      def initialize(dfn:, visit_string:, measurements:, provider_duz: nil, taken_at: nil,
                      gateway: VitalGateway)
         @dfn = dfn
         @visit_string = visit_string
         @measurements = measurements || []
         @provider_duz = provider_duz
+        @taken_at = taken_at
         @gateway = gateway
       end
 
@@ -22,7 +25,9 @@ module Lakeraven
         return failure(:invalid_input) if @dfn.nil? || @visit_string.nil?
         return failure(:no_measurements) if @measurements.empty?
 
-        raw = @gateway.add(@dfn, @visit_string, @measurements, provider_duz: @provider_duz)
+        options = { provider_duz: @provider_duz }
+        options[:taken_at] = @taken_at if @taken_at
+        raw = @gateway.add(@dfn, @visit_string, @measurements, **options)
         # Guard against gateway returning nil or a non-hash — surface as
         # :gateway_error rather than NoMethodError on raw[:success].
         return failure(:gateway_error, raw: raw) unless raw.is_a?(Hash) && raw[:success]
