@@ -176,4 +176,22 @@ module ProgressNoteTestHelper
     client = RpmsRpc.client
     duz.nil? ? client.clear_authenticated : client.set_authenticated(duz.to_s)
   end
+
+  # Stands in front of an RPMS connection and answers everything it does,
+  # except #duz: a connection that cannot say who is signed on.
+  class ConnectionWithoutDuz
+    def initialize(client)
+      @client = client
+    end
+
+    def respond_to_missing?(name, include_private = false)
+      name.to_sym != :duz && @client.respond_to?(name, include_private)
+    end
+
+    def method_missing(name, *args, **kwargs, &block)
+      return super if name.to_sym == :duz
+
+      @client.public_send(name, *args, **kwargs, &block)
+    end
+  end
 end
