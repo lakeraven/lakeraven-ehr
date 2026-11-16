@@ -31,7 +31,7 @@ module Lakeraven
       end
 
       # The clinic codes a clinic may carry: the active CLINIC STOPs.
-      def self.clinic_codes(setup: ::RpmsRpc::SchedulingSetup, today: Date.today)
+      def self.clinic_codes(setup: ::RpmsRpc::SchedulingSetup, today: SiteTime.today)
         Array(setup.clinic_stops).reject { |s| s[:inactive_date] && s[:inactive_date] <= today }.sort_by { |s| s[:name].to_s }
       end
 

@@ -95,13 +95,15 @@
       </span>
     <% end %>
   <% end %>
-  <div class="patient-banner__allergy-actions">
-    <%= link_to "Record an allergy",
-          new_patient_allergy_path(@patient.dfn) %>
-    <%= button_to "No known allergies",
-          patient_no_known_allergies_path(@patient.dfn),
-          method: :post %>
-  </div>
+  <% if capability?("allergy.record") %>
+    <div class="patient-banner__allergy-actions">
+      <%= link_to "Record an allergy",
+            new_patient_allergy_path(@patient.dfn) %>
+      <%= button_to "No known allergies",
+            patient_no_known_allergies_path(@patient.dfn),
+            method: :post %>
+    </div>
+  <% end %>
 <% end %>
 
 <div class="chart-page">
@@ -115,12 +117,28 @@
   <% end %>
 
   <div class="form-actions">
+    <% if screenings_allowed? %>
+      <%= link_to "Screenings",
+            patient_screenings_path(@patient.dfn),
+            class: "button-secondary no-underline" %>
+    <% end %>
     <%= link_to "Consents",
           patient_consents_path(@patient.dfn),
           class: "button-secondary no-underline" %>
     <%= link_to "View as FHIR",
           fhir_url,
           class: "button-secondary no-underline" %>
+    <% if capability?("visit.chart") %>
+      <%= link_to "Take vitals",
+            new_patient_vitals_path(@patient.dfn),
+            class: "button-secondary no-underline" %>
+      <%= link_to "Mark allergies reviewed",
+            new_patient_allergy_review_path(@patient.dfn),
+            class: "button-secondary no-underline" %>
+      <%= link_to "Record chief complaint",
+            new_patient_chief_complaint_path(@patient.dfn),
+            class: "button-secondary no-underline" %>
+    <% end %>
   </div>
 
   <div class="chart-grid">
