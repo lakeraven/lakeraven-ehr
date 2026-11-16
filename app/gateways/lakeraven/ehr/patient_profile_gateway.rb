@@ -7,7 +7,7 @@ module Lakeraven
   module EHR
     # The parts of a registration beside the demographics: the emergency
     # contact and next of kin (rpms-ux S-REG-08), the other tribes and eligibility
-    # modifiers (S-REG-07.2, S-REG-07.3), the languages (S-REG-10) and
+    # modifiers (S-REG-07.2, S-REG-07.3), the advance directives (S-REG-17), the languages (S-REG-10) and
     # the other names and the preferred name (S-REG-12), and race and ethnicity (S-REG-20.2). Everything goes through RpmsRpc::PatientProfile,
     # which reads and files through AG's own windows and runs AG's own field
     # checks (AGG WINDOW DATA VALIDATION) before it files.
@@ -109,6 +109,35 @@ module Lakeraven
 
         def remove_eligibility_modifier(dfn, modifier, via: ::RpmsRpc::Registration)
           result_for(via.remove_eligibility_modifier(dfn.to_i, modifier.to_i))
+        rescue ::RpmsRpc::Error, IOError, SystemCallError => e
+          unknown(e)
+        end
+
+        # The patient's advance directives (S-REG-17), newest first. RPMS has
+        # no registration call for them; RpmsRpc::Registration files them in
+        # ADVANCE DIRECTIVE (9000040) the way ADVDIRED^AGED11A does, under AG's
+        # edit lock.
+        def advance_directives(dfn, via: ::RpmsRpc::Registration)
+          via.advance_directives(dfn.to_i)
+        end
+
+        def advance_directive_types(via: ::RpmsRpc::Registration) = via.advance_directive_types
+
+        # entry is an AdvanceDirectiveEntry.
+        def record_advance_directive(dfn, entry, via: ::RpmsRpc::Registration)
+          result_for(via.record_advance_directive(dfn.to_i, **entry.record_attrs))
+        rescue ::RpmsRpc::Error, IOError, SystemCallError => e
+          unknown(e)
+        end
+
+        def change_advance_directive(dfn, ien, entry, via: ::RpmsRpc::Registration)
+          result_for(via.change_advance_directive(dfn.to_i, ien.to_i, **entry.record_attrs))
+        rescue ::RpmsRpc::Error, IOError, SystemCallError => e
+          unknown(e)
+        end
+
+        def remove_advance_directive(dfn, ien, via: ::RpmsRpc::Registration)
+          result_for(via.remove_advance_directive(dfn.to_i, ien.to_i))
         rescue ::RpmsRpc::Error, IOError, SystemCallError => e
           unknown(e)
         end
