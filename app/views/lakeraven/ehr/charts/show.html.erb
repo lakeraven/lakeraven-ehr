@@ -115,6 +115,11 @@
   <% end %>
 
   <div class="form-actions">
+    <% if screenings_allowed? %>
+      <%= link_to "Screenings",
+            patient_screenings_path(@patient.dfn),
+            class: "button-secondary no-underline" %>
+    <% end %>
     <%= link_to "Consents",
           patient_consents_path(@patient.dfn),
           class: "button-secondary no-underline" %>
