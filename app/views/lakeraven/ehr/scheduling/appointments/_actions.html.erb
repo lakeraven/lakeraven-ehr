@@ -37,11 +37,11 @@
             class: "button-secondary",
             "aria-label": "Undo the check-in of #{appointment[:patient_name]}" %>
     <% else %>
-      <% if appointment[:start_time].to_date == Date.today %>
+      <% if appointment[:start_time].to_date == Lakeraven::EHR::SiteTime.today %>
         <%= link_to "Check in",
               scheduling_checkin_clinic_appointment_path(*ids, **on) %>
       <% end %>
-      <% if appointment[:start_time] <= Time.now %>
+      <% if appointment[:start_time] <= Lakeraven::EHR::SiteTime.now %>
         <%= button_to "No-show",
               scheduling_no_show_clinic_appointment_path(*ids),
               params: on,

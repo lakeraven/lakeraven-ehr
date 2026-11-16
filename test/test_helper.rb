@@ -243,9 +243,14 @@ else
   # nothing required beyond the forms' own rules, every section asked. A test
   # that needs a site's settings stubs RegistrationSettingsGateway.current.
   Lakeraven::EHR::RegistrationSettingsGateway.reader = -> { Lakeraven::EHR::RegistrationSiteSettings.not_on_file }
-  # The mock broker has no server clock, so RPMS's today (ORWU DT, #1065) is
-  # the app's. A test that needs the site a day behind sets SiteDate.reader.
-  Lakeraven::EHR::SiteDate.reader = -> { Date.current }
+  # The mock broker has no server clock, so the site's clock (ORWU DT "NOW",
+  # #1065, #1114) is the app's. A test that needs the site's clock elsewhere
+  # sets SiteTime.reader, or clears it and seeds ORWU DT "NOW". The process
+  # runs in UTC, as CI and the deployed host do, so the app's date
+  # (Date.current) and its wall clock (Time.now) are the same day on any
+  # workstation.
+  ENV["TZ"] = "UTC"
+  Lakeraven::EHR::SiteTime.reader = -> { Time.now }
 end
 
 # Scripted RPC broker for the BPRM reg/sched/ADT twin gateway tests.
