@@ -22,8 +22,10 @@ scalar text up to 100 characters.
 
 An empty successful read and no search matches have different messages. A
 missing or malformed reply, or broker error, produces an unavailable page rather
-than an empty list. Broker exception details are not rendered. Unknown right
-values are not rendered as a definite No. Names and search text are HTML escaped.
+than an empty list. Broker exception details are not rendered. Non-boolean rights returned by the gem make the directory unavailable. The
+pinned gem interprets raw RPMS flags itself (only "1" becomes true); this screen
+cannot distinguish other raw values once the gem has converted them to false.
+Names and search text are HTML escaped.
 
 This slice changes no user rights and adds no write route. Provider management
 is separate in #1146. Rights editing, provider addition, and no-show enforcement
