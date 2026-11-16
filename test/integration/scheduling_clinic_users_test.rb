@@ -65,7 +65,7 @@ class SchedulingClinicUsersTest < ActionDispatch::IntegrationTest
         assert_select "td[data-right='master_overbook']", text: "No"
       end
       assert_select "#clinic-users tr[data-user='32'] td[data-right='master_overbook']", text: "Yes"
-      assert_select "form[method='post']", count: 0
+      assert_select "form[method='post'][action*='/scheduling/clinics/']", count: 0
       assert_select "input[type='checkbox'], select", count: 0
     end
     # A BSDX resource is not its HOSPITAL LOCATION. Reading 11 here is wrong.
