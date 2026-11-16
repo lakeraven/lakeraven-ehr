@@ -50,7 +50,7 @@ module Lakeraven
         # keys may not. The registration clerk may still start a handover (the
         # CIAV VUECENTRIC user/Consent.c scope is unchanged).
         "consent.revoke" => rule(any: %i[orders_sign orders_release]),
-        # Chart on one of the patient's open visits: the chief complaint
+        # Chart on one of the patient's open visits: allergies reviewed (S-TRI-04.1) and the chief complaint
         # (rpms-ux S-TRI-07.1). VueCentric's BGO components edit for PROVIDER
         # or BGOZ CAC and are read-only under BGOZ VIEW ONLY (BGOUTL CHKSEC,
         # seen in a medical assistant's trace). The medical assistant, nurse

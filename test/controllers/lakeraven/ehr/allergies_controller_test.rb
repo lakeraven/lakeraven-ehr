@@ -160,7 +160,7 @@ module Lakeraven
 
       # -- Successful writes ----------------------------------------------------
 
-      test "POST allergy with valid synthetic data calls gateway once and redirects with success notice" do
+      test "S-TRI-04.2 POST allergy with valid synthetic data calls gateway once and redirects with success notice" do
         post_allergy
 
         assert_equal 1, @tracker.add_calls.length
