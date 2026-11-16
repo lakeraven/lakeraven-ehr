@@ -52,6 +52,8 @@ module Lakeraven
         "lakeraven/ehr/allergies#new",              # Session-authenticated clinician entry/write surface (#644); discloses no stored clinical data
         "lakeraven/ehr/allergies#create",            # Session-authenticated clinician entry/write surface (#644); discloses no stored clinical data
         "lakeraven/ehr/allergies#no_known_allergies", # Session-authenticated clinician entry/write surface (#644); discloses no stored clinical data
+        "lakeraven/ehr/progress_notes#new",    # Session-authenticated note entry (#1001): the open visits' date, time and location, no stored note or clinical record; revisit with Part 2 (#494)
+        "lakeraven/ehr/progress_notes#create", # Session-authenticated note write and sign (#1001); answers with the form or a redirect, not disclosure
         "lakeraven/ehr/chief_complaints#new",    # Session-authenticated chief complaint entry (S-TRI-07.1): the open visits' date, time and location; discloses no stored clinical data
         "lakeraven/ehr/chief_complaints#create", # Session-authenticated chief complaint write (S-TRI-07.1); answers with the form or a redirect, not disclosure
         "lakeraven/ehr/allergy_reviews#new",    # Session-authenticated allergy review (S-TRI-04.1): the open visits' date, time and location; discloses no stored clinical data

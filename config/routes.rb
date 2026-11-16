@@ -56,6 +56,13 @@ Lakeraven::EHR::Engine.routes.draw do
   post "patients/:dfn/allergies/no_known_allergies", to: "allergies#no_known_allergies",
     as: :patient_no_known_allergies, constraints: { dfn: /\d+/ }
 
+  # A progress note written and signed from the chart (#1001). The note is
+  # created, written and signed by the POST only.
+  get  "patients/:dfn/notes/new", to: "progress_notes#new", as: :new_patient_progress_note,
+    constraints: { dfn: /\d+/ }
+  post "patients/:dfn/notes", to: "progress_notes#create", as: :patient_progress_notes,
+    constraints: { dfn: /\d+/ }
+
   # The chief complaint on an open visit (rpms-ux S-TRI-07.1). RPMS files it.
   get  "patients/:dfn/chief_complaints/new", to: "chief_complaints#new", as: :new_patient_chief_complaint,
     constraints: { dfn: /\d+/ }
