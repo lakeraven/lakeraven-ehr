@@ -250,7 +250,9 @@ else
   # (Date.current) and its wall clock (Time.now) are the same day on any
   # workstation.
   ENV["TZ"] = "UTC"
-  Lakeraven::EHR::SiteTime.reader = -> { Time.now }
+  # Guarded so red-before-green can load this helper against the base app
+  # code, where SiteTime does not exist yet; drop the guard once it is on main.
+  Lakeraven::EHR::SiteTime.reader = -> { Time.now } if defined?(Lakeraven::EHR::SiteTime)
 end
 
 # Scripted RPC broker for the BPRM reg/sched/ADT twin gateway tests.
