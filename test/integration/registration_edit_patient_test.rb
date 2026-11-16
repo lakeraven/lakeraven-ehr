@@ -193,8 +193,9 @@ class RegistrationEditPatientTest < ActionDispatch::IntegrationTest
 
   test "S-REG-21.1 the date moved defaults to RPMS's today and may not pass it, when the app's clock is a day ahead (#1065)" do
     sign_in("registration_menu")
-    rpms_today = Date.current - 1
-    Lakeraven::EHR::SiteDate.reader = -> { rpms_today }
+    rpms_now = Time.now - 1.day
+    rpms_today = rpms_now.to_date
+    Lakeraven::EHR::SiteTime.reader = -> { rpms_now }
     with_rpms(saved) do |updates|
       get "/lakeraven-ehr/registration/patients/#{DFN}/address/edit"
       assert_select "input[type=date][name='address[moved_on]'][value=?][max=?]", rpms_today.iso8601, rpms_today.iso8601
@@ -209,7 +210,7 @@ class RegistrationEditPatientTest < ActionDispatch::IntegrationTest
       assert_equal [ [ DFN, { city: "ELSEWHERE", moved_on: rpms_today } ] ], updates
     end
   ensure
-    Lakeraven::EHR::SiteDate.reader = -> { Date.current }
+    Lakeraven::EHR::SiteTime.reader = -> { Time.now }
   end
 
   test "S-REG-21.1 the patient page lists the previous addresses with the dates lived there" do

@@ -380,6 +380,25 @@ module Lakeraven
         assert_select "table.screening-responses tfoot td", "12"
       end
 
+      # #1114: the app stores the screening's time in UTC; the clinician reads
+      # it on the site's clock, which RPMS keeps (ORWU DT "NOW"). Sunday Nov 8,
+      # 2026, 20:10 Pacific is Monday 04:10 UTC.
+      test "the result page and the list show the screening's time on the site's clock, not UTC" do
+        RpmsRpc.client.seed_scalar(:orwu_dt, "NOW", "3261108.201")
+        Lakeraven::EHR::SiteTime.reader = nil if defined?(Lakeraven::EHR::SiteTime)
+        travel_to(Time.utc(2026, 11, 9, 4, 10)) do
+          submit
+          follow_redirect_authorized!
+          assert_select ".page-header p", text: /Nov 8, 2026 at 20:10/
+
+          get BASE
+          assert_select "table td", text: "Nov 8, 2026"
+        end
+      ensure
+        RpmsRpc.client.seed_scalar(:orwu_dt, "NOW", "")
+        Lakeraven::EHR::SiteTime.reader = -> { Time.now } if defined?(Lakeraven::EHR::SiteTime)
+      end
+
 
       def stub_egress_filter(implementation)
         filter = Part2EgressFilter.singleton_class
