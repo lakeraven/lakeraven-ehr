@@ -101,6 +101,28 @@ class SchedulingClinicProvidersTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "removal forms have one submit and a separate required confirmation" do
+    sign_in
+    with_rpms do
+      with_forgery_protection do
+        get BASE
+        assert_response :success
+        document = Nokogiri::HTML5.parse(response.body)
+        [ 1, 2 ].each do |id|
+          form = document.at_css("form[action='#{BASE}/#{id}']")
+          assert form, "missing removal form for #{id}"
+          assert_equal "post", form["method"]
+          assert_equal "delete", form.at_css("input[name='_method']")&.[]("value")
+          assert form.at_css("input[name='authenticity_token']")
+          assert_equal 1, form.css("button:not([type]), button[type='submit'], input[type='submit']").size
+          confirmation = form.at_css("input[type='checkbox'][name='confirm_removal'][required]")
+          assert confirmation
+          assert_empty confirmation.ancestors("button")
+        end
+      end
+    end
+  end
+
   test "supervisor changes default only after membership read and confirms fresh sole default" do
     sign_in
     with_rpms do
