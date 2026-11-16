@@ -54,8 +54,12 @@ The constraints are not technical preferences:
    record goes through the product's normal write path, under the clinician's own identity and
    review. The runtime has no credentials to write to RPMS or any EHR.
 
-7. **Part 2 data is withheld.** A use case does not receive data that ADR 0006 segments, unless a
-   later ADR decides otherwise for that use case.
+7. **Part 2 data is withheld, and until that is enforced, inputs are synthetic.** A use case does
+   not receive data that ADR 0006 segments, unless a later ADR decides otherwise for that use
+   case. ADR 0006 sets the segmentation boundary but no filter enforces it yet (bulk export, for
+   one, is unfiltered). So a use case runs on synthetic inputs only until its input path has
+   verified source-side classification and exclusion, with tests showing that a segmented record
+   never reaches the port.
 
 8. **A validation harness gates every change.** Each use case has a fixture set of synthetic
    inputs with expected outputs and a pass threshold. Any change to the model, its version, the
@@ -92,9 +96,12 @@ The constraints are not technical preferences:
 3. The validation harness, with one synthetic fixture set.
 4. The local-model adapter.
 5. The lakeraven-ehr client for the port, showing suggestions read-only to a clinician.
-6. The first use case (registry-based blood-pressure prompts), behind its own switch.
+6. Source-side classification and exclusion on the first use case's input path (decision 7).
+   Until this lands, everything above runs on synthetic data only.
+7. The first use case (registry-based blood-pressure prompts) on real-patient inputs, behind its
+   own switch.
 
-Slices 1 to 4 handle PHI and get the hard panel. Slice 5 onward touches the clinical UI and gets a
+Slices 1 to 4 and 6 handle PHI or Part 2 data and get the hard panel. Slices 5 and 7 touch the clinical UI and get a
 clinician-facing review as well.
 
 ## Open questions
