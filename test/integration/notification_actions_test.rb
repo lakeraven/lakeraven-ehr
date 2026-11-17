@@ -3,7 +3,7 @@
 require "test_helper"
 require_relative "../support/patient_banner_test_helper"
 
-# rpms-ux S-SGN-02.2, 02.3 and 02.4 (lakeraven/rpms-ux#78, pending merge):
+# rpms-ux S-SGN-02.2, 02.3 and 02.4 (openrpms/openrpms-ux#78, pending merge):
 # a clinician removes a notification RPMS lists as one they can delete, sees
 # no Remove on one it does not, and forwards one to a colleague found by name,
 # with a comment that shows in the colleague's list.
