@@ -16,8 +16,11 @@ require "capybara/cuprite"
 # Screenshots of each step land in DEMO_MODE_EVIDENCE_DIR (default
 # tmp/evidence/demo_mode).
 class DemoModeTest < ActionDispatch::SystemTestCase
-  # Chrome on a busy CI runner can take longer than Ferrum's 10-second default to
-  # report its websocket URL, which failed this test before it ran a step.
+  # The runner's first Chrome launch is a cold start, slower than Ferrum's
+  # 10-second default; CI pays it in a step before this one (ci.yml, #1112).
+  # The 30 seconds are headroom for a slow but warm launch, not the fix.
+  # Each step waits for the page it expects before taking evidence or reading
+  # the DOM, since the banner is on the page before and after each click.
   driven_by :cuprite, screen_size: [ 1280, 900 ], options: { headless: true, process_timeout: 30 }
 
   BANNER = "Test environment. Synthetic data only. " \
@@ -51,13 +54,13 @@ class DemoModeTest < ActionDispatch::SystemTestCase
     assert_no_field "Access code"
 
     click_on "I accept these terms"
+    assert_selector "h1", text: "Sign in"
     evidence "on-2-sign-in"
     assert_banner
-    assert_selector "h1", text: "Sign in"
 
     sign_in_as_provider
-    evidence "on-3-dashboard"
     assert_selector "h1", text: "Dashboard"
+    evidence "on-3-dashboard"
     assert_banner
 
     visit "/lakeraven-ehr/patients/1"
@@ -82,8 +85,8 @@ class DemoModeTest < ActionDispatch::SystemTestCase
     assert_no_text "Before you sign in"
 
     sign_in_as_provider
-    evidence "off-2-dashboard"
     assert_selector "h1", text: "Dashboard"
+    evidence "off-2-dashboard"
     assert_no_selector "#demo-banner"
     assert_no_text "Test environment"
   end

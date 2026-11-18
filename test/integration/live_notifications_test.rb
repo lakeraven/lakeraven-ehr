@@ -62,7 +62,7 @@ class LiveNotificationsTest < ActionDispatch::IntegrationTest
     assert_redirected_to "/lakeraven-ehr/patients/#{DFN}"
     follow_redirect!
     assert_response :ok
-    assert_select "h1", text: /Mouse|MOUSE/
+    assert_select ".patient-banner__name", text: /Mouse|MOUSE/
   end
 
   private

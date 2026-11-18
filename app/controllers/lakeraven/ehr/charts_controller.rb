@@ -132,6 +132,12 @@ module Lakeraven
       # patients (rpms-ux S-CHT-01.9).
       def patient_search_allowed? = can_read?("Patient")
 
+      # The chart links to the patient's screenings for a credential that may
+      # read them: the check ScreeningsController makes on a read (rpms-ux
+      # S-VIS-09.1).
+      def screenings_allowed? = can_read?(ScreeningsController::SCREENING_RESOURCE)
+      helper_method :screenings_allowed?
+
       # The chart renders in the engine layout, like every other page with a
       # patient open. The layout asks for the banner and for capabilities.
       # The banner is the chart's own (assign_patient_banner), read from the
@@ -245,7 +251,7 @@ module Lakeraven
 
       def render_chart_backend_failure_html
         @patient_banner = PatientBanner.empty
-        render :unavailable, layout: false, status: :service_unavailable
+        render :unavailable, layout: "lakeraven/ehr/application", status: :service_unavailable
       end
 
       # -- Authentication / authorization (fail closed) -------------------------
@@ -254,7 +260,7 @@ module Lakeraven
       # Guarded on development? so it can NEVER apply in test or production,
       # and on the mock-RPC flag so it can never expose a real backend.
       def demo_bypass?
-        Rails.env.development? && ENV["CHART_DEMO_OPEN"] == "1" && ENV["SPIKE_MOCK_RPC"] == "1"
+        LocalChartDemo.open?
       end
 
       # THE ONE surface that may authenticate a browser SESSION token. This is
@@ -684,7 +690,23 @@ module Lakeraven
 
         assign_chart_from_bundle(bundle)
         assign_patient_banner
+        assign_chart_actions
         render :show, layout: "lakeraven/ehr/application"
+      end
+
+      # The chart's links into other flows, shown only where the flow would
+      # answer: the note form needs the site's note title and a signed-in
+      # session whose keys meet progress_note.write (the form checks both
+      # again); the demo walk-in page answers only in the local demo.
+      def assign_chart_actions
+        @progress_note_link = progress_note_writable?
+        @demo_visit_link = demo_bypass?
+      end
+
+      def progress_note_writable?
+        Lakeraven::EHR.configuration.progress_note_title_ien.present? &&
+          session[:duz].present? &&
+          Capabilities.allows?(session[:security_keys], "progress_note.write")
       end
 
       # The banner and the allergy sections both read the filtered bundle.

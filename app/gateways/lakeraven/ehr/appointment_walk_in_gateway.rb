@@ -56,7 +56,7 @@ module Lakeraven
         listing = via.lister(file: "40.7", fields: "@;.01;1;2I", xref: "B")
         return [] if listing.nil? || listing[:error]
 
-        today = ::RpmsRpc::FilemanDateParser.to_fileman(Date.today).to_i
+        today = ::RpmsRpc::FilemanDateParser.to_fileman(SiteTime.today).to_i
         listing[:entries].filter_map do |entry|
           name, code, inactive = entry[:pieces]
           next if inactive.to_s.present? && inactive.to_i <= today

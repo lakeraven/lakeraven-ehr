@@ -26,3 +26,6 @@ live: LIVE_RPMS=1 --publish-quiet --tags "not @unsourced and not @mock_only"
 # it is tagged @live. @live scenarios reach RPMS, so a pass only means something
 # on a real broker; @pending specifies work not built yet.
 app: --publish-quiet --tags "not @unsourced and not @live and not @pending"
+# The @live scenarios against one stack, bound by RPMS_IP, RPMS_PORT, RPMS_BROKER,
+# RPMS_ACCESS and RPMS_VERIFY alone (#962). What cannot run there is not run.
+stack: LIVE_STACK=1 --publish-quiet --tags "@live and not @unsourced and not @mock_only and not @pending"

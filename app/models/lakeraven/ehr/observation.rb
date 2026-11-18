@@ -72,6 +72,64 @@ module Lakeraven
         "BMI"   => { code: "39156-5", display: "BMI",                 unit: "kg/m2" }
       }.freeze
 
+      # The unit as a clinician reads it, for each UCUM code the map uses.
+      # FHIR keeps the UCUM code; only the chart shows these (#976).
+      DISPLAY_UNITS = {
+        "[degF]" => "°F",
+        "[degC]" => "°C",
+        "mm[Hg]" => "mmHg",
+        "[in_i]" => "in",
+        "[lb_av]" => "lb",
+        "kg/m2" => "kg/m²",
+        "/min" => "/min",
+        "%" => "%"
+      }.freeze
+
+      # Names for the IHS MEASUREMENT TYPE (#9999999.07) codes the vitals
+      # read can send that VITAL_TYPE_MAP does not map, as the build's
+      # #9999999.07 names them (read from openrpms bcer-9.0, 2026-11-18).
+      # VistA's GMRV reply names pain PN.
+      VITAL_NAMES = {
+        "PA" => "Pain",
+        "PN" => "Pain",
+        "HC" => "Head Circumference",
+        "WC" => "Waist Circumference",
+        "AG" => "Abdominal Girth",
+        "FH" => "Fundal Height",
+        "FT" => "Fetal Heart Tones",
+        "ED" => "Edema",
+        "HE" => "Hearing",
+        "VU" => "Vision Uncorrected",
+        "VC" => "Vision Corrected",
+        "AUD" => "Audiometry",
+        "TON" => "Tonometry",
+        "PF" => "Peak Flow",
+        "BPF" => "Best Peak Flow",
+        "EGA" => "Estimated Gestational Age",
+        "BMIP" => "BMI Percentile",
+        "HCP" => "Head Circumference Percentile",
+        "WLP" => "Weight for Length Percentile",
+        "BFP" => "Body Fat Percentage",
+        "MAP" => "Mean Arterial Pressure",
+        "RATE" => "O2 Rate",
+        "AKBP" => "Ankle Blood Pressure",
+        "ABI" => "Ankle Brachial Index",
+        "CEF" => "Cardiac Ejection Fraction",
+        "LKW" => "Last Known Well"
+      }.freeze
+
+      # What the chart labels a vital type: the map's name, then the
+      # #9999999.07 name, then the type as RPMS sent it.
+      def self.vital_name(type)
+        VITAL_TYPE_MAP.dig(type, :display) || VITAL_NAMES[type] || type.to_s
+      end
+
+      # What the chart shows for a unit: the clinician's form of a UCUM code.
+      # Recorded text that is not a mapped code is shown as recorded.
+      def self.display_unit(unit)
+        DISPLAY_UNITS.fetch(unit.to_s) { unit }
+      end
+
       attribute :ien, :string
       attribute :patient_dfn, :string
       attribute :code, :string

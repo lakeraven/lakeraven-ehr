@@ -165,6 +165,13 @@
           can_edit: can_edit %>
   <% end %>
 
+  <% unless @advance_directives.nil? %>
+    <%= render "lakeraven/ehr/registration/advance_directives/section",
+          dfn: params[:dfn],
+          directives: @advance_directives,
+          can_edit: can_edit %>
+  <% end %>
+
   <%# Shown when the site's Ask for OTHER NAMES (#9009061 field 3) is not NO (#981). %>
   <% if @other_names && registration_settings.ask?(:other_names) %>
     <%= render "lakeraven/ehr/registration/other_names/section",

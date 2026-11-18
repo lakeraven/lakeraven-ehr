@@ -13,6 +13,9 @@ module Lakeraven
       end
 
       def transmit(order, provider_duz:)
+        refusal = MatMoudMedication.refusal_for_order(order.medication_display, order.dosage_instruction)
+        return Eprescribing::TransmissionResult.failure(refusal) if refusal
+
         validate_for_transmission!(order)
 
         result = @adapter.send_prescription(order)
@@ -68,11 +71,18 @@ module Lakeraven
       end
 
       def request_change(transmission_id, pharmacy_ncpdpid:, new_medication:)
+        refusal = MatMoudMedication.refusal_for(change_medication_text(new_medication))
+        return Eprescribing::TransmissionResult.failure(refusal) if refusal
+
         @adapter.request_change(transmission_id, pharmacy_ncpdpid: pharmacy_ncpdpid, new_medication: new_medication)
       end
 
+      # Refused for every change id (#904): the medication a pharmacy change
+      # proposes cannot be read from a change id here, so it cannot be shown
+      # not to be MAT/MOUD. The adapter is never called, and the error names the
+      # change that was not approved rather than claiming an order was refused.
       def approve_change(change_id, provider_duz:)
-        @adapter.approve_change(change_id)
+        Eprescribing::TransmissionResult.failure(MatMoudMedication::CHANGE_APPROVAL_REFUSAL)
       end
 
       def deny_change(change_id, provider_duz:, reason: nil)
@@ -80,6 +90,14 @@ module Lakeraven
       end
 
       private
+
+      # The adapter is given either the medication text or a { code:, display: }
+      # hash; NcpdpScriptGenerator sends new_medication[:display] as the
+      # DrugDescription, so that is the text read. Any other shape yields no
+      # text and is refused.
+      def change_medication_text(new_medication)
+        new_medication.is_a?(Hash) ? new_medication[:display] : new_medication
+      end
 
       def validate_for_transmission!(order)
         raise PrescriptionNotActiveError, "Order status must be active for transmission" if order.status == "cancelled"

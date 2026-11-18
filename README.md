@@ -37,7 +37,7 @@ Sign in at http://localhost:3000/lakeraven-ehr/login as `SYS123` / `RPMS.000`, t
   $ docker volume rm "${COMPOSE_PROJECT_NAME:-lakeraven-ehr}_rpms-data"
   $ docker compose up -d rpms
   ```
-- **Apple Silicon:** a release tag names an arm64 image only when one was gated for it (openrpms#802); otherwise Docker runs the amd64 image under emulation, which works but is slower. `docker manifest inspect ghcr.io/lakeraven/rpms-ydb:$RPMS_TAG` lists the platforms a tag carries.
+- **Apple Silicon:** a release tag names an arm64 image only when one was gated for it (openrpms#802); otherwise Docker runs the amd64 image under emulation, which works but is slower. `docker manifest inspect ghcr.io/lakeraven/openrpms:$RPMS_TAG` lists the platforms a tag carries.
 
 ## RPMS backend
 
