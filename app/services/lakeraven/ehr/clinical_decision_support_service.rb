@@ -24,6 +24,11 @@ module Lakeraven
       DATA_FETCH_INCOMPLETE_ALERT =
         "Drug interactions could not be checked: the patient's medications or allergies could not be retrieved."
 
+      # DUE FLAG 1 is due, as the reminder engine sets it (AVAL^PXRMRPCA);
+      # 0 applicable but not due, 2 not applicable, 3 error, 4 cannot be
+      # determined (#986).
+      DUE_FLAG_DUE = 1
+
       def self.rules_config
         @rules_config ||= YAML.safe_load_file(CONFIG_PATH, permitted_classes: [ Symbol ]).deep_symbolize_keys
       end
@@ -117,7 +122,7 @@ module Lakeraven
           alerts = []
           patient = Patient.find_by_dfn(patient_dfn)
 
-          alerts.concat(evaluate_clinical_reminders)
+          alerts.concat(evaluate_clinical_reminders(patient_dfn))
           alerts.concat(evaluate_lab_results)
           alerts.concat(evaluate_conditions(patient))
           alerts.concat(evaluate_demographics(patient))
@@ -138,11 +143,17 @@ module Lakeraven
           }
         end
 
-        # Stubbable data fetch methods
-        def fetch_clinical_reminders
-          []
+        # The patient's cover-sheet reminders as RPMS evaluated them
+        # (ORQQPX REMINDERS LIST, through RpmsRpc::HealthSummary). nil when
+        # the read failed, so no reminder alert is made from a guess.
+        def fetch_clinical_reminders(patient_dfn)
+          RpmsRpc::HealthSummary.clinical_reminders(patient_dfn)
+        rescue RpmsRpc::Error, IOError, SystemCallError => e
+          Rails.logger.error("[cds] clinical reminders read failed: #{e.class}")
+          nil
         end
 
+        # Stubbable data fetch method
         def fetch_recent_labs
           []
         end
@@ -184,12 +195,12 @@ module Lakeraven
           nil
         end
 
-        def evaluate_clinical_reminders
-          reminders = fetch_clinical_reminders
+        def evaluate_clinical_reminders(patient_dfn)
+          reminders = fetch_clinical_reminders(patient_dfn)
           return [] unless reminders.is_a?(Array)
 
           reminders.filter_map do |reminder|
-            next unless reminder[:status] == "DUE"
+            next unless reminder[:due_flag] == DUE_FLAG_DUE
 
             {
               id: "cds-rem-#{reminder[:ien] || SecureRandom.hex(4)}",
