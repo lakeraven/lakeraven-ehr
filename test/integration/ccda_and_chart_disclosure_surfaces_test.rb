@@ -139,7 +139,7 @@ module Lakeraven
           get "/patients/1"
           assert_response :ok
           assert_equal "text/html", response.media_type
-          assert_includes response.body, "Problem List"
+          assert_includes response.body, %(id="chart-problems")
           assert_equal link, response.body.include?("View as FHIR")
         end
       end
@@ -149,7 +149,7 @@ module Lakeraven
         configure(ABSENT)
         get "/patients/1", headers: { "Authorization" => "Basic c3ludGhldGljOnVzZXI=" }
         assert_response :ok
-        assert_includes response.body, "Problem List"
+        assert_includes response.body, %(id="chart-problems")
       end
 
       test "the controllers declare their surfaces" do
