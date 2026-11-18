@@ -35,9 +35,17 @@ module Lakeraven
         end
       end
 
+      # sign reads the note body before and after the sign action (#960), so
+      # its note gateway answers fetch_body with synthetic body rows.
+      class BodyNoteGateway
+        BODY_ROWS = [ "S: Synthetic cough for two days.", "P: Synthetic plan: fluids and rest." ].freeze
+
+        def fetch_body(_note_ien) = BODY_ROWS.dup
+      end
+
       def service(esignature)
         ProgressNoteService.new(dfn: "3", visit_ien: "501", author_duz: DUZ,
-                                gateway: Object.new, esignature_gateway: esignature)
+                                gateway: BodyNoteGateway.new, esignature_gateway: esignature)
       end
 
       test "sign signs the note when the gateway answers true to the signature code" do

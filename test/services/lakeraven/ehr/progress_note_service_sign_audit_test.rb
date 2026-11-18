@@ -16,9 +16,9 @@ module Lakeraven
     # rows with record-sha256, so an appended, removed or edited row shows.
     #
     # The fakes model the production gateways: ESignatureGateway.validate
-    # returns a Boolean (the demo and Cucumber fakes return a Hash, and both
-    # are accepted), and the note gateway's fetch_body returns the body rows
-    # of the TIU text, without the header or the signature block.
+    # returns true or false, and only true is an accepted code (any other
+    # answer, a Hash included, is a gateway error), and the note gateway's
+    # fetch_body returns the body rows of the TIU text, without the header.
     class ProgressNoteServiceSignAuditTest < ActiveSupport::TestCase
       DFN = 8791
       VISIT_IEN = 2090061
@@ -338,17 +338,20 @@ module Lakeraven
         assert_equal success_desc(NOTE_ROWS), event.outcome_desc
       end
 
-      test "a Hash validation with a truthy :success, as the demo returns, signs too" do
+      test "a Hash validation reply, even one with a truthy :success, is a gateway error and never an acceptance" do
         @esig_gateway = FakeESignatureGateway.new(validation: { success: true, raw: "1" })
 
         event = audit_event_for do
           result = sign
-          assert result.success?, "signing failed: #{result.error.inspect}"
+          refute result.success?
+          assert_equal :gateway_error, result.error
         end
 
-        assert_equal 1, @esig_gateway.sign_actions.size
-        assert_equal "0", event.outcome
-        assert_equal success_desc(NOTE_ROWS), event.outcome_desc
+        assert_empty @esig_gateway.sign_actions
+        assert_empty @note_gateway.fetches, "a refused reply never reads the body"
+        assert_equal "8", event.outcome
+        assert_equal refusal_desc(:gateway_error), event.outcome_desc
+        refute_leaks event, SIGNATURE_CODE
       end
 
       test "a Boolean false validation is an invalid signature code, not a gateway error" do
@@ -368,7 +371,7 @@ module Lakeraven
       # -- refusals (outcome "4") -------------------------------------------
 
       test "an invalid signature code writes a refusal event and sends no sign action" do
-        @esig_gateway = FakeESignatureGateway.new(validation: { success: false, raw: "0^Invalid code" })
+        @esig_gateway = FakeESignatureGateway.new(validation: false)
 
         event = audit_event_for do
           result = sign

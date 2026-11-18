@@ -213,10 +213,16 @@ module Lakeraven
         assert_equal body, fetch_body_of(tiu_text(body: body))
       end
 
-      test "fetch_body drops trailing empty rows" do
-        text = tiu_text + "\r\r"
+      # The wire text ends with a delimiter, so splitting it leaves one empty
+      # element after the last row. Only that one is transport; an empty row
+      # before it is a row of the note, and the record hash must see it.
+      test "fetch_body drops only the final delimiter's empty element and keeps empty rows before it" do
+        plain = fetch_body_of(tiu_text)
+        with_blank_rows = fetch_body_of(tiu_text + "\r\r")
 
-        assert_equal BODY_ROWS, fetch_body_of(text)
+        assert_equal BODY_ROWS, plain
+        assert_equal BODY_ROWS + [ "", "" ], with_blank_rows
+        refute_equal plain, with_blank_rows
       end
 
       test "fetch_body returns an empty body when nothing follows the header blank" do
@@ -276,6 +282,17 @@ module Lakeraven
         record_hash = body_hash(fetch_body_of(signed_text))
 
         appended = fetch_body_of(signed_text(signature: SIGNATURE_BLOCK + [ "Addendum: synthetic row appended later." ]))
+
+        assert_equal body_hash(content), body_hash(appended.first(content.size)),
+                     "the first content-rows rows alone do not show the append"
+        refute_equal record_hash, body_hash(appended)
+      end
+
+      test "one blank row appended after filing no longer reproduces the record hash" do
+        content = fetch_body_of(tiu_text(status: "UNSIGNED"))
+        record_hash = body_hash(fetch_body_of(signed_text))
+
+        appended = fetch_body_of(signed_text(signature: SIGNATURE_BLOCK + [ "" ]))
 
         assert_equal body_hash(content), body_hash(appended.first(content.size)),
                      "the first content-rows rows alone do not show the append"
