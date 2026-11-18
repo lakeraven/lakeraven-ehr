@@ -548,6 +548,97 @@ module Lakeraven
         refute_leaks event, SIGNATURE_CODE
       end
 
+      # -- a gateway that raises a ScriptError still leaves a row -------------
+      #
+      # NotImplementedError is a ScriptError, not a StandardError.
+      # RpmsRpc::BmxClient raises it, and ProgressNotesController rescues
+      # "StandardError, NotImplementedError" for that reason. "Every #sign
+      # path writes exactly one row" holds for it too.
+
+      test "NotImplementedError is not a StandardError, so a bare rescue does not cover it" do
+        refute_operator NotImplementedError, :<=, StandardError
+      end
+
+      test "validate raising NotImplementedError writes a gateway_exception event and re-raises it" do
+        boom = NotImplementedError.new(GATEWAY_DOWN_MESSAGE)
+        @esig_gateway = FakeESignatureGateway.new(validate_error: boom)
+
+        event = audit_event_for do
+          raised = assert_raises(NotImplementedError) { sign }
+          assert_same boom, raised
+        end
+
+        assert_empty @esig_gateway.sign_actions
+        assert_equal "8", event.outcome
+        assert_equal NOTE_IEN.to_s, event.entity_identifier
+        assert_equal refusal_desc(:gateway_exception), event.outcome_desc
+        refute_leaks event, GATEWAY_DOWN_MESSAGE
+        refute_leaks event, "NotImplementedError"
+        refute_leaks event, SIGNATURE_CODE
+      end
+
+      test "the pre-sign fetch_body raising NotImplementedError writes a gateway_exception event, re-raises and sends no sign action" do
+        boom = NotImplementedError.new(GATEWAY_DOWN_MESSAGE)
+        @note_gateway = FakeNoteGateway.new(rows: NOTE_ROWS.dup, error: boom)
+
+        event = audit_event_for do
+          raised = assert_raises(NotImplementedError) { sign }
+          assert_same boom, raised
+        end
+
+        assert_equal [ NOTE_IEN.to_s ], @note_gateway.fetches.map(&:to_s)
+        assert_empty @esig_gateway.sign_actions
+        assert_equal "8", event.outcome
+        assert_equal NOTE_IEN.to_s, event.entity_identifier
+        assert_equal AUTHOR_DUZ.to_s, event.agent_who_identifier
+        assert_equal refusal_desc(:gateway_exception), event.outcome_desc
+        refute_leaks event, GATEWAY_DOWN_MESSAGE
+        refute_leaks event, "NotImplementedError"
+        refute_leaks event, SIGNATURE_CODE
+      end
+
+      test "add raising NotImplementedError writes a sign_outcome_unknown event and re-raises it" do
+        boom = NotImplementedError.new(GATEWAY_DOWN_MESSAGE)
+        @esig_gateway = FakeESignatureGateway.new(add_error: boom)
+
+        event = audit_event_for do
+          raised = assert_raises(NotImplementedError) { sign }
+          assert_same boom, raised
+        end
+
+        assert_equal 1, @esig_gateway.sign_actions.size
+        assert_equal [ NOTE_IEN.to_s ], @note_gateway.fetches.map(&:to_s)
+        assert_equal "8", event.outcome
+        assert_equal NOTE_IEN.to_s, event.entity_identifier
+        assert_equal AUTHOR_DUZ.to_s, event.agent_who_identifier
+        assert_equal refusal_desc(:sign_outcome_unknown), event.outcome_desc
+        refute_match(/sha256/i, event.outcome_desc)
+        refute_leaks event, GATEWAY_DOWN_MESSAGE
+        refute_leaks event, "NotImplementedError"
+        refute_leaks event, SIGNATURE_CODE
+      end
+
+      test "a post-sign read raising NotImplementedError still writes the success event and does not raise" do
+        boom = NotImplementedError.new(GATEWAY_DOWN_MESSAGE)
+        @note_gateway = FakeNoteGateway.new(rows: NOTE_ROWS.dup, post_sign_error: boom)
+
+        result = nil
+        event = audit_event_for { result = assert_nothing_raised { sign } }
+
+        assert result.success?, "the signature happened, so sign succeeds: #{result.error.inspect}"
+        assert_equal NOTE_IEN, result.note_ien
+        assert_equal 1, @esig_gateway.sign_actions.size
+        assert_equal 2, @note_gateway.fetches.size
+        assert_equal "0", event.outcome
+        assert_equal unavailable_desc(NOTE_ROWS), event.outcome_desc
+        assert event.outcome_desc.end_with?("record-sha256 unavailable")
+        refute_match(/record-rows/, event.outcome_desc)
+        refute_leaks event, GATEWAY_DOWN_MESSAGE
+        refute_leaks event, "NotImplementedError"
+        refute_leaks event, EMPTY_HASH
+        refute_leaks event, SIGNATURE_CODE
+      end
+
       # -- the actor must be the signer --------------------------------------
 
       test "an attributed actor who is not the author is refused before validation" do

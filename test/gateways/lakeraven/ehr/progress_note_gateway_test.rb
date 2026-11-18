@@ -2,6 +2,7 @@
 
 require "test_helper"
 require "digest"
+require "rpms_rpc/xwb_client"
 
 # Tests for ProgressNoteGateway — TIU progress note create, list, fetch,
 # edit, lock. Signing lives in ESignatureGateway, not here.
@@ -159,9 +160,13 @@ module Lakeraven
 
       SIGNATURE_BLOCK = [ "", "/es/ PROVIDER,SYNTHETIC", "Signed: 11/15/2026 10:00" ].freeze
 
-      # The wire shape: rows separated by +separator+, with a trailing one.
+      # What ProgressNote.fetch_text returns: the rows joined with
+      # +separator+ and NO trailing separator. The transport has already
+      # removed the reply's terminator (RpmsRpc::Client#split_response drops
+      # one) and DataMapper#parse_text joins the reply lines, so text that
+      # ends with a separator ends with a blank ROW of the note.
       def tiu_text(status: "UNSIGNED", body: BODY_ROWS, signature: [], separator: "\r")
-        (tiu_header(status: status) + [ "" ] + body + signature).join(separator) + separator
+        (tiu_header(status: status) + [ "" ] + body + signature).join(separator)
       end
 
       def fetch_body_of(text)
@@ -182,7 +187,8 @@ module Lakeraven
 
       test "fetch_body returns exactly the body rows of the capture-shaped text" do
         text = tiu_text
-        assert text.end_with?("\r"), "the capture ends with a row separator"
+        refute text.end_with?("\r"), "fetch_text's String has no trailing separator: the transport removed it"
+        assert text.end_with?(BODY_ROWS.last), "the text ends with the last body row"
         assert_includes text, "STATUS: UNSIGNED"
 
         assert_equal BODY_ROWS, fetch_body_of(text)
@@ -213,16 +219,33 @@ module Lakeraven
         assert_equal body, fetch_body_of(tiu_text(body: body))
       end
 
-      # The wire text ends with a delimiter, so splitting it leaves one empty
-      # element after the last row. Only that one is transport; an empty row
-      # before it is a row of the note, and the record hash must see it.
-      test "fetch_body drops only the final delimiter's empty element and keeps empty rows before it" do
+      # fetch_text's String carries no transport delimiter (the client
+      # removed it before the lines were joined), so an empty element after
+      # the last separator is a blank row of the note. fetch_body drops
+      # nothing after the header separator: the record hash must see every
+      # trailing blank row.
+      test "fetch_body keeps every trailing empty row: nothing after the header separator is dropped" do
         plain = fetch_body_of(tiu_text)
-        with_blank_rows = fetch_body_of(tiu_text + "\r\r")
+        one_blank_row = fetch_body_of(tiu_text + "\r")
+        two_blank_rows = fetch_body_of(tiu_text + "\r\r")
 
         assert_equal BODY_ROWS, plain
-        assert_equal BODY_ROWS + [ "", "" ], with_blank_rows
-        refute_equal plain, with_blank_rows
+        assert_equal BODY_ROWS + [ "" ], one_blank_row
+        assert_equal BODY_ROWS + [ "", "" ], two_blank_rows
+        assert_equal one_blank_row, fetch_body_of(tiu_text(body: BODY_ROWS + [ "" ]))
+        assert_equal two_blank_rows, fetch_body_of(tiu_text(body: BODY_ROWS + [ "", "" ]))
+        assert_equal 3, [ plain, one_blank_row, two_blank_rows ].uniq.size, "all three bodies differ"
+        assert_equal 3, [ plain, one_blank_row, two_blank_rows ].map { |rows| body_hash(rows) }.uniq.size,
+                     "all three bodies hash differently"
+      end
+
+      test "fetch_body keeps trailing empty rows with LF and CRLF separators too" do
+        [ "\n", "\r\n" ].each do |separator|
+          text = tiu_text(separator: separator)
+
+          assert_equal BODY_ROWS + [ "" ], fetch_body_of(text + separator), separator.inspect
+          assert_equal BODY_ROWS + [ "", "" ], fetch_body_of(text + separator + separator), separator.inspect
+        end
       end
 
       test "fetch_body returns an empty body when nothing follows the header blank" do
@@ -292,11 +315,46 @@ module Lakeraven
         content = fetch_body_of(tiu_text(status: "UNSIGNED"))
         record_hash = body_hash(fetch_body_of(signed_text))
 
-        appended = fetch_body_of(signed_text(signature: SIGNATURE_BLOCK + [ "" ]))
+        appended_text = signed_text(signature: SIGNATURE_BLOCK + [ "" ])
+        assert_equal signed_text + "\r", appended_text, "fetch_text's String for the note plus one blank row"
+        appended = fetch_body_of(appended_text)
 
+        assert_equal BODY_ROWS + SIGNATURE_BLOCK + [ "" ], appended
         assert_equal body_hash(content), body_hash(appended.first(content.size)),
                      "the first content-rows rows alone do not show the append"
         refute_equal record_hash, body_hash(appended)
+      end
+
+      # The REAL transport path, not a model of it (#960). The reply data as
+      # the XWB broker sends an array reply: every row ends with CR LF, and
+      # the frame ends with EOT, which Client#read_until_raw consumes. From
+      # there XwbClient#call_rpc does Reply.from_wire(split_response(data)),
+      # DataMapper#fetch_text does parse_text(reply), and that String is what
+      # ProgressNote.fetch_text hands the gateway. split_response drops ONE
+      # terminator, so a blank row filed after the signature block arrives as
+      # a trailing "\n" on the String: a row of the note, not transport.
+      def fetch_text_from_xwb_wire(rows)
+        frame = rows.map { |row| "#{row}\r\n" }.join + ::RpmsRpc::Client::EOT
+        data = frame.delete_suffix(::RpmsRpc::Client::EOT)
+        reply = ::RpmsRpc::Reply.from_wire(::RpmsRpc::XwbClient.new.send(:split_response, data))
+
+        ::RpmsRpc::DataMapper.tiu_get_record_text.parse_text(reply)
+      end
+
+      test "through the gem's real reply path, a blank row appended after filing changes the record hash" do
+        filed_rows = tiu_header(status: "COMPLETED") + [ "" ] + BODY_ROWS + SIGNATURE_BLOCK
+        filed_text = fetch_text_from_xwb_wire(filed_rows)
+        appended_text = fetch_text_from_xwb_wire(filed_rows + [ "" ])
+
+        assert_equal filed_rows.join("\n"), filed_text, "the transport leaves no terminator on the text"
+        assert_equal filed_text + "\n", appended_text, "the extra blank row survives the transport"
+
+        filed = fetch_body_of(filed_text)
+        appended = fetch_body_of(appended_text)
+
+        assert_equal BODY_ROWS + SIGNATURE_BLOCK, filed
+        assert_equal BODY_ROWS + SIGNATURE_BLOCK + [ "" ], appended
+        refute_equal body_hash(filed), body_hash(appended)
       end
 
       test "a signed note whose body was altered no longer reproduces the record hash" do
