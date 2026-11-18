@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "test_helper"
+require_relative "../../../support/captured_allergy_lookup_replies"
 
 # Tests for SymptomGateway — allergy-symptom catalog lookup for the
 # order-entry allergy-precheck UI.
@@ -52,6 +53,22 @@ module Lakeraven
         fake = FakeSymptomAPI.new(returns: { defaults: list })
 
         assert_equal list, SymptomGateway.defaults(via: fake)
+      end
+
+      # --- starting_with, on a reply RPMS sent (#1109) ---
+
+      test "starting_with walks from just before the text and keeps the names that start with it" do
+        original = RpmsRpc.configuration.client
+        RpmsRpc.mock! { |m| m.seed_raw_lines(:symptom_search, "RAR~", CapturedAllergyLookupReplies::SYMPTOMS_FROM_RAR) }
+
+        assert_equal [ { ien: "133", name: "RASH", label: "RASH" } ], SymptomGateway.starting_with("ras")
+        assert_equal [ "RAR~", "1" ], RpmsRpc.client.received_calls.last[:params].to_a
+      ensure
+        RpmsRpc.configure { |c| c.client = original }
+      end
+
+      test "starting_with blank text makes no call" do
+        assert_equal [], SymptomGateway.starting_with("  ", via: FakeSymptomAPI.new)
       end
 
       # --- default_provider ---

@@ -5,8 +5,8 @@ Feature: VFC compliance
 
   @live
   Scenario: VFC-eligible patient receives VFC vaccine successfully
-    Given patient "4" has VFC eligibility code "V04"
-    When I check VFC eligibility for patient "4"
+    Given patient "990001" has VFC eligibility code "V04"
+    When I check VFC eligibility for patient "990001"
     Then the patient should be VFC eligible
 
   @live

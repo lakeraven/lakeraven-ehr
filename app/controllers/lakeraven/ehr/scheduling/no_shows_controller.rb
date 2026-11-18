@@ -38,7 +38,7 @@ module Lakeraven
           return "is already marked no-show" if appointment[:no_show]
           return "is checked in" if appointment[:checkin_time]
 
-          "is not due yet; mark a no-show once its time has passed" if appointment[:start_time] > Time.now
+          "is not due yet; mark a no-show once its time has passed" if appointment[:start_time] > SiteTime.now
         end
       end
     end
