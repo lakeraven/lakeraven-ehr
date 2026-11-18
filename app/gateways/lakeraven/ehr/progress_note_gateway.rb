@@ -35,11 +35,15 @@ module Lakeraven
       # signing (STATUS: UNSIGNED becomes COMPLETED) and TIU appends a
       # signature block after the body, so only the body rows are evidence
       # of the note. Text with no blank row is an unrecognised shape, not
-      # evidence, so it gives nil. Wire text that ends with a delimiter
-      # splits to one final empty element; only that element is dropped.
-      # Every empty row before it is kept, so blank rows appended or removed
-      # after signing change the body (and the record hash). Text that does
-      # not end with a delimiter loses nothing.
+      # evidence, so it gives nil. Nothing after the separator is dropped:
+      # the String fetch_text returns carries no transport terminator
+      # (rpms-rpc Client#split_response removes it, DataMapper#parse_text
+      # joins the lines with "\n"), so a trailing empty element is a blank
+      # row of the note, and blank rows appended or removed after signing
+      # change the body (and the record hash). Known limit outside this
+      # gateway: RpmsRpc::CiaClient#cia_reply_lines drops every trailing
+      # empty reply fragment before the text is joined, so over CIA
+      # trailing blank rows never reach fetch_body.
       def self.fetch_body(note_ien, via: default_provider)
         text = fetch_text(note_ien, via: via)
         return nil unless text.is_a?(String)
@@ -48,9 +52,7 @@ module Lakeraven
         header_end = rows.index { |row| row.strip.empty? }
         return nil if header_end.nil?
 
-        body = rows.drop(header_end + 1)
-        body.pop if body.last == ""
-        body
+        rows.drop(header_end + 1)
       end
 
       # TIU AUTHORIZATION, TIU LOCK RECORD and TIU UNLOCK RECORD act as the

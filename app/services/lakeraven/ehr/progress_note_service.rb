@@ -33,12 +33,16 @@ module Lakeraven
     # not, the row still records the signature and ends "record-sha256
     # mismatch", which never verifies. A verifier re-reads the body and needs
     # an exact match of the hash of all its rows with record-sha256, so an
-    # appended, removed or edited row shows; a record mismatch means the note
+    # appended, removed or edited row shows (trailing blank rows only as far
+    # as the transport delivers them; CIA drops them, see
+    # ProgressNoteGateway.fetch_body); a record mismatch means the note
     # changed since filing. Comparing content-sha256 with the hash of the
     # first content-rows rows tells an append from an edit. If that post-sign
     # read fails, the row still records the signature and ends
     # "record-sha256 unavailable", which never verifies.
-    # The TIU header is not covered by either hash.
+    # The TIU header is not covered by either hash. Both hashes are written
+    # for #sign only; the chart's create_and_sign path is audited by
+    # ProgressNotesController without them.
     #
     # It fails closed: a row that cannot be written raises. The residual: if
     # the success row fails after the sign action, the RPMS signature stands
@@ -224,19 +228,20 @@ module Lakeraven
         return "record-sha256 mismatch" unless rows.first(signed.size) == signed
 
         "record-sha256 #{body_digest(rows)}; record-rows #{rows.size}"
-      rescue StandardError => e
+      rescue StandardError, NotImplementedError => e
         Rails.logger.error("[audit] could not re-read a signed note body: #{e.class.name}")
         "record-sha256 unavailable"
       end
 
-      # A gateway that raises still leaves its one row ("8"), and the caller
+      # A gateway that raises (NotImplementedError too: RpmsRpc::BmxClient
+      # raises it) still leaves its one row ("8"), and the caller
       # gets the same exception. The message is never written: it may carry
       # the signature code. If that row cannot be written either, the
       # original exception is the news, so the audit failure is logged by
       # class name and the original surfaces.
       def audit_exception(note_id, reason, agent:)
         yield
-      rescue StandardError => e
+      rescue StandardError, NotImplementedError => e
         begin
           refuse_sign!(note_id, reason, agent: agent)
         rescue StandardError => audit_error
