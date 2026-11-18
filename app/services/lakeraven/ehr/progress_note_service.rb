@@ -132,7 +132,7 @@ module Lakeraven
       # with bound values).
       def label_part2(note_ien, text)
         return :not_suspected if SudContentSuspicion.classify(text) == :not_suspected
-        return :label_failed if note_ien.to_s.strip.empty?
+        return :label_failed if note_ien.to_s.blank?
 
         Part2Label.mark!(patient_dfn: @dfn.to_s, record_type: PART2_RECORD_TYPE, record_id: note_ien.to_s)
         :labelled

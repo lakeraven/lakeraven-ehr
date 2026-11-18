@@ -26,9 +26,20 @@ module Lakeraven
       # The ONE normalisation of a record's identifiers, used by both the
       # write (mark!) and the read (Part2Posture.part2?), so a label written
       # for " 70001" or "TIU_NOTE" is found for "70001" / "tiu_note".
+      # Only surrounding whitespace is stripped. NUL bytes are kept (unlike
+      # String#strip, which also removes edge NULs) so that storable_key?
+      # and mark! see them and reject the key.
       def self.normalized_key(record_type:, record_id:)
-        { record_type: record_type.to_s.strip.downcase, record_id: record_id.to_s.strip }
+        { record_type: strip_whitespace(record_type.to_s).downcase, record_id: strip_whitespace(record_id.to_s) }
       end
+
+      # [[:space:]] does not match NUL.
+      SURROUNDING_WHITESPACE = /\A[[:space:]]+|[[:space:]]+\z/
+
+      def self.strip_whitespace(value)
+        value.gsub(SURROUNDING_WHITESPACE, "")
+      end
+      private_class_method :strip_whitespace
 
       # PostgreSQL refuses a NUL byte in a string, so a value carrying one
       # can be neither stored nor looked up.
