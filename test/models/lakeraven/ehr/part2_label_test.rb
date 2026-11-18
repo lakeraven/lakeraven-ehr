@@ -125,6 +125,49 @@ module Lakeraven
         assert_equal [ "tiu_note" ], Part2Label.pluck(:record_type)
       end
 
+      # --- mark! refuses a NUL byte anywhere in an id ---
+      # String#strip removes leading and trailing NUL bytes along with
+      # whitespace. A malformed id must be refused, not quietly stored under
+      # the id it resembles.
+
+      {
+        "a leading NUL in record_id" => { record_type: "tiu_note", record_id: "\u000070001" },
+        "a trailing NUL in record_id" => { record_type: "tiu_note", record_id: "70001\u0000" },
+        "an inner NUL in record_id" => { record_type: "tiu_note", record_id: "7\u00001" },
+        "a leading NUL in record_type" => { record_type: "\u0000tiu_note", record_id: "70001" },
+        "a trailing NUL in record_type" => { record_type: "tiu_note\u0000", record_id: "70001" },
+        "an inner NUL in record_type" => { record_type: "tiu\u0000note", record_id: "70001" },
+        "a trailing NUL wrapped in whitespace in record_id" => { record_type: "tiu_note", record_id: " 70001\u0000 " }
+      }.each do |name, record|
+        test "mark! with #{name} raises RecordInvalid and writes no row" do
+          assert_no_difference "Part2Label.count" do
+            assert_raises(ActiveRecord::RecordInvalid) do
+              Part2Label.mark!(patient_dfn: "1001", **record)
+            end
+          end
+        end
+      end
+
+      {
+        "a leading NUL in record_id" => { record_type: "tiu_note", record_id: "\u000070001" },
+        "a trailing NUL in record_id" => { record_type: "tiu_note", record_id: "70001\u0000" },
+        "a leading NUL in record_type" => { record_type: "\u0000tiu_note", record_id: "70001" },
+        "a trailing NUL in record_type" => { record_type: "tiu_note\u0000", record_id: "70001" }
+      }.each do |name, record|
+        test "the normalized key for #{name} is not storable" do
+          key = Part2Label.normalized_key(**record)
+
+          assert_equal false, Part2Label.storable_key?(key)
+        end
+      end
+
+      test "the normalized key still strips ordinary surrounding whitespace" do
+        key = Part2Label.normalized_key(record_type: " TIU_NOTE ", record_id: " 70001\n")
+
+        assert_equal({ record_type: "tiu_note", record_id: "70001" }, key)
+        assert_equal true, Part2Label.storable_key?(key)
+      end
+
       # --- mark! and a concurrent writer ---
 
       # Part2Label.find_by answers nil on its FIRST call and is the real

@@ -263,6 +263,42 @@ module Lakeraven
         assert_equal true, result
       end
 
+      # String#strip removes leading and trailing NUL bytes along with
+      # whitespace, so a NUL at either edge must survive normalisation to be
+      # seen by the guard. No label rows exist in these tests: the NUL is
+      # the only reason for the answer.
+
+      {
+        "a leading NUL in record_id" => { record_type: "tiu_note", record_id: "\u000070001" },
+        "a trailing NUL in record_id" => { record_type: "tiu_note", record_id: "70001\u0000" },
+        "a leading NUL in record_type" => { record_type: "\u0000tiu_note", record_id: "70001" },
+        "a trailing NUL in record_type" => { record_type: "tiu_note\u0000", record_id: "70001" }
+      }.each do |name, record|
+        test "#{name} is Part 2 and does not raise" do
+          assert_equal 0, Part2Label.count
+          result = nil
+          assert_nothing_raised do
+            result = Part2Posture.part2?(**record, content: "Seen.")
+          end
+          assert_equal true, result
+        end
+      end
+
+      {
+        "a trailing NUL wrapped in whitespace in record_id" => { record_type: "tiu_note", record_id: " 70001\u0000 " },
+        "a leading NUL wrapped in whitespace in record_id" => { record_type: "tiu_note", record_id: " \u000070001 " },
+        "a trailing NUL wrapped in whitespace in record_type" => { record_type: " tiu_note\u0000 ", record_id: "70001" }
+      }.each do |name, record|
+        test "#{name} is Part 2" do
+          assert_equal 0, Part2Label.count
+          result = nil
+          assert_nothing_raised do
+            result = Part2Posture.part2?(**record, content: "Seen.")
+          end
+          assert_equal true, result
+        end
+      end
+
       # --- shape ---
 
       test "part2? answers strictly true or false" do
