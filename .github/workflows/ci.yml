@@ -52,6 +52,19 @@ jobs:
           bundler-cache: true
       - run: bundle exec rails db:create db:migrate
       - run: bundle exec rails test
+      # The job's first Chrome launch is a cold start (nothing of the browser
+      # in the page cache yet). It took over 10 seconds to answer and failed
+      # DemoModeTest's first visit (Ferrum::ProcessTimeoutError), while the
+      # relaunch for the next test passed every time (#1112). Pay that cost
+      # here, with no test waiting on it, so a red system test means a real failure.
+      - name: Start Chrome once before the system tests
+        run: |
+          time bundle exec ruby -rferrum -e '
+            browser = Ferrum::Browser.new(process_timeout: 120)
+            browser.go_to("data:text/html,<p>Chrome is ready.</p>")
+            abort "Chrome did not render the page" unless browser.body.include?("Chrome is ready.")
+            browser.quit
+          '
       # `rails test` leaves test/system out. The mocked system tests (a real
       # headless Chrome, the runner's own, against the mocked broker) run here
       # by path; test/system/live needs a broker and stays out.

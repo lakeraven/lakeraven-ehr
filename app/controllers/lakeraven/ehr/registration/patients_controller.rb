@@ -63,6 +63,7 @@ module Lakeraven
           @languages = profile_read { PatientProfileGateway.languages(params[:dfn]) } if @record
           @other_tribes = profile_read { PatientProfileGateway.other_tribes(params[:dfn]) } if @record
           @eligibility_modifiers = profile_read { PatientProfileGateway.eligibility_modifiers(params[:dfn]) } if @record
+          @advance_directives = profile_read { PatientProfileGateway.advance_directives(params[:dfn]) } if @record
           @social_status = profile_read { PatientProfileGateway.social_status(params[:dfn]) } if @record
           @other_names = profile_read { PatientProfileGateway.aliases(params[:dfn]) } if @record
           @preferred_name = profile_read { PatientProfileGateway.preferred_name(params[:dfn]) } if @record

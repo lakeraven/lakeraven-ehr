@@ -246,6 +246,12 @@ Lakeraven::EHR::Engine.routes.draw do
       get "eligibility_modifiers", to: "eligibility_modifiers#index", as: :patient_eligibility_modifiers
       post "eligibility_modifiers", to: "eligibility_modifiers#create"
       post "eligibility_modifiers/:ien/remove", to: "eligibility_modifiers#destroy", as: :remove_patient_eligibility_modifier, constraints: { ien: /\d+/ }
+      # The patient's advance directives (S-REG-17): ADVANCE DIRECTIVE (9000040).
+      get "advance_directives", to: "advance_directives#index", as: :patient_advance_directives
+      post "advance_directives", to: "advance_directives#create"
+      get "advance_directives/:ien/edit", to: "advance_directives#edit", as: :edit_patient_advance_directive, constraints: { ien: /\d+/ }
+      post "advance_directives/:ien", to: "advance_directives#update", as: :patient_advance_directive, constraints: { ien: /\d+/ }
+      post "advance_directives/:ien/remove", to: "advance_directives#destroy", as: :remove_patient_advance_directive, constraints: { ien: /\d+/ }
       get "other_names", to: "other_names#index", as: :patient_other_names
       post "other_names", to: "other_names#create"
       post "other_names/:ien/remove", to: "other_names#destroy", as: :remove_patient_other_name, constraints: { ien: /\d+/ }

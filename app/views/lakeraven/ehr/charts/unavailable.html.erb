@@ -1,18 +1,13 @@
 <%#
   Chart backend failure (#467). No clinical sections: the lookup raised, so
-  there is nothing safe to show. The banner is the empty state.
+  there is nothing safe to show. It renders in the engine layout like the
+  chart (#1110), so the header and nav are there to move on with, and the
+  banner is its empty state: the patient search.
 %>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title><%= product_name %></title>
-  <%= render "lakeraven/ehr/shared/demo_banner_style" %>
-</head>
-<body>
-  <%= render "lakeraven/ehr/shared/demo_banner" %>
-  <%= render "lakeraven/ehr/shared/patient_banner", banner: @patient_banner %>
-  <p role="alert">This chart could not be loaded. The record service is unavailable.</p>
-</body>
-</html>
+<% page_title "Chart unavailable" %>
+
+<%= page_header "Chart unavailable" %>
+
+<%= alert_box :error,
+      "This chart could not be loaded. The record service is unavailable.",
+      "Try again in a moment, or find another patient." %>

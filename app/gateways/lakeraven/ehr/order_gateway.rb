@@ -24,9 +24,12 @@ module Lakeraven
         via.list(dfn.to_s, filter: filter, display_group: display_group)
       end
 
+      # Not public (#904): it hands out ::RpmsRpc::Order, whose save, check and
+      # sign-and-release methods are order writes.
       def self.default_provider
         ::RpmsRpc::Order
       end
+      private_class_method :default_provider
     end
   end
 end
