@@ -1,0 +1,67 @@
+<% page_title "Take vitals" %>
+
+<%= page_header "Take vitals",
+      "Measurements on one of the patient's open visits. RPMS checks each value and files them on the visit." %>
+
+<% if @refusal %>
+  <%= alert_box :error, id: "vitals-refusal" do %>
+    <p><%= @refusal %></p>
+    <% if @rpms_errors.present? %>
+      <ul>
+        <% @rpms_errors.each do |error| %>
+          <li><%= error[:abbreviation] %> <%= error[:value] %>: <%= error[:error_message] %></li>
+        <% end %>
+      </ul>
+    <% end %>
+  <% end %>
+<% end %>
+
+<% if @open_visits.nil? %>
+  <%= alert_box :error,
+        "The patient's visits could not be read, so nothing can be recorded now. Try again shortly.",
+        id: "vitals-visits-unread" %>
+<% elsif @open_visits.empty? %>
+  <%= alert_box :notice,
+        "No open visit was found for this patient. " \
+        "If the patient has been checked in, RPMS may not have answered: try again, or check the chart.",
+        id: "vitals-no-open-visit" %>
+<% else %>
+  <%= form_with url: patient_vitals_path(@dfn),
+        method: :post,
+        class: "entry-form" do |f| %>
+    <fieldset>
+      <legend>Visit</legend>
+      <% @open_visits.each do |visit| %>
+        <% ien = visit[:visit_ien].to_s %>
+        <div>
+          <%= radio_button_tag "visit_ien", ien,
+                @visit_ien == ien || @open_visits.one?,
+                id: "visit_ien_#{ien}",
+                required: true %>
+          <%= label_tag "visit_ien_#{ien}", visit_label(visit) %>
+        </div>
+      <% end %>
+    </fieldset>
+
+    <% vital_fields.each do |abbreviation, label, units| %>
+      <%= form_field "vitals_#{abbreviation}", [ label, units.presence && "(#{units})" ].compact.join(" "), id: "vitals_#{abbreviation}" do |aria| %>
+        <%= text_field_tag "vitals[#{abbreviation}]", @values[abbreviation],
+              id: "vitals_#{abbreviation}",
+              inputmode: "decimal",
+              maxlength: 10,
+              class: "sm:max-w-xs",
+              aria: aria %>
+      <% end %>
+    <% end %>
+
+    <div class="form-actions">
+      <%= f.submit "Save vitals", name: nil, class: "button-primary" %>
+    </div>
+  <% end %>
+<% end %>
+
+<p>
+  <%= link_to "Back to chart",
+        patient_chart_path(@dfn),
+        class: "button-secondary no-underline" %>
+</p>

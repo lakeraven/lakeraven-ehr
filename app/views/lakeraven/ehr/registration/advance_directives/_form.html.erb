@@ -1,0 +1,36 @@
+<%# The fields of one advance directive answer (rpms-ux S-REG-17), for
+    recording a new one and changing one on file.
+    Locals: f (the form builder, scope :advance_directive), entry
+    (AdvanceDirectiveEntry), types (RpmsRpc::Registration.advance_directive_types). %>
+<%# DATE OF ENTRY, 9000040.11 .01. %>
+<%= form_field :entered_on, "Date of entry", form: f, error: entry.errors[:entered_on].first do |aria| %>
+  <%= f.date_field :entered_on,
+        value: entry.entered_on,
+        required: true,
+        aria: aria %>
+<% end %>
+
+<%# ADVANCE DIRECTIVE, 9000040.11 .02. %>
+<%= choice_list f,
+      :directive,
+      legend: "Does the patient have an advance directive?",
+      choices: Lakeraven::EHR::AdvanceDirectiveEntry::ANSWERS.to_a,
+      selected: entry.directive,
+      inline: true,
+      error: entry.errors[:directive].first %>
+
+<%# TYPE, 9000040.11 .03, from ELIGIBILITY MODIFIERS (9000030) entries of type A. %>
+<%= form_field :type_ien, "Type, for a yes", form: f, error: entry.errors[:type_ien].first do |aria| %>
+  <%= f.select :type_ien,
+        types.map { |t| [ t[:name], t[:ien] ] },
+        { include_blank: "Choose a type", selected: entry.type_ien },
+        aria: aria %>
+<% end %>
+
+<%# REASON, 9000040.11 .04. %>
+<%= form_field :reason, "Reason, for a no", form: f, hint: "Why the patient has none: 3 to 30 characters.", error: entry.errors[:reason].first do |aria| %>
+  <%= f.text_field :reason,
+        value: entry.reason,
+        maxlength: 30,
+        aria: aria %>
+<% end %>

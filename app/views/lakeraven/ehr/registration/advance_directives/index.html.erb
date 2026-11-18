@@ -1,0 +1,95 @@
+<% page_title "Advance directives", @patient[:name], "Registration" %>
+
+<%= page_header @patient[:name],
+      "Whether the patient has an advance directive, of what type and from when, or why they have none." %>
+
+<%= flash_alert id: "advance-directives-alert" %>
+
+<% if flash[:notice].present? %>
+  <%= alert_box :notice,
+        flash[:notice],
+        id: "advance-directives-notice" %>
+<% end %>
+
+<section
+  id="advance-directives-manage"
+  aria-labelledby="advance-directives-heading"
+  class="card flex flex-col gap-4"
+>
+  <h2
+    id="advance-directives-heading"
+    class="text-lg font-semibold"
+  >
+    Advance directives on file
+  </h2>
+  <% if @directives.empty? %>
+    <%= empty_state "No advance directive on file.",
+          "Registration warns until one is recorded: record yes with its type, or no with the reason.",
+          id: "no-advance-directives" %>
+  <% else %>
+    <table
+      id="advance-directives"
+      class="data-table"
+    >
+      <caption class="sr-only">Advance directives on file, newest first</caption>
+      <thead>
+        <tr>
+          <th scope="col">Date of entry</th>
+          <th scope="col">Advance directive</th>
+          <th scope="col">Type or reason</th>
+          <th scope="col"><span class="sr-only">Actions</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        <% @directives.each do |row| %>
+          <tr data-advance-directive="<%= row[:ien] %>">
+            <td><%= row[:entered_on] %></td>
+            <td><%= row[:directive] ? "Yes" : "No" %></td>
+            <td><%= row[:directive] ? row[:type] : row[:reason] %></td>
+            <td class="flex gap-4">
+              <%= link_to "Change",
+                    registration_edit_patient_advance_directive_path(@dfn, row[:ien]),
+                    aria: { label: "Change the entry of #{row[:entered_on]}" } %>
+              <%= button_to "Remove",
+                    registration_remove_patient_advance_directive_path(@dfn, row[:ien]),
+                    method: :post,
+                    class: "button-secondary",
+                    aria: { label: "Remove the entry of #{row[:entered_on]}" },
+                    form: { id: "remove-advance-directive-#{row[:ien]}" } %>
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  <% end %>
+</section>
+
+<%= form_errors @entry,
+      "The advance directive was not recorded.",
+      id: "advance-directive-errors" %>
+
+<%= form_with scope: :advance_directive,
+      model: @entry,
+      url: registration_patient_advance_directives_path(@dfn),
+      method: :post,
+      local: true,
+      id: "advance-directive-form",
+      class: "card mt-6 flex flex-col gap-4" do |f| %>
+  <h2 class="text-lg font-semibold">Record an answer</h2>
+  <p class="hint">
+    Each answer is a new entry; earlier entries are kept.
+    When a patient ends their directive, record no with the reason, on the date it ended.
+  </p>
+  <%= render "lakeraven/ehr/registration/advance_directives/form",
+        f: f,
+        entry: @entry,
+        types: @types %>
+  <%= f.submit "Record the answer",
+        id: "save-advance-directive",
+        class: "button-primary self-start" %>
+<% end %>
+
+<p class="mt-6">
+  <%= link_to "Back to the patient",
+        registration_patient_path(@dfn, anchor: "advance-directives-section") %>
+</p>

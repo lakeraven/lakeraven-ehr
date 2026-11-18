@@ -81,32 +81,33 @@ class DemoPatientChartTest < ActionDispatch::IntegrationTest
     assert_response :ok
     rows = css_select("tr").to_h do |tr|
       cells = tr.css("td")
-      [ cells.first&.text&.strip, cells.last&.css("span.badge")&.text&.strip ]
+      [ cells.first&.text&.strip, cells.last&.css("[data-status-badge]")&.text&.strip ]
     end
-    assert_equal "active", rows["Lisinopril 10mg"]
-    assert_equal "stopped", rows["Metformin 500mg"]
+    assert_equal "Active", rows["Lisinopril 10mg"]
+    assert_equal "Stopped", rows["Metformin 500mg"]
   end
 
-  test "HTML chart badges each screening with a class built from the WHOLE band" do
+  ENGINE_CSS = Lakeraven::EHR::Engine.root.join("app/assets/tailwind/lakeraven_ehr/engine.css")
+
+  test "HTML chart badges each screening by the WHOLE band" do
     seed_screening(band: "moderately severe", total: 18)
     get "/patients/1", headers: @headers
 
     assert_response :ok
-    assert_select "span.badge.sev-moderately-severe", text: "moderately severe"
+    assert_select "[data-status-badge='moderately severe'].status-badge--moderately-severe", text: "Moderately severe"
     # Regression: the class came from the band's first word, so this badge
-    # rendered as `sev-moderately` — matching no rule in the stylesheet.
-    assert_select "span.badge.sev-moderately", false
-    assert_no_match(/sev-moderately"/, response.body)
+    # took the colour of a neighbouring band.
+    assert_select "[data-status-badge].status-badge--moderate", false
     # Whatever class is emitted must have a rule behind it.
-    assert_includes response.body, ".badge.sev-moderately-severe{"
+    assert_includes File.read(ENGINE_CSS), "@utility status-badge--moderately-severe {"
   end
 
   test "HTML chart badges a single-word band unchanged" do
     seed_screening(band: "minimal", total: 2)
     get "/patients/1", headers: @headers
 
-    assert_select "span.badge.sev-minimal", text: "minimal"
-    assert_includes response.body, ".badge.sev-minimal{"
+    assert_select "[data-status-badge='minimal'].status-badge--minimal", text: "Minimal"
+    assert_includes File.read(ENGINE_CSS), "@utility status-badge--minimal {"
   end
 
   # -- FHIR JSON representation (authenticated) --------------------------------

@@ -160,6 +160,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_15_000000) do
     t.index [ "launch_token" ], name: "index_lakeraven_ehr_launch_contexts_on_launch_token", unique: true
   end
 
+  create_table "lakeraven_ehr_note_form_claims", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "digest", null: false
+    t.index [ "digest" ], name: "index_lakeraven_ehr_note_form_claims_on_digest", unique: true
+  end
+
   create_table "lakeraven_ehr_part2_labels", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "patient_dfn", null: false

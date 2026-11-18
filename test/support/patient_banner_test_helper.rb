@@ -54,12 +54,13 @@ module PatientBannerTestHelper
     token
   end
 
-  def sign_in_clinician!(scopes: BANNER_SCOPES, duz: DUZ)
+  # keys: the security keys RPMS reported at sign-on, by their Roles names.
+  def sign_in_clinician!(scopes: BANNER_SCOPES, duz: DUZ, keys: [])
     @clinician_token = clinician_token(scopes: scopes, duz: duz)
     banner_request(
       :post, "#{MOUNT}/test_session",
       {
-        duz: duz, user_type: "provider",
+        duz: duz, user_type: "provider", security_keys: Array(keys).join(","),
         smart_token: @clinician_token.plaintext_token || @clinician_token.token
       }
     )
