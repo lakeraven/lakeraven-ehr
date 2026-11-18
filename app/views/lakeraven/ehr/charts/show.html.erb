@@ -9,7 +9,6 @@
   no CSS of the chart's own (#1111).
 %>
 <%
-  vital_labels = Lakeraven::EHR::Observation::VITAL_TYPE_MAP
   fhir_url = url_for(dfn: @patient.dfn, format: "json", only_path: true)
 %>
 <% page_title "Patient chart" %>
@@ -190,13 +189,13 @@
             class="rounded-md border border-slate-200 px-3 py-2"
             data-vital="<%= v[:type] %>"
           >
-            <dt class="text-sm font-semibold text-slate-600"><%= vital_labels.dig(v[:type], :display) || v[:type] %></dt>
+            <dt class="text-sm font-semibold text-slate-600"><%= Lakeraven::EHR::Observation.vital_name(v[:type]) %></dt>
             <dd class="m-0 text-xl font-semibold tabular-nums">
               <span data-vital-value><%= v[:value] %></span>
               <span
                 class="text-sm font-normal text-slate-600"
                 data-vital-unit
-              ><%= v[:units] %></span>
+              ><%= Lakeraven::EHR::Observation.display_unit(v[:units]) %></span>
             </dd>
           </div>
         <% end %>
