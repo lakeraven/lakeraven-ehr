@@ -519,7 +519,8 @@ module Lakeraven
           vital_div = html.css("[data-vital]").find { |div| div.at_css("dt")&.text == "Body Temperature" }
           html_unit = vital_div.at_css("[data-vital-unit]")&.text
 
-          assert_equal fhir_unit.to_s, html_unit.to_s, "Expected HTML chart unit to match FHIR JSON unit"
+          # The chart shows the FHIR unit as a clinician reads it (#976).
+          assert_equal Observation.display_unit(fhir_unit).to_s, html_unit.to_s, "Expected HTML chart unit to be the FHIR JSON unit, for display"
         ensure
           RpmsRpc.client.seed_keyed_collection(:patient_appointments, "1", [])
           RpmsRpc.client.seed_keyed_collection(:vitals, "1", [
