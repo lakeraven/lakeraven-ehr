@@ -9,10 +9,12 @@ module Lakeraven
     # use ObservationGateway.for_patient — kept as the single read entry
     # point to avoid two gateways exposing the same delegation.
     class VitalGateway
-      # Field metadata for the vital-entry grid at a location.
-      # Delegates to RpmsRpc::Vital.template (added in lakeraven/rpms-rpc#61).
-      def self.template(location_ien)
-        RpmsRpc::Vital.template(location_ien)
+      # Field metadata for the vital-entry grid on a patient's visit: the
+      # patient and the visit string (Encounter.visit_string), as
+      # RpmsRpc::Vital.template takes them (#1153). metric: 1 asks for metric
+      # units, -1 (the default) for the site's.
+      def self.template(dfn, visit_string, metric: -1)
+        RpmsRpc::Vital.template(dfn, visit_string, metric: metric)
       end
 
       # Per-field server validation. Returns
@@ -23,10 +25,12 @@ module Lakeraven
       end
 
       # Bulk save of measurements against an open visit. provider_duz is
-      # required (matches the underlying RPC contract).
+      # required (matches the underlying RPC contract). taken_at is filed as
+      # each measurement's date/time: pass the site's clock (SiteTime.now),
+      # since the gem's default is this process's clock.
       # Delegates to RpmsRpc::Vital.add.
-      def self.add(dfn, visit_string, measurements, provider_duz:)
-        RpmsRpc::Vital.add(dfn, visit_string, measurements, provider_duz: provider_duz)
+      def self.add(dfn, visit_string, measurements, provider_duz:, taken_at: nil)
+        RpmsRpc::Vital.add(dfn, visit_string, measurements, provider_duz: provider_duz, taken_at: taken_at)
       end
     end
   end

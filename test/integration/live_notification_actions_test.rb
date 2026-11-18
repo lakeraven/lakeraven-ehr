@@ -4,7 +4,7 @@ require "test_helper"
 require "securerandom"
 require "rpms_rpc/cia_client"
 
-# Live (rpms-ux S-SGN-02.2, 02.3 and 02.4; lakeraven/rpms-ux#78, pending
+# Live (rpms-ux S-SGN-02.2, 02.3 and 02.4; openrpms/openrpms-ux#78, pending
 # merge): the provider removes a notification RPMS lists as deletable, sees no
 # Remove on one it does not, and forwards one with a comment to the nurse,
 # who sees it in their own list with the comment. Each persona is signed in

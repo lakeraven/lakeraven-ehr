@@ -136,7 +136,7 @@ The words carry the meaning; the colour only repeats it.
 <td data-status="<%= status_key %>"><%= status_badge status_key, status %></td>
 ```
 
-Keys with a colour: booked, scheduled, checked, checked in, no-show, cancelled, active, inactive, revoked, deceased, and for a registration item, error and warning. Any other key gets the plain badge; add a key to `STATUS_TONES` in the helper (classes are written out whole there so the Tailwind build keeps them).
+Keys with a colour: booked, scheduled, checked, checked in, no-show, cancelled, active, inactive, revoked, deceased, for a registration item, error and warning, and for a severity (an allergy reaction's, a screening's band), minimal, mild, moderate, moderately severe and severe. Any other key gets the plain badge; add a key to `STATUS_TONES` in the helper (classes are written out whole there so the Tailwind build keeps them).
 Locals: `key`, `label`, `tone`.
 
 ### empty_state
@@ -166,6 +166,7 @@ Locals: `patient` (a hash with `:mrn`, `:dob`, `:sex`), `id`.
 
 On a clinical page (the chart, allergy entry, consents, screenings), the patient is shown by `shared/_patient_banner`: name, date of birth, age, sex, record number and allergies.
 The layout renders it for every page with a patient open, so a page never names the patient itself (no "Patient #4" in the heading).
+The patient's name in the banner is not a heading: the page keeps its own one `<h1>` (`page_header`), so a screen reader hears one page title.
 The chart renders in the layout too, so the banner is one partial with one set of styles (`banner`, `demoinfo`, `patient-banner__*` in engine.css).
 It shows the patient, then Switch patient, then the allergies as one alert: red, or green when RPMS says none are recorded.
 A page with more to say about allergies fills that alert with `content_for :patient_allergies` (the chart adds reactions, severity and its allergy actions) rather than adding a second one.
