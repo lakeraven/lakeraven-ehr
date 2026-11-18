@@ -57,7 +57,7 @@ module Lakeraven
       # itself, so a keyword the gem does not take raises ArgumentError here.
 
       test "record through the gem files the reason IEN as piece 8 of BGOREF SET" do
-        broker = FakeBroker.new.on("BGOREF SET", "")
+        broker = FakeBroker.new.on("ORWU DT", "3250102.12").on("BGOREF SET", "")
         use_broker(broker) do
           result = ImmunizationRefusalGateway.record(1, 42,
             reason_ien: 3, narrative: "Family declines")
@@ -68,6 +68,7 @@ module Lakeraven
           assert_equal "IMMUNIZATION", inp[1]
           assert_equal "42", inp[2]
           assert_equal "1", inp[3]
+          assert_equal "3250102", inp[4], "The default refusal date comes from the RPMS server clock"
           assert_equal "Family declines", inp[5]
           assert_equal "3", inp[7]
         end
