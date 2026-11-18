@@ -15,13 +15,16 @@ module Lakeraven
     # surrounding Unicode space and format characters. It returns nil
     # (refuse) when a label sits where it cannot be noticed: elsewhere in
     # meta or the Coding, under security or securityLabel outside a
-    # resource, in a labelled multi-line JSON document. A payload that is
-    # not a resource (a top-level Hash such as C-CDA sections, a JSON
+    # resource or under meta in a Hash that is not a resource, in a
+    # labelled multi-line JSON document. A payload that is not a resource
+    # (a top-level Hash such as C-CDA sections, a top-level Array, a JSON
     # document, a line) refuses on 42CFRPart2 anywhere (any key or leaf,
     # case-insensitively), or on a Part 2 code as a whole String leaf or
-    # CSV field; prose mentioning a short code passes. A resource is held
-    # only to the label rules. It also refuses a line that opens like JSON
-    # and does not parse, invalid encoding, and any error (fail closed).
+    # CSV field outside nested resources and human-text or demographic
+    # values (display, name, address, ...); prose mentioning a short code
+    # passes. A resource is held only to the label rules. It also refuses
+    # a line that opens like JSON and does not parse, invalid encoding,
+    # and any error (fail closed).
     # Unlabelled payloads come back unchanged; the input is never mutated.
     # It does not classify unlabelled records; keeping labels on ingest is #908.
     class Part2EgressFilter
@@ -34,8 +37,10 @@ module Lakeraven
       CODE_KEYS = [ "code", :code ].freeze
       TEXT_KEYS = [ "display", :display ].freeze
       LABEL_KEYS = %w[security securityLabel].freeze
+      # Values under these keys are human text or demographics, not codes.
+      HUMAN_TEXT_KEYS = %w[display text name family given prefix suffix address line city district state postalCode country].freeze
       PART2_NAME = /42cfrpart2/i
-      private_constant :BOM, :PADDING, :FIELD_PADDING, :CODE_KEYS, :TEXT_KEYS, :LABEL_KEYS, :PART2_NAME
+      private_constant :BOM, :PADDING, :FIELD_PADDING, :CODE_KEYS, :TEXT_KEYS, :LABEL_KEYS, :HUMAN_TEXT_KEYS, :PART2_NAME
 
       def self.call(payload)
         result = new.send(:filter, payload)
@@ -48,8 +53,8 @@ module Lakeraven
 
       def filter(payload)
         return filter_string(payload) if payload.is_a?(String)
-        # A Hash that is not a resource (C-CDA sections) cannot carry the notice.
-        refuse_non_resource(payload) if payload.is_a?(Hash) && !resource?(payload)
+        # A Hash that is not a resource (C-CDA sections), or an Array, cannot carry the notice.
+        refuse_non_resource(payload) if payload.is_a?(Array) || (payload.is_a?(Hash) && !resource?(payload))
 
         walk(payload)
       end
@@ -90,10 +95,24 @@ module Lakeraven
 
       # The rule for a value that is not a resource, so has nowhere to carry
       # the notice: refuse on 42CFRPart2 in `text` or in any key or leaf, on
-      # a Part 2 code as a whole leaf, or on a label the walk would notice.
+      # a Part 2 code as a whole leaf outside nested resources and human
+      # text, or on a label the walk would notice.
       def refuse_non_resource(node, text = nil)
-        raise Refused if text.to_s.match?(PART2_NAME) || names_part2?(node) || part2_anywhere?(node)
+        raise Refused if text.to_s.match?(PART2_NAME) || names_part2?(node) || part2_outside_resources?(node)
         raise Refused unless walk(node).equal?(node)
+      end
+
+      # Like part2_anywhere?, but a nested resource is left to the label
+      # rules (the walk) and a value under a human-text key is not a code.
+      def part2_outside_resources?(node)
+        case node
+        when Hash
+          return false if resource?(node)
+
+          node.any? { |key, value| !HUMAN_TEXT_KEYS.include?(key.to_s) && part2_outside_resources?(value) }
+        when Array then node.any? { |value| part2_outside_resources?(value) }
+        else part2?(node)
+        end
       end
 
       # Whether any key, or String or Symbol leaf, at any depth contains 42CFRPart2.
@@ -130,9 +149,11 @@ module Lakeraven
         rebuild(hash, hash.to_h { |key, value| [ key, walk_pair(key, value) ] })
       end
 
-      # A Part 2 code under a label key outside a resource's own labels.
+      # A Part 2 code under a label key outside a resource's own labels, or
+      # under meta in a Hash that is not a resource (a resource's own meta
+      # does not come here).
       def walk_pair(key, value)
-        raise Refused if LABEL_KEYS.include?(key.to_s) && part2_anywhere?(value)
+        raise Refused if (LABEL_KEYS.include?(key.to_s) || key.to_s == "meta") && part2_anywhere?(value)
 
         walk(value)
       end
