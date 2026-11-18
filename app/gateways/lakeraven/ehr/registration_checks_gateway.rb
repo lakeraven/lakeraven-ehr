@@ -53,15 +53,22 @@ module Lakeraven
       end
 
       def self.item(check)
-        window = check[:hide_window].to_s.strip
+        window = text(check[:hide_window])
         Item.new(
-          number: check[:hide_error_num].to_s,
-          message: check[:msg].to_s.strip,
+          number: text(check[:hide_error_num]),
+          message: text(check[:msg]),
           kind: ERROR_TYPES.include?(check[:type].to_s.upcase) ? :error : :warning,
           section: SECTIONS.fetch(window) { window.presence || "Other" }
         )
       end
-      private_class_method :item
+
+      # The broker hands its text over as ASCII-8BIT. Rendered as is, a
+      # window SECTIONS does not map (Medicare Eligibility, say) raised in the
+      # page (#973), so the text is read as UTF-8, any invalid byte replaced.
+      def self.text(value)
+        value.to_s.dup.force_encoding(Encoding::UTF_8).scrub.strip
+      end
+      private_class_method :item, :text
     end
   end
 end
