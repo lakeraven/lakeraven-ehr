@@ -16,7 +16,12 @@ require "test_helper"
 #   DisclosureSurfaces::UNGOVERNED_API_ROUTES  # frozen Hash: "controller#action" => one-line reason
 #
 # An unconditional rule is a disclosure_surface_rules entry whose keys other
-# than :surface and :only are all nil/false (so a bearer-only rule is not one).
+# than :surface, :only and :key are all nil/false (so a bearer-only rule is not
+# one). :key only names a rule for replacement by a later declaration; it does
+# not make the rule conditional.
+#
+# Probe controllers that use if: / key: are defined inside the tests that use
+# them, so this file still loads against app code that lacks those keywords.
 module Lakeraven
   module EHR
     class DisclosureProbeUngatedController < ApplicationController; end
@@ -25,12 +30,6 @@ module Lakeraven
     end
     class DisclosureProbeGatedController < ApplicationController
       disclosure_surface :fhir_api
-    end
-    class DisclosureProbeRaisingController < ActionController::API
-      include DisclosureSurfaceGate
-      disclosure_surface :fhir_api, if: :boom
-      def show = head(:no_content)
-      def boom = raise("boom")
     end
   end
 end
@@ -212,12 +211,20 @@ class FhirApiDisclosureSurfaceTest < ActionDispatch::IntegrationTest
   end
 
   test "a rule whose predicate raises fails closed, and serves once the surface is open" do
-    with_routing do |set|
-      set.draw { get "Probe", to: "#{NS}disclosure_probe_raising#show" }
-      [ [ ABSENT, 404 ], [ %i[bulk_export ccda], 404 ], [ %i[fhir_api], 204 ] ].each do |value, status|
-        configure(value)
-        get "/Probe"
-        assert_equal [ status, "" ], [ response.status, response.body ], value.inspect
+    definition = proc do
+      include EHR::DisclosureSurfaceGate
+      disclosure_surface :fhir_api, if: :boom
+      def show = head(:no_content)
+      def boom = raise("boom")
+    end
+    with_probe(:DisclosureProbeRaisingController, ActionController::API, definition) do
+      with_routing do |set|
+        set.draw { get "Probe", to: "#{NS}disclosure_probe_raising#show" }
+        [ [ ABSENT, 404 ], [ %i[bulk_export ccda], 404 ], [ %i[fhir_api], 204 ] ].each do |value, status|
+          configure(value)
+          get "/Probe"
+          assert_equal [ status, "" ], [ response.status, response.body ], value.inspect
+        end
       end
     end
   end
@@ -261,7 +268,42 @@ class FhirApiDisclosureSurfaceTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "the coverage check passes a controller declaring fhir_api under a key" do
+    definition = proc { disclosure_surface :fhir_api, key: :api }
+    with_probe(:DisclosureProbeKeyedController, EHR::ApplicationController, definition) do
+      set = ActionDispatch::Routing::RouteSet.new
+      set.draw { get "Widget/:id", to: "#{NS}disclosure_probe_keyed#show" }
+      assert_equal [], Surfaces.ungated_routes(set, allow: [])
+      assert_equal [ :fhir_api ], unconditional_rules(EHR::DisclosureProbeKeyedController, "show").map { |rule| rule[:surface] }
+    end
+  end
+
+  test "the coverage check reports a controller whose keyed fhir_api rule is conditional" do
+    definition = proc do
+      disclosure_surface :fhir_api, if: :some_predicate, key: :api
+      def some_predicate = true
+    end
+    with_probe(:DisclosureProbeKeyedConditionalController, EHR::ApplicationController, definition) do
+      set = ActionDispatch::Routing::RouteSet.new
+      set.draw { get "Widget/:id", to: "#{NS}disclosure_probe_keyed_conditional#show" }
+      assert_equal [ "#{NS}disclosure_probe_keyed_conditional#show" ], Surfaces.ungated_routes(set, allow: [])
+      assert_empty Surfaces.ungated_routes(set, allow: [ "#{NS}disclosure_probe_keyed_conditional#show" ])
+      assert_empty unconditional_rules(EHR::DisclosureProbeKeyedConditionalController, "show")
+    end
+  end
+
   private
+
+  # Defines Lakeraven::EHR::<name> as a subclass of +parent+ with +definition+
+  # as its body for the length of the block, then removes the constant. For
+  # probes whose declarations use keywords older app code lacks: the file
+  # still loads there, and only the test using the probe fails.
+  def with_probe(name, parent, definition)
+    EHR.const_set(name, Class.new(parent)).class_eval(&definition)
+    yield
+  ensure
+    EHR.send(:remove_const, name) if EHR.const_defined?(name, false)
+  end
 
   # [ "controller#action", verb, path ] for every engine route to a bearer-only
   # API controller that is not another surface's, path params filled with "1".
@@ -278,7 +320,7 @@ class FhirApiDisclosureSurfaceTest < ActionDispatch::IntegrationTest
 
   def unconditional_rules(klass, action)
     klass.disclosure_surface_rules.select do |rule|
-      (rule[:only].nil? || rule[:only].include?(action)) && rule.except(:surface, :only).values.none?
+      (rule[:only].nil? || rule[:only].include?(action)) && rule.except(:surface, :only, :key).values.none?
     end
   end
 
