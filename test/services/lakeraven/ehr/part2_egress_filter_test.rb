@@ -1531,6 +1531,251 @@ module Lakeraven
         assert_equal text, Part2EgressFilter.call(text)
       end
 
+      # --- round 6: the non-resource rule's reach -----------------------------
+      #
+      # A. The whole-leaf scan does not descend into a nested resource (a
+      # resource is held to the label rules) and does not treat a value under
+      # a human-text or demographic key as a code. 42CFRPart2 still refuses
+      # anywhere. B. A `meta` key in a Hash that is not a resource cannot
+      # carry the notice, so a Part 2 code under it refuses. C. A top-level
+      # Array gets the non-resource rule.
+
+      HUMAN_TEXT_KEYS = %w[display text name family given prefix suffix address line city district state postalCode country].freeze
+
+      COLLIDING_PATIENT = {
+        "resourceType" => "Patient", "id" => "syn-pt",
+        "name" => [ { "family" => "Sud", "given" => [ "Eth" ] } ],
+        "address" => [ { "country" => "ETH" } ]
+      }.freeze
+
+      CLINICAL_ETH = { "coding" => [ { "system" => "http://example.test/synthetic", "code" => "ETH" } ] }.freeze
+
+      RAW_TAGGED_ROW = { "code" => "F11.20", "meta" => { "tag" => [ { "code" => "SUD" } ] } }.freeze
+
+      test "C-CDA sections whose patient name and address collide with short codes are returned equal" do
+        patient = { dfn: "1", name: { family: "SUD", given: "Eth" }, dob: nil, sex: "F", address: { city: "Sud", country: "ETH" } }
+        sections = ccda_sections(patient: patient)
+        before = sections.deep_dup
+
+        result = Part2EgressFilter.call(sections)
+
+        assert_equal sections, result, "demographics are not labels"
+        assert_equal before, sections, "the input must not be mutated"
+      end
+
+      test "string-keyed C-CDA sections whose patient name and address collide with short codes are returned equal" do
+        patient = { dfn: "1", name: { family: "SUD", given: "Eth" }, dob: nil, sex: "F", address: { city: "Sud", country: "ETH" } }
+        sections = ccda_sections(patient: patient).deep_stringify_keys
+
+        assert_equal sections, Part2EgressFilter.call(sections)
+      end
+
+      test "C-CDA sections whose patient holds an unlabelled Patient resource with colliding demographics are returned equal" do
+        sections = ccda_sections(patient: ccda_sections[:patient].merge(fhir: COLLIDING_PATIENT.deep_dup))
+
+        assert_equal sections, Part2EgressFilter.call(sections)
+      end
+
+      test "C-CDA sections whose row holds an unlabelled Patient resource with colliding demographics are returned equal" do
+        %i[allergies conditions medications].each do |list|
+          row = { code: "SYN-1", display: "Synthetic", code_system: nil, fhir: COLLIDING_PATIENT.deep_dup }
+          sections = ccda_sections(list => [ row ])
+
+          assert_equal sections, Part2EgressFilter.call(sections), "a nested unlabelled resource in #{list}"
+        end
+      end
+
+      test "C-CDA sections holding a symbol-keyed unlabelled Patient resource with colliding demographics are returned equal" do
+        resource = { resourceType: "Patient", id: "syn-pt", name: [ { family: "Sud", given: [ "Eth" ] } ], address: [ { country: "ETH" } ] }
+        sections = ccda_sections(patient: ccda_sections[:patient].merge(fhir: resource))
+
+        assert_equal sections, Part2EgressFilter.call(sections)
+      end
+
+      test "C-CDA sections whose condition row holds an unlabelled resource with clinical coding ETH are returned equal" do
+        # The same rule as "a clinical coding outside meta.security is not a
+        # Part 2 label": a nested resource is held to the label rules.
+        row = { code: "SYN-1", display: "Synthetic", code_system: nil, fhir: condition("code" => CLINICAL_ETH.deep_dup) }
+        sections = ccda_sections(conditions: [ row ])
+        before = sections.deep_dup
+
+        result = Part2EgressFilter.call(sections)
+
+        assert_equal sections, result
+        assert_equal before, sections, "the input must not be mutated"
+      end
+
+      test "C-CDA sections whose allergy row display is ETH are returned equal" do
+        sections = ccda_sections(allergies: [ { code: "SYN-A", display: "ETH", code_system: nil } ])
+
+        assert_equal sections, Part2EgressFilter.call(sections)
+      end
+
+      test "C-CDA sections whose string-keyed row display is a short code are returned equal" do
+        sections = ccda_sections(medications: [ { "code" => "SYN-M", "display" => " sud ", "code_system" => nil } ])
+
+        assert_equal sections, Part2EgressFilter.call(sections)
+      end
+
+      HUMAN_TEXT_KEYS.each do |key|
+        test "a short code under the human-text key #{key} in a C-CDA row is not a label" do
+          [ key, key.to_sym ].each do |row_key|
+            [ "SUD", [ "Eth" ] ].each do |value|
+              sections = ccda_sections(conditions: [ { code: "SYN-1", code_system: nil, row_key => value } ])
+
+              assert_equal sections, Part2EgressFilter.call(sections), "#{row_key.inspect} => #{value.inspect} must not refuse"
+            end
+          end
+        end
+      end
+
+      test "a pretty-printed document that is not a resource and holds an unlabelled resource with clinical coding ETH is unchanged" do
+        resource = condition("code" => CLINICAL_ETH.deep_dup)
+        text = JSON.pretty_generate(export_manifest("output" => [ { "type" => "Condition", "resource" => resource } ]))
+
+        assert_operator text.lines.size, :>, 1, "test data must be a multi-line document"
+        assert_equal text, Part2EgressFilter.call(text)
+      end
+
+      # Guards for A: what the narrowed scan still refuses.
+
+      test "C-CDA sections with a raw row whose code is SUD are refused" do
+        assert_nil Part2EgressFilter.call(ccda_sections(conditions: [ { code: "SUD", display: "Synthetic", code_system: nil } ]))
+        assert_nil Part2EgressFilter.call(ccda_sections(conditions: [ { "code" => " sud ", "display" => "Synthetic" } ]))
+      end
+
+      test "C-CDA sections with a raw row tagged ETH in meta are refused" do
+        row = { code: "SYN-1", display: "Synthetic", code_system: nil, meta: { tag: [ { code: "ETH" } ] } }
+
+        assert_nil Part2EgressFilter.call(ccda_sections(allergies: [ row ]))
+      end
+
+      test "C-CDA sections whose patient family name is 42CFRPart2 are refused" do
+        # 42CFRPart2 refuses anywhere, a human-text key included.
+        [ { family: "42CFRPart2", given: "PATIENT" }, { "family" => "x 42cfrpart2 y", "given" => "PATIENT" } ].each do |name|
+          patient = ccda_sections[:patient].merge(name: name)
+
+          assert_nil Part2EgressFilter.call(ccda_sections(patient: patient)), "#{name.inspect} must refuse"
+        end
+      end
+
+      test "C-CDA sections whose row display is 42CFRPart2 are refused" do
+        assert_nil Part2EgressFilter.call(ccda_sections(allergies: [ { code: "SYN-A", display: "42CFRPart2", code_system: nil } ]))
+      end
+
+      test "a short code under another key beside a human-text key is still refused" do
+        row = { code: "SYN-1", display: "ETH", code_system: nil, label: "SUD" }
+
+        assert_nil Part2EgressFilter.call(ccda_sections(conditions: [ row ]))
+      end
+
+      test "C-CDA sections with colliding demographics and a labelled nested resource are still refused" do
+        patient = { dfn: "1", name: { family: "SUD", given: "Eth" }, dob: nil, sex: "F", address: { country: "ETH" },
+                    fhir: COLLIDING_PATIENT.merge("meta" => { "security" => [ { "code" => "SUD" } ] }) }
+
+        assert_nil Part2EgressFilter.call(ccda_sections(patient: patient))
+      end
+
+      # B. A raw row inside a resource.
+
+      test "a Bundle whose entry resource is a raw row tagged SUD in meta is refused" do
+        bundle = { "resourceType" => "Bundle", "type" => "searchset", "entry" => [ { "resource" => RAW_TAGGED_ROW.deep_dup } ] }
+
+        assert_nil Part2EgressFilter.call(bundle)
+        assert_nil Part2EgressFilter.call(bundle.deep_symbolize_keys), "symbol keys"
+      end
+
+      test "an NDJSON line that is a Bundle whose entry resource is a raw row tagged SUD in meta is refused" do
+        bundle = { "resourceType" => "Bundle", "type" => "searchset", "entry" => [ { "resource" => RAW_TAGGED_ROW.deep_dup } ] }
+
+        assert_nil Part2EgressFilter.call(bundle.to_json)
+        assert_nil Part2EgressFilter.call("#{condition.to_json}\n#{bundle.to_json}\n")
+      end
+
+      test "a pretty-printed Bundle whose entry resource is a raw row tagged SUD in meta is refused" do
+        bundle = { "resourceType" => "Bundle", "type" => "searchset", "entry" => [ { "resource" => RAW_TAGGED_ROW.deep_dup } ] }
+        text = JSON.pretty_generate(bundle)
+
+        assert_operator text.lines.size, :>, 1, "test data must be a multi-line document"
+        assert_nil Part2EgressFilter.call(text)
+      end
+
+      test "a resource holding a raw Hash with a normalised Part 2 code under meta is refused" do
+        resource = { "resourceType" => "Condition", "id" => "syn-1", "raw" => { "meta" => { "tag" => [ { "code" => "ethud " } ] } } }
+
+        assert_nil Part2EgressFilter.call(resource)
+      end
+
+      test "a symbol-keyed resource holding a raw Hash with a normalised Part 2 code under meta is refused" do
+        resource = { resourceType: "Condition", id: "syn-1", raw: { meta: { tag: [ { code: "ethud " } ] } } }
+
+        assert_nil Part2EgressFilter.call(resource)
+      end
+
+      %w[42CFRPart2 ETH SUD ETHUD OPIOIDUD].each do |code|
+        test "a #{code} code under the meta of a raw Hash inside a resource is refused" do
+          assert_nil Part2EgressFilter.call(condition("raw" => { "meta" => { "tag" => [ { "code" => code } ] } }))
+          assert_nil Part2EgressFilter.call(condition("raw" => [ { "nested" => { "meta" => { "profile" => [ code.downcase ] } } } ])), "deeper"
+        end
+      end
+
+      # Guards for B.
+
+      test "a Bundle whose entry holds an unlabelled resource with an ordinary meta.tag is returned equal" do
+        bundle = bundle_of(entry(condition("meta" => { "tag" => [ { "code" => "syn" } ] }), mode: "match"))
+
+        result = Part2EgressFilter.call(bundle)
+
+        assert_equal bundle, result
+        refute_noticed result
+        refute_noticed result["entry"][0]["resource"]
+      end
+
+      test "a symbol-keyed Bundle whose entry holds an unlabelled resource with an ordinary meta.tag is returned equal" do
+        bundle = {
+          resourceType: "Bundle", type: "searchset",
+          entry: [ { resource: { resourceType: "Condition", id: "syn-1", meta: { tag: [ { code: "syn" } ] } } } ]
+        }
+
+        assert_equal bundle, Part2EgressFilter.call(bundle)
+      end
+
+      test "a resource holding a raw Hash whose meta has no Part 2 code is returned equal" do
+        resource = condition("raw" => { "code" => "F11.20", "meta" => { "tag" => [ { "code" => "syn" } ], "versionId" => "1" } })
+
+        result = Part2EgressFilter.call(resource)
+
+        assert_equal resource, result
+        refute_noticed result
+      end
+
+      test "a resource's own meta.tag and meta.security behave as before beside a raw Hash" do
+        raw = { "code" => "F11.20", "meta" => { "tag" => [ { "code" => "syn" } ] } }
+
+        assert_nil Part2EgressFilter.call(condition("meta" => { "tag" => [ { "code" => "SUD" } ] }, "raw" => raw))
+
+        labelled = condition("meta" => { "security" => [ PART2_LABEL ], "tag" => [ { "code" => "syn" } ] }, "raw" => raw)
+        result = Part2EgressFilter.call(labelled)
+        assert_noticed result
+        assert_equal labelled, without_notice(result)
+      end
+
+      # C. A top-level Array.
+
+      test "a top-level Array holding a raw row tagged SUD in meta is refused" do
+        assert_nil Part2EgressFilter.call([ { code: "F11.20", meta: { tag: [ { code: "SUD" } ] } } ])
+      end
+
+      test "a top-level Array holding a string-keyed raw row tagged SUD in meta is refused" do
+        assert_nil Part2EgressFilter.call([ { "code" => "SYN-1" }, RAW_TAGGED_ROW.deep_dup ])
+      end
+
+      test "an unlabelled top-level Array is returned as the same object" do
+        rows = [ { code: "SYN-1", display: "x" } ]
+
+        assert_same rows, Part2EgressFilter.call(rows)
+      end
+
       private
 
       # The audit_log.csv of an EHI export: the service's own header, then a
