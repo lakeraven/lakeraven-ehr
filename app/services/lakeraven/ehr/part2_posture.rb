@@ -28,8 +28,12 @@ module Lakeraven
       # gives no reason to call the record clean, so it fails closed to
       # Part 2. Anything else is a bug and is left to surface rather than
       # being silently swallowed.
+      #
+      # The read runs in a savepoint, so a statement that fails at the
+      # database rolls back only the savepoint and never aborts a caller's
+      # open transaction. A read needs no detachment.
       def self.labelled?(key)
-        Part2Label.exists?(key) ? true : false
+        Part2Label.transaction(requires_new: true) { Part2Label.exists?(key) } ? true : false
       rescue ActiveRecord::ActiveRecordError
         true
       end

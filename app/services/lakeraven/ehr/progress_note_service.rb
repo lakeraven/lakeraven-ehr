@@ -104,7 +104,8 @@ module Lakeraven
       # written. TIU is asked which signing action the author holds on it,
       # and only :sign signs it, with the code just checked. Any other answer
       # (:cosign, nil) leaves the note saved unsigned, and the code is not
-      # sent.
+      # sent. Every Result once the note exists carries the part2_label
+      # create computed, so a :label_failed is never invisible to the chart.
       def create_and_sign(title_ien:, text:, signature_code:)
         checked = check_signature_code(signature_code)
         return checked unless checked.success?
@@ -113,10 +114,13 @@ module Lakeraven
         return created unless created.success?
 
         note_ien = created.note_ien
+        part2_label = created.part2_label
         action = @esignature_gateway.which_action(note_ien, @author_duz)
-        return failure(:sign_not_permitted, stage: :sign_action, note_ien: note_ien) unless action == :sign
+        unless action == :sign
+          return failure(:sign_not_permitted, stage: :sign_action, note_ien: note_ien, part2_label: part2_label)
+        end
 
-        add_signature(note_ien, signature_code)
+        add_signature(note_ien, signature_code, part2_label: part2_label)
       end
 
       private
@@ -141,11 +145,15 @@ module Lakeraven
         :label_failed
       end
 
-      def add_signature(note_ien, signature_code)
+      # part2_label is passed through to the Result unchanged; sign leaves it
+      # nil because it labels nothing.
+      def add_signature(note_ien, signature_code, part2_label: nil)
         raw = @esignature_gateway.add(note_ien, @author_duz, signature_code, action: :sign)
-        return failure(:gateway_error, raw: raw, stage: :sign, note_ien: note_ien) unless raw.is_a?(Hash) && raw[:success]
+        unless raw.is_a?(Hash) && raw[:success]
+          return failure(:gateway_error, raw: raw, stage: :sign, note_ien: note_ien, part2_label: part2_label)
+        end
 
-        Result.new(success: true, note_ien: note_ien, raw: raw)
+        Result.new(success: true, note_ien: note_ien, raw: raw, part2_label: part2_label)
       end
 
       def failure(reason, raw: nil, stage: nil, note_ien: nil, part2_label: nil)

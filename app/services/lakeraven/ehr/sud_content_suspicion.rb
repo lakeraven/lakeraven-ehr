@@ -121,8 +121,12 @@ module Lakeraven
       READABLE_CONTENT = Regexp.new("[\\p{L}\\p{N}]", timeout: MATCH_TIMEOUT)
 
       # Removed before matching: format characters (soft hyphen, zero-width
-      # space and joiners, BOM, bidi controls).
-      FORMAT_CHARACTERS = /\p{Cf}/
+      # space and joiners, BOM, bidi controls) and the control characters
+      # that are not whitespace (NUL, U+0001-U+0008, U+000E-U+001F, U+007F,
+      # U+0080-U+009F except U+0085), so "alco<NUL>hol" reads as "alcohol".
+      # Whitespace controls (tab, line feed, vertical tab, form feed,
+      # carriage return, U+0085) are kept and still separate words.
+      FORMAT_CHARACTERS = /[\p{Cf}[^\P{Cc}[:space:]]]/
 
       # Read as a word separator before matching: underscore and all dash
       # punctuation (hyphen, non-breaking hyphen, en and em dash, ...).
@@ -164,8 +168,9 @@ module Lakeraven
       end
       private_class_method :readable_utf8
 
-      # NFKC, then format characters dropped and separators spaced, so a
-      # term is matched on what a reader sees rather than how it is keyed.
+      # NFKC, then format and non-whitespace control characters dropped and
+      # separators spaced, so a term is matched on what a reader sees rather
+      # than how it is keyed.
       def self.canonicalise(text)
         text.unicode_normalize(:nfkc).gsub(FORMAT_CHARACTERS, "").gsub(SEPARATOR_CHARACTERS, " ")
       end

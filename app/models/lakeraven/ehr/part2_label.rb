@@ -11,6 +11,13 @@ module Lakeraven
     # row whose code this version does not recognise must still load and be
     # read, because Part2Posture counts ANY label row as Part 2 — an unknown
     # label is never a reason to treat a record as clean.
+    #
+    # A label outlives the caller's transaction. The chart runs the whole
+    # action inside the request's audit transaction (AuditableClinicalAccess),
+    # which can roll back after the note was filed in RPMS; the note stays
+    # filed, so its label must stay written. Inside an open transaction mark!
+    # runs on a connection of its own and commits at once, the way
+    # NoteFormClaim.claim! and AuditEvent.create_detached! write.
     class Part2Label < ApplicationRecord
       self.table_name = "lakeraven_ehr_part2_labels"
 
@@ -57,30 +64,52 @@ module Lakeraven
       # Blank inputs, or inputs carrying a NUL byte, raise
       # ActiveRecord::RecordInvalid and write nothing.
       #
+      # The lookup, the insert and its retries all run detached: inside an
+      # open transaction, on a connection of its own that commits at once.
+      # So the label survives a rollback of the caller's transaction, and a
+      # statement that fails at the database never aborts it. Errors raised
+      # there reach the caller unchanged.
+      #
       # A concurrent writer may commit the same record between the lookup
       # and the insert. The insert runs in a savepoint, so a unique-index
-      # refusal rolls back only the savepoint and never aborts the caller's
-      # PostgreSQL transaction; that refusal, or a uniqueness-only
+      # refusal rolls back only the savepoint and never aborts the
+      # surrounding transaction; that refusal, or a uniqueness-only
       # validation failure, means the record is already labelled, and the
       # existing row is returned.
       def self.mark!(patient_dfn:, record_type:, record_id:)
         key = normalized_key(record_type: record_type, record_id: record_id)
-        refuse_nul!(key.merge(patient_dfn: patient_dfn.to_s))
-        existing = find_by(key)
-        return existing if existing
-
-        begin
-          transaction(requires_new: true) do
-            create!(key.merge(patient_dfn: patient_dfn.to_s, security_code: PART2_SECURITY_CODE))
-          end
-        rescue ActiveRecord::RecordNotUnique
-          find_by!(key)
-        rescue ActiveRecord::RecordInvalid => e
-          raise unless only_taken?(e.record)
-
-          find_by!(key)
-        end
+        attributes = key.merge(patient_dfn: patient_dfn.to_s)
+        refuse_nul!(attributes)
+        detached { find_by(key) || insert_label!(key, attributes) }
       end
+
+      def self.insert_label!(key, attributes)
+        transaction(requires_new: true) do
+          create!(attributes.merge(security_code: PART2_SECURITY_CODE))
+        end
+      rescue ActiveRecord::RecordNotUnique
+        find_by!(key)
+      rescue ActiveRecord::RecordInvalid => e
+        raise unless only_taken?(e.record)
+
+        find_by!(key)
+      end
+      private_class_method :insert_label!
+
+      # Runs the block on a connection no open transaction can roll back.
+      # The transactional-test harness pins one connection for every thread,
+      # so there the block runs inline (see AuditEvent.create_detached!).
+      def self.detached(&block)
+        conn = connection
+        return yield unless conn.transaction_open?
+        return yield if conn.respond_to?(:pinned) && conn.pinned
+
+        Thread.new do
+          Thread.current.report_on_exception = false
+          connection_pool.with_connection(&block)
+        end.value
+      end
+      private_class_method :detached
 
       # Raises ActiveRecord::RecordInvalid, before any query, when a value
       # carries a NUL byte: the database would refuse it with an
