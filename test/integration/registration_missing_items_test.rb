@@ -63,6 +63,30 @@ class RegistrationMissingItemsTest < ActionDispatch::IntegrationTest
     assert_select "#missing-items li[data-check='40'][data-kind='warning']", text: /Warning\s+Patient's Homeless information incomplete/
   end
 
+  # What AG answered live (openrpms bcer-9.0 2a9b3fe) for DEMO,PATIENT ONE, a
+  # patient with Medicare on file: coverage items name windows (Medicare
+  # Eligibility, Emergency Contact Info) that SECTIONS does not map. The
+  # broker hands its text over as ASCII-8BIT; the section heading read that
+  # name, and parameterize raised on it, a 500 for every registration clerk
+  # (#973).
+  WITH_COVERAGE = [
+    "15^Emergency contact information incomplete^WARNING^Emergency Contact Info^AGGECNME^Demographics^C",
+    "21^Group number/Plan Number incomplete^WARNING^^^AltRes^",
+    "29^Medicare eligibility data incomplete (#)^ERROR^Medicare Eligibility^^AltRes^"
+  ].freeze
+
+  test "a clerk holding AGZMENU opens the registration of a patient with coverage, its windows as the broker sends them" do
+    sign_in("registration_menu")
+    RpmsRpc.client.seed(:agg_patient_edit_check, "3", (([ HEADER ] + WITH_COVERAGE).map { |r| "#{r}#{RS}" }.join + US).b)
+
+    get "/lakeraven-ehr/registration/patients/3"
+
+    assert_response :ok
+    assert_select "#missing-items h3[data-section='medicare-eligibility']", text: "Medicare Eligibility"
+    assert_select "#missing-items h3[data-section='emergency-contact-info']", text: "Emergency Contact Info"
+    assert_select "#missing-items li[data-check='29'][data-kind='error']", text: /Medicare eligibility data incomplete/
+  end
+
   test "S-REG-23.2 an item RPMS no longer lists is gone from the page" do
     sign_in("registration_menu")
     seed_checks(MINIMUM.reject { |row| row.start_with?("807^") })
