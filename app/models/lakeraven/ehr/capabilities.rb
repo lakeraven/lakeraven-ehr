@@ -50,10 +50,29 @@ module Lakeraven
         # keys may not. The registration clerk may still start a handover (the
         # CIAV VUECENTRIC user/Consent.c scope is unchanged).
         "consent.revoke" => rule(any: %i[orders_sign orders_release]),
+        # Chart on one of the patient's open visits: vitals (S-TRI-02), allergies reviewed (S-TRI-04.1) and the chief complaint
+        # (rpms-ux S-TRI-07.1). VueCentric's BGO components edit for PROVIDER
+        # or BGOZ CAC and are read-only under BGOZ VIEW ONLY (BGOUTL CHKSEC,
+        # seen in a medical assistant's trace). The medical assistant, nurse
+        # and provider personas hold PROVIDER.
+        "visit.chart" => rule(any: %i[provider charting_coordinator], deny: %i[charting_view_only]),
+        # Record an allergy, or no known allergies, for the patient (rpms-ux
+        # S-TRI-04.2): the same keys as charting on a visit, as VueCentric's
+        # charting components check them. The provider, nurse and medical
+        # assistant personas hold PROVIDER. Sign-on mints no AllergyIntolerance
+        # write scope, so this is what lets a clinician record one.
+        "allergy.record" => rule(any: %i[provider charting_coordinator], deny: %i[charting_view_only]),
         # Work the facility's referrals: list the ones still pending across
         # patients (#873). RPMS: RCIS's menu key BMCZMENU, or its supervisor
         # and manager keys, the same keys Roles.can_process_chs? reads.
         "referrals.work" => rule(any: %i[referrals_user referrals_supervisor referrals_manager]),
+        # Write a progress note on an open visit from the chart and sign it
+        # with the user's electronic signature code (#1001). The PROVIDER key
+        # marks the clinicians who author notes. Before anything is written,
+        # RPMS is asked whether it accepts the signature code; before the note
+        # is signed, TIU is asked which signing action the author holds on it
+        # (ESignatureGateway.which_action), and only "sign" signs it.
+        "progress_note.write" => rule(any: %i[provider]),
         # Open the registration tables a site keeps itself: anyone who may edit one
         # of them. BPRM: CanAccessSettings, narrowed to the tables lakeraven-ehr has.
         "registration.setup" => rule(any: %i[registration_manager record_flags_manager]),

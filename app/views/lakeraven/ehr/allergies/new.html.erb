@@ -5,7 +5,8 @@
     RpmsRpc::Api::Allergy: TYPE, NATURE, OBHX, SEVERITY). %>
 
 <%= page_header "Record an allergy",
-      "Enter what the patient reacts to and how it was found out." %>
+      [ "Find what the patient reacts to, then say how it was found out.",
+        "Dates and times are the site's." ] %>
 
 <% if @allergy_not_saved %>
   <%= alert_box :error, id: "allergy-failure" do %>
@@ -19,37 +20,30 @@
       method: :post,
       class: "allergy-form entry-form" do |f| %>
   <fieldset>
-    <legend>Allergen</legend>
+    <legend>What the patient reacts to</legend>
 
-    <div class="field-row">
-      <%= form_field :agent, "Allergen", form: f do |aria| %>
-        <%= f.text_field :agent,
-              value: allergy_value("agent"),
-              autocomplete: "off",
-              required: true,
-              aria: aria %>
-      <% end %>
-
-      <%# GMRAGNT piece 2: a variable pointer, "IEN;GLOBAL(FILE,". %>
-      <%= form_field :agent_pointer,
-            "Allergen entry in RPMS",
-            form: f,
-            hint: "Its RPMS pointer, for example 12;GMRD(120.82, until allergen search is built." do |aria| %>
-        <%= f.text_field :agent_pointer,
-              value: allergy_value("agent_pointer"),
-              autocomplete: "off",
-              required: true,
-              class: "font-mono",
-              aria: aria %>
-      <% end %>
-    </div>
+    <%# GMRAGNT: the agent and its variable pointer, as RPMS's allergen
+        search (RpmsRpc::Allergen.search) gives them. %>
+    <%= lookup_field f,
+          :agent_choice,
+          legend: "Allergen",
+          search: :allergen_search,
+          search_label: "Allergen name starts with",
+          find_label: "Find allergen",
+          find_url: new_patient_allergy_path(@dfn),
+          find_method: :get,
+          choices: @allergen_matches.map { |match| [ allergen_choice(match), allergen_label(match), { allergen: match[:agent_pointer] } ] },
+          selected: form_value("agent_choice"),
+          chosen_text: chosen_text(form_value("agent_choice"), "Allergen"),
+          empty_text: allergen_empty_text,
+          hint: "Search allergies, foods, drugs, drug ingredients and drug classes." %>
 
     <div class="field-row">
       <%# GMRATYPE, PATIENT ALLERGIES (120.8) field 3.1. %>
       <%= form_field :type, "Type", form: f do |aria| %>
         <%= f.select :type,
               [ [ "Drug", "D" ], [ "Food", "F" ], [ "Other", "O" ], [ "Drug and food", "DF" ] ],
-              { include_blank: "Choose a type", selected: allergy_value("type") },
+              { include_blank: "Choose a type", selected: form_value("type") },
               required: true,
               aria: aria %>
       <% end %>
@@ -58,7 +52,7 @@
       <%= form_field :nature, "Nature of reaction", form: f do |aria| %>
         <%= f.select :nature,
               [ [ "Allergy", "A" ], [ "Pharmacologic (side effect)", "P" ], [ "Unknown", "U" ] ],
-              { include_blank: "Choose a nature", selected: allergy_value("nature") },
+              { include_blank: "Choose a nature", selected: form_value("nature") },
               required: true,
               aria: aria %>
       <% end %>
@@ -73,31 +67,28 @@
           :observed_or_historical,
           legend: "Observed or historical",
           choices: [ [ "o", "Observed in this clinic" ], [ "h", "Historical (reported by the patient or another record)" ] ],
-          selected: allergy_value("observed_or_historical") %>
+          selected: form_value("observed_or_historical") %>
 
     <div class="field-row">
-      <%# GMRAORDT, a FileMan date and time. %>
-      <%= form_field :originated_at,
+      <%# GMRAORDT, a FileMan date and time, converted on submit. %>
+      <%= form_field :originated_on,
             "Entered on",
             form: f,
-            hint: "FileMan date and time, for example 3261110.1430 for Nov 10, 2026 at 14:30." do |aria| %>
-        <%= f.text_field :originated_at,
-              value: allergy_value("originated_at"),
-              autocomplete: "off",
+            hint: "The site's date and time." do |aria| %>
+        <%= f.datetime_local_field :originated_on,
+              value: form_value("originated_on"),
+              max: site_now_for_picker,
               required: true,
-              class: "font-mono",
               aria: aria %>
       <% end %>
 
-      <%# GMRARDT, a FileMan date. %>
-      <%= form_field :reaction_date,
+      <%# GMRARDT, a FileMan date, converted on submit. %>
+      <%= form_field :reaction_on,
             "Reaction date (optional)",
-            form: f,
-            hint: "FileMan date, for example 3261108." do |aria| %>
-        <%= f.text_field :reaction_date,
-              value: allergy_value("reaction_date"),
-              autocomplete: "off",
-              class: "font-mono",
+            form: f do |aria| %>
+        <%= f.date_field :reaction_on,
+              value: form_value("reaction_on"),
+              max: site_today_for_picker,
               aria: aria %>
       <% end %>
     </div>
@@ -106,47 +97,37 @@
     <%= form_field :severity, "Severity (optional)", form: f do |aria| %>
       <%= f.select :severity,
             [ [ "Mild", "1" ], [ "Moderate", "2" ], [ "Severe", "3" ] ],
-            { include_blank: "Not given", selected: allergy_value("severity") },
+            { include_blank: "Not given", selected: form_value("severity") },
             class: "sm:max-w-xs",
             aria: aria %>
     <% end %>
   </fieldset>
 
   <fieldset>
-    <legend>Symptom (optional)</legend>
+    <legend>Reaction (optional)</legend>
 
-    <%# GMRASYMP(n) = "ien^text^FileMan date". %>
-    <div class="field-row">
-      <%= form_field :symptom_text, "Symptom", id: "allergy_symptom_text" do |aria| %>
-        <%= text_field_tag "allergy[symptoms][][text]",
-              symptom_value("text"),
-              id: "allergy_symptom_text",
-              autocomplete: "off",
-              aria: aria %>
-      <% end %>
+    <%# GMRASYMP(n) = "ien^text^FileMan date": the symptom from the
+        SIGN/SYMPTOMS catalog (RpmsRpc::Symptom.search), its date converted on submit. %>
+    <%= lookup_field f,
+          :symptom_choice,
+          legend: "Symptom",
+          search: :symptom_search,
+          search_label: "Symptom name starts with",
+          find_label: "Find symptom",
+          find_url: new_patient_allergy_path(@dfn),
+          find_method: :get,
+          choices: @symptom_matches.map { |match| [ "#{match[:ien]}^#{match[:name]}", match[:label], { symptom: match[:ien] } ] },
+          selected: form_value("symptom_choice"),
+          chosen_text: chosen_text(form_value("symptom_choice"), "Symptom"),
+          empty_text: symptom_empty_text %>
 
-      <%= form_field :symptom_ien,
-            "Symptom entry in RPMS",
-            id: "allergy_symptom_ien",
-            hint: "Its RPMS number, or FT for free text." do |aria| %>
-        <%= text_field_tag "allergy[symptoms][][ien]",
-              symptom_value("ien"),
-              id: "allergy_symptom_ien",
-              autocomplete: "off",
-              class: "font-mono",
-              aria: aria %>
-      <% end %>
-    </div>
-
-    <%= form_field :symptom_date,
-          "Symptom date",
-          id: "allergy_symptom_date",
-          hint: "FileMan date, for example 3261108." do |aria| %>
-      <%= text_field_tag "allergy[symptoms][][date]",
-            symptom_value("date"),
-            id: "allergy_symptom_date",
-            autocomplete: "off",
-            class: "font-mono sm:max-w-xs",
+    <%= form_field :symptom_on,
+          "Symptom date (optional)",
+          form: f do |aria| %>
+      <%= f.date_field :symptom_on,
+            value: form_value("symptom_on"),
+            max: site_today_for_picker,
+            class: "sm:max-w-xs",
             aria: aria %>
     <% end %>
   </fieldset>

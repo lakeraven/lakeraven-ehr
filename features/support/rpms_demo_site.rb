@@ -6,13 +6,15 @@
 # the rpms-rpc API the engine uses. On a mock run it is seeded into the mock,
 # so the mock says what RPMS says. On a live run (LIVE_RPMS=1) it is checked
 # against RPMS before the first scenario, and the run aborts on any
-# difference: the fake cannot drift from the backend it stands in for.
+# difference: the fake cannot drift from the backend it stands in for. A ready
+# stack run (LIVE_STACK, #962) skips the check: it signs on as the demo personas,
+# needs the pinned build, and would print the stack's patient rows on a diff.
 #
 # Values are verbatim, including RPMS's own quirks (trailing spaces in problem
 # narratives, mixed-case ORWU NEWPERS names). Change a value only after
 # reading it from the pinned build.
 module RpmsDemoSite
-  BUILD = "rpms-ydb 9b5cccd (bcer-9.0, openrpms demo site seed)"
+  BUILD = "openrpms 3f5487a (bcer-9.0-20261113-3f5487a-ydb, openrpms demo site seed)"
 
   # ORWPT SELECT / ORWPT ID INFO / ORWPT FULLSSN, by DFN.
   PATIENTS = {
@@ -59,6 +61,7 @@ module RpmsDemoSite
     { ien: "204", name: "Profile,Ma" },
     { ien: "206", name: "Profile,Md" },
     { ien: "207", name: "Profile,Reg" },
+    { ien: "210", name: "Profile,Regsup" },
     { ien: "205", name: "Profile,Rn" },
     { ien: "208", name: "Profile,Sched" },
     { ien: "200", name: "Provider,Test" }
@@ -66,6 +69,11 @@ module RpmsDemoSite
 
   # BGOVIMM2 GETELIG (active rows of BI TABLE ELIGIBILITY CODES) and
   # BGOVIMM GETVFC, by DFN (IHS-site flag ^ age ^ default label).
+  # GETVFC names "Am Indian/AK Native" only for beneficiary type 1; any other
+  # type answers its IEN, which names no code. DEMO,PATIENT ONE is OTHER, which
+  # sits at IEN 8 since BENEFICIARY records moved to IEN = code
+  # (https://github.com/lakeraven/openrpms/commit/eacf4116), so DFN 4 has no
+  # default eligibility. ALPHA,CASEY (990001) is INDIAN/ALASKA NATIVE.
   VFC_CODES = [
     { ien: "1", code: "999", label: "Unknown" },
     { ien: "2", code: "V01", label: "Not Eligible" },
@@ -77,7 +85,8 @@ module RpmsDemoSite
     { ien: "8", code: "V07", label: "Local-specific Elig" }
   ].freeze
   VFC_DEFAULTS = {
-    4 => { ihs_site: "Y", age: "25", default_label: "Am Indian/AK Native" }
+    4 => { ihs_site: "Y", age: "25", default_label: "8" },
+    990001 => { ihs_site: "Y", age: "74", default_label: "Am Indian/AK Native" }
   }.freeze
 
   # The demo site's sign-on personas (openrpms SEEDPERS; the pairs are
@@ -137,7 +146,7 @@ module RpmsDemoSite
     check.call("providers", PROVIDERS, project(RpmsRpc::Practitioner.search(""), PROVIDERS))
     check.call("VFC codes", VFC_CODES.map { |r| r.slice(:code, :label) }, RpmsRpc::Eligibility.codes)
     VFC_DEFAULTS.each do |dfn, row|
-      expected = VFC_CODES.find { |c| c[:label] == row[:default_label] }&.slice(:code, :label)
+      expected = VFC_CODES.find { |c| c[:label] == row[:default_label] }&.slice(:code, :label) || RpmsRpc::Eligibility::NIL_ELIGIBILITY
       check.call("VFC eligibility #{dfn}", expected, RpmsRpc::Eligibility.for_patient(dfn))
     end
     PERSONAS.each do |access, p|
@@ -154,7 +163,7 @@ module RpmsDemoSite
   end
 end
 
-if LIVE_RPMS
+if LIVE_RPMS && !LIVE_STACK&.ready?
   diffs = RpmsDemoSite.differences
   abort(<<~MSG) unless diffs.empty?
     LIVE_RPMS=1: RPMS disagrees with features/support/rpms_demo_site.rb (#{RpmsDemoSite::BUILD}).

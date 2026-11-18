@@ -56,6 +56,29 @@ Lakeraven::EHR::Engine.routes.draw do
   post "patients/:dfn/allergies/no_known_allergies", to: "allergies#no_known_allergies",
     as: :patient_no_known_allergies, constraints: { dfn: /\d+/ }
 
+  # A progress note written and signed from the chart (#1001). The note is
+  # created, written and signed by the POST only.
+  get  "patients/:dfn/notes/new", to: "progress_notes#new", as: :new_patient_progress_note,
+    constraints: { dfn: /\d+/ }
+  post "patients/:dfn/notes", to: "progress_notes#create", as: :patient_progress_notes,
+    constraints: { dfn: /\d+/ }
+
+  # The chief complaint on an open visit (rpms-ux S-TRI-07.1). RPMS files it.
+  get  "patients/:dfn/chief_complaints/new", to: "chief_complaints#new", as: :new_patient_chief_complaint,
+    constraints: { dfn: /\d+/ }
+  post "patients/:dfn/chief_complaints", to: "chief_complaints#create", as: :patient_chief_complaints,
+    constraints: { dfn: /\d+/ }
+
+  # That the allergies were reviewed on an open visit (rpms-ux S-TRI-04.1). RPMS files it.
+  get  "patients/:dfn/allergy_reviews/new", to: "allergy_reviews#new", as: :new_patient_allergy_review,
+    constraints: { dfn: /\d+/ }
+  post "patients/:dfn/allergy_reviews", to: "allergy_reviews#create", as: :patient_allergy_reviews,
+    constraints: { dfn: /\d+/ }
+
+  # Vitals on an open visit (rpms-ux S-TRI-02). RPMS checks and files them.
+  get  "patients/:dfn/vitals/new", to: "vitals#new", as: :new_patient_vitals, constraints: { dfn: /\d+/ }
+  post "patients/:dfn/vitals", to: "vitals#create", as: :patient_vitals, constraints: { dfn: /\d+/ }
+
   # In-clinic consent (#793). A signature is immutable, so there is no
   # update or delete route. Revocation is a new row. `new` and `handover`
   # are declared before any `:id` segment.
@@ -235,6 +258,12 @@ Lakeraven::EHR::Engine.routes.draw do
       get "eligibility_modifiers", to: "eligibility_modifiers#index", as: :patient_eligibility_modifiers
       post "eligibility_modifiers", to: "eligibility_modifiers#create"
       post "eligibility_modifiers/:ien/remove", to: "eligibility_modifiers#destroy", as: :remove_patient_eligibility_modifier, constraints: { ien: /\d+/ }
+      # The patient's advance directives (S-REG-17): ADVANCE DIRECTIVE (9000040).
+      get "advance_directives", to: "advance_directives#index", as: :patient_advance_directives
+      post "advance_directives", to: "advance_directives#create"
+      get "advance_directives/:ien/edit", to: "advance_directives#edit", as: :edit_patient_advance_directive, constraints: { ien: /\d+/ }
+      post "advance_directives/:ien", to: "advance_directives#update", as: :patient_advance_directive, constraints: { ien: /\d+/ }
+      post "advance_directives/:ien/remove", to: "advance_directives#destroy", as: :remove_patient_advance_directive, constraints: { ien: /\d+/ }
       get "other_names", to: "other_names#index", as: :patient_other_names
       post "other_names", to: "other_names#create"
       post "other_names/:ien/remove", to: "other_names#destroy", as: :remove_patient_other_name, constraints: { ien: /\d+/ }
