@@ -1,0 +1,55 @@
+<% page_title "Record the chief complaint" %>
+
+<%= page_header "Record the chief complaint",
+      "Why the patient came, on one of the patient's open visits. RPMS files it on the visit." %>
+
+<% if @refusal %>
+  <%= alert_box :error, @refusal, id: "chief-complaint-refusal" %>
+<% end %>
+
+<% if @open_visits.nil? %>
+  <%= alert_box :error,
+        "The patient's visits could not be read, so nothing can be recorded now. Try again shortly.",
+        id: "chief-complaint-visits-unread" %>
+<% elsif @open_visits.empty? %>
+  <%= alert_box :notice,
+        "No open visit was found for this patient. " \
+        "If the patient has been checked in, RPMS may not have answered: try again, or check the chart.",
+        id: "chief-complaint-no-open-visit" %>
+<% else %>
+  <%= form_with url: patient_chief_complaints_path(@dfn),
+        method: :post,
+        class: "entry-form" do |f| %>
+    <fieldset>
+      <legend>Visit</legend>
+      <% @open_visits.each do |visit| %>
+        <% ien = visit[:visit_ien].to_s %>
+        <div>
+          <%= radio_button_tag "visit_ien", ien,
+                @visit_ien == ien || @open_visits.one?,
+                id: "visit_ien_#{ien}",
+                required: true %>
+          <%= label_tag "visit_ien_#{ien}", visit_label(visit) %>
+        </div>
+      <% end %>
+    </fieldset>
+
+    <%= form_field :chief_complaint, "Chief complaint", id: "chief_complaint" do |aria| %>
+      <%= text_field_tag "chief_complaint", @text,
+            id: "chief_complaint",
+            maxlength: 240,
+            required: true,
+            aria: aria %>
+    <% end %>
+
+    <div class="form-actions">
+      <%= f.submit "Record", name: nil, class: "button-primary" %>
+    </div>
+  <% end %>
+<% end %>
+
+<p>
+  <%= link_to "Back to chart",
+        patient_chart_path(@dfn),
+        class: "button-secondary no-underline" %>
+</p>

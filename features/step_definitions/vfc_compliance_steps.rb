@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 Given("patient {string} has VFC eligibility code {string}") do |dfn, code|
-  # The demo site gives DFN 4 V04 (features/support/rpms_demo_site.rb); a
+  # The demo site gives DFN 990001 V04 (features/support/rpms_demo_site.rb); a
   # patient RPMS names no default for answers a nil code.
   @vfc_dfn = dfn
 end

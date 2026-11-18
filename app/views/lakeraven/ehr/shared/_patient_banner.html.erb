@@ -21,9 +21,9 @@
 
       <% if banner.demographics %>
         <div class="banner">
-          <div>
-            <h1><%= banner.demographics.name %></h1>
-          </div>
+          <%# The patient's name, not a heading: the banner is on every page
+              with a patient open, and each page has its own one h1 (#1113). %>
+          <p class="patient-banner__name"><%= banner.demographics.name %></p>
           <dl class="demoinfo">
             <div><dt>DOB</dt><dd><%= banner.demographics.dob_text %></dd></div>
             <div><dt>Age</dt><dd><%= banner.demographics.age_text %></dd></div>

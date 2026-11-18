@@ -1,0 +1,31 @@
+<% page_title "Change an advance directive", @patient[:name], "Registration" %>
+
+<%= page_header "Change an advance directive",
+      [ @patient[:name],
+        "This changes the entry itself. To record that the patient's answer changed, add a new entry instead." ] %>
+
+<%= flash_alert id: "advance-directive-alert" %>
+
+<%= form_errors @entry,
+      "The change was not saved.",
+      id: "advance-directive-errors" %>
+
+<%= form_with scope: :advance_directive,
+      model: @entry,
+      url: registration_patient_advance_directive_path(@dfn, params[:ien]),
+      method: :post,
+      local: true,
+      id: "advance-directive-form",
+      class: "card flex flex-col gap-4" do |f| %>
+  <%= render "lakeraven/ehr/registration/advance_directives/form",
+        f: f,
+        entry: @entry,
+        types: @types %>
+  <div class="flex items-center gap-4">
+    <%= f.submit "Save the change",
+          id: "save-advance-directive",
+          class: "button-primary" %>
+    <%= link_to "Cancel",
+          registration_patient_advance_directives_path(@dfn) %>
+  </div>
+<% end %>

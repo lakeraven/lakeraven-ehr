@@ -21,9 +21,9 @@ module Lakeraven
     class AllergiesController < WebController
       include BrowserSmartAuthentication
       include ClinicianPatientContext
+      include AuditLogProbe
 
       ALLERGY_RESOURCE = "AllergyIntolerance"
-      USER_CONTEXTS = %w[user].freeze
       SCALAR_FIELDS = %w[
         agent agent_pointer type nature originated_at
         observed_or_historical reaction_date severity
@@ -53,15 +53,21 @@ module Lakeraven
       before_action :enforce_token_patient_context!
       before_action :enforce_patient_context!
 
+      # The entry form. A Find button resubmits it here (GET, nothing filed)
+      # with an allergen or symptom search, so what was already entered is
+      # shown again beside the matches RPMS's own search gives.
       def new
-        @allergy = {}
+        @form_values = form_values
+        @allergen_matches = allergen_matches
+        @symptom_matches = symptom_matches
       end
 
       def create
         return if audit_unwritable?
 
+        @form_values = form_values
         @allergy = parse_allergy
-        if @allergy && allergy_recorded?
+        if @allergy && allergen_confirmed? && allergy_recorded?
           redirect_to patient_chart_path(@dfn), notice: "Allergy recorded."
         else
           render_allergy_not_saved
@@ -80,7 +86,7 @@ module Lakeraven
 
       private
 
-      helper_method :allergy_value, :symptom_value, :comment_value
+      helper_method :form_value, :comment_value
       helper_method :allergy_failure_heading, :allergy_failure_detail
       helper_method :nka_failure_heading, :nka_failure_detail
 
@@ -92,12 +98,13 @@ module Lakeraven
         false
       end
 
+      # Reading takes the token's AllergyIntolerance read. Recording takes that
+      # read and the "allergy.record" capability, from the keys RPMS reported
+      # at sign-on (PROVIDER or BGOZ CAC, never BGOZ VIEW ONLY): sign-on mints
+      # no AllergyIntolerance write scope (S-TRI-04.2). The entry form is
+      # offered on the same terms.
       def allergy_scope_permitted?
-        if request.get?
-          can_read?(ALLERGY_RESOURCE)
-        else
-          scope_permits?(ALLERGY_RESOURCE, write_permission, contexts: USER_CONTEXTS)
-        end
+        can_read?(ALLERGY_RESOURCE) && capability?("allergy.record")
       end
 
       def enforce_token_patient_context! = authorize_patient_context!(params[:dfn])
@@ -220,26 +227,8 @@ module Lakeraven
         end
       end
 
-      def audit_log_writable?
-        AuditEvent.transaction(requires_new: true) do
-          AuditEvent.create!(probe_audit_attributes)
-          raise ActiveRecord::Rollback
-        end
-        true
-      rescue StandardError => error
-        Rails.logger.warn("[allergy] audit log did not accept a row: #{error.class}")
-        false
-      end
-
-      def probe_audit_attributes
-        {
-          event_type: "rest",
-          action: "C",
-          outcome: "0",
-          entity_type: "Patient",
-          entity_identifier: Patient.canonical_dfn(@dfn) || @dfn.to_s
-        }
-      end
+      def audit_probe_log_tag = "allergy"
+      def audit_probe_dfn = @dfn
 
       def allergy_recorded?
         result = AllergyIntoleranceGateway.add(@dfn, @allergy, clinician_duz: current_duz)
@@ -274,6 +263,8 @@ module Lakeraven
 
       def render_allergy_not_saved
         @allergy ||= {}
+        @allergen_matches ||= []
+        @symptom_matches ||= []
         @allergy_not_saved = true
         render :new, status: :unprocessable_entity
       end
@@ -285,7 +276,7 @@ module Lakeraven
       # shipped form, and are left out. originator is not a field: the
       # gateway files the clinician DUZ, so a posted one is discarded.
       def parse_allergy
-        raw = allergy_input
+        raw = rpms_allergy_input
         return unless raw
 
         parsed = {}
@@ -297,6 +288,104 @@ module Lakeraven
         end
         with_lists(parsed)
       end
+
+      # The submitted allergy with the form's own values (a search match,
+      # date pickers, a catalog symptom) turned into RPMS's (AllergyEntryForm).
+      # A refused form value is kept as the reason; nothing reaches RPMS.
+      def rpms_allergy_input
+        raw = allergy_input
+        return unless raw
+
+        form = AllergyEntryForm.to_rpms(raw, now: SiteTime.now)
+        @allergy_error = form.error
+        @chosen_agent = form.chosen_agent
+        form.allergy
+      end
+
+      # An allergen chosen on the form is filed only if RPMS's own search for
+      # it still offers that agent and pointer (AllergenGateway.offers?), so
+      # what RPMS receives is a pair its search gave. A search that does not
+      # answer files nothing.
+      def allergen_confirmed?
+        return true unless @chosen_agent
+
+        offered = AllergenGateway.offers?(@chosen_agent[:agent], @chosen_agent[:agent_pointer])
+        @allergy_error = :allergen_not_offered unless offered
+        offered
+      rescue ::RpmsRpc::Error, IOError, SystemCallError => e
+        Rails.logger.warn("[allergy] allergen check failed: #{e.class}")
+        @allergy_error = :allergen_search_failed
+        false
+      end
+
+      # What the form shows: the values it last posted (after a Find, or a
+      # refusal), with the entry time defaulting to the site's now.
+      def form_values
+        raw = params[:allergy]
+        raw = raw.to_unsafe_h if raw.respond_to?(:to_unsafe_h)
+        values = raw.is_a?(Hash) ? raw.select { |_key, value| value.is_a?(String) } : {}
+        values = values.to_h { |key, value| [ key.to_s, value ] }
+        values["originated_on"] = site_now_for_picker if values["originated_on"].blank?
+        values
+      end
+
+      def allergen_matches
+        text = params[:allergen_search].to_s.strip
+        return [] if text.empty?
+
+        AllergenGateway.search(text).uniq { |match| allergen_choice(match) }
+      rescue ::RpmsRpc::Error, IOError, SystemCallError => e
+        Rails.logger.warn("[allergy] allergen search failed: #{e.class}")
+        @allergen_search_failed = true
+        []
+      end
+
+      def symptom_matches
+        text = params[:symptom_search].to_s.strip
+        return [] if text.empty?
+
+        SymptomGateway.starting_with(text)
+      rescue ::RpmsRpc::Error, IOError, SystemCallError => e
+        Rails.logger.warn("[allergy] symptom search failed: #{e.class}")
+        @symptom_search_failed = true
+        []
+      end
+
+      helper_method :allergen_choice, :allergen_label, :chosen_text
+      helper_method :allergen_empty_text, :symptom_empty_text
+      helper_method :site_now_for_picker, :site_today_for_picker
+
+      def allergen_choice(match) = "#{match[:agent_pointer]}^#{match[:agent]}"
+
+      # The agent, the synonym that found it, and the file it is from.
+      def allergen_label(match)
+        found_as = " (found as #{match[:synonym]})" if match[:synonym]
+        from = " - #{match[:source_name]}" if match[:source_name]
+        "#{match[:agent]}#{found_as}#{from}"
+      end
+
+      # "Allergen chosen: STRAWBERRIES." for a choice kept across a Find.
+      def chosen_text(choice, what)
+        name = choice.to_s.split("^", 2).last
+        "#{what} chosen: #{name}." if name.present?
+      end
+
+      def allergen_empty_text
+        return "RPMS's allergen search did not answer. Try again." if @allergen_search_failed
+        return if params[:allergen_search].blank?
+
+        "No allergen starts with #{params[:allergen_search].to_s.strip.upcase}."
+      end
+
+      def symptom_empty_text
+        return "RPMS's symptom search did not answer. Try again." if @symptom_search_failed
+        return if params[:symptom_search].blank?
+
+        "No symptom starts with #{params[:symptom_search].to_s.strip.upcase}."
+      end
+
+      def site_now_for_picker = SiteTime.now.strftime("%Y-%m-%dT%H:%M")
+      def site_today_for_picker = SiteTime.today.iso8601
 
       # Rails removes nils from parameter arrays before the action, so a nil
       # comment would vanish and the rest would be filed. The raw JSON body
@@ -404,20 +493,14 @@ module Lakeraven
         key.to_s.match?(INDEX_KEY)
       end
 
-      def allergy_value(key)
-        record = @allergy || {}
-        record[key.to_s] || record[key.to_sym]
-      end
-
-      def symptom_value(key)
-        row = Array(allergy_value("symptoms")).first
-        return if row.blank?
-
-        row[key.to_s] || row[key.to_sym]
+      def form_value(key)
+        (@form_values || {})[key.to_s]
       end
 
       def comment_value
-        Array(allergy_value("comments")).first
+        comments = params.dig(:allergy, :comments)
+        comments = comments.values if comments.respond_to?(:values) && !comments.is_a?(Array)
+        Array(comments).grep(String).first
       end
 
       def outcome_unknown?
@@ -442,6 +525,9 @@ module Lakeraven
         when :active_allergies then "The patient has active allergies on file."
         when :locked then locked_detail
         when :invalid_value, :missing_fields then invalid_or_missing_detail
+        when :future_date then "A date or time is later than now at this site."
+        when :allergen_not_offered then "RPMS's allergen search no longer offers the chosen allergen. Search again and choose it from the list."
+        when :allergen_search_failed then "RPMS's allergen search did not answer, so nothing was saved. Try again."
         else "The allergy was not saved."
         end
       end
