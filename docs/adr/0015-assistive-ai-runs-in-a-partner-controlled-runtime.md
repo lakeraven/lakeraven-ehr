@@ -1,6 +1,6 @@
 # ADR 0015: Assistive AI runs in a partner-controlled runtime behind one adapter
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-11-16
 **Issue:** #1136
 **Builds on:** ADR 0005 (PHI access audit), ADR 0006 (Part 2 posture), ADR 0013 (a tenant is one RPMS instance)
