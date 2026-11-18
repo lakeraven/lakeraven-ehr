@@ -196,10 +196,14 @@ end
 
 # The re-read goes through the production gateway's parsing: the fake API
 # returns a TIU display built from a header and the signed note's body rows,
-# which already end with the signature block the fake filed on signing.
+# which already end with the signature block the fake filed on signing. The
+# text is built the way RpmsRpc::ProgressNote.fetch_text returns it: rows
+# joined with a separator and NO trailing separator (the transport has
+# already removed the reply's terminator), so a trailing separator here
+# would be a blank row the note does not have.
 When("TIU later returns the signed note with a {string} header and a signature block") do |status|
   assert @note_gateway.signed?(@note_result.note_ien), "the note was not signed"
-  text = (note_signing_tiu_header(status) + [ "" ] + note_signing_body_rows).join("\r") + "\r"
+  text = (note_signing_tiu_header(status) + [ "" ] + note_signing_body_rows).join("\r")
   @reread_text = text
   @reread_body = Lakeraven::EHR::ProgressNoteGateway.fetch_body(
     @note_result.note_ien, via: FakeTiuRecordTextApi.new(text)
