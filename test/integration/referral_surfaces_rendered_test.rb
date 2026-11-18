@@ -2,14 +2,18 @@
 
 require "test_helper"
 require_relative "../support/sud_words"
+require_relative "../support/patient_banner_test_helper"
 
 # #905 (slice of #522): the December build is MH/BH only, so the referral
 # surfaces offer no structured SUD path. Proven on what the pages render:
 # the whole response, layout and every partial and helper included, however
-# a control was built. RPMS is stood in for at the wire, as in
-# test/integration/pending_referrals_test.rb.
+# a control was built, in every state the two pages have: rows, none, a failed
+# or refused read, a refused window, every other capability's links and
+# counts, and a patient open or searched for. RPMS is stood in for at the
+# wire, as in test/integration/pending_referrals_test.rb.
 class ReferralSurfacesRenderedTest < ActionDispatch::IntegrationTest
   include IhsFeatureAvailabilityTestHelper
+  include PatientBannerTestHelper
 
   TODAY = Date.new(2026, 11, 4)
   PENDING = "/lakeraven-ehr/referrals/pending"
@@ -20,66 +24,307 @@ class ReferralSurfacesRenderedTest < ActionDispatch::IntegrationTest
     "~`1^NOV 01, 2026^^990003^CHARLIE,JORDAN^^^<UNKNOWN>^^ACTIVE^^^DIRECT ONLY^^^^^^^^^^06/03/1966^^" \
     "~`2^NOV 01, 2026^^990003^CHARLIE,JORDAN^^^<UNKNOWN>^^APPROVED^^^DIRECT ONLY^^^^^^^^^^06/03/1966^^"
 
-  # Every form control a referral surface may render, as [tag, type, name]:
-  # the date window and its submit, the buttons that open a chart and sign
-  # out, and the hidden fields Rails gives those buttons' forms. The test
-  # environment renders no authenticity_token; where forgery protection is
-  # on, Rails adds one to each button's form.
+  # Synthetic scheduling replies, in the shape the three BSDX reads answer
+  # (test/integration/appointments_needing_action_test.rb): two clinics, and
+  # two appointments today in the second, neither with anything recorded.
+  SYNTHETIC_SCHEDULING = {
+    "BSDX RESOURCES" =>
+      "3\u0000I00010RESOURCEID^T00030RESOURCE_NAME^T00010INACTIVE^I00010TIMESCALE^I00010HOSPITAL_LOCATION_ID^" \
+      "T00030LETTER_TEXT^T00030NO_SHOW_LETTER^T00030CLINIC_CANCELLATION_LETTER^I00010VIEW^I00010OVERBOOK^" \
+      "I00010MODIFY_SCHEDULE^I00010MODIFY_APPOINTMENTS\u001e" \
+      "1^SYNTHETIC CLINIC A^0^15^6^^^^1^1^1^1\u001e2^SYNTHETIC CLINIC B^0^15^3^^^^1^1^1^1\u001e",
+    "BSDX ALL APPOINTMENTS" => [
+      "D00030START_TIME^D00030END_TIME^I00010PAT_ID^T00030RES_NAME",
+      "NOV 04,2026 09:00^NOV 04,2026 09:15^990003^SYNTHETIC CLINIC B",
+      "NOV 04,2026 16:00^NOV 04,2026 16:15^990003^SYNTHETIC CLINIC B"
+    ],
+    "BSDX CREATE APPT SCHEDULE" =>
+      "5\u0000I00020APPOINTMENTID^D00030START_TIME^D00030END_TIME^D00030CHECKIN^D00030AUXTIME^I00020PATIENTID^" \
+      "T00030PATIENTNAME^T00030RESOURCENAME^I00005NOSHOW^T00020HRN^I00005ACCESSTYPEID^I00005WALKIN^D00030CHECKOUT^" \
+      "I00020VPROVIDER^T00020CANCELLED^T00250NOTE\u001e" \
+      "71^NOV 04,2026 09:00^NOV 04,2026 09:15^^^990003^CHARLIE,JORDAN^SYNTHETIC CLINIC B^0^990003^0^0^^^0^\u001e" \
+      "72^NOV 04,2026 16:00^NOV 04,2026 16:15^^^990003^CHARLIE,JORDAN^SYNTHETIC CLINIC B^0^990003^0^0^^^0^\u001e"
+  }.freeze
+
+  # Two synthetic alerts, in the shape BEHOXQ ALRLIST answers
+  # (test/integration/notifications_test.rb).
+  SYNTHETIC_ALERTS = [
+    "1^0^^  ^Staff meeting moved to 3 PM.^3261104.075352^PROFILE,MANAGER^0^BEHOXQ^BEHOXQ,PROBE;4;3261104.075352^0^PRI=1^INF=0",
+    "2^1^CHARLIE,JORDAN    (990003)^  ^Unscheduled visit.^3261104.074742^PROFILE,MANAGER^3^OR.19^OR,3,19;.5;3261104.074742^1^"
+  ].freeze
+
+  # The keys of a user every link of the main navigation shows to, and every
+  # count of the dashboard: all three referral keys, registration (search and
+  # setup) and scheduling. The patient-read scope shows Notifications and the
+  # patient search.
+  REFERRAL_KEYS = %w[referrals_user referrals_supervisor referrals_manager].freeze
+  EVERY_KEY = (REFERRAL_KEYS + %w[registration_menu registration_manager scheduling_user scheduling_supervisor]).freeze
+  NAV_LINKS = {
+    "Notifications" => "/lakeraven-ehr/notifications", "Registration" => "/lakeraven-ehr/registration/patients",
+    "Scheduling" => "/lakeraven-ehr/scheduling", "Referrals" => PENDING, "Setup" => "/lakeraven-ehr/registration/setup"
+  }.freeze
+
+  # Every form a referral surface may render, and the controls each may hold,
+  # as [tag, type, name]. A control is allowed only inside the form it is
+  # listed under: that method, that action path, and that id where one is
+  # named. A control in no form is never allowed. The test environment
+  # renders no authenticity_token; where forgery protection is on, Rails adds
+  # one to each posting form.
   CSRF_TOKEN = %w[input hidden authenticity_token].freeze
-  SIGN_OUT_CONTROLS = [ [ "button", "submit", "" ], %w[input hidden _method] ].freeze
-  PENDING_CONTROLS = ([ %w[input date from], %w[input date to], [ "input", "submit", "" ] ] + SIGN_OUT_CONTROLS).freeze
-  ALLOWED_CONTROLS = (PENDING_CONTROLS + [ CSRF_TOKEN ]).freeze
+  NAMELESS_SUBMIT = [ "input", "submit", "" ].freeze
+  NAMELESS_BUTTON = [ "button", "submit", "" ].freeze
+  METHOD_OVERRIDE = %w[input hidden _method].freeze
+  SIGN_OUT_CONTROLS = [ NAMELESS_BUTTON, METHOD_OVERRIDE ].freeze
+  WINDOW_CONTROLS = [ %w[input date from], %w[input date to], NAMELESS_SUBMIT ].freeze
+  PENDING_CONTROLS = (WINDOW_CONTROLS + SIGN_OUT_CONTROLS).freeze
+  SEARCH_CONTROLS = [ %w[input text q], NAMELESS_SUBMIT ].freeze
+  Form = Data.define(:verb, :action, :id, :controls)
+  FORMS = [
+    # The date window of the pending list.
+    Form.new("get", %r{\A/lakeraven-ehr/referrals/pending\z}, "referral-window", WINDOW_CONTROLS),
+    # "Open chart" on a referral's row: opens that patient, by DFN in the path.
+    Form.new("post", %r{\A/lakeraven-ehr/patients/\d+/context\z}, nil, [ NAMELESS_BUTTON, CSRF_TOKEN ]),
+    # "Sign out".
+    Form.new("post", %r{\A/lakeraven-ehr/logout\z}, nil, SIGN_OUT_CONTROLS + [ CSRF_TOKEN ]),
+    # "Clear patient context" in the patient banner.
+    Form.new("post", %r{\A/lakeraven-ehr/patient_context\z}, nil, [ NAMELESS_BUTTON, METHOD_OVERRIDE, CSRF_TOKEN ]),
+    # The patient search of the empty banner: free text, never inspected.
+    Form.new("post", %r{\A/lakeraven-ehr/chart_search\z}, "patient-search", SEARCH_CONTROLS + [ CSRF_TOKEN ])
+  ].freeze
 
   # Never a referral surface's, whatever the allowlist says: a control that
-  # offers a choice among named things.
+  # offers a choice among named things, or sends its form somewhere else.
   CHOICE_TAGS = %w[select option optgroup datalist].freeze
   CHOICE_TYPES = %w[radio checkbox].freeze
   CONTROL_TAGS = %w[input select textarea button datalist option optgroup output].freeze
+  FORM_OVERRIDES = %w[formaction formmethod].freeze
 
-  # The only query parameters a URL on the page may carry, and what they hold.
-  ALLOWED_QUERY = %w[from to].freeze
+  # The only query parameters a URL on the page may carry, by the path that
+  # carries them, and what they hold: the pending list's window, and the day
+  # of a clinic the dashboard links a count to. Any other key, and either of
+  # these on another path, is a choice.
   ISO_DATE = /\A(\d{4}-\d{2}-\d{2})?\z/
+  A_DATE = /\A\d{4}-\d{2}-\d{2}\z/
+  CLINIC_DAY = %r{\A/lakeraven-ehr/scheduling/clinics/\d+\z}
+  ALLOWED_QUERY = {
+    %r{\A/lakeraven-ehr/referrals/pending\z} => { "from" => ISO_DATE, "to" => ISO_DATE },
+    CLINIC_DAY => { "date" => A_DATE }
+  }.freeze
   URL_ATTRIBUTES = %w[href action formaction src].freeze
 
   # Rails' per-request random tokens: not words, and not read as words.
   RANDOM_TOKENS = [ "input[name='authenticity_token']", "meta[name='csrf-token']" ].freeze
 
+  teardown { teardown_oauth! }
+
   def sign_in(keys)
     post "/lakeraven-ehr/test_session", params: { duz: "206", user_type: "provider", user_name: "PROFILE,MD", security_keys: keys }
   end
 
-  # The whole rendered page, with RPMS answering the two synthetic referrals.
-  def page(path, **params)
-    RpmsRpc.client.seed_raw_lines(:referral_search, "", [ SYNTHETIC_PENDING ])
-    sign_in("referrals_user")
-    travel_to(TODAY.to_time.change(hour: 9)) { get path, params: params }
-    assert_response :ok
-    Nokogiri::HTML5(response.body)
+  # Answers the named RPCs for the fake client, the way
+  # appointments_needing_action_test.rb does: a reply as it comes off the
+  # wire, or an exception to raise.
+  def rpms_answers(replies)
+    client = RpmsRpc.client
+    %i[call_rpc call_rpc_global_array].each do |name|
+      original = client.method(name)
+      client.define_singleton_method(name) do |rpc, *params|
+        next original.call(rpc, *params) unless replies.key?(rpc)
+
+        reply = replies[rpc]
+        raise reply if reply.is_a?(Exception)
+
+        reply.is_a?(Array) ? RpmsRpc::Reply.from_wire(reply) : reply
+      end
+    end
   end
 
+  def pending_answers(lines) = RpmsRpc.client.seed_raw_lines(:referral_search, "", lines)
+
+  # One rendered page, from a fresh session and a fresh fake RPMS that
+  # answers the two synthetic referrals unless the block seeds otherwise.
+  # scopes: sign on with a SMART token too (the patient banner's reads), with
+  # forgery protection on as a browser has it, so each posting form renders
+  # its authenticity_token. patient: the DFN of a chart to open first.
+  def page(path, keys: %w[referrals_user], scopes: nil, patient: nil, hour: 9, **params)
+    reset!
+    GlobalStoreIsolation.reset!
+    enable_forgery_protection! if scopes
+    pending_answers([ SYNTHETIC_PENDING ])
+    yield if block_given?
+    travel_to(TODAY.to_time.change(hour: hour)) do
+      scopes ? sign_in_clinician!(scopes: scopes, keys: keys) : sign_in(keys.join(","))
+      open_patient_context!(patient) if patient
+      get path, params: params
+    end
+    assert_response :ok
+    Nokogiri::HTML5(response.body)
+  ensure
+    restore_forgery_protection!
+  end
+
+  def shown!(document, selector, text = //, state)
+    node = document.at_css(selector)
+
+    assert node, "#{state}: #{selector} was not rendered, so the state was not checked"
+    assert_match text, node.text.squish, "#{state}: #{selector}"
+    document
+  end
+
+  # The states the first three rounds checked: rows, with and without a
+  # chosen window, and the dashboard's count of them.
+
+  def pending_rows(**params)
+    shown!(page(PENDING, **params), "#pending-referrals tr[data-referral]", /CHARLIE,JORDAN/, "pending rows")
+  end
+
+  def dashboard_count
+    shown!(page(DASHBOARD), "#referral-counts td[data-count='2']", /2 referrals pending/, "dashboard count")
+  end
+
+  # RPMS answers no rows.
+  def pending_empty
+    shown!(page(PENDING) { pending_answers([]) }, "#no-pending-referrals", /No referrals initiated from .* are pending/, "empty list")
+  end
+
+  # The read of the pending referrals raises: nothing else of RPMS does.
+  def unread(path, error, selector, text)
+    document = page(path) { rpms_answers("BMC SEARCH REFERRAL" => error) }
+
+    assert_empty document.css("#pending-referrals, #no-pending-referrals, #referral-counts"), "#{error.class}: a failed read shows no list or count"
+    shown!(document, selector, text, error.class.name)
+  end
+
+  def pending_unread(error = RpmsRpc::Client::RpcError.new("broker timeout"))
+    unread(PENDING, error, "#pending-referrals-unread", /Pending referrals could not be read from RPMS/)
+  end
+
+  def pending_refused
+    unread(PENDING, RpmsRpc::Client::RpcRefusedError.new("Access denied for remote procedure: BMC SEARCH REFERRAL"),
+      "#pending-referrals-unread", /RPMS refused to list the pending referrals: Access denied for remote procedure: BMC SEARCH REFERRAL/)
+  end
+
+  def dashboard_unread(error = RpmsRpc::Client::RpcError.new("broker timeout"))
+    unread(DASHBOARD, error, "#referral-counts-unread", /Pending referrals could not be read from RPMS/)
+  end
+
+  # A window RPMS is never asked for: the error is named next to the field.
+  def pending_invalid_window(**dates)
+    document = shown!(page(PENDING, **dates), "#from_error", /\S/, "invalid window #{dates}")
+
+    assert_empty document.css("#pending-referrals, #no-pending-referrals, #pending-referrals-unread"), "#{dates}: no list is read"
+    shown!(document, "#from[aria-invalid='true']", "invalid window #{dates}")
+  end
+
+  # Every capability at once: each link of the main navigation, and on the
+  # dashboard every count, with rows RPMS answered. The hour is past the
+  # first appointment's time, so one needs action.
+  def every_capability(path)
+    document = page(path, keys: EVERY_KEY, scopes: BANNER_SCOPES, hour: 15) do
+      rpms_answers(SYNTHETIC_SCHEDULING)
+      RpmsRpc.client.seed_raw_lines(:notifications_inbox, "", SYNTHETIC_ALERTS)
+    end
+
+    assert_equal NAV_LINKS, document.css("nav[aria-label='Main'] a").to_h { |a| [ a.text.squish, a["href"] ] }, "#{path}: every link of the navigation"
+    shown!(document, "#patient-banner form#patient-search input[name='q']", "every capability")
+  end
+
+  def dashboard_every_count
+    document = every_capability(DASHBOARD)
+
+    assert_empty document.css("[id$='-unread'], #no-counts, #no-clinics"), "every count is one RPMS answered"
+    assert_equal [ "/lakeraven-ehr/scheduling/clinics/1?date=2026-11-04", "/lakeraven-ehr/scheduling/clinics/2?date=2026-11-04" ],
+      document.css("#clinic-counts tr[data-resource] a").map { |a| a["href"] }
+    shown!(document, "#clinic-counts tr[data-resource='2'] td[data-count='2']", /2 appointments today at SYNTHETIC CLINIC B/, "clinic counts")
+    shown!(document, "#needing-action-count[data-count='1'] a[href='/lakeraven-ehr/scheduling/needing_action']", "needing action")
+    shown!(document, "#notification-count[data-count='2'] a[href='/lakeraven-ehr/notifications']", "notifications")
+    shown!(document, "#referral-counts td[data-count='2']", "referral count")
+  end
+
+  # A chart open in the session: the banner names the patient and their
+  # allergies, and offers another patient or none.
+  def patient_open(path)
+    document = page(path, keys: REFERRAL_KEYS, scopes: BANNER_SCOPES, patient: 1) { seed_orqqal_reply!("1", [ "1^LATEX", "2^PENICILLIN" ]) }
+    banner = "#patient-banner"
+
+    shown!(document, "#{banner} .patient-banner__name", /\S/, "patient open")
+    shown!(document, "#{banner} dl.demoinfo", /DOB.*Age.*Sex.*MRN/, "patient open")
+    shown!(document, "#{banner} [data-allergies-state='loaded']", /Allergies\s*LATEX\s*PENICILLIN/i, "patient open")
+    shown!(document, "#{banner} a#switch-patient[href='/lakeraven-ehr/chart_search']", /Switch patient/, "patient open")
+    shown!(document, "#{banner} form[action$='/lakeraven-ehr/patient_context'] button", /Clear patient context/, "patient open")
+  end
+
+  # No chart open, and a user who may search patients: the banner is the search.
+  def patient_search(path)
+    document = page(path, keys: REFERRAL_KEYS, scopes: BANNER_SCOPES)
+
+    assert_equal SEARCH_CONTROLS, controls(document.at_css("form#patient-search")) - [ CSRF_TOKEN ], "the search is its field and a submit"
+    shown!(document, "form#patient-search[action='/lakeraven-ehr/chart_search'][method='post'] a#recent-patients-link", /Recent patients/, "patient search")
+  end
+
+  # Every state of the two pages, rendered. Each proves itself rendered
+  # before it is returned.
   def pages
     {
-      "the pending referrals" => page(PENDING),
-      "the pending referrals of a chosen window" => page(PENDING, from: "2026-11-01", to: "2026-11-02"),
-      "the dashboard" => page(DASHBOARD)
+      "the pending referrals" => pending_rows,
+      "the pending referrals of a chosen window" => pending_rows(from: "2026-11-01", to: "2026-11-02"),
+      "no pending referrals" => pending_empty,
+      "the pending referrals RPMS did not answer" => pending_unread,
+      "the pending referrals a dropped connection left unread" => pending_unread(IOError.new("closed stream")),
+      "the pending referrals RPMS refused" => pending_refused,
+      "the pending referrals of a window the wrong way round" => pending_invalid_window(from: "2026-11-05", to: "2026-11-01"),
+      "the pending referrals of a date that is not one" => pending_invalid_window(from: "2026-13-01", to: "2026-11-02"),
+      "the pending referrals of a user with every capability" => every_capability(PENDING),
+      "the pending referrals with a chart open" => patient_open(PENDING),
+      "the pending referrals with the patient search" => patient_search(PENDING),
+      "the dashboard" => dashboard_count,
+      "the dashboard RPMS did not answer" => dashboard_unread,
+      "the dashboard a dropped connection left unread" => dashboard_unread(IOError.new("closed stream")),
+      "the dashboard of a user with every capability" => dashboard_every_count,
+      "the dashboard with a chart open" => patient_open(DASHBOARD),
+      "the dashboard with the patient search" => patient_search(DASHBOARD)
     }
   end
 
+  def control_nodes(document) = document.css(CONTROL_TAGS.join(",")) | document.css("form [name]")
+
   # Every form control in a document, as [tag, type, name].
   def controls(document)
-    (document.css(CONTROL_TAGS.join(",")) | document.css("form [name]")).map do |node|
-      [ node.name, node["type"].to_s.downcase, node["name"].to_s ]
-    end
+    control_nodes(document).map { |node| [ node.name, node["type"].to_s.downcase, node["name"].to_s ] }
   end
 
+  # The form a control is sent with: the one its form attribute names, or
+  # the one it is inside.
+  def form_of(node)
+    return node.document.css("form").find { |form| form["id"] == node["form"] } if node["form"]
+
+    node.ancestors("form").first
+  end
+
+  def path_of(url) = url.to_s.strip.sub(%r{\Ahttps?://[^/?#]*}i, "")[/\A[^?#]*/]
+
+  # The listed form a form on the page is, if any.
+  def listed(form)
+    return if form.nil?
+
+    verb = form["method"].to_s.downcase.presence || "get"
+    FORMS.find { |known| known.verb == verb && path_of(form["action"]).match?(known.action) && (known.id.nil? || known.id == form["id"]) }
+  end
+
+  # Every control that is not one its own form is listed with, as
+  # [form, tag, type, name].
   def disallowed_controls(document)
-    controls(document).reject do |control|
-      ALLOWED_CONTROLS.include?(control) && CHOICE_TAGS.exclude?(control[0]) && CHOICE_TYPES.exclude?(control[1])
+    control_nodes(document).filter_map do |node|
+      control = [ node.name, node["type"].to_s.downcase, node["name"].to_s ]
+      form = form_of(node)
+      allowed = listed(form)&.controls&.include?(control) && CHOICE_TAGS.exclude?(control[0]) && CHOICE_TYPES.exclude?(control[1]) &&
+        FORM_OVERRIDES.none? { |attribute| node.key?(attribute) }
+      [ form ? "#{form['method'] || 'get'} #{form['action']}" : "no form", *control ] unless allowed
     end
   end
 
-  # Every URL on the page that carries a query parameter other than a from
-  # or to date: any href, action, formaction or src, and any other attribute
+  # Every URL on the page that carries a query parameter its path is not
+  # listed with: any href, action, formaction or src, and any other attribute
   # whose value is a path or a URL.
   def urls_carrying_a_choice(document)
     document.xpath("//@*").filter_map do |attribute|
@@ -89,8 +334,9 @@ class ReferralSurfacesRenderedTest < ActionDispatch::IntegrationTest
       query = url[/\?([^#]*)/, 1]
       next if query.nil?
 
+      allowed = ALLOWED_QUERY.find { |path, _keys| path_of(url).match?(path) }&.last || {}
       carried = Rack::Utils.parse_query(query)
-      "#{attribute.name}=#{url}" unless carried.all? { |key, value| ALLOWED_QUERY.include?(key) && value.to_s.match?(ISO_DATE) }
+      "#{attribute.name}=#{url}" unless carried.all? { |key, value| allowed.key?(key) && value.to_s.match?(allowed[key]) }
     end
   end
 
@@ -110,7 +356,7 @@ class ReferralSurfacesRenderedTest < ActionDispatch::IntegrationTest
   test "#905 every form control a referral surface renders is on the allowlist" do
     pages.each do |name, document|
       assert_empty disallowed_controls(document),
-        "#{name} render a form control that is not on the allowlist #{ALLOWED_CONTROLS.inspect}"
+        "#{name} render a form control its form is not listed with"
       assert_empty document.css(CHOICE_TAGS.join(",")), "#{name} offer a choice"
     end
   end
@@ -139,6 +385,25 @@ class ReferralSurfacesRenderedTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "#905 the only query parameters rendered are the window's dates and a clinic's day" do
+    carried = pages.values.flat_map { |document| document.xpath("//@href | //@action").map(&:value).grep(/\?/) }.uniq
+
+    assert_equal [ "/lakeraven-ehr/scheduling/clinics/1?date=2026-11-04", "/lakeraven-ehr/scheduling/clinics/2?date=2026-11-04" ], carried.sort,
+      "the dashboard links each clinic's count to that clinic's day, today; nothing else carries a parameter"
+  end
+
+  test "#905 across every state the pages render only the listed forms, each with exactly its controls" do
+    rendered = pages.values.flat_map { |document| document.css("form").to_a }
+    forms = rendered.group_by { |form| listed(form) }
+
+    assert_equal FORMS.to_set, forms.keys.to_set, "every listed form is rendered in some state, and no other form is"
+    forms.each do |known, found|
+      found.each do |form|
+        assert_equal (known.controls - [ CSRF_TOKEN ]).sort, (controls(form) - [ CSRF_TOKEN ]).sort, "#{form['method']} #{form['action']}"
+      end
+    end
+  end
+
   test "#905 the text and attributes a referral surface renders name no SUD path" do
     pages.each do |name, document|
       assert_operator document.text.squish.size, :>, 100, "#{name}: no text found"
@@ -164,7 +429,7 @@ class ReferralSurfacesRenderedTest < ActionDispatch::IntegrationTest
       %(<form><input type="submit" name="kind" value="Program A"></form>) => [ %w[input kind] ],
       %(<form><div name="kind" contenteditable>7</div></form>) => [ %w[div kind] ]
     }.each do |fragment, expected|
-      flagged = disallowed_controls(html(fragment)).map { |tag, _type, name| [ tag, name ] }
+      flagged = disallowed_controls(html(fragment)).map { |_form, tag, _type, name| [ tag, name ] }
 
       expected.each { |control| assert_includes flagged, control, fragment }
     end
@@ -182,12 +447,80 @@ class ReferralSurfacesRenderedTest < ActionDispatch::IntegrationTest
         <input type="hidden" name="authenticity_token" value="synthetic">
       </form>
       <a href="/lakeraven-ehr/referrals/pending?from=2026-11-01&amp;to=2026-11-02">Referrals</a>
+      <a href="/lakeraven-ehr/referrals/pending?from=&amp;to=">Referrals</a>
     HTML
 
     assert_equal 6, controls(html(window)).size
     assert_empty disallowed_controls(html(window))
     assert_empty urls_carrying_a_choice(html(window))
     assert_empty sud_words_on(html(window))
+  end
+
+  test "#905 the rendered check allows the chart button, the patient search, clearing the patient and a clinic's day" do
+    banner = <<~HTML
+      <form class="button_to" method="post" action="/lakeraven-ehr/patients/990003/context">
+        <button type="submit">Open chart</button><input type="hidden" name="authenticity_token" value="synthetic">
+      </form>
+      <form id="patient-search" role="search" action="/lakeraven-ehr/chart_search" method="post">
+        <input type="hidden" name="authenticity_token" value="synthetic">
+        <input type="text" name="q" id="patient_search_q" required><input type="submit" value="Find patient">
+      </form>
+      <form class="button_to" method="post" action="http://www.example.com/lakeraven-ehr/patient_context">
+        <input type="hidden" name="_method" value="delete"><button type="submit">Clear patient context</button>
+      </form>
+      <a href="/lakeraven-ehr/scheduling/clinics/2?date=2026-11-04">2 appointments</a>
+    HTML
+
+    assert_equal 7, controls(html(banner)).size
+    assert_empty disallowed_controls(html(banner))
+    assert_empty urls_carrying_a_choice(html(banner))
+    assert_empty sud_words_on(html(banner))
+  end
+
+  test "#905 the rendered check flags an allowed control in a form it is not listed with, or in none" do
+    {
+      # The search field, sent anywhere but the chart search, or from another form there.
+      %(<form id="patient-search" method="post" action="/lakeraven-ehr/referrals"><input type="text" name="q"></form>) => %w[input text q],
+      %(<form id="patient-search" method="get" action="/lakeraven-ehr/chart_search"><input type="text" name="q"></form>) => %w[input text q],
+      %(<form id="refer" method="post" action="/lakeraven-ehr/chart_search"><input type="text" name="q"></form>) => %w[input text q],
+      %(<form id="referral-window" method="get" action="/lakeraven-ehr/referrals/pending"><input type="text" name="q"></form>) => %w[input text q],
+      %(<input type="text" name="q">) => %w[input text q],
+      # A nameless submit in a form that is not one of the five.
+      %(<form method="post" action="/lakeraven-ehr/referrals"><input type="submit" value="Refer"></form>) => NAMELESS_SUBMIT,
+      %(<form method="post" action="/lakeraven-ehr/referrals"><button type="submit">Refer</button></form>) => NAMELESS_BUTTON,
+      %(<form method="post" action="/lakeraven-ehr/patients/990003/referrals"><button type="submit">Refer</button></form>) => NAMELESS_BUTTON,
+      %(<form><input type="submit" value="Refer"></form>) => NAMELESS_SUBMIT,
+      %(<button type="submit">Refer</button>) => NAMELESS_BUTTON,
+      # The window's dates outside the window, or posted.
+      %(<form method="post" action="/lakeraven-ehr/logout"><input type="date" name="from"></form>) => %w[input date from],
+      %(<form id="referral-window" method="post" action="/lakeraven-ehr/referrals/pending"><input type="date" name="to"></form>) => %w[input date to],
+      %(<form id="other" method="get" action="/lakeraven-ehr/referrals/pending"><input type="date" name="to"></form>) => %w[input date to],
+      # A control a listed form does not hold, or one that leaves its form.
+      %(<form method="post" action="/lakeraven-ehr/logout"><input type="text" name="q"></form>) => %w[input text q],
+      %(<form method="post" action="/lakeraven-ehr/logout"><button type="submit" formaction="/lakeraven-ehr/referrals">Refer</button></form>) => NAMELESS_BUTTON,
+      %(<form id="patient-search" method="post" action="/lakeraven-ehr/chart_search"></form><input type="text" name="q" form="other">) => %w[input text q],
+      %(<form method="post" action="/lakeraven-ehr/referrals" id="refer"></form><form method="post" action="/lakeraven-ehr/logout"><button type="submit" form="refer">Refer</button></form>) => NAMELESS_BUTTON
+    }.each do |fragment, control|
+      assert_includes disallowed_controls(html(fragment)).map { |_form, *flagged| flagged }, control, fragment
+    end
+  end
+
+  test "#905 the rendered check flags a known parameter on a path it is not listed with" do
+    [
+      %(<a href="/lakeraven-ehr/referrals/pending?date=2026-11-04">Referrals</a>),
+      %(<a href="/lakeraven-ehr/scheduling/clinics/2?from=2026-11-01">Clinic</a>),
+      %(<a href="/lakeraven-ehr/scheduling/clinics/2?date=2026-11-04&amp;to=2026-11-05">Clinic</a>),
+      %(<a href="/lakeraven-ehr/scheduling/clinics/2?date=">Clinic</a>),
+      %(<a href="/lakeraven-ehr/scheduling/clinics/2?date=7">Clinic</a>),
+      %(<a href="/lakeraven-ehr/scheduling/clinics/2?date=2026-11-04&amp;kind=7">Clinic</a>),
+      %(<a href="/lakeraven-ehr/scheduling/clinics/2/week?date=2026-11-04">Clinic</a>),
+      %(<a href="/lakeraven-ehr/scheduling?date=2026-11-04">Scheduling</a>),
+      %(<a href="/lakeraven-ehr/referrals?from=2026-11-01">Referrals</a>),
+      %(<a href="/lakeraven-ehr/referrals/pending/7?from=2026-11-01">Referrals</a>),
+      %(<a href="/lakeraven-ehr/dashboard?from=2026-11-01&amp;to=2026-11-02">Dashboard</a>),
+      %(<a href="/lakeraven-ehr/chart_search?q=7">Find</a>),
+      %(<form action="/lakeraven-ehr/chart_search?date=2026-11-04"></form>)
+    ].each { |fragment| assert_not_empty urls_carrying_a_choice(html(fragment)), fragment }
   end
 
   test "#905 the rendered check flags a URL that carries a choice" do
