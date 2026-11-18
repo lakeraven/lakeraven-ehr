@@ -350,6 +350,44 @@ module Lakeraven
           assert_includes %i[suspected not_suspected unclassified], SudContentSuspicion.classify(input)
         end
       end
+
+      # --- control characters inside a term (#906 review) ---
+      # A non-whitespace control character keyed inside a term must not make
+      # the text read clean. Either answer is acceptable: :suspected (the
+      # control character is removed before matching) or :unclassified.
+
+      { "a NUL" => "alco\u0000hol",
+        "a C0 control (U+0001)" => "alco\u0001hol",
+        "a backspace" => "alco\bhol",
+        "a DEL (U+007F)" => "alco\u007Fhol",
+        "a C1 control (U+0090)" => "alco\u0090hol" }.each do |name, text|
+        test "a term split by #{name} is never not_suspected" do
+          refute_equal :not_suspected, SudContentSuspicion.classify(text), text.inspect
+        end
+
+        test "a term split by #{name} inside a sentence is never not_suspected" do
+          sentence = "Seen for follow-up. Reports #{text} nightly. Vitals stable."
+          refute_equal :not_suspected, SudContentSuspicion.classify(sentence), sentence.inspect
+        end
+      end
+
+      test "UTF-16LE bytes of a term read as UTF-8 are never not_suspected" do
+        text = "a\0l\0c\0o\0h\0o\0l\0"
+        assert_equal Encoding::UTF_8, text.encoding
+        assert text.valid_encoding?
+
+        refute_equal :not_suspected, SudContentSuspicion.classify(text)
+      end
+
+      test "ordinary whitespace controls still separate words in clean text" do
+        assert_equal :not_suspected, SudContentSuspicion.classify("Seen.\tVitals stable.\nNo concerns.")
+        assert_equal :not_suspected, SudContentSuspicion.classify("Seen.\r\nVitals stable.\r\nNo concerns.")
+      end
+
+      test "a term followed by a tab is still read" do
+        refute_equal :not_suspected, SudContentSuspicion.classify("alcohol\tuse")
+        refute_equal :not_suspected, SudContentSuspicion.classify("Reports\nalcohol\nuse")
+      end
     end
   end
 end

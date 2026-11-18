@@ -305,6 +305,14 @@ module Lakeraven
         assert_same true, Part2Posture.part2?(**RECORD, content: SUSPECTED)
         assert_same false, Part2Posture.part2?(**RECORD, content: CLEAN)
       end
+
+      # --- control characters inside a term (#906 review) ---
+
+      test "unlabelled content that is UTF-16LE bytes of a term read as UTF-8 is Part 2" do
+        content = "a\0l\0c\0o\0h\0o\0l\0"
+
+        assert_equal true, Part2Posture.part2?(record_type: "tiu_note", record_id: "424242", content: content)
+      end
     end
   end
 end
