@@ -35,7 +35,11 @@ module Lakeraven
       # signing (STATUS: UNSIGNED becomes COMPLETED) and TIU appends a
       # signature block after the body, so only the body rows are evidence
       # of the note. Text with no blank row is an unrecognised shape, not
-      # evidence, so it gives nil.
+      # evidence, so it gives nil. Wire text that ends with a delimiter
+      # splits to one final empty element; only that element is dropped.
+      # Every empty row before it is kept, so blank rows appended or removed
+      # after signing change the body (and the record hash). Text that does
+      # not end with a delimiter loses nothing.
       def self.fetch_body(note_ien, via: default_provider)
         text = fetch_text(note_ien, via: via)
         return nil unless text.is_a?(String)
@@ -45,7 +49,7 @@ module Lakeraven
         return nil if header_end.nil?
 
         body = rows.drop(header_end + 1)
-        body.pop while body.last == ""
+        body.pop if body.last == ""
         body
       end
 
