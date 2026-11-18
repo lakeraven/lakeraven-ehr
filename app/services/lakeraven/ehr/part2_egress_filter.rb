@@ -15,12 +15,13 @@ module Lakeraven
     # surrounding Unicode space and format characters. It returns nil
     # (refuse) when a label sits where it cannot be noticed: elsewhere in
     # meta or the Coding, under security or securityLabel outside a
-    # resource, anywhere in a top-level Hash that is not a resource (C-CDA
-    # sections), in a labelled multi-line JSON document. A line that is
-    # not a resource refuses on 42CFRPart2 anywhere, or on a Part 2 code
-    # as a whole CSV field or JSON String leaf; prose mentioning a short
-    # code passes. It also refuses a line that opens like JSON and does
-    # not parse, invalid encoding, and any error (fail closed).
+    # resource, in a labelled multi-line JSON document. A payload that is
+    # not a resource (a top-level Hash such as C-CDA sections, a JSON
+    # document, a line) refuses on 42CFRPart2 anywhere (any key or leaf,
+    # case-insensitively), or on a Part 2 code as a whole String leaf or
+    # CSV field; prose mentioning a short code passes. A resource is held
+    # only to the label rules. It also refuses a line that opens like JSON
+    # and does not parse, invalid encoding, and any error (fail closed).
     # Unlabelled payloads come back unchanged; the input is never mutated.
     # It does not classify unlabelled records; keeping labels on ingest is #908.
     class Part2EgressFilter
@@ -33,7 +34,8 @@ module Lakeraven
       CODE_KEYS = [ "code", :code ].freeze
       TEXT_KEYS = [ "display", :display ].freeze
       LABEL_KEYS = %w[security securityLabel].freeze
-      private_constant :BOM, :PADDING, :FIELD_PADDING, :CODE_KEYS, :TEXT_KEYS, :LABEL_KEYS
+      PART2_NAME = /42cfrpart2/i
+      private_constant :BOM, :PADDING, :FIELD_PADDING, :CODE_KEYS, :TEXT_KEYS, :LABEL_KEYS, :PART2_NAME
 
       def self.call(payload)
         result = new.send(:filter, payload)
@@ -47,7 +49,7 @@ module Lakeraven
       def filter(payload)
         return filter_string(payload) if payload.is_a?(String)
         # A Hash that is not a resource (C-CDA sections) cannot carry the notice.
-        raise Refused if payload.is_a?(Hash) && !resource?(payload) && !walk(payload).equal?(payload)
+        refuse_non_resource(payload) if payload.is_a?(Hash) && !resource?(payload)
 
         walk(payload)
       end
@@ -59,6 +61,7 @@ module Lakeraven
         document = parse_json(text.delete_prefix(BOM))
         return filter_lines(text) if document.nil?
         # Pretty JSON is not re-serialised: a labelled document is refused.
+        refuse_non_resource(document, text) unless resource?(document)
         raise Refused unless walk(document).equal?(document)
 
         text
@@ -79,11 +82,28 @@ module Lakeraven
         end
         # Not a resource line, so a label inside it has nowhere to be noticed.
         raise Refused if parsed.nil? && body.match?(/\A[[:space:]]*[{\[]/)
-        raise Refused if line.match?(/42cfrpart2/i)
-        raise Refused if parsed.nil? ? csv_fields(body).any? { |field| part2?(field.to_s.gsub(FIELD_PADDING, "")) } : part2_anywhere?(parsed)
-        raise Refused unless walk(parsed).equal?(parsed)
+        raise Refused if parsed.nil? && csv_fields(body).any? { |field| part2?(field.to_s.gsub(FIELD_PADDING, "")) }
+        refuse_non_resource(parsed, line)
 
         line
+      end
+
+      # The rule for a value that is not a resource, so has nowhere to carry
+      # the notice: refuse on 42CFRPart2 in `text` or in any key or leaf, on
+      # a Part 2 code as a whole leaf, or on a label the walk would notice.
+      def refuse_non_resource(node, text = nil)
+        raise Refused if text.to_s.match?(PART2_NAME) || names_part2?(node) || part2_anywhere?(node)
+        raise Refused unless walk(node).equal?(node)
+      end
+
+      # Whether any key, or String or Symbol leaf, at any depth contains 42CFRPart2.
+      def names_part2?(node)
+        case node
+        when Hash then node.any? { |key, value| names_part2?(key) || names_part2?(value) }
+        when Array then node.any? { |value| names_part2?(value) }
+        when String, Symbol then node.to_s.match?(PART2_NAME)
+        else false
+        end
       end
 
       def csv_fields(line)
