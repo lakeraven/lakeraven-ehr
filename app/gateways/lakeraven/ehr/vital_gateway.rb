@@ -9,10 +9,12 @@ module Lakeraven
     # use ObservationGateway.for_patient — kept as the single read entry
     # point to avoid two gateways exposing the same delegation.
     class VitalGateway
-      # Field metadata for the vital-entry grid at a location.
-      # Delegates to RpmsRpc::Vital.template (added in lakeraven/rpms-rpc#61).
-      def self.template(location_ien)
-        RpmsRpc::Vital.template(location_ien)
+      # Field metadata for the vital-entry grid on a patient's visit: the
+      # patient and the visit string (Encounter.visit_string), as
+      # RpmsRpc::Vital.template takes them (#1153). metric: 1 asks for metric
+      # units, -1 (the default) for the site's.
+      def self.template(dfn, visit_string, metric: -1)
+        RpmsRpc::Vital.template(dfn, visit_string, metric: metric)
       end
 
       # Per-field server validation. Returns

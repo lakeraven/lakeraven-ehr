@@ -57,7 +57,9 @@ module Lakeraven
       # --- default_provider ---
 
       test "default_provider resolves to RpmsRpc::Order when the gem ships it" do
-        provider = OrderGateway.default_provider
+        # default_provider is not public API (#904: it hands out RpmsRpc::Order,
+        # whose save/check/sign_and_release are order writes).
+        provider = OrderGateway.send(:default_provider)
         refute_nil provider, "expected RpmsRpc::Order to be loaded via the gateway's guarded require"
         assert_equal "RpmsRpc::Order", provider.name
       end
