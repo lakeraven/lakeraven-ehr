@@ -66,7 +66,7 @@ class LivePatientBarSearchTest < ActionDispatch::IntegrationTest
     assert_redirected_to "/lakeraven-ehr/patients/3"
     follow_redirect!
     assert_response :ok
-    assert_select "h1", text: /Mouse|MOUSE/
+    assert_select ".patient-banner__name", text: /Mouse|MOUSE/
 
     get "/lakeraven-ehr/chart_search"
     assert_response :ok

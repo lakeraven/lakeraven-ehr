@@ -60,7 +60,7 @@ module Lakeraven
       def dob_in_range
         return if dob.nil?
 
-        errors.add(:dob, "cannot be in the future") if dob > SiteDate.today
+        errors.add(:dob, "cannot be in the future") if dob > SiteTime.today
         errors.add(:dob, "cannot be before 1871") if dob < PatientRegistration::EARLIEST_DOB
       end
     end

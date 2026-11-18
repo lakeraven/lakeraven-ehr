@@ -34,8 +34,10 @@ module Lakeraven
         # `allergy` is the chart entry payload: allergen, comments, symptoms.
         # `signature` and `signer_name` are the tablet capture: the PNG data
         # URL and the typed name. `client_assertion` is the backend-services JWT.
-        # None of them may reach a log line.
-        app.config.filter_parameters += %i[username access_code verify_code allergy signature signer_name client_assertion]
+        # `note_text` is a progress note's body (#1001); its signature code is
+        # already matched by `signature`. None of them may reach a log line.
+        app.config.filter_parameters += %i[username access_code verify_code allergy signature signer_name client_assertion
+                                           note_text]
         # A patient's identity never reaches a log line (#722): the registration form,
         # any SSN, and the search's q and dob (matched exactly: a bare :q would also
         # match every key containing a q). The revocation form's reason is matched

@@ -117,7 +117,14 @@ module Lakeraven
         "revoked" => "status-badge--cancelled",
         "deceased" => "status-badge--deceased",
         "error" => "status-badge--error",
-        "warning" => "status-badge--warning"
+        "warning" => "status-badge--warning",
+        # A severity: an allergy reaction's, or a screening's band (#474).
+        # "moderately severe" is its own key, never read as "moderate".
+        "minimal" => "status-badge--minimal",
+        "mild" => "status-badge--mild",
+        "moderate" => "status-badge--moderate",
+        "moderately severe" => "status-badge--moderately-severe",
+        "severe" => "status-badge--severe"
       }.freeze
 
       # A status in words, coloured by its key: status_badge("booked", "Booked").

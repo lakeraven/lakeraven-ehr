@@ -83,5 +83,5 @@
 <% end %>
 
 <p class="mt-6">
-  <%= link_to "Back to the clinic's day", scheduling_clinic_path(@resource[:id], date: Date.today.iso8601) %>
+  <%= link_to "Back to the clinic's day", scheduling_clinic_path(@resource[:id], date: Lakeraven::EHR::SiteTime.today.iso8601) %>
 </p>
