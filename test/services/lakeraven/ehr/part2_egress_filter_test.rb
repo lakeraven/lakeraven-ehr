@@ -1436,6 +1436,101 @@ module Lakeraven
         end
       end
 
+      # --- round 5: the non-resource rule on a top-level Hash and a document ---
+
+      test "C-CDA sections with a condition row tagged SUD outside security are refused" do
+        row = { code: "SYN-1", display: "Synthetic", code_system: nil, meta: { tag: [ { code: "SUD" } ] } }
+
+        assert_nil Part2EgressFilter.call(ccda_sections(conditions: [ row ]))
+      end
+
+      test "C-CDA sections with a string-keyed row tagged SUD outside security are refused" do
+        row = { "code" => "SYN-1", "display" => "Synthetic", "code_system" => nil, "meta" => { "tag" => [ { "code" => "SUD" } ] } }
+
+        assert_nil Part2EgressFilter.call(ccda_sections(conditions: [ row ]))
+        assert_nil Part2EgressFilter.call(ccda_sections(conditions: [ row ]).deep_stringify_keys)
+      end
+
+      %w[42CFRPart2 ETH SUD ETHUD OPIOIDUD].each do |code|
+        %i[allergies conditions medications].each do |list|
+          test "C-CDA sections with a #{code} code outside security in #{list} are refused" do
+            [ code, " #{code.downcase} " ].each do |value|
+              row = { code: "SYN-1", display: "Synthetic", code_system: nil, meta: { tag: [ { code: value } ] } }
+
+              assert_nil Part2EgressFilter.call(ccda_sections(list => [ row ])), "#{value.inspect} in #{list} must refuse"
+            end
+          end
+        end
+      end
+
+      test "C-CDA sections with a row whose String leaf is 42CFRPart2 are refused" do
+        row = { code: "SYN-1", display: "Synthetic", code_system: nil, note: "42CFRPart2" }
+
+        assert_nil Part2EgressFilter.call(ccda_sections(conditions: [ row ]))
+      end
+
+      test "C-CDA sections with a row whose String leaf names 42CFRPart2 in prose are refused" do
+        row = { code: "SYN-1", display: "Synthetic", code_system: nil, note: "label 42cfrpart2 applied" }
+
+        assert_nil Part2EgressFilter.call(ccda_sections(medications: [ row ]))
+        assert_nil Part2EgressFilter.call(ccda_sections(medications: [ row.stringify_keys ]))
+      end
+
+      test "a top-level Hash that is not a resource and has a Part 2 code as a String leaf is refused" do
+        assert_nil Part2EgressFilter.call({ "rows" => [ { "x" => [ "N", "OPIOIDUD" ] } ] })
+      end
+
+      test "a pretty-printed document that is not a resource and holds a row tagged SUD is refused" do
+        text = JSON.pretty_generate({ "rows" => [ { "code" => "x", "meta" => { "tag" => [ { "code" => "SUD" } ] } } ] })
+
+        assert_operator text.lines.size, :>, 1, "test data must be a multi-line document"
+        assert_nil Part2EgressFilter.call(text)
+        assert_nil Part2EgressFilter.call("﻿#{text}"), "after a byte order mark"
+      end
+
+      test "a pretty-printed document that is not a resource and holds a Part 2 code as a String leaf is refused" do
+        text = JSON.pretty_generate({ "rows" => [ { "label" => "eth", "n" => 1 } ] })
+
+        assert_operator text.lines.size, :>, 1, "test data must be a multi-line document"
+        assert_nil Part2EgressFilter.call(text)
+        assert_nil Part2EgressFilter.call("﻿#{text}"), "after a byte order mark"
+      end
+
+      test "a pretty-printed document that is not a resource and names 42CFRPart2 in a longer string is refused" do
+        text = JSON.pretty_generate({ "rows" => [ { "note" => "label 42cfrpart2 applied", "n" => 1 } ] })
+
+        assert_operator text.lines.size, :>, 1, "test data must be a multi-line document"
+        assert_nil Part2EgressFilter.call(text)
+        assert_nil Part2EgressFilter.call("﻿#{text}"), "after a byte order mark"
+      end
+
+      # Guards: the non-resource rule must not over-refuse.
+
+      test "C-CDA sections whose display is prose naming a short code are returned equal" do
+        sections = ccda_sections(
+          conditions: [ { code: "SYN-1", display: "County SUD Clinic follow-up", code_system: nil } ],
+          medications: [ { "code" => "SYN-M", "display" => "METHOD of ETH-free preparation", "code_system" => nil } ]
+        )
+
+        assert_equal sections, Part2EgressFilter.call(sections)
+      end
+
+      test "a pretty-printed document that is not a resource and names a short code in prose is unchanged" do
+        text = JSON.pretty_generate({ "rows" => [ { "note" => "County SUD Clinic", "code" => "N", "n" => 1 }, [ 1, "METHOD" ] ] })
+
+        assert_operator text.lines.size, :>, 1, "test data must be a multi-line document"
+        assert_equal text, Part2EgressFilter.call(text)
+        assert_equal "﻿#{text}", Part2EgressFilter.call("﻿#{text}"), "after a byte order mark"
+      end
+
+      test "a pretty-printed unlabelled resource whose clinical coding is ETH is unchanged" do
+        resource = condition("code" => { "coding" => [ { "system" => "http://example.test/synthetic", "code" => "ETH" } ] })
+        text = JSON.pretty_generate(resource)
+
+        assert_operator text.lines.size, :>, 1, "test data must be a multi-line document"
+        assert_equal text, Part2EgressFilter.call(text)
+      end
+
       private
 
       # The audit_log.csv of an EHI export: the service's own header, then a
