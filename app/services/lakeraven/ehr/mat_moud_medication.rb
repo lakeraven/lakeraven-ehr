@@ -105,7 +105,7 @@ module Lakeraven
       # The refusal for an order: the medication text is read first, then the
       # sig. The sig is free text the NewRx sends to the pharmacy as SigText
       # and Directions, so it is read with the same rule — except that a nil
-      # sig, or a String sig that is blank after stripping, is allowed (no
+      # sig, or a String sig of only spaces, tabs and line breaks, is allowed (no
       # sig names nothing). The medication itself is never allowed blank.
       def self.refusal_for_order(medication_text, sig_text)
         refusal = refusal_for(medication_text)
@@ -180,8 +180,11 @@ module Lakeraven
 
       # True for a String that is empty after stripping. Text that cannot even
       # be stripped (invalid bytes) is not blank.
+      # Blank means only the whitespace the reading rule accepts (space, tab,
+      # LF, CR). String#strip also drops NUL, VT and FF, which the rule
+      # treats as unreadable, so it must not decide blankness.
       def self.blank_string?(value)
-        value.is_a?(String) && value.strip.empty?
+        value.is_a?(String) && value.match?(/\A[ \t\r\n]*\z/)
       rescue EncodingError, ArgumentError
         false
       end

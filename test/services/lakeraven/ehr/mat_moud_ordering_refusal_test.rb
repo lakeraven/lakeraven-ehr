@@ -278,7 +278,8 @@ module Lakeraven
         [ "METHADONE 40 mg by mouth daily", "Suboxone 8 mg SL daily", "1 tab daily (naltrexone)" ].each do |sig|
           assert_equal MatMoudMedication::REFUSAL, MatMoudMedication.refusal_for_order("oral solution 10 mg/mL", sig), sig.inspect
         end
-        [ "Take \u00BD tab", "meth\u0430done 40 mg daily", "take 1 tab\xFF", 40, [ "take 1 tab daily" ] ].each do |sig|
+        [ "Take \u00BD tab", "meth\u0430done 40 mg daily", "take 1 tab\xFF", 40, [ "take 1 tab daily" ],
+          "\u0000", "\v", "\f", " \u0000 ", "\t\v\n" ].each do |sig|
           assert_equal MatMoudMedication::UNREADABLE, MatMoudMedication.refusal_for_order("Sertraline 50 mg tablet", sig), sig.inspect
         end
       end

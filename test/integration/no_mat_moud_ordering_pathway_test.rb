@@ -92,11 +92,13 @@ class NoMatMoudOrderingPathwayTest < ActionDispatch::IntegrationTest
 
   test "no source file names an order-write RPC or calls an RpmsRpc::Order write method" do
     root = Lakeraven::EHR::Engine.root
-    files = Dir[root.join("{app,lib}/**/*.{rb,erb,rake}").to_s]
+    # config/ too: initializers and routes execute application code.
+    files = Dir[root.join("{app,lib}/**/*.{rb,erb,rake}").to_s] + Dir[root.join("config/**/*").to_s].select { |f| File.file?(f) }
     assert_operator files.size, :>, 100, "source scan found too few files to be trusted"
+    assert(files.any? { |f| f.start_with?(root.join("config").to_s) }, "source scan found no config files")
 
-    hits = files.flat_map do |file|
-      File.readlines(file).each_with_index.filter_map do |line, index|
+    hits = files.uniq.flat_map do |file|
+      File.readlines(file, encoding: "UTF-8").map(&:scrub).each_with_index.filter_map do |line, index|
         next unless ORDER_WRITE_RPCS.any? { |rpc| line.include?(rpc) } || line.match?(ORDER_WRITE_RPC_NAME) ||
           ORDER_WRITE_CALLS.any? { |call| line.match?(call) }
 
