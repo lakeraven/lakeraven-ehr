@@ -12,7 +12,6 @@ require_relative "../support/patient_banner_test_helper"
 # counts, and a patient open or searched for. RPMS is stood in for at the
 # wire, as in test/integration/pending_referrals_test.rb.
 class ReferralSurfacesRenderedTest < ActionDispatch::IntegrationTest
-  include IhsFeatureAvailabilityTestHelper
   include PatientBannerTestHelper
 
   TODAY = Date.new(2026, 11, 4)
@@ -171,6 +170,19 @@ class ReferralSurfacesRenderedTest < ActionDispatch::IntegrationTest
     document
   end
 
+  # The page's own referral content, in a state that is about something else
+  # (the navigation, the banner): both synthetic rows on the pending list,
+  # their count on the dashboard, and no fallback to an unread read.
+  def referrals_shown!(document, path, state)
+    assert_empty document.css("#pending-referrals-unread, #referral-counts-unread"), "#{state}: the referrals were read"
+    if path == PENDING
+      assert_equal 2, document.css("#pending-referrals tr[data-referral]").size, "#{state}: both synthetic referrals are listed"
+      shown!(document, "#pending-referrals tr[data-referral]", /CHARLIE,JORDAN/, state)
+    else
+      shown!(document, "#referral-counts td[data-count='2']", /2 referrals pending/, state)
+    end
+  end
+
   # The states the first three rounds checked: rows, with and without a
   # chosen window, and the dashboard's count of them.
 
@@ -227,6 +239,7 @@ class ReferralSurfacesRenderedTest < ActionDispatch::IntegrationTest
 
     assert_equal NAV_LINKS, document.css("nav[aria-label='Main'] a").to_h { |a| [ a.text.squish, a["href"] ] }, "#{path}: every link of the navigation"
     shown!(document, "#patient-banner form#patient-search input[name='q']", "every capability")
+    referrals_shown!(document, path, "every capability")
   end
 
   def dashboard_every_count
@@ -252,6 +265,7 @@ class ReferralSurfacesRenderedTest < ActionDispatch::IntegrationTest
     shown!(document, "#{banner} [data-allergies-state='loaded']", /Allergies\s*LATEX\s*PENICILLIN/i, "patient open")
     shown!(document, "#{banner} a#switch-patient[href='/lakeraven-ehr/chart_search']", /Switch patient/, "patient open")
     shown!(document, "#{banner} form[action$='/lakeraven-ehr/patient_context'] button", /Clear patient context/, "patient open")
+    referrals_shown!(document, path, "patient open")
   end
 
   # No chart open, and a user who may search patients: the banner is the search.
@@ -260,6 +274,7 @@ class ReferralSurfacesRenderedTest < ActionDispatch::IntegrationTest
 
     assert_equal SEARCH_CONTROLS, controls(document.at_css("form#patient-search")) - [ CSRF_TOKEN ], "the search is its field and a submit"
     shown!(document, "form#patient-search[action='/lakeraven-ehr/chart_search'][method='post'] a#recent-patients-link", /Recent patients/, "patient search")
+    referrals_shown!(document, path, "patient search")
   end
 
   # Every state of the two pages, rendered. Each proves itself rendered
@@ -301,6 +316,24 @@ class ReferralSurfacesRenderedTest < ActionDispatch::IntegrationTest
     node.ancestors("form").first
   end
 
+  # Every control sent with a form, as [tag, type, name]: those inside it,
+  # and those anywhere on the page its id is named by in a form attribute.
+  def controls_of(form)
+    named = form["id"].present? ? control_nodes(form.document).select { |node| node["form"] == form["id"] } : []
+    (control_nodes(form).to_a | named).map { |node| [ node.name, node["type"].to_s.downcase, node["name"].to_s ] }
+  end
+
+  # Every listed form among these that is not exactly its listed controls.
+  def inexact_forms(forms)
+    forms.filter_map do |form|
+      next "#{form['method']} #{form['action']}: not a listed form" unless listed(form)
+
+      expected = (listed(form).controls - [ CSRF_TOKEN ]).sort
+      found = (controls_of(form) - [ CSRF_TOKEN ]).sort
+      "#{form['method']} #{form['action']}: #{found.inspect}, not #{expected.inspect}" unless found == expected
+    end
+  end
+
   def path_of(url) = url.to_s.strip.sub(%r{\Ahttps?://[^/?#]*}i, "")[/\A[^?#]*/]
 
   # The listed form a form on the page is, if any.
@@ -323,14 +356,20 @@ class ReferralSurfacesRenderedTest < ActionDispatch::IntegrationTest
     end
   end
 
+  # Every attribute read as a URL: any href, action, formaction or src, and
+  # any other attribute (a data-* one, say) whose value is a path or a URL.
+  def url_attributes(document)
+    document.xpath("//@*").select do |attribute|
+      URL_ATTRIBUTES.include?(attribute.name) || attribute.value.strip.match?(%r{\A(/|https?:)})
+    end
+  end
+
   # Every URL on the page that carries a query parameter its path is not
   # listed with: any href, action, formaction or src, and any other attribute
   # whose value is a path or a URL.
   def urls_carrying_a_choice(document)
-    document.xpath("//@*").filter_map do |attribute|
+    url_attributes(document).filter_map do |attribute|
       url = attribute.value.strip
-      next unless URL_ATTRIBUTES.include?(attribute.name) || url.match?(%r{\A(/|https?:)})
-
       query = url[/\?([^#]*)/, 1]
       next if query.nil?
 
@@ -341,12 +380,16 @@ class ReferralSurfacesRenderedTest < ActionDispatch::IntegrationTest
   end
 
   # The SUD words in the page's text (scripts and styles included) and in
-  # every attribute value, each with where it was found.
+  # every attribute value, each with where it was found. The text is read
+  # twice: each text node on its own, so a whole word in one element is not
+  # fused with its neighbour's (<li>MH</li><li>SUD</li> is not "MHSUD"), and
+  # the page's text as one, so a phrase split across elements still reads.
   def sud_words_on(document)
     skipped = RANDOM_TOKENS.flat_map { |selector| document.css(selector).to_a }
     attributes = document.xpath("//@*").reject { |attribute| skipped.include?(attribute.parent) }
-    texts = [ [ "text", document.text ] ] + attributes.map { |attribute| [ "#{attribute.parent.name}[#{attribute.name}]", attribute.value ] }
-    texts.flat_map { |where, text| SudWords.hits(text).map { |hit| "#{where}: #{hit} in #{text.squish.truncate(80)}" } }
+    nodes = document.xpath("//text()").map { |node| [ "text of #{node.parent&.name}", node.text ] }
+    texts = [ [ "text", document.text ] ] + nodes + attributes.map { |attribute| [ "#{attribute.parent.name}[#{attribute.name}]", attribute.value ] }
+    texts.flat_map { |where, text| SudWords.hits(text).map { |hit| "#{where}: #{hit} in #{text.squish.truncate(80)}" } }.uniq
   end
 
   def html(fragment)
@@ -378,7 +421,7 @@ class ReferralSurfacesRenderedTest < ActionDispatch::IntegrationTest
     assert_equal SIGN_OUT_CONTROLS.sort, (controls(document) - [ CSRF_TOKEN ]).sort
   end
 
-  test "#905 no link or form action on a referral surface carries a parameter other than a from or to date" do
+  test "#905 no URL a referral surface renders carries a parameter its path is not listed with" do
     pages.each do |name, document|
       assert_not_empty document.css("a[href], form[action]"), "#{name}: no link or form found"
       assert_empty urls_carrying_a_choice(document), "#{name} carry a choice in a URL"
@@ -386,7 +429,7 @@ class ReferralSurfacesRenderedTest < ActionDispatch::IntegrationTest
   end
 
   test "#905 the only query parameters rendered are the window's dates and a clinic's day" do
-    carried = pages.values.flat_map { |document| document.xpath("//@href | //@action").map(&:value).grep(/\?/) }.uniq
+    carried = pages.values.flat_map { |document| url_attributes(document).map { |attribute| attribute.value.strip }.grep(/\?/) }.uniq
 
     assert_equal [ "/lakeraven-ehr/scheduling/clinics/1?date=2026-11-04", "/lakeraven-ehr/scheduling/clinics/2?date=2026-11-04" ], carried.sort,
       "the dashboard links each clinic's count to that clinic's day, today; nothing else carries a parameter"
@@ -397,11 +440,7 @@ class ReferralSurfacesRenderedTest < ActionDispatch::IntegrationTest
     forms = rendered.group_by { |form| listed(form) }
 
     assert_equal FORMS.to_set, forms.keys.to_set, "every listed form is rendered in some state, and no other form is"
-    forms.each do |known, found|
-      found.each do |form|
-        assert_equal (known.controls - [ CSRF_TOKEN ]).sort, (controls(form) - [ CSRF_TOKEN ]).sort, "#{form['method']} #{form['action']}"
-      end
-    end
+    assert_empty inexact_forms(rendered), "a form holds, or is sent with, a control it is not listed with, or lacks one"
   end
 
   test "#905 the text and attributes a referral surface renders name no SUD path" do
@@ -505,6 +544,20 @@ class ReferralSurfacesRenderedTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "#905 the exact-controls check counts a control sent with a form from outside it" do
+    window = %(<form id="referral-window" action="/lakeraven-ehr/referrals/pending" method="get">) +
+      %(<input type="date" name="from"><input type="date" name="to"><input type="submit" value="Show referrals"></form>)
+
+    assert_empty inexact_forms(html(window).css("form"))
+    [
+      %(#{window}<input type="date" name="from" form="referral-window">),
+      %(<div><input type="date" name="to" form="referral-window"></div>#{window}),
+      %(#{window}<form method="post" action="/lakeraven-ehr/logout"><button type="submit" form="referral-window">Go</button></form>),
+      window.sub(%(<input type="date" name="to">), ""),
+      window.sub("</form>", %(<input type="date" name="from"></form>))
+    ].each { |fragment| assert_not_empty inexact_forms(html(fragment).css("form#referral-window")), fragment }
+  end
+
   test "#905 the rendered check flags a known parameter on a path it is not listed with" do
     [
       %(<a href="/lakeraven-ehr/referrals/pending?date=2026-11-04">Referrals</a>),
@@ -542,6 +595,12 @@ class ReferralSurfacesRenderedTest < ActionDispatch::IntegrationTest
       %(<button data-kind="matreferral">Refer</button>), %(<input type="hidden" name="kind" value="SudReferral">),
       %(<img alt="Sober living">), %(<script>var kinds = ["detox"];</script>), %(<style>.oud-program { color: red }</style>),
       %(<input type="hidden" name="other" value="naltrexone">)
+    ].each { |fragment| assert_not_empty sud_words_on(html(fragment)), fragment }
+
+    # A whole word in its own element, next to an element it would fuse with.
+    [
+      %(<ul><li>MH</li><li>SUD</li></ul>), %(<table><tr><th>SUD</th><th>clinic</th></tr></table>),
+      %(<p>the <b>use</b> <i>disorder</i> clinic</p>)
     ].each { |fragment| assert_not_empty sud_words_on(html(fragment)), fragment }
 
     assert_empty sud_words_on(html(%(<p class="format">Audit the material</p><a href="/sudo/audit">Referrals pending</a>)))
