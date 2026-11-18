@@ -56,7 +56,10 @@ module Lakeraven
       # unconditional disclosure_surface rule covers, less +allow+. An API
       # route is one to an ApplicationController descendant, or one whose
       # path has a static segment starting with an uppercase letter or "$". A
-      # FHIR-shaped route whose controller cannot be loaded is reported.
+      # FHIR-shaped route whose controller cannot be loaded is reported. A
+      # rule is unconditional when every key other than :surface, :only and
+      # :key (which only names the rule for replacement) is nil or false; any
+      # other key, :if or one added later, makes it conditional.
       def ungated_routes(route_set, allow: UNGOVERNED_API_ROUTES.keys)
         route_set.routes.filter_map do |route|
           name = route.defaults[:controller] ? "#{route.defaults[:controller]}##{route.defaults[:action]}" : route.path.spec.to_s
@@ -85,7 +88,7 @@ module Lakeraven
         return false unless klass.respond_to?(:disclosure_surface_rules)
 
         klass.disclosure_surface_rules.any? do |rule|
-          (rule[:only].nil? || rule[:only].include?(action)) && rule.except(:surface, :only).values.none?
+          (rule[:only].nil? || rule[:only].include?(action)) && rule.except(:surface, :only, :key).values.none?
         end
       end
 
