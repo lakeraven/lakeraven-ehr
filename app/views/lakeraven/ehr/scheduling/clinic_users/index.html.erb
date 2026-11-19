@@ -1,0 +1,45 @@
+<% page_title "Users", @resource[:name] %>
+
+<%= page_header "Clinic users", @resource[:name] do %>
+  <%= link_to "Back to clinic settings", scheduling_clinic_settings_path(@resource[:id]) %>
+<% end %>
+
+<p>These users and their scheduling rights are read from RPMS each time this page opens. This page does not change access.</p>
+
+<%= form_with url: scheduling_clinic_users_path(@resource[:id]), method: :get do |form| %>
+  <%= form.label :q, "Find a clinic user by name" %>
+  <%= form.search_field :q, value: @query, maxlength: 100 %>
+  <%= form.submit "Search" %>
+  <%= link_to "Clear search", scheduling_clinic_users_path(@resource[:id]) %>
+<% end %>
+
+<% if @directory.status == :unavailable %>
+  <%= alert_box :error, "Clinic users could not be read from RPMS. Try again later.", id: "clinic-users-unavailable" %>
+<% elsif @directory.total.zero? %>
+  <p id="clinic-users-empty">No users are assigned to this clinic resource in RPMS.</p>
+<% elsif @directory.users.empty? %>
+  <p id="clinic-users-no-matches">No clinic users match this search.</p>
+<% else %>
+  <table id="clinic-users" class="table">
+    <caption>Existing users and scheduling rights for <%= @resource[:name] %></caption>
+    <thead>
+      <tr>
+        <th scope="col">Name</th>
+        <th scope="col">Overbook</th>
+        <th scope="col">Modify schedule</th>
+        <th scope="col">Modify appointments</th>
+        <th scope="col">Master overbook</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% @directory.users.each do |user| %>
+        <tr data-user="<%= user[:id] %>">
+          <td><%= user[:name] %></td>
+          <% Lakeraven::EHR::ClinicUsersGateway::RIGHTS.each do |right| %>
+            <td data-right="<%= right %>"><%= user[right] ? "Yes" : "No" %></td>
+          <% end %>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+<% end %>

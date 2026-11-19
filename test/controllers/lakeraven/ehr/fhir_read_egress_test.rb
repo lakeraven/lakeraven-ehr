@@ -172,6 +172,7 @@ module Lakeraven
         "lakeraven/ehr/scheduling/checkouts#undo",       # Undo check-out entry, not disclosure
         "lakeraven/ehr/scheduling/no_shows#create",      # No-show entry, not disclosure
         "lakeraven/ehr/scheduling/no_shows#undo",        # Undo no-show entry, not disclosure
+        "lakeraven/ehr/scheduling/clinic_users#index",     # Supervisor-only staff directory and rights; no patient data
         "lakeraven/ehr/scheduling/clinic_settings#show",   # A clinic's settings, letters and default provider: no patient data
         "lakeraven/ehr/scheduling/clinic_settings#edit",   # The same, as a form
         "lakeraven/ehr/scheduling/clinic_settings#update", # Files a clinic's settings; no patient data
