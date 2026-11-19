@@ -3,6 +3,7 @@
 module Lakeraven
   module EHR
     class MeasureReportsController < ApplicationController
+      disclosure_surface :fhir_api
       rate_limit only: :index
 
       def index
