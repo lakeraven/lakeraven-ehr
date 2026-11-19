@@ -36,9 +36,14 @@ module Lakeraven
       class MultipleProcesses < StandardError; end
 
       # After a refused or failed service-account sign-on, no new one is tried
-      # for that client application for this many seconds: a wrong code is not
-      # sent to RPMS on every request. Each application backs off on its own.
+      # for that client application for a while: a wrong code is not sent to
+      # RPMS on every request, and RPMS does not lock the account or address
+      # for repeated failures. The first failure backs the application off
+      # SERVICE_SIGNON_BACKOFF seconds; each further consecutive failure
+      # doubles the window, up to SERVICE_SIGNON_BACKOFF_MAX. A successful
+      # sign-on starts it over. Each application backs off on its own.
       SERVICE_SIGNON_BACKOFF = 30
+      SERVICE_SIGNON_BACKOFF_MAX = 900
 
       class << self
         # Turned on at boot when config/rpms.yml names a broker. factory makes
@@ -56,8 +61,10 @@ module Lakeraven
           # One sign-on lock per service key (per client application), so a
           # slow broker holds up only that application's first request.
           @service_signon_locks = Concurrent::Map.new
-          # When each service key's last sign-on failed (its back-off).
-          @service_signon_failed_at = Concurrent::Map.new
+          # Each service key's consecutive sign-on failures and when the last
+          # one happened ([count, failed_at], its back-off). Written only
+          # inside that key's sign-on lock.
+          @service_signon_failures = Concurrent::Map.new
         end
 
         def enabled? = !@pool.nil?
@@ -178,19 +185,22 @@ module Lakeraven
           @max_sessions = nil
           @service_duzes = nil
           @service_signon_locks = nil
-          @service_signon_failed_at = nil
+          @service_signon_failures = nil
         end
 
         private
 
         # [key, signed_on]: the application's service key with a live lease
         # kept for no longer than the token has left, and whether this request
-        # signed it on. nil when no lease can be had.
+        # signed it on. nil when no lease can be had. A lease that looks
+        # dropped is not released here: what the key holds may change before
+        # this request acts on it, so sign_on_service_account looks again
+        # under the application's sign-on lock and decides there.
         def service_lease(token)
           return nil unless token_seconds_left(token)
 
           key = service_key_for(token)
-          signed_on = !live?(key)
+          signed_on = !service_lease_connected?(key)
           return nil if signed_on && !sign_on_service_account(key, token)
 
           # Measured afresh: a slow sign-on is not added to the lease.
@@ -216,15 +226,33 @@ module Lakeraven
           seconds if seconds >= 1
         end
 
+        # Whether key holds a lease whose connection is still connected. Only
+        # looks: never releases.
+        def service_lease_connected?(key)
+          return false unless held?(key)
+
+          @pool.with_client(key) { |c| !c.respond_to?(:connected?) || c.connected? }
+        rescue SignInAgain, RpmsRpc::SessionPool::PoolExhaustedError
+          false
+        end
+
         # Sign a fresh connection on as the token's application's own service
         # account and hold it under key. True when a lease is held afterwards.
-        # The application's back-off, capacity and its codes are checked first,
-        # inside the key's lock, so a full pool builds no client and concurrent
-        # first requests of one application send at most one sign-on per
-        # back-off window.
+        # Inside the key's lock, which every service-account sign-on of key
+        # holds: a held, connected lease (a sibling request's, perhaps) is
+        # reused; a held lease whose connection has dropped is released here,
+        # where no other sign-on can put a fresh one under key, and replaced.
+        # The application's back-off, capacity and its codes are checked
+        # before signing on, so a full pool builds no client and concurrent
+        # requests of one application send at most one sign-on per back-off
+        # window.
         def sign_on_service_account(key, token)
           @service_signon_locks.compute_if_absent(key) { Mutex.new }.synchronize do
-            return true if held?(key)
+            if held?(key)
+              return true if service_lease_connected?(key)
+
+              release_service_account_key(key)
+            end
             return false if service_signon_backing_off?(key)
 
             if @pool.size >= @max_sessions
@@ -261,7 +289,7 @@ module Lakeraven
 
           @service_duzes[key] = duz
           adopt(key, client)
-          @service_signon_failed_at.delete(key)
+          @service_signon_failures.delete(key)
           keep_adopted_service_account(key, token)
         rescue RpmsRpc::SessionPool::PoolExhaustedError, RpmsRpc::SessionPool::SessionOccupiedError => e
           @service_duzes.delete(key)
@@ -307,16 +335,30 @@ module Lakeraven
           refuse_service_sign_on(key, client, e.class.name)
         end
 
+        # Called inside the key's sign-on lock: one more consecutive failure,
+        # which lengthens the key's back-off.
         def refuse_service_sign_on(key, client, reason)
-          @service_signon_failed_at[key] = Time.current
+          count, = @service_signon_failures[key]
+          @service_signon_failures[key] = [ count.to_i + 1, Time.current ].freeze
           safe_disconnect(client)
           Rails.logger.warn("[rpms] service-account sign-on failed for #{key}: #{reason}")
           nil
         end
 
+        # Whether key is inside the back-off its consecutive failures opened.
         def service_signon_backing_off?(key)
-          failed_at = @service_signon_failed_at[key]
-          failed_at.present? && Time.current < failed_at + SERVICE_SIGNON_BACKOFF
+          count, failed_at = @service_signon_failures[key]
+          return false unless count && failed_at
+
+          Time.current < failed_at + service_signon_backoff_for(count)
+        end
+
+        # The back-off after count consecutive failures: SERVICE_SIGNON_BACKOFF
+        # doubled for each failure after the first, capped at
+        # SERVICE_SIGNON_BACKOFF_MAX.
+        def service_signon_backoff_for(count)
+          doublings = (count - 1).clamp(0, 16) # 30 * 2**16 is far past the cap
+          [ SERVICE_SIGNON_BACKOFF * (2**doublings), SERVICE_SIGNON_BACKOFF_MAX ].min
         end
 
         def safe_disconnect(client)
