@@ -28,9 +28,9 @@ module Lakeraven
       before_action :validate_fhir_paging!, if: :fhir_search?
       before_action :validate_fhir_sort_and_include!, if: :fhir_search?
       # A launched token reads RPMS on its user's own connection (#844, ADR
-      # 0011), and a Backend Services token on the service account's (#996,
-      # ADR 0011 §6), after every check above has passed. Any other token has
-      # none.
+      # 0011), and a Backend Services token on its client application's own
+      # service account's (#996, ADR 0011 §6, ADR 0013 decision 4), after every
+      # check above has passed. Any other token has none.
       around_action :run_on_rpms_connection
 
       # Actions that DISCLOSE clinical data even though they are shaped as
@@ -68,21 +68,13 @@ module Lakeraven
         run_on_launched_users_connection(&action)
       end
 
-      # A SMART Backend Services token: a client application's own, with no
-      # person behind it. Not launched, not a browser session's, no resource
-      # owner, and every scope it carries is system/. Anything else (a user/ or
-      # patient/ scope, openid, launch/..., offline_access) is not one, and
-      # never rides the service account.
+      # A SMART Backend Services token (BackendServicesToken): a client
+      # application's own, with no person behind it. Anything else never rides
+      # its application's service account.
       def backend_services_token?
         return false unless current_token && RpmsSessions.enabled?
-        return false if current_token.resource_owner_id.present? || launched_authorization ||
-                        browser_sso_token?(current_token)
 
-        raw = current_token.scopes.to_a.map(&:to_s)
-        return false unless raw.all? { |scope| scope.start_with?("system/") }
-
-        scopes = SmartScope.parse_all(raw)
-        scopes.any? && scopes.all? { |scope| scope.context == "system" }
+        BackendServicesToken.match?(current_token, launched: launched_authorization.present?)
       end
 
       # The request runs inside the approving user's RPMS connection
@@ -154,8 +146,9 @@ module Lakeraven
       # -- a rescued message is free text that can carry PHI.
       # An API request carries a token, not a signed-in user's RPMS connection,
       # and this process holds no shared one (ADR 0011). A Backend Services
-      # token reads on the deployment's service account (ADR 0011 §6) when one
-      # is configured; with none, or when its sign-on fails, it lands here. A
+      # token reads on its client application's own service account (ADR 0011
+      # §6, ADR 0013 decision 4) when one is configured for that client; with
+      # none, or when its sign-on fails, it lands here. A
       # request that reaches for RPMS with no connection of its own is refused,
       # never served on another user's connection.
       rescue_from RpmsRpc::NotConfiguredError do

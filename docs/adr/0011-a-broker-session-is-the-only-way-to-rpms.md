@@ -104,7 +104,7 @@ Each slot is a long-lived M process on the RPMS host, so it is sized with the st
 
 A `system/` token gets a broker session for a **service account**: an RPMS user provisioned for that backend client, whose codes come from the host's secrets, never from a user.
 That session is keyed to the client application, not to any human.
-A deployment with no service account configured refuses `system/` requests with 503.
+A `system/` request from a backend client with no service account configured for it gets 503.
 It never falls back to a clinician's session.
 
 This replaces #553's structural argument ("one shared client, so one organization") with a stated one.
@@ -172,7 +172,7 @@ Neither leaves a mixed state where a request path can still reach the global cli
 - ~~Every gateway call site threads the session (25 files), a wide but mechanical diff.~~ Amended: no call site changes; a request is wrapped once.
 - A process restart signs every user out.
   That is the honest consequence of holding no credentials.
-- Backend services need an RPMS service account per deployment before `system/` tokens work against a live broker.
+- Backend services need an RPMS service account per backend client before that client's `system/` tokens work against a live broker.
 
 **Rejected**
 

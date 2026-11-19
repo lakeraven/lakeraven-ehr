@@ -36,8 +36,8 @@ module Lakeraven
       class MultipleProcesses < StandardError; end
 
       # After a refused or failed service-account sign-on, no new one is tried
-      # for this many seconds, process-wide: a wrong code is not sent to RPMS
-      # on every request.
+      # for that client application for this many seconds: a wrong code is not
+      # sent to RPMS on every request. Each application backs off on its own.
       SERVICE_SIGNON_BACKOFF = 30
 
       class << self
@@ -56,7 +56,8 @@ module Lakeraven
           # One sign-on lock per service key (per client application), so a
           # slow broker holds up only that application's first request.
           @service_signon_locks = Concurrent::Map.new
-          @service_signon_failed_at = nil
+          # When each service key's last sign-on failed (its back-off).
+          @service_signon_failed_at = Concurrent::Map.new
         end
 
         def enabled? = !@pool.nil?
@@ -75,12 +76,15 @@ module Lakeraven
         # (ServiceAccountLeaseRelease).
         def service_key_for(token) = "system-app-#{token.application_id}"
 
-        # Run the block with the deployment's service account as RpmsRpc.client,
-        # for a system/ token. The application's first request signs a fresh
-        # connection on and leases it; later ones reuse it, each keeping it for
-        # the token's remaining lifetime. A request that gets no lease (no
-        # service account configured, a refused sign-on or its back-off, a full
-        # pool, a lease that is gone or signed on as someone else) runs with no
+        # Run the block with the token's client application's own service
+        # account as RpmsRpc.client, for a Backend Services token. The
+        # application's first request signs a fresh connection on with that
+        # application's codes (ServiceAccount.codes_for) and leases it; later
+        # ones reuse it, each keeping it for no longer than the token has left.
+        # A request that gets no lease (no account configured for the
+        # application, a refused sign-on or the application's back-off, a full
+        # pool, a token with under a second left or that ran out during the
+        # sign-on, a lease that is gone or signed on as someone else) runs with no
         # RPMS client at all: one that reaches for RPMS fails closed as
         # RpmsRpc::NotConfiguredError, one that does not answers as ever. Never
         # another identity's connection, and the block runs exactly once.
@@ -111,7 +115,8 @@ module Lakeraven
           ran ? result : yield
         end
 
-        # The token was revoked: end its application's service-account session, if any.
+        # A Backend Services token was revoked: end its application's
+        # service-account session, if any.
         def release_service_account(token) = release_service_account_key(service_key_for(token))
 
         # Hold an authenticated client under the session's key. Raises
@@ -179,17 +184,18 @@ module Lakeraven
         private
 
         # [key, signed_on]: the application's service key with a live lease
-        # kept for the token's remaining lifetime, and whether this request
+        # kept for no longer than the token has left, and whether this request
         # signed it on. nil when no lease can be had.
         def service_lease(token)
-          idle_for = token_seconds_left(token)
-          return nil unless idle_for
+          return nil unless token_seconds_left(token)
 
           key = service_key_for(token)
           signed_on = !live?(key)
-          return nil if signed_on && !sign_on_service_account(key)
+          return nil if signed_on && !sign_on_service_account(key, token)
 
-          [ key, signed_on ] if touch(key, idle_for: idle_for)
+          # Measured afresh: a slow sign-on is not added to the lease.
+          idle_for = token_seconds_left(token)
+          [ key, signed_on ] if idle_for && touch(key, idle_for: idle_for)
         end
 
         # The token's revocation as the database holds it now, not as this
@@ -198,48 +204,85 @@ module Lakeraven
           Doorkeeper::AccessToken.where(id: token.id).where.not(revoked_at: nil).exists?
         end
 
-        # The token's remaining lifetime in whole seconds, at least 1: the
-        # service-account session never outlives the token. A non-expiring
-        # token gets none.
+        # The token's remaining lifetime in whole seconds, measured now: the
+        # service-account session never outlives the token. nil for a token
+        # with under one whole second left, an expired one, or a non-expiring
+        # one: none of them gets a lease.
         def token_seconds_left(token)
           expires_at = token.expires_at
-          expires_at && [ (expires_at - Time.current).floor, 1 ].max
+          return nil unless expires_at
+
+          seconds = (expires_at - Time.current).floor
+          seconds if seconds >= 1
         end
 
-        # Sign a fresh connection on as the service account and hold it under
-        # key. True when a lease is held afterwards. Capacity, the back-off and
-        # the codes are checked first, so a full pool builds no client.
-        def sign_on_service_account(key)
+        # Sign a fresh connection on as the token's application's own service
+        # account and hold it under key. True when a lease is held afterwards.
+        # The application's back-off, capacity and its codes are checked first,
+        # inside the key's lock, so a full pool builds no client and concurrent
+        # first requests of one application send at most one sign-on per
+        # back-off window.
+        def sign_on_service_account(key, token)
           @service_signon_locks.compute_if_absent(key) { Mutex.new }.synchronize do
             return true if held?(key)
-            return false if service_signon_backing_off?
+            return false if service_signon_backing_off?(key)
 
             if @pool.size >= @max_sessions
               Rails.logger.warn("[rpms] service-account sign-on skipped for #{key}: session pool full")
               return false
             end
 
-            codes = ServiceAccount.codes
+            codes = ServiceAccount.codes_for(token.application&.uid)
             return false unless codes
 
-            adopt_service_account(key, codes)
+            adopt_service_account(key, codes, token)
           end
         end
 
-        def adopt_service_account(key, codes)
+        # Called inside the key's sign-on lock. A token that ran out during its
+        # own sign-on gets nothing: the fresh client is logged off and never
+        # adopted. An adopted entry has no deadline until touched, and the
+        # keeper never ends one without, so the deadline is set here, before
+        # the lock is let go; if that fails, the entry this sign-on just
+        # created is released (no other sign-on can adopt under key while the
+        # lock is held).
+        def adopt_service_account(key, codes, token)
           client = build_service_client(key)
           return false unless client
 
           duz = service_account_duz(key, client, codes)
           return false unless duz
 
+          unless token_seconds_left(token)
+            safe_disconnect(client)
+            Rails.logger.warn("[rpms] service-account sign-on for #{key} outlived its token: not leased")
+            return false
+          end
+
           @service_duzes[key] = duz
           adopt(key, client)
-          true
+          @service_signon_failed_at.delete(key)
+          keep_adopted_service_account(key, token)
         rescue RpmsRpc::SessionPool::PoolExhaustedError, RpmsRpc::SessionPool::SessionOccupiedError => e
           @service_duzes.delete(key)
           safe_disconnect(client)
           Rails.logger.warn("[rpms] service-account lease refused for #{key}: #{e.class.name}")
+          false
+        end
+
+        # The just-adopted lease's first deadline: the token's remaining
+        # lifetime, measured now. False, having released the entry, when the
+        # token ran out after all or the deadline cannot be set; false too when
+        # a revocation already released it.
+        def keep_adopted_service_account(key, token)
+          idle_for = token_seconds_left(token)
+          return true if idle_for && @pool.touch(key, idle_for: idle_for)
+
+          release_service_account_key(key)
+          false
+        rescue StandardError => e
+          release_service_account_key(key)
+          Rails.logger.warn("[rpms] service-account lease for #{key} could not be kept: #{e.class.name}")
           false
         end
 
@@ -265,14 +308,14 @@ module Lakeraven
         end
 
         def refuse_service_sign_on(key, client, reason)
-          @service_signon_failed_at = Time.current
+          @service_signon_failed_at[key] = Time.current
           safe_disconnect(client)
           Rails.logger.warn("[rpms] service-account sign-on failed for #{key}: #{reason}")
           nil
         end
 
-        def service_signon_backing_off?
-          failed_at = @service_signon_failed_at
+        def service_signon_backing_off?(key)
+          failed_at = @service_signon_failed_at[key]
           failed_at.present? && Time.current < failed_at + SERVICE_SIGNON_BACKOFF
         end
 
