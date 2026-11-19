@@ -5,22 +5,30 @@ require "rpms_rpc/mock_client"
 require "rpms_rpc/api/authentication"
 
 # A SMART Backend Services (system/) token reads RPMS through a broker session
-# signed on as the deployment's service account (ADR 0011 section 6, #996),
-# keyed to the client application and never to a person: every live token of
-# one application shares one session. A request that gets no such session runs
+# signed on as its client application's own service account (ADR 0011 section
+# 6, ADR 0013 decision 4: one account per backend client, #996), keyed to the
+# client application and never to a person: every live token of one
+# application shares one session, and no application rides another's account. A request that gets no such session runs
 # with no RPMS client at all, so a read that reaches RPMS answers 503 as before
 # and one that never touches RPMS answers as it always did; a user/ or patient/
 # token never rides the service account.
 #
 # The process is set up as a server is: no shared client, and a pool whose
 # factory builds a fresh mock broker per sign-on. Each mock carries the suite's
-# baseline seeds and one synthetic service-account user (DUZ 4242), and records
-# for every RPC the DUZ it held at the moment of the call.
+# baseline seeds and two synthetic service-account users (client A's, DUZ 4242,
+# and client B's, DUZ 9002), and records for every RPC the DUZ it held at the
+# moment of the call.
 class BackendServiceAccountRpmsTest < ActionDispatch::IntegrationTest
   SERVICE_DUZ = 4242
   ACCESS_CODE = "SVCACCT1"
   VERIFY_CODE = "SVCACCT1!!"
-  ENV_KEYS = %w[RPMS_SERVICE_ACCESS_CODE RPMS_SERVICE_VERIFY_CODE].freeze
+  # Client B's own account: another RPMS user, with its own codes.
+  SERVICE_DUZ_B = 9002
+  ACCESS_CODE_B = "SVCB1"
+  VERIFY_CODE_B = "SVCB1!!"
+  CLIENT_ID_A = "synthetic-backend-a"
+  CLIENT_ID_B = "synthetic-backend-b"
+  ENV_KEYS = %w[RPMS_SERVICE_ACCESS_CODE RPMS_SERVICE_VERIFY_CODE RPMS_SERVICE_CLIENT_ID].freeze
   # Sent before anyone is signed on, so they carry no DUZ by construction.
   # XUS GET USER INFO is the gem's own read-back inside authenticate, sent before it returns.
   SIGNON_RPCS = [ "XUS SIGNON SETUP", "XUS AV CODE", "XUS GET USER INFO" ].freeze
@@ -37,13 +45,14 @@ class BackendServiceAccountRpmsTest < ActionDispatch::IntegrationTest
   # sent on it) until #disconnect or the broker drops it (#drop!), and records
   # each RPC with the DUZ it ran under.
   class RecordingClient < RpmsRpc::MockClient
-    attr_reader :rpcs, :disconnected
+    attr_reader :rpcs, :disconnected, :av_codes
     # Set to an exception class to have #disconnect raise it.
     attr_accessor :disconnect_error
 
     def initialize
       super
       @rpcs = []
+      @av_codes = []
       @hooks = {}
       @connected = false
       @disconnected = false
@@ -75,28 +84,39 @@ class BackendServiceAccountRpmsTest < ActionDispatch::IntegrationTest
     end
 
     def call_rpc(rpc_name, *params)
-      record(rpc_name)
+      record(rpc_name, params)
       super
     end
 
     def call_rpc_lines(rpc_name, *params)
-      record(rpc_name)
+      record(rpc_name, params)
       super
     end
 
     def call_rpc_global_array(rpc_name, *params)
-      record(rpc_name)
+      record(rpc_name, params)
       super
     end
 
     # The RPCs made once the sign-on exchange itself was over.
     def rpcs_after_signon = rpcs.reject { |rpc| SIGNON_RPCS.include?(rpc[:rpc]) }
 
+    # How many sign-ons (XUS AV CODE) were sent on this connection.
+    def signons = rpcs.count { |rpc| rpc[:rpc] == "XUS AV CODE" }
+
     private
 
-    def record(rpc_name)
+    # The "ACCESS;VERIFY" pair the broker would decrypt from the parameter.
+    def decoded_av_code(param)
+      RpmsRpc::XwbCipher.framed?(param) ? RpmsRpc::XwbCipher.decrypt(param.to_s) : param.to_s
+    rescue StandardError
+      param.to_s
+    end
+
+    def record(rpc_name, params = [])
       @connected = true # an RPC only travels on an open connection
       @rpcs << { rpc: rpc_name, duz: duz&.to_s }
+      @av_codes << decoded_av_code(params.first) if rpc_name == "XUS AV CODE"
       @hooks.delete(rpc_name)&.call
     end
   end
@@ -111,22 +131,58 @@ class BackendServiceAccountRpmsTest < ActionDispatch::IntegrationTest
     @prepare_client = nil
     RpmsRpc.reset! # no shared client in a pooled process
     configure_pool(max_sessions: 4)
-    @client_app = backend_app("backend-client-a", "synthetic-org-a")
+    @client_app = backend_app("backend-client-a", "synthetic-org-a", uid: CLIENT_ID_A)
     @token = token_for(@client_app)
   end
 
   teardown do
     @restore_touch&.call
+    @restore_credentials&.call
     (@saved_env || {}).each { |key, value| value == :missing ? ENV.delete(key) : ENV[key] = value }
     # Later tests get the suite's shared mock back, whatever they include.
     Lakeraven::EHR::RpmsSessions.reset!
     RpmsRpc.mock!(&BASELINE_MOCK_SEEDS) unless LIVE_RPMS
   end
 
-  def configure_service_account(access: ACCESS_CODE, verify: VERIFY_CODE)
+  # The ENV pair, which belongs to the one client RPMS_SERVICE_CLIENT_ID names:
+  # the test's application A unless another is given.
+  def configure_service_account(access: ACCESS_CODE, verify: VERIFY_CODE, client: @client_app)
     ENV["RPMS_SERVICE_ACCESS_CODE"] = access if access
     ENV["RPMS_SERVICE_VERIFY_CODE"] = verify if verify
+    ENV["RPMS_SERVICE_CLIENT_ID"] = client.uid if client
   end
+
+  # Rails.application.credentials with the given rpms subtree; everything else
+  # is the real object's. The real one holds symbol keys; a client_id may be
+  # dug as a symbol or a string.
+  class RpmsCredentials < SimpleDelegator
+    def initialize(real, rpms)
+      super(real)
+      @tree = { rpms: rpms }.with_indifferent_access
+    end
+
+    def dig(*keys) = keys.first.to_s == "rpms" ? @tree.dig(*keys) : __getobj__.dig(*keys)
+    def rpms = @tree[:rpms]
+    def [](key) = key.to_s == "rpms" ? @tree[:rpms] : __getobj__[key]
+  end
+
+  # Give each application its own account in the host's credentials
+  # (rpms.service_accounts.<client_id>), for the rest of the test. accounts maps
+  # an application to its [access_code, verify_code]; extra is merged into the
+  # rpms subtree beside it.
+  def configure_credentials_accounts(accounts, extra: {})
+    @restore_credentials&.call
+    entries = accounts.to_h { |app, (access, verify)| [ app.uid, { access_code: access, verify_code: verify } ] }
+    fake = RpmsCredentials.new(Rails.application.credentials, { service_accounts: entries }.merge(extra))
+    restore = install_singleton_stub(Rails.application, :credentials, fake)
+    @restore_credentials = lambda do
+      restore.call
+      @restore_credentials = nil
+    end
+  end
+
+  # Client application B, another backend client of the deployment.
+  def client_app_b = @client_app_b ||= backend_app("backend-client-b", "synthetic-org-b", uid: CLIENT_ID_B)
 
   # The pool as a server configures it; again in a test that needs another size.
   def configure_pool(max_sessions:)
@@ -138,6 +194,7 @@ class BackendServiceAccountRpmsTest < ActionDispatch::IntegrationTest
   def build_client
     seeded_client.tap do |client|
       client.seed_user(SERVICE_DUZ, credentials: "#{ACCESS_CODE};#{VERIFY_CODE}", name: "SERVICE,ACCOUNT", role: "user")
+      client.seed_user(SERVICE_DUZ_B, credentials: "#{ACCESS_CODE_B};#{VERIFY_CODE_B}", name: "SERVICE,ACCOUNTB", role: "user")
       @prepare_client&.call(client)
       @clients << client
     end
@@ -157,10 +214,10 @@ class BackendServiceAccountRpmsTest < ActionDispatch::IntegrationTest
     [ key, client ]
   end
 
-  def backend_app(name, organization_id)
+  def backend_app(name, organization_id, uid: nil)
     Doorkeeper::Application.create!(
-      name: name, redirect_uri: "https://example.test/callback",
-      scopes: SYSTEM_SCOPES, confidential: true, organization_id: organization_id
+      { name: name, redirect_uri: "https://example.test/callback",
+        scopes: SYSTEM_SCOPES, confidential: true, organization_id: organization_id, uid: uid }.compact
     )
   end
 
@@ -387,7 +444,8 @@ class BackendServiceAccountRpmsTest < ActionDispatch::IntegrationTest
     refute held?(service_key)
   end
 
-  # Back-off (process-wide): a refused sign-on is not retried on every request.
+  # Back-off: a refused sign-on is not retried on every request. (It is the
+  # refused client's own: see "a refused sign-on backs off its own client only".)
   test "after a refused sign-on no new sign-on is attempted until the back-off has passed" do
     configure_service_account(access: "WRONG1", verify: "WRONG1!!")
 
@@ -398,9 +456,9 @@ class BackendServiceAccountRpmsTest < ActionDispatch::IntegrationTest
     assert_equal 1, @clients.size, "the second request inside the back-off signs nobody on"
     assert_equal 30, Lakeraven::EHR::RpmsSessions::SERVICE_SIGNON_BACKOFF
 
-    read "/lakeraven-ehr/Patient/1", backend_token("backend-client-b", "synthetic-org-b")
-    assert_no_rpms_connection("another application, inside the back-off")
-    assert_equal 1, @clients.size, "the back-off is the process's, not one application's"
+    read "/lakeraven-ehr/Patient/1", token_for(client_app_b)
+    assert_no_rpms_connection("another application, with no account of its own")
+    assert_equal 1, @clients.size, "an application with no account never sends the refused application's codes"
 
     travel (Lakeraven::EHR::RpmsSessions::SERVICE_SIGNON_BACKOFF + 1).seconds
     read "/lakeraven-ehr/Patient/1", token_for(@client_app) # the first token may have expired by now
@@ -426,7 +484,8 @@ class BackendServiceAccountRpmsTest < ActionDispatch::IntegrationTest
   # H.
   test "the lease is keyed to the client application, never to a person or a token" do
     configure_service_account
-    other = backend_token("backend-client-b", "synthetic-org-b")
+    configure_credentials_accounts({ client_app_b => [ ACCESS_CODE_B, VERIFY_CODE_B ] })
+    other = token_for(client_app_b)
     sibling = token_for(@client_app)
 
     key = service_key
@@ -441,7 +500,8 @@ class BackendServiceAccountRpmsTest < ActionDispatch::IntegrationTest
     assert_read_ok "another application"
 
     assert_equal 2, @clients.size, "each application signs on for itself"
-    assert_equal [ SERVICE_DUZ.to_s, SERVICE_DUZ.to_s ], @clients.map { |client| client.duz.to_s }
+    assert_equal [ SERVICE_DUZ.to_s, SERVICE_DUZ_B.to_s ], @clients.map { |client| client.duz.to_s },
+                 "each on its own account"
     assert held?(key)
     assert held?(service_key(other))
   end
@@ -752,10 +812,11 @@ class BackendServiceAccountRpmsTest < ActionDispatch::IntegrationTest
   end
 
   # The pool's deadlines run on the monotonic clock, which travel does not
-  # move: a token of one second, and a real wait.
+  # move: a token of two seconds (one with less than a whole second left gets
+  # no lease at all), and a real wait.
   test "the keeper keeps a live lease and ends it once its token has expired" do
     configure_service_account
-    token = token_for(@client_app, expires_in: 1)
+    token = token_for(@client_app, expires_in: 2)
     read "/lakeraven-ehr/Patient/1", token
     assert_read_ok
     key = service_key(token)
@@ -764,7 +825,7 @@ class BackendServiceAccountRpmsTest < ActionDispatch::IntegrationTest
     assert held?(key), "a connected lease inside its token's lifetime survives a keeper pass"
     refute @clients[0].disconnected
 
-    sleep 1.2
+    sleep 2.2
     keeper_tick
 
     refute held?(key), "the lease does not outlive its token"
@@ -772,5 +833,271 @@ class BackendServiceAccountRpmsTest < ActionDispatch::IntegrationTest
     read "/lakeraven-ehr/Patient/1", token
     assert_equal 401, response.status
     assert_equal 1, @clients.size
+  end
+
+  # ---------------------------------------------------------------------------
+  # One RPMS account per backend client (ADR 0013 decision 4). The codes are
+  # looked up for the token's client application, by its client_id (uid):
+  # credentials at rpms.service_accounts.<client_id>, else the ENV pair of the
+  # one client RPMS_SERVICE_CLIENT_ID names. No deployment-wide account.
+  # ---------------------------------------------------------------------------
+
+  def service_duzes(client) = client.rpcs_after_signon.map { |rpc| rpc[:duz] }.uniq
+
+  # Every call of RpmsRpc::SessionPool#touch on the configured pool, with the
+  # wall-clock time (the clock token lifetimes are measured on) of the call.
+  def spy_on_pool_touch
+    pool = Lakeraven::EHR::RpmsSessions.instance_variable_get(:@pool)
+    touches = []
+    original = pool.method(:touch)
+    pool.define_singleton_method(:touch) do |key, idle_for:|
+      touches << { key: key, idle_for: idle_for, at: Time.current }
+      original.call(key, idle_for: idle_for)
+    end
+    touches
+  end
+
+  # The broker takes this long to answer the service account's sign-on.
+  def slow_sign_on(duration)
+    @prepare_client = ->(client) { client.on_rpc("XUS AV CODE") { travel duration } }
+  end
+
+  # 1e. A's account is the ENV pair's, B's is in the credentials.
+  test "two backend clients each read as their own service account" do
+    configure_service_account
+    configure_credentials_accounts({ client_app_b => [ ACCESS_CODE_B, VERIFY_CODE_B ] })
+    token_b = token_for(client_app_b)
+
+    read "/lakeraven-ehr/Patient/1"
+    assert_read_ok "client A"
+    read "/lakeraven-ehr/Patient/1", token_b
+    assert_read_ok "client B"
+
+    assert_equal 2, @clients.size, "each application signs on for itself"
+    of_a, of_b = @clients
+    assert_equal SERVICE_DUZ.to_s, of_a.duz.to_s
+    assert_equal SERVICE_DUZ_B.to_s, of_b.duz.to_s, "B signs on as B's account, not A's"
+    assert_equal [ SERVICE_DUZ.to_s ], service_duzes(of_a), "every RPC of A's request ran as A's DUZ"
+    assert_equal [ SERVICE_DUZ_B.to_s ], service_duzes(of_b), "every RPC of B's request ran as B's DUZ"
+    assert_equal [ "#{ACCESS_CODE};#{VERIFY_CODE}" ], of_a.av_codes
+    assert_equal [ "#{ACCESS_CODE_B};#{VERIFY_CODE_B}" ], of_b.av_codes, "A's codes are never sent for B"
+    assert held?(service_key)
+    assert held?(service_key(token_b))
+  end
+
+  # 1e. Both accounts in the credentials, B first: neither order nor source
+  # hands one client the other's account.
+  test "two backend clients with credentials entries each read as their own service account" do
+    configure_credentials_accounts({ @client_app => [ ACCESS_CODE, VERIFY_CODE ],
+                                   client_app_b => [ ACCESS_CODE_B, VERIFY_CODE_B ] })
+    token_b = token_for(client_app_b)
+
+    read "/lakeraven-ehr/Patient/1", token_b
+    assert_read_ok "client B"
+    read "/lakeraven-ehr/Patient/1"
+    assert_read_ok "client A"
+    read "/lakeraven-ehr/Patient/1", token_b
+    assert_read_ok "client B again"
+
+    assert_equal 2, @clients.size, "one sign-on per application"
+    of_b, of_a = @clients
+    assert_equal [ SERVICE_DUZ_B.to_s ], service_duzes(of_b), "every RPC of B's requests ran as B's DUZ"
+    assert_equal [ SERVICE_DUZ.to_s ], service_duzes(of_a), "every RPC of A's request ran as A's DUZ"
+    assert_equal [ "#{ACCESS_CODE_B};#{VERIFY_CODE_B}" ], of_b.av_codes
+    assert_equal [ "#{ACCESS_CODE};#{VERIFY_CODE}" ], of_a.av_codes
+  end
+
+  # 1f.
+  test "a backend client with no account of its own answers 503 and sends no RPC while another client's account is leased" do
+    configure_service_account
+    read "/lakeraven-ehr/Patient/1"
+    assert_read_ok "client A, which has an account"
+    assert held?(service_key)
+    used = @clients[0].rpcs.size
+    token_b = token_for(client_app_b)
+
+    READS.each do |resource, path|
+      read path, token_b
+
+      assert_no_rpms_connection("client B reading #{resource}")
+    end
+    assert_equal 1, @clients.size, "no connection was opened for B, not even for a sign-on"
+    assert_equal used, @clients[0].rpcs.size, "and A's connection carried nothing for B"
+    assert_equal 1, @clients[0].signons
+    refute held?(service_key(token_b))
+    assert held?(service_key), "A keeps its lease"
+  end
+
+  # 1f, with A's account in the credentials.
+  test "a backend client with no credentials entry answers 503 though another client has one" do
+    configure_credentials_accounts({ @client_app => [ ACCESS_CODE, VERIFY_CODE ] })
+    token_b = token_for(client_app_b)
+
+    read "/lakeraven-ehr/Patient/1", token_b
+
+    assert_no_rpms_connection("client B, with no entry")
+    assert_no_client_built
+    refute held?(service_key(token_b))
+
+    read "/lakeraven-ehr/Patient/1"
+    assert_read_ok "client A, on its own entry"
+    assert_equal [ SERVICE_DUZ.to_s ], service_duzes(@clients[0])
+  end
+
+  # 1b. The ENV pair is one client's: unnamed, it is nobody's.
+  test "the ENV pair with no RPMS_SERVICE_CLIENT_ID is no client's account" do
+    configure_service_account(client: nil)
+
+    read "/lakeraven-ehr/Patient/1"
+
+    assert_no_rpms_connection("ENV pair naming no client")
+    assert_no_client_built
+    refute held?(service_key)
+  end
+
+  # 1d.
+  test "a deployment-wide rpms.service_account credentials entry signs no client on" do
+    wide = { service_account: { access_code: ACCESS_CODE, verify_code: VERIFY_CODE } }
+    configure_credentials_accounts({}, extra: wide)
+
+    [ @token, token_for(client_app_b) ].each do |token|
+      read "/lakeraven-ehr/Patient/1", token
+
+      assert_no_rpms_connection("deployment-wide entry")
+      refute held?(service_key(token))
+    end
+    assert_no_client_built
+  end
+
+  # 1a. The client's credentials entry alone decides: a partial one is no
+  # account, and the ENV pair does not stand in for it.
+  test "a partial credentials entry for the client answers 503 though the ENV pair names it" do
+    configure_service_account
+    configure_credentials_accounts({ @client_app => [ ACCESS_CODE, "" ] })
+
+    read "/lakeraven-ehr/Patient/1"
+
+    assert_no_rpms_connection("partial credentials entry")
+    assert_no_client_built
+    refute held?(service_key)
+  end
+
+  # 2. The back-off is per client: A's refused sign-on does not hold B up.
+  test "a refused sign-on backs off its own client only" do
+    configure_service_account(access: "WRONG1", verify: "WRONG1!!") # A's codes are wrong
+    configure_credentials_accounts({ client_app_b => [ ACCESS_CODE_B, VERIFY_CODE_B ] })
+    token_b = token_for(client_app_b)
+
+    read "/lakeraven-ehr/Patient/1"
+    assert_no_rpms_connection("client A, refused")
+    assert_equal 1, @clients.size
+
+    read "/lakeraven-ehr/Patient/1", token_b # well inside SERVICE_SIGNON_BACKOFF
+    assert_read_ok "client B, inside A's back-off"
+    assert_equal 2, @clients.size, "B signs on while A is backed off"
+    assert_equal SERVICE_DUZ_B.to_s, @clients[1].duz.to_s
+    assert_equal [ SERVICE_DUZ_B.to_s ], service_duzes(@clients[1])
+    assert_equal [ "#{ACCESS_CODE_B};#{VERIFY_CODE_B}" ], @clients[1].av_codes
+    assert held?(service_key(token_b))
+
+    read "/lakeraven-ehr/Patient/1"
+    assert_no_rpms_connection("client A, still backed off")
+    assert_equal 2, @clients.size, "A's next request inside the back-off opens no connection"
+    assert_equal 2, @clients.sum(&:signons), "and sends no sign-on"
+    refute held?(service_key)
+
+    read "/lakeraven-ehr/Patient/1", token_b
+    assert_read_ok "client B again"
+    assert_equal 2, @clients.size
+  end
+
+  # 3a. A lease never outlives its token: the time the sign-on took is not
+  # added to the lease.
+  test "a slow sign-on leases the connection for no longer than the token has left" do
+    configure_service_account
+    token = token_for(@client_app, expires_in: 300)
+    slow_sign_on 100.seconds
+    touches = spy_on_pool_touch
+
+    read "/lakeraven-ehr/Patient/1", token
+
+    assert_read_ok "a token with 200 seconds left after the sign-on"
+    kept = touches.select { |touch| touch[:key] == service_key(token) }
+    assert_predicate kept, :any?, "the lease was touched"
+    kept.each do |touch|
+      left = token.expires_at - touch[:at]
+      assert_operator touch[:idle_for], :<=, left,
+                      "the lease is kept #{touch[:idle_for]}s, the token has #{left}s left"
+      assert_operator touch[:idle_for], :>, 0
+    end
+  end
+
+  # 3b.
+  test "a token that expires during the sign-on gets no lease" do
+    configure_service_account
+    token = token_for(@client_app, expires_in: 60)
+    slow_sign_on 120.seconds
+    touches = spy_on_pool_touch
+
+    read "/lakeraven-ehr/Patient/1", token
+
+    assert_no_rpms_connection("token expired during the sign-on")
+    assert_equal 1, @clients.size
+    refute held?(service_key(token)), "no lease outlives its token"
+    assert @clients[0].disconnected, "the connection that was just signed on is logged off"
+    assert_empty @clients[0].rpcs_after_signon, "nothing was read on it"
+    assert_empty touches.select { |touch| touch[:key] == service_key(token) }, "and it was never kept"
+  end
+
+  # 3c. No clamp up to one second.
+  test "a token with less than one whole second left gets no lease" do
+    configure_service_account
+    token = token_for(@client_app, expires_in: 300)
+    touches = spy_on_pool_touch
+    travel_to token.expires_at - 0.4.seconds, with_usec: true
+
+    read "/lakeraven-ehr/Patient/1", token
+
+    refute_equal 401, response.status, "the token itself is still good"
+    assert_no_rpms_connection("0.4 seconds left")
+    refute held?(service_key(token))
+    assert_empty @clients.reject(&:disconnected), "no connection is left open"
+    assert_empty touches, "nothing was kept"
+  end
+
+  # 4. Only a Backend Services token's revocation ends the application's
+  # service-account session ("the lease is shared by an application's tokens
+  # and released when any of them is revoked" keeps that half). A token of the
+  # same application that is not one (a person's, a browser session's) never
+  # rode the lease, and revoking it leaves the lease alone.
+  NOT_BACKEND_SERVICES = {
+    "with a resource owner" => { resource_owner_id: 9001 },
+    "with a resource owner and user/ scopes" => { resource_owner_id: 9002, scopes: "user/Patient.rs user/ServiceRequest.rs" },
+    "of a browser session" => { browser_session: true }
+  }.freeze
+
+  NOT_BACKEND_SERVICES.each do |label, attributes|
+    test "revoking a token #{label} does not release its application's service-account lease" do
+      configure_service_account
+      read "/lakeraven-ehr/Patient/1"
+      assert_read_ok
+      key = service_key
+      assert held?(key)
+      used = @clients[0].rpcs.size
+      other = Doorkeeper::AccessToken.create!(
+        { application: @client_app, scopes: SYSTEM_SCOPES, expires_in: 300 }.merge(attributes)
+      )
+      assert_equal @token.application_id, other.application_id
+
+      other.revoke
+
+      assert_predicate other.reload, :revoked?
+      assert held?(key), "the application's backend tokens keep their service-account session"
+      refute @clients[0].disconnected, "RPMS did not log the service account off"
+      read "/lakeraven-ehr/Patient/1"
+      assert_read_ok "the backend token, after the other token was revoked"
+      assert_equal 1, @clients.size, "on the same connection: no second sign-on"
+      assert_operator @clients[0].rpcs.size, :>, used
+    end
   end
 end
