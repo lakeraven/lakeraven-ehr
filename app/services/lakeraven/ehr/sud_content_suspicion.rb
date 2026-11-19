@@ -18,12 +18,18 @@ module Lakeraven
     #                   in time. Absence of data, or unreadable data, is
     #                   never evidence of safety.
     #
-    # Before matching, the text is canonicalised: Unicode NFKC (fullwidth
-    # and compatibility forms fold to plain letters and digits), format
-    # characters (soft hyphen, zero-width space, BOM) are removed, and
-    # underscores and dash punctuation read as spaces. So a soft hyphen or
-    # a zero-width space inside "alcohol", a fullwidth "ａｌｃｏｈｏｌ",
-    # "substance_use" and "F10_20" all read as the plain term or code.
+    # Before matching, the text is canonicalised in TWO forms, and it is
+    # :suspected when either form matches. Both apply Unicode NFKC
+    # (fullwidth and compatibility forms fold to plain letters and digits)
+    # and read underscores and dash punctuation as spaces. Format characters
+    # (soft hyphen, zero-width space, BOM) and non-whitespace control
+    # characters (NUL, ESC, DEL, C1 controls) are REMOVED in the first form
+    # and read as a SPACE in the second. So a soft hyphen or a NUL inside
+    # "alcohol" still reads as the plain term (first form), and one used as
+    # the only separator between words ("used<US>heroin") still separates
+    # them (second form). A fullwidth "ａｌｃｏｈｏｌ", "substance_use" and
+    # "F10_20" also read as the plain term or code. Readability is judged on
+    # the first form; both forms hold the same letters and digits.
     #
     # classify never raises for a String: an unreadable String is
     # :unclassified, never clean.
@@ -120,12 +126,14 @@ module Lakeraven
       # content.
       READABLE_CONTENT = Regexp.new("[\\p{L}\\p{N}]", timeout: MATCH_TIMEOUT)
 
-      # Removed before matching: format characters (soft hyphen, zero-width
-      # space and joiners, BOM, bidi controls) and the control characters
-      # that are not whitespace (NUL, U+0001-U+0008, U+000E-U+001F, U+007F,
-      # U+0080-U+009F except U+0085), so "alco<NUL>hol" reads as "alcohol".
-      # Whitespace controls (tab, line feed, vertical tab, form feed,
-      # carriage return, U+0085) are kept and still separate words.
+      # Format characters (soft hyphen, zero-width space and joiners, BOM,
+      # bidi controls) and the control characters that are not whitespace
+      # (NUL, U+0001-U+0008, U+000E-U+001F, U+007F, U+0080-U+009F except
+      # U+0085). Each is removed in one canonical form, so "alco<NUL>hol"
+      # reads as "alcohol", and read as a space in the other, so
+      # "used<US>heroin" reads as "used heroin". Whitespace controls (tab,
+      # line feed, vertical tab, form feed, carriage return, U+0085) are kept
+      # in both forms and always separate words.
       FORMAT_CHARACTERS = /[\p{Cf}[^\P{Cc}[:space:]]]/
 
       # Read as a word separator before matching: underscore and all dash
@@ -138,9 +146,11 @@ module Lakeraven
         readable = readable_utf8(text)
         return :unclassified if readable.nil?
 
-        canonical = canonicalise(readable)
-        return :unclassified unless READABLE_CONTENT.match?(canonical)
-        return :suspected if PATTERNS.any? { |pattern| pattern.match?(canonical) }
+        removed = canonicalise(readable, format_replacement: "")
+        return :unclassified unless READABLE_CONTENT.match?(removed)
+
+        spaced = canonicalise(readable, format_replacement: " ")
+        return :suspected if [ removed, spaced ].any? { |form| suspected_form?(form) }
 
         :not_suspected
       # A match that times out (Regexp::TimeoutError is a RegexpError), or
@@ -168,13 +178,19 @@ module Lakeraven
       end
       private_class_method :readable_utf8
 
-      # NFKC, then format and non-whitespace control characters dropped and
-      # separators spaced, so a term is matched on what a reader sees rather
-      # than how it is keyed.
-      def self.canonicalise(text)
-        text.unicode_normalize(:nfkc).gsub(FORMAT_CHARACTERS, "").gsub(SEPARATOR_CHARACTERS, " ")
+      # NFKC, then format and non-whitespace control characters replaced by
+      # format_replacement ("" for the removed form, " " for the spaced
+      # form) and separators spaced, so a term is matched on what a reader
+      # sees rather than how it is keyed.
+      def self.canonicalise(text, format_replacement:)
+        text.unicode_normalize(:nfkc).gsub(FORMAT_CHARACTERS, format_replacement).gsub(SEPARATOR_CHARACTERS, " ")
       end
       private_class_method :canonicalise
+
+      def self.suspected_form?(canonical)
+        PATTERNS.any? { |pattern| pattern.match?(canonical) }
+      end
+      private_class_method :suspected_form?
     end
   end
 end

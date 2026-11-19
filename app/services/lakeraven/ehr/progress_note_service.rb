@@ -13,8 +13,10 @@ module Lakeraven
     # LABELLED, never blocked. Once the gateway has given the note its IEN,
     # and before the text is written, text that SudContentSuspicion reads as
     # :suspected or :unclassified gets a Part2Label row. A failed label write
-    # does not stop the note (part2_label is :label_failed); read-time
-    # Part2Posture still treats an unlabelled suspected note as Part 2.
+    # does not stop the note (part2_label is :label_failed, on the Result and
+    # on the instance); the controller records it in the note submission's
+    # audit row, and read-time Part2Posture still treats an unlabelled
+    # suspected note as Part 2.
     #
     # ESignatureGateway.validate answers what RpmsRpc::ESignature.validate
     # answers: true when RPMS accepts the code, false when it does not. Only
@@ -88,6 +90,12 @@ module Lakeraven
       # The note created by this service, once TIU answered with its IEN.
       attr_reader :created_note_ien
 
+      # The Part 2 label outcome of create (:labelled, :not_suspected or
+      # :label_failed): nil before create labels anything, and set as soon
+      # as the label step returns, before the text is written, so a later
+      # step that raises does not lose it.
+      attr_reader :part2_label
+
       # Whether a TIU write (note creation) has been sent. Once it has, a
       # raised call leaves the chart in an unknown state.
       def write_sent? = @write_sent
@@ -102,7 +110,7 @@ module Lakeraven
 
         note_ien = created[:ien]
         @created_note_ien = note_ien
-        part2_label = label_part2(note_ien, text)
+        part2_label = @part2_label = label_part2(note_ien, text)
 
         written = @gateway.update_text(note_ien, text)
         unless written.is_a?(Hash) && written[:success]
@@ -171,7 +179,9 @@ module Lakeraven
       # and only :sign signs it, with the code just checked. Any other answer
       # (:cosign, nil) leaves the note saved unsigned, and the code is not
       # sent. Every Result once the note exists carries the part2_label
-      # create computed, so a :label_failed is never invisible to the chart.
+      # create computed, and the instance's part2_label keeps it even when a
+      # later step raises; ProgressNotesController records a :label_failed
+      # in the note submission's audit row ("part 2 label failed").
       def create_and_sign(title_ien:, text:, signature_code:)
         checked = check_signature_code(signature_code)
         return checked unless checked.success?

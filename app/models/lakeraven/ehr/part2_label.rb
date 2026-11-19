@@ -99,6 +99,18 @@ module Lakeraven
       # Runs the block on a connection no open transaction can roll back.
       # The transactional-test harness pins one connection for every thread,
       # so there the block runs inline (see AuditEvent.create_detached!).
+      #
+      # Pool sizing: inside an open transaction the write takes a SECOND
+      # pooled connection while the request still holds its own, so the
+      # pool must be sized for that: each concurrent request that labels a
+      # note may need two connections at once. When no connection frees up
+      # within the pool's checkout timeout, mark! raises
+      # ActiveRecord::ConnectionTimeoutError; ProgressNoteService then
+      # reports :label_failed and ProgressNotesController records "part 2
+      # label failed" in the note submission's audit row (Part2Posture still
+      # treats the unlabelled suspected note as Part 2 at read time).
+      # AuditEvent.create_detached! and NoteFormClaim.claim! use the same
+      # pattern and need the same headroom.
       def self.detached(&block)
         conn = connection
         return yield unless conn.transaction_open?
