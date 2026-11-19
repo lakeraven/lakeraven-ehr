@@ -4,6 +4,11 @@ When("the persona reads from the stack") do
   RpmsRpc.configuration.client.call_rpc("ORWU USERINFO")
 end
 
+# A scenario that ran against the stack and failed (#1179).
+Then("a check fails") do
+  raise "the check failed"
+end
+
 When("nothing is read") do
   # No RPC at all.
 end

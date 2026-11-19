@@ -40,3 +40,7 @@ Feature: A ready stack run reports a scenario as run only with evidence
 
   Scenario: The app swallows an error from the mock
     When the app swallows an error from the mock
+
+  Scenario: The persona reads from the stack and a check fails
+    When the persona reads from the stack
+    Then a check fails
