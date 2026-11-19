@@ -1400,6 +1400,116 @@ module Lakeraven
         refute_includes patient_audit_rows.pluck(:outcome), "8", "nothing was sent: the chart did not change"
         refute_includes AuditEvent.all.map { |event| event.attributes.to_s }.join, SYNTHETIC_BROKER_MESSAGE
       end
+
+      # -- 15. A Part 2 label that could not be written is in the audit row ----
+      #
+      # Part2Label.mark! takes a second pooled connection inside the
+      # request's open transaction (Part2Label.detached). With the pool
+      # exhausted that checkout times out, the note is still filed, and the
+      # service reports :label_failed. A label that was not written must not
+      # be invisible: the note submission's audit row says so, in the exact
+      # phrase "part 2 label failed", with no note text and no PHI.
+
+      SUSPECTED_NOTE_TEXT = "Synthetic follow-up: counselled on alcohol use."
+      SYNTHETIC_POOL_MESSAGE = "SYNTHETIC-POOL-MESSAGE"
+
+      # mark! fails the way a connection-pool checkout timeout fails
+      # (ActiveRecord::ConnectionTimeoutError, an ActiveRecordError).
+      def with_pool_timeout_on_label
+        restore = singleton_method_restore(Part2Label, :mark!)
+        Part2Label.define_singleton_method(:mark!) do |*_args, **_kwargs|
+          raise ActiveRecord::ConnectionTimeoutError, SYNTHETIC_POOL_MESSAGE
+        end
+        yield
+      ensure
+        restore&.call
+      end
+
+      def note_audit_descriptions = patient_audit_rows.pluck(:outcome_desc).compact
+
+      def assert_label_failure_audited!
+        descriptions = note_audit_descriptions
+        failed = descriptions.grep(/part 2 label failed/i)
+        assert_equal 1, failed.size,
+                     "one audit row says the part 2 label failed: #{descriptions.inspect}"
+        refute_includes failed.first, SUSPECTED_NOTE_TEXT
+        refute_includes failed.first, SYNTHETIC_SIGNATURE_CODE
+        refute_includes failed.first, SYNTHETIC_POOL_MESSAGE
+        everything = AuditEvent.all.map { |event| event.attributes.to_s }.join
+        refute_includes everything, SUSPECTED_NOTE_TEXT
+        refute_includes everything, SYNTHETIC_SIGNATURE_CODE
+        refute_includes everything, SYNTHETIC_POOL_MESSAGE
+      end
+
+      test "the audit row of a signed note whose part 2 label could not be written says the label failed" do
+        sign_in_provider!
+        form_token = fetch_form_token
+        AuditEvent.delete_all
+
+        with_pool_timeout_on_label do
+          post_note(form_token: form_token, note_text: SUSPECTED_NOTE_TEXT)
+        end
+
+        assert_equal %i[create update_text add], @tiu.tiu_calls.map(&:first)
+        assert_equal 0, Part2Label.count
+        assert_label_failure_audited!
+      end
+
+      test "the audit row of a note saved unsigned whose part 2 label could not be written says the label failed" do
+        sign_in_provider!
+        @tiu = FakeTiu.new(visits_by_dfn: default_visits, which_action: nil)
+        form_token = fetch_form_token
+        AuditEvent.delete_all
+
+        with_pool_timeout_on_label do
+          post_note(form_token: form_token, note_text: SUSPECTED_NOTE_TEXT)
+        end
+
+        assert_response :unprocessable_entity
+        assert_empty @tiu.calls_to(:add)
+        assert_label_failure_audited!
+      end
+
+      test "the audit row of a suspected note whose part 2 label was written does not say the label failed" do
+        sign_in_provider!
+        form_token = fetch_form_token
+        AuditEvent.delete_all
+
+        post_note(form_token: form_token, note_text: SUSPECTED_NOTE_TEXT)
+
+        assert_equal 1, Part2Label.count
+        assert_empty note_audit_descriptions.grep(/label failed/i),
+                     "the label was written: #{note_audit_descriptions.inspect}"
+      end
+
+      test "the audit row of a clean note does not say a part 2 label failed" do
+        sign_in_provider!
+        form_token = fetch_form_token
+        AuditEvent.delete_all
+
+        post_note(form_token: form_token)
+
+        assert_equal 0, Part2Label.count
+        assert_empty note_audit_descriptions.grep(/label failed/i),
+                     "nothing to label: #{note_audit_descriptions.inspect}"
+      end
+
+      test "the audit row says the part 2 label failed when the signing step then raises" do
+        sign_in_provider!
+        @tiu = FakeTiu.new(visits_by_dfn: default_visits,
+                           raises: { add: RpmsRpc::Error.new(SYNTHETIC_BROKER_MESSAGE) })
+        form_token = fetch_form_token
+        AuditEvent.delete_all
+
+        with_pool_timeout_on_label do
+          post_note(form_token: form_token, note_text: SUSPECTED_NOTE_TEXT)
+        end
+
+        assert_outcome_unknown_page!
+        assert_includes patient_audit_rows.pluck(:outcome), "8"
+        assert_label_failure_audited!
+        refute_includes AuditEvent.all.map { |event| event.attributes.to_s }.join, SYNTHETIC_BROKER_MESSAGE
+      end
     end
   end
 end
