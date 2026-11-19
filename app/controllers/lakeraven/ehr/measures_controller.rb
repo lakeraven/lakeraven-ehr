@@ -3,6 +3,7 @@
 module Lakeraven
   module EHR
     class MeasuresController < ApplicationController
+      disclosure_surface :fhir_api
       rate_limit only: %i[index import]
 
       skip_before_action :authorize_fhir_scope!, only: :import
