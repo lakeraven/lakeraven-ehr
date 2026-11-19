@@ -1206,6 +1206,26 @@ module Lakeraven
         assert_equal %w[3004 3002 3003 3001 3005], offered_visit_iens
       end
 
+      # "Today" is the site's clock (SiteTime, #1138), not the app server's:
+      # during a US evening the server (UTC) is already on the next day. Here
+      # the site is a day behind the process clock, so the visit checked in on
+      # the site's today comes first even though a later-dated visit exists.
+      test "today is the site's date, not the app server's" do
+        site_now = today_at(20, 10, days_ago: 1)
+        Lakeraven::EHR::SiteTime.reader = -> { site_now }
+        seed_visits(DFN_PARAM, [
+          visit_row("3101", at: today_at(19, 45, days_ago: 1)),
+          visit_row("3102", at: today_at(8, 0))
+        ])
+
+        get "#{BASE}/new", params: { instrument: "phq-9" }
+
+        assert_response :ok
+        assert_equal %w[3101 3102], offered_visit_iens
+      ensure
+        Lakeraven::EHR::SiteTime.reader = -> { Time.now }
+      end
+
       test "the form has no typed visit number" do
         get "#{BASE}/new", params: { instrument: "phq-9" }
 

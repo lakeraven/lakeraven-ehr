@@ -258,9 +258,10 @@ module Lakeraven
       # Only the filtered Encounters whose id is an eligible IEN (a key of
       # `presence`) and whose period still parses are offered, labelled only
       # from the filtered displays plus the raw had-a-clinic/provider flags. An IEN the filter returned more than once with different
-      # content is not offered (fail closed). Today's first (process-local
-      # date: the gem builds visit times with Time.new in the process zone,
-      # see WallClock), then newest first.
+      # content is not offered (fail closed). Today's first (the site's date,
+      # SiteTime: the app server runs UTC, already tomorrow during a US
+      # evening; visit times are wall-clock values, see WallClock), then
+      # newest first.
       def filtered_visits(document, presence)
         visits = bundle_entry_resources(document).filter_map do |resource|
           filtered_visit(resource, presence) if resource_type(resource) == "Encounter"
@@ -272,7 +273,7 @@ module Lakeraven
       end
 
       def sort_visits(visits)
-        today = Time.now.to_date # rubocop:disable Rails/TimeZone
+        today = SiteTime.today
         visits.sort_by { |visit| visit[:datetime] }.reverse.partition { |visit| visit[:datetime].to_date == today }.flatten
       end
 
