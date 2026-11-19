@@ -12,7 +12,12 @@
 SCREENING_PHQ9 = Lakeraven::EHR::ScreeningInstrument::PHQ9
 SCREENING_GAD7 = Lakeraven::EHR::ScreeningInstrument::GAD7
 SCREENING_MOUNT = "/lakeraven-ehr"
-SCREENING_SCOPES = Lakeraven::EHR::SessionScopePolicy.scope_string(security_keys: [ :behavioral_health_user ])
+# The behavioral health key, plus the Encounter read the form needs to offer
+# the patient's open visits and create needs to accept one of them (#1003).
+SCREENING_SCOPES = [
+  Lakeraven::EHR::SessionScopePolicy.scope_string(security_keys: [ :behavioral_health_user ]),
+  "user/Encounter.rs"
+].join(" ")
 
 module ScreeningStepHelpers
   def instrument_named(name)
@@ -242,6 +247,18 @@ Given("the clinician is signed in") do
 
   post "#{SCREENING_MOUNT}/patients/#{@dfn}/context",
        authenticity_token: @authenticity_token
+
+  # The Background's active encounter, as RPMS lists it (BEHOENCX VISITLST):
+  # the form submits against one of the patient's open visits (#1003).
+  # Synthetic clinic and provider; checked in today.
+  day = Date.current
+  checked_in_at = Time.zone.local(day.year, day.month, day.day, 9, 30)
+  fileman = "#{checked_in_at.year - 1700}#{checked_in_at.strftime('%m%d')}.#{checked_in_at.strftime('%H%M')}"
+  RpmsRpc.client.seed_keyed_collection(:encounter_visit_list, @dfn.to_s, [
+    { visit_string: "40;#{fileman};A;#{@visit_ien}", location: "Riverbend Behavioral Health",
+      category: "AMBULATORY", datetime: checked_in_at, locked: false,
+      provider_ien: 9001, provider: "TESTPROVIDER,ALPHA" }
+  ])
 end
 
 After do

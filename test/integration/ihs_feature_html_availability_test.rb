@@ -35,7 +35,7 @@ class IhsFeatureHtmlAvailabilityTest < ActionDispatch::IntegrationTest
     with_restricted_backend do
       get_chart_html
       assert_response :ok
-      refute_includes response.body, ">Immunizations</h2>"
+      assert_select "h2", text: /Immunizations/, count: 0
     end
   end
 
@@ -53,10 +53,10 @@ class IhsFeatureHtmlAvailabilityTest < ActionDispatch::IntegrationTest
       with_gateway_method(Lakeraven::EHR::ImmunizationGateway, :for_patient, ->(*) { raise RpmsRpc::Client::RpcError, "broker timeout" }) do
         get_chart_html
         assert_response :ok
-        assert_includes response.body, ">Immunizations</h2>"
+        assert_select "h2", text: /Immunizations/
         assert_match(/immunizations could not be loaded/i, response.body)
         refute_includes response.body, "No immunizations on file."
-        refute_match(/Immunizations<\/h2><span class="count">0<\/span>/, response.body)
+        assert_select "#chart-immunizations h2 span", { count: 0 }, "no count when the list did not load"
       end
     end
   end

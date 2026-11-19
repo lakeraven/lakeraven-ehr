@@ -11,10 +11,10 @@ module Lakeraven
     module NeedingActionWindow
       MAX_DAYS = 31
 
-      def self.default(today = Date.today) = today..today
+      def self.default(today = SiteTime.today) = today..today
 
       # [window, error] from the list's from and to parameters; see DateWindow.
-      def self.parse(from, to, today: Date.today)
+      def self.parse(from, to, today: SiteTime.today)
         DateWindow.parse(from, to, default: default(today), today: today, max_days: MAX_DAYS)
       end
     end

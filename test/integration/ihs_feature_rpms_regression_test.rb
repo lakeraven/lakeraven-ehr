@@ -39,7 +39,7 @@ class IhsFeatureRpmsRegressionTest < ActionDispatch::IntegrationTest
   test "chart still renders the Immunizations card on rpms" do
     get "/lakeraven-ehr/patients/#{PATIENT_DFN}", headers: @headers
     assert_response :ok
-    assert_includes response.body, ">Immunizations</h2>"
+    assert_select "h2", text: /Immunizations/
     assert_includes response.body, "Synthetic COVID-19"
   end
 

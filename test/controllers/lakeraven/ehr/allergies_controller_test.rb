@@ -3,6 +3,8 @@
 require "test_helper"
 require_relative "../../../dummy/lib/lakeraven_demo_seeds"
 require_relative "../../../support/allergy_write_test_helper"
+require_relative "../../../support/demo_persona_keys"
+require_relative "../../../support/captured_allergy_lookup_replies"
 
 module Lakeraven
   module EHR
@@ -10,11 +12,15 @@ module Lakeraven
     # patient-context story as ScreeningsController (#486).
     class AllergiesControllerTest < ActionDispatch::IntegrationTest
       include AllergyWriteTestHelper
+      include CapturedAllergyLookupReplies
 
       DFN = "3"
       BASE = "/lakeraven-ehr/patients/#{DFN}/allergies"
       NKA_PATH = "/lakeraven-ehr/patients/#{DFN}/allergies/no_known_allergies"
       CHART = "/lakeraven-ehr/patients/#{DFN}"
+      MEDICAL_ASSISTANT_KEYS = %w[provider orders_enter].freeze
+      # What sign-on mints for the medical assistant: the chart option's reads, no write scope.
+      MEDICAL_ASSISTANT_SCOPES = SessionScopePolicy.scope_string(security_keys: MEDICAL_ASSISTANT_KEYS, options: [ "CIAV VUECENTRIC" ])
 
       setup do
         @forgery_was = ActionController::Base.allow_forgery_protection
@@ -22,7 +28,7 @@ module Lakeraven
         Lakeraven::EHR::AuditEvent.delete_all
         @demo_original_client = RpmsRpc.configuration.client
         RpmsRpc.mock! { |m| LakeravenDemoSeeds.seed(m) }
-        sign_in_clinician!(scopes: WRITE_SCOPES)
+        sign_in_clinician!(scopes: WRITE_SCOPES, keys: MEDICAL_ASSISTANT_KEYS)
         open_patient_context!(DFN)
         @tracker = TrackingAllergyGateway.new
       end
@@ -91,18 +97,43 @@ module Lakeraven
 
       # -- Chart entry points ---------------------------------------------------
 
-      test "chart shows link to record an allergy and POST form for no known allergies" do
-        setup_chart_bearer!
-        get CHART, headers: @chart_headers
+      test "S-TRI-04.2 the provider, nurse and medical assistant personas, each holding PROVIDER, are offered allergy entry and record an allergy with the scopes sign-on mints" do
+        %w[PROFILE,MD PROFILE,RN PROFILE,MA].each do |persona|
+          keys = Roles.symbolize_keys(DemoPersonaKeys::BY_PERSONA.fetch(persona)).map(&:to_s)
+          scopes = SessionScopePolicy.scope_string(security_keys: keys, options: DemoPersonaKeys::OPTIONS_BY_PERSONA.fetch(persona))
+          refute_includes scopes, "AllergyIntolerance.write", "#{persona}: sign-on mints no allergy write scope"
+          sign_in_clinician!(scopes: scopes, keys: keys)
+          open_patient_context!(DFN)
+          get CHART
 
-        assert_response :ok
-        assert_select "a[href=?]", "#{MOUNT}/patients/#{DFN}/allergies/new", text: /record.*allergy/i
-        assert_select "form[action=?][method=post]", NKA_PATH
-        nka_forms = css_select("form[action='#{NKA_PATH}'][method=post]")
-        submits = nka_forms.flat_map { |form| form.css("input[type=submit], button[type=submit]") }
-        assert submits.any? { |node| (node["value"] || node.text).match?(/no known allergies/i) },
-               "expected NKA form submit control labeled No known allergies"
-        assert_select "a[href=?]", NKA_PATH, count: 0
+          assert_response :ok
+          assert_select "a[href=?]", "#{MOUNT}/patients/#{DFN}/allergies/new", { text: /record.*allergy/i }, persona
+          assert_select "form[action=?][method=post]", NKA_PATH
+          submits = css_select("form[action='#{NKA_PATH}'] input[type=submit], form[action='#{NKA_PATH}'] button[type=submit]")
+          assert submits.any? { |node| (node["value"] || node.text).match?(/no known allergies/i) }, persona
+          assert_select "a[href=?]", NKA_PATH, count: 0
+          calls_before = @tracker.add_calls.length
+          post_allergy
+          assert_redirected_to CHART, persona
+          assert_equal calls_before + 1, @tracker.add_calls.length, persona
+        end
+      end
+
+      test "S-TRI-04.2 a view-only or keyless sign-on is not offered allergy entry, and its writes are refused" do
+        [ %w[provider charting_view_only], %w[orders_enter] ].each do |keys|
+          sign_in_clinician!(scopes: MEDICAL_ASSISTANT_SCOPES, keys: keys)
+          open_patient_context!(DFN)
+          get CHART
+          assert_select "a[href=?]", "#{MOUNT}/patients/#{DFN}/allergies/new", { count: 0 }, keys.inspect
+          assert_select "form[action=?]", NKA_PATH, { count: 0 }, keys.inspect
+
+          post_allergy
+          assert_response :forbidden, keys.inspect
+          post_nka
+          assert_response :forbidden, keys.inspect
+        end
+        assert_empty @tracker.add_calls
+        assert_empty @tracker.nka_calls
       end
 
       test "GET no known allergies path does not record NKA" do
@@ -123,7 +154,122 @@ module Lakeraven
 
         assert_response :ok
         assert_select "form[action=?]", BASE
-        assert_select "input[name=?]", "allergy[agent]"
+        assert_select "input[name=?]", "allergen_search"
+      end
+
+      # -- Search and pickers, not RPMS values (#1109) ------------------------
+
+      test "S-TRI-04.2 the form asks for no RPMS pointer, FileMan date or symptom number" do
+        get "#{BASE}/new"
+
+        assert_select "input[name=?]", "allergen_search"
+        assert_select "input[name=?]", "symptom_search"
+        assert_select "input[type=datetime-local][name=?]", "allergy[originated_on]"
+        assert_select "input[type=date][name=?]", "allergy[reaction_on]"
+        assert_select "input[type=date][name=?]", "allergy[symptom_on]"
+        %w[allergy[agent] allergy[agent_pointer] allergy[originated_at] allergy[reaction_date]
+           allergy[symptoms][][ien] allergy[symptoms][][date]].each do |name|
+          assert_select "input[name=?]", name, count: 0
+        end
+        assert_no_match(/FileMan|GMRD\(|RPMS pointer/, response.body)
+      end
+
+      test "the entry time starts at the site's now and no picker goes past it" do
+        site_now = Time.new(2026, 11, 10, 14, 30, 0)
+        SiteTime.reader = -> { site_now }
+        SiteTime.reset
+
+        get "#{BASE}/new"
+
+        assert_select "input[name='allergy[originated_on]'][value=?][max=?]", "2026-11-10T14:30", "2026-11-10T14:30:00"
+        assert_select "input[name='allergy[reaction_on]'][max=?]", "2026-11-10"
+      ensure
+        SiteTime.reader = -> { Time.now }
+        SiteTime.reset
+      end
+
+      test "S-TRI-04.2 Find allergen lists RPMS's matches, each carrying the agent and its pointer" do
+        seed_allergy_lookups!
+
+        get "#{BASE}/new", params: { allergen_search: "STRAWB", allergy: { nature: "A" } }
+
+        assert_response :ok
+        values = css_select("input[type=radio][name='allergy[agent_choice]']").map { |i| i["value"] }
+        assert_equal [ "6;GMRD(120.82,^STRAWBERRIES" ], values, "the synonym match is the same allergen, offered once"
+        assert_select "label[data-allergen='6;GMRD(120.82,']", text: /STRAWBERRIES/
+        assert_select "select[name='allergy[nature]'] option[selected][value=?]", "A"
+        assert_equal [ { rpc: "ORWDAL32 ALLERGY MATCH", params: [ "STRAWB" ] } ],
+                     RpmsRpc.client.received_calls.select { |c| c[:rpc] == "ORWDAL32 ALLERGY MATCH" }.map { |c| c.slice(:rpc, :params) }
+      end
+
+      test "Find symptom lists the catalog's symptoms that start with the text" do
+        seed_allergy_lookups!
+
+        get "#{BASE}/new", params: { symptom_search: "ras" }
+
+        values = css_select("input[type=radio][name='allergy[symptom_choice]']").map { |i| i["value"] }
+        assert_equal [ "133^RASH" ], values
+      end
+
+      test "S-TRI-04.2 the chosen allergen, the picked dates and the chosen symptom reach ORWDAL32 SAVE ALLERGY as RPMS's values" do
+        seed_allergy_lookups!
+        site_now = Time.new(2026, 11, 10, 15, 0, 0)
+        SiteTime.reader = -> { site_now }
+        SiteTime.reset
+
+        post BASE, params: { authenticity_token: csrf_token, allergy: {
+          agent_choice: "6;GMRD(120.82,^STRAWBERRIES", type: "F", nature: "A",
+          observed_or_historical: "o", originated_on: "2026-11-10T14:30", reaction_on: "2026-11-08",
+          severity: "2", symptom_choice: "133^RASH", symptom_on: "2026-11-09", comments: [ "" ]
+        } }
+
+        save = RpmsRpc.client.received_calls.find { |c| c[:rpc] == "ORWDAL32 SAVE ALLERGY" }
+        assert save, "the allergy reached RPMS"
+        _new_entry, dfn, edited = save[:params]
+        assert_equal DFN, dfn.to_s
+        assert_equal "STRAWBERRIES^6;GMRD(120.82,", edited["GMRAGNT"]
+        assert_equal "3261110.1430", edited["GMRAORDT"]
+        assert_equal "3261108", edited["GMRARDT"]
+        assert_equal "133^RASH^3261109", edited[[ "GMRASYMP", 1 ]]
+        assert_equal DUZ.to_s, edited["GMRAORIG"]
+        assert_equal [ "STRAWBERRIES" ], RpmsRpc.client.received_calls
+          .select { |c| c[:rpc] == "ORWDAL32 ALLERGY MATCH" }.map { |c| c[:params].first },
+          "the choice was checked against RPMS's own search first"
+      ensure
+        SiteTime.reader = -> { Time.now }
+        SiteTime.reset
+      end
+
+      test "a date later than the site's now is refused before RPMS is asked" do
+        seed_allergy_lookups!
+        site_now = Time.new(2026, 11, 10, 15, 0, 0)
+        SiteTime.reader = -> { site_now }
+        SiteTime.reset
+
+        post BASE, params: { authenticity_token: csrf_token, allergy: {
+          agent_choice: "6;GMRD(120.82,^STRAWBERRIES", type: "F", nature: "A",
+          observed_or_historical: "h", originated_on: "2026-11-10T15:30"
+        } }
+
+        assert_response :unprocessable_entity
+        assert_match "later than now at this site", response.body
+        assert_empty RpmsRpc.client.received_calls.select { |c| c[:rpc] == "ORWDAL32 SAVE ALLERGY" }
+      ensure
+        SiteTime.reader = -> { Time.now }
+        SiteTime.reset
+      end
+
+      test "an allergen RPMS's search does not offer is not filed" do
+        seed_allergy_lookups!
+
+        post BASE, params: { authenticity_token: csrf_token, allergy: {
+          agent_choice: "125;GMRD(120.82,^STRAWBERRIES", type: "F", nature: "A",
+          observed_or_historical: "h", originated_on: 1.hour.ago.strftime("%Y-%m-%dT%H:%M")
+        } }
+
+        assert_response :unprocessable_entity
+        assert_match "no longer offers the chosen allergen", response.body
+        assert_empty RpmsRpc.client.received_calls.select { |c| c[:rpc] == "ORWDAL32 SAVE ALLERGY" }
       end
 
       # The page names its patient with the chart's own banner, not a
@@ -160,7 +306,7 @@ module Lakeraven
 
       # -- Successful writes ----------------------------------------------------
 
-      test "POST allergy with valid synthetic data calls gateway once and redirects with success notice" do
+      test "S-TRI-04.2 POST allergy with valid synthetic data calls gateway once and redirects with success notice" do
         post_allergy
 
         assert_equal 1, @tracker.add_calls.length
@@ -221,18 +367,6 @@ module Lakeraven
         end
 
         assert_response :unauthorized
-        assert_empty @tracker.add_calls
-      end
-
-      test "token without allergy write scope refuses create" do
-        sign_in_clinician!(scopes: READ_SCOPES)
-        open_patient_context!(DFN)
-
-        with_tracking_allergy_gateway(@tracker) do
-          post BASE, params: allergy_form_params.merge(authenticity_token: csrf_token)
-        end
-
-        assert_response :forbidden
         assert_empty @tracker.add_calls
       end
 

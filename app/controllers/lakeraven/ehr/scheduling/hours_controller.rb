@@ -16,7 +16,7 @@ module Lakeraven
 
         # GET /scheduling/clinics/:resource_id/hours/new
         def new
-          start = Date.today.next_day
+          start = SiteTime.today.next_day
           @hours = ClinicHours.new(weekdays: (1..5).to_a, opens: "08:00", closes: "17:00", slots: 1,
                                    first_date: start.iso8601, last_date: (start >> 1).iso8601)
           @access_types = AppointmentBookingGateway.access_types
