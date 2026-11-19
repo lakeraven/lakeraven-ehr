@@ -14,6 +14,10 @@ module Lakeraven
       DISCLOSED_TYPES = %w[Patient AllergyIntolerance Condition MedicationRequest].freeze
       EGRESS_LISTS = %i[allergies conditions medications].freeze
 
+      # An item whose FHIR form cannot be read cannot be shown unlabelled.
+      FhirFormUnavailable = Class.new(StandardError)
+      private_constant :FhirFormUnavailable
+
       # This POST RETURNS the patient's chart as a C-CDA, so it needs read
       # scope as well as write, and it is bound to the patient compartment
       # like any other read of that patient.
@@ -30,6 +34,8 @@ module Lakeraven
         return refuse_unfiltered_egress unless requested_patient_dfn?(filtered[:patient][:dfn])
 
         render xml: renderable_ccda(filtered), status: :created, content_type: "application/xml"
+      rescue FhirFormUnavailable
+        refuse_unfiltered_egress
       end
 
       private
@@ -80,7 +86,8 @@ module Lakeraven
           name: { family: family&.strip, given: given&.strip },
           dob: patient.dob,
           sex: patient.sex,
-          address: address_hash(patient)
+          address: address_hash(patient),
+          fhir: fhir_form(patient)
         }
       end
 
@@ -102,16 +109,32 @@ module Lakeraven
         rows = model.for_patient(dfn)
         rows = [] unless rows.is_a?(Array)
         rows.map { |item| coded_row(item, code_key, display_key, system_key) }
+      rescue FhirFormUnavailable
+        raise
       rescue StandardError
         []
       end
 
+      # The row carries the item's whole FHIR form so the filter refuses
+      # the C-CDA for any label on it. The C-CDA models are built without it.
       def coded_row(item, code_key, display_key, system_key)
         {
           code: item_value(item, code_key),
           display: item_value(item, display_key),
-          code_system: system_key ? item_value(item, system_key) : nil
+          code_system: system_key ? item_value(item, system_key) : nil,
+          fhir: fhir_form(item)
         }
+      end
+
+      # Hash: the Hash itself. Model: its to_fhir, which must be a Hash.
+      # An item with no to_fhir cannot be shown unlabelled: refuse.
+      def fhir_form(item)
+        return item if item.is_a?(Hash)
+
+        form = item.to_fhir
+        form.is_a?(Hash) ? form : raise(FhirFormUnavailable)
+      rescue StandardError
+        raise FhirFormUnavailable
       end
 
       def item_value(item, key)
