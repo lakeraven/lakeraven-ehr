@@ -8,6 +8,8 @@ module Lakeraven
       include PatientCompartment
 
       disclosure_surface :ccda
+      # A bearer client here is a C-CDA client, not the FHIR API (#969).
+      bearer_disclosure_surface :ccda
       rate_limit only: :create
 
       # Types in the C-CDA body. A scope named after this controller is not

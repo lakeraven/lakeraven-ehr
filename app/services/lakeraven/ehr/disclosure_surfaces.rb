@@ -41,16 +41,12 @@ module Lakeraven
         value.filter_map { |entry| known_name(entry) }.uniq
       end
 
-      # API routes not yet behind any surface, each with why. C-CDA is the
-      # :ccda surface's own slice (#969); until then a bearer request to
-      # these is still fhir_api (SmartAuthentication's bearer rule).
-      # Not listed, as it is not an API route: the session chart's FHIR JSON
-      # (charts#show as .json for a browser session) is not gated yet; a
-      # later slice.
-      UNGOVERNED_API_ROUTES = {
-        "lakeraven/ehr/ccda_imports#create" => "C-CDA import: gated as :ccda in #969; bearer requests are fhir_api until then",
-        "lakeraven/ehr/transitions_of_care#create" => "C-CDA generation: gated as :ccda in #969; bearer requests are fhir_api until then"
-      }.freeze
+      # API routes not yet behind any surface, each with why. None today:
+      # both C-CDA routes are the :ccda surface (#969), and the session
+      # chart's FHIR form (charts#show as .json, ?_format=json or
+      # Accept: application/fhir+json) is fhir_api even for a browser
+      # session (ChartsController's fhir_api_request? rule).
+      UNGOVERNED_API_ROUTES = {}.freeze
 
       # "controller#action" for every FHIR API route of +route_set+ that no
       # unconditional disclosure_surface rule covers, less +allow+. An API
