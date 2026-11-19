@@ -20,11 +20,16 @@ class FakePovGateway
 end
 
 class FakeProgressNoteGateway
+  # What TIU appends after the body when a note is signed. Synthetic.
+  SIGNATURE_ROWS = [ "", "/es/ PROVIDER,SYNTHETIC", "Signed: 11/15/2026 10:00" ].freeze
+
   attr_reader :creates, :text_updates
 
   def initialize
     @creates = []
     @text_updates = []
+    @signed = []
+    @appended = Hash.new { |rows, note| rows[note] = [] }
   end
 
   def create(dfn, visit_ien, title_ien)
@@ -36,13 +41,55 @@ class FakeProgressNoteGateway
     @text_updates << { note_ien: note_ien, text: text }
     { success: true, raw: "1" }
   end
+
+  # Models ProgressNoteGateway.fetch_body: the body rows of the note, or nil
+  # if no text was written. Before signing that is the written text. Once
+  # signed it is the written text, then the signature block, then any rows
+  # appended since. There is no fetch_text here: the signing audit hashes
+  # the body, not the TIU display.
+  def fetch_body(note_ien)
+    rows = written_rows(note_ien)
+    return nil if rows.nil?
+    return rows unless signed?(note_ien)
+
+    rows + SIGNATURE_ROWS + @appended[note_ien.to_s]
+  end
+
+  # The rows of the text most recently written for this note, or nil.
+  def written_rows(note_ien)
+    update = @text_updates.reverse.find { |u| u[:note_ien].to_s == note_ien.to_s }
+    update && update[:text].to_s.split("\n", -1)
+  end
+
+  # TIU appends the signature block when the sign action files. Called by
+  # FakeESignatureGateway#add.
+  def file_signature(note_ien)
+    @before_filing&.call(note_ien)
+    @signed << note_ien.to_s
+  end
+
+  # A hook run when the sign action arrives, before the signature block is
+  # appended: the window between the signer's read and filing.
+  def before_filing(&hook)
+    @before_filing = hook
+  end
+
+  def signed?(note_ien) = @signed.include?(note_ien.to_s)
+
+  # A row added to a signed note after its signature block.
+  def append_row(note_ien, row)
+    @appended[note_ien.to_s] << row
+  end
 end
 
 class FakeESignatureGateway
   attr_reader :validations, :sign_actions
 
-  def initialize(valid: true)
+  # +note_gateway+ is the note store the signature is filed on: a sign
+  # action makes it append the signature block, as TIU does.
+  def initialize(valid: true, note_gateway: nil)
     @valid = valid
+    @note_gateway = note_gateway
     @validations = []
     @sign_actions = []
   end
@@ -55,6 +102,7 @@ class FakeESignatureGateway
 
   def add(note_ien, user_duz, signature_code, action: :sign)
     @sign_actions << { note_ien: note_ien, user_duz: user_duz, action: action }
+    @note_gateway&.file_signature(note_ien)
     { success: true, raw: "1" }
   end
 end
@@ -63,7 +111,7 @@ Given("a demo visit with IEN {int}") do |visit_ien|
   @visit_ien = visit_ien
   @pov_gateway = FakePovGateway.new
   @note_gateway = FakeProgressNoteGateway.new
-  @esig_gateway = FakeESignatureGateway.new
+  @esig_gateway = FakeESignatureGateway.new(note_gateway: @note_gateway)
 end
 
 Given("no open visit") do
@@ -79,7 +127,7 @@ Given("the POV gateway will fail") do
 end
 
 Given("the signature code will fail validation") do
-  @esig_gateway = FakeESignatureGateway.new(valid: false)
+  @esig_gateway = FakeESignatureGateway.new(valid: false, note_gateway: @note_gateway)
 end
 
 # --- POV -----------------------------------------------------------------
