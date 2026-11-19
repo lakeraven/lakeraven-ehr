@@ -360,6 +360,12 @@ module Lakeraven
       # resolves to "browser": where several applications share the SSO name
       # they are all SSO applications, so nothing legitimate is caught by it.
       def browser_sso_token?(token = current_token)
+        SmartAuthentication.browser_sso_token?(token)
+      end
+
+      # The predicate itself, for code that has a token and no controller
+      # (BackendServicesToken, the lease release on revocation).
+      def self.browser_sso_token?(token)
         return false if token.nil?
         return true if browser_session_flag(token)
 
@@ -416,7 +422,7 @@ module Lakeraven
 
       # The intrinsic marker. Absent column (migration not yet run) answers
       # false and lets the legacy path decide.
-      def browser_session_flag(token)
+      def self.browser_session_flag(token)
         return false unless token.respond_to?(:has_attribute?)
         return false unless token.has_attribute?(:browser_session)
 
@@ -428,11 +434,12 @@ module Lakeraven
       # Pre-flag fallback. Resolves by application NAME, which is why it is the
       # fallback and not the rule; any match counts, per the ambiguity note on
       # #browser_sso_token?.
-      def legacy_browser_sso_token?(token)
+      def self.legacy_browser_sso_token?(token)
         token.application&.name == BROWSER_SSO_APP_NAME
       rescue StandardError
         false
       end
+      private_class_method :browser_session_flag, :legacy_browser_sso_token?
 
       # DUZ of the clinician this request acts as, or nil.
       #

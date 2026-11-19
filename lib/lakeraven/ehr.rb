@@ -4,6 +4,7 @@ require "doorkeeper"
 require "jwt"
 require "lakeraven/ehr/version"
 require "lakeraven/ehr/rpms_sessions"
+require "lakeraven/ehr/service_account"
 require "lakeraven/ehr/engine"
 
 module Lakeraven
