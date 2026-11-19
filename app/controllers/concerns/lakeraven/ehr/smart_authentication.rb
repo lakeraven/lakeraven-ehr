@@ -26,20 +26,35 @@ module Lakeraven
       # rule to remember.
       READ_METHODS = %w[GET HEAD OPTIONS].freeze unless defined?(READ_METHODS)
 
+      # "Bearer <token>", any case: the one shape both the token lookup and
+      # the fhir_api gate read a header credential from.
+      BEARER_HEADER = /\ABearer\s+(.+)\z/i
+      BEARER_RULE_KEY = :smart_bearer
+
+      # True when +request+ carries a header bearer token (headers only).
+      def self.bearer_authorization?(request)
+        request.headers["Authorization"].to_s.match?(BEARER_HEADER)
+      end
+
       included do
         attr_reader :current_token
+
+        # A header bearer token to any controller here is the FHIR API
+        # (#970): closed until the host opens fhir_api, refused in #process
+        # ahead of every callback. A browser session (no Authorization
+        # header, or a non-Bearer one) is untouched. Plain objects that
+        # borrow these helpers (BannerToken) have no #process to gate.
+        if self < AbstractController::Base
+          include DisclosureSurfaceGate
+          bearer_disclosure_surface :fhir_api
+        end
       end
 
-      BEARER_AUTHORIZATION = /\ABearer\s+(.+)\z/i
-
-      # The token of a Bearer Authorization header, else nil. The one
-      # definition of "a bearer header" (ChartRepresentation reads it too).
-      def self.bearer_token(authorization)
-        authorization.to_s[BEARER_AUTHORIZATION, 1]
-      end
-
-      def self.bearer_authorization?(request)
-        !bearer_token(request.headers["Authorization"]).nil?
+      class_methods do
+        # Restates which surface a header bearer request here belongs to.
+        def bearer_disclosure_surface(surface)
+          disclosure_surface surface, if: :disclosure_bearer_request?, key: BEARER_RULE_KEY
+        end
       end
 
       def authenticate_smart_token!
@@ -268,14 +283,17 @@ module Lakeraven
       def extract_bearer_token
         # Returns [token_string, :header | :session] — the SOURCE matters, and
         # is what the browser-credential rules below are decided on.
-        header_token = SmartAuthentication.bearer_token(request.headers["Authorization"])
-        # A present-but-non-Bearer header (a proxy-injected `Basic`, say) is
-        # "no bearer token FOUND", not "a header arrived, so refuse" — so it
-        # falls through to the session path below rather than short-circuiting.
-        # Option 3 is preserved: that path is gated on
-        # session_token_fallback_allowed? (false on the FHIR API), so a
-        # non-Bearer header there still refuses.
-        return [ header_token, :header ] if header_token
+        auth = request.headers["Authorization"]
+        if auth.present?
+          match = auth.match(BEARER_HEADER)
+          # A present-but-non-Bearer header (a proxy-injected `Basic`, say) is
+          # "no bearer token FOUND", not "a header arrived, so refuse" — so it
+          # falls through to the session path below rather than short-circuiting.
+          # Option 3 is preserved: that path is gated on
+          # session_token_fallback_allowed? (false on the FHIR API), so a
+          # non-Bearer header there still refuses.
+          return [ match.captures.first, :header ] if match
+        end
 
         # Browser session fallback: the sign-on bridge (SessionsController) mints
         # a SMART token and stashes it here, since a browser won't send an
@@ -301,6 +319,10 @@ module Lakeraven
       # controller (ActionController::API) stays bearer-only.
       def session_token_fallback_allowed?
         false
+      end
+
+      def disclosure_bearer_request?
+        SmartAuthentication.bearer_authorization?(request)
       end
 
       # A browser-session token is valid ONLY when it arrives through the

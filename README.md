@@ -129,8 +129,10 @@ The names are `fhir_api`, `bulk_export` and `ccda`.
 The setting fails closed: only an Array opens anything, and only its entries that spell a name exactly.
 A bare name, `true`, a Hash or an unknown name opens nothing.
 A closed surface answers a bare 404 before authentication, audit or the action runs.
-Gated so far: `bulk_export` (`/exports` and its files); `ccda` (`/transitions_of_care`, and `/ccda_imports`, which also needs `fhir_api`, #969); and `fhir_api` on the chart's FHIR form (`.json`, `?_format=json`, `Accept: application/fhir+json`) or any chart read with a Bearer header.
-A signed-in browser's HTML chart is not a disclosure surface; it offers "View as FHIR" only while `fhir_api` is open.
+`bulk_export` gates `/exports` and its files.
+`fhir_api` gates the FHIR resource routes, `Measure/$import`, and any `Authorization: Bearer` request to a SMART-authenticated controller (the chart included); a browser session without a bearer header is untouched.
+`fhir_api` also gates SMART App Launch: `smart/launch`, `oauth/authorize*` and the authorization-code `oauth/token`. The backend services (client_credentials) token stays open for bulk export.
+`/metadata` and SMART discovery stay open. C-CDA (`ccda`) is still to come.
 
 ## Contributing
 Contribution directions go here.
