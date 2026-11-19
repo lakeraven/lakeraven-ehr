@@ -1,0 +1,44 @@
+<% page_title "Providers | #{@resource[:name]}" %>
+
+<%= page_header "Clinic providers", @resource[:name] do %>
+  <%= link_to "Back to clinic settings", scheduling_clinic_settings_path(@resource[:id]) %>
+<% end %>
+
+<% if flash[:notice].present? %>
+  <%= alert_box :notice, flash[:notice] %>
+<% end %>
+<% if flash[:alert].present? %>
+  <%= alert_box :error, flash[:alert] %>
+<% end %>
+
+<% if @providers.nil? %>
+  <%= alert_box :error, "Clinic providers are unavailable. Please try again." %>
+<% elsif @providers.empty? %>
+  <p>No clinic providers are listed.</p>
+<% else %>
+  <table>
+    <thead><tr><th>Provider</th><th>Default</th><% if supervisor? %><th>Actions</th><% end %></tr></thead>
+    <tbody>
+      <% @providers.each do |provider| %>
+        <tr>
+          <td><%= provider[:name] %></td>
+          <td><%= provider[:default] ? "Yes" : "No" %></td>
+          <% if supervisor? %>
+            <td>
+              <% unless provider[:default] %>
+                <%= button_to "Set as default", scheduling_default_clinic_provider_path(@resource[:id], provider[:id]), method: :post %>
+              <% end %>
+              <%= form_with url: scheduling_clinic_provider_path(@resource[:id], provider[:id]), method: :delete, local: true do %>
+                <label>
+                  <%= check_box_tag :confirm_removal, "1", false, required: true, id: "confirm-removal-#{provider[:id]}" %>
+                  Confirm removal of <%= provider[:name] %>
+                </label>
+                <%= button_tag "Remove", type: :submit %>
+              <% end %>
+            </td>
+          <% end %>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+<% end %>
