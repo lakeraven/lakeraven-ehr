@@ -47,8 +47,8 @@ module Lakeraven
         "lakeraven/ehr/demo_visits#reset",    # Dev-gated demo UI
         "lakeraven/ehr/demo_visits#new",      # Dev-gated demo UI
         "lakeraven/ehr/demo_visits#summary",  # Dev-gated demo UI
-        "lakeraven/ehr/screenings#create",    # Session-authenticated clinician UI (entry, not disclosure)
-        "lakeraven/ehr/screenings#new",       # Session-authenticated clinician UI (entry, not disclosure)
+        "lakeraven/ehr/screenings#create",    # Clinician entry form (#1003): renders the patient's open visits (date, clinic, provider) only from Encounter resources passed through filter_fhir_for_egress; not a FHIR read
+        "lakeraven/ehr/screenings#new",       # Clinician entry form (#1003): renders the patient's open visits (date, clinic, provider) only from Encounter resources passed through filter_fhir_for_egress; not a FHIR read
         "lakeraven/ehr/allergies#new",              # Session-authenticated clinician entry/write surface (#644); discloses no stored clinical data
         "lakeraven/ehr/allergies#create",            # Session-authenticated clinician entry/write surface (#644); discloses no stored clinical data
         "lakeraven/ehr/allergies#no_known_allergies", # Session-authenticated clinician entry/write surface (#644); discloses no stored clinical data
