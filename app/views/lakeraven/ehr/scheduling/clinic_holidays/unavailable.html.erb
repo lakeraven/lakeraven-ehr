@@ -1,0 +1,3 @@
+<% page_title "Holidays unavailable" %>
+<%= alert_box :error, "RPMS holiday information is unavailable. Try again later.", id: "clinic-holidays-unavailable" %>
+<%= link_to "Back to clinic settings", scheduling_clinic_settings_path(@resource[:id]) %>
