@@ -60,7 +60,17 @@ class BackendServiceAccountRpmsTest < ActionDispatch::IntegrationTest
     end
 
     def connect(*) = (@connected = true)
-    def connected? = @connected && !@disconnected && !@dropped
+
+    def connected?
+      hook = @on_connected_check
+      @on_connected_check = nil
+      hook&.call
+      @connected && !@disconnected && !@dropped
+    end
+
+    # Run the block once, the next time the client is asked connected?, before
+    # it answers.
+    def on_connected_check(&hook) = (@on_connected_check = hook)
 
     def disconnect
       @disconnected = true
@@ -697,6 +707,137 @@ class BackendServiceAccountRpmsTest < ActionDispatch::IntegrationTest
     refute held?(service_key)
   end
 
+  # A dropped service-account lease is replaced under the application's
+  # sign-on lock, and a request never logs off a lease a sibling request of
+  # the same application has just signed on.
+  #
+  # Two requests of one application meet a lease whose connection the broker
+  # dropped. Request A is parked at a seam the moment it looks at the dropped
+  # connection; request B then runs, in full, through the public request path
+  # (its own integration session, its own token of the same application) on
+  # its own thread, and request A goes on once B is done or SIBLING_WAIT has
+  # passed. Both orders must end the same way: the dropped connection logged
+  # off, ONE fresh connection signed on for the replacement, and both
+  # requests reading on it as the service account.
+  #
+  # Request A is driven as the one call application_controller makes
+  # (RpmsSessions.with_service_account(current_token, &action), see
+  # `read_as_service_account`) rather than as an HTTP request, because a
+  # transactional test keeps the single database connection for the thread
+  # inside the request: while an HTTP request A sat at the seam, request B's
+  # thread could not run one query, so the two orders could never meet. A's
+  # own HTTP path is read again at the end of each test, on the lease the
+  # race left behind.
+  #
+  # The seams, one per test, neither of them a private method of RpmsSessions:
+  #   * the dropped fake client's #connected? (RecordingClient#on_connected_check):
+  #     request A is asking whether the lease is alive and has not been
+  #     answered yet;
+  #   * RpmsRpc::SessionPool#release on the configured pool, for the service
+  #     key (hold_first_pool_release): request A has seen the drop and is
+  #     about to release what the key holds, which by then is B's fresh
+  #     connection.
+  #
+  # Should a fix hold the application's sign-on lock across the seam, request
+  # B simply waits its turn there and the test sees the other order, which the
+  # same assertions describe.
+  SIBLING_WAIT = 3
+
+  # Request B: a whole request of a sibling token of the same application,
+  # read through the public path on its own session. [status, body].
+  def sibling_read(path, token)
+    session = open_session
+    session.get path, headers: { "Authorization" => "Bearer #{token.plaintext_token || token.token}" }
+    [ session.response.status, session.response.body ]
+  end
+
+  # Request A: the action the controller runs inside
+  # RpmsSessions.with_service_account, reading patient 1 the way
+  # PatientsController#show does. { duz:, patient:, error: }.
+  def read_as_service_account(token)
+    seen = {}
+    Lakeraven::EHR::RpmsSessions.with_service_account(token) do
+      seen[:duz] = RpmsRpc.client.duz.to_s
+      seen[:patient] = Lakeraven::EHR::Patient.find_by_dfn("1")
+    rescue RpmsRpc::NotConfiguredError => e
+      seen[:error] = e.class.name # the request had no RPMS connection of its own
+    end
+    seen
+  end
+
+  # Run the block once, in the first RpmsRpc::SessionPool#release of key on the
+  # configured pool, before that release is done. The pool is rebuilt per test.
+  def hold_first_pool_release(key, &hook)
+    pool = Lakeraven::EHR::RpmsSessions.instance_variable_get(:@pool)
+    original = pool.method(:release)
+    pool.define_singleton_method(:release) do |released|
+      run = hook
+      if released == key && run
+        hook = nil
+        run.call
+      end
+      original.call(released)
+    end
+  end
+
+  # The lease is held, its connection has dropped, and request A is about to
+  # look at it. Yields the dropped client and a callable that runs request B
+  # on its own thread; the block arms one seam with it.
+  def assert_dropped_lease_replaced_once
+    configure_service_account
+    read "/lakeraven-ehr/Patient/1"
+    assert_read_ok "the read that takes the lease"
+    dropped = @clients[0]
+    used = dropped.rpcs.size
+    sibling_token = token_for(@client_app)
+    assert_equal service_key, service_key(sibling_token), "both tokens are the same application's"
+    sibling = nil
+    dropped.drop!
+
+    yield dropped, lambda {
+      sibling ||= Thread.new { sibling_read("/lakeraven-ehr/Patient/1", sibling_token) }
+      sibling.join(SIBLING_WAIT)
+    }
+    request_a = read_as_service_account(@token)
+
+    assert sibling, "the seam was reached: request B ran while request A was replacing the dropped lease"
+    assert sibling.join(SIBLING_WAIT), "request B finished"
+    request_b = sibling.value
+    assert_kind_of Array, request_b, "request B raised: #{request_b.inspect}"
+    fresh = @clients[1]
+    assert fresh, "the dropped lease was replaced by a fresh sign-on"
+    refute fresh.disconnected,
+           "the fresh connection one request signed on was logged off by its sibling " \
+           "(#{@clients.size} connections were opened)"
+    assert_equal 2, @clients.size, "the dropped connection and ONE fresh one: exactly one new sign-on"
+    assert_equal 1, fresh.signons, "one sign-on on the fresh connection"
+    assert_nil request_a[:error], "request A read on the service account's connection"
+    assert_equal SERVICE_DUZ.to_s, request_a[:duz], "request A ran as the service account"
+    assert request_a[:patient], "request A read patient 1"
+    assert_equal 200, request_b[0], "request B: #{request_b[1].to_s[0, 300]}"
+    assert_equal used, dropped.rpcs.size, "the dropped connection is not used"
+    assert dropped.disconnected, "the dropped connection is released"
+    assert_equal SERVICE_DUZ.to_s, fresh.duz.to_s
+    assert_equal [ SERVICE_DUZ.to_s ], service_duzes(fresh), "both requests read as the service account"
+    assert held?(service_key), "the application holds its lease"
+
+    read "/lakeraven-ehr/Patient/1" # A's own path, on what the race left
+    assert_read_ok "a read after the replacement"
+    assert_equal 2, @clients.size, "and no further sign-on"
+  end
+
+  test "a sibling request that replaces a dropped lease while another is still asking whether it is alive keeps its fresh connection" do
+    assert_dropped_lease_replaced_once do |dropped, run_sibling|
+      dropped.on_connected_check { run_sibling.call }
+    end
+  end
+
+  test "a request that saw a dropped lease does not log off the fresh one a sibling request signed on meanwhile" do
+    assert_dropped_lease_replaced_once do |_dropped, run_sibling|
+      hold_first_pool_release(service_key) { run_sibling.call }
+    end
+  end
+
   test "a lease that is no longer the service account's is released, not used" do
     configure_service_account
     read "/lakeraven-ehr/Patient/1"
@@ -1009,6 +1150,170 @@ class BackendServiceAccountRpmsTest < ActionDispatch::IntegrationTest
     read "/lakeraven-ehr/Patient/1", token_b
     assert_read_ok "client B again"
     assert_equal 2, @clients.size
+  end
+
+  # 2b. The back-off grows. RPMS locks an account, or an address, after
+  # repeated failed sign-ons, so a stale code is not sent every 30 s for ever:
+  # an application's first failure backs it off SERVICE_SIGNON_BACKOFF seconds,
+  # each further consecutive failure doubles that, up to
+  # SERVICE_SIGNON_BACKOFF_MAX; its next successful sign-on starts it over.
+  # Each application's back-off is its own.
+  WRONG_ACCESS = "WRONG1"
+  WRONG_VERIFY = "WRONG1!!"
+  WRONG_ACCESS_B = "WRONGB1"
+  WRONG_VERIFY_B = "WRONGB1!!"
+
+  # How many sign-ons were sent to RPMS with this access code, on any connection.
+  def signons_sent(access) = @clients.sum { |client| client.av_codes.count { |pair| pair.start_with?("#{access};") } }
+
+  # A read with a fresh token of the application: an earlier one may have
+  # expired by now. Fresh tokens of one application share its key.
+  def read_fresh(app = @client_app) = read("/lakeraven-ehr/Patient/1", token_for(app))
+
+  # The application's last sign-on has just failed, for the nth time running,
+  # and it must now be backed off for seconds: a request one second before
+  # that sends no sign-on (and opens no connection), one a second after it
+  # sends exactly one, which fails in turn. Leaves the clock one second past
+  # the window, at the moment of that next failure.
+  def assert_backed_off_for(seconds, access: WRONG_ACCESS, app: @client_app, label: "client A")
+    sent = signons_sent(access)
+    built = @clients.size
+
+    travel (seconds - 1).seconds
+    read_fresh app
+    assert_no_rpms_connection("#{label}, 1 s before its #{seconds} s back-off ends")
+    assert_equal sent, signons_sent(access),
+                 "#{label}: no sign-on is sent to RPMS before its #{seconds} s back-off has passed"
+    assert_equal built, @clients.size, "#{label}: and no connection is opened"
+
+    travel 2.seconds
+    yield if block_given?
+    read_fresh app
+    assert_equal sent + 1, signons_sent(access),
+                 "#{label}: one sign-on is sent once its #{seconds} s back-off has passed"
+  end
+
+  test "the back-off cap is 900 seconds" do
+    assert Lakeraven::EHR::RpmsSessions.const_defined?(:SERVICE_SIGNON_BACKOFF_MAX),
+           "RpmsSessions::SERVICE_SIGNON_BACKOFF_MAX is defined"
+    assert_equal 900, Lakeraven::EHR::RpmsSessions::SERVICE_SIGNON_BACKOFF_MAX
+    assert_equal 30, Lakeraven::EHR::RpmsSessions::SERVICE_SIGNON_BACKOFF
+  end
+
+  test "each further failed sign-on of an application doubles its back-off, and another application is unaffected" do
+    freeze_time
+    configure_service_account(access: WRONG_ACCESS, verify: WRONG_VERIFY) # A's codes are stale
+    configure_credentials_accounts({ client_app_b => [ ACCESS_CODE_B, VERIFY_CODE_B ] })
+    read_b = lambda do |moment|
+      read_fresh client_app_b
+      assert_read_ok "client B, #{moment}"
+      assert_equal 1, signons_sent(ACCESS_CODE_B), "client B signed on once and keeps its lease (#{moment})"
+    end
+
+    read_fresh
+    assert_no_rpms_connection("client A, first failure")
+    assert_equal 1, signons_sent(WRONG_ACCESS)
+    read_b.call("after A's first failure")
+
+    [ 30, 60, 120 ].each do |seconds|
+      assert_backed_off_for(seconds)
+      assert_no_rpms_connection("client A, refused again after #{seconds} s")
+      read_b.call("after A's #{seconds} s back-off")
+    end
+
+    assert_equal 4, signons_sent(WRONG_ACCESS), "four sign-ons in 30 + 60 + 120 s and a little, not one every 30 s"
+    assert_equal 5, @clients.size
+    assert @clients.select { |client| client.av_codes.any? { |pair| pair.start_with?("#{WRONG_ACCESS};") } }.all?(&:disconnected),
+           "every refused connection is closed"
+    refute held?(service_key)
+    assert held?(service_key(token_for(client_app_b)))
+  end
+
+  test "the back-off stops growing at SERVICE_SIGNON_BACKOFF_MAX" do
+    freeze_time
+    configure_service_account(access: WRONG_ACCESS, verify: WRONG_VERIFY)
+
+    # Failures 1 to 6, each made a second after the window before it: the
+    # windows they open are 30, 60, 120, 240, 480 and (960, capped) 900 s.
+    read_fresh
+    [ 30, 60, 120, 240, 480 ].each do |seconds|
+      travel (seconds + 1).seconds
+      read_fresh
+    end
+    assert_no_rpms_connection("client A, sixth failure")
+    assert_equal 6, signons_sent(WRONG_ACCESS), "one sign-on per window so far"
+
+    # The sixth failure, and every one after it, backs off 900 s: not 960,
+    # not 1920.
+    3.times do |n|
+      assert_backed_off_for(900, label: "client A, failure #{6 + n}")
+      assert_no_rpms_connection("client A, failure #{7 + n}")
+    end
+    assert_equal 9, signons_sent(WRONG_ACCESS)
+  end
+
+  test "a successful sign-on starts the application's back-off over" do
+    freeze_time
+    configure_service_account(access: WRONG_ACCESS, verify: WRONG_VERIFY)
+
+    read_fresh
+    assert_no_rpms_connection("client A, first failure")
+    assert_backed_off_for(30)
+    assert_no_rpms_connection("client A, second failure")
+
+    # The second failure backs off 60 s; then the codes are put right.
+    built = @clients.size
+    travel 59.seconds
+    read_fresh
+    assert_no_rpms_connection("client A, 1 s before its 60 s back-off ends")
+    assert_equal built, @clients.size, "no sign-on is sent before the 60 s back-off has passed"
+    travel 2.seconds
+    configure_service_account
+    token = token_for(@client_app)
+    read "/lakeraven-ehr/Patient/1", token
+    assert_read_ok "client A, with the right codes after its back-off"
+    assert_equal 1, signons_sent(ACCESS_CODE)
+    assert held?(service_key)
+
+    # The lease ends and the codes go stale again: a first failure, 30 s.
+    token.revoke
+    refute held?(service_key)
+    configure_service_account(access: WRONG_ACCESS, verify: WRONG_VERIFY)
+    read_fresh
+    assert_no_rpms_connection("client A, a new first failure")
+    assert_equal 3, signons_sent(WRONG_ACCESS)
+    assert_backed_off_for(30, label: "client A, after a success")
+    assert_no_rpms_connection("client A, a second failure running")
+    assert_backed_off_for(60, label: "client A, after a success and two failures")
+  end
+
+  test "one application's grown back-off does not lengthen another's first" do
+    freeze_time
+    configure_service_account(access: WRONG_ACCESS, verify: WRONG_VERIFY)
+    configure_credentials_accounts({ client_app_b => [ WRONG_ACCESS_B, WRONG_VERIFY_B ] })
+
+    read_fresh
+    assert_backed_off_for(30)
+    # A's third failure, and B's first, at the same moment.
+    assert_backed_off_for(60) { read_fresh client_app_b }
+    assert_no_rpms_connection("client A, third failure")
+    assert_equal 3, signons_sent(WRONG_ACCESS)
+    assert_equal 1, signons_sent(WRONG_ACCESS_B)
+
+    # B is backed off 30 s, A 120 s.
+    assert_backed_off_for(30, access: WRONG_ACCESS_B, app: client_app_b, label: "client B") do
+      read_fresh
+      assert_equal 3, signons_sent(WRONG_ACCESS), "client A is still inside its own 120 s back-off"
+    end
+    assert_no_rpms_connection("client B, second failure")
+    assert_equal 2, signons_sent(WRONG_ACCESS_B)
+
+    travel 88.seconds # 119 s after A's third failure
+    read_fresh
+    assert_equal 3, signons_sent(WRONG_ACCESS), "client A: no sign-on before its 120 s back-off has passed"
+    travel 2.seconds
+    read_fresh
+    assert_equal 4, signons_sent(WRONG_ACCESS), "client A: one sign-on once its 120 s back-off has passed"
   end
 
   # 3a. A lease never outlives its token: the time the sign-on took is not
