@@ -44,3 +44,17 @@ Feature: A ready stack run reports a scenario as run only with evidence
   Scenario: The persona reads from the stack and a check fails
     When the persona reads from the stack
     Then a check fails
+
+  # #1179 round 2. These stay below "Nothing is read": cucumber runs in file
+  # order, and one test names the first reason in that order.
+  Scenario: A step is pending
+    When a step is pending
+
+  Scenario: A step has no definition
+    When a step nobody defined is used
+
+  Scenario: The first attempt fails and the second reads nothing
+    When the first attempt fails and the second reads nothing
+
+  Scenario: A step skips the scenario itself
+    When a step skips the scenario itself
