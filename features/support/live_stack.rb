@@ -11,21 +11,29 @@
 # a scenario was not run, and exits non-zero. A run in which one ran keeps
 # cucumber's own exit code.
 if LIVE_STACK
-  stack_run = { ran: 0, reason: nil }
+  # The last attempt of a scenario decides (--retry): outcomes are keyed by
+  # location and overwritten. Only :passed and :failed ran; skipped, pending,
+  # undefined and ambiguous did not.
+  stack_run = { outcomes: {}, reason: nil }
 
   After do |scenario|
-    if scenario.status == :skipped
+    stack_run[:outcomes][scenario.location.to_s] = scenario.status
+    case scenario.status
+    when :passed, :failed then next
+    when :skipped
       stack_run[:reason] ||= @live_stack_reason || LiveStack.take_evidence.reasons.first ||
                              (LIVE_STACK.reason unless LIVE_STACK.ready?)
     else
-      stack_run[:ran] += 1
+      stack_run[:reason] ||= "a step was pending or undefined"
     end
   end
 
   at_exit do
-    next if stack_run[:ran].positive?
+    outcomes = stack_run[:outcomes]
+    next if outcomes.values.any? { |status| %i[passed failed].include?(status) }
 
-    reason = stack_run[:reason] || (LIVE_STACK.reason unless LIVE_STACK.ready?) || "no @live scenario was selected"
+    reason = stack_run[:reason] ||
+             (outcomes.empty? ? (LIVE_STACK.reason unless LIVE_STACK.ready?) || "no @live scenario was selected" : "a scenario was skipped without a stack reason")
     warn "[stack] no @live scenario ran: #{reason}"
     status = $!.is_a?(SystemExit) ? $!.status : 0
     exit(status.zero? ? 1 : status)
