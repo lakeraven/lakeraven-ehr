@@ -388,6 +388,57 @@ module Lakeraven
         refute_equal :not_suspected, SudContentSuspicion.classify("alcohol\tuse")
         refute_equal :not_suspected, SudContentSuspicion.classify("Reports\nalcohol\nuse")
       end
+
+      # --- a control or format character as the ONLY separator (#906 review) ---
+      # Removing these characters glues the neighbouring words together
+      # ("used<US>heroin" -> "usedheroin"), so the term no longer starts a
+      # word and is missed. The text is read in both canonical forms (the
+      # character removed, and the character read as a space) and is
+      # :suspected when either form matches.
+
+      { "a unit separator (U+001F) in a sentence" => "patient used\x1Fheroin daily",
+        "a unit separator (U+001F)" => "used\x1Fheroin",
+        "a NUL (U+0000)" => "used\x00heroin",
+        "an ESC (U+001B)" => "used\eheroin",
+        "a DEL (U+007F)" => "used\x7Fheroin",
+        "a C1 control (U+0090)" => "used\u0090heroin",
+        "a C1 control (U+009B)" => "used\u009Bheroin",
+        "a zero-width space (U+200B)" => "used​heroin",
+        "a word joiner (U+2060)" => "used⁠heroin",
+        "a BOM (U+FEFF)" => "used﻿heroin" }.each do |name, text|
+        test "a term separated from the word before it only by #{name} is suspected" do
+          assert_equal :suspected, SudContentSuspicion.classify(text),
+                       "#{name} was the only separator in #{text.inspect}"
+        end
+      end
+
+      test "a term separated only by a control character on both sides is suspected" do
+        text = "Reports\x1Fheroin\x1Fuse nightly."
+        assert_equal :suspected, SudContentSuspicion.classify(text), text.inspect
+      end
+
+      test "a multi-word phrase whose words are separated only by a control character is suspected" do
+        text = "attends twelve\x1Fstep meetings"
+        assert_equal :suspected, SudContentSuspicion.classify(text), text.inspect
+      end
+
+      test "an ICD-10-CM substance-use code separated only by a control character is suspected" do
+        text = "Dx\x1FF10.20 noted"
+        assert_equal :suspected, SudContentSuspicion.classify(text), text.inspect
+      end
+
+      # Regression guards: the removed form still matches, and a control
+      # separator alone never makes clean text suspected.
+
+      test "a term split by a NUL or a soft hyphen is still suspected" do
+        assert_equal :suspected, SudContentSuspicion.classify("alco\u0000hol")
+        assert_equal :suspected, SudContentSuspicion.classify("alco­hol")
+      end
+
+      test "a control character separating clean words does not make the text suspected" do
+        assert_equal :not_suspected, SudContentSuspicion.classify("patient\x1Fwell today")
+        assert_equal :not_suspected, SudContentSuspicion.classify("patient​well today")
+      end
     end
   end
 end
