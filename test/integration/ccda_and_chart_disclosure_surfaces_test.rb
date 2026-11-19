@@ -41,6 +41,25 @@ module Lakeraven
         [ "Accept: #{FHIR_TYPE}",   "/patients/1",              { "Accept" => FHIR_TYPE } ]
       ].freeze
 
+      # Counts every entry into the throttle's two writers, so a request that
+      # never reached the limiter is told apart from one it counted.
+      module RateLimitProbe
+        class << self
+          attr_accessor :calls
+        end
+        self.calls = 0
+
+        def permit?(**)
+          RateLimitProbe.calls += 1
+          super
+        end
+
+        def audit_due?(**)
+          RateLimitProbe.calls += 1
+          super
+        end
+      end
+
       # [ label, configured value, "View as FHIR" offered ]
       BROWSER_ROWS = [
         [ "every surface is closed",          ABSENT,               false ],
@@ -51,12 +70,16 @@ module Lakeraven
       setup do
         @saved_options = Rails.application.config.x.lakeraven_ehr
         @original_client = RpmsRpc.configuration.client
-        RpmsRpc.mock! { |m| LakeravenDemoSeeds.seed(m) }
+        @broker = RpmsRpc.mock! { |m| LakeravenDemoSeeds.seed(m) }
+        RateLimit.singleton_class.prepend(RateLimitProbe) unless RateLimit.singleton_class < RateLimitProbe
+        RateLimit.reset!
+        @work_before = nil
       end
 
       teardown do
         Rails.application.config.x.lakeraven_ehr = @saved_options
         RpmsRpc.configure { |c| c.client = @original_client }
+        RateLimit.reset!
         teardown_smart_auth
       end
 
@@ -152,10 +175,59 @@ module Lakeraven
         assert_includes response.body, %(id="chart-problems")
       end
 
-      test "the controllers declare their surfaces" do
-        assert_equal [ :ccda ], surfaces(TransitionsOfCareController)
-        assert_equal %i[ccda fhir_api], surfaces(CcdaImportsController).sort
-        assert_includes ChartsController.ancestors, DisclosureSurfaceGate
+      test "transitions of care declares ccda and nothing else, for a bearer client too" do
+        rules = TransitionsOfCareController.disclosure_surface_rules
+        assert_equal [ :ccda ], surfaces(TransitionsOfCareController).uniq
+        assert_includes unconditional_surfaces(TransitionsOfCareController), :ccda
+        bearer = rules.select { |rule| rule[:key] == SmartAuthentication::BEARER_RULE_KEY }
+        assert_equal [ :ccda ], bearer.map { |rule| rule[:surface] }
+      end
+
+      test "C-CDA import declares ccda and fhir_api unconditionally" do
+        assert_empty %i[ccda fhir_api] - unconditional_surfaces(CcdaImportsController)
+      end
+
+      test "the chart declares fhir_api under a predicate it defines" do
+        conditional = ChartsController.disclosure_surface_rules.select { |rule| rule[:surface] == :fhir_api && rule[:if] }
+        assert_not_empty conditional
+        conditional.each do |rule|
+          assert_kind_of Symbol, rule[:if]
+          assert ChartsController.method_defined?(rule[:if]) || ChartsController.private_method_defined?(rule[:if]),
+                 "#{rule[:if]} is not a ChartsController method"
+        end
+      end
+
+      test "the C-CDA routes are gated without an allowlist and are not listed as ungoverned" do
+        routes = %w[lakeraven/ehr/ccda_imports#create lakeraven/ehr/transitions_of_care#create]
+        drawn = EHR::Engine.routes.routes.map { |route| "#{route.defaults[:controller]}##{route.defaults[:action]}" }
+        assert_empty routes - drawn, "the engine no longer draws these routes"
+        assert_empty routes & DisclosureSurfaces.ungated_routes(EHR::Engine.routes, allow: [])
+        assert_empty routes & DisclosureSurfaces::UNGOVERNED_API_ROUTES.keys
+      end
+
+      # assert_closed compares these recorders across the request. Each must be
+      # seen to move for a request that is served, or "unchanged" proves nothing.
+      test "the work recorders see a served chart read: throttle, broker and audit" do
+        setup_smart_auth(scopes: "system/*.read")
+        configure(%i[fhir_api])
+        get "/patients/1.json", headers: @headers
+        assert_response :ok
+        after = work_snapshot
+        assert_operator after[:rate_limit_calls], :>, @work_before[:rate_limit_calls]
+        assert_operator after[:rate_limit_buckets], :>, @work_before[:rate_limit_buckets]
+        assert_operator after[:broker_calls], :>, @work_before[:broker_calls]
+        assert_operator after[:audit_events], :>, @work_before[:audit_events]
+      end
+
+      [ [ TOC, %i[ccda] ], [ IMPORTS, %i[ccda fhir_api] ] ].each do |path, value|
+        test "the throttle recorder sees POST #{path} once its surfaces are open" do
+          configure(value)
+          post path, params: { patient_dfn: "1" }
+          assert_response :unauthorized
+          after = work_snapshot
+          assert_operator after[:rate_limit_calls], :>, @work_before[:rate_limit_calls]
+          assert_operator after[:rate_limit_buckets], :>, @work_before[:rate_limit_buckets]
+        end
       end
 
       private
@@ -166,13 +238,44 @@ module Lakeraven
         Rails.application.config.x.lakeraven_ehr = options
       end
 
+      # Every request snapshots the work recorders first, so assert_closed can
+      # show the request it follows left them as they were.
+      %i[get post].each do |verb|
+        define_method(verb) do |*args, **options|
+          @work_before = work_snapshot
+          super(*args, **options)
+        end
+      end
+
+      # A closed surface answers a bare 404 and does no work: no audit row, no
+      # throttle check or counter, no broker call or context bind.
       def assert_closed
         assert_response :not_found
         assert_empty response.body
+        assert @work_before, "assert_closed must follow a request made through this test's get/post"
+        assert_equal @work_before, work_snapshot, "a closed surface did work"
+      ensure
+        @work_before = nil
+      end
+
+      def work_snapshot
+        assert_same @broker, RpmsRpc.client, "the recording broker is not the configured client"
+        assert_operator RateLimit.singleton_class, :<, RateLimitProbe, "the throttle probe is not installed"
+        {
+          audit_events: AuditEvent.count,
+          rate_limit_calls: RateLimitProbe.calls,
+          rate_limit_buckets: RateLimit.bucket_count,
+          broker_calls: @broker.received_calls.size,
+          broker_context_binds: @broker.context_binds.size
+        }
       end
 
       def surfaces(controller)
         controller.disclosure_surface_rules.map { |rule| rule[:surface] }
+      end
+
+      def unconditional_surfaces(controller)
+        controller.disclosure_surface_rules.reject { |rule| rule[:if] }.map { |rule| rule[:surface] }
       end
 
       # A signed-in clinician: the SMART token rides the session, as the
