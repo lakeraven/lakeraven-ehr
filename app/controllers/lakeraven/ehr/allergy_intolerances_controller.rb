@@ -3,6 +3,7 @@
 module Lakeraven
   module EHR
     class AllergyIntolerancesController < ApplicationController
+      disclosure_surface :fhir_api
       include PatientScopedRead
 
       private
