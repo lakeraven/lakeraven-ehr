@@ -45,6 +45,15 @@ module Lakeraven
         refute Capabilities.allows?(Roles.symbolize_keys(%w[AGZMENU]), "registration.setup")
       end
 
+      test "#981 DOB correction belongs to the registration manager policy" do
+        manager = Roles.symbolize_keys(%w[AGZMGR])
+        clerk = Roles.symbolize_keys(%w[AGZMENU])
+        view_only_manager = Roles.symbolize_keys(%w[AGZMGR AGZVIEWONLY])
+        assert_includes Capabilities.for(manager), "patient.correct_dob"
+        refute_includes Capabilities.for(clerk), "patient.correct_dob"
+        refute_includes Capabilities.for(view_only_manager), "patient.correct_dob"
+      end
+
       test "#983 only DGPF MANAGER defines local record flags, as BPRM's CanAccessLocalFlagsTableMaintenance" do
         manager = Roles.symbolize_keys([ "DGPF MANAGER" ])
         assert Capabilities.allows?(manager, "record_flags.define")

@@ -37,10 +37,12 @@
     <%= form_field :dob,
           "Date of birth",
           form: f,
-          error: @demographics.errors[:dob].first do |aria| %>
+          hint: ("A registration manager must change the date of birth at this site." if @dob_restricted),
+          error: @dob_error || @demographics.errors[:dob].first do |aria| %>
       <%= f.date_field :dob,
             value: @demographics.dob,
             required: true,
+            disabled: @dob_restricted,
             aria: aria %>
     <% end %>
     <%# SEX, PATIENT (2) field .02. %>
