@@ -11,7 +11,7 @@
 #     -e VISTA_BROKER=cia -e VISTA_RPC_HOST=10.0.0.5 -e VISTA_RPC_PORT=9100 \
 #     lakeraven-ehr
 
-ARG RUBY_VERSION=4.0.2
+ARG RUBY_VERSION=4.0.10
 FROM docker.io/library/ruby:$RUBY_VERSION-slim AS base
 
 WORKDIR /rails
