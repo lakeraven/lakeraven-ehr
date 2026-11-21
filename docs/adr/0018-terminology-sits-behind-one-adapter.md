@@ -59,11 +59,11 @@ Design principles that bind:
 
 - A single `Terminology` port with four operations, `lookup`, `validate_code`, `expand` and `translate`, plus two catalog reads, `read_value_set` and `list_value_sets`. Its shapes follow FHIR `CodeSystem/$lookup`, `ValueSet/$validate-code`, `ValueSet/$expand`, `ConceptMap/$translate`, and ValueSet read and search.
 - An **RPMS adapter** answers from the RPMS record and BSTS, through rpms-rpc gateways, never by naming an RPC.
-- A **FHIR terminology adapter** answers from any FHIR terminology server. The first deployment is a self-hosted **Open Concept Lab (OCL)**, holding three kinds of content:
+- A **FHIR terminology adapter** answers from any FHIR terminology server. The first deployment is a self-hosted **HAPI FHIR JPA server** on PostgreSQL (Apache 2.0), holding three kinds of content:
   - mappings from RPMS local codes to SNOMED/LOINC (ConceptMaps);
   - CRS taxonomies as ValueSets, published as immutable, tenant-scoped snapshots (see decision 5);
   - eCQM value sets mirrored from VSAC.
-- **Snowstorm** is added behind the same adapter when a consumer needs SNOMED hierarchy queries (ECL), which OCL does not do well.
+- **Snowstorm** (or Snowstorm Lite) is added behind the same adapter when a consumer needs SNOMED hierarchy queries (ECL), which HAPI does not do.
 - A **local adapter** (today's JSON files) stays for tests and air-gapped demos.
 - A composite tries the sources in a configured order per operation. A source that errors stops the chain with a typed error. Only a source that answers "not found" passes to the next.
 
@@ -73,7 +73,7 @@ Design principles that bind:
 
 1. **One port.** `Lakeraven::EHR::Terminology::Port` defines four operations: `lookup(system, code)`, `validate_code(code, system:, value_set:)`, `expand(value_set, version:)` and `translate(code, system:, target:)`. It also defines two catalog reads, `read_value_set(id, version: nil)` and `list_value_sets(query: nil)`, with the same typed failures. The value-set and FHIR controllers, the CQM engine and the FHIR serializers call the port, never a backend.
 2. **RPMS first, read-only.** The RPMS adapter serves SNOMED via BSTS and the RPMS-local code systems (health factors, measurement types, exams) as read-only CodeSystems. Nothing is written to RPMS under this ADR. Writing value sets back into RPMS taxonomies is a separate decision.
-3. **An open server holds only what RPMS can't.** That means mappings, versioned value sets and tribe-owned code systems. OCL is the first; Snowstorm is added when ECL is needed. Both are open source and self-hostable, so a tribe can run its own. Terminology content is not PHI, so the server holds no patient data and is outside the BAA boundary.
+3. **An open server holds only what RPMS can't.** That means mappings, versioned value sets and tribe-owned code systems. HAPI FHIR JPA is the first; Snowstorm is added when ECL is needed. HAPI was chosen over Open Concept Lab (OCL) after a side-by-side test on synthetic CRS-style content (filtered, excluding, version-pinned and nested value sets, plus a local-to-LOINC ConceptMap): HAPI answered all 17 checks, while the OCL release we could run failed to load filtered value sets and unmatched mappings, dropped child concepts on CodeSystem import, and errored on `$translate`. HAPI also runs as one Java service on PostgreSQL, where OCL needs Elasticsearch, Celery and Redis. OCL's newer FHIR operations were not tested and can be revisited behind the same adapter. Both are open source and self-hostable, so a tribe can run its own. Terminology content is not PHI, so the server holds no patient data and is outside the BAA boundary.
 4. **Failure is typed, never empty.** An unreachable or erroring source raises `Terminology::Unavailable`. What the caller does with it depends on what it is serving:
    - **Terminology endpoints** (`ValueSet`, `CodeSystem`, `ConceptMap` reads and operations) return a 503 `OperationOutcome`. Their whole answer is terminology.
    - **Patient-resource reads** (an Observation search, for example) still return the clinical data with its RPMS local coding. They add an `OperationOutcome` warning naming the codes that could not be translated. Readable clinical data is never withheld because a translation service is down, and the gap is never silent.
@@ -81,16 +81,16 @@ Design principles that bind:
    - The UI shows a message in every case.
 
    "Code not in value set" is an answer only when the expansion succeeded.
-5. **Versions are pinned and immutable.** A published value set is a snapshot that never changes. Its identity is the value-set id plus a version, `<CRS year>.<revision>`, and site-populated taxonomies (lab and drug lists) are scoped to the tenant. Any membership change, including a site editing its lab taxonomy mid-year, publishes a new revision rather than replacing the old one. Every expansion names its version, and a report run records the tenant, value-set ids and versions it used. Re-running a period therefore gives the same denominator.
+5. **Versions are pinned and immutable.** A published value set is a snapshot that never changes. Its identity is the value-set id plus a version, `<CRS year>.<revision>`, and site-populated taxonomies (lab and drug lists) are scoped to the tenant. Any membership change, including a site editing its lab taxonomy mid-year, publishes a new revision rather than replacing the old one. HAPI rejects a second resource with the same url and version but lets an update overwrite an existing one, so the publish step, not the server, enforces immutability. Every expansion names its version, and a report run records the tenant, value-set ids and versions it used. Re-running a period therefore gives the same denominator.
 6. **Unmapped is shown, never guessed.** A local code with no mapping is emitted with its local coding only. The engine never picks a "closest" standard code.
 7. **Hard surface where it decides money or eligibility.** A value set that drives an eligibility, coverage or payment decision (e.g. Corvid's PRC emergency diagnosis list) takes the hard panel. A failed expansion there never confers eligibility.
 8. **Code system URIs.** RPMS-local systems use one stable base, `https://fhir.lakeraven.com/CodeSystem/rpms-<file>` (e.g. `rpms-health-factor`), with site-local additions qualified by the tenant. *Open:* confirm the base URI before the first CodeSystem ships.
 
 ## Consequences
 
-- #164 becomes the adapter slice of this ADR, without its Swedish scope, which stays parked under #433. #120 becomes the FHIR terminology adapter; #265 becomes the OCL content slices; #365 stays the VSAC licence, which the mirror needs.
+- #164 becomes the adapter slice of this ADR, without its Swedish scope, which stays parked under #433. #120 becomes the FHIR terminology adapter; #265 becomes the content slices loaded into HAPI; #365 stays the VSAC licence, which the mirror needs.
 - rpms-rpc gains a symbolic BSTS API (search, concept detail, code sets) and read APIs for the local code files.
 - The `ValueSetsController` rescue-to-empty goes away; a test pins it.
-- Deployments gain one optional service (OCL). Without it, the engine still answers from RPMS and local files; mapping and taxonomy operations return `Unavailable`, never empty.
+- Deployments gain one optional service (HAPI FHIR JPA, with its Lucene index on persistent storage). It brings a Java runtime this stack does not run today, and no authoring UI: content is loaded as FHIR resources from versioned files. Without it, the engine still answers from RPMS and local files; mapping and taxonomy operations return `Unavailable`, never empty.
 - rook and aviary consume the same server through their own copy of the port. They gain shared, versioned value sets without depending on this engine.
-- **Not decided here:** writing taxonomies back into RPMS; Snowstorm's deployment; licensing IMO or any commercial interface terminology (not planned); country packs (#433).
+- **Not decided here:** writing taxonomies back into RPMS; Snowstorm's deployment; tenant scoping inside HAPI (partitioning), which is untested; licensing IMO or any commercial interface terminology (not planned); country packs (#433).
