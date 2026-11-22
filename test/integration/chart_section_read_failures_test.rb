@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "test_helper"
+require_relative "../support/patient_banner_test_helper"
 
 # Chart sections whose RPMS read fails (#579, first slice).
 #
@@ -712,5 +713,222 @@ class ChartSectionReadFailuresTest < ActionDispatch::IntegrationTest
 
   def resource_types(body)
     body.fetch("entry").filter_map { |entry| entry.dig("resource", "resourceType") }
+  end
+end
+
+# Round 4: a screenings query that fails when it is LOADED (#579).
+#
+# ScreeningResponse.for_patient is a scope: it returns an unloaded relation and
+# never raises itself. The SQL runs, and fails, when the relation is first
+# enumerated — after the read seam has already returned it. The eager-raise
+# stubs above cannot see that.
+#
+# Transactional tests are OFF, deliberately: PostgreSQL aborts the enclosing
+# transaction on a failed statement, so inside the test wrapper every later
+# query of the request (the audit row among them) would fail too, whatever the
+# chart did about the screenings read. A real request has no such wrapper.
+# These tests clean up their own rows.
+class ChartLazyScreeningsReadFailureTest < ActionDispatch::IntegrationTest
+  include SmartAuthTestHelper
+
+  self.use_transactional_tests = false
+
+  PATIENT_DFN = ChartSectionReadFailuresTest::PATIENT_DFN
+  HTML_SECTIONS = ChartSectionReadFailuresTest::HTML_SECTIONS
+  ALL_PHRASES = ChartSectionReadFailuresTest::ALL_PHRASES
+
+  # Synthetic. It appears in the failing SQL, and so in the exception message.
+  FAILING_COLUMN = "no_such_column_579"
+
+  setup do
+    Lakeraven::EHR::AuditEvent.delete_all
+    setup_smart_auth(scopes: "system/*.read")
+  end
+
+  teardown do
+    teardown_smart_auth
+    Lakeraven::EHR::AuditEvent.delete_all
+  end
+
+  test "the lazy screenings stub is an unloaded relation that raises only when loaded" do
+    relation = lazily_failing_screenings
+
+    assert_kind_of ActiveRecord::Relation, relation
+    refute relation.loaded?, "the stub must not have run its SQL yet"
+    error = assert_raises(ActiveRecord::StatementInvalid) { relation.to_a }
+    assert_includes error.message, FAILING_COLUMN, "the SQL text is the exception message"
+  end
+
+  test "chart screenings section reports a query that fails on load as could not be loaded, not as an empty section" do
+    with_lazily_failing_screenings do
+      raised = chart_request_error
+
+      assert_nil raised, "a screenings query failure must not escape the chart request"
+      assert_response :ok
+      assert_select "#chart-screenings", { count: 1 }, "the screenings section is rendered"
+      assert_select "#chart-screenings", { text: /No screenings recorded\./, count: 0 },
+        "a failed screenings read must not render the empty state"
+      assert_select "#chart-screenings", text: /could not be loaded/i
+      assert_select "#chart-screenings h2 span", { count: 0 }, "no count when the list did not load"
+      assert_other_sections_rendered
+      refute_includes response.body, FAILING_COLUMN, "the SQL text must not reach the page"
+    end
+  end
+
+  test "chart FHIR bundle carries an exception outcome naming QuestionnaireResponse when the screenings query fails on load" do
+    with_lazily_failing_screenings do
+      raised = chart_request_error("Accept" => "application/fhir+json")
+
+      assert_nil raised, "a screenings query failure must not escape the chart request"
+      assert_response :ok
+      assert_equal "application/fhir+json", response.media_type
+      body = JSON.parse(response.body)
+      issue = outcome_issues(body).find { |candidate| candidate["diagnostics"].to_s.match?(/\bQuestionnaireResponses?\b/) }
+      assert issue, "expected an outcome entry naming QuestionnaireResponse; outcomes: #{outcome_issues(body).inspect}"
+      assert_equal "exception", issue["code"]
+      assert_equal "error", issue["severity"]
+      refute_includes issue["diagnostics"], FAILING_COLUMN
+      refute_includes response.body, FAILING_COLUMN, "the SQL text must not reach the bundle"
+      resource_types = body.fetch("entry").filter_map { |entry| entry.dig("resource", "resourceType") }
+      assert_includes resource_types, "Patient", "the Patient resource stays in the bundle"
+    end
+  end
+
+  test "chart logs the class of a screenings query that fails on load and never its SQL" do
+    assert_class_logged_without_sql
+  end
+
+  test "chart FHIR request logs the class of a screenings query that fails on load and never its SQL" do
+    assert_class_logged_without_sql("Accept" => "application/fhir+json")
+  end
+
+  private
+
+  # An unloaded relation whose SQL names a column that does not exist: valid
+  # to build, ActiveRecord::StatementInvalid when enumerated.
+  def lazily_failing_screenings
+    Lakeraven::EHR::ScreeningResponse.where("#{FAILING_COLUMN} = 1")
+  end
+
+  # As with_class_method above. The lambda becomes a method on the model, so
+  # the relation is built from a constant, not from a helper on the test.
+  def with_lazily_failing_screenings
+    owner = Lakeraven::EHR::ScreeningResponse
+    original = owner.singleton_class.instance_method(:for_patient)
+    owner.define_singleton_method(:for_patient) { |*| where("#{FAILING_COLUMN} = 1") }
+    yield
+  ensure
+    owner.define_singleton_method(:for_patient, original) if original
+  end
+
+  # GET the chart. Returns the exception the request raised (the test stack
+  # re-raises one no handler rescues), or nil when it answered.
+  def chart_request_error(extra_headers = {})
+    get "/lakeraven-ehr/patients/#{PATIENT_DFN}", headers: @headers.merge(extra_headers)
+    nil
+  rescue StandardError => error
+    error
+  end
+
+  def assert_class_logged_without_sql(extra_headers = {})
+    raised = nil
+    entries = capture_rails_log do
+      with_lazily_failing_screenings { raised = chart_request_error(extra_headers) }
+    end
+    text = entries.map { |entry| "#{entry[:severity]} #{entry[:message]}" }.join("\n")
+
+    assert_nil raised, "a screenings query failure must not escape the chart request"
+    assert_response :ok
+    assert_includes text, "ActiveRecord::StatementInvalid"
+    refute_includes text, FAILING_COLUMN, "the SQL text is the exception message and must not be logged"
+  end
+
+  def capture_rails_log
+    original = Rails.logger
+    recorder = ChartSectionReadFailuresTest::RecordingLogger.new
+    Rails.logger = ActiveSupport::TaggedLogging.new(recorder)
+    yield
+    recorder.entries
+  ensure
+    Rails.logger = original
+  end
+
+  def assert_other_sections_rendered
+    HTML_SECTIONS.each do |name, section|
+      assert_select section[:id], { count: 1 }, "the #{name} section is still rendered"
+      assert_select "#{section[:id]} h2 span", { count: 1 }, "the #{name} section still shows its count"
+      ALL_PHRASES.each do |phrase|
+        assert_select section[:id], { text: phrase, count: 0 }, "the #{name} section did not fail"
+      end
+    end
+  end
+
+  def outcome_issues(body)
+    body.fetch("entry")
+      .select { |entry| entry.dig("search", "mode") == "outcome" }
+      .filter_map { |entry| entry.dig("resource", "issue", 0) if entry.dig("resource", "resourceType") == "OperationOutcome" }
+  end
+end
+
+# Round 4: the banner on a NON-chart page keeps its pre-#579 behaviour (#579).
+#
+# The dashboard's banner reads allergies through AllergySource.fetch. When
+# that read raises RpmsSessions::SignInAgain, main answers the page with the
+# patient still named and the allergies field "not loaded". Letting the raise
+# out of the fetch reaches PatientBannerRendering's rescue instead, which
+# swaps the whole banner for the closed state: the patient's identity is gone
+# from a page that could show it.
+class NonChartBannerAllergySignInAgainTest < ActionDispatch::IntegrationTest
+  include PatientBannerTestHelper
+
+  # Synthetic. Stands in for detail an exception message can carry.
+  MARKER = ChartSectionReadFailuresTest::MARKER
+
+  setup do
+    enable_forgery_protection!
+    Lakeraven::EHR::AuditEvent.delete_all
+  end
+
+  teardown do
+    restore_forgery_protection!
+    teardown_oauth!
+    Lakeraven::EHR::AuditEvent.delete_all
+  end
+
+  test "dashboard banner still names the patient with allergies not loaded when the banner's allergy read raises SignInAgain" do
+    with_demo_clinical_seeds do
+      sign_in_clinician!
+      open_patient_context!(1)
+
+      get "#{MOUNT}/dashboard"
+      assert_response :ok
+      baseline = assert_patient_banner!.text
+      assert_includes baseline, "Alice Anderson", "fixture check: the dashboard banner names the open patient"
+
+      with_banner_allergy_read_raising(Lakeraven::EHR::RpmsSessions::SignInAgain) do
+        get "#{MOUNT}/dashboard"
+
+        assert_response :ok
+        banner = assert_patient_banner!
+        assert_includes banner.text, "Alice Anderson", "the banner still names the patient"
+        refute_match(/could not be shown/i, banner.text, "the banner must not fall to the closed state")
+        assert_allergies_state!("not-loaded", text_fragment: "Not loaded")
+        refute_includes response.body, "None recorded"
+        refute_includes response.body, "No Known Allergies"
+        refute_includes response.body, MARKER, "the exception message must not reach the page"
+      end
+    end
+  end
+
+  private
+
+  def with_banner_allergy_read_raising(error_class)
+    klass = Lakeraven::EHR::SupplementalClinicalResources
+    original = klass.method(:merged_allergy_intolerances_for_patient)
+    message = MARKER
+    klass.define_singleton_method(:merged_allergy_intolerances_for_patient) { |_dfn| raise error_class, message }
+    yield
+  ensure
+    klass.define_singleton_method(:merged_allergy_intolerances_for_patient, original)
   end
 end
