@@ -4,6 +4,7 @@ require "test_helper"
 require "net/http"
 require "json"
 require "uri"
+require "zlib"
 
 module Lakeraven
   module EHR
@@ -115,26 +116,115 @@ module Lakeraven
           assert_equal "/fhir/Patient/1", http[:requests].first[:path]
         end
 
-        test "an id with path separators stays inside its own path segment" do
-          id = "1/../Practitioner/2"
-          _, http = with_http(200, PATIENT.to_json) { client.read("Patient", id) }
-
-          path = http[:requests].first[:path]
-          assert path.start_with?("/fhir/Patient/"), "unexpected path #{path}"
-          segment = path.delete_prefix("/fhir/Patient/")
-          refute_match %r{[/?#]}, segment
-          refute_includes path, "/Practitioner/"
-          assert_equal id, URI.decode_www_form_component(segment)
+        # Factory-Spec-Amendment (#599 review round 1): these two examples used
+        # to pin that such an id was percent-encoded into one path segment and
+        # sent. An id outside FHIR's id grammar is now refused before any
+        # request, so nothing that is not an id reaches the endpoint at all.
+        test "an id with path separators is refused before any request" do
+          assert_refused_before_any_request { |c| c.read("Patient", "1/../Practitioner/2") }
         end
 
-        test "an id with a query delimiter cannot start a query string" do
-          id = "1?x=y"
+        test "an id with a query delimiter is refused before any request" do
+          assert_refused_before_any_request { |c| c.read("Patient", "1?x=y") }
+        end
+
+        # --- argument validation: nothing malformed is ever sent -------------
+
+        {
+          "nil" => nil,
+          "empty" => "",
+          "a single dot" => ".",
+          "two dots" => "..",
+          "65 characters" => "a" * 65,
+          "a slash" => "1/2",
+          "a space" => "a b",
+          "a percent escape" => "1%2F2",
+          "an underscore" => "a_b",
+          "a trailing newline" => "1\n"
+        }.each do |label, id|
+          test "read refuses an id that is #{label} before any request" do
+            assert_refused_before_any_request { |c| c.read("Patient", id) }
+          end
+        end
+
+        test "read accepts an id of 64 characters from FHIR's id grammar" do
+          id = "#{'A' * 30}-#{'z' * 30}.09"
+          assert_equal 64, id.length
           _, http = with_http(200, PATIENT.to_json) { client.read("Patient", id) }
 
-          path = http[:requests].first[:path]
-          refute_includes path, "?"
-          segment = path.delete_prefix("/fhir/Patient/")
-          assert_equal id, URI.decode_www_form_component(segment)
+          assert_equal "/fhir/Patient/#{id}", http[:requests].first[:path]
+        end
+
+        {
+          "nil" => nil,
+          "empty" => "",
+          "two dots" => "..",
+          "a type and an id" => "Patient/1",
+          "lower case" => "patient",
+          "a type with a query" => "Patient?x=y",
+          "a type with a digit" => "Patient1",
+          "a type with a trailing newline" => "Patient\n"
+        }.each do |label, type|
+          test "read refuses a resource type that is #{label} before any request" do
+            assert_refused_before_any_request { |c| c.read(type, "1") }
+          end
+
+          test "search refuses a resource type that is #{label} before any request" do
+            assert_refused_before_any_request { |c| c.search(type, name: "Testpatient") }
+          end
+        end
+
+        # --- base_url validation at construction -----------------------------
+
+        {
+          "nil" => nil,
+          "empty" => "",
+          "without a scheme" => "fhir.example.test/fhir",
+          "ftp" => "ftp://fhir.example.test/fhir",
+          "carrying a query" => "https://fhir.example.test/fhir?tenant=a",
+          "carrying userinfo" => "https://user:SECRETPW@fhir.example.test/fhir",
+          "plain http to a host that is not loopback" => "http://fhir.example.test/fhir"
+        }.each do |label, url|
+          test "new refuses a base_url that is #{label}" do
+            assert_raises(ArgumentError) { Client.new(base_url: url) }
+          end
+        end
+
+        test "the refusal of a base_url with userinfo names neither the credentials nor the URL" do
+          url = "https://user:SECRETPW@fhir.example.test/fhir"
+          error = assert_raises(ArgumentError) { Client.new(base_url: url) }
+
+          refute_includes error.message, "SECRETPW"
+          refute_includes error.message, "pw"
+          refute_includes error.message, "user:"
+          refute_includes error.message, url
+          refute_includes error.message, "fhir.example.test"
+        end
+
+        test "the refusal of a base_url with a query does not repeat the URL" do
+          url = "https://fhir.example.test/fhir?tenant=SECRETTENANT"
+          error = assert_raises(ArgumentError) { Client.new(base_url: url) }
+
+          refute_includes error.message, "SECRETTENANT"
+          refute_includes error.message, url
+        end
+
+        {
+          "https://fhir.example.test/fhir" => [ "fhir.example.test", 443, true, "/fhir/Patient/1" ],
+          "https://fhir.example.test/fhir/" => [ "fhir.example.test", 443, true, "/fhir/Patient/1" ],
+          "http://127.0.0.1:52773/fhir/r4" => [ "127.0.0.1", 52773, false, "/fhir/r4/Patient/1" ],
+          "http://localhost:8080/fhir" => [ "localhost", 8080, false, "/fhir/Patient/1" ],
+          "http://[::1]:8080/fhir" => [ "::1", 8080, false, "/fhir/Patient/1" ]
+        }.each do |url, (host, port, tls, path)|
+          test "new accepts #{url} and reads from it" do
+            _, http = with_http(200, PATIENT.to_json) { Client.new(base_url: url).read("Patient", "1") }
+
+            start = http[:starts].first
+            assert_equal host, start[:args][0].to_s.delete("[]")
+            assert_equal port, start[:args][1]
+            assert_equal tls, start[:opts][:use_ssl] ? true : false
+            assert_equal path, http[:requests].first[:path]
+          end
         end
 
         # --- search ---------------------------------------------------------
@@ -185,6 +275,170 @@ module Lakeraven
           result, = with_http(410, NOT_FOUND.to_json) { client.read("Patient", "404") }
 
           assert_equal "OperationOutcome", result["resourceType"]
+        end
+
+        test "a 410 whose OperationOutcome says deleted returns the OperationOutcome" do
+          result, = with_http(410, outcome("deleted").to_json) { client.read("Patient", "404") }
+
+          assert_equal outcome("deleted"), result
+        end
+
+        test "a 404 OperationOutcome whose only issue is not-supported raises" do
+          assert_raises(Client::Error) do
+            with_http(404, outcome("not-supported").to_json) { client.read("Patient", "1") }
+          end
+        end
+
+        test "a 404 OperationOutcome whose only issue is deleted raises" do
+          assert_raises(Client::Error) do
+            with_http(404, outcome("deleted").to_json) { client.read("Patient", "1") }
+          end
+        end
+
+        test "a 410 OperationOutcome whose only issue is processing raises" do
+          assert_raises(Client::Error) do
+            with_http(410, outcome("processing").to_json) { client.read("Patient", "1") }
+          end
+        end
+
+        test "a 404 OperationOutcome with no issues raises" do
+          assert_raises(Client::Error) do
+            with_http(404, { "resourceType" => "OperationOutcome", "issue" => [] }.to_json) { client.read("Patient", "1") }
+          end
+        end
+
+        test "a 404 search whose OperationOutcome is not-supported raises" do
+          assert_raises(Client::Error) do
+            with_http(404, outcome("not-supported").to_json) { client.search("Patient", name: "Testpatient") }
+          end
+        end
+
+        # --- a 2xx must be what was asked for --------------------------------
+
+        test "read raises when a 200 carries an OperationOutcome" do
+          assert_raises(Client::Error) do
+            with_http(200, NOT_FOUND.to_json) { client.read("Patient", "1") }
+          end
+        end
+
+        test "read raises when a 200 carries a Bundle" do
+          assert_raises(Client::Error) do
+            with_http(200, BUNDLE.to_json) { client.read("Patient", "1") }
+          end
+        end
+
+        test "read raises when a 200 carries another resource type" do
+          body = { "resourceType" => "Practitioner", "id" => "1" }.to_json
+          assert_raises(Client::Error) do
+            with_http(200, body) { client.read("Patient", "1") }
+          end
+        end
+
+        test "read raises when a 200 carries an object with no resourceType" do
+          assert_raises(Client::Error) do
+            with_http(200, "{}") { client.read("Patient", "1") }
+          end
+        end
+
+        test "search raises when a 200 carries a resource that is not a Bundle" do
+          assert_raises(Client::Error) do
+            with_http(200, PATIENT.to_json) { client.search("Patient", name: "Testpatient") }
+          end
+        end
+
+        test "search raises when a 200 carries an OperationOutcome" do
+          assert_raises(Client::Error) do
+            with_http(200, NOT_FOUND.to_json) { client.search("Patient", name: "Testpatient") }
+          end
+        end
+
+        # --- transport failures ---------------------------------------------
+
+        test "a malformed status line becomes Client::Error and its text is not repeated" do
+          error = assert_raises(Client::Error) do
+            with_failing_http(Net::HTTPBadResponse.new("wrong status line: SECRETBODY")) { client.read("Patient", "1") }
+          end
+
+          refute_includes error.message, "SECRETBODY"
+        end
+
+        test "a corrupt compressed body becomes Client::Error and its text is not repeated" do
+          error = assert_raises(Client::Error) do
+            with_failing_http(Zlib::DataError.new("incorrect header check SECRETBODY")) { client.search("Patient", name: "Testpatient") }
+          end
+
+          refute_includes error.message, "SECRETBODY"
+        end
+
+        test "a refused connection becomes Client::Error" do
+          assert_raises(Client::Error) do
+            with_failing_http(Errno::ECONNREFUSED.new("connect(2) for fhir.example.test")) { client.read("Patient", "1") }
+          end
+        end
+
+        test "a read timeout becomes Client::Error" do
+          assert_raises(Client::Error) do
+            with_failing_http(Net::ReadTimeout.new) { client.read("Patient", "1") }
+          end
+        end
+
+        test "the open and read timeouts are passed to the connection" do
+          _, http = with_http(200, PATIENT.to_json) do
+            Client.new(base_url: BASE_URL, open_timeout: 2, read_timeout: 7).read("Patient", "1")
+          end
+
+          assert_equal 2, http[:starts].first[:opts][:open_timeout]
+          assert_equal 7, http[:starts].first[:opts][:read_timeout]
+        end
+
+        test "the default timeouts are passed to the connection" do
+          _, http = with_http(200, PATIENT.to_json) { client.read("Patient", "1") }
+
+          assert_equal Client::OPEN_TIMEOUT, http[:starts].first[:opts][:open_timeout]
+          assert_equal Client::READ_TIMEOUT, http[:starts].first[:opts][:read_timeout]
+        end
+
+        # --- error messages carry no id, params or body ----------------------
+
+        test "a read error names neither the id nor the response body" do
+          body = { "resourceType" => "OperationOutcome", "issue" => [ { "diagnostics" => "BODYMARKER IDMARKER-77" } ] }.to_json
+          error = assert_raises(Client::Error) do
+            with_http(500, body) { client.read("Patient", "IDMARKER-77") }
+          end
+
+          refute_includes error.message, "IDMARKER"
+          refute_includes error.message, "BODYMARKER"
+        end
+
+        test "a search error names neither the params nor the response body" do
+          error = assert_raises(Client::Error) do
+            with_http(500, "BODYMARKER PARAMMARKER") { client.search("Patient", name: "PARAMMARKER") }
+          end
+
+          refute_includes error.message, "PARAMMARKER"
+          refute_includes error.message, "BODYMARKER"
+        end
+
+        test "a wrong resource type error names neither the id nor the response body" do
+          body = { "resourceType" => "Practitioner", "id" => "IDMARKER-77", "text" => "BODYMARKER" }.to_json
+          error = assert_raises(Client::Error) do
+            with_http(200, body) { client.read("Patient", "IDMARKER-77") }
+          end
+
+          refute_includes error.message, "IDMARKER"
+          refute_includes error.message, "BODYMARKER"
+        end
+
+        test "a transport error names neither the id nor the params" do
+          read_error = assert_raises(Client::Error) do
+            with_failing_http(Errno::ECONNREFUSED.new("IDMARKER-77")) { client.read("Patient", "IDMARKER-77") }
+          end
+          search_error = assert_raises(Client::Error) do
+            with_failing_http(Net::ReadTimeout.new("PARAMMARKER")) { client.search("Patient", name: "PARAMMARKER") }
+          end
+
+          refute_includes read_error.message, "IDMARKER"
+          refute_includes search_error.message, "PARAMMARKER"
         end
 
         # --- failures raise; absence of data never reads as success ---------
@@ -305,25 +559,58 @@ module Lakeraven
           res
         end
 
+        def outcome(code)
+          {
+            "resourceType" => "OperationOutcome",
+            "issue" => [ { "severity" => "error", "code" => code, "diagnostics" => "synthetic #{code}" } ]
+          }
+        end
+
         # Runs the block with Net::HTTP.start replaced. Returns the block's
         # value and what the connection saw.
         def with_http(status, body)
           connection = RecordingConnection.new(response(status, body))
           starts = []
-          fake_start = lambda do |*args, **opts, &blk|
+          result = with_start(recording_start(connection, starts)) { yield }
+          [ result, { requests: connection.requests, starts: starts } ]
+        end
+
+        # Runs the block with a Net::HTTP.start that raises the given error,
+        # the way a connection that fails in transport does.
+        def with_failing_http(error)
+          with_start(->(*, **, &_blk) { raise error }) { yield }
+        end
+
+        # The block is given a client and must raise ArgumentError without
+        # opening a connection or sending a request.
+        def assert_refused_before_any_request
+          connection = RecordingConnection.new(response(200, PATIENT.to_json))
+          starts = []
+          subject = client
+          with_start(recording_start(connection, starts)) do
+            assert_raises(ArgumentError) { yield subject }
+          end
+
+          assert_empty connection.requests, "a request was sent"
+          assert_empty starts, "a connection was opened"
+        end
+
+        def recording_start(connection, starts)
+          lambda do |*args, **opts, &blk|
             opts = args.pop.merge(opts) if args.last.is_a?(Hash)
             starts << { args: args, opts: opts }
             blk ? blk.call(connection) : connection
           end
+        end
 
+        def with_start(fake_start)
           original = Net::HTTP.method(:start)
           Net::HTTP.define_singleton_method(:start, &fake_start)
           begin
-            result = yield
+            yield
           ensure
             Net::HTTP.define_singleton_method(:start, original)
           end
-          [ result, { requests: connection.requests, starts: starts } ]
         end
       end
     end

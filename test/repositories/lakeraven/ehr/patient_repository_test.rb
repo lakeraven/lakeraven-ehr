@@ -223,16 +223,122 @@ module Lakeraven
       end
 
       test "the FHIR read path never touches RpmsRpc's FHIR surface" do
+        fhir = seeded_fhir_client("1")
+        fhir.seed_resource("Patient", "99999", synthetic_patient("99999"))
+
         StubHelpers.with_recording_stub(RpmsRpc, :fhir_client, nil) do |client_calls|
           StubHelpers.with_recording_stub(RpmsRpc, :mock_fhir!, nil) do |mock_calls|
-            fhir_first = PatientRepository.find(1, source_preference: :fhir_first)
-            rpc_first = PatientRepository.find(99999, source_preference: :rpc_first)
+            with_fhir_client(fhir) do
+              fhir_first = PatientRepository.find(1, source_preference: :fhir_first)
+              rpc_first = PatientRepository.find(99999, source_preference: :rpc_first)
 
-            assert_empty client_calls, "PatientRepository called RpmsRpc.fhir_client"
-            assert_empty mock_calls, "PatientRepository called RpmsRpc.mock_fhir!"
-            assert_equal :rpc, fhir_first.provenance[:rpms][:source]
-            assert_nil rpc_first
+              assert_empty client_calls, "PatientRepository called RpmsRpc.fhir_client"
+              assert_empty mock_calls, "PatientRepository called RpmsRpc.mock_fhir!"
+              assert_equal :fhir, fhir_first.provenance[:rpms][:source]
+              assert_equal "TESTPATIENT,ADA", fhir_first.name
+              assert_equal :fhir, rpc_first.provenance[:rpms][:source]
+              assert_equal 99999, rpc_first.dfn
+            end
           end
+        end
+      end
+
+      # --- fail closed: a FHIR answer that is not the patient asked for (#599) ---
+      #
+      # Each answer is given for the DFN that was asked. None of them is that
+      # patient, so none may come back as a Patient with source :fhir.
+      WRONG_ANSWERS = {
+        "a Patient with another id" => ->(_dfn) { { "resourceType" => "Patient", "id" => "2", "name" => [ { "family" => "Wrongpatient", "given" => [ "Bea" ] } ] } },
+        "a Patient with no id" => ->(_dfn) { { "resourceType" => "Patient", "name" => [ { "family" => "Wrongpatient", "given" => [ "Bea" ] } ] } },
+        "a Patient whose id only starts with the DFN" => ->(dfn) { { "resourceType" => "Patient", "id" => "#{dfn}abc", "name" => [ { "family" => "Wrongpatient", "given" => [ "Bea" ] } ] } },
+        "an empty object" => ->(_dfn) { {} },
+        "an empty searchset Bundle" => ->(_dfn) { { "resourceType" => "Bundle", "type" => "searchset", "total" => 0, "entry" => [] } },
+        "a Practitioner with the DFN as its id" => ->(dfn) { { "resourceType" => "Practitioner", "id" => dfn.to_s, "name" => [ { "family" => "Wrongprovider", "given" => [ "Cy" ] } ] } }
+      }.freeze
+
+      WRONG_ANSWERS.each do |label, answer|
+        test "fhir_first falls back to RPC when FHIR answers #{label}" do
+          fhir = AnsweringClient.new(answer.call(1))
+
+          with_fhir_client(fhir) do
+            patient = PatientRepository.find(1, source_preference: :fhir_first)
+
+            assert_equal [ [ "Patient", "1" ] ], fhir.reads
+            assert_instance_of Patient, patient
+            assert_equal :rpc, patient.provenance[:rpms][:source]
+            assert_equal 1, patient.dfn
+            assert_equal "Anderson,Alice", patient.name
+          end
+        end
+
+        test "rpc_first returns nil when RPC does not know the DFN and FHIR answers #{label}" do
+          fhir = AnsweringClient.new(answer.call(99999))
+
+          with_fhir_client(fhir) do
+            patient = PatientRepository.find(99999, source_preference: :rpc_first)
+
+            assert_equal [ [ "Patient", "99999" ] ], fhir.reads
+            assert patient.nil?, "a patient came back with source #{patient&.provenance&.dig(:rpms, :source).inspect}"
+          end
+        end
+      end
+
+      test "fhir_first falls back to RPC when the test double holds another patient under the requested key" do
+        fhir = Lakeraven::EHR::FHIR::MockClient.new
+        fhir.seed_resource("Patient", "1", synthetic_patient("2"))
+
+        with_fhir_client(fhir) do
+          patient = PatientRepository.find(1, source_preference: :fhir_first)
+
+          assert_equal :rpc, patient.provenance[:rpms][:source]
+          assert_equal "Anderson,Alice", patient.name
+        end
+      end
+
+      test "rpc_first returns nil when the test double holds another patient under the requested key" do
+        fhir = Lakeraven::EHR::FHIR::MockClient.new
+        fhir.seed_resource("Patient", "99999", synthetic_patient("2"))
+
+        with_fhir_client(fhir) do
+          patient = PatientRepository.find(99999, source_preference: :rpc_first)
+
+          assert patient.nil?, "a patient came back with source #{patient&.provenance&.dig(:rpms, :source).inspect}"
+        end
+      end
+
+      # --- an outage is not "no such patient" (#599) ---
+
+      test "rpc_first raises when RPC does not know the DFN and the FHIR client fails" do
+        fhir = AnsweringClient.new(Lakeraven::EHR::FHIR::Client::Error.new("FHIR Patient request answered 503"))
+
+        with_fhir_client(fhir) do
+          assert_raises(Lakeraven::EHR::FHIR::Client::Error) do
+            PatientRepository.find(99999, source_preference: :rpc_first)
+          end
+          assert_equal [ [ "Patient", "99999" ] ], fhir.reads
+        end
+      end
+
+      test "rpc_first never asks FHIR when RPC knows the DFN" do
+        fhir = AnsweringClient.new(synthetic_patient("1").deep_stringify_keys)
+
+        with_fhir_client(fhir) do
+          patient = PatientRepository.find(1, source_preference: :rpc_first)
+
+          assert_empty fhir.reads
+          assert_equal :rpc, patient.provenance[:rpms][:source]
+          assert_equal "Anderson,Alice", patient.name
+        end
+      end
+
+      test "rpc_first does not raise for a failing FHIR client when RPC knows the DFN" do
+        fhir = AnsweringClient.new(Lakeraven::EHR::FHIR::Client::Error.new("FHIR Patient request answered 503"))
+
+        with_fhir_client(fhir) do
+          patient = PatientRepository.find(1, source_preference: :rpc_first)
+
+          assert_empty fhir.reads
+          assert_equal :rpc, patient.provenance[:rpms][:source]
         end
       end
 
@@ -300,12 +406,34 @@ module Lakeraven
       # Synthetic patient, seeded under the given id.
       def seeded_fhir_client(id)
         client = Lakeraven::EHR::FHIR::MockClient.new
-        client.seed_resource("Patient", id, {
+        client.seed_resource("Patient", id, synthetic_patient(id))
+        client
+      end
+
+      def synthetic_patient(id)
+        {
           resourceType: "Patient", id: id,
           name: [ { family: "Testpatient", given: [ "Ada" ] } ],
           gender: "female", birthDate: "1980-05-15"
-        })
-        client
+        }
+      end
+
+      # A FHIR client that gives every read the same answer (raising it when
+      # it is an exception) and records what it was asked.
+      class AnsweringClient
+        attr_reader :reads
+
+        def initialize(answer)
+          @answer = answer
+          @reads = []
+        end
+
+        def read(resource_type, id)
+          @reads << [ resource_type, id ]
+          raise @answer if @answer.is_a?(Exception)
+
+          @answer
+        end
       end
     end
   end
