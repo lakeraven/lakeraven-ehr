@@ -41,6 +41,13 @@ class SensitivePatientAccessTest < ActionDispatch::IntegrationTest
     5 => [ "Access to this record is restricted." ]
   }.freeze
   FAIL_CLOSED_STATUSES = [ 403, 503 ].freeze
+  # How a broker words "this RPC is served, but not to this user" (rpms-rpc
+  # lib/rpms_rpc/client.rb, REFUSED_PATTERN): both raise RpcRefusedError.
+  RPC_REFUSALS = {
+    "CIA" => "Access denied for remote procedure: %s",
+    "XWB" => "The remote procedure %s is not registered to the option #{OPTION}."
+  }.freeze
+  ACCOUNT_NOT_SET_UP = /RPMS account is not set up for the sensitive-record check/i
 
   setup do
     enable_forgery_protection!
@@ -64,6 +71,7 @@ class SensitivePatientAccessTest < ActionDispatch::IntegrationTest
 
     assert_opened!(PLAIN_DFN)
     assert_checked_once!(PLAIN_DFN)
+    assert_check_asks_for_message!
     assert_no_bulletin!
     assert_open_audited_as_success!(PLAIN_DFN)
   end
@@ -93,6 +101,7 @@ class SensitivePatientAccessTest < ActionDispatch::IntegrationTest
     assert_response :forbidden
     assert_not_opened!
     assert_checked_once!(SENSITIVE_DFN)
+    assert_check_asks_for_message!
     assert_no_bulletin!
     assert_refusal_audited!(SENSITIVE_DFN)
   end
@@ -204,6 +213,20 @@ class SensitivePatientAccessTest < ActionDispatch::IntegrationTest
 
     assert_equal 1, raised.size, "the bulletin was sent, and raised"
     assert_failed_closed!(SENSITIVE_DFN)
+  end
+
+  # RPMS serves the bulletin, but not to this user (r2): the same determined
+  # "no" about the account as a refused check, not an outage.
+  RPC_REFUSALS.each do |broker, wording|
+    test "an acknowledged open is refused as account-not-set-up when RPMS refuses the user the bulletin (#{broker})" do
+      seed_sensitive_access!(SENSITIVE_DFN, 2, WARNING_LINES)
+      raised = rpms_refuses!(BULLETIN_RPC, wording)
+
+      post_open(SENSITIVE_DFN, acknowledge: true)
+
+      assert_equal 1, raised.size, "the bulletin was sent, and refused"
+      assert_account_not_set_up!(SENSITIVE_DFN)
+    end
   end
 
   test "an unacknowledged attempt on a sensitive record does not switch the session to it" do
@@ -327,17 +350,36 @@ class SensitivePatientAccessTest < ActionDispatch::IntegrationTest
     assert_failed_closed!(PLAIN_DFN)
   end
 
-  # Patient.canonical_dfn reads "03" as record 3. Whether the open canonicalizes
-  # before the check or RPMS refuses the id, a sensitive record's leading-zero
-  # form is not a way round the warning.
-  test "a leading-zero form of a sensitive record's id does not open it unacknowledged" do
+  # Patient.canonical_dfn reads "03" as record 3, and RPMS is asked about
+  # record 3: a sensitive record's leading-zero form is not a way round the
+  # warning, and it is not a dead end either (r2).
+  test "a leading-zero form of a sensitive record's id gets the warning for that record, unacknowledged" do
     seed_sensitive_access!(SENSITIVE_DFN, 2, WARNING_LINES)
 
     post_open("0#{SENSITIVE_DFN}")
 
+    assert_response :forbidden
     assert_not_opened!
-    refute response.redirect?, "expected no redirect, got one to #{response.location}"
+    assert_checked_once!(SENSITIVE_DFN) # the check names record 3, not "03"
+    assert_includes response.body, WARNING_LINES.first
+    form = acknowledgement_form("0#{SENSITIVE_DFN}")
+    assert form, "expected the warning page's form, posting back to #{context_path("0#{SENSITIVE_DFN}")}"
+    assert_equal "1", form.at_css("input[name='acknowledge_sensitive']")&.[]("value")
     assert_no_bulletin!
+    assert_refusal_audited!(SENSITIVE_DFN)
+  end
+
+  test "an acknowledged open by a sensitive record's leading-zero id sends the bulletin for that record and opens" do
+    seed_sensitive_access!(SENSITIVE_DFN, 2, WARNING_LINES)
+    seed_sensitive_bulletin!(SENSITIVE_DFN, true)
+
+    post_open("0#{SENSITIVE_DFN}", acknowledge: true)
+
+    assert_opened!("0#{SENSITIVE_DFN}") # the session keeps the route's segment
+    assert_checked_once!(SENSITIVE_DFN)
+    assert_equal [ [ SENSITIVE_DFN, OPTION, LOG_AND_SEND ] ], sensitive_bulletin_calls.map { |c| c[:params].to_a },
+                 "the bulletin names record 3, not \"03\""
+    assert_open_audited_as_success!(SENSITIVE_DFN)
   end
 
   # -- A refused open of the record already open closes it (r1) ---------------
@@ -421,43 +463,71 @@ class SensitivePatientAccessTest < ActionDispatch::IntegrationTest
     end
   end
 
-  # -- The user cannot bind the option the check runs under (r1) --------------
+  # -- An error that is not RPMS's, during a re-open (r2) ----------------------
   #
-  # RPMS accepted the user's codes but does not give them OR CPRS GUI CHART:
-  # the gem's ContextRefusedError (as sign-on raises it, #501). That is a
-  # determined "no" about the account, not an outage: 403, and the page says
-  # so instead of telling the user to try again.
+  # Not every failure of the check is an RpmsRpc::Error (a bug, a bad argument
+  # below the gateway). Whatever it is, RPMS did not clear this open, so the
+  # session must not go on holding the record. The request itself may error:
+  # what is asserted is the session the browser is left with.
 
-  test "a user whose RPMS account cannot run the sensitive-record check is refused with 403 and told why" do
-    seed_not_sensitive!(PLAIN_DFN)
-    raised = rpms_raises_on!(ACCESS_RPC, error: RpmsRpc::Client::ContextRefusedError,
-                                         message: "this user may not use #{OPTION}")
+  test "re-opening the record already open closes it when the check fails with an error that is not RPMS's" do
+    open_not_sensitive!(SENSITIVE_DFN)
+    raised = rpms_raises_on!(ACCESS_RPC, error: ArgumentError, message: "not an RPMS error")
 
-    post_open(PLAIN_DFN)
+    post_open_tolerating(ArgumentError, SENSITIVE_DFN)
 
-    assert_equal 1, raised.size, "the check was attempted, and refused"
-    assert_response :forbidden
-    assert_not_opened!
-    assert_match(/RPMS account is not set up for the sensitive-record check/i, response.body)
-    refute_match(/try again/i, response.body, "retrying does not fix an account that lacks the option")
-    assert_nil acknowledgement_form
-    assert_no_bulletin!
-    assert_refusal_audited!(PLAIN_DFN)
+    assert_equal 1, raised.size, "the check was sent, and raised"
+    assert_session_context_closed_after_error!
   end
 
-  test "an acknowledgement does not open a record for a user whose RPMS account cannot run the check" do
-    seed_sensitive_bulletin!(SENSITIVE_DFN, true)
-    raised = rpms_raises_on!(ACCESS_RPC, error: RpmsRpc::Client::ContextRefusedError,
-                                         message: "this user may not use #{OPTION}")
+  test "a different open record stays open when the check fails with an error that is not RPMS's" do
+    open_not_sensitive!(PLAIN_DFN)
+    raised = rpms_raises_on!(ACCESS_RPC, error: ArgumentError, message: "not an RPMS error")
 
-    post_open(SENSITIVE_DFN, acknowledge: true)
+    post_open_tolerating(ArgumentError, SENSITIVE_DFN)
 
-    assert_equal 1, raised.size
-    assert_response :forbidden
-    assert_not_opened!
-    refute_match(/try again/i, response.body)
-    assert_no_bulletin!
-    assert_refusal_audited!(SENSITIVE_DFN)
+    assert_equal 1, raised.size, "the check was sent, and raised"
+    get "#{MOUNT}/login" # the session as the browser's cookie now holds it
+    assert_equal PLAIN_DFN, session_open_patient_dfn, "the failure was about patient #{SENSITIVE_DFN}, not the open record"
+  end
+
+  # -- RPMS will not run the check for this user (r1, corrected in r2) --------
+  #
+  # Factory-Spec-Amendment (r2): r1 had these tests raise ContextRefusedError,
+  # on the premise that the gem raises it from the check. It does not: the gem
+  # raises ContextRefusedError only at CIA sign-on (#501), never from
+  # DgSensitive. A broker that serves DG SENSITIVE RECORD ACCESS, but not to
+  # this user under OR CPRS GUI CHART, raises RpmsRpc::Client::RpcRefusedError
+  # (rpms-rpc lib/rpms_rpc/client.rb, REFUSED_PATTERN):
+  #   CIA  "Access denied for remote procedure: NAME"                     (CIANBACT.m:49)
+  #   XWB  "The remote procedure NAME is not registered to the option OPT." (XQCS.m:75)
+  # That is a determined "no" about the account, not an outage: 403, and the
+  # page says so instead of telling the user to try again.
+
+  RPC_REFUSALS.each do |broker, wording|
+    test "the gem reads the #{broker} refusal of the sensitive-record check as RpcRefusedError" do
+      assert_equal RpmsRpc::Client::RpcRefusedError, RpmsRpc::Client.rpc_error_for(format(wording, ACCESS_RPC))
+    end
+
+    test "a user whose RPMS account cannot run the sensitive-record check is refused with 403 and told why (#{broker})" do
+      seed_not_sensitive!(PLAIN_DFN)
+      raised = rpms_refuses!(ACCESS_RPC, wording)
+
+      post_open(PLAIN_DFN)
+
+      assert_equal 1, raised.size, "the check was attempted, and refused"
+      assert_account_not_set_up!(PLAIN_DFN)
+    end
+
+    test "an acknowledgement does not open a record for a user whose RPMS account cannot run the check (#{broker})" do
+      seed_sensitive_bulletin!(SENSITIVE_DFN, true)
+      raised = rpms_refuses!(ACCESS_RPC, wording)
+
+      post_open(SENSITIVE_DFN, acknowledge: true)
+
+      assert_equal 1, raised.size
+      assert_account_not_set_up!(SENSITIVE_DFN)
+    end
   end
 
   # -- Ordering: a caller who may not open the record never causes the check --
@@ -530,9 +600,9 @@ class SensitivePatientAccessTest < ActionDispatch::IntegrationTest
 
   # The warning page's form: posts to the open it came from, with the
   # acknowledgement. Nil when the page has none.
-  def acknowledgement_form
+  def acknowledgement_form(dfn = SENSITIVE_DFN)
     Nokogiri::HTML(response.body).css("form").find do |form|
-      form["action"].to_s.end_with?(context_path(SENSITIVE_DFN)) &&
+      form["action"].to_s.end_with?(context_path(dfn)) &&
         form.at_css("input[name='acknowledge_sensitive']")
     end
   end
@@ -549,6 +619,42 @@ class SensitivePatientAccessTest < ActionDispatch::IntegrationTest
       super(rpc, *params)
     end
     raised
+  end
+
+  # RPMS serves the RPC, but not to this user: RpcRefusedError, in a broker's
+  # own wording (RPC_REFUSALS).
+  def rpms_refuses!(rpc_name, wording)
+    rpms_raises_on!(rpc_name, error: RpmsRpc::Client::RpcRefusedError, message: format(wording, rpc_name))
+  end
+
+  # The open, when the error may come back out of the request (the test
+  # environment re-raises what Rails does not rescue) or be rendered as a 500.
+  def post_open_tolerating(error, dfn)
+    post_open(dfn)
+    refute response.redirect?, "the open failed: it must not redirect to #{response.location}"
+  rescue error
+    nil
+  end
+
+  # After a request that raised, the integration session still shows the
+  # request before it. A further request reads the session the browser's
+  # cookie now holds, and the record's pages say whether it is open.
+  def assert_session_context_closed_after_error!
+    get "#{MOUNT}/login"
+    assert_not_opened!
+    get "#{MOUNT}/patients/#{SENSITIVE_DFN}/screenings"
+    assert_response :forbidden, "the record is not open in the session"
+  end
+
+  # 403, the account-not-set-up page, nothing to retry or acknowledge, not
+  # opened, no bulletin left behind, audited as a refusal.
+  def assert_account_not_set_up!(dfn)
+    assert_response :forbidden
+    assert_not_opened!
+    assert_match ACCOUNT_NOT_SET_UP, response.body
+    refute_match(/try again/i, response.body, "retrying does not fix an account RPMS refuses the RPC")
+    assert_nil acknowledgement_form, "nothing to acknowledge"
+    assert_refusal_audited!(dfn)
   end
 
   # The record is open in the session (RPMS answered 0), and the audit log
@@ -577,6 +683,18 @@ class SensitivePatientAccessTest < ActionDispatch::IntegrationTest
     assert_equal 1, calls.size, "expected one DG SENSITIVE RECORD ACCESS, got #{calls.size}"
     assert_equal dfn, calls.first[:params][0], "the check names the route's patient"
     assert_equal OPTION, calls.first[:params][2], "the check sends the option the open runs under"
+  end
+
+  # DGMSG, the check's second parameter, is "1". The only captured reply that
+  # carried RPMS's warning lines was sent with DGMSG=1 (rpms-rpc
+  # test/fixtures/captured_replies/dg-sensitive.yml, capture sensitive/1,
+  # inputs ["990028", "1", "OR CPRS GUI CHART"]); the not-sensitive captures,
+  # sent with "0", carry a code and no lines. The warning page reads RPMS's
+  # text from those lines, so the open asks for them the way the capture did.
+  def assert_check_asks_for_message!
+    call = sensitive_access_calls.first
+    assert call, "expected a DG SENSITIVE RECORD ACCESS call"
+    assert_equal "1", call[:params][1], "the check is sent with DGMSG (generate_message) \"1\""
   end
 
   def assert_no_bulletin!
