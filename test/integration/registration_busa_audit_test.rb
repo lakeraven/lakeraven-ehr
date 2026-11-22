@@ -10,9 +10,10 @@ require "rpms_rpc/api/busa"
 #
 # The RPMS change has already happened when the entry is written and cannot be
 # undone, so an entry RPMS does not confirm leaves the edit as saved and is
-# recorded locally as a gap. "Not confirmed", never "not filed": the pinned
-# build files the BUSA summary and then answers 0^ for the patient-detail row
-# (rpms-rpc test/fixtures/captured_replies/busa-log.yml, patient_detail/1), so
+# recorded locally as a gap. "Not confirmed", never "not filed": release
+# bcer-9.0-20261119-f67498c-ydb files the BUSA summary and then answers 0^ for
+# the patient-detail row (rpms-rpc
+# test/fixtures/captured_replies/busa-log.yml, patient_detail/1), so
 # a refusal does not show that nothing was filed.
 #
 # A save that changes nothing is not an edit and files nothing. An edit whose

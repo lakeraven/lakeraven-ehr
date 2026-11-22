@@ -27,12 +27,13 @@ Feature: Session and audit behaviours carried over from BPRM 6.0
 
   # What this scenario shows is what the app sends. It does not show RPMS
   # confirming the entry: RPMS here is a stand-in that answers success. RPMS
-  # confirming a patient-detail entry is not yet shown on the pinned build. The
-  # only live capture of this entry shape (rpms-rpc
-  # test/fixtures/captured_replies/busa-log.yml, patient_detail/1) has the
-  # build file the summary, refuse the patient-detail row and answer 0^. An
-  # entry RPMS does not confirm is recorded locally as "BUSA entry not
-  # confirmed"; the next scenario is that captured reply.
+  # confirming a patient-detail entry is not yet shown on any build. The only
+  # live capture of this entry shape (rpms-rpc
+  # test/fixtures/captured_replies/busa-log.yml, patient_detail/1) was taken
+  # from release bcer-9.0-20261119-f67498c-ydb, which files the summary,
+  # refuses the patient-detail row and answers 0^. An entry RPMS does not
+  # confirm is recorded locally as "BUSA entry not confirmed"; the next
+  # scenario is that captured reply.
   Scenario: A saved edit sends one BUSA entry naming the patient and the action, and RPMS takes the user from the session
     Given a registration clerk is signed on as RPMS user 207
     And RPMS holds registered patient 990031
@@ -43,16 +44,25 @@ Feature: Session and audit behaviours carried over from BPRM 6.0
     And the BUSA entry records a patient edit described as "Registration: demographics edited"
     And the BUSA entry carries no user, because RPMS takes the user from the session
 
-  # The pinned build's answer to this exact entry shape, as captured live:
-  # rpms-rpc test/fixtures/captured_replies/busa-log.yml, patient_detail/1
-  # (input P|E|SYNTH RPC|Synthetic demographic update|990031). The reply the
-  # app is handed is the gem's own parse of the captured raw return, not a
-  # hand-built one. The edit is already saved in RPMS, so the clerk's flow is
-  # unchanged and the unconfirmed entry is recorded locally.
-  Scenario: The pinned build's captured reply to a patient-detail entry is recorded as not confirmed
+  # The answer of release bcer-9.0-20261119-f67498c-ydb to this exact entry
+  # shape, as captured live: rpms-rpc
+  # test/fixtures/captured_replies/busa-log.yml, patient_detail/1 (input
+  # P|E|SYNTH RPC|Synthetic demographic update|990031). The reply the app is
+  # handed is the gem's own parse of the captured raw return, not a hand-built
+  # one. The edit is already saved in RPMS, so the clerk's flow is unchanged
+  # and the unconfirmed entry is recorded locally.
+  #
+  # Where the capture comes from, and what it does not cover:
+  #   - The capture's user was a demo user given the BUSARPC option by hand on
+  #     a throwaway container. No published demo persona holds BUSARPC.
+  #   - On this repo's pinned build (bcer-9.0-20261113-3f5487a-ydb, 3f5487a) no
+  #     BUSA reply has been captured.
+  #   - A user without BUSARPC is expected to be refused the context, which the
+  #     app records as not confirmed with the error class as the reason.
+  Scenario: The captured reply of bcer-9.0-20261119-f67498c-ydb to a patient-detail entry is recorded as not confirmed
     Given a registration clerk is signed on as RPMS user 207
     And RPMS holds registered patient 990031
-    And RPMS answers the BUSA entry with the pinned build's captured reply for a patient-detail row
+    And RPMS answers the BUSA entry with the captured reply of bcer-9.0-20261119-f67498c-ydb for a patient-detail row
     When the clerk saves a change to the demographics of patient 990031
     Then the change is saved
     And RPMS receives exactly 1 BUSA security audit entry

@@ -25,10 +25,11 @@ module SessionAndAuditSteps
       phone_work: nil, phone_other: nil, community: nil }
   end
 
-  # The pinned build's reply to a patient-detail entry, byte for byte as
-  # captured live: rpms-rpc test/fixtures/captured_replies/busa-log.yml,
-  # patient_detail/1 (sha256 fe4c7411...c7a9). It files the summary, refuses
-  # the detail row and answers 0^ with no message.
+  # The reply of release bcer-9.0-20261119-f67498c-ydb to a patient-detail
+  # entry, byte for byte as captured live: rpms-rpc
+  # test/fixtures/captured_replies/busa-log.yml, patient_detail/1 (sha256
+  # fe4c7411...c7a9). That release files the summary, refuses the detail row
+  # and answers 0^ with no message.
   CAPTURED_PATIENT_DETAIL_RETURN = "5\0I00001RESULT^T00250ERROR_MESSAGE\x1E0^\x1E"
   CAPTURED_PATIENT_DETAIL_SHA256 = "fe4c741139e42adb431f89a5b31968d2c32d184bb7ce26f673f4c0fc6090c7a9"
 
@@ -82,8 +83,8 @@ Given("RPMS holds registered patient {int}") do |dfn|
 end
 
 # The reply is the gem's parse of the captured wire return, so the scenario
-# follows what the pinned build sent, not a hash written to suit the app.
-Given("RPMS answers the BUSA entry with the pinned build's captured reply for a patient-detail row") do
+# follows what release bcer-9.0-20261119-f67498c-ydb sent, not a hash written to suit the app.
+Given("RPMS answers the BUSA entry with the captured reply of bcer-9.0-20261119-f67498c-ydb for a patient-detail row") do
   raw = SessionAndAuditSteps::CAPTURED_PATIENT_DETAIL_RETURN
   assert_equal SessionAndAuditSteps::CAPTURED_PATIENT_DETAIL_SHA256, Digest::SHA256.hexdigest(raw),
                "the reply must be the captured raw_return, byte for byte"
