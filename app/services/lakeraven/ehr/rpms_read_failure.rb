@@ -27,17 +27,42 @@ module Lakeraven
       # enough that the line stays one line.
       LOCATION_FRAMES = 3
 
+      # Errors with their own handlers (RpmsUserScope, the audit concern).
+      # A read seam re-raises these unchanged: they are not a section's
+      # failure, and rendering them as one would hide a lost session, a
+      # missing configuration or an unrecorded access.
+      PASS_THROUGH = [
+        ::RpmsRpc::NotConfiguredError,
+        Lakeraven::EHR::RpmsSessions::SignInAgain,
+        ::RpmsRpc::SessionPool::PoolExhaustedError,
+        Lakeraven::EHR::AuditedBroker::UnrecordedAccessError
+      ].freeze
+
       attr_reader :cause, :noun
 
+      # A read that answered, but not with a list (nil, a Hash, a String).
+      # That is a failure, never "no data". There is no exception, so no
+      # backtrace is invented: the log names the class that came back.
+      def self.not_a_list(noun:, returned:, subject: nil)
+        new(nil, noun: noun, subject: subject, returned: returned)
+      end
+
+      # Anything a read may return as its list: an Array, or an Enumerable
+      # that converts to one (an ActiveRecord relation).
+      def self.list?(value)
+        value.respond_to?(:to_ary) || value.is_a?(ActiveRecord::Relation)
+      end
+
       # noun: the lower-case plural the section is called in prose ("problems").
-      # subject: what the generic failure text calls the section, when that is
-      # not the FHIR resource type ("Immunizations").
-      def initialize(error, noun:, subject: nil)
+      # subject: what the diagnostics call the section, when that is not the
+      # FHIR resource type ("Immunizations"). returned: the class of a
+      # non-list answer (see not_a_list).
+      def initialize(error, noun:, subject: nil, returned: nil)
         @cause = classify(error)
         @noun = noun
         @subject = subject
-        @error_class = error.class
-        @locations = source_locations(error)
+        @error_class = returned || error.class
+        @detail = returned ? "returned #{returned}, not a list" : "#{error.class} at #{source_locations(error).join(', ')}"
       end
 
       def fhir_code = FHIR_CODES.fetch(cause)
@@ -48,7 +73,7 @@ module Lakeraven
       # is never logged: it can carry PHI.
       def log(logger, label)
         if cause == FAILED
-          logger.error("#{label} failed: #{@error_class} at #{@locations.join(', ')}")
+          logger.error("#{label} failed: #{@detail}")
         else
           logger.warn("#{label} failed: #{@error_class}")
         end
@@ -63,13 +88,14 @@ module Lakeraven
         end
       end
 
-      # OperationOutcome diagnostics naming the FHIR resource type. The
-      # generic failure text uses the subject, when one was given.
+      # OperationOutcome diagnostics naming the FHIR resource type, or the
+      # subject when one was given (a section that spans resource types).
       def diagnostics(resource_type)
+        name = @subject || resource_type
         case cause
-        when REFUSED then "#{resource_type} is not permitted for this user."
-        when NOT_OFFERED then "#{resource_type} is not offered on this RPMS server."
-        else "#{@subject || resource_type} could not be loaded."
+        when REFUSED then "Access to #{name} is not permitted for this user."
+        when NOT_OFFERED then "Access to #{name} is not offered on this RPMS server."
+        else "#{name} could not be loaded."
         end
       end
 
@@ -84,6 +110,8 @@ module Lakeraven
       end
 
       def classify(error)
+        return FAILED if error.nil?
+
         case error
         when ::RpmsRpc::Client::RpcRefusedError then REFUSED
         when ::RpmsRpc::Client::RpcNotAvailableError then NOT_OFFERED

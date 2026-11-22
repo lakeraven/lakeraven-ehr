@@ -240,10 +240,10 @@
         <span class="font-normal text-slate-600">(<%= @screenings.length %>)</span>
       <% end %>
     </h2>
-    <% if @section_failures["QuestionnaireResponse"] %>
-      <%= empty_state @section_failures["QuestionnaireResponse"].html_message %>
-    <% elsif withheld_message("QuestionnaireResponse") %>
+    <% if withheld_message("QuestionnaireResponse") %>
       <%= empty_state withheld_message("QuestionnaireResponse") %>
+    <% elsif @section_failures["QuestionnaireResponse"] %>
+      <%= empty_state @section_failures["QuestionnaireResponse"].html_message %>
     <% elsif @screenings.any? %>
       <table
         id="chart-screenings-table"
@@ -291,7 +291,8 @@
       <span class="font-normal text-slate-600">(<%= @allergy_list_status.count_label %>)</span>
     </h2>
     <% unless @allergy_list_status.loaded? %>
-      <%= empty_state @allergy_list_status.text %>
+      <%# A failed read names its own cause; a withheld list has no failure. %>
+      <%= empty_state(@section_failures["AllergyIntolerance"]&.html_message || @allergy_list_status.text) %>
     <% end %>
     <% if @allergy_list_status.loaded? || @allergies.any? %>
       <table
@@ -337,12 +338,14 @@
         class="mt-0"
       >
         Immunizations
-        <% unless @section_failures["Immunization"] %>
+        <% unless @section_failures["Immunization"] || withheld_message("Immunization") %>
           <span class="font-normal text-slate-600">(<%= @immunizations.length %>)</span>
         <% end %>
       </h2>
       <% if @section_failures["Immunization"] %>
         <%= empty_state @section_failures["Immunization"].html_message %>
+      <% elsif withheld_message("Immunization") %>
+        <%= empty_state withheld_message("Immunization") %>
       <% elsif @immunizations.any? %>
         <table
           id="chart-immunizations-table"

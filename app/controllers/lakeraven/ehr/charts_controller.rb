@@ -88,6 +88,10 @@ module Lakeraven
 
       # Chart sections an IHS capability owns. A backend that withholds one
       # adds an outcome entry instead of those resources (#647).
+      # Screenings span two resource families (answers and scores), so their
+      # failure text names both rather than the one type it is recorded under.
+      SCREENINGS_SUBJECT = "Screenings (QuestionnaireResponse and screening Observation)"
+
       CHART_CAPABILITY_RESOURCES = { ihs_immunization: "Immunization" }.freeze
 
       before_action :authenticate_chart_request!
@@ -352,6 +356,10 @@ module Lakeraven
 
       # -- Data loading (per-type scope enforced; a mock miss yields []) --------
 
+      # Mapping a row after its read (from_rpms_row, Procedure.new,
+      # build_encounter_resources, to_fhir) runs OUTSIDE read_section on
+      # purpose: a malformed row fails the whole request closed (a 500),
+      # never an empty section that reads as "none recorded".
       def load_clinical_collections
         dfn = @patient.dfn.to_s
         @section_failures = {}
@@ -375,7 +383,8 @@ module Lakeraven
       # capability never sees the gateway call, and the card is omitted.
       # A read that raises is a failed card, not an empty list.
       def ihs_immunizations(dfn)
-        return [] unless readable?("Immunization") && BackendRegistry.current.provides?(:ihs_immunization)
+        return [] unless BackendRegistry.current.provides?(:ihs_immunization)
+        return [] unless readable_section?("Immunization", "immunizations")
 
         read_section("Immunization", "immunizations", subject: "Immunizations") { Immunization.for_patient(dfn) }
       end
@@ -404,17 +413,28 @@ module Lakeraven
       # CLASS (and, for a fault, where it was raised) is logged: the message
       # can carry PHI. subject names the section in the generic failure text
       # when that is not the resource type.
+      #
+      # A read that returns something other than a list (nil included) is a
+      # failure too, never coerced to []. Errors with their own handlers
+      # (RpmsReadFailure::PASS_THROUGH) leave the action unchanged.
       def read_section(resource_type, noun, subject: nil)
-        Array(yield)
+        value = yield
+        return value if RpmsReadFailure.list?(value)
+
+        record_read_failure(
+          resource_type, RpmsReadFailure.not_a_list(noun: noun, subject: subject, returned: value.class), noun: noun
+        )
+      rescue *RpmsReadFailure::PASS_THROUGH
+        raise
       rescue StandardError => error
-        record_read_failure(resource_type, error, noun: noun, subject: subject)
-        []
+        record_read_failure(resource_type, RpmsReadFailure.new(error, noun: noun, subject: subject), noun: noun)
       end
 
-      def record_read_failure(resource_type, error, noun:, subject: nil)
-        failure = RpmsReadFailure.new(error, noun: noun, subject: subject)
+      # Records the failure and answers the empty list the section renders from.
+      def record_read_failure(resource_type, failure, noun:)
         failure.log(Rails.logger, "[chart] #{noun} read")
         @section_failures[resource_type] = failure
+        []
       end
 
       def build_observations(dfn)
@@ -443,12 +463,16 @@ module Lakeraven
       # ordinal (serializer -> nil choice -> NoMethodError) 500'd the whole
       # bundle. Rows whose instrument no longer exists are dropped up front;
       # anything else that raises is dropped per row by `safe_map`.
+      #
+      # The HTML table is built from the score Observations only, so the HTML
+      # section is withheld whenever Observation scope is missing, even when
+      # the answers are readable (they still go in the bundle).
       def load_screenings(dfn)
         wants_scores  = readable?("Observation")
         wants_answers = readable?("QuestionnaireResponse")
-        @withheld_sections["QuestionnaireResponse"] = "screenings" unless wants_scores || wants_answers
+        @withheld_sections["QuestionnaireResponse"] = "screenings" unless wants_scores
         screenings = if wants_scores || wants_answers
-                       publishable_screenings(read_section("QuestionnaireResponse", "screenings") { ScreeningResponse.for_patient(dfn) })
+                       publishable_screenings(read_screenings(dfn))
         else
                        []
         end
@@ -456,6 +480,12 @@ module Lakeraven
         @screenings = wants_scores ? screenings : []
         @screening_observations = safe_map(@screenings, &:to_observation)
         @screening_answers = wants_answers ? screenings : []
+      end
+
+      # The failure names both families, so a token holding only one of them
+      # is told which of its resources are missing.
+      def read_screenings(dfn)
+        read_section("QuestionnaireResponse", "screenings", subject: SCREENINGS_SUBJECT) { ScreeningResponse.for_patient(dfn) }
       end
 
       # Validation runs on WRITE; this is the read side of the same contract.

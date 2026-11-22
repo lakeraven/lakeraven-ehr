@@ -16,7 +16,7 @@ module Lakeraven
 
       def self.fetch(log_label:)
         value = yield
-        return errored unless value.is_a?(Array)
+        return not_a_list(value, log_label) unless value.is_a?(Array)
 
         new(
           value,
@@ -25,6 +25,8 @@ module Lakeraven
           dropped_count: dropped_count_of(value),
           conflict: value.is_a?(AllergyIntoleranceReading) && value.conflict
         )
+      rescue *RpmsReadFailure::PASS_THROUGH
+        raise
       rescue StandardError => e
         # Never the message: one from a supplemental provider includes the
         # patient identifier, and a name would be worse.
@@ -70,6 +72,14 @@ module Lakeraven
           conflict: @conflict
         )
       end
+
+      # A reply that is not a list is a failed read, not "none recorded".
+      def self.not_a_list(value, log_label)
+        failure = RpmsReadFailure.not_a_list(noun: "allergies", returned: value.class)
+        failure.log(Rails.logger, "#{log_label} allergy source")
+        errored(failure)
+      end
+      private_class_method :not_a_list
 
       def self.errored(failure = nil)
         new([], :error, failure: failure)
