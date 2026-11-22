@@ -3,8 +3,9 @@
 require "test_helper"
 
 # lakeraven-ehr#908 (slice of #522): confidentialityCode / DS4P security
-# labels must survive C-CDA ingest. Labels are a marker, never a block;
-# an unreadable label fails closed. Synthetic data only.
+# labels must survive C-CDA ingest. Labels are a marker, never a block:
+# an unreadable label marks its scope as suspected Part 2 (part2: true)
+# without rejecting the document or inventing a value. Synthetic data only.
 module Lakeraven
   module EHR
     class CcdaParserSecurityLabelsTest < ActiveSupport::TestCase
@@ -21,11 +22,11 @@ module Lakeraven
       end
 
       # DS4P-style security observation carried in an entryRelationship.
-      def security_obs(code)
+      def security_obs(code, oid: ACT_OID)
         <<~XML
           <entryRelationship typeCode="COMP"><observation classCode="OBS" moodCode="EVN">
             <code code="SECCLASSOBS" codeSystem="2.16.840.1.113883.1.11.20457"/>
-            <value xsi:type="CE" code="#{code}" codeSystem="#{ACT_OID}"/>
+            <value xsi:type="CE" code="#{code}"#{%( codeSystem="#{oid}") if oid}/>
           </observation></entryRelationship>
         XML
       end
@@ -61,7 +62,7 @@ module Lakeraven
       end
 
       def ccda(header: "", allergies: allergy, conditions: condition, medications: medication,
-               allergies_header: "", conditions_header: "", medications_header: "")
+               allergies_header: "", conditions_header: "", medications_header: "", extra: "")
         <<~XML
           <ClinicalDocument xmlns="urn:hl7-org:v3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
             #{header}
@@ -69,6 +70,7 @@ module Lakeraven
               #{section(ALLERGIES, allergies, allergies_header)}
               #{section(PROBLEMS, conditions, conditions_header)}
               #{section(MEDS, medications, medications_header)}
+              #{extra}
             </structuredBody></component>
           </ClinicalDocument>
         XML
@@ -98,6 +100,7 @@ module Lakeraven
       test "normal (N) document is labelled N and not Part 2; existing fields unchanged" do
         result = parse(header: conf("N"))
 
+        assert_equal false, result[:part2]
         items(result).each do |item|
           assert_equal [ { system: CONF, code: "N" } ], item[:security_labels]
           assert_equal false, item[:part2]
@@ -114,6 +117,7 @@ module Lakeraven
         result = parse
 
         assert_equal [], result[:security_labels]
+        assert_equal false, result[:part2]
         items(result).each do |item|
           assert_equal [], item[:security_labels]
           assert_equal false, item[:part2]
@@ -160,6 +164,7 @@ module Lakeraven
         assert_equal false, plain[:part2]
         assert_equal false, result[:allergies].first[:part2]
         assert_equal [ [ CONF, "N" ] ], pairs(result[:security_labels])
+        assert_equal true, result[:part2], "top-level part2 is true when any label anywhere is Part 2"
       end
 
       test "Part 2 code matching is case-insensitive and the code is kept verbatim" do
@@ -180,12 +185,117 @@ module Lakeraven
         end
       end
 
-      test "fail closed: confidentialityCode with only a nullFlavor raises" do
-        assert_raises(StandardError) { parse(header: %(<confidentialityCode nullFlavor="NI"/>)) }
+      # --- Rule A: unreadable label is a marker (suspected Part 2), never a block ---
+
+      test "unreadable document confidentialityCode (nullFlavor only) marks everything Part 2 without inventing a label" do
+        result = parse(header: %(<confidentialityCode nullFlavor="NI"/>))
+
+        assert_equal [], result[:security_labels]
+        assert_equal true, result[:part2]
+        assert_equal 3, items(result).size
+        items(result).each do |item|
+          assert_equal [], item[:security_labels]
+          assert_equal true, item[:part2]
+        end
       end
 
-      test "fail closed: blank confidentialityCode code inside an entry raises" do
-        assert_raises(StandardError) { parse(header: conf("N"), allergies: allergy(conf(""))) }
+      test "blank confidentialityCode code inside an entry marks only that entry Part 2" do
+        result = parse(header: conf("N"), allergies: allergy(conf("")) + allergy)
+
+        assert_equal [ { system: CONF, code: "N" } ], result[:allergies][0][:security_labels]
+        assert_equal true, result[:allergies][0][:part2]
+        assert_equal false, result[:allergies][1][:part2]
+        assert_equal false, result[:conditions].first[:part2]
+        assert_equal true, result[:part2]
+      end
+
+      test "unreadable section confidentialityCode marks that section's entries Part 2" do
+        result = parse(header: conf("N"), medications_header: %(<confidentialityCode nullFlavor="UNK"/>))
+
+        assert_equal [ { system: CONF, code: "N" } ], result[:medications].first[:security_labels]
+        assert_equal true, result[:medications].first[:part2]
+        assert_equal false, result[:allergies].first[:part2]
+        assert_equal true, result[:part2]
+      end
+
+      test "label with no codeSystem is unreadable: entry is Part 2 and no label is invented" do
+        result = parse(conditions: condition(security_obs("42CFRPart2", oid: nil)),
+                       medications: medication(%(<confidentialityCode code="R"/>)))
+
+        [ result[:conditions].first, result[:medications].first ].each do |item|
+          assert_equal [], item[:security_labels]
+          assert_equal true, item[:part2]
+        end
+        assert_equal false, result[:allergies].first[:part2]
+      end
+
+      # --- Rule C: no label is lost by position ---
+
+      test "label-only sibling entry in an imported section labels that section's entries" do
+        label_only = %(<entry><act classCode="ACT" moodCode="EVN"><code code="42CFRPart2" codeSystem="#{ACT_OID}"/></act></entry>)
+        result = parse(header: conf("N"), conditions: condition + label_only)
+        clinical = result[:conditions].select { |c| c[:code] == "E11.9" }
+
+        assert_equal 1, clinical.size
+        assert_equal [ [ ACT, "42CFRPart2" ], [ CONF, "N" ] ], pairs(clinical.first[:security_labels])
+        assert_equal true, clinical.first[:part2]
+        assert_equal false, result[:allergies].first[:part2]
+        assert_equal [ [ CONF, "N" ] ], pairs(result[:security_labels])
+        assert_equal true, result[:part2]
+      end
+
+      test "labels in a non-imported section (header and entries) belong to the document" do
+        # DS4P-style Privacy Markings section: not one of the three imported sections.
+        privacy = section("2.16.840.1.113883.3.3251.1.5", "<entry><act classCode=\"ACT\" moodCode=\"EVN\">#{security_obs('42CFRPart2')}</act></entry>", conf("R"))
+        result = parse(header: conf("N"), extra: privacy)
+        expected = [ [ ACT, "42CFRPart2" ], [ CONF, "N" ], [ CONF, "R" ] ]
+
+        assert_equal expected, pairs(result[:security_labels])
+        assert_equal true, result[:part2]
+        assert_equal 3, items(result).size
+        items(result).each do |item|
+          assert_equal expected, pairs(item[:security_labels])
+          assert_equal true, item[:part2]
+        end
+      end
+
+      # --- Rule D: label recognition ---
+
+      test "v3-Confidentiality value outside a confidentialityCode element is a label" do
+        result = parse(header: conf("N"), allergies: allergy(security_obs("R", oid: CONF_OID)))
+
+        assert_equal [ [ CONF, "N" ], [ CONF, "R" ] ], pairs(result[:allergies].first[:security_labels])
+        assert_equal [ [ CONF, "N" ] ], pairs(result[:conditions].first[:security_labels])
+      end
+
+      test "Part 2 code under a non-ActCode (value set) OID is a label mapped to urn:oid" do
+        result = parse(conditions: condition(security_obs("SUD", oid: "2.16.840.1.113883.3.9999.2")))
+
+        assert_equal [ { system: "urn:oid:2.16.840.1.113883.3.9999.2", code: "SUD" } ], result[:conditions].first[:security_labels]
+        assert_equal true, result[:conditions].first[:part2]
+      end
+
+      test "codeSystem is compared ignoring a urn:oid: prefix and surrounding space/format characters" do
+        result = parse(medications: medication(security_obs("&#x200B;42CFRPart2 ", oid: " urn:oid:#{ACT_OID}&#x200B;")))
+
+        assert_equal [ { system: ACT, code: "​42CFRPart2 " } ], result[:medications].first[:security_labels]
+        assert_equal true, result[:medications].first[:part2]
+      end
+
+      # --- Rule E: malformed C-CDA ---
+
+      test "XML that is not well-formed raises" do
+        # Unquoted attribute: a lenient parser would drop the Part 2 code silently.
+        unquoted = ccda(conditions: condition(security_obs("42CFRPart2"))).sub(%(code="42CFRPart2"), "code=42CFRPart2")
+        unclosed = ccda(header: conf("N")).sub("</structuredBody>", "")
+
+        assert_raises(StandardError) { CcdaParser.parse(unquoted) }
+        assert_raises(StandardError) { CcdaParser.parse(unclosed) }
+      end
+
+      test "root that is not ClinicalDocument in the HL7 v3 namespace raises" do
+        assert_raises(StandardError) { CcdaParser.parse(ccda.gsub("ClinicalDocument", "Document")) }
+        assert_raises(StandardError) { CcdaParser.parse(ccda.sub(%( xmlns="urn:hl7-org:v3"), "")) }
       end
     end
   end

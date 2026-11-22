@@ -30,8 +30,8 @@ module Lakeraven
         @service.import_from_fhir_bundle(patient_dfn: "123", clinician_duz: "301", json_string: bundle.to_json)
       end
 
-      def import_ccda(header)
-        xml = <<~XML
+      def ccda_xml(header)
+        <<~XML
           <ClinicalDocument xmlns="urn:hl7-org:v3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
             #{header}
             <component><structuredBody><component><section>
@@ -45,6 +45,9 @@ module Lakeraven
             </section></component></structuredBody></component>
           </ClinicalDocument>
         XML
+      end
+
+      def import_ccda(header, xml: ccda_xml(header))
         @service.import_from_ccda(patient_dfn: "123", clinician_duz: "301", xml_string: xml)
       end
 
@@ -73,6 +76,16 @@ module Lakeraven
         assert_equal [], medication[:security_labels]
         assert_equal false, medication[:part2]
         assert_equal [], result.imported[:security_labels]
+        assert_equal true, result.imported[:part2], "top-level part2 is true when any label anywhere is Part 2"
+      end
+
+      test "FHIR: bundle with no labels anywhere is not Part 2 at any level" do
+        result = import_bundle([ resource("Condition"), resource("MedicationRequest", meta: { "security" => [ R_CODING ] }) ])
+
+        assert result.success?
+        assert_equal false, result.imported[:part2]
+        assert_equal false, result.imported[:conditions].first[:part2]
+        assert_equal false, result.imported[:medications].first[:part2]
       end
 
       test "FHIR: Bundle meta.security labels every item, unioned and de-duplicated with resource labels" do
@@ -88,26 +101,97 @@ module Lakeraven
         assert_equal true, result.imported[:medications].first[:part2]
       end
 
+      # Rule A: an unreadable label is a marker (suspected Part 2), never a block.
       {
+        "meta is not a Hash" => "restricted",
         "meta.security is not an Array" => { "security" => PART2_CODING },
         "a Coding is not a Hash" => { "security" => [ "42CFRPart2" ] },
         "a Coding has no code" => { "security" => [ { "system" => ACT } ] },
-        "a Coding has a blank code" => { "security" => [ { "system" => ACT, "code" => " " } ] }
+        "a Coding has a blank code" => { "security" => [ { "system" => ACT, "code" => " " } ] },
+        "a Coding has a non-String code" => { "security" => [ { "system" => ACT, "code" => 42 } ] }
       }.each do |label, meta|
-        test "FHIR fail closed: import fails when #{label} (resource)" do
-          result = import_bundle([ resource("Condition", meta: meta) ])
+        test "FHIR: import succeeds and the resource is marked Part 2 when #{label}" do
+          result = import_bundle([ resource("Condition", meta: meta), resource("MedicationRequest") ])
 
-          refute result.success?, "malformed security label must fail the import, not be dropped"
-          assert result.errors.any? { |e| e.match?(/security label/i) }, "errors: #{result.errors.inspect}"
-          assert_nil result.imported
+          assert result.success?, "an unreadable security label must not reject the import: #{result.errors.inspect}"
+          assert_equal [], result.imported[:conditions].first[:security_labels], "no label value may be invented"
+          assert_equal true, result.imported[:conditions].first[:part2]
+          assert_equal false, result.imported[:medications].first[:part2]
+          assert_equal true, result.imported[:part2]
         end
       end
 
-      test "FHIR fail closed: malformed Bundle meta.security fails the import" do
-        result = import_bundle([ resource("Condition") ], meta: { "security" => "R" })
+      test "FHIR: unreadable Bundle meta.security marks every item Part 2 without rejecting" do
+        result = import_bundle([ resource("Condition"), resource("AllergyIntolerance") ], meta: { "security" => "R" })
 
-        refute result.success?
-        assert result.errors.any? { |e| e.match?(/security label/i) }, "errors: #{result.errors.inspect}"
+        assert result.success?, result.errors.inspect
+        assert_equal [], result.imported[:security_labels]
+        assert_equal true, result.imported[:part2]
+        assert_equal true, result.imported[:conditions].first[:part2]
+        assert_equal true, result.imported[:allergies].first[:part2]
+      end
+
+      test "FHIR: a readable label is kept alongside an unreadable one" do
+        result = import_bundle([ resource("Condition", meta: { "security" => [ R_CODING, { "system" => CONF } ] }) ])
+
+        assert result.success?, result.errors.inspect
+        assert_equal [ [ CONF, "R" ] ], pairs(result.imported[:conditions].first[:security_labels])
+        assert_equal true, result.imported[:conditions].first[:part2]
+      end
+
+      test "FHIR: Coding with a code but no system is kept as { code: } and counts for Part 2" do
+        result = import_bundle([ resource("Condition", meta: { "security" => [ { "code" => "42CFRPart2" } ] }) ])
+
+        assert result.success?, result.errors.inspect
+        assert_equal [ { code: "42CFRPart2" } ], result.imported[:conditions].first[:security_labels]
+        assert_equal true, result.imported[:conditions].first[:part2]
+      end
+
+      # Rule C: no label is lost by position.
+      test "FHIR: labels at any depth of an extracted resource belong to that item" do
+        inline = { "url" => "http://hl7.org/fhir/uv/security-label-ds4p/StructureDefinition/extension-inline-sec-label",
+                   "valueCoding" => PART2_CODING }
+        result = import_bundle([
+          resource("AllergyIntolerance").merge("contained" => [ { "resourceType" => "Observation", "id" => "o1", "meta" => { "security" => [ PART2_CODING ] } } ]),
+          resource("Condition").merge("extension" => [ inline ]),
+          resource("MedicationRequest").merge("contained" => [ { "resourceType" => "DocumentReference", "id" => "d1", "securityLabel" => [ { "coding" => [ R_CODING ] } ] } ])
+        ])
+
+        assert result.success?, result.errors.inspect
+        assert_equal [ { system: ACT, code: "42CFRPart2" } ], result.imported[:allergies].first[:security_labels]
+        assert_equal true, result.imported[:allergies].first[:part2]
+        assert_equal [ { system: ACT, code: "42CFRPart2" } ], result.imported[:conditions].first[:security_labels]
+        assert_equal true, result.imported[:conditions].first[:part2]
+        assert_equal [ { system: CONF, code: "R", display: "restricted" } ], result.imported[:medications].first[:security_labels]
+        assert_equal false, result.imported[:medications].first[:part2]
+        assert_equal [], result.imported[:security_labels]
+        assert_equal true, result.imported[:part2]
+      end
+
+      test "FHIR: labels on non-extracted entries belong to the Bundle and reach every item" do
+        composition = { "resourceType" => "Composition", "subject" => { "reference" => "Patient/123" }, "meta" => { "security" => [ PART2_CODING ] } }
+        nested = { "resourceType" => "Bundle", "type" => "collection", "meta" => { "security" => [ R_CODING ] } }
+        result = import_bundle([ composition, nested, resource("Condition"), resource("MedicationRequest") ])
+        expected = [ [ ACT, "42CFRPart2" ], [ CONF, "R" ] ]
+
+        assert result.success?, result.errors.inspect
+        assert_equal expected, pairs(result.imported[:security_labels])
+        assert_equal true, result.imported[:part2]
+        [ result.imported[:conditions].first, result.imported[:medications].first ].each do |item|
+          assert_equal expected, pairs(item[:security_labels])
+          assert_equal true, item[:part2]
+        end
+      end
+
+      test "FHIR: unreadable meta on a non-extracted entry marks the Bundle and every item Part 2" do
+        observation = { "resourceType" => "Observation", "subject" => { "reference" => "Patient/123" }, "meta" => { "security" => [ nil ] } }
+        result = import_bundle([ observation, resource("Condition") ])
+
+        assert result.success?, result.errors.inspect
+        assert_equal [], result.imported[:security_labels]
+        assert_equal true, result.imported[:part2]
+        assert_equal [], result.imported[:conditions].first[:security_labels]
+        assert_equal true, result.imported[:conditions].first[:part2]
       end
 
       test "C-CDA: Part 2 label reaches the imported items via the real parser" do
@@ -119,14 +203,32 @@ module Lakeraven
         assert_equal "E11.9", condition[:code]
         assert_equal [ [ ACT, "42CFRPart2" ], [ CONF, "R" ] ], pairs(condition[:security_labels])
         assert_equal true, condition[:part2]
+        assert_equal true, result.imported[:part2]
       end
 
-      test "C-CDA fail closed: unreadable confidentialityCode fails the import with an error" do
+      test "C-CDA: unreadable confidentialityCode does not reject the import; everything is marked Part 2" do
         result = import_ccda(%(<confidentialityCode nullFlavor="NI"/>))
 
-        refute result.success?, "unreadable confidentialityCode must fail the import, not be dropped"
-        assert result.errors.any?(&:present?)
-        assert_nil result.imported
+        assert result.success?, "an unreadable security label must not reject the import: #{result.errors.inspect}"
+        assert_equal [], result.imported[:security_labels]
+        assert_equal true, result.imported[:part2]
+        assert_equal [ { system: ACT, code: "42CFRPart2" } ], result.imported[:conditions].first[:security_labels]
+        assert_equal true, result.imported[:conditions].first[:part2]
+      end
+
+      # Rule E: malformed C-CDA fails with a fixed message that echoes no document content.
+      test "C-CDA: malformed XML or a wrong root fails with a fixed, content-free message" do
+        unquoted = ccda_xml("").sub(%(code="42CFRPart2"), "code=42CFRPart2")
+        wrong_root = ccda_xml("").gsub("ClinicalDocument", "SyntheticRoot")
+        results = [ unquoted, wrong_root ].map { |xml| import_ccda(nil, xml: xml) }
+
+        results.each do |result|
+          refute result.success?, "malformed C-CDA must not be imported"
+          assert_nil result.imported
+          assert result.errors.any?(&:present?)
+          refute result.errors.join(" ").match?(/42CFRPart2|SyntheticRoot|E11\.9|confidentialityCode/), "error must not echo document content"
+        end
+        assert_equal results.first.errors, results.last.errors, "message is fixed, not derived from the document"
       end
 
       test "imported is nil on an unrelated failure" do
