@@ -3,7 +3,9 @@
 module Lakeraven
   module EHR
     # Access layer: hydrates Patient domain objects from RPMS (via rpms-rpc)
-    # and optionally FHIR (via rpms-rpc MockFhirClient or IRIS for Health).
+    # and optionally FHIR, through the engine's configured FHIR client
+    # (Lakeraven::EHR.configuration.fhir_client: FHIR::Client for an endpoint
+    # such as IRIS for Health, FHIR::MockClient in tests).
     #
     # Layer contract:
     # - Only this class calls PatientGateway / DataMapper for patient data
@@ -61,21 +63,24 @@ module Lakeraven
         def try_fhir(dfn)
           return nil unless fhir_available?
 
-          fhir_data = RpmsRpc.fhir_client.read("Patient", dfn.to_s)
+          fhir_data = fhir_client.read("Patient", dfn.to_s)
           return nil if fhir_data.nil? || fhir_data["resourceType"] == "OperationOutcome"
 
           patient = Patient.from_fhir(fhir_data)
           normalize_from_fhir!(patient) if patient
           patient
         rescue => e
-          Rails.logger.warn("PatientRepository: FHIR read failed for DFN #{dfn}: #{e.message}")
+          # The class only: a message can carry a response body or patient data.
+          Rails.logger.warn("PatientRepository: FHIR read failed (#{e.class}); falling back")
           nil
         end
 
+        def fhir_client
+          Lakeraven::EHR.configuration.fhir_client
+        end
+
         def fhir_available?
-          RpmsRpc.respond_to?(:fhir_client) && RpmsRpc.fhir_client.present?
-        rescue
-          false
+          !fhir_client.nil?
         end
 
         def normalize_from_fhir!(patient)
