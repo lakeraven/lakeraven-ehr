@@ -224,16 +224,15 @@ class ChartSectionReadFailuresTest < ActionDispatch::IntegrationTest
       get_chart_html
       assert_response :ok
 
-      # The section may be omitted altogether; if it is on the page it must
-      # not claim an empty list or a count.
-      if css_select(section[:id]).any?
-        assert_select section[:id], { text: /#{Regexp.escape(section[:empty])}/, count: 0 },
-          "#{name} was not read for this token; the empty state is a clinical claim it cannot make"
-        assert_select "#{section[:id]} h2 span", { count: 0 }, "no count for a section that was not read"
-        assert_select section[:id], text: /not included/i
-        ALL_PHRASES.each do |phrase|
-          assert_select section[:id], { text: phrase, count: 0 }, "an unread section is not a failed read"
-        end
+      # Round 3: the section IS on the page. A section that disappears would
+      # otherwise satisfy every assertion below without making any claim.
+      assert_select section[:id], { count: 1 }, "the #{name} section is rendered, saying it is not included"
+      assert_select section[:id], { text: /#{Regexp.escape(section[:empty])}/, count: 0 },
+        "#{name} was not read for this token; the empty state is a clinical claim it cannot make"
+      assert_select "#{section[:id]} h2 span", { count: 0 }, "no count for a section that was not read"
+      assert_select section[:id], text: /not included/i
+      ALL_PHRASES.each do |phrase|
+        assert_select section[:id], { text: phrase, count: 0 }, "an unread section is not a failed read"
       end
     end
   end
@@ -395,6 +394,188 @@ class ChartSectionReadFailuresTest < ActionDispatch::IntegrationTest
     end
   end
 
+  # ===========================================================================
+  # Round 3 (#579): gaps found in review.
+  # ===========================================================================
+
+  # -- 1. Immunizations withheld by scope --------------------------------------
+
+  test "chart Immunizations card says not included, not none on file, when the token cannot read Immunization" do
+    use_token_with("system/Patient.read")
+
+    with_restricted_backend(capabilities: [ :ihs_immunization ]) do
+      get_chart_html
+      assert_response :ok
+      assert_select "#chart-immunizations", { count: 1 }, "the card is rendered, saying it is not included"
+      assert_select "#chart-immunizations", text: /not included/i
+      assert_select "#chart-immunizations", { text: /No immunizations on file\./, count: 0 },
+        "immunizations were not read for this token; the empty state is a clinical claim it cannot make"
+      assert_select "#chart-immunizations h2 span", { count: 0 }, "no count for a section that was not read"
+      ALL_PHRASES.each do |phrase|
+        assert_select "#chart-immunizations", { text: phrase, count: 0 }, "an unread section is not a failed read"
+      end
+    end
+  end
+
+  # -- 2. Screenings: answers scope without score scope ------------------------
+
+  # The HTML screenings table is built only from score Observations, so a
+  # token that may read the answers but not the scores has no rows to show.
+  test "chart screenings section says not included, not none recorded, when the token has QuestionnaireResponse scope but no Observation scope" do
+    use_token_with("system/Patient.read system/QuestionnaireResponse.read")
+
+    get_chart_html
+    assert_response :ok
+    assert_select "#chart-screenings", { count: 1 }, "the section is rendered, saying it is not included"
+    assert_select "#chart-screenings", text: /not included/i
+    assert_select "#chart-screenings", { text: /No screenings recorded\./, count: 0 },
+      "screening scores were not read for this token; the empty state is a clinical claim it cannot make"
+    assert_select "#chart-screenings h2 span", { count: 0 }, "no count for a section that was not read"
+    ALL_PHRASES.each do |phrase|
+      assert_select "#chart-screenings", { text: phrase, count: 0 }, "an unread section is not a failed read"
+    end
+  end
+
+  # -- 3. Allergies: the page names the cause ----------------------------------
+
+  ERRORS.each do |label, cause|
+    test "chart allergies section reports #{label} with its own cause" do
+      with_failing_read(allergy_read, cause[:error]) do
+        get_chart_html
+        assert_response :ok
+        assert_select "#chart-allergies", text: cause[:phrase]
+        (ALL_PHRASES - [ cause[:phrase] ]).each do |other|
+          assert_select "#chart-allergies", { text: other, count: 0 },
+            "allergies failed with #{label}; the message must be specific to that cause"
+        end
+        refute_includes response.body, MARKER, "the exception message must not reach the page"
+      end
+    end
+  end
+
+  # -- 4. nil is not a list -----------------------------------------------------
+
+  test "chart problems section reports a nil Condition read as could not be loaded, not as an empty section" do
+    with_class_method(Lakeraven::EHR::Condition, :for_patient, ->(*) { nil }) do
+      get_chart_html
+      assert_response :ok
+      assert_select "#chart-problems", text: /could not be loaded/i
+      assert_select "#chart-problems", { text: /No active problems recorded\./, count: 0 },
+        "nil is not a list; the empty state is a clinical claim it cannot support"
+      assert_select "#chart-problems h2 span", { count: 0 }, "no count when the list did not load"
+      assert_other_sections_rendered(except: "problems")
+    end
+  end
+
+  test "chart FHIR bundle carries an exception outcome naming Condition when the Condition read returns nil" do
+    with_class_method(Lakeraven::EHR::Condition, :for_patient, ->(*) { nil }) do
+      body = get_chart_bundle
+      issue = outcome_issue_for(body, "Condition")
+      assert issue, "expected an outcome entry naming Condition; outcomes: #{outcome_issues(body).inspect}"
+      assert_equal "exception", issue["code"]
+      assert_equal "error", issue["severity"]
+      refute_includes resource_types(body), "Condition"
+      assert_includes resource_types(body), "Patient", "the Patient resource stays in the bundle"
+    end
+  end
+
+  test "chart FHIR bundle carries an exception outcome naming AllergyIntolerance when the allergy read returns nil" do
+    with_class_method(allergy_read[:owner].call, allergy_read[:method], ->(*) { nil }) do
+      body = get_chart_bundle
+      issue = outcome_issue_for(body, "AllergyIntolerance")
+      assert issue, "expected an outcome entry naming AllergyIntolerance; outcomes: #{outcome_issues(body).inspect}"
+      assert_equal "exception", issue["code"]
+      assert_equal "error", issue["severity"]
+      refute_includes resource_types(body), "AllergyIntolerance"
+      assert_includes resource_types(body), "Patient", "the Patient resource stays in the bundle"
+    end
+  end
+
+  test "chart allergies section reports a nil allergy read as could not be loaded" do
+    with_class_method(allergy_read[:owner].call, allergy_read[:method], ->(*) { nil }) do
+      get_chart_html
+      assert_response :ok
+      assert_select "#chart-allergies", text: /could not be loaded/i
+      assert_select "#chart-allergies", { text: /none recorded/i, count: 0 }
+      assert_select "#chart-allergies", { text: /no known allergies/i, count: 0 }
+      assert_select "#chart-allergies-table", { count: 0 }, "no allergy rows when the list did not load"
+    end
+  end
+
+  # -- 5. Errors with their own seam are not a section's failure ---------------
+
+  # RpmsUserScope#rpms_identity_missing: a bearer-token request has no
+  # session[:duz], so the answer is a bare 503, not a chart.
+  test "chart does not turn RpmsRpc::NotConfiguredError into a problems section that could not be loaded" do
+    with_failing_read(FHIR_READS.fetch("Condition"), RpmsRpc::NotConfiguredError) do
+      raised = chart_html_request_error
+
+      assert_nil raised, "RpmsUserScope handles NotConfiguredError; it does not escape the request"
+      assert_response :service_unavailable
+      assert_not_rendered_as_failed_section("#chart-problems")
+      refute_includes response.body, MARKER
+    end
+  end
+
+  # RpmsUserScope#run_on_users_rpms_connection rescues SignInAgain around the
+  # action and ends the session: an HTML request is sent to the login page.
+  test "chart does not turn RpmsSessions::SignInAgain into a problems section that could not be loaded" do
+    with_failing_read(FHIR_READS.fetch("Condition"), Lakeraven::EHR::RpmsSessions::SignInAgain) do
+      raised = chart_html_request_error
+
+      assert_nil raised, "RpmsUserScope handles SignInAgain; it does not escape the request"
+      assert_response :redirect
+      assert_match %r{/login\z}, response.location
+      assert_not_rendered_as_failed_section("#chart-problems")
+      refute_includes response.body, MARKER
+    end
+  end
+
+  # Nothing on the chart rescues UnrecordedAccessError, so it leaves the action.
+  # show_exceptions is :rescuable in test, so an unhandled StandardError is
+  # re-raised to the test; a 5xx is accepted for a stack that renders it.
+  test "chart does not turn AuditedBroker::UnrecordedAccessError into a problems section that could not be loaded" do
+    with_failing_read(FHIR_READS.fetch("Condition"), Lakeraven::EHR::AuditedBroker::UnrecordedAccessError) do
+      raised = chart_html_request_error
+
+      assert_failed_closed(raised, Lakeraven::EHR::AuditedBroker::UnrecordedAccessError)
+      assert_not_rendered_as_failed_section("#chart-problems") unless raised
+    end
+  end
+
+  # -- 6. A failed screenings read, told to an Observation-scope holder --------
+
+  test "chart FHIR bundle tells an Observation-scope holder that screenings could not be loaded" do
+    use_token_with("system/Patient.read system/Observation.read")
+
+    with_failing_read(screening_read, ActiveRecord::StatementInvalid) do
+      body = get_chart_bundle
+      issue = outcome_issues(body).find { |candidate| candidate["diagnostics"].to_s.match?(/screening/i) }
+      assert issue, "expected an outcome entry mentioning screenings; outcomes: #{outcome_issues(body).inspect}"
+      assert_match(/\bObservation\b/, issue["diagnostics"],
+        "the holder of Observation scope must be told which of its resources are missing")
+      assert_equal "exception", issue["code"]
+      assert_equal "error", issue["severity"]
+      refute_includes issue["diagnostics"], MARKER
+      refute_includes response.body, MARKER, "the exception message must not reach the bundle"
+      assert_includes resource_types(body), "Patient", "the Patient resource stays in the bundle"
+    end
+  end
+
+  # -- 7. Post-read mapping fails closed ---------------------------------------
+
+  test "chart does not render an empty problems section when a Condition row is not a Hash" do
+    with_class_method(Lakeraven::EHR::Condition, :for_patient, ->(*) { [ "not a row" ] }) do
+      raised = chart_html_request_error
+
+      assert_failed_closed(raised, StandardError)
+      unless raised
+        refute_includes response.body, "No active problems recorded.",
+          "a row that could not be mapped is not an empty problem list"
+      end
+    end
+  end
+
   private
 
   # Records every Rails.logger call as { severity:, message: }, whatever the
@@ -464,6 +645,35 @@ class ChartSectionReadFailuresTest < ActionDispatch::IntegrationTest
     yield
   ensure
     owner.define_singleton_method(name, original) if original
+  end
+
+  def use_token_with(scopes)
+    teardown_smart_auth
+    setup_smart_auth(scopes: scopes)
+  end
+
+  # GET the HTML chart. Returns the exception the request raised (the test
+  # stack re-raises one no handler rescues), or nil when it answered.
+  def chart_html_request_error
+    get_chart_html
+    nil
+  rescue StandardError => error
+    error
+  end
+
+  # The request did not answer 200: the error left the action (re-raised to
+  # the test) or the stack rendered it as a 5xx.
+  def assert_failed_closed(raised, error_class)
+    if raised
+      assert_kind_of error_class, raised
+    else
+      assert_operator response.status, :>=, 500, "expected the error to propagate or a 5xx, got #{response.status}"
+    end
+  end
+
+  def assert_not_rendered_as_failed_section(id)
+    refute_equal 200, response.status, "the error must not be served as a chart page"
+    assert_select id, { text: /could not be loaded/i, count: 0 }
   end
 
   def get_chart_html
