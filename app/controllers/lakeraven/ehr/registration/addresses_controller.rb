@@ -35,6 +35,8 @@ module Lakeraven
 
         private
 
+        def busa_description = "Registration: address edited"
+
         def render_form(status)
           @states = PatientRecordGateway.choices(:state)
           render :edit, status: status

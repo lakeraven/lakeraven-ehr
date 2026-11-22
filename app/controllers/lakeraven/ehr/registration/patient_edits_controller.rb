@@ -42,6 +42,7 @@ module Lakeraven
         def save(form, current, saved_notice)
           changes = form.changes_from(current)
           result = block_given? ? yield(changes) : PatientRecordGateway.update(dfn, changes)
+          record_busa_entry if result.saved? || result.partial?
           if result.saved?
             flash[:notice] = saved_notice
             redirect_to registration_patient_path(dfn)
@@ -57,6 +58,30 @@ module Lakeraven
             flash.now[:alert] = "RPMS did not save the change: #{result.message}"
             render_form(:unprocessable_content)
           end
+        end
+
+        # One BUSA security audit entry for an edit RPMS saved (#617), described
+        # by the section's busa_description, which holds no PHI. The edit has
+        # already happened, so an entry RPMS does not file leaves the clerk's
+        # flow as it is and is recorded here as a gap, detached from the
+        # request's transaction so a rollback cannot erase it. A gap that
+        # cannot be written raises (fail closed).
+        def record_busa_entry
+          result = SecurityAuditGateway.record_patient_edit(dfn: dfn, description: busa_description)
+          return if result.filed?
+
+          AuditEvent.create_detached!(
+            event_type: "security",
+            action: "U",
+            outcome: "4",
+            outcome_desc: "BUSA entry not filed: #{result.reason}",
+            entity_type: "Patient",
+            entity_identifier: dfn.to_s,
+            **AuditContext.agent_attributes,
+            agent_network_address: AuditContext.network_address,
+            tenant_identifier: AuditContext.tenant_identifier,
+            facility_identifier: AuditContext.facility_identifier
+          )
         end
       end
     end
