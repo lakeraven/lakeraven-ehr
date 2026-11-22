@@ -525,4 +525,137 @@ class SchedulingHolidaysTest < ActionDispatch::IntegrationTest
 
     assert_equal [ [ :remove_holiday, TODAY ] ], writes
   end
+
+  # --- amendment round 3 -------------------------------------------------
+
+  REFUSED_READ = -> { raise RpmsRpc::Client::RpcRefusedError, "DDR LISTER is not in this user's context" }
+
+  def holiday_alerts = css_select("[id^='holiday-alert']").map { |node| node.text.strip }.join(" ")
+
+  def assert_no_list
+    assert_select "#holidays tr[data-holiday]", count: 0
+    assert_no_match(/no holidays/i, response.body)
+  end
+
+  # Reports the RPMS connection closed once the block given to it has set the
+  # flag, the way a broker that dropped mid-write does: open when the request
+  # is authenticated, closed by the time the page is rendered.
+  def with_rpms_connection(closed)
+    web = Lakeraven::EHR::WebController
+    web.alias_method(:__rpms_connection_closed?, :rpms_connection_closed?)
+    web.define_method(:rpms_connection_closed?) { closed.call }
+    web.send(:private, :rpms_connection_closed?)
+    yield
+  ensure
+    web.alias_method(:rpms_connection_closed?, :__rpms_connection_closed?)
+    web.remove_method(:__rpms_connection_closed?)
+    web.send(:private, :rpms_connection_closed?)
+  end
+
+  test "S-SCH-19.22 an unconfirmed add keeps its warning when RPMS then refuses the holidays read" do
+    sign_in("scheduling_supervisor")
+    with_rpms(add: ->(_) { nil }, read: REFUSED_READ) do
+      add(date: "2031-07-04", name: "DEMO FOUNDERS DAY")
+
+      assert_response :service_unavailable
+      assert_select "#holiday-alert", text: /check the holidays before/i
+      assert_no_list
+      assert_no_success
+      assert_equal [ [ :add_holiday, { date: FOURTH, name: "DEMO FOUNDERS DAY" } ] ], writes, "sent once and not retried"
+    end
+  end
+
+  test "S-SCH-19.23 an unconfirmed remove keeps its warning when RPMS then refuses the holidays read" do
+    sign_in("scheduling_supervisor")
+    with_rpms(holidays: [ FOUNDERS ], remove: ->(_) { nil }, read: REFUSED_READ) do
+      post REMOVE_FOURTH
+
+      assert_response :service_unavailable
+      assert_select "#holiday-alert", text: /check the holidays before/i
+      assert_no_list
+      assert_no_success
+      assert_equal [ [ :remove_holiday, FOURTH ] ], writes, "sent once and not retried"
+    end
+  end
+
+  test "S-SCH-19.24 a refused add still names its refusal when RPMS then refuses the holidays read" do
+    sign_in("scheduling_supervisor")
+    exists = ->(_args) { { success: false, error: :filer_failed, message: "Entry '3310704,' already exists." } }
+    with_rpms(holidays: [ FOUNDERS ], add: exists, read: REFUSED_READ) do
+      add(date: "2031-07-04", name: "DEMO FOUNDERS DAY")
+
+      assert_operator response.status, :>=, 400, "not a success"
+      assert_match(/RPMS did not add the holiday/, holiday_alerts)
+      assert_no_list
+      assert_no_success
+    end
+
+    assert_equal [ [ :add_holiday, { date: FOURTH, name: "DEMO FOUNDERS DAY" } ] ], writes
+  end
+
+  # The 503 page is kept rather than the login redirect: the add may have
+  # filed, and the redirect's one-shot flash on the sign-in page is the easier
+  # of the two to miss. The session still ends on the supervisor's next request
+  # (WebController#require_authentication), so nothing stays signed in.
+  test "S-SCH-19.25 an add cut off by a closed RPMS connection still says the change was not confirmed" do
+    sign_in("scheduling_supervisor")
+    closed = false
+    dropped = ->(_) { closed = true; raise IOError, "closed stream" }
+    with_rpms_connection(-> { closed }) do
+      with_rpms(add: dropped, read: -> { raise IOError, "closed stream" if closed }) do
+        add(date: "2031-07-04", name: "DEMO FOUNDERS DAY")
+
+        assert_response :service_unavailable
+        assert_select "#holiday-alert", text: /check the holidays before/i
+        assert_no_list
+        assert_no_success
+        assert_equal [ [ :add_holiday, { date: FOURTH, name: "DEMO FOUNDERS DAY" } ] ], writes, "sent once and not retried"
+      end
+    end
+  end
+
+  # A broker stand-in below the gem: the real RpmsRpc::SchedulingSetup and
+  # RpmsRpc::DdrFileman run, and only the wire reply is made up. It cannot bind
+  # a context, so ContextScope runs the call as it is.
+  class ReplyingClient
+    attr_reader :calls
+
+    def initialize(reply)
+      @reply = reply
+      @calls = []
+    end
+
+    def call_rpc(name, *params)
+      @calls << [ name, params ]
+      @reply
+    end
+  end
+
+  test "S-SCH-19.26 the pinned gem's words for a DDR FILER reply with no [Data] line are an unknown outcome" do
+    broker = ReplyingClient.new("[Misc]")
+    result = RpmsRpc.with_client(broker) do
+      Lakeraven::EHR::SchedulingTablesGateway.add_holiday(FOURTH, "DEMO FOUNDERS DAY")
+    end
+
+    assert_equal :unknown, result.status
+    assert_not result.saved?
+    assert_equal [ "DDR FILER" ], broker.calls.map(&:first), "one FILER call, through the real gem"
+
+    filed = RpmsRpc.with_client(ReplyingClient.new("[Misc]")) do
+      RpmsRpc::DdrFileman.filer(mode: "ADD", rows: [ { file: "40.5", field: ".01", iens: "+1,", value: "3310704" } ])
+    end
+    assert_equal false, filed[:success]
+    assert filed[:errors].first.start_with?(Lakeraven::EHR::SchedulingTablesGateway::NO_DATA_MARKER), filed[:errors].first
+  end
+
+  test "S-SCH-19.27 a holiday parameter that is not a form is refused, with no RPC" do
+    sign_in("scheduling_supervisor")
+    with_rpms do
+      post INDEX, params: { holiday: "x" }
+
+      assert_includes [ 400, 422 ], response.status
+      assert_no_success
+      assert_empty writes
+    end
+  end
 end
