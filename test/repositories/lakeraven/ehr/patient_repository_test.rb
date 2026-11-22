@@ -134,6 +134,125 @@ module Lakeraven
         assert_includes [ :rpc, :fhir ], patient.provenance[:rpms][:source]
       end
 
+      # =============================================================================
+      # FHIR READ PATH: the engine's own client (#599)
+      # =============================================================================
+
+      test "configuration fhir_client defaults to nil" do
+        assert_nil Lakeraven::EHR::Configuration.new.fhir_client
+      end
+
+      test "fhir_first reads the patient from the configured FHIR client" do
+        with_fhir_client(seeded_fhir_client("1")) do
+          patient = PatientRepository.find(1, source_preference: :fhir_first)
+
+          assert_instance_of Patient, patient
+          assert_equal :fhir, patient.provenance[:rpms][:source]
+          assert_equal 1, patient.dfn
+          assert_equal "TESTPATIENT,ADA", patient.name
+          assert_equal "F", patient.sex
+          assert_equal Date.new(1980, 5, 15), patient.dob
+        end
+      end
+
+      test "fhir_first falls back to RPC when the FHIR client has no such patient" do
+        with_fhir_client(Lakeraven::EHR::FHIR::MockClient.new) do
+          patient = PatientRepository.find(1, source_preference: :fhir_first)
+
+          assert_equal :rpc, patient.provenance[:rpms][:source]
+          assert_equal "Anderson,Alice", patient.name
+        end
+      end
+
+      test "fhir_first reads from RPC when no FHIR client is configured" do
+        with_fhir_client(nil) do
+          patient = PatientRepository.find(1, source_preference: :fhir_first)
+
+          assert_equal :rpc, patient.provenance[:rpms][:source]
+          assert_equal "Anderson,Alice", patient.name
+        end
+      end
+
+      test "fhir_first returns nil when neither source knows the patient" do
+        with_fhir_client(Lakeraven::EHR::FHIR::MockClient.new) do
+          assert_nil PatientRepository.find(99999, source_preference: :fhir_first)
+        end
+      end
+
+      test "rpc_first returns the FHIR patient when RPC does not know the DFN" do
+        with_fhir_client(seeded_fhir_client("99999")) do
+          patient = PatientRepository.find(99999, source_preference: :rpc_first)
+
+          assert_instance_of Patient, patient
+          assert_equal :fhir, patient.provenance[:rpms][:source]
+          assert_equal 99999, patient.dfn
+          assert_equal "TESTPATIENT,ADA", patient.name
+        end
+      end
+
+      test "rpc_first returns the RPC patient when RPC knows the DFN" do
+        with_fhir_client(seeded_fhir_client("1")) do
+          patient = PatientRepository.find(1, source_preference: :rpc_first)
+
+          assert_equal :rpc, patient.provenance[:rpms][:source]
+          assert_equal "Anderson,Alice", patient.name
+        end
+      end
+
+      test "rpc_only never reads the configured FHIR client" do
+        with_fhir_client(seeded_fhir_client("1")) do
+          patient = PatientRepository.find(1, source_preference: :rpc_only)
+
+          assert_equal :rpc, patient.provenance[:rpms][:source]
+          assert_equal "Anderson,Alice", patient.name
+        end
+      end
+
+      test "fhir_first falls back to RPC when the FHIR client raises" do
+        failing = Object.new
+        failing.define_singleton_method(:read) do |_type, _id|
+          raise Lakeraven::EHR::FHIR::Client::Error, "FHIR endpoint answered 503"
+        end
+
+        with_fhir_client(failing) do
+          patient = PatientRepository.find(1, source_preference: :fhir_first)
+
+          assert_equal :rpc, patient.provenance[:rpms][:source]
+          assert_equal "Anderson,Alice", patient.name
+        end
+      end
+
+      test "the FHIR read path never touches RpmsRpc's FHIR surface" do
+        StubHelpers.with_recording_stub(RpmsRpc, :fhir_client, nil) do |client_calls|
+          StubHelpers.with_recording_stub(RpmsRpc, :mock_fhir!, nil) do |mock_calls|
+            fhir_first = PatientRepository.find(1, source_preference: :fhir_first)
+            rpc_first = PatientRepository.find(99999, source_preference: :rpc_first)
+
+            assert_empty client_calls, "PatientRepository called RpmsRpc.fhir_client"
+            assert_empty mock_calls, "PatientRepository called RpmsRpc.mock_fhir!"
+            assert_equal :rpc, fhir_first.provenance[:rpms][:source]
+            assert_nil rpc_first
+          end
+        end
+      end
+
+      test "nothing in the engine names the rpms-rpc FHIR client" do
+        root = Lakeraven::EHR::Engine.root
+        banned = [ "RpmsRpc.fhir_client", "RpmsRpc.mock_fhir!", "RpmsRpc::MockFhirClient", "RpmsRpc::FhirClient" ]
+        this_file = File.expand_path(__FILE__)
+
+        offenders = %w[app lib test].flat_map do |dir|
+          Dir.glob(root.join(dir, "**", "*").to_s).select { |path| File.file?(path) }
+        end.reject { |path| File.expand_path(path) == this_file || path.include?("/test/dummy/tmp/") || path.include?("/test/dummy/log/") }
+          .filter_map do |path|
+            text = File.binread(path)
+            hits = banned.select { |needle| text.include?(needle) }
+            "#{path.delete_prefix("#{root}/")}: #{hits.join(', ')}" if hits.any?
+          end
+
+        assert_empty offenders, "rpms-rpc FHIR client still referenced:\n#{offenders.join("\n")}"
+      end
+
       test "search accepts source_preference" do
         patients = PatientRepository.search("Anderson", source_preference: :rpc_only)
 
@@ -162,6 +281,31 @@ module Lakeraven
 
         refute_nil patient
         assert_equal 1, patient.dfn
+      end
+
+      private
+
+      # Sets the engine's FHIR client for the block and puts the previous one
+      # back afterwards. Only this one attribute is saved and restored, so the
+      # rest of the configuration is left alone.
+      def with_fhir_client(client)
+        config = Lakeraven::EHR.configuration
+        saved = config.fhir_client
+        config.fhir_client = client
+        yield
+      ensure
+        config.fhir_client = saved if config.respond_to?(:fhir_client=)
+      end
+
+      # Synthetic patient, seeded under the given id.
+      def seeded_fhir_client(id)
+        client = Lakeraven::EHR::FHIR::MockClient.new
+        client.seed_resource("Patient", id, {
+          resourceType: "Patient", id: id,
+          name: [ { family: "Testpatient", given: [ "Ada" ] } ],
+          gender: "female", birthDate: "1980-05-15"
+        })
+        client
       end
     end
   end
