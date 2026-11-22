@@ -18,17 +18,31 @@ class LiveStackReadyCucumberTest < ActiveSupport::TestCase
     LIVE_RPMS_ACCESS LIVE_RPMS_VERIFY RPMS_UCI VISTA_RPC_HOST VISTA_RPC_PORT VISTA_BROKER
   ].to_h { |name| [ name, nil ] }.freeze
 
-  def cucumber(scenario)
-    Open3.capture2e(
-      CLEARED, "bundle", "exec", "cucumber", "--publish-quiet", "--name", "^#{Regexp.escape(scenario)}$",
-      chdir: PROJECT
-    )
+  def cucumber(*scenarios, options: [])
+    names = scenarios.flat_map { |scenario| [ "--name", "^#{Regexp.escape(scenario)}$" ] }
+    Open3.capture2e(CLEARED, "bundle", "exec", "cucumber", "--publish-quiet", *options, *names, chdir: PROJECT)
+  end
+
+  NO_SCENARIO_RAN = /^\[stack\] no @live scenario ran: (.*)$/
+
+  # #1179: no scenario ran, so the run is not green and says so in one line.
+  # Returns what the line names.
+  def assert_no_scenario_ran(output, status)
+    assert_not_equal 0, status.exitstatus, "a stack run with no scenario run exited 0:\n#{output}"
+    lines = output.scan(NO_SCENARIO_RAN).flatten
+    assert_equal 1, lines.size, "expected one line saying no @live scenario ran:\n#{output}"
+    lines.first
   end
 
   def assert_not_run(scenario, reason:)
     output, status = cucumber(scenario)
 
-    assert_equal 0, status.exitstatus, "expected exit 0:\n#{output}"
+    # #1179: the one scenario was not run, so no scenario ran: not a green run.
+    assert_not_equal 0, status.exitstatus, "a stack run with no scenario run exited 0:\n#{output}"
+    assert_equal 1, output.scan(/^\[stack\] no @live scenario ran: /).size,
+                 "expected one line saying no @live scenario ran:\n#{output}"
+    assert_match(/^\[stack\] no @live scenario ran: .*#{Regexp.escape(reason)}/, output,
+                 "expected the line to name #{reason.inspect}:\n#{output}")
     assert_match(/^1 scenario \(1 skipped\)$/, output, "expected the one scenario skipped:\n#{output}")
     assert_includes output, "not run:", "the run did not say why:\n#{output}"
     assert_match(/not run: .*#{Regexp.escape(reason)}/, output, "expected the reason to name #{reason.inspect}:\n#{output}")
@@ -44,6 +58,25 @@ class LiveStackReadyCucumberTest < ActiveSupport::TestCase
     assert_equal 0, status.exitstatus, "expected exit 0:\n#{output}"
     assert_match(/^1 scenario \(1 passed\)$/, output, "expected the one scenario passed:\n#{output}")
     assert_not_includes output, "not run:"
+    assert_not_includes output, "no @live scenario ran"
+  end
+
+  # #1179: one scenario ran, so the exit code is cucumber's own.
+  test "a run in which one scenario passed and another was not run keeps cucumber's exit 0" do
+    output, status = cucumber("The persona reads from the stack", "Nothing is read")
+
+    assert_equal 0, status.exitstatus, "expected exit 0:\n#{output}"
+    assert_match(/^2 scenarios \(1 skipped, 1 passed\)$/, output, "expected one passed, one skipped:\n#{output}")
+    assert_match(/not run: .*no RPC reached the stack/, output)
+    assert_not_includes output, "no @live scenario ran"
+  end
+
+  test "a run whose one scenario ran and failed keeps cucumber's failing exit" do
+    output, status = cucumber("The persona reads from the stack and a check fails")
+
+    assert_equal 1, status.exitstatus, "expected cucumber's exit 1:\n#{output}"
+    assert_match(/^1 scenario \(1 failed\)$/, output, "expected the one scenario failed:\n#{output}")
+    assert_not_includes output, "no @live scenario ran"
   end
 
   test "a scenario that read nothing is not run" do
@@ -93,6 +126,7 @@ class LiveStackReadyCucumberTest < ActiveSupport::TestCase
     assert_equal 0, status.exitstatus, "expected exit 0:\n#{output}"
     assert_match(/^1 scenario \(1 passed\)$/, output, "expected the one scenario passed:\n#{output}")
     assert_not_includes output, "not run:"
+    assert_not_includes output, "no @live scenario ran"
   end
 
   test "a scenario that moved the clock and stubbed a gateway bare is not run, and names the gateway" do
@@ -103,5 +137,55 @@ class LiveStackReadyCucumberTest < ActiveSupport::TestCase
   # The mock raised, so it answered nothing, but the scenario still reached it.
   test "a scenario that swallowed an error from the mock is not run" do
     assert_not_run "The app swallows an error from the mock", reason: "ORWPT LIST ALL was answered by the mock"
+  end
+
+  # #1179 round 2: only a scenario that passed or failed ran. A pending or
+  # undefined scenario produced no evidence, and cucumber is not strict.
+  test "a run whose one scenario is pending is not a green run" do
+    output, status = cucumber("A step is pending")
+
+    assert_match(/^1 scenario \(1 pending\)$/, output, "expected the one scenario pending:\n#{output}")
+    assert_includes assert_no_scenario_ran(output, status), "pending or undefined", output
+  end
+
+  test "a run whose one scenario has an undefined step is not a green run" do
+    output, status = cucumber("A step has no definition")
+
+    assert_match(/^1 scenario \(1 undefined\)$/, output, "expected the one scenario undefined:\n#{output}")
+    assert_includes assert_no_scenario_ran(output, status), "pending or undefined", output
+  end
+
+  # "Nothing is read" comes first in the feature, so its reason is the first.
+  test "a run of a scenario not run and then a pending one names the first reason" do
+    output, status = cucumber("Nothing is read", "A step is pending")
+
+    assert_match(/^2 scenarios \(1 skipped, 1 pending\)$/, output, "expected one skipped, one pending:\n#{output}")
+    line = assert_no_scenario_ran(output, status)
+    assert_includes line, "no RPC reached the stack", output
+    assert_not_includes line, "pending or undefined", output
+  end
+
+  # The last attempt of a scenario decides: the retry was not run.
+  test "a retried scenario whose last attempt was not run is not a green run" do
+    output, status = cucumber("The first attempt fails and the second reads nothing", options: %w[--retry 1])
+
+    assert_includes output, "the first attempt failed", "the first attempt did not fail:\n#{output}"
+    assert_match(/not run: .*no RPC reached the stack/, output, "the second attempt was run:\n#{output}")
+    assert_includes assert_no_scenario_ran(output, status), "no RPC reached the stack", output
+  end
+
+  # Selected, and skipped by its own step with no recorded reason.
+  test "a run whose one scenario skipped itself does not say none was selected" do
+    output, status = cucumber("A step skips the scenario itself")
+
+    assert_match(/^1 scenario \(1 skipped\)$/, output, "expected the one scenario skipped:\n#{output}")
+    assert_not_includes assert_no_scenario_ran(output, status), "was selected", output
+  end
+
+  test "a ready run that selected no scenario says so" do
+    output, status = cucumber("No scenario has this name")
+
+    assert_match(/^0 scenarios$/, output, "expected no scenario selected:\n#{output}")
+    assert_includes assert_no_scenario_ran(output, status), "no @live scenario was selected", output
   end
 end

@@ -4,6 +4,11 @@ When("the persona reads from the stack") do
   RpmsRpc.configuration.client.call_rpc("ORWU USERINFO")
 end
 
+# A scenario that ran against the stack and failed (#1179).
+Then("a check fails") do
+  raise "the check failed"
+end
+
 When("nothing is read") do
   # No RPC at all.
 end
@@ -96,4 +101,27 @@ When("the app swallows an error from the mock") do
   rescue RpmsRpc::Error
     nil
   end
+end
+
+# #1179 round 2: scenarios that produced no evidence without being skipped by
+# the verdict. "a step nobody defined is used" has no definition, on purpose.
+When("a step is pending") do
+  pending
+end
+
+# Counts calls in this process: under --retry 1 the first attempt fails before
+# any RPC and the second reads nothing.
+module LiveStackReady
+  @attempts = 0
+
+  def self.next_attempt = @attempts += 1
+end
+
+When("the first attempt fails and the second reads nothing") do
+  raise "the first attempt failed" if LiveStackReady.next_attempt == 1
+end
+
+# Skipped by the step, not by the verdict: no reason is recorded.
+When("a step skips the scenario itself") do
+  skip_this_scenario
 end
