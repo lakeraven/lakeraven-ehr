@@ -1,6 +1,6 @@
 # ADR 0018: Terminology sits behind one adapter, with RPMS as the first source
 
-**Status:** Proposed
+**Status:** Accepted on 22 Nov 2026, by the owner's decision. The owner chose HAPI FHIR JPA over OCL the same day (#1217). Tenant scoping inside HAPI, ConceptMap authoring and rebuilding a server from content files are still untested; the slices that need them (#1212, #1213, #1214) carry those tests.
 **Date:** 2026-11-21
 **Decides:** how the engine looks up codes, expands value sets and translates RPMS local codes to standard ones; which servers sit behind that seam; and what happens when a lookup fails
 
