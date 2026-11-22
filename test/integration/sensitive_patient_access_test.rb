@@ -198,10 +198,11 @@ class SensitivePatientAccessTest < ActionDispatch::IntegrationTest
 
   test "an acknowledged open does not happen when the bulletin call raises" do
     seed_sensitive_access!(SENSITIVE_DFN, 2, WARNING_LINES)
-    rpms_raises_on!(BULLETIN_RPC)
+    raised = rpms_raises_on!(BULLETIN_RPC)
 
     post_open(SENSITIVE_DFN, acknowledge: true)
 
+    assert_equal 1, raised.size, "the bulletin was sent, and raised"
     assert_failed_closed!(SENSITIVE_DFN)
   end
 
@@ -339,6 +340,184 @@ class SensitivePatientAccessTest < ActionDispatch::IntegrationTest
     assert_no_bulletin!
   end
 
+  # -- A refused open of the record already open closes it (r1) ---------------
+  #
+  # RPMS is asked on every open. When it now refuses the record the session
+  # holds, the session must stop holding it: every session-authenticated read
+  # trusts that context, and RPMS has just said no. Each block runs in the test.
+
+  REFUSED_REOPENS = {
+    "denies it (code 3)" => proc do
+      seed_sensitive_access!(SENSITIVE_DFN, 3, DENIAL_MESSAGES.fetch(3))
+      post_open(SENSITIVE_DFN)
+      assert_response :forbidden
+    end,
+    "asks for an acknowledgement that is not given (code 2)" => proc do
+      seed_sensitive_access!(SENSITIVE_DFN, 2, WARNING_LINES)
+      post_open(SENSITIVE_DFN)
+      assert_response :forbidden
+      assert acknowledgement_form, "expected the warning page"
+    end,
+    "answers that the acknowledged bulletin was not sent" => proc do
+      seed_sensitive_access!(SENSITIVE_DFN, 2, WARNING_LINES)
+      seed_sensitive_bulletin!(SENSITIVE_DFN, false)
+      post_open(SENSITIVE_DFN, acknowledge: true)
+      assert_equal 1, sensitive_bulletin_calls.size, "the bulletin was attempted"
+      assert_includes FAIL_CLOSED_STATUSES, response.status
+    end,
+    "does not answer the check" => proc do
+      clear_sensitive_access!(SENSITIVE_DFN)
+      post_open(SENSITIVE_DFN)
+      assert_includes FAIL_CLOSED_STATUSES, response.status
+    end,
+    "raises on the check" => proc do
+      raised = rpms_raises_on!(ACCESS_RPC)
+      post_open(SENSITIVE_DFN)
+      assert_equal 1, raised.size, "the check was sent, and raised"
+      assert_includes FAIL_CLOSED_STATUSES, response.status
+    end
+  }.freeze
+
+  REFUSED_REOPENS.each do |label, refused_reopen|
+    test "re-opening the record already open closes it when RPMS now #{label}" do
+      open_not_sensitive!(SENSITIVE_DFN)
+
+      instance_exec(&refused_reopen)
+
+      refute response.redirect?, "the re-open is refused, not redirected to #{response.location}"
+      assert_not_opened!
+      assert_refusal_audited!(SENSITIVE_DFN)
+    end
+  end
+
+  test "a refused re-open closes the open record when the session holds its leading-zero form" do
+    open_not_sensitive!("0#{SENSITIVE_DFN}", record: SENSITIVE_DFN)
+    seed_sensitive_access!(SENSITIVE_DFN, 3, DENIAL_MESSAGES.fetch(3))
+
+    post_open(SENSITIVE_DFN)
+
+    assert_response :forbidden
+    assert_not_opened! # "03" and "3" are the same record
+  end
+
+  test "a refused re-open by its leading-zero form closes the record the session holds as the plain id" do
+    open_not_sensitive!(SENSITIVE_DFN)
+    seed_sensitive_access!(SENSITIVE_DFN, 3, DENIAL_MESSAGES.fetch(3))
+
+    post_open("0#{SENSITIVE_DFN}")
+
+    refute response.redirect?, "expected no redirect, got one to #{response.location}"
+    assert_not_opened!
+  end
+
+  REFUSED_REOPENS.each do |label, refused_open|
+    test "a different open record stays open when RPMS #{label} for another patient" do
+      open_not_sensitive!(PLAIN_DFN)
+
+      instance_exec(&refused_open)
+
+      refute response.redirect?
+      assert_equal PLAIN_DFN, session_open_patient_dfn, "the refusal was about patient #{SENSITIVE_DFN}, not the open record"
+    end
+  end
+
+  # -- The user cannot bind the option the check runs under (r1) --------------
+  #
+  # RPMS accepted the user's codes but does not give them OR CPRS GUI CHART:
+  # the gem's ContextRefusedError (as sign-on raises it, #501). That is a
+  # determined "no" about the account, not an outage: 403, and the page says
+  # so instead of telling the user to try again.
+
+  test "a user whose RPMS account cannot run the sensitive-record check is refused with 403 and told why" do
+    seed_not_sensitive!(PLAIN_DFN)
+    raised = rpms_raises_on!(ACCESS_RPC, error: RpmsRpc::Client::ContextRefusedError,
+                                         message: "this user may not use #{OPTION}")
+
+    post_open(PLAIN_DFN)
+
+    assert_equal 1, raised.size, "the check was attempted, and refused"
+    assert_response :forbidden
+    assert_not_opened!
+    assert_match(/RPMS account is not set up for the sensitive-record check/i, response.body)
+    refute_match(/try again/i, response.body, "retrying does not fix an account that lacks the option")
+    assert_nil acknowledgement_form
+    assert_no_bulletin!
+    assert_refusal_audited!(PLAIN_DFN)
+  end
+
+  test "an acknowledgement does not open a record for a user whose RPMS account cannot run the check" do
+    seed_sensitive_bulletin!(SENSITIVE_DFN, true)
+    raised = rpms_raises_on!(ACCESS_RPC, error: RpmsRpc::Client::ContextRefusedError,
+                                         message: "this user may not use #{OPTION}")
+
+    post_open(SENSITIVE_DFN, acknowledge: true)
+
+    assert_equal 1, raised.size
+    assert_response :forbidden
+    assert_not_opened!
+    refute_match(/try again/i, response.body)
+    assert_no_bulletin!
+    assert_refusal_audited!(SENSITIVE_DFN)
+  end
+
+  # -- Ordering: a caller who may not open the record never causes the check --
+  #
+  # PTSEC^DGSEC4 writes the DG SECURITY LOG. A request the open refuses for
+  # its own reasons must not reach it.
+
+  test "a POST without a CSRF token sends no sensitive-record check" do
+    seed_sensitive_access!(SENSITIVE_DFN, 2, WARNING_LINES)
+
+    post context_path(SENSITIVE_DFN), params: { acknowledge_sensitive: "1" }
+
+    assert_response :unprocessable_entity # InvalidAuthenticityToken
+    assert_not_opened!
+    assert_empty sensitive_access_calls, "DG SENSITIVE RECORD ACCESS must not be sent"
+    assert_no_bulletin!
+  end
+
+  test "a POST from a session that is not signed in sends no sensitive-record check" do
+    seed_sensitive_access!(SENSITIVE_DFN, 2, WARNING_LINES)
+    reset! # a new browser: no session
+    @csrf_token = nil
+
+    post context_path(SENSITIVE_DFN), params: { authenticity_token: csrf_token, acknowledge_sensitive: "1" }
+
+    assert_response :unauthorized
+    assert_not_opened!
+    assert_empty sensitive_access_calls, "DG SENSITIVE RECORD ACCESS must not be sent"
+    assert_no_bulletin!
+  end
+
+  test "a token with neither Patient nor screening read scope sends no sensitive-record check" do
+    seed_sensitive_access!(SENSITIVE_DFN, 2, WARNING_LINES)
+    sign_in_clinician!(scopes: "user/AllergyIntolerance.read")
+
+    post_open(SENSITIVE_DFN, acknowledge: true)
+
+    assert_response :forbidden
+    assert_not_opened!
+    assert_nil acknowledgement_form
+    assert_empty sensitive_access_calls, "DG SENSITIVE RECORD ACCESS must not be sent"
+    assert_no_bulletin!
+  end
+
+  test "a patient-scoped token for another patient sends no sensitive-record check" do
+    seed_sensitive_access!(SENSITIVE_DFN, 2, WARNING_LINES)
+    reset! # the patient app is not the clinician's browser
+    @csrf_token = nil
+
+    post context_path(SENSITIVE_DFN),
+         params: { authenticity_token: csrf_token, acknowledge_sensitive: "1" },
+         headers: patient_bound_chart_headers(patient_dfn: PLAIN_DFN)
+
+    assert_response :forbidden
+    assert_includes response.body, "Patient context mismatch"
+    assert_not_opened!
+    assert_empty sensitive_access_calls, "DG SENSITIVE RECORD ACCESS must not be sent"
+    assert_no_bulletin!
+  end
+
   private
 
   def context_path(dfn) = "#{MOUNT}/patients/#{dfn}/context"
@@ -360,16 +539,26 @@ class SensitivePatientAccessTest < ActionDispatch::IntegrationTest
 
   # RPMS raises for one RPC, as a broker that drops the call does. The mock is
   # rebuilt before every test (GlobalStoreIsolation), so nothing to restore.
-  def rpms_raises_on!(rpc_name)
+  def rpms_raises_on!(rpc_name, error: RpmsRpc::Client::RpcError, message: "broker dropped #{rpc_name}")
     raised = []
     RpmsRpc.client.define_singleton_method(:call_rpc) do |rpc, *params|
       if rpc == rpc_name
         raised << params
-        raise RpmsRpc::Client::RpcError, "broker dropped #{rpc_name}"
+        raise error, message
       end
       super(rpc, *params)
     end
     raised
+  end
+
+  # The record is open in the session (RPMS answered 0), and the audit log
+  # holds nothing of that open: one row per attempt below.
+  def open_not_sensitive!(dfn, record: dfn)
+    seed_not_sensitive!(record)
+    post_open(dfn)
+    assert_equal dfn, session_open_patient_dfn, "precondition: the record is open"
+    RpmsRpc.client.received_calls.clear
+    AuditEvent.delete_all
   end
 
   def assert_opened!(dfn)
