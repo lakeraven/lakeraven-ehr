@@ -185,7 +185,7 @@ class SchedulingHolidaysTest < ActionDispatch::IntegrationTest
       follow_redirect!
 
       assert_response :ok
-      assert_select "#holiday-alert", text: /no holiday on that date/i
+      assert_select "#holiday-alert", text: /no holiday on 2031-07-04/i
       assert_select "#holiday-notice", count: 0
     end
 
@@ -320,6 +320,8 @@ class SchedulingHolidaysTest < ActionDispatch::IntegrationTest
       with_rpms do
         add(date: "2031-06-02", name: "DEMO SITE DAY")
         assert_redirected_to INDEX
+        follow_redirect!
+        assert_select "#holiday-notice", text: /DEMO SITE DAY/
         assert_equal [ [ :add_holiday, { date: TODAY, name: "DEMO SITE DAY" } ] ], writes
       end
 
