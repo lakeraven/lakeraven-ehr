@@ -98,6 +98,42 @@ module Lakeraven
           refute_includes result.to_json, "SYNTHETIC TRIBE A"
         end
 
+        # String-keyed resources (a JSON round trip, #1187 gate finding): the
+        # policy must redact these too, not only symbol-keyed hashes.
+
+        test "external view removes a string-keyed US Core tribal affiliation extension" do
+          resource = build_patient_resource(us_core_tribal: true).deep_stringify_keys
+          assert_equal [ US_CORE_TRIBAL_URL ], resource["extension"].map { |e| e["url"] }
+
+          result = RedactionPolicy.new(view: :external).apply(resource)
+
+          tribal_exts = Array(result["extension"]).select { |e| e["url"].to_s.include?("tribal-affiliation") }
+          assert_empty tribal_exts
+          refute_includes result.to_json, "SYNTHETIC TRIBE A"
+        end
+
+        test "research view removes a string-keyed US Core tribal affiliation extension" do
+          resource = build_patient_resource(us_core_tribal: true).deep_stringify_keys
+          assert_equal [ US_CORE_TRIBAL_URL ], resource["extension"].map { |e| e["url"] }
+
+          result = RedactionPolicy.new(view: :research).apply(resource)
+
+          tribal_exts = Array(result["extension"]).select { |e| e["url"].to_s.include?("tribal-affiliation") }
+          assert_empty tribal_exts
+          refute_includes result.to_json, "SYNTHETIC TRIBE A"
+        end
+
+        test "external and research views remove the tribal extension from a parsed JSON resource" do
+          parsed = JSON.parse(build_patient_resource(us_core_tribal: true).to_json)
+
+          %i[external research].each do |view|
+            result = RedactionPolicy.new(view: view).apply(parsed)
+
+            refute_includes result.to_json, "tribal-affiliation", "#{view} view"
+            refute_includes result.to_json, "SYNTHETIC TRIBE A", "#{view} view"
+          end
+        end
+
         test "research view removes legacy tribal enrollment extension" do
           policy = RedactionPolicy.new(view: :research)
           resource = build_patient_resource(tribal: "SYN-0001")

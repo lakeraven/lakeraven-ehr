@@ -246,6 +246,78 @@ module Lakeraven
         assert_equal 1, reads
       end
 
+      # -- fhir_tribal_affiliation: robustness (#1187 round 2) -----------------
+
+      test "fhir_tribal_affiliation treats a non-Hash enrollment read as a failed read and falls back to the attribute" do
+        [ "SYNTHETIC GARBAGE", [ "SYNTHETIC GARBAGE" ], 42, true ].each do |garbage|
+          with_gateway(enrollment_details: garbage, tribe_info: tribe_entry) do
+            result = :unset
+            assert_nothing_raised { result = patient(tribal_affiliation: TRIBE_NAME).fhir_tribal_affiliation }
+            assert_equal({ name: TRIBE_NAME, code: nil, enrolled: nil }, result, "read #{garbage.inspect}")
+          end
+        end
+      end
+
+      test "fhir_tribal_affiliation is nil for a non-Hash enrollment read when no attribute is set" do
+        [ "SYNTHETIC GARBAGE", [ "SYNTHETIC GARBAGE" ], 42, true ].each do |garbage|
+          with_gateway(enrollment_details: garbage, tribe_info: tribe_entry) do
+            result = :unset
+            assert_nothing_raised { result = patient.fhir_tribal_affiliation }
+            assert_nil result, "read #{garbage.inspect}"
+          end
+        end
+      end
+
+      test "fhir_tribal_affiliation strips whitespace around the tribe name and code" do
+        with_gateway(enrollment_details: enrollment_read,
+                     tribe_info: { ien: TRIBE_IEN, name: "  #{TRIBE_NAME} \n", code: " #{TRIBE_CODE}  " }) do
+          assert_equal({ name: TRIBE_NAME, code: TRIBE_CODE, enrolled: true },
+                       patient.fhir_tribal_affiliation)
+        end
+      end
+
+      test "fhir_tribal_affiliation returns an Integer tribe code as a String" do
+        with_gateway(enrollment_details: enrollment_read,
+                     tribe_info: { ien: TRIBE_IEN, name: TRIBE_NAME, code: 901 }) do
+          result = patient.fhir_tribal_affiliation
+          assert_equal "901", result[:code]
+          assert_instance_of String, result[:code]
+        end
+      end
+
+      test "fhir_tribal_affiliation has a nil code when the tribe code is only whitespace" do
+        with_gateway(enrollment_details: enrollment_read,
+                     tribe_info: { ien: TRIBE_IEN, name: TRIBE_NAME, code: "   " }) do
+          assert_equal({ name: TRIBE_NAME, code: nil, enrolled: true }, patient.fhir_tribal_affiliation)
+        end
+      end
+
+      test "fhir_tribal_affiliation strips whitespace around the read's tribe_name in the tribe_info fallback" do
+        with_gateway(enrollment_details: enrollment_read(tribe_name: " #{TRIBE_NAME}  "), tribe_info: nil) do
+          assert_equal({ name: TRIBE_NAME, code: nil, enrolled: true }, patient.fhir_tribal_affiliation)
+        end
+      end
+
+      test "fhir_tribal_affiliation memo is per dfn so a changed dfn re-reads" do
+        other_dfn = 4343
+        reads = []
+        by_dfn = {
+          4242 => enrollment_read,
+          other_dfn => enrollment_read(enrollment_number: nil, tribe_ien: 9002, tribe_name: "SYNTHETIC TRIBE B")
+        }
+        tribes = { TRIBE_IEN => tribe_entry, 9002 => { ien: 9002, name: "SYNTHETIC TRIBE B", code: "902" } }
+        with_gateway(enrollment_details: ->(dfn) { reads << dfn; by_dfn.fetch(dfn) },
+                     tribe_info: ->(ien) { tribes.fetch(ien) }) do
+          subject = patient
+          assert_equal({ name: TRIBE_NAME, code: TRIBE_CODE, enrolled: true }, subject.fhir_tribal_affiliation)
+
+          subject.dfn = other_dfn
+          assert_equal({ name: "SYNTHETIC TRIBE B", code: "902", enrolled: nil }, subject.fhir_tribal_affiliation)
+          subject.fhir_tribal_affiliation
+        end
+        assert_equal [ 4242, other_dfn ], reads
+      end
+
       # -- Patient.from_fhir --------------------------------------------------
 
       test "from_fhir reads tribal_affiliation from the complex extension's CodeableConcept text" do
@@ -302,6 +374,92 @@ module Lakeraven
         result = Patient.from_fhir(fhir_patient)
 
         assert_nil result.tribal_affiliation
+        assert_nil result.tribal_enrollment_number
+      end
+
+      # -- Patient.from_fhir: malformed input (#1187 round 2) -----------------
+
+      test "from_fhir leaves tribal_affiliation nil when valueCodeableConcept is a String" do
+        # "text" inside the string must not be read as the concept's text.
+        result = nil
+        assert_nothing_raised { result = Patient.from_fhir(fhir_patient(complex_extension("SYNTHETIC free text coding"))) }
+
+        assert_nil result.tribal_affiliation
+        assert_nil result.tribal_enrollment_number
+      end
+
+      test "from_fhir leaves tribal_affiliation nil when valueCodeableConcept is an Array" do
+        result = nil
+        assert_nothing_raised do
+          result = Patient.from_fhir(fhir_patient(complex_extension([ { "text" => TRIBE_NAME } ])))
+        end
+
+        assert_nil result.tribal_affiliation
+      end
+
+      test "from_fhir does not raise when a coding element is not a Hash" do
+        [ "SYNTHETIC display", 901, nil, [ "display" ] ].each do |junk|
+          result = nil
+          assert_nothing_raised do
+            result = Patient.from_fhir(fhir_patient(complex_extension({ "coding" => [ junk ] })))
+          end
+          assert_nil result.tribal_affiliation, "coding #{junk.inspect}"
+        end
+      end
+
+      test "from_fhir does not raise when coding is not an Array of Hashes and a valid coding follows" do
+        concept = { "coding" => [ "SYNTHETIC junk", { "system" => IHS_TRIBE_SYSTEM, "code" => TRIBE_CODE,
+                                                      "display" => TRIBE_NAME } ] }
+        result = nil
+        assert_nothing_raised { result = Patient.from_fhir(fhir_patient(complex_extension(concept))) }
+
+        # nil, or the valid later display; never the junk.
+        assert_includes [ nil, TRIBE_NAME ], result.tribal_affiliation
+      end
+
+      test "from_fhir reads the text even when a coding element is not a Hash" do
+        concept = { "coding" => [ "SYNTHETIC junk" ], "text" => TRIBE_NAME }
+        result = nil
+        assert_nothing_raised { result = Patient.from_fhir(fhir_patient(complex_extension(concept))) }
+
+        assert_equal TRIBE_NAME, result.tribal_affiliation
+      end
+
+      test "from_fhir leaves tribal_affiliation nil when the only sub-extension is nil" do
+        ext = { "url" => US_CORE_TRIBAL_URL, "extension" => [ nil ] }
+        result = nil
+        assert_nothing_raised { result = Patient.from_fhir(fhir_patient(ext)) }
+
+        assert_nil result.tribal_affiliation
+      end
+
+      test "from_fhir does not raise on a nil sub-extension before a valid tribalAffiliation" do
+        concept = { "text" => TRIBE_NAME }
+        ext = { "url" => US_CORE_TRIBAL_URL,
+                "extension" => [ nil, { "url" => "tribalAffiliation", "valueCodeableConcept" => concept } ] }
+        result = nil
+        assert_nothing_raised { result = Patient.from_fhir(fhir_patient(ext)) }
+
+        # nil, or the valid later value.
+        assert_includes [ nil, TRIBE_NAME ], result.tribal_affiliation
+      end
+
+      test "from_fhir does not raise when the sub-extension list is not an Array of Hashes" do
+        [ "SYNTHETIC junk", [ "SYNTHETIC junk" ], [ 42 ] ].each do |junk|
+          ext = { "url" => US_CORE_TRIBAL_URL, "extension" => junk }
+          result = nil
+          assert_nothing_raised { result = Patient.from_fhir(fhir_patient(ext)) }
+          assert_nil result.tribal_affiliation, "extension #{junk.inspect}"
+        end
+      end
+
+      test "from_fhir reads the new-shape extension when an old-shape valueString extension comes first" do
+        old_shape = { "url" => "http://hl7.org/fhir/us/core/StructureDefinition/tribal-affiliation",
+                      "valueString" => ENROLLMENT_NUMBER }
+        concept = { "coding" => [ { "system" => IHS_TRIBE_SYSTEM, "code" => TRIBE_CODE } ], "text" => TRIBE_NAME }
+        result = Patient.from_fhir(fhir_patient(old_shape, complex_extension(concept)))
+
+        assert_equal TRIBE_NAME, result.tribal_affiliation
         assert_nil result.tribal_enrollment_number
       end
     end

@@ -124,6 +124,39 @@ module Lakeraven
         assert_equal "forbidden", body["issue"].first["code"]
       end
 
+      # -- Tribal affiliation is not on the egress path (#1187 / #566) -----------
+      #
+      # Tribal affiliation is a sovereign identifier. Until an authorization
+      # gate exists (#566) no Patient egress path may emit it, and the read
+      # must not even be made, whatever RPMS holds for the patient.
+
+      test "GET /Patient/:dfn does not emit tribal affiliation or read it from RPMS" do
+        calls = with_tribe_in_rpms { get "/lakeraven-ehr/Patient/1", headers: @headers }
+
+        assert_response :ok
+        body = JSON.parse(response.body)
+        assert_equal "Patient", body["resourceType"]
+        tribal = Array(body["extension"]).select { |e| e["url"].to_s.include?("tribal-affiliation") }
+        assert_empty tribal
+        refute_includes response.body, "tribal-affiliation"
+        refute_includes response.body, "SYNTHETIC TRIBE A"
+        refute_includes response.body, "SYN-0001"
+        assert_equal 0, calls, "Patient read must not call the tribal gateway"
+      end
+
+      test "GET /Patient search does not emit tribal affiliation or read it from RPMS" do
+        calls = with_tribe_in_rpms do
+          get "/lakeraven-ehr/Patient", params: { name: "Anderson" }, headers: @headers
+        end
+
+        assert_response :ok
+        body = JSON.parse(response.body)
+        assert_operator body["total"], :>=, 1
+        refute_includes response.body, "tribal-affiliation"
+        refute_includes response.body, "SYNTHETIC TRIBE A"
+        assert_equal 0, calls, "Patient search must not call the tribal gateway"
+      end
+
       # -- Error response structure ----------------------------------------------
 
       test "401 response is OperationOutcome" do
@@ -149,6 +182,25 @@ module Lakeraven
       test "FHIR content type on 404 responses" do
         get "/lakeraven-ehr/Patient/99999", headers: @headers
         assert_equal "application/fhir+json", response.media_type
+      end
+
+      private
+
+      # Runs the block with the tribal gateway answering a synthetic tribe and
+      # enrollment for every patient; returns how many gateway reads were made.
+      def with_tribe_in_rpms
+        gw = TribalEnrollmentGateway
+        calls = 0
+        stubs = {
+          enrollment_details: ->(*) { calls += 1; { enrollment_number: "SYN-0001", tribe_ien: 9001, tribe_name: "SYNTHETIC TRIBE A" } },
+          tribe_info: ->(*) { calls += 1; { ien: 9001, name: "SYNTHETIC TRIBE A", code: "901" } }
+        }
+        originals = stubs.keys.to_h { |name| [ name, gw.method(name) ] }
+        stubs.each { |name, fn| gw.define_singleton_method(name) { |*args| fn.call(*args) } }
+        yield
+        calls
+      ensure
+        originals&.each { |name, meth| gw.define_singleton_method(name, meth) }
       end
     end
   end

@@ -182,9 +182,99 @@ module Lakeraven
         # Patient#fhir_tribal_affiliation (nil, or { name:, code:, enrolled: })
         # and emits the us-core-tribal-affiliation complex extension. The
         # enrollment number is an identifier, not the tribe, and is never sent.
+        #
+        # FAIL CLOSED (#1187 gate finding / #566): tribal affiliation is a
+        # sovereign identifier and no egress path has an authorization gate, so
+        # the serializer emits it ONLY when the caller opts in with
+        # `tribal_affiliation: true`. With no option it emits nothing and makes
+        # no tribal read at all. The tests below the default-off block opt in.
+
+        test "default serializer emits no tribal affiliation extension even when the patient has tribal attributes" do
+          patient = build_patient(tribal_affiliation: "SYNTHETIC TRIBE A", tribal_enrollment_number: "SYN-0001")
+          result, calls = counting_tribal_gateway { PatientSerializer.new(patient).to_h }
+
+          assert_empty tribal_extensions(result)
+          assert_empty deep_values(result).select { |v| v.to_s.include?("SYNTHETIC TRIBE A") || v.to_s.include?("SYN-0001") }
+          assert_equal 0, calls, "default serialization must not read tribal data from RPMS"
+        end
+
+        test "default serializer emits no tribal affiliation extension when RPMS holds a tribe" do
+          patient = build_patient
+          result, calls = counting_tribal_gateway(
+            enrollment_details: { enrollment_number: "SYN-0001", tribe_ien: 9001, tribe_name: "SYNTHETIC TRIBE A" },
+            tribe_info: { ien: 9001, name: "SYNTHETIC TRIBE A", code: "901" }
+          ) { PatientSerializer.new(patient).to_h }
+
+          assert_empty tribal_extensions(result)
+          refute_includes result.to_json, "SYNTHETIC TRIBE A"
+          assert_equal 0, calls, "default serialization must not read tribal data from RPMS"
+        end
+
+        test "default serializer does not ask the patient for its tribal affiliation" do
+          patient = build_patient(tribal_affiliation: "SYNTHETIC TRIBE A")
+          asked = 0
+          patient.define_singleton_method(:fhir_tribal_affiliation) do
+            asked += 1
+            { name: "SYNTHETIC TRIBE A", code: "901", enrolled: true }
+          end
+
+          result = PatientSerializer.new(patient).to_h
+
+          assert_empty tribal_extensions(result)
+          assert_equal 0, asked
+        end
+
+        test "PatientSerializer.call emits no tribal affiliation extension by default" do
+          patient = build_patient(tribal_affiliation: "SYNTHETIC TRIBE A", tribal_enrollment_number: "SYN-0001")
+          result, calls = counting_tribal_gateway { PatientSerializer.call(patient) }
+
+          assert_empty tribal_extensions(result)
+          assert_equal 0, calls
+        end
+
+        test "Patient#to_fhir emits no tribal affiliation extension by default" do
+          patient = build_patient(tribal_affiliation: "SYNTHETIC TRIBE A", tribal_enrollment_number: "SYN-0001")
+          result, calls = counting_tribal_gateway { patient.to_fhir }
+
+          assert_empty tribal_extensions(result)
+          assert_equal 0, calls
+        end
+
+        test "tribal_affiliation false is the same as the default" do
+          patient = build_patient(tribal_affiliation: "SYNTHETIC TRIBE A", tribal_enrollment_number: "SYN-0001")
+          result, calls = counting_tribal_gateway { PatientSerializer.new(patient, tribal_affiliation: false).to_h }
+
+          assert_empty tribal_extensions(result)
+          assert_equal 0, calls
+        end
+
+        test "default serializer still emits race and ethnicity extensions" do
+          result = serialize(build_patient(tribal_affiliation: "SYNTHETIC TRIBE A"))
+
+          urls = result[:extension].map { |e| e[:url] }
+          assert urls.any? { |u| u.include?("us-core-race") }
+          assert urls.any? { |u| u.include?("us-core-ethnicity") }
+          assert_empty tribal_extensions(result)
+        end
+
+        test "PatientSerializer.call with tribal_affiliation true emits the US Core extension" do
+          patient = tribal_patient(name: "SYNTHETIC TRIBE A", code: "901", enrolled: true)
+          result = PatientSerializer.call(patient, tribal_affiliation: true)
+
+          assert_equal [ US_CORE_TRIBAL_URL ], tribal_extensions(result).map { |e| e[:url] }
+          assert_equal "SYNTHETIC TRIBE A", tribal_concept(result)[:text]
+        end
+
+        test "Patient#to_fhir with tribal_affiliation true emits the US Core extension" do
+          patient = tribal_patient(name: "SYNTHETIC TRIBE A", code: "901", enrolled: true)
+          result = patient.to_fhir(tribal_affiliation: true)
+
+          assert_equal [ US_CORE_TRIBAL_URL ], tribal_extensions(result).map { |e| e[:url] }
+          assert_equal "SYNTHETIC TRIBE A", tribal_concept(result)[:text]
+        end
 
         test "includes US Core tribal affiliation extension for an enrolled patient" do
-          result = serialize(tribal_patient(name: "SYNTHETIC TRIBE A", code: "901", enrolled: true))
+          result = serialize_tribal(tribal_patient(name: "SYNTHETIC TRIBE A", code: "901", enrolled: true))
 
           tribal_exts = tribal_extensions(result)
           assert_equal 1, tribal_exts.size
@@ -192,7 +282,7 @@ module Lakeraven
         end
 
         test "tribal affiliation extension matches the US Core complex shape exactly" do
-          result = serialize(tribal_patient(name: "SYNTHETIC TRIBE A", code: "901", enrolled: true))
+          result = serialize_tribal(tribal_patient(name: "SYNTHETIC TRIBE A", code: "901", enrolled: true))
 
           expected = {
             url: US_CORE_TRIBAL_URL,
@@ -214,7 +304,7 @@ module Lakeraven
         end
 
         test "tribalAffiliation CodeableConcept carries the tribe name as text" do
-          result = serialize(tribal_patient(name: "SYNTHETIC TRIBE A", code: "901", enrolled: true))
+          result = serialize_tribal(tribal_patient(name: "SYNTHETIC TRIBE A", code: "901", enrolled: true))
 
           concept = tribal_concept(result)
           refute_nil concept
@@ -222,7 +312,7 @@ module Lakeraven
         end
 
         test "tribalAffiliation CodeableConcept carries the IHS tribe code under the lakeraven ihs-tribe system" do
-          result = serialize(tribal_patient(name: "SYNTHETIC TRIBE A", code: "901", enrolled: true))
+          result = serialize_tribal(tribal_patient(name: "SYNTHETIC TRIBE A", code: "901", enrolled: true))
 
           concept = tribal_concept(result)
           refute_nil concept
@@ -233,7 +323,7 @@ module Lakeraven
         end
 
         test "tribal affiliation extension has isEnrolled true for an enrolled patient" do
-          result = serialize(tribal_patient(name: "SYNTHETIC TRIBE A", code: "901", enrolled: true))
+          result = serialize_tribal(tribal_patient(name: "SYNTHETIC TRIBE A", code: "901", enrolled: true))
 
           tribal_ext = tribal_extensions(result).first
           refute_nil tribal_ext
@@ -245,7 +335,7 @@ module Lakeraven
         test "no serialized extension carries the enrollment number" do
           patient = tribal_patient({ name: "SYNTHETIC TRIBE A", code: "901", enrolled: true },
                                    tribal_enrollment_number: "SYN-0001")
-          result = serialize(patient)
+          result = serialize_tribal(patient)
 
           refute_empty tribal_extensions(result)
           leaked = deep_values(result[:extension]).select { |v| v.to_s.include?("SYN-0001") }
@@ -255,7 +345,7 @@ module Lakeraven
         test "tribal affiliation extension has no valueString" do
           patient = tribal_patient({ name: "SYNTHETIC TRIBE A", code: "901", enrolled: true },
                                    tribal_enrollment_number: "SYN-0001")
-          result = serialize(patient)
+          result = serialize_tribal(patient)
 
           tribal_ext = tribal_extensions(result).first
           refute_nil tribal_ext
@@ -263,7 +353,7 @@ module Lakeraven
         end
 
         test "tribal affiliation extension never carries a v3-TribalEntityUS coding" do
-          result = serialize(tribal_patient(name: "SYNTHETIC TRIBE A", code: "901", enrolled: true))
+          result = serialize_tribal(tribal_patient(name: "SYNTHETIC TRIBE A", code: "901", enrolled: true))
 
           refute_empty tribal_extensions(result)
           v3 = deep_values(tribal_extensions(result)).select { |v| v.to_s.include?("v3-TribalEntityUS") }
@@ -271,7 +361,7 @@ module Lakeraven
         end
 
         test "omits isEnrolled when enrollment is unknown" do
-          result = serialize(tribal_patient(name: "SYNTHETIC TRIBE A", code: "901", enrolled: nil))
+          result = serialize_tribal(tribal_patient(name: "SYNTHETIC TRIBE A", code: "901", enrolled: nil))
 
           tribal_ext = tribal_extensions(result).first
           refute_nil tribal_ext
@@ -282,7 +372,7 @@ module Lakeraven
           # The model contract never returns false; even so the serializer must
           # not turn anything other than true into an isEnrolled sub-extension.
           [ nil, false ].each do |not_enrolled|
-            result = serialize(tribal_patient(name: "SYNTHETIC TRIBE A", code: "901", enrolled: not_enrolled))
+            result = serialize_tribal(tribal_patient(name: "SYNTHETIC TRIBE A", code: "901", enrolled: not_enrolled))
 
             tribal_ext = tribal_extensions(result).first
             refute_nil tribal_ext, "enrolled #{not_enrolled.inspect}"
@@ -295,7 +385,7 @@ module Lakeraven
         test "tribal affiliation extension is present without isEnrolled when the enrollment read fails" do
           patient = build_patient(tribal_affiliation: "SYNTHETIC TRIBE A", tribal_enrollment_number: "SYN-0001")
           result = with_tribal_gateway(enrollment_details: ->(*) { raise StandardError, "synthetic broker failure" }) do
-            serialize(patient)
+            serialize_tribal(patient)
           end
 
           tribal_ext = tribal_extensions(result).first
@@ -311,7 +401,7 @@ module Lakeraven
           result = with_tribal_gateway(
             enrollment_details: { enrollment_number: "SYN-0001", tribe_ien: 9001, tribe_name: "SYNTHETIC TRIBE A" },
             tribe_info: { ien: 9001, name: "SYNTHETIC TRIBE A", code: "901" }
-          ) { serialize(patient) }
+          ) { serialize_tribal(patient) }
 
           tribal_ext = tribal_extensions(result).first
           refute_nil tribal_ext
@@ -325,7 +415,7 @@ module Lakeraven
         end
 
         test "tribalAffiliation CodeableConcept has text only and no coding key when the tribe code is nil" do
-          result = serialize(tribal_patient(name: "SYNTHETIC TRIBE A", code: nil, enrolled: true))
+          result = serialize_tribal(tribal_patient(name: "SYNTHETIC TRIBE A", code: nil, enrolled: true))
 
           concept = tribal_concept(result)
           refute_nil concept
@@ -335,7 +425,7 @@ module Lakeraven
 
         test "omits tribal affiliation extension when the patient has no tribe of membership" do
           # An enrollment number alone is not a tribe: nothing may be emitted.
-          result = serialize(tribal_patient(nil, tribal_enrollment_number: "SYN-0001"))
+          result = serialize_tribal(tribal_patient(nil, tribal_enrollment_number: "SYN-0001"))
 
           tribal_exts = (result[:extension] || []).select { |e| e[:url]&.include?("tribal-affiliation") }
           assert_empty tribal_exts
@@ -347,7 +437,7 @@ module Lakeraven
           result = with_tribal_gateway(
             enrollment_details: { enrollment_number: "SYN-0001", tribe_ien: nil, tribe_name: nil },
             tribe_info: nil
-          ) { serialize(patient) }
+          ) { serialize_tribal(patient) }
 
           tribal_exts = (result[:extension] || []).select { |e| e[:url]&.include?("tribal-affiliation") }
           assert_empty tribal_exts
@@ -356,7 +446,7 @@ module Lakeraven
         test "tribal affiliation round trips through from_fhir" do
           patient = tribal_patient({ name: "SYNTHETIC TRIBE A", code: "901", enrolled: true },
                                    tribal_enrollment_number: "SYN-0001")
-          as_json = JSON.parse(serialize(patient).to_json)
+          as_json = JSON.parse(serialize_tribal(patient).to_json)
 
           restored = Patient.from_fhir(as_json)
 
@@ -365,7 +455,7 @@ module Lakeraven
         end
 
         test "external and research views remove the serialized US Core tribal affiliation extension" do
-          serialized = serialize(tribal_patient(name: "SYNTHETIC TRIBE A", code: "901", enrolled: true))
+          serialized = serialize_tribal(tribal_patient(name: "SYNTHETIC TRIBE A", code: "901", enrolled: true))
           assert_equal [ US_CORE_TRIBAL_URL ], tribal_extensions(serialized).map { |e| e[:url] }
 
           %i[external research].each do |view|
@@ -463,8 +553,28 @@ module Lakeraven
           Patient.new(defaults.merge(attrs))
         end
 
-        def serialize(patient)
-          PatientSerializer.new(patient).to_h
+        def serialize(patient, **options)
+          PatientSerializer.new(patient, **options).to_h
+        end
+
+        # Tribal affiliation is opt-in (#1187 / #566): the caller must ask.
+        def serialize_tribal(patient)
+          serialize(patient, tribal_affiliation: true)
+        end
+
+        # Runs the block with both tribal gateway reads counted; returns
+        # [ block result, number of gateway calls ]. With no stub values the
+        # reads raise, so an unexpected call cannot quietly succeed either.
+        def counting_tribal_gateway(enrollment_details: nil, tribe_info: nil)
+          calls = 0
+          failing = ->(*) { raise StandardError, "synthetic: tribal gateway must not be called" }
+          details = enrollment_details ? ->(*) { enrollment_details } : failing
+          tribe = tribe_info ? ->(*) { tribe_info } : failing
+          result = with_tribal_gateway(
+            enrollment_details: ->(*args) { calls += 1; details.call(*args) },
+            tribe_info: ->(*args) { calls += 1; tribe.call(*args) }
+          ) { yield }
+          [ result, calls ]
         end
 
         US_CORE_TRIBAL_URL = "http://hl7.org/fhir/us/core/StructureDefinition/us-core-tribal-affiliation"

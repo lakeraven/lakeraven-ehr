@@ -325,13 +325,55 @@ module Lakeraven
 
       # -- FHIR US Core / TEFCA (ported from the predecessor app) -------------------------
 
-      test "to_fhir includes tribal enrollment extension for TEFCA" do
-        patient = Patient.new(dfn: 1, name: "TEST,TEFCA", sex: "M",
-                              tribal_enrollment_number: "EXNH-12345")
-        fhir = patient.to_fhir
-        extensions = fhir[:extension] || []
-        tribal_ext = extensions.find { |e| e[:url]&.include?("tribal") }
-        assert tribal_ext, "TEFCA requires tribal enrollment extension"
+      # Tribal affiliation is opt-in on to_fhir (#1187; egress gate is #566).
+      # The extension is the US Core complex shape and never the enrollment
+      # number, which is an identifier and not the tribe.
+
+      test "to_fhir with tribal_affiliation true includes the US Core tribal affiliation extension for TEFCA" do
+        patient = Patient.new(dfn: 4242, name: "SYNTHETIC,TEFCA", sex: "M",
+                              tribal_enrollment_number: "SYN-0001")
+        fhir = with_tribal_gateway_stub(
+          enrollment_details: ->(*) { { enrollment_number: "SYN-0001", tribe_ien: 9001, tribe_name: "SYNTHETIC TRIBE A" } },
+          tribe_info: ->(*) { { ien: 9001, name: "SYNTHETIC TRIBE A", code: "901" } }
+        ) { patient.to_fhir(tribal_affiliation: true) }
+
+        tribal_exts = (fhir[:extension] || []).select { |e| e[:url]&.include?("tribal-affiliation") }
+        assert_equal [ "http://hl7.org/fhir/us/core/StructureDefinition/us-core-tribal-affiliation" ],
+                     tribal_exts.map { |e| e[:url] }
+        subs = tribal_exts.first[:extension]
+        concept = subs.find { |e| e[:url] == "tribalAffiliation" }[:valueCodeableConcept]
+        assert_equal "SYNTHETIC TRIBE A", concept[:text]
+        assert_equal [ "901" ], concept[:coding].map { |c| c[:code] }
+        assert_equal true, subs.find { |e| e[:url] == "isEnrolled" }[:valueBoolean]
+        refute_includes fhir.to_json, "SYN-0001"
+      end
+
+      test "to_fhir has no tribal affiliation extension by default" do
+        patient = Patient.new(dfn: 4242, name: "SYNTHETIC,TEFCA", sex: "M",
+                              tribal_affiliation: "SYNTHETIC TRIBE A",
+                              tribal_enrollment_number: "SYN-0001")
+        calls = 0
+        fhir = with_tribal_gateway_stub(
+          enrollment_details: ->(*) { calls += 1; { enrollment_number: "SYN-0001", tribe_ien: 9001, tribe_name: "SYNTHETIC TRIBE A" } },
+          tribe_info: ->(*) { calls += 1; { ien: 9001, name: "SYNTHETIC TRIBE A", code: "901" } }
+        ) { patient.to_fhir }
+
+        tribal_exts = (fhir[:extension] || []).select { |e| e[:url]&.include?("tribal") }
+        assert_empty tribal_exts
+        refute_includes fhir.to_json, "SYNTHETIC TRIBE A"
+        refute_includes fhir.to_json, "SYN-0001"
+        assert_equal 0, calls, "default to_fhir must not read tribal data from RPMS"
+      end
+
+      # Non-destructively override TribalEnrollmentGateway class methods (each a
+      # callable) for the block.
+      def with_tribal_gateway_stub(**stubs)
+        gw = TribalEnrollmentGateway
+        originals = stubs.keys.to_h { |name| [ name, gw.method(name) ] }
+        stubs.each { |name, fn| gw.define_singleton_method(name) { |*args| fn.call(*args) } }
+        yield
+      ensure
+        originals&.each { |name, meth| gw.define_singleton_method(name, meth) }
       end
 
       test "to_fhir supports US Core Patient profile requirements" do
