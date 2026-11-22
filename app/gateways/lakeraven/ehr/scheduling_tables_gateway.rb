@@ -12,8 +12,9 @@ module Lakeraven
     # through the BSDX add/edit RPCs Windows Scheduling sends
     # (SchedulingMaintenance), so BPRM and Windows Scheduling see the same rows.
     class SchedulingTablesGateway
-      # status: :saved (id names the row), :refused (message is RPMS's reason)
-      # or :unknown (RPMS did not answer).
+      # status: :saved (id names the row), :refused (message is RPMS's reason),
+      # :not_found (a holiday removal named a date with none) or :unknown (RPMS
+      # did not answer).
       Result = Data.define(:status, :id, :message) do
         def saved? = status == :saved
       end
@@ -59,11 +60,28 @@ module Lakeraven
         filing { outcome(maintenance.remove_resource_group_member(group_id: group_id, item_id: item_id)) }
       end
 
+      # The site-wide holidays (HOLIDAY #40.5) from today through a year ahead
+      # (rpms-ux S-SCH-19). Never cached: the open times must see a change at
+      # once. A failed read raises RpmsRpc::Error for the caller to show.
+      def self.holidays(setup: ::RpmsRpc::SchedulingSetup)
+        today = Date.current
+        Array(setup.holidays(start_date: today, end_date: today.next_year))
+      end
+
+      def self.add_holiday(date, name, setup: ::RpmsRpc::SchedulingSetup)
+        filing { outcome(setup.add_holiday(date: date, name: name)) }
+      end
+
+      def self.remove_holiday(date, setup: ::RpmsRpc::SchedulingSetup)
+        filing { outcome(setup.remove_holiday(date)) }
+      end
+
       def self.outcome(reply)
         return Result.new(status: :unknown, id: nil, message: nil) if reply.nil?
+        return Result.new(status: :not_found, id: nil, message: reply[:message]) if reply[:error] == :not_found
         return Result.new(status: :saved, id: reply[:id], message: nil) if reply[:success]
 
-        Result.new(status: :refused, id: nil, message: reply[:error].to_s.sub(/\ABSDX\d+: /, ""))
+        Result.new(status: :refused, id: nil, message: (reply[:message] || reply[:error]).to_s.sub(/\ABSDX\d+: /, ""))
       end
       private_class_method :outcome
 
