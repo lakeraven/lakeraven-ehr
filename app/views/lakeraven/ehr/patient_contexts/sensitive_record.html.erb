@@ -1,0 +1,42 @@
+<%# Shown before the record opens (#613): the route's dfn and RPMS's own
+    lines only, escaped. Nothing about the patient is read for this page. %>
+<% page_title "Sensitive record" %>
+
+<div class="page-header">
+  <% case @sensitive_outcome %>
+  <% when :acknowledge %>
+    <h1>This is a sensitive record</h1>
+  <% when :denied %>
+    <h1>RPMS does not let you open this record</h1>
+  <% else %>
+    <h1>This record could not be opened</h1>
+  <% end %>
+  <p>Patient #<%= @sensitive_dfn %></p>
+</div>
+
+<div id="sensitive-record" class="alert alert--error" role="alert">
+  <% if @sensitive_messages.present? %>
+    <pre class="sensitive-record-message"><%= @sensitive_messages.join("\n") %></pre>
+  <% end %>
+  <% if @sensitive_outcome == :unavailable %>
+    <p>
+      RPMS did not say whether you may open this record, so it was not opened.
+      Try again in a moment.
+    </p>
+  <% end %>
+</div>
+
+<% if @sensitive_outcome == :acknowledge %>
+  <p>
+    Opening it writes an entry in the RPMS security log against your user and
+    sends the sensitive record bulletin.
+  </p>
+  <%= form_with url: patient_context_path(@sensitive_dfn), method: :post do %>
+    <%= hidden_field_tag Lakeraven::EHR::SensitiveRecordAccess::ACKNOWLEDGEMENT_PARAM, Lakeraven::EHR::SensitiveRecordAccess::ACKNOWLEDGED, id: nil %>
+    <button type="submit">I understand: open the record</button>
+  <% end %>
+<% end %>
+
+<div class="screening-actions">
+  <a href="<%= dashboard_path %>">Back to dashboard</a>
+</div>

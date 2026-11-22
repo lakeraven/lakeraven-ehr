@@ -296,6 +296,9 @@ class PatientBannerSpecGapsTest < ActionDispatch::IntegrationTest
   test "closed banner explains when open patient dfn does not exist" do
     with_demo_clinical_seeds do
       sign_in_clinician!
+      # The open asks RPMS whether the record is sensitive first (#613); this
+      # record is not in the shared seeds, and answers "0", not sensitive.
+      SensitivePatientAccessSeeds.seed_not_sensitive!(424_242)
       open_patient_context!(424_242)
 
       get "#{MOUNT}/dashboard"
