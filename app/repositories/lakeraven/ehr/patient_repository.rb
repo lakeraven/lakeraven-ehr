@@ -41,69 +41,86 @@ module Lakeraven
 
         private
 
+        # A FHIR read ends one of three ways (#599):
+        #   [:patient, patient]  the requested Patient, mapped and named
+        #   [:absent]            no client, or a not-found/deleted OperationOutcome
+        #   [:failure, reason]   anything else; reason is PHI-free
+        # A failure is never "no such patient": when RPC has no patient
+        # either, it raises Client::Error.
         def fetch_patient(dfn, source_preference)
           case source_preference
           when :fhir_first
-            patient = try_fhir(dfn)
-            return [ patient, :fhir ] if patient
+            outcome, value = read_fhir(dfn)
+            return [ value, :fhir ] if outcome == :patient
 
             patient = PatientGateway.find(dfn)
+            raise_failure(value) if patient.nil? && outcome == :failure
             [ patient, :rpc ]
           when :rpc_first
             patient = PatientGateway.find(dfn)
             return [ patient, :rpc ] if patient
 
-            # An outage is not "no such patient": a Client::Error propagates.
-            patient = read_fhir(dfn)
-            [ patient, :fhir ]
+            outcome, value = read_fhir(dfn)
+            raise_failure(value) if outcome == :failure
+            [ value, :fhir ]
           else # :rpc_only
             [ PatientGateway.find(dfn), :rpc ]
           end
         end
 
-        # FHIR first: a failed read logs and falls back to RPC, so nothing
-        # from FHIR escapes this path.
-        def try_fhir(dfn)
-          read_fhir(dfn)
+        def read_fhir(dfn)
+          return [ :absent ] unless fhir_available?
+
+          answer = fhir_client.read("Patient", dfn.to_s)
+          return [ :absent ] if absent_outcome?(answer)
+
+          patient_outcome(answer, dfn)
         rescue Lakeraven::EHR::FHIR::Client::Error => e
           # Client::Error messages carry no id, params or body.
-          Rails.logger.warn("PatientRepository: FHIR read failed (#{e.message}); falling back")
-          nil
+          fhir_failure(e.message)
         rescue StandardError => e
           # The class only: a message can carry a response body or patient data.
-          Rails.logger.warn("PatientRepository: FHIR read failed (#{e.class}); falling back")
-          nil
+          fhir_failure(e.class.name)
         end
 
-        # The requested Patient from FHIR, or nil for any other answer. Fails
-        # closed: only a Patient whose id is exactly the DFN counts.
-        def read_fhir(dfn)
-          return nil unless fhir_available?
+        def patient_outcome(answer, dfn)
+          return fhir_failure("not the requested Patient") unless requested_patient?(answer, dfn)
 
-          fhir_data = fhir_client.read("Patient", dfn.to_s)
-          patient = patient_from(fhir_data, dfn)
-          unless patient
-            Rails.logger.warn("PatientRepository: FHIR answer was not the requested Patient")
-            return nil
-          end
+          patient = map_patient(answer)
+          return fhir_failure("could not be mapped") unless patient
+          return fhir_failure("no usable name") if patient.name.blank?
 
           normalize_from_fhir!(patient)
-          patient
+          [ :patient, patient ]
         end
 
-        def patient_from(fhir_data, dfn)
-          return nil unless requested_patient?(fhir_data, dfn)
+        # One warn per failure, with a reason that names no patient.
+        def fhir_failure(reason)
+          Rails.logger.warn("PatientRepository: FHIR Patient read failed (#{reason})")
+          [ :failure, reason ]
+        end
 
-          Patient.from_fhir(fhir_data)
-        rescue ArgumentError, TypeError, NoMethodError
-          # A malformed resource, e.g. Date::Error on birthDate.
+        def raise_failure(reason)
+          raise Lakeraven::EHR::FHIR::Client::Error, "FHIR Patient read failed (#{reason})", cause: nil
+        end
+
+        def map_patient(answer)
+          Patient.from_fhir(answer)
+        rescue StandardError
+          # A malformed resource, e.g. Date::Error on a partial birthDate.
           nil
         end
 
-        def requested_patient?(fhir_data, dfn)
-          fhir_data.is_a?(Hash) &&
-            fhir_data["resourceType"] == "Patient" &&
-            fhir_data["id"] == dfn.to_s
+        def absent_outcome?(answer)
+          answer.is_a?(Hash) &&
+            answer["resourceType"] == "OperationOutcome" &&
+            Array(answer["issue"]).any? { |issue| issue.is_a?(Hash) && %w[not-found deleted].include?(issue["code"]) }
+        end
+
+        def requested_patient?(answer, dfn)
+          answer.is_a?(Hash) &&
+            answer["resourceType"] == "Patient" &&
+            answer["id"] == dfn.to_s
         end
 
         def fhir_client

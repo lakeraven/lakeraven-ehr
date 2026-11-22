@@ -22,11 +22,13 @@ module Lakeraven
       # refused with ArgumentError before any connection is opened.
       #
       # A 2xx answer returns the parsed resource, and must be the requested
-      # type (read) or a Bundle (search). A 404 whose OperationOutcome says
-      # not-found, or a 410 whose OperationOutcome says deleted or not-found,
-      # returns that OperationOutcome, the way the test double answers for an
-      # unknown id. Every other answer raises Client::Error, so an outage, an
-      # auth failure or a gateway page never reads as "no data".
+      # type (read) or a Bundle (search). For read, a 404 whose
+      # OperationOutcome says not-found, or a 410 whose OperationOutcome says
+      # deleted or not-found, returns that OperationOutcome, the way the test
+      # double answers for an unknown id. Every other answer, a 404 or 410 to
+      # a search included, raises Client::Error, so an outage, an auth failure
+      # or a gateway page never reads as "no data". Each call sends one GET:
+      # Net::HTTP's idempotent retry is off.
       #
       # Error messages name the resource type and the HTTP status only. They
       # never carry the response body, the URL, or the request's id or params:
@@ -55,18 +57,23 @@ module Lakeraven
         end
 
         def read(resource_type, id)
-          validate_type!(resource_type)
+          resource_type = validated_type(resource_type)
           id = id.to_s
           raise ArgumentError, "FHIR id is outside FHIR's id grammar" unless ID.match?(id) && !%w[. ..].include?(id)
 
-          get(resource_type, "#{type_path(resource_type)}/#{id}", resource_type)
+          get(resource_type, "#{type_path(resource_type)}/#{id}", resource_type, absent_ok: true)
         end
 
+        # A search with no matches is a 200 with an empty Bundle, so a 404 or
+        # 410 here means the type or endpoint is missing and always raises.
         def search(resource_type, params = {})
-          validate_type!(resource_type)
+          resource_type = validated_type(resource_type)
+          params = {} if params.nil?
+          raise ArgumentError, "FHIR search params must be a Hash" unless params.is_a?(Hash)
+
           path = type_path(resource_type)
-          path = "#{path}?#{URI.encode_www_form(params)}" unless params.nil? || params.empty?
-          get(resource_type, path, "Bundle")
+          path = "#{path}?#{URI.encode_www_form(params)}" unless params.empty?
+          get(resource_type, path, "Bundle", absent_ok: false)
         end
 
         private
@@ -94,35 +101,38 @@ module Lakeraven
           false
         end
 
-        def validate_type!(resource_type)
-          raise ArgumentError, "FHIR resource type is not a resource type name" unless RESOURCE_TYPE.match?(resource_type.to_s)
+        def validated_type(resource_type)
+          resource_type = resource_type.to_s
+          raise ArgumentError, "FHIR resource type is not a resource type name" unless RESOURCE_TYPE.match?(resource_type)
+
+          resource_type
         end
 
         def type_path(resource_type)
           "#{@base_uri.path.delete_suffix('/')}/#{resource_type}"
         end
 
-        def get(resource_type, path, expected_type)
+        def get(resource_type, path, expected_type, absent_ok:)
           response = Net::HTTP.start(
             @base_uri.hostname, @base_uri.port,
             use_ssl: @base_uri.scheme == "https",
-            open_timeout: @open_timeout, read_timeout: @read_timeout
+            open_timeout: @open_timeout, read_timeout: @read_timeout, max_retries: 0
           ) do |http|
             http.request(Net::HTTP::Get.new(path, "Accept" => ACCEPT))
           end
-          handle(resource_type, response, expected_type)
+          handle(resource_type, response, expected_type, absent_ok)
         rescue *NETWORK_ERRORS => e
           raise Error, "FHIR #{resource_type} request failed (#{e.class})", cause: nil
         end
 
-        def handle(resource_type, response, expected_type)
+        def handle(resource_type, response, expected_type, absent_ok)
           code = response.code.to_s
           if code.start_with?("2")
             resource = parse(resource_type, code, response.body)
             return resource if resource["resourceType"] == expected_type
 
             raise Error, "FHIR #{resource_type} request answered #{code} with an unexpected resource type"
-          elsif ABSENT_CODES.key?(code)
+          elsif absent_ok && ABSENT_CODES.key?(code)
             outcome = parse(resource_type, code, response.body)
             return outcome if absent_outcome?(outcome, ABSENT_CODES[code])
 
