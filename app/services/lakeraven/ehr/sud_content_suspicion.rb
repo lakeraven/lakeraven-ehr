@@ -18,21 +18,30 @@ module Lakeraven
     #                   in time. Absence of data, or unreadable data, is
     #                   never evidence of safety.
     #
-    # Before matching, the text is canonicalised in TWO forms, and it is
-    # :suspected when either form matches. Both apply Unicode NFKC
-    # (fullwidth and compatibility forms fold to plain letters and digits)
-    # and read underscores and dash punctuation as spaces. Format characters
-    # (soft hyphen, zero-width space, BOM) and non-whitespace control
-    # characters (NUL, ESC, DEL, C1 controls) are REMOVED in the first form
-    # and read as a SPACE in the second. So a soft hyphen or a NUL inside
-    # "alcohol" still reads as the plain term (first form), and one used as
-    # the only separator between words ("used<US>heroin") still separates
-    # them (second form). A fullwidth "ａｌｃｏｈｏｌ", "substance_use" and
-    # "F10_20" also read as the plain term or code. Readability is judged on
-    # the first form; both forms hold the same letters and digits.
+    # Before matching, the text goes through ONE normalisation step:
+    #   1. Unicode NFKC (fullwidth and compatibility forms fold to plain
+    #      letters and digits, so "ａｌｃｏｈｏｌ" reads as "alcohol").
+    #   2. Every maximal run of invisible code points becomes ONE sentinel:
+    #      Default_Ignorable_Code_Point (soft hyphen, zero-width space and
+    #      joiners, BOM, combining grapheme joiner, Hangul fillers, variation
+    #      selectors, tags), every Cf, every non-whitespace Cc (NUL, ESC,
+    #      DEL, C1 controls) and private-use characters (Co, so the sentinel
+    #      itself cannot arrive as input). Whitespace controls (tab, line
+    #      feed, vertical tab, form feed, carriage return, U+0085) are kept.
+    #   3. Underscores and dash punctuation read as spaces ("substance_use",
+    #      "F10_20").
+    # Every pattern allows the sentinel between any two characters of a
+    # term or code, and a phrase also takes it as a word separator. The
+    # sentinel is not a word character, so a word boundary holds next to
+    # it. Each invisible character is therefore read per position: removed
+    # inside a term ("alco<NUL>hol" is alcohol) and a boundary between words
+    # ("used<US>heroin" starts a word at "heroin"), in the same text.
+    # Readability is judged on the normalised text; the sentinel is not a
+    # letter or digit. Matching only decides the label: classify answers a
+    # Symbol and never returns, logs, stores or keeps the normalised text.
     #
-    # classify never raises for a String: an unreadable String is
-    # :unclassified, never clean.
+    # classify never raises for a String: an unreadable String, or one whose
+    # normalisation or matching fails, is :unclassified, never clean.
     #
     # The vocabulary is NOT exhaustive: slang, misspellings, drug brand names
     # and other languages will get past it. :not_suspected is a statement
@@ -83,14 +92,32 @@ module Lakeraven
         "rehab", "rehabs", "weed", "beer", "beers", "wine", "wines"
       ].freeze
 
-      WORD_SEPARATOR = "[[:space:]\\-]+"
+      # Stands for a run of invisible code points in the normalised text. It
+      # is private use (Co), so any copy of it in the input is itself
+      # invisible and replaced; and it is not a word character, so \b holds
+      # next to it.
+      SENTINEL = "\u{E000}"
+      OPTIONAL_SENTINEL = "#{SENTINEL}?"
+
+      WORD_SEPARATOR = "[[:space:]\\-#{SENTINEL}]+"
 
       # Every pattern carries a match timeout, so a pathological input cannot
       # hold the caller; a timeout is read as :unclassified.
       MATCH_TIMEOUT = 1.0
 
+      # Regex fragments joined so that one sentinel may stand between any two
+      # of them: the one place an invisible character inside a term or code
+      # is allowed for. Each fragment matches a single character, so the
+      # pattern stays linear.
+      def self.spread(fragments)
+        fragments.join(OPTIONAL_SENTINEL)
+      end
+      private_class_method :spread
+
       def self.term_pattern(terms)
-        terms.map { |term| term.split.map { |word| Regexp.escape(word) }.join(WORD_SEPARATOR) }.join("|")
+        terms.map { |term|
+          term.split.map { |word| spread(word.chars.map { |char| Regexp.escape(char) }) }.join(WORD_SEPARATOR)
+        }.join("|")
       end
       private_class_method :term_pattern
 
@@ -104,7 +131,8 @@ module Lakeraven
       # range Icd10CmSubstanceUseRange::SUBSTANCE_USE_CODE reads from a coded
       # field). F20 and on, and F3210, are outside it.
       SUBSTANCE_USE_CODE = Regexp.new(
-        "\\bF1[0-9](?:\\.?[0-9A-Z]{1,4})?\\b",
+        "\\b#{spread(%w[F 1 [0-9]])}" \
+        "(?:#{spread([ '', '\\.?', '[0-9A-Z]' ])}(?:#{OPTIONAL_SENTINEL}[0-9A-Z]){0,3})?\\b",
         Regexp::IGNORECASE,
         timeout: MATCH_TIMEOUT
       )
@@ -114,7 +142,7 @@ module Lakeraven
       # the text, dotted or undotted.
       COUNSELLING_CODE = Regexp.new(
         "\\b(?:" + Icd10CmSubstanceUseRange::SUBSTANCE_USE_CODES_OUTSIDE_RANGE.map { |code|
-          code.split(".").map { |part| Regexp.escape(part) }.join("\\.?")
+          spread(code.chars.map { |char| char == "." ? "\\.?" : Regexp.escape(char) })
         }.join("|") + ")\\b",
         Regexp::IGNORECASE,
         timeout: MATCH_TIMEOUT
@@ -122,19 +150,20 @@ module Lakeraven
 
       PATTERNS = [ VOCABULARY, SUBSTANCE_USE_CODE, COUNSELLING_CODE ].freeze
 
-      # A letter or a digit. Canonical text without one has no readable
+      # A letter or a digit. Normalised text without one has no readable
       # content.
       READABLE_CONTENT = Regexp.new("[\\p{L}\\p{N}]", timeout: MATCH_TIMEOUT)
 
-      # Format characters (soft hyphen, zero-width space and joiners, BOM,
-      # bidi controls) and the control characters that are not whitespace
-      # (NUL, U+0001-U+0008, U+000E-U+001F, U+007F, U+0080-U+009F except
-      # U+0085). Each is removed in one canonical form, so "alco<NUL>hol"
-      # reads as "alcohol", and read as a space in the other, so
-      # "used<US>heroin" reads as "used heroin". Whitespace controls (tab,
-      # line feed, vertical tab, form feed, carriage return, U+0085) are kept
-      # in both forms and always separate words.
-      FORMAT_CHARACTERS = /[\p{Cf}[^\P{Cc}[:space:]]]/
+      # Invisible code points, each maximal run replaced by one SENTINEL:
+      # Default_Ignorable_Code_Point, format characters (Cf), private-use
+      # characters (Co, which holds the sentinel) and the control characters
+      # that are not whitespace (NUL, U+0001-U+0008, U+000E-U+001F, U+007F,
+      # U+0080-U+009F except U+0085). Whitespace controls already separate
+      # words and are kept.
+      INVISIBLE_RUN = Regexp.new(
+        "[\\p{Default_Ignorable_Code_Point}\\p{Cf}\\p{Co}[^\\P{Cc}[:space:]]]+",
+        timeout: MATCH_TIMEOUT
+      )
 
       # Read as a word separator before matching: underscore and all dash
       # punctuation (hyphen, non-breaking hyphen, en and em dash, ...).
@@ -146,19 +175,19 @@ module Lakeraven
         readable = readable_utf8(text)
         return :unclassified if readable.nil?
 
-        removed = canonicalise(readable, format_replacement: "")
-        return :unclassified unless READABLE_CONTENT.match?(removed)
-
-        spaced = canonicalise(readable, format_replacement: " ")
-        return :suspected if [ removed, spaced ].any? { |form| suspected_form?(form) }
+        normalised = normalise(readable)
+        return :unclassified unless READABLE_CONTENT.match?(normalised)
+        return :suspected if PATTERNS.any? { |pattern| pattern.match?(normalised) }
 
         :not_suspected
-      # A match that times out (Regexp::TimeoutError is a RegexpError), or
-      # text whose characters do not survive canonicalisation, has not been
-      # read. Unread text is never clean, and classify must not raise for a
-      # String: callers label on its answer and a note must never be blocked
-      # by it.
-      rescue RegexpError, EncodingError
+      # Any error while reading, normalising or matching (a match timeout is
+      # a RegexpError; a failed normalisation can raise ArgumentError or an
+      # EncodingError) means the text has not been read, and unread text is
+      # never clean. :unclassified text is labelled by
+      # ProgressNoteService#label_part2 and read as Part 2 by Part2Posture.
+      # classify must not raise for a String: callers label on its answer
+      # and a note must never be blocked by it.
+      rescue StandardError
         :unclassified
       end
 
@@ -178,19 +207,14 @@ module Lakeraven
       end
       private_class_method :readable_utf8
 
-      # NFKC, then format and non-whitespace control characters replaced by
-      # format_replacement ("" for the removed form, " " for the spaced
-      # form) and separators spaced, so a term is matched on what a reader
-      # sees rather than how it is keyed.
-      def self.canonicalise(text, format_replacement:)
-        text.unicode_normalize(:nfkc).gsub(FORMAT_CHARACTERS, format_replacement).gsub(SEPARATOR_CHARACTERS, " ")
+      # The one normalisation step: NFKC, then each run of invisible code
+      # points as one sentinel, then separators as spaces, so a term is
+      # matched on what a reader sees rather than how it is keyed. Used only
+      # to decide the label; never kept.
+      def self.normalise(text)
+        text.unicode_normalize(:nfkc).gsub(INVISIBLE_RUN, SENTINEL).gsub(SEPARATOR_CHARACTERS, " ")
       end
-      private_class_method :canonicalise
-
-      def self.suspected_form?(canonical)
-        PATTERNS.any? { |pattern| pattern.match?(canonical) }
-      end
-      private_class_method :suspected_form?
+      private_class_method :normalise
     end
   end
 end
