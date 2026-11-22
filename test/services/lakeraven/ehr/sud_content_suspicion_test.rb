@@ -591,6 +591,59 @@ module Lakeraven
           assert_includes %i[suspected not_suspected unclassified], result, text.inspect
         end
       end
+
+      # --- every Cc, whitespace controls included (#906 owner continue, round 2) ---
+      # The owner's step 2 removes ALL Cc characters. The whitespace controls
+      # (U+0009-U+000D, U+0085) are Cc too: one inside a term must not hide
+      # it, and one between words is still a word boundary.
+
+      [ 0x0009, 0x000A, 0x000B, 0x000C, 0x000D, 0x0085 ].each do |codepoint|
+        c = codepoint.chr(Encoding::UTF_8)
+        label = codepoint_label(codepoint)
+
+        test "a term split by the whitespace control #{label} is suspected" do
+          assert_equal :suspected, SudContentSuspicion.classify("alco#{c}hol")
+        end
+
+        test "a term split by #{label} after a control-character separator is suspected" do
+          assert_equal :suspected, SudContentSuspicion.classify("pt used\x1Falco#{c}hol today")
+        end
+
+        test "an ICD-10-CM code split by #{label} is suspected" do
+          assert_equal :suspected, SudContentSuspicion.classify("dx#{c}F1#{c}0.20")
+        end
+
+        test "#{label} as the only separator before a term is suspected" do
+          assert_equal :suspected, SudContentSuspicion.classify("used#{c}heroin")
+        end
+      end
+
+      test "every Cc code point is removed inside a term and still separates words" do
+        cc = (0..0x10FFFF).select do |codepoint|
+          next false if (0xD800..0xDFFF).cover?(codepoint)
+
+          codepoint.chr(Encoding::UTF_8).match?(/\p{Cc}/)
+        end
+        assert_equal 65, cc.size, "expected the 65 Cc code points (U+0000-U+001F, U+007F-U+009F)"
+
+        cc.each do |codepoint|
+          c = codepoint.chr(Encoding::UTF_8)
+          label = self.class.codepoint_label(codepoint)
+
+          assert_equal :suspected, SudContentSuspicion.classify("alco#{c}hol"),
+                       "#{label} inside the term"
+          assert_equal :suspected, SudContentSuspicion.classify("used#{c}heroin"),
+                       "#{label} as the only separator before the term"
+        end
+      end
+
+      test "whitespace controls between clean words do not make the text suspected" do
+        [ "Seen.\tVitals stable.\nNo concerns.",
+          "Seen.\r\nVitals stable.\r\nNo concerns.",
+          "Plan:\u000Bfollow up\u0085in two weeks" ].each do |text|
+          assert_equal :not_suspected, SudContentSuspicion.classify(text), text.inspect
+        end
+      end
     end
   end
 end
