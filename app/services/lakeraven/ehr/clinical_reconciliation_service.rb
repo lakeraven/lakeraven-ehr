@@ -77,10 +77,25 @@ module Lakeraven
 
       private
 
+      # nil unless the input, and every string parsed from it, is valid UTF-8
+      # JSON without duplicate keys.
       def parse_json(input)
-        JSON.parse(input, allow_duplicate_key: false)
+        text = input.to_s.dup.force_encoding(Encoding::UTF_8)
+        return unless text.valid_encoding?
+
+        parsed = JSON.parse(text, allow_duplicate_key: false)
+        parsed if valid_strings?(parsed)
       rescue JSON::ParserError
         nil
+      end
+
+      def valid_strings?(node)
+        case node
+        when Hash then node.all? { |key, value| valid_strings?(key) && valid_strings?(value) }
+        when Array then node.all? { |value| valid_strings?(value) }
+        when String then node.valid_encoding?
+        else true
+        end
       end
 
       # Hash resources of the Bundle, and the Bundle-level marks: labels on

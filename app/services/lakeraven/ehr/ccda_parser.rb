@@ -17,7 +17,7 @@ module Lakeraven
     # document, so a label-only entry's labels reach its siblings. A label with
     # no code or codeSystem marks its scope part2: true with no label value.
     # Top-level part2 is true for any Part 2 or unreadable label anywhere.
-    # XML that is not well-formed, has a DOCTYPE (entities could hide
+    # XML that is not (namespace-)well-formed, has a DOCTYPE (entities could hide
     # labels), or is not a v3 ClinicalDocument, raises.
     class CcdaParser
       NS = "urn:hl7-org:v3"
@@ -43,6 +43,7 @@ module Lakeraven
 
       def parse(xml)
         doc = Nokogiri::XML(xml) { |config| config.strict.nonet }
+        raise Malformed, "C-CDA is not well-formed" if doc.errors.any? # e.g. an unbound namespace prefix
         raise Malformed, "C-CDA must not have a DOCTYPE" if doc.internal_subset || doc.external_subset
 
         root = doc.root
@@ -50,8 +51,8 @@ module Lakeraven
 
         entries = SECTIONS.transform_values { |spec| section_entries(doc, *spec) }
         content_entries = entries.values.flatten(1).filter_map { |entry, _, content| entry if content }
-        sections = doc.xpath(SECTIONS.values.map { |template, *| section_xpath(template) }.join(" | "), XMLNS)
-        marks = owned_marks(doc, content_entries + sections.to_a)
+        imported_sections = doc.xpath(SECTIONS.values.map { |template, *| section_xpath(template) }.join(" | "), XMLNS)
+        marks = owned_marks(doc, content_entries + imported_sections.to_a)
         document = marks.fetch(nil, [])
         inheriting = {} # section pointer_ids => fields for document + those sections
 
@@ -94,7 +95,7 @@ module Lakeraven
 
       def mark(element)
         code = element["code"]
-        oid = Part2RedisclosureNotice.unpad(Part2RedisclosureNotice.unpad(element["codeSystem"]).delete_prefix("urn:oid:"))
+        oid = Part2RedisclosureNotice.unpad(Part2RedisclosureNotice.unpad(element["codeSystem"]).sub(/\Aurn:oid:/i, ""))
         confidentiality = element.name == "confidentialityCode" # in any namespace
         return unless confidentiality || oid == CONFIDENTIALITY_OID || Part2RedisclosureNotice.part2_code?(code)
         return Part2RedisclosureNotice::UNREADABLE if Part2RedisclosureNotice.unpad(code).empty? || oid.empty?
