@@ -25,7 +25,15 @@ Feature: Session and audit behaviours carried over from BPRM 6.0
   # edit. The scenarios tagged @pending specify what is not built yet; their
   # steps are left undefined rather than stubbed.
 
-  Scenario: Each audited action leaves one BUSA entry with the user, the patient and the action
+  # What this scenario shows is what the app sends. It does not show RPMS
+  # confirming the entry: RPMS here is a stand-in that answers success. RPMS
+  # confirming a patient-detail entry is not yet shown on the pinned build. The
+  # only live capture of this entry shape (rpms-rpc
+  # test/fixtures/captured_replies/busa-log.yml, patient_detail/1) has the
+  # build file the summary, refuse the patient-detail row and answer 0^. An
+  # entry RPMS does not confirm is recorded locally as "BUSA entry not
+  # confirmed"; the next scenario is that captured reply.
+  Scenario: A saved edit sends one BUSA entry naming the patient and the action, and RPMS takes the user from the session
     Given a registration clerk is signed on as RPMS user 207
     And RPMS holds registered patient 990031
     When the clerk saves a change to the demographics of patient 990031
@@ -33,7 +41,23 @@ Feature: Session and audit behaviours carried over from BPRM 6.0
     And RPMS receives exactly 1 BUSA security audit entry
     And the BUSA entry names patient 990031
     And the BUSA entry records a patient edit described as "Registration: demographics edited"
-    And the BUSA entry leaves the user to RPMS, which records the signed-on user
+    And the BUSA entry carries no user, because RPMS takes the user from the session
+
+  # The pinned build's answer to this exact entry shape, as captured live:
+  # rpms-rpc test/fixtures/captured_replies/busa-log.yml, patient_detail/1
+  # (input P|E|SYNTH RPC|Synthetic demographic update|990031). The reply the
+  # app is handed is the gem's own parse of the captured raw return, not a
+  # hand-built one. The edit is already saved in RPMS, so the clerk's flow is
+  # unchanged and the unconfirmed entry is recorded locally.
+  Scenario: The pinned build's captured reply to a patient-detail entry is recorded as not confirmed
+    Given a registration clerk is signed on as RPMS user 207
+    And RPMS holds registered patient 990031
+    And RPMS answers the BUSA entry with the pinned build's captured reply for a patient-detail row
+    When the clerk saves a change to the demographics of patient 990031
+    Then the change is saved
+    And RPMS receives exactly 1 BUSA security audit entry
+    And the BUSA entry names patient 990031
+    And exactly 1 local "BUSA entry not confirmed" row names patient 990031
 
   # A form saved as RPMS already holds it is not an edit: nothing is sent to
   # RPMS, so there is nothing to audit. The change saved after it is the

@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "digest"
 require "rpms_rpc/api/busa"
 
 # lakeraven-ehr#617, features/bprm_twin/session_and_audit.feature. RPMS is
@@ -22,6 +23,18 @@ module SessionAndAuditSteps
       address_line1: "317 DUNEGRASS ST", address_line2: nil, address_line3: nil, city: "ANYWHERE",
       state: { internal: "27", external: "MONTANA" }, zip: "59000", phone_home: "406-555-1031",
       phone_work: nil, phone_other: nil, community: nil }
+  end
+
+  # The pinned build's reply to a patient-detail entry, byte for byte as
+  # captured live: rpms-rpc test/fixtures/captured_replies/busa-log.yml,
+  # patient_detail/1 (sha256 fe4c7411...c7a9). It files the summary, refuses
+  # the detail row and answers 0^ with no message.
+  CAPTURED_PATIENT_DETAIL_RETURN = "5\0I00001RESULT^T00250ERROR_MESSAGE\x1E0^\x1E"
+  CAPTURED_PATIENT_DETAIL_SHA256 = "fe4c741139e42adb431f89a5b31968d2c32d184bb7ce26f673f4c0fc6090c7a9"
+
+  def local_busa_rows(dfn)
+    Lakeraven::EHR::AuditEvent.where(event_type: "security", entity_type: "Patient", entity_identifier: dfn.to_s)
+                              .where("outcome_desc LIKE ?", "BUSA entry%")
   end
 
   # Saved and restored with the scenario's other gateway stubs.
@@ -48,6 +61,12 @@ Given("RPMS holds registered patient {int}") do |dfn|
   record = registration_record(dfn)
   updates = (@registration_updates = [])
   busa = (@busa_entries = [])
+  # What RPMS answers a BUSA entry with. Success unless a later step says so.
+  busa_answer = (@busa_answer = { reply: { success: true, message: "" } })
+  # The gap row is written outside the scenario's transaction, so it is
+  # cleared here and again with the scenario's stubs.
+  local_busa_rows(dfn).delete_all
+  @gateway_stubs << -> { local_busa_rows(dfn).delete_all }
   stub_rpms(RpmsRpc::Patient, :brief_header) { |_dfn| { name: record[:name], dob: record[:dob], sex: "F", mrn: dfn.to_s } }
   stub_rpms(RpmsRpc::Patient, :registration_record) { |asked| asked.to_i == dfn ? record : nil }
   stub_rpms(RpmsRpc::Patient, :contact) { |_dfn| { dfn: dfn, phone_home: record[:phone_home] } }
@@ -58,8 +77,17 @@ Given("RPMS holds registered patient {int}") do |dfn|
   end
   stub_rpms(RpmsRpc::Busa, :log_security_audit) do |**pieces|
     busa << pieces
-    { success: true, message: "" }
+    busa_answer[:reply]
   end
+end
+
+# The reply is the gem's parse of the captured wire return, so the scenario
+# follows what the pinned build sent, not a hash written to suit the app.
+Given("RPMS answers the BUSA entry with the pinned build's captured reply for a patient-detail row") do
+  raw = SessionAndAuditSteps::CAPTURED_PATIENT_DETAIL_RETURN
+  assert_equal SessionAndAuditSteps::CAPTURED_PATIENT_DETAIL_SHA256, Digest::SHA256.hexdigest(raw),
+               "the reply must be the captured raw_return, byte for byte"
+  @busa_answer[:reply] = RpmsRpc::Busa.parse_log_reply(raw)
 end
 
 When("the clerk saves a change to the demographics of patient {int}") do |dfn|
@@ -110,6 +138,16 @@ end
 
 # BUSA takes the user (DUZ) from the broker session the entry is written on.
 # The app sends the five pieces and no user of its own.
-Then("the BUSA entry leaves the user to RPMS, which records the signed-on user") do
+Then("the BUSA entry carries no user, because RPMS takes the user from the session") do
   assert_equal %i[action call category description detail], the_busa_entry.keys.sort
+end
+
+Then("exactly {int} local {string} row names patient {int}") do |count, what, dfn|
+  rows = local_busa_rows(dfn).to_a
+  assert_equal count, rows.size, "expected #{count} local BUSA row(s) for patient #{dfn}, found #{rows.size}"
+  rows.each do |row|
+    assert row.outcome_desc.start_with?("#{what}: "), "expected #{what.inspect}, got #{row.outcome_desc.inspect}"
+    assert row.outcome_desc.delete_prefix("#{what}: ").strip.present?, "the row must say why"
+    assert_equal dfn.to_s, row.entity_identifier
+  end
 end

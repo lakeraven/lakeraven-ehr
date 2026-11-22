@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "test_helper"
+require "digest"
 require "rpms_rpc/api/busa"
 
 # lakeraven-ehr#617: BPRM 6.0 writes a BUSA security audit entry for audited
@@ -124,6 +125,25 @@ module Lakeraven
         result = record(via: fake)
 
         assert_equal 1, fake.calls.size, "RPMS must have been asked"
+        assert_not_filed(result)
+      end
+
+      # The only live capture of this entry shape: rpms-rpc
+      # test/fixtures/captured_replies/busa-log.yml, patient_detail/1 (input
+      # P|E|SYNTH RPC|Synthetic demographic update|990031). The reply is the
+      # gem's own parse of the captured raw return, not a hand-built hash.
+      CAPTURED_PATIENT_DETAIL_RETURN = "5\0I00001RESULT^T00250ERROR_MESSAGE\x1E0^\x1E"
+      CAPTURED_PATIENT_DETAIL_SHA256 = "fe4c741139e42adb431f89a5b31968d2c32d184bb7ce26f673f4c0fc6090c7a9"
+
+      test "the pinned build's captured reply to a patient-detail entry is not filed, and says why" do
+        assert_equal CAPTURED_PATIENT_DETAIL_SHA256, Digest::SHA256.hexdigest(CAPTURED_PATIENT_DETAIL_RETURN),
+                     "the reply must be the captured raw_return, byte for byte"
+        fake = FakeBusa.new(::RpmsRpc::Busa.parse_log_reply(CAPTURED_PATIENT_DETAIL_RETURN))
+
+        result = record(via: fake)
+
+        assert_equal [ { category: "P", action: "E", call: "LAKERAVEN EHR REGISTRATION",
+                         description: DESCRIPTION, detail: "990031" } ], fake.calls
         assert_not_filed(result)
       end
 
