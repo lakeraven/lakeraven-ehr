@@ -15,6 +15,9 @@ module Lakeraven
       # status: :saved (id names the row), :refused (message is RPMS's reason),
       # :not_found (a holiday removal named a date with none) or :unknown (RPMS
       # did not answer).
+      # RPMS answered the holidays read, but not with a list of dated rows.
+      class UnreadableHolidays < ::RpmsRpc::Error; end
+
       Result = Data.define(:status, :id, :message) do
         def saved? = status == :saved
       end
@@ -64,8 +67,13 @@ module Lakeraven
       # (rpms-ux S-SCH-19). Never cached: the open times must see a change at
       # once. A failed read raises RpmsRpc::Error for the caller to show.
       def self.holidays(setup: ::RpmsRpc::SchedulingSetup)
-        today = Date.current
-        Array(setup.holidays(start_date: today, end_date: today.next_year))
+        today = SiteTime.today
+        rows = setup.holidays(start_date: today, end_date: today.next_year)
+        unless rows.is_a?(Array) && rows.all? { |row| row.is_a?(Hash) && row[:date].is_a?(Date) }
+          raise UnreadableHolidays, "RPMS answered holidays with something other than a list of dated rows"
+        end
+
+        rows
       end
 
       def self.add_holiday(date, name, setup: ::RpmsRpc::SchedulingSetup)
@@ -77,11 +85,14 @@ module Lakeraven
       end
 
       def self.outcome(reply)
-        return Result.new(status: :unknown, id: nil, message: nil) if reply.nil?
-        return Result.new(status: :not_found, id: nil, message: reply[:message]) if reply[:error] == :not_found
-        return Result.new(status: :saved, id: reply[:id], message: nil) if reply[:success]
+        return Result.new(status: :unknown, id: nil, message: nil) unless reply.is_a?(Hash)
+        return Result.new(status: :saved, id: reply[:id], message: nil) if reply[:success] == true
 
-        Result.new(status: :refused, id: nil, message: (reply[:message] || reply[:error]).to_s.sub(/\ABSDX\d+: /, ""))
+        reason = reply[:message].presence || reply[:error]
+        return Result.new(status: :unknown, id: nil, message: nil) if reason.blank?
+        return Result.new(status: :not_found, id: nil, message: reply[:message]) if reply[:error] == :not_found
+
+        Result.new(status: :refused, id: nil, message: reason.to_s.sub(/\ABSDX\d+: /, ""))
       end
       private_class_method :outcome
 

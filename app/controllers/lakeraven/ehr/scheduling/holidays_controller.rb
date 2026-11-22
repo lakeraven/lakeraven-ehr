@@ -30,14 +30,14 @@ module Lakeraven
           elsif result.status == :unknown
             unconfirmed
           else
-            flash.now[:alert] = "RPMS did not add the holiday: #{result.message}"
+            flash.now[:alert] = "RPMS did not add the holiday.#{" #{result.message}" if result.message.present?}"
             render_index(:unprocessable_content)
           end
         end
 
         # POST /scheduling/holidays/:date/remove
         def remove
-          date = parse_date(params[:date])
+          date = strict_date(params[:date])
           return render(plain: "No such date", status: :not_found) unless date
 
           result = SchedulingTablesGateway.remove_holiday(date)
@@ -46,10 +46,10 @@ module Lakeraven
             flash[:notice] = "Holiday on #{date.iso8601} removed."
             redirect_to scheduling_holidays_path
           when :not_found
-            flash[:alert] = "RPMS has no holiday on #{date.iso8601}: #{result.message}"
+            flash[:alert] = "RPMS has no holiday on #{date.iso8601}."
             redirect_to scheduling_holidays_path
           when :refused
-            flash[:alert] = "RPMS did not remove the holiday: #{result.message}"
+            flash[:alert] = "RPMS did not remove the holiday.#{" #{result.message}" if result.message.present?}"
             redirect_to scheduling_holidays_path
           else
             @form = HolidayForm.new
@@ -73,13 +73,13 @@ module Lakeraven
           rescue ::RpmsRpc::Error, IOError, SystemCallError => e
             Rails.logger.error("[scheduling] holidays read raised #{e.class}")
             @holidays = nil
-            flash.now[:alert] = "RPMS did not return the holidays. Try again shortly." if flash.now[:alert].blank?
+            flash.now[:alert] = [ flash.now[:alert].presence, "RPMS did not return the holidays. Try again shortly." ].compact.join(" ")
             status = :service_unavailable
           end
           render :index, status: status
         end
 
-        def parse_date(text)
+        def strict_date(text)
           Date.iso8601(text.to_s)
         rescue Date::Error
           nil

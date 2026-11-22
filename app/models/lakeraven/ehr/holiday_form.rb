@@ -3,7 +3,7 @@
 module Lakeraven
   module EHR
     # A holiday as a scheduling supervisor adds it (rpms-ux S-SCH-19): a date
-    # not before today and a name of 1 to 30 characters. Filed in HOLIDAY
+    # from today through a year ahead (the list's window) and a name of 1 to 30 characters. Filed in HOLIDAY
     # (#40.5) by RpmsRpc::SchedulingSetup.add_holiday, which refuses the same
     # names (no ^, no control character, not exactly @).
     class HolidayForm
@@ -44,8 +44,10 @@ module Lakeraven
         day = calendar_date
         if day.nil?
           errors.add(:date, "must be a real date such as 2031-07-04")
-        elsif day < Date.current
+        elsif day < SiteTime.today
           errors.add(:date, "cannot be before today")
+        elsif day > SiteTime.today.next_year
+          errors.add(:date, "cannot be more than a year ahead")
         end
       end
     end
