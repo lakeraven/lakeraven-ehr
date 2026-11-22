@@ -95,12 +95,14 @@
       class="mt-0"
     >
       Problem list
-      <% unless @section_failures["Condition"] %>
+      <% unless @section_failures["Condition"] || withheld_message("Condition") %>
         <span class="font-normal text-slate-600">(<%= @conditions.length %>)</span>
       <% end %>
     </h2>
     <% if @section_failures["Condition"] %>
       <%= empty_state @section_failures["Condition"].html_message %>
+    <% elsif withheld_message("Condition") %>
+      <%= empty_state withheld_message("Condition") %>
     <% elsif @conditions.any? %>
       <table
         id="chart-problems-table"
@@ -141,12 +143,14 @@
       class="mt-0"
     >
       Medications
-      <% unless @section_failures["MedicationRequest"] %>
+      <% unless @section_failures["MedicationRequest"] || withheld_message("MedicationRequest") %>
         <span class="font-normal text-slate-600">(<%= @medications.length %>)</span>
       <% end %>
     </h2>
     <% if @section_failures["MedicationRequest"] %>
       <%= empty_state @section_failures["MedicationRequest"].html_message %>
+    <% elsif withheld_message("MedicationRequest") %>
+      <%= empty_state withheld_message("MedicationRequest") %>
     <% elsif @medications.any? %>
       <table
         id="chart-medications-table"
@@ -190,12 +194,14 @@
       class="mt-0"
     >
       Vital signs
-      <% unless @section_failures["Observation"] %>
+      <% unless @section_failures["Observation"] || withheld_message("Observation") %>
         <span class="font-normal text-slate-600">(<%= @vitals.length %>)</span>
       <% end %>
     </h2>
     <% if @section_failures["Observation"] %>
       <%= empty_state @section_failures["Observation"].html_message %>
+    <% elsif withheld_message("Observation") %>
+      <%= empty_state withheld_message("Observation") %>
     <% elsif @vitals.any? %>
       <dl class="m-0 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <% @vitals.each do |v| %>
@@ -230,9 +236,15 @@
       class="mt-0"
     >
       Behavioral health screenings
-      <span class="font-normal text-slate-600">(<%= @screenings.length %>)</span>
+      <% unless @section_failures["QuestionnaireResponse"] || withheld_message("QuestionnaireResponse") %>
+        <span class="font-normal text-slate-600">(<%= @screenings.length %>)</span>
+      <% end %>
     </h2>
-    <% if @screenings.any? %>
+    <% if @section_failures["QuestionnaireResponse"] %>
+      <%= empty_state @section_failures["QuestionnaireResponse"].html_message %>
+    <% elsif withheld_message("QuestionnaireResponse") %>
+      <%= empty_state withheld_message("QuestionnaireResponse") %>
+    <% elsif @screenings.any? %>
       <table
         id="chart-screenings-table"
         class="data-table"
@@ -372,7 +384,7 @@
         class="my-0"
       >
         Encounters &amp; Appointments
-        <% unless @section_failures["Encounter"] %>
+        <% unless @section_failures["Encounter"] || withheld_message("Encounter") %>
           <span class="font-normal text-slate-600">(<%= @encounters.length %>)</span>
         <% end %>
       </h2>
@@ -393,6 +405,8 @@
     </div>
     <% if @section_failures["Encounter"] %>
       <%= empty_state @section_failures["Encounter"].html_message %>
+    <% elsif withheld_message("Encounter") %>
+      <%= empty_state withheld_message("Encounter") %>
     <% elsif @encounters.any? %>
       <table
         id="chart-encounters-table"
