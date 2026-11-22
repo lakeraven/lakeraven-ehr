@@ -28,19 +28,20 @@ module Lakeraven
       # DG SECURITY LOG entry and send the bulletin.
       LOG_AND_SEND = 3
 
-      # DGMSG. The wrapper documents this parameter only by its signature
-      # default, `generate_message: 0` (RpmsRpc::DgSensitive#check_access), and
-      # docs/rpcs.md lists DGMSG as an optional parameter with no stated
-      # meaning. Nothing citable says what a non-zero value makes PTSEC^DGSEC4
-      # do, so the open sends the wrapper's documented default and reads only
-      # what the wrapper documents: the code and RESULT(2+) message lines.
+      # DGMSG: ask PTSEC^DGSEC4 for its message lines. The only captured
+      # sensitive reply, rpms-rpc test/fixtures/captured_replies/
+      # dg-sensitive.yml capture `sensitive/1` (inputs 990028, 1,
+      # OR CPRS GUI CHART), was taken with DGMSG=1 and carried the warning
+      # lines in RESULT(2+); the not-sensitive captures, sent with 0, carry a
+      # code and no lines. The warning page shows RPMS's own text, so the open
+      # asks the way that capture did, not with the wrapper's signature
+      # default of 0.
       #
-      # Not yet proven: whether PTSEC^DGSEC4 returns those warning lines under
-      # DGMSG=0 on a live sensitive record. The only capture of a sensitive
-      # answer was taken with DGMSG=1. The page refuses correctly either way:
-      # the code alone decides the open, and a warning or denial with no lines
-      # is still refused, it just shows no RPMS text.
-      GENERATE_MESSAGE = 0
+      # Still owed: live proof under the app's own call (this option, the
+      # signed-in user's connection) that PTSEC^DGSEC4 returns those lines.
+      # The page refuses correctly either way: the code alone decides the
+      # open, and a warning or denial with no lines is still refused.
+      GENERATE_MESSAGE = 1
 
       class << self
         # { result: Integer, messages: [String] }, or nil when RPMS did not

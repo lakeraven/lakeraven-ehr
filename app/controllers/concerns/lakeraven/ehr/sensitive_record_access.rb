@@ -16,10 +16,19 @@ module Lakeraven
     #   3, 4, 5  denied, with RPMS's reason; an acknowledgement changes nothing
     #   other    -1, an undefined code, no answer, or an error: not opened
     #
-    # RPMS refusing to bind the option the check runs under (the gem's
-    # ContextRefusedError, from the check or the bulletin) is its own answer:
-    # the user's account is not set up for the check. That is a determined
-    # "no", 403, and retrying will not change it.
+    # RPMS serving the check or the bulletin, but not to this user, is its
+    # own answer: the gem's RpmsRpc::Client::RpcRefusedError, raised when the
+    # broker's error reads as a refusal (rpms-rpc lib/rpms_rpc/client.rb,
+    # REFUSED_PATTERN: CIA "Access denied for remote procedure: NAME", XWB
+    # "The remote procedure NAME is not registered to the option OPT."). The
+    # user's account is not set up for the check. That is a determined "no",
+    # 403, and retrying will not change it.
+    #
+    # The gem's ContextRefusedError is not mapped here: it raises that only at
+    # CIA sign-on (#501), never from RpmsRpc::DgSensitive, so it is not an
+    # answer about this check. Any other RpmsRpc::Error, a plain RpcError
+    # included (an XWB "Failed to create context", a dropped call), is no
+    # answer: unavailable, 503. So is an error that is not RPMS's at all.
     #
     # Every refusal goes through refuse_sensitive_record: it notes the reason
     # for the audit row (AuditableClinicalAccess#note_audit_denial), so the
@@ -72,12 +81,12 @@ module Lakeraven
         SensitiveRecordGateway.check(record)
       rescue ::RpmsRpc::NotConfiguredError
         raise # no connection of its own: RpmsUserScope ends the session
-      rescue ::RpmsRpc::Client::ContextRefusedError => e
+      rescue ::RpmsRpc::Client::RpcRefusedError => e
         refuse_account_not_set_up(e, "check")
-      rescue ::RpmsRpc::Error => e
-        Rails.logger.error("[sensitive-record] check raised #{e.class}")
-        refuse_sensitive_record(:unavailable, [], "sensitive record check: RPMS call failed (#{e.class.name})")
-        :failed
+      rescue StandardError => e
+        # A plain RpcError (XWB "Failed to create context", a dropped call)
+        # or an error that is not RPMS's: nobody decided, 503.
+        refuse_after_error(e, "check")
       end
 
       # Code 2. The acknowledgement is honoured only on top of the check this
@@ -98,17 +107,29 @@ module Lakeraven
         SensitiveRecordGateway.record_acknowledged_access(record)
       rescue ::RpmsRpc::NotConfiguredError
         raise
-      rescue ::RpmsRpc::Client::ContextRefusedError => e
+      rescue ::RpmsRpc::Client::RpcRefusedError => e
         refuse_account_not_set_up(e, "bulletin")
-      rescue ::RpmsRpc::Error => e
-        Rails.logger.error("[sensitive-record] bulletin raised #{e.class}")
-        nil
+      rescue StandardError => e
+        # As for the check: a plain RpcError or a non-RPMS error is 503.
+        refuse_after_error(e, "bulletin")
       end
 
       # Renders the refusal and returns :failed, for the callers above.
       def refuse_account_not_set_up(error, call)
-        Rails.logger.warn("[sensitive-record] #{call} context refused: #{error.class}")
+        Rails.logger.warn("[sensitive-record] #{call} refused: #{error.class}")
         refuse_sensitive_record(:account_not_set_up, [], ACCOUNT_NOT_SET_UP_REASON)
+        :failed
+      end
+
+      # The check or the bulletin raised something other than a refusal.
+      # The open is refused here, rendered rather than re-raised: with the
+      # cookie session store a raised request drops its session changes, so
+      # a re-raise would leave the refused record open in the browser. Only
+      # the error's class is logged and audited, never its message, which
+      # may carry what RPMS or the code below said about the patient.
+      def refuse_after_error(error, call)
+        Rails.logger.error("[sensitive-record] #{call} raised #{error.class}")
+        refuse_sensitive_record(:unavailable, [], "sensitive record #{call}: call failed (#{error.class.name})")
         :failed
       end
 
