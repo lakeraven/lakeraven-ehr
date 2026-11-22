@@ -9,8 +9,18 @@ require "rpms_rpc/api/busa"
 # holds no PHI. BUSA takes the user from the broker session.
 #
 # The RPMS change has already happened when the entry is written and cannot be
-# undone, so an entry RPMS does not file leaves the edit as saved and is
-# recorded locally as a gap. RPMS is stood in for at the gem boundary, as in
+# undone, so an entry RPMS does not confirm leaves the edit as saved and is
+# recorded locally as a gap. "Not confirmed", never "not filed": the pinned
+# build files the BUSA summary and then answers 0^ for the patient-detail row
+# (rpms-rpc test/fixtures/captured_replies/busa-log.yml, patient_detail/1), so
+# a refusal does not show that nothing was filed.
+#
+# A save that changes nothing is not an edit and files nothing. An edit whose
+# outcome is unknown is not claimed in BUSA, and is recorded locally as an
+# entry that was not attempted. A gap row that cannot be written does not
+# change what the clerk sees; the request's own audit row says so.
+#
+# RPMS is stood in for at the gem boundary, as in
 # registration_edit_patient_test.rb.
 class RegistrationBusaAuditTest < ActionDispatch::IntegrationTest
   DFN = 990_031
@@ -40,8 +50,18 @@ class RegistrationBusaAuditTest < ActionDispatch::IntegrationTest
   # What the form carries that must never reach an audit row.
   PHI = [ "TESTPATIENT", "ALPHA", "666321031", "1997", "MAR 15" ].freeze
 
-  setup { busa_gap_rows.delete_all }
-  teardown { busa_gap_rows.delete_all }
+  NOT_CONFIRMED = "BUSA entry not confirmed: "
+  NOT_ATTEMPTED = "BUSA entry not attempted: "
+
+  setup do
+    clear_audit_rows
+    @audit_floor = Lakeraven::EHR::AuditEvent.maximum(:id).to_i
+  end
+  teardown { clear_audit_rows }
+
+  def clear_audit_rows
+    Lakeraven::EHR::AuditEvent.where(entity_type: "Patient", entity_identifier: DFN.to_s).delete_all
+  end
 
   def sign_in(keys)
     post "/lakeraven-ehr/test_session", params: { duz: "207", user_type: "user", user_name: "PROFILE,REG", security_keys: keys }
@@ -112,26 +132,96 @@ class RegistrationBusaAuditTest < ActionDispatch::IntegrationTest
     { category: "P", action: "E", call: "LAKERAVEN EHR REGISTRATION", description: description, detail: DFN.to_s }
   end
 
-  def busa_gap_rows
+  def patient_audit_rows
     Lakeraven::EHR::AuditEvent.where(entity_type: "Patient", entity_identifier: DFN.to_s)
-                              .where("outcome_desc LIKE ?", "BUSA entry not filed:%")
   end
 
-  # The one local row that records a BUSA entry RPMS did not file.
-  def assert_busa_gap_recorded(reason_pattern)
-    rows = busa_gap_rows.to_a
-    assert_equal 1, rows.size, "expected one local audit row for the BUSA entry that was not filed"
-    row = rows.first
+  # Every local row about a BUSA entry for the patient, whatever it says of it.
+  # The request's own row (event_type "rest") is not one of them.
+  def busa_rows
+    patient_audit_rows.where(event_type: "security").where("outcome_desc LIKE ?", "BUSA entry%")
+  end
+
+  # The rows that record a BUSA entry RPMS did not confirm.
+  def busa_gap_rows
+    busa_rows.where("outcome_desc LIKE ?", "#{NOT_CONFIRMED}%")
+  end
+
+  # The rows that record a BUSA entry the app did not attempt.
+  def busa_not_attempted_rows
+    busa_rows.where("outcome_desc LIKE ?", "#{NOT_ATTEMPTED}%")
+  end
+
+  # The rows AuditableClinicalAccess wrote for this test's PATCH requests.
+  def request_audit_rows
+    Lakeraven::EHR::AuditEvent.where(event_type: "rest", action: "U").where("id > ?", @audit_floor)
+  end
+
+  def assert_no_phi(row)
+    held = row.attributes.values.compact.map(&:to_s).join(" ")
+    PHI.each { |phi| refute_includes held, phi, "the audit row must hold no PHI" }
+  end
+
+  # The one local security row about the patient's BUSA entry, with the given
+  # prefix and a reason after it.
+  def assert_busa_row(prefix, reason_pattern, what)
+    assert_equal 1, busa_rows.count, "expected one local audit row for the BUSA entry that was #{what}"
+    row = busa_rows.first
     assert_equal "security", row.event_type
     assert_equal "U", row.action
     assert_equal "4", row.outcome
     assert_equal "Patient", row.entity_type
     assert_equal DFN.to_s, row.entity_identifier
-    reason = row.outcome_desc.delete_prefix("BUSA entry not filed:").strip
-    assert reason.present?, "the row must carry the gateway's reason"
+    assert row.outcome_desc.start_with?(prefix), "expected outcome_desc to start with #{prefix.inspect}, got #{row.outcome_desc.inspect}"
+    reason = row.outcome_desc.delete_prefix(prefix).strip
+    assert reason.present?, "the row must carry a reason"
     assert_match reason_pattern, reason
-    held = row.attributes.values.compact.map(&:to_s).join(" ")
-    PHI.each { |phi| refute_includes held, phi, "the audit row must hold no PHI" }
+    assert_no_phi(row)
+    row
+  end
+
+  # The one local row that records a BUSA entry RPMS did not confirm.
+  def assert_busa_gap_recorded(reason_pattern)
+    assert_busa_row(NOT_CONFIRMED, reason_pattern, "not confirmed")
+  end
+
+  # The one local row that records a BUSA entry the app did not attempt.
+  def assert_busa_not_attempted_recorded(reason_pattern)
+    assert_busa_row(NOT_ATTEMPTED, reason_pattern, "not attempted")
+  end
+
+  # The store refuses the local row about a BUSA entry, and nothing else: the
+  # request's own row and every other audit row are written as usual.
+  def with_gap_row_unwritable
+    refused = []
+    events = Lakeraven::EHR::AuditEvent
+    %i[create! create_detached!].each do |writer|
+      original = events.method(writer)
+      stub(events, writer) do |*args, **attrs, &block|
+        row = attrs.empty? && args.first.is_a?(Hash) ? args.first : attrs
+        if row[:event_type].to_s == "security" && row[:outcome_desc].to_s.start_with?("BUSA entry")
+          refused << row[:outcome_desc].to_s
+          raise ActiveRecord::StatementInvalid, "the audit store refused the row"
+        end
+        original.call(*args, **attrs, &block)
+      end
+    end
+    yield refused
+  end
+
+  # The request's own audit row says the BUSA entry was not confirmed and that
+  # the row recording it could not be written.
+  def assert_request_row_carries_the_unwritten_gap
+    rows = request_audit_rows.to_a
+    assert_equal 1, rows.size, "expected the request's own audit row"
+    row = rows.first
+    desc = row.outcome_desc.to_s
+    assert_includes desc, "BUSA entry not confirmed"
+    assert_match(/could not be written/i, desc, "the request row must say the gap row could not be written")
+    # The note names the patient by DFN (an identifier, not PHI), as the gap
+    # row would have: the request row's own entity is the controller's.
+    assert_includes desc, "Patient #{DFN}", "the request row's note must name the patient by DFN"
+    assert_no_phi(row)
     row
   end
 
@@ -144,7 +234,73 @@ class RegistrationBusaAuditTest < ActionDispatch::IntegrationTest
       assert_equal "Demographics saved.", flash[:notice]
       assert_equal 1, updates.size
       assert_equal [ busa_entry("Registration: demographics edited") ], busa
-      assert_equal 0, busa_gap_rows.count
+      assert_equal 0, busa_rows.count
+    end
+  end
+
+  # The second save is the control: the same stand-ins that saw nothing for the
+  # form that changed nothing see the one RPMS update and the one BUSA entry
+  # of the form that did.
+  test "a demographics form that changes nothing files nothing; the change after it files one entry" do
+    sign_in("registration_menu")
+    with_rpms(saved) do |updates, busa|
+      patch "#{patient_path}/demographics", params: { demographics: demographics }
+
+      assert_redirected_to patient_path
+      assert_equal "Demographics saved.", flash[:notice]
+      assert_empty updates, "nothing changed, so RPMS must not be asked to update"
+      assert_empty busa, "a save that changes nothing is not an edit"
+      assert_equal 0, busa_rows.count, "nothing was attempted, so there is no gap to record"
+
+      save_demographics
+
+      assert_redirected_to patient_path
+      assert_equal "Demographics saved.", flash[:notice]
+      assert_equal [ [ DFN, { marital_status: "6" } ] ], updates
+      assert_equal [ busa_entry("Registration: demographics edited") ], busa
+      assert_equal 0, busa_rows.count
+    end
+  end
+
+  test "an address form that changes nothing files nothing; the change after it files one entry" do
+    sign_in("registration_menu")
+    with_rpms(saved) do |updates, busa|
+      patch "#{patient_path}/address", params: { address: address }
+
+      assert_redirected_to patient_path
+      assert_equal "Address and phones saved.", flash[:notice]
+      assert_empty updates, "nothing changed, so RPMS must not be asked to update"
+      assert_empty busa, "a save that changes nothing is not an edit"
+      assert_equal 0, busa_rows.count, "nothing was attempted, so there is no gap to record"
+
+      patch "#{patient_path}/address", params: { address: address(phone_work: "406-555-0143") }
+
+      assert_redirected_to patient_path
+      assert_equal "Address and phones saved.", flash[:notice]
+      assert_equal 1, updates.size
+      assert_equal [ busa_entry("Registration: address edited") ], busa
+      assert_equal 0, busa_rows.count
+    end
+  end
+
+  # BUSA would refuse here, so a gap row would be written if BUSA were asked:
+  # the form that changes nothing leaves neither a call nor a row.
+  test "a form that changes nothing leaves no gap row even when RPMS would not confirm the entry" do
+    sign_in("registration_menu")
+    with_rpms(saved, busa_reply: { success: false, message: "" }) do |updates, busa|
+      patch "#{patient_path}/demographics", params: { demographics: demographics }
+
+      assert_redirected_to patient_path
+      assert_equal "Demographics saved.", flash[:notice]
+      assert_empty updates
+      assert_empty busa
+      assert_equal 0, busa_rows.count
+
+      save_demographics
+
+      assert_equal 1, updates.size
+      assert_equal 1, busa.size
+      assert_busa_gap_recorded(/\S/)
     end
   end
 
@@ -206,7 +362,9 @@ class RegistrationBusaAuditTest < ActionDispatch::IntegrationTest
 
   # The saved edit at the end is the control: the same stand-in that saw
   # nothing for the three edits that changed nothing in RPMS sees the one
-  # that did.
+  # that did. Only the edit whose outcome is unknown leaves a local row: the
+  # app does not claim in BUSA an edit that may not have happened, and says
+  # locally that it did not.
   test "an edit RPMS refused, one whose outcome is unknown and an invalid form file no BUSA entry; the saved one after them does" do
     sign_in("registration_menu")
     refusal = { success: false, error: :agg_invalid, field: :zip, message: "Enter 5 or 9 digit zip code." }
@@ -215,22 +373,57 @@ class RegistrationBusaAuditTest < ActionDispatch::IntegrationTest
       assert_response :unprocessable_content
       assert_equal 1, updates.size, "RPMS must have been asked and refused"
       assert_empty busa, "a refused write is not an edit"
+      assert_equal 0, busa_rows.count, "a refused write leaves no local BUSA row"
 
       patch "#{patient_path}/address", params: { address: address(phone_home: "406-555-0101") }
       assert_response :service_unavailable
       assert_equal 2, updates.size, "RPMS must have been asked and not answered"
       assert_empty busa, "a write whose outcome is unknown is not audited as an edit"
+      assert_busa_not_attempted_recorded(/unknown/i)
 
       patch "#{patient_path}/address", params: { address: address(phone_work: "123") }
       assert_response :unprocessable_content
       assert_equal 2, updates.size, "an invalid form does not reach RPMS"
       assert_empty busa, "an invalid form is not an edit"
+      assert_equal 1, busa_rows.count, "an invalid form leaves no local BUSA row"
 
       patch "#{patient_path}/address", params: { address: address(phone_work: "406-555-0143") }
       assert_redirected_to patient_path
       assert_equal 3, updates.size
       assert_equal [ busa_entry("Registration: address edited") ], busa
       assert_equal 0, busa_gap_rows.count
+      assert_equal 1, busa_rows.count, "the saved edit adds no local BUSA row"
+    end
+  end
+
+  test "a demographics edit whose outcome is unknown asks BUSA nothing and leaves one local row saying the entry was not attempted" do
+    sign_in("registration_menu")
+    with_rpms(nil) do |updates, busa|
+      save_demographics(name: "TESTPATIENT,ALPHA B", dob: "1997-03-16", ssn: "666321032")
+
+      assert_response :service_unavailable
+      assert_equal 1, updates.size, "RPMS must have been asked and not answered"
+      assert_empty busa, "an edit that may not have happened is not claimed in BUSA"
+      row = assert_busa_not_attempted_recorded(/unknown/i)
+      refute_includes row.attributes.values.compact.map(&:to_s).join(" "), "666321032"
+      assert_equal 0, busa_gap_rows.count
+    end
+  end
+
+  test "an edit RPMS raised on mid-call is unknown too: no BUSA call, one not-attempted row" do
+    sign_in("registration_menu")
+    with_rpms(saved) do |updates, busa|
+      stub(RpmsRpc::Patient, :update) do |dfn, **attrs|
+        updates << [ dfn, attrs ]
+        raise RpmsRpc::Client::RpcError, "broker dropped the call"
+      end
+
+      save_demographics
+
+      assert_response :service_unavailable
+      assert_equal 1, updates.size
+      assert_empty busa
+      assert_busa_not_attempted_recorded(/unknown/i)
     end
   end
 
@@ -284,7 +477,7 @@ class RegistrationBusaAuditTest < ActionDispatch::IntegrationTest
     end
   end
 
-  test "a partially saved address whose BUSA entry is not filed keeps its alert and records the gap" do
+  test "a partially saved address whose BUSA entry is not confirmed keeps its alert and records the gap" do
     sign_in("registration_menu")
     partial = { success: false, error: :partial, message: "The address was saved, but the previous address was not kept: refused" }
     with_rpms(partial, busa_reply: nil) do |_updates, busa|
@@ -294,6 +487,66 @@ class RegistrationBusaAuditTest < ActionDispatch::IntegrationTest
       assert_equal partial[:message], flash[:alert]
       assert_equal 1, busa.size, "BUSA must have been asked"
       assert_busa_gap_recorded(/did not answer/i)
+    end
+  end
+
+  # The gap row is the app's only record that BUSA did not confirm the entry.
+  # When the store refuses it, the edit is still saved and the clerk still
+  # sees that; the request's own audit row carries what the gap row would have.
+  test "when the gap row cannot be written, a saved edit is still shown as saved and the request's row says so" do
+    sign_in("registration_menu")
+    with_rpms(saved, busa_reply: { success: false, message: "" }) do |updates, busa|
+      with_gap_row_unwritable do |refused|
+        assert_nothing_raised { save_demographics(name: "TESTPATIENT,ALPHA B", dob: "1997-03-16", ssn: "666321032") }
+
+        assert_redirected_to patient_path
+        assert_equal "Demographics saved.", flash[:notice]
+        assert_nil flash[:alert]
+        assert_equal 1, updates.size
+        assert_equal 1, busa.size, "BUSA must have been asked"
+        assert_equal 1, refused.size, "the gap row must have been tried once, and refused"
+        assert refused.first.start_with?(NOT_CONFIRMED), "the row tried must be the not-confirmed gap row, got #{refused.first.inspect}"
+        assert_equal 0, busa_rows.count
+        row = assert_request_row_carries_the_unwritten_gap
+        refute_includes row.attributes.values.compact.map(&:to_s).join(" "), "666321032"
+      end
+    end
+  end
+
+  test "when the gap row cannot be written, a partially saved address keeps its alert and the request's row says so" do
+    sign_in("registration_menu")
+    partial = { success: false, error: :partial, message: "The address was saved, but the previous address was not kept: refused" }
+    with_rpms(partial, busa_reply: nil) do |_updates, busa|
+      with_gap_row_unwritable do |refused|
+        assert_nothing_raised { patch "#{patient_path}/address", params: { address: address(city: "Elsewhere") } }
+
+        assert_redirected_to patient_path
+        assert_equal partial[:message], flash[:alert]
+        assert_nil flash[:notice]
+        assert_equal 1, busa.size, "BUSA must have been asked"
+        assert_equal 1, refused.size, "the gap row must have been tried once, and refused"
+        assert_equal 0, busa_rows.count
+        assert_request_row_carries_the_unwritten_gap
+      end
+    end
+  end
+
+  # The control for the two tests above: with the same refusing store, an
+  # entry RPMS confirms needs no gap row, and the request's row says nothing
+  # of BUSA.
+  test "with the same refusing store, a confirmed entry tries no gap row and the request's row does not mention BUSA" do
+    sign_in("registration_menu")
+    with_rpms(saved) do |_updates, busa|
+      with_gap_row_unwritable do |refused|
+        save_demographics
+
+        assert_redirected_to patient_path
+        assert_equal "Demographics saved.", flash[:notice]
+        assert_equal 1, busa.size
+        assert_empty refused
+        assert_equal 1, request_audit_rows.count, "expected the request's own audit row"
+        refute_includes request_audit_rows.first.outcome_desc.to_s, "BUSA"
+      end
     end
   end
 end

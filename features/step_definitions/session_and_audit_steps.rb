@@ -69,13 +69,29 @@ When("the clerk saves a change to the demographics of patient {int}") do |dfn|
   @edited_dfn = dfn
 end
 
+When("the clerk saves the demographics of patient {int} without changing anything") do |dfn|
+  patch "#{SessionAndAuditSteps::MOUNT}/registration/patients/#{dfn}/demographics",
+        demographics: { name: "TESTPATIENT,ALPHA", dob: "1997-03-15", sex: "F", marital_status: "2", religion: "1",
+                        birth_city: "", birth_state: "", employer: "", employment_status: "", ssn: "" }
+  @edited_dfn = dfn
+end
+
+Then("the clerk is returned to patient {int}") do |dfn|
+  assert_equal 302, last_response.status, "expected a redirect to the patient page, got #{last_response.status}"
+  assert_match %r{/registration/patients/#{dfn}\z}, last_response.headers["Location"].to_s
+end
+
+Then("RPMS is asked to change nothing") do
+  assert_empty @registration_updates, "nothing changed, so RPMS must not be asked to update"
+end
+
 Then("the change is saved") do
   assert_equal 302, last_response.status, "expected a redirect to the patient page, got #{last_response.status}"
   assert_match %r{/registration/patients/#{@edited_dfn}\z}, last_response.headers["Location"].to_s
   assert_equal [ [ @edited_dfn, { marital_status: "6" } ] ], @registration_updates
 end
 
-Then("RPMS receives exactly {int} BUSA security audit entry") do |count|
+Then("RPMS receives exactly {int} BUSA security audit entry/entries") do |count|
   assert_equal count, @busa_entries.size,
                "expected #{count} BUSA LOG SECURITY AUDIT ENTRY call(s), RPMS received #{@busa_entries.size}"
 end

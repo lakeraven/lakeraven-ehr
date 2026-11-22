@@ -11,6 +11,8 @@ require "rpms_rpc/api/busa"
 # BUSA records the signed-on user (DUZ) from the broker session, so the user is
 # never a parameter. A reply that is not success is not a filed entry, and the
 # caller is never raised at: the RPMS edit it follows has already happened.
+# A DFN is sent only in the gem's canonical form (a positive whole number, or
+# its digits with no leading zero); anything else is refused before any call.
 module Lakeraven
   module EHR
     class SecurityAuditGatewayTest < ActiveSupport::TestCase
@@ -152,7 +154,10 @@ module Lakeraven
 
       {
         "nil" => nil, "an empty string" => "", "the string 0" => "0", "letters" => "abc", "a fraction" => "12/3",
-        "the integer 0" => 0, "a negative integer" => -5
+        "the integer 0" => 0, "a negative integer" => -5,
+        # The gem's canonical DFN has no leading zero: "0990031" is not sent
+        # as 990031, it is not sent.
+        "digits with a leading zero" => "0990031", "zeros before a digit" => "007"
       }.each do |label, bad_dfn|
         test "a DFN that is #{label} is refused before RPMS is asked" do
           fake = FakeBusa.new(FILED)

@@ -35,6 +35,20 @@ Feature: Session and audit behaviours carried over from BPRM 6.0
     And the BUSA entry records a patient edit described as "Registration: demographics edited"
     And the BUSA entry leaves the user to RPMS, which records the signed-on user
 
+  # A form saved as RPMS already holds it is not an edit: nothing is sent to
+  # RPMS, so there is nothing to audit. The change saved after it is the
+  # control: the same stand-in for RPMS then sees one update and one entry.
+  Scenario: A save that changes nothing leaves no BUSA entry
+    Given a registration clerk is signed on as RPMS user 207
+    And RPMS holds registered patient 990031
+    When the clerk saves the demographics of patient 990031 without changing anything
+    Then the clerk is returned to patient 990031
+    And RPMS is asked to change nothing
+    And RPMS receives exactly 0 BUSA security audit entries
+    When the clerk saves a change to the demographics of patient 990031
+    Then the change is saved
+    And RPMS receives exactly 1 BUSA security audit entry
+
   # Waits on: the app choosing which of its own timestamps come from RPMS. No
   # app timestamp path reads the server clock (ORWU DT) yet.
   @pending
