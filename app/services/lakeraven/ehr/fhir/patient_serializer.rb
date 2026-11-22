@@ -6,6 +6,8 @@ module Lakeraven
       # Serializes a Patient model to a US Core conformant FHIR R4 Patient hash.
       class PatientSerializer
         US_CORE_PROFILE = "http://hl7.org/fhir/us/core/StructureDefinition/us-core-patient"
+        US_CORE_TRIBAL_AFFILIATION_URL = "http://hl7.org/fhir/us/core/StructureDefinition/us-core-tribal-affiliation"
+        IHS_TRIBE_SYSTEM = "https://terminology.lakeraven.com/CodeSystem/ihs-tribe"
 
         # CDC Race & Ethnicity code system OID
         RACE_CODE_SYSTEM = "urn:oid:2.16.840.1.113883.6.238"
@@ -105,13 +107,9 @@ module Lakeraven
           # US Core Ethnicity extension (Inferno requires this)
           exts << build_ethnicity_extension
 
-          # Tribal affiliation
-          if @p.tribal_enrollment_number.present?
-            exts << {
-              url: "http://hl7.org/fhir/us/core/StructureDefinition/tribal-affiliation",
-              valueString: @p.tribal_enrollment_number
-            }
-          end
+          # US Core tribal affiliation (#1187). Never the enrollment number.
+          tribe = @p.fhir_tribal_affiliation
+          exts << build_tribal_affiliation_extension(tribe) if tribe.present?
 
           # SOGI extensions (USCDI v3 / ONC 170.315(a)(15))
           if @p.respond_to?(:sexual_orientation) && @p.sexual_orientation.present?
@@ -129,6 +127,20 @@ module Lakeraven
           end
 
           exts
+        end
+
+        # tribalAffiliation is a CodeableConcept (IHS tribe code when known,
+        # tribe name as text); isEnrolled is sent only when RPMS holds an
+        # enrollment, never as false.
+        def build_tribal_affiliation_extension(tribe)
+          concept = {}
+          concept[:coding] = [ { system: IHS_TRIBE_SYSTEM, code: tribe[:code] } ] if tribe[:code].present?
+          concept[:text] = tribe[:name]
+
+          sub_extensions = [ { url: "tribalAffiliation", valueCodeableConcept: concept } ]
+          sub_extensions << { url: "isEnrolled", valueBoolean: true } if tribe[:enrolled] == true
+
+          { url: US_CORE_TRIBAL_AFFILIATION_URL, extension: sub_extensions }
         end
 
         def build_race_extension
