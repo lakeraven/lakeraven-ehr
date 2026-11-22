@@ -19,8 +19,13 @@ module Lakeraven
         def success? = success
       end
 
-      InvalidSecurityLabel = Class.new(StandardError)
-      private_constant :InvalidSecurityLabel
+      # Extracted resource types: resourceType => [result key, extractor].
+      EXTRACTORS = {
+        "AllergyIntolerance" => [ :allergies, :extract_allergy ],
+        "Condition" => [ :conditions, :extract_condition ],
+        "MedicationRequest" => [ :medications, :extract_medication ]
+      }.freeze
+      UNREADABLE = Part2RedisclosureNotice::UNREADABLE
 
       def initialize(matcher: nil, ccda_parser: nil)
         @matcher = matcher || ClinicalReconciliationMatcher.new
@@ -35,17 +40,13 @@ module Lakeraven
       def import_from_fhir_bundle(patient_dfn:, clinician_duz:, json_string:)
         bundle = parse_json(json_string)
         return error_result("Invalid JSON") unless bundle
-        return error_result("Expected Bundle resourceType") unless bundle["resourceType"] == "Bundle"
+        return error_result("Expected Bundle resourceType") unless bundle.is_a?(Hash) && bundle["resourceType"] == "Bundle"
 
-        entries = (bundle["entry"] || []).filter_map { |e| e["resource"] }
+        entries, bundle_marks = bundle_contents(bundle)
         invalid = entries.reject { |r| patient_reference_matches?(r, patient_dfn) }
         return error_result("Bundle contains resources for a different patient") if invalid.any?
 
-        imported = begin
-          extract_from_fhir_entries(entries, security_labels(bundle))
-        rescue InvalidSecurityLabel
-          return error_result("Bundle contains an unreadable security label")
-        end
+        imported = extract_from_fhir_entries(entries, bundle_marks)
 
         create_session_with_items(
           patient_dfn: patient_dfn,
@@ -60,9 +61,8 @@ module Lakeraven
       def import_from_ccda(patient_dfn:, clinician_duz:, xml_string:)
         parsed = begin
           ccda_parser.parse(xml_string)
-        rescue CcdaParser::UnreadableSecurityLabel
-          return error_result("C-CDA contains an unreadable security label")
-        rescue StandardError
+        rescue StandardError => e
+          log_warn("ccda_import_parse_failed", error: e.class.name)
           return error_result("C-CDA could not be parsed")
         end
 
@@ -83,43 +83,93 @@ module Lakeraven
         nil
       end
 
-      def extract_from_fhir_entries(entries, bundle_labels = [])
-        {
-          allergies: labelled(entries, "AllergyIntolerance", bundle_labels) { |r| extract_allergy(r) },
-          conditions: labelled(entries, "Condition", bundle_labels) { |r| extract_condition(r) },
-          medications: labelled(entries, "MedicationRequest", bundle_labels) { |r| extract_medication(r) },
-          security_labels: Part2RedisclosureNotice.label_fields(bundle_labels)[:security_labels]
-        }
+      # Hash resources of the Bundle, and the Bundle-level marks: labels on
+      # the Bundle itself and its entry wrappers, and UNREADABLE for an entry
+      # list, entry or resource that is not the right JSON type.
+      def bundle_contents(bundle)
+        marks = label_marks(bundle.except("entry"))
+        entries = bundle["entry"]
+        return [ [], marks ] if entries.nil?
+        return [ [], marks << UNREADABLE ] unless entries.is_a?(Array)
+
+        resources = []
+        entries.each do |entry|
+          resource = entry["resource"] if entry.is_a?(Hash)
+          marks.concat(label_marks(entry.except("resource"))) if entry.is_a?(Hash)
+          if resource.is_a?(Hash) then resources << resource
+          elsif !(entry.is_a?(Hash) && resource.nil?) then marks << UNREADABLE
+          end
+        end
+        [ resources, marks ]
       end
 
-      # Resources of this type, extracted and carrying Bundle ∪ resource labels.
-      def labelled(entries, type, bundle_labels)
-        entries.select { |r| r["resourceType"] == type }.map do |r|
-          yield(r).merge(Part2RedisclosureNotice.label_fields(bundle_labels + security_labels(r)))
+      # Each extracted item carries the marks at any depth of its resource
+      # plus the Bundle's; marks on other resources belong to the Bundle.
+      def extract_from_fhir_entries(entries, bundle_marks = [])
+        marked = entries.map { |r| [ r, label_marks(r) ] }
+        extracted, others = marked.partition { |r, _| EXTRACTORS.key?(r["resourceType"]) }
+        bundle_marks += others.flat_map(&:last)
+
+        items = EXTRACTORS.values.to_h { |key, _| [ key, [] ] }
+        extracted.each do |resource, marks|
+          key, extractor = EXTRACTORS[resource["resourceType"]]
+          items[key] << send(extractor, resource).merge(Part2RedisclosureNotice.label_fields(bundle_marks + marks))
+        end
+        items.merge(
+          security_labels: Part2RedisclosureNotice.label_fields(bundle_marks)[:security_labels],
+          part2: Part2RedisclosureNotice.label_fields(bundle_marks + extracted.flat_map(&:last))[:part2]
+        )
+      end
+
+      # Label marks at any depth: meta.security Codings, securityLabel
+      # CodeableConcepts, and any Coding whose code is a Part 2 code.
+      def label_marks(node)
+        case node
+        when Array then node.flat_map { |value| label_marks(value) }
+        when Hash
+          marks = []
+          marks.concat(meta_marks(node["meta"])) if node.key?("meta")
+          marks.concat(security_label_marks(node["securityLabel"])) if node.key?("securityLabel")
+          marks << coding_mark(node) if node["code"].is_a?(String) && Part2RedisclosureNotice.part2_code?(node["code"])
+          marks + node.except("meta", "securityLabel").values.flat_map { |value| label_marks(value) }
+        else []
         end
       end
 
-      # meta.security Codings as { system:, code:, display: } labels. Absent
-      # meta or security is no labels; anything present but unreadable raises.
-      def security_labels(resource)
-        meta = resource["meta"]
+      def meta_marks(meta)
         return [] if meta.nil?
-        raise InvalidSecurityLabel unless meta.is_a?(Hash)
+        return [ UNREADABLE ] unless meta.is_a?(Hash)
 
         security = meta["security"]
-        return [] if security.nil?
-        raise InvalidSecurityLabel unless security.is_a?(Array)
+        others = label_marks(meta.except("security"))
+        return others if security.nil?
+        return others << UNREADABLE unless security.is_a?(Array)
 
-        security.map do |coding|
-          raise InvalidSecurityLabel unless coding.is_a?(Hash)
+        others + security.map { |coding| coding_mark(coding) }
+      end
 
-          system, code, display = coding.values_at("system", "code", "display")
-          raise InvalidSecurityLabel unless system.is_a?(String) && code.is_a?(String) && system.present? && code.present?
+      def security_label_marks(concepts)
+        return [] if concepts.nil?
+        return [ UNREADABLE ] unless concepts.is_a?(Array)
 
-          label = { system: system, code: code }
-          label[:display] = display if display.is_a?(String) && display.present?
-          label
+        concepts.flat_map do |concept|
+          codings = concept["coding"] if concept.is_a?(Hash)
+          codings.is_a?(Array) && codings.any? ? codings.map { |coding| coding_mark(coding) } : [ UNREADABLE ]
         end
+      end
+
+      # A Coding as { system:, code:, display: } (system and display only
+      # when present), or UNREADABLE.
+      def coding_mark(coding)
+        return UNREADABLE unless coding.is_a?(Hash)
+
+        system, code, display = coding.values_at("system", "code", "display")
+        return UNREADABLE unless code.is_a?(String) && Part2RedisclosureNotice.unpad(code).present?
+        return UNREADABLE unless system.nil? || (system.is_a?(String) && system.present?)
+
+        label = { system: system, code: code }.compact
+        label[:display] = display if display.is_a?(String) && display.present?
+        label
       end
 
       def extract_allergy(resource)

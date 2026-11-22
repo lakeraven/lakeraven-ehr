@@ -36,17 +36,26 @@ module Lakeraven
 
       PADDING = /\A[[:space:]\p{Cf}]+|[[:space:]\p{Cf}]+\z/
 
+      # Stands in for a label that is present but unreadable: it marks its
+      # scope as suspected Part 2 without inventing a label value.
+      UNREADABLE = :unreadable
+
+      def self.unpad(value)
+        value.to_s.gsub(PADDING, "")
+      end
+
       def self.part2_code?(code)
-        value = code.to_s.gsub(PADDING, "")
+        value = unpad(code)
         PART2_CODES.any? { |part2| part2.casecmp?(value) }
       end
 
-      # The fields an ingested item carries for its labels ({ system:, code: }
-      # Hashes): the labels de-duplicated on system and code, and whether any
-      # of them is a Part 2 code. Labels are a marker, never a block.
-      def self.label_fields(labels)
-        unique = labels.uniq { |label| label.values_at(:system, :code) }
-        { security_labels: unique, part2: unique.any? { |label| part2_code?(label[:code]) } }
+      # The fields an ingested item carries for its marks (label Hashes and
+      # UNREADABLE): the labels de-duplicated on system and code, and whether
+      # any mark is a Part 2 code or unreadable. Labels mark, never block.
+      def self.label_fields(marks)
+        labels = marks.grep(Hash).uniq { |label| label.values_at(:system, :code) }
+        part2 = marks.include?(UNREADABLE) || labels.any? { |label| part2_code?(label[:code]) }
+        { security_labels: labels, part2: part2 }
       end
     end
   end
