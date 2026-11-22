@@ -167,6 +167,104 @@ module Lakeraven
           assert_equal "CUSTOM RACE", text[:valueString]
         end
 
+        # US Core race extension: ombCategory value set (#1186)
+        CDC_RACE_SYSTEM = "urn:oid:2.16.840.1.113883.6.238"
+        NULL_FLAVOR_SYSTEM = "http://terminology.hl7.org/CodeSystem/v3-NullFlavor"
+        OMB_RACE_CODES = %w[1002-5 2028-9 2054-5 2076-8 2106-3].freeze
+        NULL_FLAVOR_RACE_CODES = %w[UNK ASKU].freeze
+
+        OMB_CATEGORY_ROWS = [
+          { rpms: "AMERICAN INDIAN OR ALASKA NATIVE", omb: "1002-5", system: CDC_RACE_SYSTEM,
+            text: "American Indian or Alaska Native" },
+          { rpms: "WHITE", omb: "2106-3", system: CDC_RACE_SYSTEM, text: "White" },
+          { rpms: "UNKNOWN", omb: "UNK", system: NULL_FLAVOR_SYSTEM, text: "Unknown" },
+          { rpms: "DECLINED TO ANSWER", omb: "ASKU", system: NULL_FLAVOR_SYSTEM, text: "Declined to answer" }
+        ].freeze
+
+        TEXT_ONLY_RACES = [ "OTHER", "CUSTOM RACE" ].freeze
+
+        OMB_CATEGORY_ROWS.each do |row|
+          test "race #{row[:rpms]} serializes ombCategory #{row[:omb]} from #{row[:system]}" do
+            race_ext = race_extension(serialize(build_patient(race: row[:rpms])))
+            refute_nil race_ext
+
+            ombs = omb_categories(race_ext)
+            assert_equal 1, ombs.size, "Expected exactly one ombCategory for '#{row[:rpms]}'"
+            coding = ombs.first[:valueCoding]
+            assert_equal row[:omb], coding[:code]
+            assert_equal row[:system], coding[:system]
+
+            assert_equal [ row[:text] ], race_texts(race_ext)
+          end
+        end
+
+        TEXT_ONLY_RACES.each do |race|
+          test "race #{race} serializes as text only with no ombCategory" do
+            race_ext = race_extension(serialize(build_patient(race: race)))
+            refute_nil race_ext
+
+            assert_empty omb_categories(race_ext), "Expected no ombCategory for '#{race}'"
+            assert_equal [ race ], race_texts(race_ext)
+          end
+        end
+
+        test "every RACE_CODE_MAP key serializes an ombCategory allowed by US Core" do
+          PatientSerializer::RACE_CODE_MAP.each_key do |race|
+            race_ext = race_extension(serialize(build_patient(race: race)))
+            refute_nil race_ext, "Expected race extension for '#{race}'"
+
+            omb_categories(race_ext).each do |omb|
+              coding = omb[:valueCoding]
+              refute_equal "2131-1", coding[:code], "'#{race}' must not emit 2131-1 under ombCategory"
+
+              omb_code = coding[:system] == CDC_RACE_SYSTEM && OMB_RACE_CODES.include?(coding[:code])
+              null_flavor = coding[:system] == NULL_FLAVOR_SYSTEM && NULL_FLAVOR_RACE_CODES.include?(coding[:code])
+              assert omb_code || null_flavor,
+                "'#{race}' emitted ombCategory #{coding[:system]}|#{coding[:code]}, not in the US Core value set"
+            end
+          end
+        end
+
+        test "no serialized race emits code 2131-1" do
+          races = PatientSerializer::RACE_CODE_MAP.keys + OMB_CATEGORY_ROWS.map { |r| r[:rpms] } + TEXT_ONLY_RACES
+
+          races.uniq.each do |race|
+            result = serialize(build_patient(race: race))
+            refute_includes result.to_json, "2131-1", "'#{race}' output must not contain 2131-1"
+          end
+        end
+
+        test "every race extension has exactly one non-empty text" do
+          races = PatientSerializer::RACE_CODE_MAP.keys + OMB_CATEGORY_ROWS.map { |r| r[:rpms] } + TEXT_ONLY_RACES
+
+          races.uniq.each do |race|
+            race_ext = race_extension(serialize(build_patient(race: race)))
+            refute_nil race_ext, "Expected race extension for '#{race}'"
+
+            texts = race_texts(race_ext)
+            assert_equal 1, texts.size, "Expected exactly one text for '#{race}'"
+            assert texts.first.present?, "Expected non-empty text for '#{race}'"
+          end
+        end
+
+        test "race UNKNOWN uses the v3-NullFlavor display unknown" do
+          race_ext = race_extension(serialize(build_patient(race: "UNKNOWN")))
+          coding = omb_categories(race_ext).first&.dig(:valueCoding)
+
+          refute_nil coding
+          assert_equal NULL_FLAVOR_SYSTEM, coding[:system]
+          assert_equal "unknown", coding[:display]
+        end
+
+        test "race DECLINED TO ANSWER uses the v3-NullFlavor display asked but unknown" do
+          race_ext = race_extension(serialize(build_patient(race: "DECLINED TO ANSWER")))
+          coding = omb_categories(race_ext).first&.dig(:valueCoding)
+
+          refute_nil coding
+          assert_equal NULL_FLAVOR_SYSTEM, coding[:system]
+          assert_equal "asked but unknown", coding[:display]
+        end
+
         test "includes US Core ethnicity extension" do
           result = serialize(build_patient)
 
@@ -281,6 +379,18 @@ module Lakeraven
 
         def serialize(patient)
           PatientSerializer.new(patient).to_h
+        end
+
+        def race_extension(result)
+          (result[:extension] || []).find { |e| e[:url]&.include?("us-core-race") }
+        end
+
+        def omb_categories(race_ext)
+          race_ext[:extension].select { |e| e[:url] == "ombCategory" }
+        end
+
+        def race_texts(race_ext)
+          race_ext[:extension].select { |e| e[:url] == "text" }.map { |e| e[:valueString] }
         end
       end
     end

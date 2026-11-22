@@ -83,7 +83,6 @@ module Lakeraven
           "BLACK",
           "NATIVE HAWAIIAN OR OTHER PACIFIC ISLANDER",
           "WHITE",
-          "OTHER",
           "UNKNOWN"
         ]
 
@@ -93,6 +92,10 @@ module Lakeraven
           assert mapping[:code].present?, "Expected code for '#{race}'"
           assert mapping[:display].present?, "Expected display for '#{race}'"
         end
+
+        # OTHER is not in the OMB race category value set: it is sent as text only
+        other = FHIR::PatientSerializer::RACE_CODE_MAP["OTHER"]
+        assert other.nil? || other[:code].blank?, "Expected RACE_CODE_MAP to have no code for 'OTHER'"
       end
     end
   end
