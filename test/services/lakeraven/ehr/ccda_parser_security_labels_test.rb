@@ -297,6 +297,33 @@ module Lakeraven
         assert_raises(StandardError) { CcdaParser.parse(ccda.gsub("ClinicalDocument", "Document")) }
         assert_raises(StandardError) { CcdaParser.parse(ccda.sub(%( xmlns="urn:hl7-org:v3"), "")) }
       end
+
+      # --- Rule F: a DOCTYPE is malformed (entities can hide labels) ---
+
+      test "DOCTYPE with an internal entity carrying labels raises" do
+        hidden = %(<confidentialityCode code="R" codeSystem="#{CONF_OID}"/>) +
+          %(<documentationOf><serviceEvent classCode="ACT"><code code="42CFRPart2" codeSystem="#{ACT_OID}"/></serviceEvent></documentationOf>)
+        xml = "<!DOCTYPE ClinicalDocument [<!ENTITY labels '#{hidden}'>]>\n" + ccda(header: "&labels;")
+
+        assert_raises(StandardError) { CcdaParser.parse(xml) }
+      end
+
+      test "DOCTYPE with an external SYSTEM id raises" do
+        xml = %(<!DOCTYPE ClinicalDocument SYSTEM "synthetic.dtd">\n) + ccda(header: conf("N"))
+
+        assert_raises(StandardError) { CcdaParser.parse(xml) }
+      end
+
+      # --- Rule J: confidentialityCode in any namespace is a label ---
+
+      test "confidentialityCode outside the HL7 v3 namespace still marks its entry" do
+        result = parse(header: conf("N"), allergies: allergy(%(<confidentialityCode xmlns="" nullFlavor="NI"/>)) + allergy)
+
+        assert_equal [ { system: CONF, code: "N" } ], result[:allergies][0][:security_labels]
+        assert_equal true, result[:allergies][0][:part2]
+        assert_equal false, result[:allergies][1][:part2]
+        assert_equal true, result[:part2]
+      end
     end
   end
 end

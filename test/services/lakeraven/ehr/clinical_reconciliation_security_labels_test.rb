@@ -238,6 +238,79 @@ module Lakeraven
         assert_respond_to result, :imported
         assert_nil result.imported
       end
+
+      # Rule F: a DOCTYPE is malformed, with the same fixed message as other malformed documents.
+      test "C-CDA: a document with a DOCTYPE fails like any malformed document" do
+        hidden = %(<confidentialityCode code="R" codeSystem="2.16.840.1.113883.5.25"/>)
+        entity = "<!DOCTYPE ClinicalDocument [<!ENTITY labels '#{hidden}'>]>\n" + ccda_xml("&labels;")
+        external = %(<!DOCTYPE ClinicalDocument SYSTEM "synthetic.dtd">\n) + ccda_xml("")
+        malformed = import_ccda(nil, xml: ccda_xml("").sub("</structuredBody>", ""))
+
+        refute malformed.success?
+        [ entity, external ].each do |xml|
+          result = import_ccda(nil, xml: xml)
+
+          refute result.success?, "a C-CDA with a DOCTYPE must not be imported"
+          assert_equal malformed.errors, result.errors
+          assert_nil result.imported
+        end
+      end
+
+      # Rule G: a Part 2 Coding nested inside a label counts for the label's owner.
+      test "FHIR: Part 2 Coding nested in a meta.security Coding or a securityLabel concept marks that item" do
+        nested = [ { "url" => "http://example.test/synthetic-nested-label", "valueCoding" => PART2_CODING } ]
+        result = import_bundle([
+          resource("Condition", meta: { "security" => [ R_CODING.merge("extension" => nested) ] }),
+          resource("MedicationRequest").merge("contained" => [
+            { "resourceType" => "DocumentReference", "id" => "d1", "securityLabel" => [ { "coding" => [ R_CODING ], "extension" => nested } ] }
+          ]),
+          resource("AllergyIntolerance")
+        ])
+
+        assert result.success?, result.errors.inspect
+        [ result.imported[:conditions].first, result.imported[:medications].first ].each do |item|
+          assert_equal [ [ ACT, "42CFRPart2" ], [ CONF, "R" ] ], pairs(item[:security_labels])
+          assert_equal true, item[:part2]
+        end
+        assert_equal false, result.imported[:allergies].first[:part2]
+        assert_equal true, result.imported[:part2]
+      end
+
+      test "FHIR: Part 2 Coding nested in a Bundle meta.security Coding marks the Bundle and every item" do
+        nested = [ { "url" => "http://example.test/synthetic-nested-label", "valueCoding" => PART2_CODING } ]
+        result = import_bundle([ resource("Condition") ], meta: { "security" => [ R_CODING.merge("extension" => nested) ] })
+
+        assert result.success?, result.errors.inspect
+        assert_equal [ [ ACT, "42CFRPart2" ], [ CONF, "R" ] ], pairs(result.imported[:security_labels])
+        assert_equal [ [ ACT, "42CFRPart2" ], [ CONF, "R" ] ], pairs(result.imported[:conditions].first[:security_labels])
+        assert_equal true, result.imported[:conditions].first[:part2]
+        assert_equal true, result.imported[:part2]
+      end
+
+      # Rule H: a Part 2 code as a primitive valueCode.
+      test "FHIR: Part 2 valueCode on an extracted resource marks that item" do
+        extension = [ { "url" => "http://example.test/synthetic-sensitivity", "valueCode" => "42CFRPart2" } ]
+        result = import_bundle([ resource("Condition").merge("extension" => extension), resource("MedicationRequest") ])
+
+        assert result.success?, result.errors.inspect
+        assert_equal [ { code: "42CFRPart2" } ], result.imported[:conditions].first[:security_labels]
+        assert_equal true, result.imported[:conditions].first[:part2]
+        assert_equal false, result.imported[:medications].first[:part2]
+        assert_equal true, result.imported[:part2]
+      end
+
+      # Rule I: a duplicate key could hide a label behind a later, empty value.
+      test "FHIR: Bundle JSON with a duplicate object key is invalid JSON" do
+        bundle = { "resourceType" => "Bundle", "entry" => [ { "resource" => resource("Condition", meta: { "security" => [ PART2_CODING ] }) } ] }
+        json = bundle.to_json.sub(%("meta":), %("meta":{},"meta":))
+        assert_equal 2, json.scan(%("meta":)).size
+
+        result = @service.import_from_fhir_bundle(patient_dfn: "123", clinician_duz: "301", json_string: json)
+
+        refute result.success?, "duplicate keys must be rejected, not resolved by last-wins"
+        assert_includes result.errors, "Invalid JSON"
+        assert_nil result.imported
+      end
     end
   end
 end
