@@ -13,9 +13,14 @@ module Lakeraven
     class ClinicalReconciliationService
       include StructuredLogging
 
-      ImportResult = Struct.new(:success, :session, :errors, keyword_init: true) do
+      # imported: the items handed to the session, with their security
+      # labels (#908); nil on failure.
+      ImportResult = Struct.new(:success, :session, :errors, :imported, keyword_init: true) do
         def success? = success
       end
+
+      InvalidSecurityLabel = Class.new(StandardError)
+      private_constant :InvalidSecurityLabel
 
       def initialize(matcher: nil, ccda_parser: nil)
         @matcher = matcher || ClinicalReconciliationMatcher.new
@@ -36,7 +41,11 @@ module Lakeraven
         invalid = entries.reject { |r| patient_reference_matches?(r, patient_dfn) }
         return error_result("Bundle contains resources for a different patient") if invalid.any?
 
-        imported = extract_from_fhir_entries(entries)
+        imported = begin
+          extract_from_fhir_entries(entries, security_labels(bundle))
+        rescue InvalidSecurityLabel
+          return error_result("Bundle contains an unreadable security label")
+        end
 
         create_session_with_items(
           patient_dfn: patient_dfn,
@@ -49,7 +58,13 @@ module Lakeraven
 
       # Import from a C-CDA XML document
       def import_from_ccda(patient_dfn:, clinician_duz:, xml_string:)
-        parsed = ccda_parser.parse(xml_string)
+        parsed = begin
+          ccda_parser.parse(xml_string)
+        rescue CcdaParser::UnreadableSecurityLabel
+          return error_result("C-CDA contains an unreadable security label")
+        rescue StandardError
+          return error_result("C-CDA could not be parsed")
+        end
 
         create_session_with_items(
           patient_dfn: patient_dfn,
@@ -68,12 +83,43 @@ module Lakeraven
         nil
       end
 
-      def extract_from_fhir_entries(entries)
-        allergies = entries.select { |r| r["resourceType"] == "AllergyIntolerance" }.map { |r| extract_allergy(r) }
-        conditions = entries.select { |r| r["resourceType"] == "Condition" }.map { |r| extract_condition(r) }
-        medications = entries.select { |r| r["resourceType"] == "MedicationRequest" }.map { |r| extract_medication(r) }
+      def extract_from_fhir_entries(entries, bundle_labels = [])
+        {
+          allergies: labelled(entries, "AllergyIntolerance", bundle_labels) { |r| extract_allergy(r) },
+          conditions: labelled(entries, "Condition", bundle_labels) { |r| extract_condition(r) },
+          medications: labelled(entries, "MedicationRequest", bundle_labels) { |r| extract_medication(r) },
+          security_labels: Part2RedisclosureNotice.label_fields(bundle_labels)[:security_labels]
+        }
+      end
 
-        { allergies: allergies, conditions: conditions, medications: medications }
+      # Resources of this type, extracted and carrying Bundle ∪ resource labels.
+      def labelled(entries, type, bundle_labels)
+        entries.select { |r| r["resourceType"] == type }.map do |r|
+          yield(r).merge(Part2RedisclosureNotice.label_fields(bundle_labels + security_labels(r)))
+        end
+      end
+
+      # meta.security Codings as { system:, code:, display: } labels. Absent
+      # meta or security is no labels; anything present but unreadable raises.
+      def security_labels(resource)
+        meta = resource["meta"]
+        return [] if meta.nil?
+        raise InvalidSecurityLabel unless meta.is_a?(Hash)
+
+        security = meta["security"]
+        return [] if security.nil?
+        raise InvalidSecurityLabel unless security.is_a?(Array)
+
+        security.map do |coding|
+          raise InvalidSecurityLabel unless coding.is_a?(Hash)
+
+          system, code, display = coding.values_at("system", "code", "display")
+          raise InvalidSecurityLabel unless system.is_a?(String) && code.is_a?(String) && system.present? && code.present?
+
+          label = { system: system, code: code }
+          label[:display] = display if display.is_a?(String) && display.present?
+          label
+        end
       end
 
       def extract_allergy(resource)
@@ -111,7 +157,7 @@ module Lakeraven
 
       def create_session_with_items(patient_dfn:, clinician_duz:, source_type:, imported:, raw_document: nil)
         session = Object.new
-        ImportResult.new(success: true, session: session, errors: [])
+        ImportResult.new(success: true, session: session, errors: [], imported: imported)
       rescue StandardError => e
         error_result("Import failed: #{e.message}")
       end

@@ -33,6 +33,21 @@ module Lakeraven
       PART2_CODES = %w[42CFRPart2 ETH SUD ETHUD OPIOIDUD].freeze
 
       EXTENSION = { "url" => EXTENSION_URL, "valueString" => TEXT }.freeze
+
+      PADDING = /\A[[:space:]\p{Cf}]+|[[:space:]\p{Cf}]+\z/
+
+      def self.part2_code?(code)
+        value = code.to_s.gsub(PADDING, "")
+        PART2_CODES.any? { |part2| part2.casecmp?(value) }
+      end
+
+      # The fields an ingested item carries for its labels ({ system:, code: }
+      # Hashes): the labels de-duplicated on system and code, and whether any
+      # of them is a Part 2 code. Labels are a marker, never a block.
+      def self.label_fields(labels)
+        unique = labels.uniq { |label| label.values_at(:system, :code) }
+        { security_labels: unique, part2: unique.any? { |label| part2_code?(label[:code]) } }
+      end
     end
   end
 end
