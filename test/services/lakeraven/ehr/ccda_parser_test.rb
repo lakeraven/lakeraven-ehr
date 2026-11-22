@@ -27,7 +27,7 @@ module Lakeraven
           <ClinicalDocument xmlns="urn:hl7-org:v3"/>
         XML
 
-        assert_equal({ allergies: [], conditions: [], medications: [] }, result)
+        assert_equal({ allergies: [], conditions: [], medications: [], security_labels: [] }, result)
       end
     end
   end
