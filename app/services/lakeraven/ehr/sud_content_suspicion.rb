@@ -24,10 +24,12 @@ module Lakeraven
     #   2. Every maximal run of invisible code points becomes ONE sentinel:
     #      Default_Ignorable_Code_Point (soft hyphen, zero-width space and
     #      joiners, BOM, combining grapheme joiner, Hangul fillers, variation
-    #      selectors, tags), every Cf, every non-whitespace Cc (NUL, ESC,
-    #      DEL, C1 controls) and private-use characters (Co, so the sentinel
-    #      itself cannot arrive as input). Whitespace controls (tab, line
-    #      feed, vertical tab, form feed, carriage return, U+0085) are kept.
+    #      selectors, tags), every Cf, every Cc (NUL, ESC, DEL, C1 controls
+    #      and the whitespace controls too: tab, line feed, vertical tab,
+    #      form feed, carriage return, U+0085) and private-use characters
+    #      (Co, so the sentinel itself cannot arrive as input). Whitespace
+    #      controls are read like the other invisible characters: removed
+    #      inside a term, a boundary between words.
     #   3. Underscores and dash punctuation read as spaces ("substance_use",
     #      "F10_20").
     # Every pattern allows the sentinel between any two characters of a
@@ -156,12 +158,13 @@ module Lakeraven
 
       # Invisible code points, each maximal run replaced by one SENTINEL:
       # Default_Ignorable_Code_Point, format characters (Cf), private-use
-      # characters (Co, which holds the sentinel) and the control characters
-      # that are not whitespace (NUL, U+0001-U+0008, U+000E-U+001F, U+007F,
-      # U+0080-U+009F except U+0085). Whitespace controls already separate
-      # words and are kept.
+      # characters (Co, which holds the sentinel) and every control
+      # character (Cc: U+0000-U+001F, U+007F-U+009F). Whitespace controls
+      # (tab, line feed, vertical tab, form feed, carriage return, U+0085)
+      # are read like the other invisible characters: removed inside a term,
+      # a boundary between words.
       INVISIBLE_RUN = Regexp.new(
-        "[\\p{Default_Ignorable_Code_Point}\\p{Cf}\\p{Co}[^\\P{Cc}[:space:]]]+",
+        "[\\p{Default_Ignorable_Code_Point}\\p{Cf}\\p{Co}\\p{Cc}]+",
         timeout: MATCH_TIMEOUT
       )
 
