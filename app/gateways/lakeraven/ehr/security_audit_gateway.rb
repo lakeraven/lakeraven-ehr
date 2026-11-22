@@ -14,10 +14,16 @@ module Lakeraven
     # action E (edit), this app's call name, a fixed description that holds no
     # PHI, and the DFN as detail.
     #
-    # Only RESULT 1 is a filed entry. The live build (rpms-rpc
-    # test/fixtures/captured_replies/busa-log.yml) files a system event, but
-    # answers 0^ with no message for a patient-detail row naming a DFN; so a
-    # not-filed result is expected there, and the caller records it as a gap.
+    # Only RESULT 1 is a confirmed entry. The live build (rpms-rpc
+    # test/fixtures/captured_replies/busa-log.yml, patient_detail/1) files the
+    # summary of a patient-related event, then refuses the patient-detail row
+    # naming the DFN and answers 0^ with no message. So a result that is not
+    # 1 does not show that nothing was filed: it is an entry RPMS did not
+    # confirm, and the caller records it as a gap ("BUSA entry not confirmed").
+    #
+    # A DFN is sent only in the gem's canonical form (RpmsRpc::Scheduling
+    # canonical_id): a positive Integer, or a String of digits with no leading
+    # zero. Anything else is refused before any call, and never normalised.
     #
     # Never raises: the RPMS change the entry follows has already happened.
     class SecurityAuditGateway
@@ -47,7 +53,7 @@ module Lakeraven
       def self.patient_detail(dfn)
         case dfn
         when Integer then dfn.positive? ? dfn.to_s : nil
-        when String then dfn.match?(/\A\d+\z/) && dfn.to_i.positive? ? dfn.to_i.to_s : nil
+        when String then dfn.match?(/\A[1-9]\d*\z/) ? dfn : nil
         end
       end
       private_class_method :patient_detail
