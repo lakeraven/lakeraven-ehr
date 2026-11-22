@@ -446,4 +446,83 @@ class SchedulingHolidaysTest < ActionDispatch::IntegrationTest
 
     assert_equal [ [ :remove_holiday, FOURTH ] ], writes
   end
+
+  # --- amendment round 2 -------------------------------------------------
+
+  # The gem's own words when DDR FILER answers without a [Data] line (rpms-rpc
+  # ddr_fileman.rb, filer): the reply could not be read, so whether RPMS filed
+  # is not known. It shares error: :filer_failed with a true FileMan refusal.
+  NO_DATA_MARKER = { success: false, error: :filer_failed,
+                     message: "no [Data] marker in DDR FILER reply: [Misc]" }.freeze
+
+  test "S-SCH-19.18 a DDR FILER reply with no [Data] line is an unknown outcome, not a refusal" do
+    sign_in("scheduling_supervisor")
+    with_rpms(add: ->(_) { NO_DATA_MARKER }) do
+      add(date: "2031-07-04", name: "DEMO FOUNDERS DAY")
+
+      assert_response :service_unavailable
+      assert_select "#holiday-alert", text: /check the holidays before/i
+      assert_no_success
+      assert_equal [ [ :add_holiday, { date: FOURTH, name: "DEMO FOUNDERS DAY" } ] ], writes, "sent once and not retried"
+    end
+    with_rpms(holidays: [ FOUNDERS ], remove: ->(_) { NO_DATA_MARKER }) do
+      post REMOVE_FOURTH
+
+      assert_response :service_unavailable
+      assert_select "#holiday-alert", text: /check the holidays before/i
+      assert_no_success
+      assert_equal [ [ :remove_holiday, FOURTH ] ], writes, "sent once and not retried"
+    end
+  end
+
+  test "S-SCH-19.19 a refusal with no readable reason never shows an internal code" do
+    sign_in("scheduling_supervisor")
+    with_rpms(add: ->(_) { { success: false, error: :filer_failed, message: "" } }) do
+      add(date: "2031-07-04", name: "DEMO FOUNDERS DAY")
+
+      assert_response :unprocessable_content
+      assert_select "#holiday-alert"
+      assert_match(/RPMS did not add the holiday/, alert_text)
+      assert_no_match(/filer_failed/i, alert_text)
+      assert_no_match(/filer_failed/i, response.body)
+      assert_no_success
+    end
+
+    assert_equal [ [ :add_holiday, { date: FOURTH, name: "DEMO FOUNDERS DAY" } ] ], writes
+  end
+
+  test "S-SCH-19.20 a holidays read RPMS refuses to this user is a refusal, with RPMS's reason" do
+    sign_in("scheduling_supervisor")
+    refusal = "DDR LISTER is not in this user's context"
+    with_rpms(holidays: [ FOUNDERS ], read: -> { raise RpmsRpc::Client::RpcRefusedError, refusal }) do
+      get INDEX
+
+      assert_response :forbidden
+      assert_select "[role=alert]", text: /RPMS refused.*DDR LISTER is not in this user's context/m
+      assert_select "#holidays tr[data-holiday]", count: 0
+      assert_no_match(/no holidays/i, response.body)
+      assert_equal 1, @reads.size
+    end
+  end
+
+  test "S-SCH-19.21 a remove for a date before the site's today is refused here, with no RPC" do
+    sign_in("scheduling_supervisor")
+    with_site_clock(Time.new(2031, 6, 2, 9)) do
+      with_rpms(holidays: [ { date: Date.new(2031, 6, 1), name: "DEMO PAST DAY" }, { date: TODAY, name: "DEMO SITE DAY" } ]) do
+        %w[2031-06-01 2030-12-25].each do |past|
+          post "/lakeraven-ehr/scheduling/holidays/#{past}/remove"
+
+          assert_response :not_found, past
+          assert_nil flash[:notice], past
+          assert_empty writes, past
+        end
+
+        # The site's today is still removable.
+        post "/lakeraven-ehr/scheduling/holidays/2031-06-02/remove"
+        assert_redirected_to INDEX
+      end
+    end
+
+    assert_equal [ [ :remove_holiday, TODAY ] ], writes
+  end
 end
