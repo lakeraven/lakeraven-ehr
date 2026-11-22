@@ -37,7 +37,7 @@ class SchedulingHolidaysTest < ActionDispatch::IntegrationTest
   # Stands in for the gem. The holiday list is stateful: a successful add
   # appends to what holidays returns, a successful remove deletes from it.
   # Every write and every holidays read is recorded.
-  def with_rpms(holidays: [], add: ADDED, remove: REMOVED, read: nil, rules: RULES)
+  def with_rpms(holidays: [], add: ADDED, remove: REMOVED, read: nil, listing: nil, rules: RULES)
     @writes = []
     @reads = []
     list = holidays.dup
@@ -56,6 +56,7 @@ class SchedulingHolidaysTest < ActionDispatch::IntegrationTest
       holidays: lambda { |start_date:, end_date:|
         reads << { start_date: start_date, end_date: end_date }
         read&.call
+        next listing.call if listing # a reply of some other shape, returned as it is
         list.select { |h| (start_date..end_date).cover?(h[:date]) }.sort_by { |h| h[:date] }
       },
       add_holiday: lambda { |**args|
@@ -288,6 +289,157 @@ class SchedulingHolidaysTest < ActionDispatch::IntegrationTest
       # The same route with a real date does remove.
       post REMOVE_FOURTH
       assert_redirected_to INDEX
+    end
+
+    assert_equal [ [ :remove_holiday, FOURTH ] ], writes
+  end
+
+  # --- amendment round 1 -------------------------------------------------
+
+  def with_site_clock(time)
+    Lakeraven::EHR::SiteTime.reader = -> { time }
+    yield
+  ensure
+    Lakeraven::EHR::SiteTime.reader = -> { Time.now }
+  end
+
+  def alert_text = css_select("#holiday-alert").map { |node| node.text.strip }.join(" ")
+
+  test "S-SCH-19.11 today is the site's clock, not the app server's" do
+    travel_back
+    travel_to Time.new(2031, 6, 3, 2) # the app server is already on the 3rd
+    sign_in("scheduling_supervisor")
+    with_site_clock(Time.new(2031, 6, 2, 19)) do
+      with_rpms(holidays: [ { date: TODAY, name: "DEMO SITE DAY" } ]) do
+        get INDEX
+        assert_response :ok
+        assert_equal [ { start_date: TODAY, end_date: Date.new(2032, 6, 2) } ], @reads, "the site's today through one year ahead"
+        assert_select "#holidays tr[data-holiday='2031-06-02'] form[action='/lakeraven-ehr/scheduling/holidays/2031-06-02/remove']"
+      end
+
+      with_rpms do
+        add(date: "2031-06-02", name: "DEMO SITE DAY")
+        assert_redirected_to INDEX
+        assert_equal [ [ :add_holiday, { date: TODAY, name: "DEMO SITE DAY" } ] ], writes
+      end
+
+      with_rpms do
+        add(date: "2031-06-01", name: "DEMO SITE DAY")
+        assert_response :unprocessable_content
+        assert_select "#holiday-errors", text: /Date/i
+        assert_no_success
+        assert_empty writes
+      end
+    end
+  end
+
+  test "S-SCH-19.12 a holidays read that is not a list of dated rows is a failed read" do
+    sign_in("scheduling_supervisor")
+    odd = {
+      "nil" => nil,
+      "a Hash" => { date: FOURTH, name: "X" },
+      "a row with no date" => [ FOUNDERS, { date: nil, name: "DEMO NO DATE" } ]
+    }
+    odd.each do |what, value|
+      with_rpms(holidays: [ FOUNDERS ], listing: -> { value }) do
+        get INDEX
+
+        assert_response :service_unavailable, what
+        assert_select "#holiday-alert", {}, what
+        assert_select "#holidays tr[data-holiday]", { count: 0 }, what
+        assert_no_match(/no holidays/i, response.body, what)
+      end
+    end
+  end
+
+  test "S-SCH-19.13 a write reply that does not plainly say success is an unknown outcome" do
+    sign_in("scheduling_supervisor")
+    replies = { "true" => true, "a string" => "ok", "an empty list" => [], "an empty hash" => {},
+                "success in words" => { success: "no" }, "a failure with no error" => { success: false } }
+    replies.each do |what, reply|
+      with_rpms(add: ->(_) { reply }) do
+        add(date: "2031-07-04", name: "DEMO FOUNDERS DAY")
+
+        assert_response :service_unavailable, "add: #{what}"
+        assert_select "#holiday-alert", { text: /check the holidays before/i }, "add: #{what}"
+        assert_no_success
+        assert_equal [ [ :add_holiday, { date: FOURTH, name: "DEMO FOUNDERS DAY" } ] ], writes, "add: #{what}, sent once"
+      end
+      with_rpms(holidays: [ FOUNDERS ], remove: ->(_) { reply }) do
+        post REMOVE_FOURTH
+
+        assert_response :service_unavailable, "remove: #{what}"
+        assert_select "#holiday-alert", { text: /check the holidays before/i }, "remove: #{what}"
+        assert_no_success
+        assert_equal [ [ :remove_holiday, FOURTH ] ], writes, "remove: #{what}, sent once"
+      end
+    end
+  end
+
+  test "S-SCH-19.14 a refusal with an empty message still says RPMS refused" do
+    sign_in("scheduling_supervisor")
+    with_rpms(add: ->(_) { { success: false, error: :filer_failed, message: "" } }) do
+      add(date: "2031-07-04", name: "DEMO FOUNDERS DAY")
+
+      assert_response :unprocessable_content
+      assert_select "#holiday-alert"
+      assert_match(/RPMS did not add the holiday/, alert_text)
+      assert_no_match(/:\s*\z/, alert_text)
+      assert_no_success
+    end
+
+    assert_equal [ [ :add_holiday, { date: FOURTH, name: "DEMO FOUNDERS DAY" } ] ], writes
+  end
+
+  test "S-SCH-19.15 a date past the list's year ahead is refused here, with no RPC" do
+    sign_in("scheduling_supervisor")
+    with_site_clock(Time.new(2031, 6, 2, 9)) do
+      with_rpms do
+        %w[2032-06-03 9999-12-31].each do |late|
+          add(date: late, name: "DEMO FAR DAY")
+
+          assert_response :unprocessable_content, late
+          assert_select "#holiday-errors", { text: /Date/i }, late
+          assert_no_success
+          assert_empty writes, late
+        end
+
+        add(date: "2032-06-02", name: "DEMO FAR DAY")
+        assert_redirected_to INDEX
+      end
+    end
+
+    assert_equal [ [ :add_holiday, { date: Date.new(2032, 6, 2), name: "DEMO FAR DAY" } ] ], writes
+  end
+
+  test "S-SCH-19.16 a refused add whose list read also fails says both" do
+    sign_in("scheduling_supervisor")
+    exists = ->(_args) { { success: false, error: :filer_failed, message: "Entry '3310704,' already exists." } }
+    with_rpms(holidays: [ FOUNDERS ], add: exists, read: -> { raise RpmsRpc::Error, "read failed" }) do
+      add(date: "2031-07-04", name: "DEMO FOUNDERS DAY")
+
+      assert_response :service_unavailable
+      alerts = css_select("[id^='holiday-alert']").map(&:text).join(" ")
+      assert_match(/Entry '3310704,' already exists\./, alerts)
+      assert_match(/did not return the holidays/i, alerts)
+      assert_select "#holidays tr[data-holiday]", count: 0
+      assert_no_success
+    end
+
+    assert_equal [ [ :add_holiday, { date: FOURTH, name: "DEMO FOUNDERS DAY" } ] ], writes
+  end
+
+  test "S-SCH-19.17 the not-found remove alert names the date and does not repeat itself" do
+    sign_in("scheduling_supervisor")
+    none = ->(_date) { { success: false, error: :not_found, message: "no holiday on that date" } }
+    with_rpms(remove: none) do
+      post REMOVE_FOURTH
+      assert_redirected_to INDEX
+      follow_redirect!
+
+      assert_response :ok
+      assert_match(/no holiday on 2031-07-04/i, alert_text)
+      assert_equal 1, alert_text.scan(/no holiday/i).size, alert_text
     end
 
     assert_equal [ [ :remove_holiday, FOURTH ] ], writes
