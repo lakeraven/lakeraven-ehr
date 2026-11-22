@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "test_helper"
+require_relative "../../../support/sud_normalisation_failure"
 require_relative "../../../dummy/lib/lakeraven_demo_seeds"
 require_relative "../../../support/progress_note_test_helper"
 
@@ -1509,6 +1510,33 @@ module Lakeraven
         assert_includes patient_audit_rows.pluck(:outcome), "8"
         assert_label_failure_audited!
         refute_includes AuditEvent.all.map { |event| event.attributes.to_s }.join, SYNTHETIC_BROKER_MESSAGE
+      end
+
+      # --- one normalisation step (#906 owner continue) ---
+      # Text whose normalisation failed has not been read, so it counts as
+      # Part 2 (fail closed). When its label then cannot be written, the
+      # existing audit path still records "part 2 label failed".
+
+      include SudNormalisationFailure
+
+      CLEAN_LOOKING_NOTE_TEXT = "Synthetic follow-up: sleep hygiene reviewed."
+
+      test "the audit row of a note whose text could not be normalised and whose part 2 label could not be written says the label failed" do
+        sign_in_provider!
+        form_token = fetch_form_token
+        AuditEvent.delete_all
+
+        with_failing_unicode_normalisation(ArgumentError, only: CLEAN_LOOKING_NOTE_TEXT) do |fired|
+          with_pool_timeout_on_label do
+            post_note(form_token: form_token, note_text: CLEAN_LOOKING_NOTE_TEXT)
+          end
+          refute_empty fired, "the synthetic normalisation failure never fired"
+        end
+
+        assert_equal %i[create update_text add], @tiu.tiu_calls.map(&:first)
+        assert_equal 0, Part2Label.count
+        assert_label_failure_audited!
+        refute_includes AuditEvent.all.map { |event| event.attributes.to_s }.join, CLEAN_LOOKING_NOTE_TEXT
       end
     end
   end

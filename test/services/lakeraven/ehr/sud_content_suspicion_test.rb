@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "test_helper"
+require_relative "../../../support/sud_normalisation_failure"
 
 # SudContentSuspicion reads free text (a progress note) and answers whether
 # it looks like substance-use content (#906, slice of #522). It labels; it
@@ -438,6 +439,157 @@ module Lakeraven
       test "a control character separating clean words does not make the text suspected" do
         assert_equal :not_suspected, SudContentSuspicion.classify("patient\x1Fwell today")
         assert_equal :not_suspected, SudContentSuspicion.classify("patient​well today")
+      end
+
+      # --- one normalisation step (#906 owner continue) ---
+      # One step before matching: NFKC, then every Default_Ignorable_Code_Point
+      # and every Cc / Cf character is taken out. The place an invisible
+      # character stood may also count as a word boundary, decided per
+      # position, so the same text can hide a term both ways at once: one
+      # invisible character INSIDE the term and another as its ONLY separator.
+      # Matching only decides the label: classify answers a Symbol and never
+      # the normalised text.
+
+      include SudNormalisationFailure
+
+      # Default_Ignorable_Code_Point, scanned once at load and grouped into
+      # contiguous ranges.
+      DEFAULT_IGNORABLE_RANGES = begin
+        ranges = []
+        (0..0x10FFFF).each do |codepoint|
+          next if codepoint.between?(0xD800, 0xDFFF)
+          next unless /\p{Default_Ignorable_Code_Point}/.match?(codepoint.chr(Encoding::UTF_8))
+
+          if ranges.last && ranges.last.last == codepoint - 1
+            ranges[-1] = (ranges.last.first..codepoint)
+          else
+            ranges << (codepoint..codepoint)
+          end
+        end
+        ranges.freeze
+      end
+
+      # Known members of the property: the table cannot silently be empty or
+      # wrong.
+      KNOWN_DEFAULT_IGNORABLE_RANGES = [
+        0x00AD..0x00AD, 0x034F..0x034F, 0x115F..0x1160, 0x17B4..0x17B5, 0x180B..0x180F,
+        0x200B..0x200F, 0x202A..0x202E, 0x2060..0x206F, 0x3164..0x3164, 0xFE00..0xFE0F,
+        0xFEFF..0xFEFF, 0xFFA0..0xFFA0, 0xFFF0..0xFFF8, 0x1D173..0x1D17A, 0xE0000..0xE0FFF
+      ].freeze
+
+      def self.codepoint_label(codepoint) = format("U+%04X", codepoint)
+
+      def self.range_label(range)
+        "#{codepoint_label(range.first)}-#{codepoint_label(range.last)}"
+      end
+
+      # a. an invisible character inside the term AND another as its separator
+
+      test "the owner case, a unit separator before the term and a NUL inside it, is suspected" do
+        text = "pt used\x1Falco\x00hol today"
+        assert_equal :suspected, SudContentSuspicion.classify(text), text.inspect
+      end
+
+      { "a zero-width space as the separator and a soft hyphen inside the term" => "used​hero­in",
+        "an ICD-10-CM code split from the word before it and glued by a NUL" => "dx\x1FF1\x000.20",
+        "a phrase separated by a unit separator with a NUL inside its second word" =>
+          "attends twelve\x1Fst\x00ep meetings" }.each do |name, text|
+        test "#{name} is suspected" do
+          assert_equal :suspected, SudContentSuspicion.classify(text), text.inspect
+        end
+      end
+
+      # b. combining grapheme joiner (U+034F): Mn, not Cf, but default ignorable
+
+      test "a term hidden by a combining grapheme joiner inside it is suspected" do
+        [ "alco͏hol", "Reports alco͏hol use" ].each do |text|
+          assert_equal :suspected, SudContentSuspicion.classify(text), text.inspect
+        end
+      end
+
+      test "a term separated from the word before it only by a combining grapheme joiner is suspected" do
+        text = "used͏heroin"
+        assert_equal :suspected, SudContentSuspicion.classify(text), text.inspect
+      end
+
+      # c. Hangul fillers: letters (Lo), not Cf, but default ignorable
+
+      { "the Hangul filler (U+3164)" => "ㅤ",
+        "the Hangul choseong filler (U+115F)" => "ᅟ",
+        "the halfwidth Hangul filler (U+FFA0)" => "ﾠ" }.each do |name, filler|
+        test "a term hidden by #{name} inside it is suspected" do
+          text = "alco#{filler}hol"
+          assert_equal :suspected, SudContentSuspicion.classify(text), text.inspect
+        end
+
+        test "a term separated from the word before it only by #{name} is suspected" do
+          text = "used#{filler}heroin"
+          assert_equal :suspected, SudContentSuspicion.classify(text), text.inspect
+        end
+      end
+
+      # d. every Default_Ignorable_Code_Point range, through the same check
+
+      test "the default ignorable table holds the known ranges" do
+        refute_empty DEFAULT_IGNORABLE_RANGES
+        KNOWN_DEFAULT_IGNORABLE_RANGES.each do |known|
+          covering = DEFAULT_IGNORABLE_RANGES.find { |range| range.cover?(known) }
+          assert covering, "#{self.class.range_label(known)} is not in the Default_Ignorable_Code_Point table"
+        end
+      end
+
+      DEFAULT_IGNORABLE_RANGES.each do |range|
+        sampled = [ range.first, range.last ]
+        sampled << (range.first + range.size / 2) if range.size > 2
+        sampled = sampled.uniq.sort
+
+        test "a term hidden by a default ignorable code point in #{range_label(range)} is suspected" do
+          sampled.each do |codepoint|
+            c = codepoint.chr(Encoding::UTF_8)
+            label = self.class.codepoint_label(codepoint)
+
+            assert_equal :suspected, SudContentSuspicion.classify("alco#{c}hol"),
+                         "#{label} inside the term"
+            assert_equal :suspected, SudContentSuspicion.classify("used#{c}heroin"),
+                         "#{label} as the only separator before the term"
+            assert_equal :suspected, SudContentSuspicion.classify("pt used#{c}alco#{c}hol today"),
+                         "#{label} as the separator and inside the term"
+          end
+        end
+      end
+
+      # e. an invisible character between clean words does not make text suspected
+
+      test "an invisible character between clean words does not make the text suspected" do
+        [ "patientㅤwell today", "patient͏well today", "Seen­today. Vitals stable." ].each do |text|
+          assert_equal :not_suspected, SudContentSuspicion.classify(text), text.inspect
+        end
+      end
+
+      # f. a failure during normalisation is :unclassified (fail closed)
+
+      [ ArgumentError, Encoding::CompatibilityError ].each do |error_class|
+        [ "Discussed sleep hygiene and work stress; PHQ-9 reviewed.", "heroin" ].each do |text|
+          test "#{error_class} raised while normalising #{text.inspect} is unclassified and does not raise" do
+            with_failing_unicode_normalisation(error_class) do |fired|
+              result = nil
+              assert_nothing_raised { result = SudContentSuspicion.classify(text) }
+              assert_equal :unclassified, result
+              refute_empty fired, "the synthetic normalisation failure never fired"
+            end
+          end
+        end
+      end
+
+      # g. the answer is a Symbol: the normalised text is never echoed
+
+      test "classify answers a Symbol, never the normalised text, for text hiding a term" do
+        [ "pt used\x1Falco\x00hol today", "alco͏hol", "usedㅤheroin", "dx\x1FF1\x000.20",
+          "patientㅤwell today" ].each do |text|
+          result = SudContentSuspicion.classify(text)
+          assert_instance_of Symbol, result, text.inspect
+          assert_includes %i[suspected not_suspected unclassified], result, text.inspect
+        end
       end
     end
   end

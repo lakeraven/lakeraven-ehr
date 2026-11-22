@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "test_helper"
+require_relative "../../../support/sud_normalisation_failure"
 
 # ProgressNoteService#create and the Part 2 label (#906, slice of #522).
 # Incidental substance-use content in a progress note is LABELLED, never
@@ -373,6 +374,32 @@ module Lakeraven
         assert_equal :gateway_error, result.error
         assert_equal %i[create], gateway.methods_called
         assert_equal 0, Part2Label.count
+      end
+
+      # --- one normalisation step (#906 owner continue) ---
+      # A failure while normalising the text must not stop the note or
+      # escape as an exception: the text has not been read, so the note is
+      # labelled (fail closed) and written exactly as given.
+
+      include SudNormalisationFailure
+
+      test "a normalisation failure while reading the text labels the note and still writes it" do
+        gateway = FakeNoteGateway.new
+        result = nil
+
+        with_failing_unicode_normalisation(ArgumentError) do |fired|
+          assert_nothing_raised do
+            result = service(gateway).create(title_ien: TITLE_IEN, text: CLEAN_TEXT)
+          end
+          refute_empty fired, "the synthetic normalisation failure never fired"
+        end
+
+        assert result.success?
+        assert_equal %i[create update_text], gateway.methods_called
+        assert_equal [ NOTE_IEN, CLEAN_TEXT ], gateway.calls[1][:args]
+        assert_equal :labelled, result.part2_label
+        assert_equal 1, note_labels.count
+        assert_equal true, gateway.label_present_at_update_text
       end
     end
   end
