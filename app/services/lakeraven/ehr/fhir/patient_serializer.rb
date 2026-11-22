@@ -26,12 +26,15 @@ module Lakeraven
           "UNKNOWN" => { code: "UNK", display: "Unknown" }
         }.freeze
 
-        def self.call(patient)
-          new(patient).to_h
+        # Tribal affiliation is opt-in and off by default: no app caller opts
+        # in until the egress authorization gate exists (#566).
+        def self.call(patient, tribal_affiliation: false)
+          new(patient, tribal_affiliation: tribal_affiliation).to_h
         end
 
-        def initialize(patient)
+        def initialize(patient, tribal_affiliation: false)
           @p = patient
+          @tribal_affiliation = tribal_affiliation == true
         end
 
         def to_h
@@ -107,9 +110,12 @@ module Lakeraven
           # US Core Ethnicity extension (Inferno requires this)
           exts << build_ethnicity_extension
 
-          # US Core tribal affiliation (#1187). Never the enrollment number.
-          tribe = @p.fhir_tribal_affiliation
-          exts << build_tribal_affiliation_extension(tribe) if tribe.present?
+          # US Core tribal affiliation (#1187), only on explicit opt-in; without
+          # it no tribal read is made. Never the enrollment number.
+          if @tribal_affiliation
+            tribe = @p.fhir_tribal_affiliation
+            exts << build_tribal_affiliation_extension(tribe) if tribe.present?
+          end
 
           # SOGI extensions (USCDI v3 / ONC 170.315(a)(15))
           if @p.respond_to?(:sexual_orientation) && @p.sexual_orientation.present?
