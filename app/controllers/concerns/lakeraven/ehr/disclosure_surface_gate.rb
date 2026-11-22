@@ -8,7 +8,8 @@ module Lakeraven
     #   disclosure_surface :bulk_export
     #   disclosure_surface :fhir_api, if: :bearer_request?, key: :bearer
     #
-    # +if:+ names a predicate method: the rule applies only when it is true,
+    # +if:+ names a predicate method by Symbol (nil: unconditional); any
+    # other value raises ArgumentError. The rule applies only when it is true,
     # and a predicate that raises applies the rule (fail closed). A later
     # declaration with the same +key:+ replaces the earlier rule, so a
     # subclass can restate an inherited one.
@@ -28,10 +29,14 @@ module Lakeraven
           name = DisclosureSurfaces.known_name(surface)
           raise ArgumentError, "unknown disclosure surface: #{surface.inspect}" unless name
 
-          actions = only && Array(only).map(&:to_s).freeze
           condition = binding.local_variable_get(:if)
+          unless condition.nil? || condition.is_a?(Symbol)
+            raise ArgumentError, "disclosure_surface if: must name a predicate method as a Symbol, got #{condition.inspect}"
+          end
+
+          actions = only && Array(only).map(&:to_s).freeze
           rule = { surface: name, only: actions }
-          rule[:if] = condition.to_sym if condition
+          rule[:if] = condition if condition
           rule[:key] = key if key
           rules = disclosure_surface_rules.dup
           index = key && rules.index { |existing| existing[:key] == key }
