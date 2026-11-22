@@ -95,9 +95,13 @@
       class="mt-0"
     >
       Problem list
-      <span class="font-normal text-slate-600">(<%= @conditions.length %>)</span>
+      <% unless @section_failures["Condition"] %>
+        <span class="font-normal text-slate-600">(<%= @conditions.length %>)</span>
+      <% end %>
     </h2>
-    <% if @conditions.any? %>
+    <% if @section_failures["Condition"] %>
+      <%= empty_state @section_failures["Condition"].html_message %>
+    <% elsif @conditions.any? %>
       <table
         id="chart-problems-table"
         class="data-table"
@@ -137,9 +141,13 @@
       class="mt-0"
     >
       Medications
-      <span class="font-normal text-slate-600">(<%= @medications.length %>)</span>
+      <% unless @section_failures["MedicationRequest"] %>
+        <span class="font-normal text-slate-600">(<%= @medications.length %>)</span>
+      <% end %>
     </h2>
-    <% if @medications.any? %>
+    <% if @section_failures["MedicationRequest"] %>
+      <%= empty_state @section_failures["MedicationRequest"].html_message %>
+    <% elsif @medications.any? %>
       <table
         id="chart-medications-table"
         class="data-table"
@@ -182,9 +190,13 @@
       class="mt-0"
     >
       Vital signs
-      <span class="font-normal text-slate-600">(<%= @vitals.length %>)</span>
+      <% unless @section_failures["Observation"] %>
+        <span class="font-normal text-slate-600">(<%= @vitals.length %>)</span>
+      <% end %>
     </h2>
-    <% if @vitals.any? %>
+    <% if @section_failures["Observation"] %>
+      <%= empty_state @section_failures["Observation"].html_message %>
+    <% elsif @vitals.any? %>
       <dl class="m-0 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <% @vitals.each do |v| %>
           <div
@@ -313,12 +325,12 @@
         class="mt-0"
       >
         Immunizations
-        <% unless @immunizations_load_failed %>
+        <% unless @section_failures["Immunization"] %>
           <span class="font-normal text-slate-600">(<%= @immunizations.length %>)</span>
         <% end %>
       </h2>
-      <% if @immunizations_load_failed %>
-        <%= empty_state "Immunizations could not be loaded." %>
+      <% if @section_failures["Immunization"] %>
+        <%= empty_state @section_failures["Immunization"].html_message %>
       <% elsif @immunizations.any? %>
         <table
           id="chart-immunizations-table"
@@ -360,7 +372,9 @@
         class="my-0"
       >
         Encounters &amp; Appointments
-        <span class="font-normal text-slate-600">(<%= @encounters.length %>)</span>
+        <% unless @section_failures["Encounter"] %>
+          <span class="font-normal text-slate-600">(<%= @encounters.length %>)</span>
+        <% end %>
       </h2>
       <% if @progress_note_link || @demo_visit_link %>
         <div class="form-actions">
@@ -377,7 +391,9 @@
         </div>
       <% end %>
     </div>
-    <% if @encounters.any? %>
+    <% if @section_failures["Encounter"] %>
+      <%= empty_state @section_failures["Encounter"].html_message %>
+    <% elsif @encounters.any? %>
       <table
         id="chart-encounters-table"
         class="data-table"

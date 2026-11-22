@@ -354,6 +354,7 @@ module Lakeraven
 
       def load_clinical_collections
         dfn = @patient.dfn.to_s
+        @section_failures = {}
         @conditions    = readable?("Condition") ? build_conditions(dfn) : []
         @medications   = readable?("MedicationRequest") ? build_medications(dfn) : []
         @allergies     = build_allergies(dfn)
@@ -361,10 +362,10 @@ module Lakeraven
         # would stamp this patient's DFN over whatever a row stated, and would
         # omit a configured supplemental provider's rows from the chart while
         # showing them in the search.
-        @observations  = readable?("Observation") ? safe { SupplementalClinicalResources.merged_observations_for_patient(dfn) } || [] : []
+        @observations  = readable?("Observation") ? build_observations(dfn) : []
         @immunizations = ihs_immunizations(dfn)
         @procedures    = readable?("Procedure") ? build_procedures(dfn) : []
-        @encounters    = readable?("Encounter") ? safe { EncounterGateway.for_patient(dfn) } : []
+        @encounters    = readable?("Encounter") ? read_section("Encounter", "encounters") { EncounterGateway.for_patient(dfn) } : []
         @encounter_resources = build_encounter_resources(dfn)
         load_screenings(dfn)
       end
@@ -375,18 +376,24 @@ module Lakeraven
       def ihs_immunizations(dfn)
         return [] unless readable?("Immunization") && BackendRegistry.current.provides?(:ihs_immunization)
 
-        Immunization.for_patient(dfn)
+        read_section("Immunization", "immunizations") { Immunization.for_patient(dfn) }
+      end
+
+      # An RPMS-backed read. A raise is recorded as that section's failure
+      # (cause + fixed message, no exception text) and the list is empty, so a
+      # failed read is never rendered as "none recorded". Only the exception
+      # CLASS is logged: the message can carry PHI.
+      def read_section(resource_type, noun)
+        Array(yield)
       rescue StandardError => error
-        record_immunization_load_failure(error)
+        @section_failures[resource_type] = RpmsReadFailure.new(error, noun: noun)
+        Rails.logger.warn("[chart] #{noun} read failed: #{error.class}")
         []
       end
 
-      def record_immunization_load_failure(error)
-        @immunizations_load_failed = true
-        Rails.logger.warn(
-          "[chart] immunizations could not be loaded: #{error.class}: " \
-          "#{PhiSanitizer.sanitize_message(error.message)}"
-        )
+      def build_observations(dfn)
+        # Through the seam, like the FHIR search (see load_clinical_collections).
+        read_section("Observation", "vitals") { SupplementalClinicalResources.merged_observations_for_patient(dfn) }
       end
 
       # Scored screening instruments (#474). Engine-owned records rather than an
@@ -439,11 +446,11 @@ module Lakeraven
       end
 
       def build_conditions(dfn)
-        safe { Condition.for_patient(dfn) }.map { |h| Condition.from_rpms_row(h, patient_dfn: dfn) }
+        read_section("Condition", "problems") { Condition.for_patient(dfn) }.map { |h| Condition.from_rpms_row(h, patient_dfn: dfn) }
       end
 
       def build_medications(dfn)
-        safe { MedicationRequest.for_patient(dfn) }.map { |h| MedicationRequest.from_rpms_row(h, patient_dfn: dfn) }
+        read_section("MedicationRequest", "medications") { MedicationRequest.for_patient(dfn) }.map { |h| MedicationRequest.from_rpms_row(h, patient_dfn: dfn) }
       end
 
       # `status` has a REQUIRED binding in FHIR. RPMS status text like
@@ -461,7 +468,7 @@ module Lakeraven
       #
       # Not `safe`. That helper turns a raise and a real [] into the same [],
       # and the banner then cannot tell "not loaded" from "none recorded".
-      # Other sections still use `safe`.
+      # The RPMS reads use read_section, which records the failure.
       def build_allergies(dfn)
         @allergy_source = chart_allergy_source(dfn)
         @allergy_source.records
@@ -485,7 +492,7 @@ module Lakeraven
       end
 
       def build_procedures(dfn)
-        safe { Procedure.for_patient(dfn) }.map do |h|
+        read_section("Procedure", "procedures") { Procedure.for_patient(dfn) }.map do |h|
           Procedure.new(
             ien: h[:ien]&.to_s, patient_dfn: dfn,
             display: h[:name],
@@ -551,7 +558,7 @@ module Lakeraven
           type: "searchset",
           total: resources.length,
           link: [ { relation: "self", url: request.original_url } ],
-          entry: entries + withheld_chart_outcomes + immunization_load_outcomes
+          entry: entries + withheld_chart_outcomes + section_failure_outcomes
         }
       end
 
@@ -566,12 +573,18 @@ module Lakeraven
         end
       end
 
-      # The capability is present, but the read failed. The diagnostics stay
-      # fixed: the exception message can carry broker detail and stays in the log.
-      def immunization_load_outcomes
-        return [] unless @immunizations_load_failed
-
-        [ chart_feature_outcome(code: "exception", diagnostics: "Immunizations could not be loaded.") ]
+      # The section was readable, but its read failed. The diagnostics are
+      # fixed text naming the resource type: the exception message can carry
+      # broker detail and is never used.
+      def section_failure_outcomes
+        @section_failures.map do |resource_type, failure|
+          # The immunization card has always said "Immunizations could not be loaded."
+          subject = resource_type == "Immunization" ? "Immunizations" : resource_type
+          chart_feature_outcome(
+            code: failure.fhir_code,
+            diagnostics: failure.diagnostics(resource_type, generic_subject: subject)
+          )
+        end
       end
 
       def chart_feature_outcome(code:, diagnostics:)
