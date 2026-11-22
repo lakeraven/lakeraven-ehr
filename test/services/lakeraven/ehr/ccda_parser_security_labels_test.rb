@@ -324,6 +324,28 @@ module Lakeraven
         assert_equal false, result[:allergies][1][:part2]
         assert_equal true, result[:part2]
       end
+
+      # --- Rule L: an undeclared namespace prefix is malformed ---
+
+      test "undeclared prefix on a label element or attribute raises" do
+        element = ccda(header: conf("N"), allergies: allergy(%(<foo:confidentialityCode nullFlavor="NI"/>)))
+        attribute = ccda(header: conf("N"), conditions: condition(security_obs("42CFRPart2")).sub(%( code="42CFRPart2"), %( foo:code="42CFRPart2")))
+        assert_includes attribute, %(foo:code="42CFRPart2")
+
+        assert_raises(StandardError) { CcdaParser.parse(element) }
+        assert_raises(StandardError) { CcdaParser.parse(attribute) }
+      end
+
+      # --- Rule M: urn:oid: prefix is case-insensitive ---
+
+      test "codeSystem urn:oid: prefix is stripped case-insensitively" do
+        result = parse(header: conf("N"), allergies: allergy(security_obs("R", oid: "URN:OID:#{CONF_OID}")),
+                       medications: medication(security_obs("42CFRPart2", oid: "Urn:Oid:#{ACT_OID}")))
+
+        assert_equal [ [ CONF, "N" ], [ CONF, "R" ] ], pairs(result[:allergies].first[:security_labels])
+        assert_equal [ [ ACT, "42CFRPart2" ], [ CONF, "N" ] ], pairs(result[:medications].first[:security_labels])
+        assert_equal [ [ CONF, "N" ] ], pairs(result[:conditions].first[:security_labels])
+      end
     end
   end
 end

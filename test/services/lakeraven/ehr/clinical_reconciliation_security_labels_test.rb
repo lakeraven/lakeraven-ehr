@@ -311,6 +311,44 @@ module Lakeraven
         assert_includes result.errors, "Invalid JSON"
         assert_nil result.imported
       end
+
+      # Rule K: invalid UTF-8 anywhere is invalid JSON, never an exception.
+      {
+        "a clinical code" => [ %("code":"E11.9"), "\"code\":\"E11\xF3\"".b ],
+        "a security label display" => [ %("display":"restricted"), "\"display\":\"restricted\xFF\"".b ]
+      }.each do |place, (valid, invalid)|
+        [ Encoding::UTF_8, Encoding::BINARY ].each do |encoding|
+          test "FHIR: invalid UTF-8 in #{place} (#{encoding} string) is Invalid JSON" do
+            bundle = { "resourceType" => "Bundle", "entry" => [ { "resource" => resource("Condition", meta: { "security" => [ R_CODING, PART2_CODING ] }) } ] }
+            json = bundle.to_json.b.sub(valid.b) { invalid }.force_encoding(encoding)
+            refute json.dup.force_encoding(Encoding::UTF_8).valid_encoding?, "fixture must hold invalid UTF-8"
+
+            result = assert_nothing_raised do
+              @service.import_from_fhir_bundle(patient_dfn: "123", clinician_duz: "301", json_string: json)
+            end
+
+            refute result.success?, "invalid UTF-8 must not be imported"
+            assert_equal [ "Invalid JSON" ], result.errors
+            assert_nil result.imported
+          end
+        end
+      end
+
+      # Rule L: an undeclared namespace prefix is malformed, with the fixed message.
+      test "C-CDA: an undeclared namespace prefix fails like any malformed document" do
+        element = ccda_xml(%(<foo:confidentialityCode nullFlavor="NI"/>))
+        attribute = ccda_xml("").sub(%( code="42CFRPart2"), %( foo:code="42CFRPart2"))
+        malformed = import_ccda(nil, xml: ccda_xml("").sub("</structuredBody>", ""))
+
+        refute malformed.success?
+        [ element, attribute ].each do |xml|
+          result = import_ccda(nil, xml: xml)
+
+          refute result.success?, "a C-CDA with an unbound prefix must not be imported"
+          assert_equal malformed.errors, result.errors
+          assert_nil result.imported
+        end
+      end
     end
   end
 end
