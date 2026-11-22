@@ -14,10 +14,12 @@ module Lakeraven
     # action E (edit), this app's call name, a fixed description that holds no
     # PHI, and the DFN as detail.
     #
-    # Only RESULT 1 is a confirmed entry. The live build (rpms-rpc
-    # test/fixtures/captured_replies/busa-log.yml, patient_detail/1) files the
-    # summary of a patient-related event, then refuses the patient-detail row
-    # naming the DFN and answers 0^ with no message. So a result that is not
+    # Only RESULT 1 is a confirmed entry. The capture in rpms-rpc
+    # test/fixtures/captured_replies/busa-log.yml (patient_detail/1), from
+    # release bcer-9.0-20261119-f67498c-ydb, shows the summary of a
+    # patient-related event filed, then the patient-detail row naming the DFN
+    # refused with 0^ and no message. No reply is captured yet for this
+    # repo's pinned build (bcer-9.0-20261113-3f5487a-ydb). So a result that is not
     # 1 does not show that nothing was filed: it is an entry RPMS did not
     # confirm, and the caller records it as a gap ("BUSA entry not confirmed").
     #

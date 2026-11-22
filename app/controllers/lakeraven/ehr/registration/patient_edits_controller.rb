@@ -76,8 +76,9 @@ module Lakeraven
         # by the section's busa_description, which holds no PHI. The edit has
         # already happened, so an entry RPMS does not confirm leaves the
         # clerk's flow as it is and is recorded here as a gap. "Not confirmed",
-        # never "not filed": the pinned build files the summary and refuses the
-        # patient-detail row (SecurityAuditGateway).
+        # never "not filed": the capture from bcer-9.0-20261119-f67498c-ydb
+        # files the summary and refuses the patient-detail row; none is captured
+        # yet for the pinned build (SecurityAuditGateway).
         def record_busa_entry
           result = SecurityAuditGateway.record_patient_edit(dfn: dfn, description: busa_description)
           return if result.filed?
