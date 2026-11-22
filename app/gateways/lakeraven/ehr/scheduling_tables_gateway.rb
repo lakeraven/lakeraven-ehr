@@ -12,12 +12,12 @@ module Lakeraven
     # through the BSDX add/edit RPCs Windows Scheduling sends
     # (SchedulingMaintenance), so BPRM and Windows Scheduling see the same rows.
     class SchedulingTablesGateway
-      # status: :saved (id names the row), :refused (message is RPMS's reason),
-      # :not_found (a holiday removal named a date with none) or :unknown (RPMS
-      # did not answer).
       # RPMS answered the holidays read, but not with a list of dated rows.
       class UnreadableHolidays < ::RpmsRpc::Error; end
 
+      # status: :saved (id names the row), :refused (message is RPMS's reason),
+      # :not_found (a holiday removal named a date with none) or :unknown (RPMS
+      # did not answer).
       Result = Data.define(:status, :id, :message) do
         def saved? = status == :saved
       end
@@ -77,11 +77,11 @@ module Lakeraven
       end
 
       def self.add_holiday(date, name, setup: ::RpmsRpc::SchedulingSetup)
-        filing { outcome(setup.add_holiday(date: date, name: name)) }
+        filing { holiday_outcome(setup.add_holiday(date: date, name: name)) }
       end
 
       def self.remove_holiday(date, setup: ::RpmsRpc::SchedulingSetup)
-        filing { outcome(setup.remove_holiday(date)) }
+        filing { holiday_outcome(setup.remove_holiday(date)) }
       end
 
       def self.outcome(reply)
@@ -91,10 +91,27 @@ module Lakeraven
         reason = reply[:message].presence || reply[:error]
         return Result.new(status: :unknown, id: nil, message: nil) if reason.blank?
         return Result.new(status: :not_found, id: nil, message: reply[:message]) if reply[:error] == :not_found
+        # Only a String is RPMS's reason; a Symbol is the gem's internal code,
+        # so a refusal without a message says nothing more.
+        return Result.new(status: :refused, id: nil, message: nil) unless reason.is_a?(String)
 
-        Result.new(status: :refused, id: nil, message: reason.to_s.sub(/\ABSDX\d+: /, ""))
+        Result.new(status: :refused, id: nil, message: reason.sub(/\ABSDX\d+: /, ""))
       end
       private_class_method :outcome
+
+      # rpms-rpc DdrFileman.filer (ddr_fileman.rb) answers a reply with no
+      # [Data] line as :filer_failed with this text: the call did not complete,
+      # so whether RPMS filed is unknown, not a refusal.
+      NO_DATA_MARKER = "no [Data] marker in DDR FILER reply"
+
+      def self.holiday_outcome(reply)
+        if reply.is_a?(Hash) && reply[:error] == :filer_failed && reply[:message].to_s.start_with?(NO_DATA_MARKER)
+          return Result.new(status: :unknown, id: nil, message: nil)
+        end
+
+        outcome(reply)
+      end
+      private_class_method :holiday_outcome
 
       # A write that raises may already have filed: its outcome is unknown.
       def self.filing

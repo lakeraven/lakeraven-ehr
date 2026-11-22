@@ -38,7 +38,7 @@ module Lakeraven
         # POST /scheduling/holidays/:date/remove
         def remove
           date = strict_date(params[:date])
-          return render(plain: "No such date", status: :not_found) unless date
+          return render(plain: "No such date", status: :not_found) unless date && date >= SiteTime.today
 
           result = SchedulingTablesGateway.remove_holiday(date)
           case result.status
@@ -71,12 +71,22 @@ module Lakeraven
           begin
             @holidays = SchedulingTablesGateway.holidays
           rescue ::RpmsRpc::Error, IOError, SystemCallError => e
+            return render_rpms_unavailable(e) if rpms_connection_closed? || e.is_a?(::RpmsRpc::Client::RpcRefusedError)
+
             Rails.logger.error("[scheduling] holidays read raised #{e.class}")
             @holidays = nil
-            flash.now[:alert] = [ flash.now[:alert].presence, "RPMS did not return the holidays. Try again shortly." ].compact.join(" ")
+            flash.now[:alert] = [ flash.now[:alert].presence, read_failure_alert(e) ].compact.join(" ")
             status = :service_unavailable
           end
           render :index, status: status
+        end
+
+        def read_failure_alert(error)
+          if error.is_a?(SchedulingTablesGateway::UnreadableHolidays)
+            "RPMS's holiday list could not be read. Check the HOLIDAY file."
+          else
+            "RPMS did not return the holidays. Try again shortly."
+          end
         end
 
         def strict_date(text)
