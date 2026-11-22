@@ -21,7 +21,7 @@ module Lakeraven
         # POST /scheduling/holidays
         def create
           @form = HolidayForm.new(form_params)
-          return render_index(:unprocessable_content) unless @form.valid?
+          return render_index(:unprocessable_content, after_write: true) unless @form.valid?
 
           result = SchedulingTablesGateway.add_holiday(@form.calendar_date, @form.name)
           if result.saved?
@@ -31,7 +31,7 @@ module Lakeraven
             unconfirmed
           else
             flash.now[:alert] = "RPMS did not add the holiday.#{" #{result.message}" if result.message.present?}"
-            render_index(:unprocessable_content)
+            render_index(:unprocessable_content, after_write: true)
           end
         end
 
@@ -62,16 +62,18 @@ module Lakeraven
         def unconfirmed
           @form ||= HolidayForm.new
           flash.now[:alert] = "RPMS did not confirm the change. Check the holidays before trying again."
-          render_index(:service_unavailable)
+          render_index(:service_unavailable, after_write: true)
         end
 
         # Lists the holidays; a read that fails is shown as a failure, never as
-        # an empty list.
-        def render_index(status = :ok)
+        # an empty list. The shared RPMS-unavailable page replaces this one only
+        # for a plain read; after a write the page keeps the write's alert and
+        # adds the read failure's.
+        def render_index(status = :ok, after_write: false)
           begin
             @holidays = SchedulingTablesGateway.holidays
           rescue ::RpmsRpc::Error, IOError, SystemCallError => e
-            return render_rpms_unavailable(e) if rpms_connection_closed? || e.is_a?(::RpmsRpc::Client::RpcRefusedError)
+            return render_rpms_unavailable(e) if !after_write && (rpms_connection_closed? || e.is_a?(::RpmsRpc::Client::RpcRefusedError))
 
             Rails.logger.error("[scheduling] holidays read raised #{e.class}")
             @holidays = nil
@@ -102,7 +104,10 @@ module Lakeraven
         end
 
         def form_params
-          params.fetch(:holiday, {}).permit(:date, :name).to_h.symbolize_keys
+          holiday = params[:holiday]
+          return {} unless holiday.is_a?(ActionController::Parameters)
+
+          holiday.permit(:date, :name).to_h.symbolize_keys
         end
       end
     end
