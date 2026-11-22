@@ -16,10 +16,17 @@ module Lakeraven
     #   3, 4, 5  denied, with RPMS's reason; an acknowledgement changes nothing
     #   other    -1, an undefined code, no answer, or an error: not opened
     #
-    # Every refusal renders here and notes its reason for the audit row
-    # (AuditableClinicalAccess#note_audit_denial), so the attempt is filed as
-    # a refusal, not an open. RPMS's message lines are its own text, shown
-    # escaped; nothing about the patient is read or shown before the open.
+    # RPMS refusing to bind the option the check runs under (the gem's
+    # ContextRefusedError, from the check or the bulletin) is its own answer:
+    # the user's account is not set up for the check. That is a determined
+    # "no", 403, and retrying will not change it.
+    #
+    # Every refusal goes through refuse_sensitive_record: it notes the reason
+    # for the audit row (AuditableClinicalAccess#note_audit_denial), so the
+    # attempt is filed as a refusal, not an open; it closes the session's open
+    # record when that is the record refused, since RPMS has just said no to
+    # it; and it renders the page. RPMS's message lines are its own text,
+    # shown escaped; nothing about the patient is read or shown before the open.
     module SensitiveRecordAccess
       extend ActiveSupport::Concern
 
@@ -31,7 +38,14 @@ module Lakeraven
       TEMPLATE = "lakeraven/ehr/patient_contexts/sensitive_record"
       # A warning or a denial is RPMS's determined "not yet" or "no": 403, as
       # the record-not-open page is. No usable answer is 503: nobody decided.
-      STATUS_BY_OUTCOME = { acknowledge: :forbidden, denied: :forbidden, unavailable: :service_unavailable }.freeze
+      STATUS_BY_OUTCOME = {
+        acknowledge: :forbidden,
+        denied: :forbidden,
+        account_not_set_up: :forbidden,
+        unavailable: :service_unavailable
+      }.freeze
+      ACCOUNT_NOT_SET_UP_REASON =
+        "sensitive record check: RPMS refused the user's account the #{SensitiveRecordGateway::OPTION} option"
 
       private
 
@@ -40,7 +54,7 @@ module Lakeraven
       # canonical record it names (the gem refuses leading zeros).
       def sensitive_record_cleared?(dfn)
         @sensitive_dfn = dfn
-        record = Patient.canonical_dfn(dfn)
+        @sensitive_record = record = Patient.canonical_dfn(dfn)
         answer = ask_sensitive_record(record)
         return false if answer == :failed
 
@@ -58,6 +72,8 @@ module Lakeraven
         SensitiveRecordGateway.check(record)
       rescue ::RpmsRpc::NotConfiguredError
         raise # no connection of its own: RpmsUserScope ends the session
+      rescue ::RpmsRpc::Client::ContextRefusedError => e
+        refuse_account_not_set_up(e, "check")
       rescue ::RpmsRpc::Error => e
         Rails.logger.error("[sensitive-record] check raised #{e.class}")
         refuse_sensitive_record(:unavailable, [], "sensitive record check: RPMS call failed (#{e.class.name})")
@@ -72,6 +88,7 @@ module Lakeraven
         end
 
         logged = record_sensitive_acknowledgement(record)
+        return false if logged == :failed
         return true if logged.is_a?(Hash) && logged[:success] == true
 
         refuse_sensitive_record(:unavailable, [], "sensitive record bulletin: RPMS did not record the acknowledged access")
@@ -81,17 +98,37 @@ module Lakeraven
         SensitiveRecordGateway.record_acknowledged_access(record)
       rescue ::RpmsRpc::NotConfiguredError
         raise
+      rescue ::RpmsRpc::Client::ContextRefusedError => e
+        refuse_account_not_set_up(e, "bulletin")
       rescue ::RpmsRpc::Error => e
         Rails.logger.error("[sensitive-record] bulletin raised #{e.class}")
         nil
       end
 
+      # Renders the refusal and returns :failed, for the callers above.
+      def refuse_account_not_set_up(error, call)
+        Rails.logger.warn("[sensitive-record] #{call} context refused: #{error.class}")
+        refuse_sensitive_record(:account_not_set_up, [], ACCOUNT_NOT_SET_UP_REASON)
+        :failed
+      end
+
+      # The one way a sensitive-record open is refused.
       def refuse_sensitive_record(outcome, messages, reason)
         note_audit_denial(reason)
+        close_refused_patient_context!
         @sensitive_outcome = outcome
         @sensitive_messages = messages.map(&:to_s)
         render template: TEMPLATE, formats: :html, status: STATUS_BY_OUTCOME.fetch(outcome)
         false
+      end
+
+      # The session stops holding the refused record, however either side
+      # spells it ("03" is patient 3). Another open record is not touched.
+      def close_refused_patient_context!
+        return if @sensitive_record.blank?
+        return unless Patient.canonical_dfn(session[ClinicianPatientContext::SESSION_KEY]) == @sensitive_record
+
+        close_patient_context!
       end
     end
   end

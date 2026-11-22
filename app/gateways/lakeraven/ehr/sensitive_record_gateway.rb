@@ -34,6 +34,12 @@ module Lakeraven
       # meaning. Nothing citable says what a non-zero value makes PTSEC^DGSEC4
       # do, so the open sends the wrapper's documented default and reads only
       # what the wrapper documents: the code and RESULT(2+) message lines.
+      #
+      # Not yet proven: whether PTSEC^DGSEC4 returns those warning lines under
+      # DGMSG=0 on a live sensitive record. The only capture of a sensitive
+      # answer was taken with DGMSG=1. The page refuses correctly either way:
+      # the code alone decides the open, and a warning or denial with no lines
+      # is still refused, it just shows no RPMS text.
       GENERATE_MESSAGE = 0
 
       class << self

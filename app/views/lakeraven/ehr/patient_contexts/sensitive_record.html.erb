@@ -8,6 +8,8 @@
     <h1>This is a sensitive record</h1>
   <% when :denied %>
     <h1>RPMS does not let you open this record</h1>
+  <% when :account_not_set_up %>
+    <h1>This record could not be opened</h1>
   <% else %>
     <h1>This record could not be opened</h1>
   <% end %>
@@ -17,6 +19,13 @@
 <div id="sensitive-record" class="alert alert--error" role="alert">
   <% if @sensitive_messages.present? %>
     <pre class="sensitive-record-message"><%= @sensitive_messages.join("\n") %></pre>
+  <% end %>
+  <% if @sensitive_outcome == :account_not_set_up %>
+    <p>
+      Your RPMS account is not set up for the sensitive-record check, so this
+      record was not opened. Ask your RPMS site manager to give your account
+      the <%= Lakeraven::EHR::SensitiveRecordGateway::OPTION %> option.
+    </p>
   <% end %>
   <% if @sensitive_outcome == :unavailable %>
     <p>
