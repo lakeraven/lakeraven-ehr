@@ -313,6 +313,120 @@ module Lakeraven
           end
         end
 
+        # --- search: a 404 or 410 is never "no matches" (#599 review round 2) --
+        #
+        # A search with no matches is a 200 with an empty Bundle. A 404 or 410
+        # to a search says the type or the endpoint is not there, so it raises
+        # whatever its OperationOutcome says. read keeps returning the
+        # not-found OperationOutcome (the examples above).
+
+        test "a 404 search whose OperationOutcome is not-found raises" do
+          assert_raises(Client::Error) do
+            with_http(404, NOT_FOUND.to_json) { client.search("Patient", name: "Testpatient") }
+          end
+        end
+
+        test "a 410 search whose OperationOutcome is not-found raises" do
+          assert_raises(Client::Error) do
+            with_http(410, NOT_FOUND.to_json) { client.search("Patient", name: "Testpatient") }
+          end
+        end
+
+        test "a 410 search whose OperationOutcome is deleted raises" do
+          assert_raises(Client::Error) do
+            with_http(410, outcome("deleted").to_json) { client.search("Patient", name: "Testpatient") }
+          end
+        end
+
+        test "a 404 search error names neither the params nor the response body" do
+          body = { "resourceType" => "OperationOutcome",
+                   "issue" => [ { "code" => "not-found", "diagnostics" => "BODYMARKER" } ] }.to_json
+          error = assert_raises(Client::Error) do
+            with_http(404, body) { client.search("Patient", name: "PARAMMARKER") }
+          end
+
+          refute_includes error.message, "PARAMMARKER"
+          refute_includes error.message, "BODYMARKER"
+        end
+
+        test "a 200 search with an empty Bundle returns the Bundle" do
+          empty = { "resourceType" => "Bundle", "type" => "searchset", "total" => 0, "entry" => [] }
+          result, = with_http(200, empty.to_json) { client.search("Patient", name: "Testpatient") }
+
+          assert_equal empty, result
+        end
+
+        # --- a Symbol resource type is the same type (#599 review round 2) ----
+
+        test "read accepts a Symbol resource type and returns the Patient" do
+          result, http = with_http(200, PATIENT.to_json) { client.read(:Patient, 1) }
+
+          assert_equal PATIENT, result
+          assert_equal "/fhir/Patient/1", http[:requests].first[:path]
+        end
+
+        test "read with a Symbol resource type returns the not-found OperationOutcome on a 404" do
+          result, = with_http(404, NOT_FOUND.to_json) { client.read(:Patient, "404") }
+
+          assert_equal NOT_FOUND, result
+        end
+
+        test "read with a Symbol resource type still raises when a 200 carries another type" do
+          body = { "resourceType" => "Practitioner", "id" => "1" }.to_json
+          assert_raises(Client::Error) do
+            with_http(200, body) { client.read(:Patient, 1) }
+          end
+        end
+
+        test "search accepts a Symbol resource type and returns the Bundle" do
+          result, http = with_http(200, BUNDLE.to_json) { client.search(:Patient, {}) }
+
+          assert_equal BUNDLE, result
+          assert_equal "/fhir/Patient", http[:requests].first[:path].delete_suffix("?")
+        end
+
+        test "a Symbol that is not a resource type name is refused before any request" do
+          assert_refused_before_any_request { |c| c.read(:patient, 1) }
+          assert_refused_before_any_request { |c| c.search(:"Patient/1", {}) }
+        end
+
+        # --- one GET per call: no silent retry (#599 review round 2) ----------
+
+        test "read opens its connection with max_retries 0" do
+          _, http = with_http(200, PATIENT.to_json) { client.read("Patient", "1") }
+
+          assert_equal 1, http[:starts].length
+          assert_equal 0, http[:starts].first[:opts][:max_retries]
+        end
+
+        test "search opens its connection with max_retries 0" do
+          _, http = with_http(200, BUNDLE.to_json) { client.search("Patient", name: "Testpatient") }
+
+          assert_equal 1, http[:starts].length
+          assert_equal 0, http[:starts].first[:opts][:max_retries]
+        end
+
+        # --- search params must be a Hash (#599 review round 2) ---------------
+
+        {
+          "a raw query String" => "raw=1",
+          "an Integer" => 5,
+          "an Array of pairs" => [ [ "name", "Testpatient" ] ],
+          "true" => true
+        }.each do |label, params|
+          test "search refuses params that are #{label} before any request" do
+            assert_refused_before_any_request { |c| c.search("Patient", params) }
+          end
+        end
+
+        test "search with nil params behaves as no params" do
+          result, http = with_http(200, BUNDLE.to_json) { client.search("Patient", nil) }
+
+          assert_equal BUNDLE, result
+          assert_equal 1, http[:requests].length
+          assert_equal "/fhir/Patient", http[:requests].first[:path].delete_suffix("?")
+        end
+
         # --- a 2xx must be what was asked for --------------------------------
 
         test "read raises when a 200 carries an OperationOutcome" do

@@ -243,20 +243,58 @@ module Lakeraven
         end
       end
 
-      # --- fail closed: a FHIR answer that is not the patient asked for (#599) ---
+      # --- one rule for a FHIR read (#599 review round 2) ---
       #
+      # A FHIR read for a DFN ends one of three ways:
+      #   PATIENT  a Patient whose id is exactly the DFN, that Patient.from_fhir
+      #            maps, and whose mapped name is present.
+      #   ABSENT   a not-found OperationOutcome, or no FHIR client configured.
+      #   FAILURE  everything else.
+      # :fhir_first reads RPC after ABSENT or FAILURE; when RPC has no patient
+      # either, ABSENT is nil and FAILURE raises Client::Error, because we
+      # could not tell whether the patient exists. :rpc_first asks FHIR only
+      # when RPC has no patient: ABSENT is nil, FAILURE raises.
+      #
+      # Factory-Spec-Amendment (#599 review round 2): the rpc_first examples
+      # below used to expect nil for a wrong answer about DFN 99999. A wrong
+      # answer is a FAILURE, not a miss, so they now expect Client::Error.
+      CLIENT_ERROR = Lakeraven::EHR::FHIR::Client::Error
+
       # Each answer is given for the DFN that was asked. None of them is that
       # patient, so none may come back as a Patient with source :fhir.
       WRONG_ANSWERS = {
-        "a Patient with another id" => ->(_dfn) { { "resourceType" => "Patient", "id" => "2", "name" => [ { "family" => "Wrongpatient", "given" => [ "Bea" ] } ] } },
+        "a Patient with another id" => ->(_dfn) { { "resourceType" => "Patient", "id" => "424242", "name" => [ { "family" => "Wrongpatient", "given" => [ "Bea" ] } ] } },
         "a Patient with no id" => ->(_dfn) { { "resourceType" => "Patient", "name" => [ { "family" => "Wrongpatient", "given" => [ "Bea" ] } ] } },
         "a Patient whose id only starts with the DFN" => ->(dfn) { { "resourceType" => "Patient", "id" => "#{dfn}abc", "name" => [ { "family" => "Wrongpatient", "given" => [ "Bea" ] } ] } },
         "an empty object" => ->(_dfn) { {} },
         "an empty searchset Bundle" => ->(_dfn) { { "resourceType" => "Bundle", "type" => "searchset", "total" => 0, "entry" => [] } },
-        "a Practitioner with the DFN as its id" => ->(dfn) { { "resourceType" => "Practitioner", "id" => dfn.to_s, "name" => [ { "family" => "Wrongprovider", "given" => [ "Cy" ] } ] } }
+        "a Practitioner with the DFN as its id" => ->(dfn) { { "resourceType" => "Practitioner", "id" => dfn.to_s, "name" => [ { "family" => "Wrongprovider", "given" => [ "Cy" ] } ] } },
+        "an OperationOutcome that is not not-found" => ->(_dfn) { { "resourceType" => "OperationOutcome", "issue" => [ { "severity" => "error", "code" => "processing", "diagnostics" => "Bodymarker" } ] } },
+        "an OperationOutcome with no issues" => ->(_dfn) { { "resourceType" => "OperationOutcome", "issue" => [] } },
+        "nil" => ->(_dfn) { nil }
       }.freeze
 
-      WRONG_ANSWERS.each do |label, answer|
+      # The requested Patient, with nothing Patient.from_fhir maps to a name.
+      NAMELESS_ANSWERS = {
+        "the requested Patient with no name" => ->(dfn) { { "resourceType" => "Patient", "id" => dfn.to_s } },
+        "the requested Patient with an empty name list" => ->(dfn) { { "resourceType" => "Patient", "id" => dfn.to_s, "name" => [], "gender" => "female" } },
+        "the requested Patient named only by text" => ->(dfn) { { "resourceType" => "Patient", "id" => dfn.to_s, "name" => [ { "text" => "Bodymarker Textonly" } ] } },
+        "the requested Patient with a blank family name" => ->(dfn) { { "resourceType" => "Patient", "id" => dfn.to_s, "name" => [ { "family" => "  ", "given" => [] } ] } }
+      }.freeze
+
+      # The requested Patient, named, that Patient.from_fhir raises on.
+      UNMAPPABLE_ANSWERS = {
+        "the requested Patient with a year-only birthDate" => ->(dfn) { { "resourceType" => "Patient", "id" => dfn.to_s, "name" => [ { "family" => "Wrongpatient", "given" => [ "Bea" ] } ], "birthDate" => "1980" } },
+        "the requested Patient with a year-month birthDate" => ->(dfn) { { "resourceType" => "Patient", "id" => dfn.to_s, "name" => [ { "family" => "Wrongpatient", "given" => [ "Bea" ] } ], "birthDate" => "1980-05" } },
+        "the requested Patient with a birthDate that is not a date" => ->(dfn) { { "resourceType" => "Patient", "id" => dfn.to_s, "name" => [ { "family" => "Wrongpatient", "given" => [ "Bea" ] } ], "birthDate" => "Bodymarker" } }
+      }.freeze
+
+      FAILURE_ANSWERS = WRONG_ANSWERS.merge(NAMELESS_ANSWERS).merge(UNMAPPABLE_ANSWERS).freeze
+
+      # What a FAILURE's error message and log line must never repeat.
+      LEAK_MARKERS = %w[99999 424242 Wrongpatient WRONGPATIENT Bea Wrongprovider Bodymarker BODYMARKER Textonly 1980].freeze
+
+      FAILURE_ANSWERS.each do |label, answer|
         test "fhir_first falls back to RPC when FHIR answers #{label}" do
           fhir = AnsweringClient.new(answer.call(1))
 
@@ -271,14 +309,31 @@ module Lakeraven
           end
         end
 
-        test "rpc_first returns nil when RPC does not know the DFN and FHIR answers #{label}" do
+        test "fhir_first raises when RPC does not know the DFN and FHIR answers #{label}" do
           fhir = AnsweringClient.new(answer.call(99999))
 
           with_fhir_client(fhir) do
-            patient = PatientRepository.find(99999, source_preference: :rpc_first)
+            error = assert_raises(CLIENT_ERROR) do
+              PatientRepository.find(99999, source_preference: :fhir_first)
+            end
 
             assert_equal [ [ "Patient", "99999" ] ], fhir.reads
-            assert patient.nil?, "a patient came back with source #{patient&.provenance&.dig(:rpms, :source).inspect}"
+            assert_names_nothing error.message
+          end
+        end
+
+        # Amended: was "rpc_first returns nil when RPC does not know the DFN
+        # and FHIR answers ...".
+        test "rpc_first raises when RPC does not know the DFN and FHIR answers #{label}" do
+          fhir = AnsweringClient.new(answer.call(99999))
+
+          with_fhir_client(fhir) do
+            error = assert_raises(CLIENT_ERROR) do
+              PatientRepository.find(99999, source_preference: :rpc_first)
+            end
+
+            assert_equal [ [ "Patient", "99999" ] ], fhir.reads
+            assert_names_nothing error.message
           end
         end
       end
@@ -295,15 +350,166 @@ module Lakeraven
         end
       end
 
-      test "rpc_first returns nil when the test double holds another patient under the requested key" do
+      # Amended: was "rpc_first returns nil when the test double holds another
+      # patient under the requested key".
+      test "rpc_first raises when the test double holds another patient under the requested key" do
         fhir = Lakeraven::EHR::FHIR::MockClient.new
         fhir.seed_resource("Patient", "99999", synthetic_patient("2"))
 
         with_fhir_client(fhir) do
-          patient = PatientRepository.find(99999, source_preference: :rpc_first)
-
-          assert patient.nil?, "a patient came back with source #{patient&.provenance&.dig(:rpms, :source).inspect}"
+          assert_raises(CLIENT_ERROR) do
+            PatientRepository.find(99999, source_preference: :rpc_first)
+          end
         end
+      end
+
+      test "fhir_first raises when the test double holds another patient under the requested key and RPC does not know the DFN" do
+        fhir = Lakeraven::EHR::FHIR::MockClient.new
+        fhir.seed_resource("Patient", "99999", synthetic_patient("2"))
+
+        with_fhir_client(fhir) do
+          assert_raises(CLIENT_ERROR) do
+            PatientRepository.find(99999, source_preference: :fhir_first)
+          end
+        end
+      end
+
+      # --- ABSENT: the ordinary miss is nil, never an error ---
+
+      test "fhir_first returns nil when FHIR answers not-found and RPC does not know the DFN" do
+        fhir = AnsweringClient.new(not_found_outcome)
+
+        with_fhir_client(fhir) do
+          assert_nil PatientRepository.find(99999, source_preference: :fhir_first)
+          assert_equal [ [ "Patient", "99999" ] ], fhir.reads
+        end
+      end
+
+      test "rpc_first returns nil when FHIR answers not-found and RPC does not know the DFN" do
+        fhir = AnsweringClient.new(not_found_outcome)
+
+        with_fhir_client(fhir) do
+          assert_nil PatientRepository.find(99999, source_preference: :rpc_first)
+          assert_equal [ [ "Patient", "99999" ] ], fhir.reads
+        end
+      end
+
+      test "rpc_first returns nil when the test double has no such patient and RPC does not know the DFN" do
+        with_fhir_client(Lakeraven::EHR::FHIR::MockClient.new) do
+          assert_nil PatientRepository.find(99999, source_preference: :rpc_first)
+        end
+      end
+
+      test "fhir_first and rpc_first return nil for an unknown DFN when no FHIR client is configured" do
+        with_fhir_client(nil) do
+          assert_nil PatientRepository.find(99999, source_preference: :fhir_first)
+          assert_nil PatientRepository.find(99999, source_preference: :rpc_first)
+        end
+      end
+
+      # --- FAILURE by a raised Client::Error, with RPC not knowing the DFN ---
+
+      test "fhir_first raises when the FHIR client fails and RPC does not know the DFN" do
+        fhir = AnsweringClient.new(CLIENT_ERROR.new("FHIR Patient request answered 503"))
+
+        with_fhir_client(fhir) do
+          error = assert_raises(CLIENT_ERROR) do
+            PatientRepository.find(99999, source_preference: :fhir_first)
+          end
+
+          assert_equal [ [ "Patient", "99999" ] ], fhir.reads
+          assert_names_nothing error.message
+        end
+      end
+
+      # --- log lines: a FAILURE warns with a truthful reason; a miss does not ---
+
+      test "a not-found miss logs nothing at warn" do
+        log = capture_log do
+          with_fhir_client(Lakeraven::EHR::FHIR::MockClient.new) do
+            assert_equal :rpc, PatientRepository.find(1, source_preference: :fhir_first).provenance[:rpms][:source]
+            assert_nil PatientRepository.find(99999, source_preference: :fhir_first)
+            assert_nil PatientRepository.find(99999, source_preference: :rpc_first)
+          end
+        end
+
+        assert_empty warn_lines(log)
+      end
+
+      test "an unconfigured FHIR client logs nothing at warn" do
+        log = capture_log do
+          with_fhir_client(nil) do
+            PatientRepository.find(1, source_preference: :fhir_first)
+            PatientRepository.find(99999, source_preference: :rpc_first)
+          end
+        end
+
+        assert_empty warn_lines(log)
+      end
+
+      test "a wrong-id answer under fhir_first warns that it was not the requested Patient" do
+        fhir = AnsweringClient.new(WRONG_ANSWERS.fetch("a Patient with another id").call(1))
+        log = capture_log do
+          with_fhir_client(fhir) { PatientRepository.find(1, source_preference: :fhir_first) }
+        end
+
+        assert_warned log, "not the requested Patient"
+      end
+
+      test "a wrong-id answer under rpc_first warns that it was not the requested Patient" do
+        fhir = AnsweringClient.new(WRONG_ANSWERS.fetch("a Patient with another id").call(99999))
+        log = capture_log do
+          with_fhir_client(fhir) do
+            assert_raises(CLIENT_ERROR) { PatientRepository.find(99999, source_preference: :rpc_first) }
+          end
+        end
+
+        assert_warned log, "not the requested Patient"
+      end
+
+      test "a nameless answer warns that it has no usable name" do
+        fhir = AnsweringClient.new(NAMELESS_ANSWERS.fetch("the requested Patient named only by text").call(1))
+        log = capture_log do
+          with_fhir_client(fhir) { PatientRepository.find(1, source_preference: :fhir_first) }
+        end
+
+        assert_warned log, "no usable name"
+        refute_includes warn_lines(log).join, "not the requested Patient"
+      end
+
+      test "an unmappable answer warns that it could not be mapped" do
+        fhir = AnsweringClient.new(UNMAPPABLE_ANSWERS.fetch("the requested Patient with a year-only birthDate").call(1))
+        log = capture_log do
+          with_fhir_client(fhir) { PatientRepository.find(1, source_preference: :fhir_first) }
+        end
+
+        assert_warned log, "could not be mapped"
+        refute_includes warn_lines(log).join, "not the requested Patient"
+      end
+
+      test "a failed FHIR read warns with the client's message under both preferences" do
+        fhir = AnsweringClient.new(CLIENT_ERROR.new("FHIR Patient request answered 503"))
+        fhir_first = capture_log do
+          with_fhir_client(fhir) { PatientRepository.find(1, source_preference: :fhir_first) }
+        end
+        rpc_first = capture_log do
+          with_fhir_client(fhir) do
+            assert_raises(CLIENT_ERROR) { PatientRepository.find(99999, source_preference: :rpc_first) }
+          end
+        end
+
+        assert_warned fhir_first, "FHIR Patient request answered 503"
+        assert_warned rpc_first, "FHIR Patient request answered 503"
+      end
+
+      test "a found FHIR patient logs nothing at warn" do
+        log = capture_log do
+          with_fhir_client(seeded_fhir_client("1")) do
+            assert_equal :fhir, PatientRepository.find(1, source_preference: :fhir_first).provenance[:rpms][:source]
+          end
+        end
+
+        assert_empty warn_lines(log)
       end
 
       # --- an outage is not "no such patient" (#599) ---
@@ -416,6 +622,45 @@ module Lakeraven
           name: [ { family: "Testpatient", given: [ "Ada" ] } ],
           gender: "female", birthDate: "1980-05-15"
         }
+      end
+
+      def not_found_outcome
+        {
+          "resourceType" => "OperationOutcome",
+          "issue" => [ { "severity" => "error", "code" => "not-found", "diagnostics" => "Patient not found" } ]
+        }
+      end
+
+      # Runs the block with Rails.logger swapped for a logger on a StringIO,
+      # one "SEVERITY message" line per entry, and returns what was logged.
+      def capture_log
+        io = StringIO.new
+        logger = ActiveSupport::Logger.new(io)
+        logger.level = Logger::DEBUG
+        logger.formatter = ->(severity, _time, _progname, message) { "#{severity} #{message}\n" }
+        saved = Rails.logger
+        Rails.logger = logger
+        yield
+        io.string
+      ensure
+        Rails.logger = saved
+      end
+
+      def warn_lines(log)
+        log.lines.select { |line| line.start_with?("WARN", "ERROR", "FATAL") }
+      end
+
+      # One warn line says the reason, and no line at warn or above repeats
+      # an id, a name or a piece of the answer.
+      def assert_warned(log, reason)
+        warned = warn_lines(log)
+        assert warned.any? { |line| line.start_with?("WARN") && line.include?(reason) },
+               "no WARN line says #{reason.inspect}:\n#{log}"
+        assert_names_nothing warned.join
+      end
+
+      def assert_names_nothing(text)
+        LEAK_MARKERS.each { |marker| refute_includes text, marker }
       end
 
       # A FHIR client that gives every read the same answer (raising it when
