@@ -71,6 +71,51 @@ module Lakeraven
           assert_empty tribal_exts
         end
 
+        # US Core tribal affiliation (#1187): the complex us-core-tribal-affiliation
+        # extension must be removed just like the legacy URL.
+
+        test "external view removes US Core tribal affiliation extension" do
+          policy = RedactionPolicy.new(view: :external)
+          resource = build_patient_resource(us_core_tribal: true)
+          assert_equal [ US_CORE_TRIBAL_URL ], resource[:extension].map { |e| e[:url] }
+
+          result = policy.apply(resource)
+
+          tribal_exts = (result[:extension] || []).select { |e| e[:url]&.include?("tribal") }
+          assert_empty tribal_exts
+          refute_includes result.to_json, "SYNTHETIC TRIBE A"
+        end
+
+        test "research view removes US Core tribal affiliation extension" do
+          policy = RedactionPolicy.new(view: :research)
+          resource = build_patient_resource(us_core_tribal: true)
+          assert_equal [ US_CORE_TRIBAL_URL ], resource[:extension].map { |e| e[:url] }
+
+          result = policy.apply(resource)
+
+          tribal_exts = (result[:extension] || []).select { |e| e[:url]&.include?("tribal") }
+          assert_empty tribal_exts
+          refute_includes result.to_json, "SYNTHETIC TRIBE A"
+        end
+
+        test "research view removes legacy tribal enrollment extension" do
+          policy = RedactionPolicy.new(view: :research)
+          resource = build_patient_resource(tribal: "SYN-0001")
+
+          result = policy.apply(resource)
+
+          tribal_exts = (result[:extension] || []).select { |e| e[:url]&.include?("tribal") }
+          assert_empty tribal_exts
+        end
+
+        test "full and patient_safe views keep the US Core tribal affiliation extension" do
+          %i[full patient_safe].each do |view|
+            result = RedactionPolicy.new(view: view).apply(build_patient_resource(us_core_tribal: true))
+
+            assert_equal [ US_CORE_TRIBAL_URL ], (result[:extension] || []).map { |e| e[:url] }, "#{view} view"
+          end
+        end
+
         # =============================================================================
         # RESEARCH VIEW (redact all direct identifiers)
         # =============================================================================
@@ -149,7 +194,9 @@ module Lakeraven
 
         private
 
-        def build_patient_resource(ssn: nil, tribal: nil, sogi: false)
+        US_CORE_TRIBAL_URL = "http://hl7.org/fhir/us/core/StructureDefinition/us-core-tribal-affiliation"
+
+        def build_patient_resource(ssn: nil, tribal: nil, sogi: false, us_core_tribal: false)
           resource = {
             resourceType: "Patient",
             id: "1",
@@ -170,6 +217,20 @@ module Lakeraven
             resource[:extension] << {
               url: "http://hl7.org/fhir/us/core/StructureDefinition/tribal-affiliation",
               valueString: tribal
+            }
+          end
+
+          if us_core_tribal
+            resource[:extension] << {
+              url: US_CORE_TRIBAL_URL,
+              extension: [
+                { url: "tribalAffiliation",
+                  valueCodeableConcept: {
+                    coding: [ { system: "https://terminology.lakeraven.com/CodeSystem/ihs-tribe", code: "901" } ],
+                    text: "SYNTHETIC TRIBE A"
+                  } },
+                { url: "isEnrolled", valueBoolean: true }
+              ]
             }
           end
 
