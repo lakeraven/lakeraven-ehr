@@ -28,9 +28,11 @@ module Lakeraven
       LOCATION_FRAMES = 3
 
       # Errors with their own handlers (RpmsUserScope, the audit concern).
-      # A read seam re-raises these unchanged: they are not a section's
+      # The chart's read_section re-raises these unchanged: they are not a section's
       # failure, and rendering them as one would hide a lost session, a
-      # missing configuration or an unrecorded access.
+      # missing configuration or an unrecorded access. The chart's read_section
+      # re-raises them; AllergySource.fetch does not, so the banner on other
+      # pages degrades to "allergies not loaded" instead of failing the page.
       PASS_THROUGH = [
         ::RpmsRpc::NotConfiguredError,
         Lakeraven::EHR::RpmsSessions::SignInAgain,
@@ -47,10 +49,11 @@ module Lakeraven
         new(nil, noun: noun, subject: subject, returned: returned)
       end
 
-      # Anything a read may return as its list: an Array, or an Enumerable
-      # that converts to one (an ActiveRecord relation).
+      # What a read seam accepts as its list: an already-loaded one. An
+      # unloaded relation is refused, because its query would run after the
+      # seam's rescue; the read loads it inside the block (`.to_a`).
       def self.list?(value)
-        value.respond_to?(:to_ary) || value.is_a?(ActiveRecord::Relation)
+        value.respond_to?(:to_ary)
       end
 
       # noun: the lower-case plural the section is called in prose ("problems").

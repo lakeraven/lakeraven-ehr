@@ -485,7 +485,13 @@ module Lakeraven
       # The failure names both families, so a token holding only one of them
       # is told which of its resources are missing.
       def read_screenings(dfn)
-        read_section("QuestionnaireResponse", "screenings", subject: SCREENINGS_SUBJECT) { ScreeningResponse.for_patient(dfn) }
+        read_section("QuestionnaireResponse", "screenings", subject: SCREENINGS_SUBJECT) do
+          # Loaded here, inside the seam, so a failure on load is a recorded
+          # section failure. The savepoint keeps a failed statement from
+          # aborting the audit wrapper's transaction (PostgreSQL refuses every
+          # later statement of an aborted one, the audit row included).
+          ScreeningResponse.transaction(requires_new: true) { ScreeningResponse.for_patient(dfn).to_a }
+        end
       end
 
       # Validation runs on WRITE; this is the read side of the same contract.

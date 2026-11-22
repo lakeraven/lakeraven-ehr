@@ -25,8 +25,6 @@ module Lakeraven
           dropped_count: dropped_count_of(value),
           conflict: value.is_a?(AllergyIntoleranceReading) && value.conflict
         )
-      rescue *RpmsReadFailure::PASS_THROUGH
-        raise
       rescue StandardError => e
         # Never the message: one from a supplemental provider includes the
         # patient identifier, and a name would be worse.
