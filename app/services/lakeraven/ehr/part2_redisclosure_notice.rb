@@ -57,6 +57,19 @@ module Lakeraven
         part2 = marks.include?(UNREADABLE) || labels.any? { |label| part2_code?(label[:code]) }
         { security_labels: labels, part2: part2 }
       end
+
+      # For items that all inherit the same marks (document, section or
+      # Bundle): dedupes those and works out their part2 once, and returns
+      # a lambda giving label_fields(inherited + own) from an item's own marks.
+      def self.inheriting(inherited)
+        base = label_fields(inherited)
+        keys = base[:security_labels].to_set { |label| label.values_at(:system, :code) }
+        lambda do |own_marks|
+          own = label_fields(own_marks)
+          extra = own[:security_labels].reject { |label| keys.include?(label.values_at(:system, :code)) }
+          { security_labels: base[:security_labels] + extra, part2: base[:part2] || own[:part2] }
+        end
+      end
     end
   end
 end

@@ -78,7 +78,7 @@ module Lakeraven
       private
 
       def parse_json(input)
-        JSON.parse(input)
+        JSON.parse(input, allow_duplicate_key: false)
       rescue JSON::ParserError
         nil
       end
@@ -110,19 +110,19 @@ module Lakeraven
         extracted, others = marked.partition { |r, _| EXTRACTORS.key?(r["resourceType"]) }
         bundle_marks += others.flat_map(&:last)
 
+        merge = Part2RedisclosureNotice.inheriting(bundle_marks)
         items = EXTRACTORS.values.to_h { |key, _| [ key, [] ] }
         extracted.each do |resource, marks|
           key, extractor = EXTRACTORS[resource["resourceType"]]
-          items[key] << send(extractor, resource).merge(Part2RedisclosureNotice.label_fields(bundle_marks + marks))
+          items[key] << send(extractor, resource).merge(merge.call(marks))
         end
-        items.merge(
-          security_labels: Part2RedisclosureNotice.label_fields(bundle_marks)[:security_labels],
-          part2: Part2RedisclosureNotice.label_fields(bundle_marks + extracted.flat_map(&:last))[:part2]
-        )
+        top = merge.call(extracted.flat_map(&:last))
+        items.merge(security_labels: merge.call([])[:security_labels], part2: top[:part2])
       end
 
       # Label marks at any depth: meta.security Codings, securityLabel
-      # CodeableConcepts, and any Coding whose code is a Part 2 code.
+      # CodeableConcepts (and Part 2 codes nested inside either), any Coding
+      # whose code is a Part 2 code, and a Part 2 primitive valueCode.
       def label_marks(node)
         case node
         when Array then node.flat_map { |value| label_marks(value) }
@@ -131,6 +131,7 @@ module Lakeraven
           marks.concat(meta_marks(node["meta"])) if node.key?("meta")
           marks.concat(security_label_marks(node["securityLabel"])) if node.key?("securityLabel")
           marks << coding_mark(node) if node["code"].is_a?(String) && Part2RedisclosureNotice.part2_code?(node["code"])
+          marks << { code: node["valueCode"] } if node["valueCode"].is_a?(String) && Part2RedisclosureNotice.part2_code?(node["valueCode"])
           marks + node.except("meta", "securityLabel").values.flat_map { |value| label_marks(value) }
         else []
         end
@@ -145,7 +146,7 @@ module Lakeraven
         return others if security.nil?
         return others << UNREADABLE unless security.is_a?(Array)
 
-        others + security.map { |coding| coding_mark(coding) }
+        others + security.flat_map { |coding| coding_marks(coding) }
       end
 
       def security_label_marks(concepts)
@@ -153,9 +154,18 @@ module Lakeraven
         return [ UNREADABLE ] unless concepts.is_a?(Array)
 
         concepts.flat_map do |concept|
-          codings = concept["coding"] if concept.is_a?(Hash)
-          codings.is_a?(Array) && codings.any? ? codings.map { |coding| coding_mark(coding) } : [ UNREADABLE ]
+          next [ UNREADABLE ] unless concept.is_a?(Hash)
+
+          codings = concept["coding"]
+          own = codings.is_a?(Array) && codings.any? ? codings.flat_map { |coding| coding_marks(coding) } : [ UNREADABLE ]
+          own + label_marks(concept.except("coding"))
         end
+      end
+
+      # A label Coding's own mark plus the marks nested in its children.
+      def coding_marks(coding)
+        children = coding.is_a?(Hash) ? label_marks(coding.values) : []
+        [ coding_mark(coding), *children ]
       end
 
       # A Coding as { system:, code:, display: } (system and display only

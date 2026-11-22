@@ -17,7 +17,8 @@ module Lakeraven
     # document, so a label-only entry's labels reach its siblings. A label with
     # no code or codeSystem marks its scope part2: true with no label value.
     # Top-level part2 is true for any Part 2 or unreadable label anywhere.
-    # XML that is not well-formed, or not a v3 ClinicalDocument, raises.
+    # XML that is not well-formed, has a DOCTYPE (entities could hide
+    # labels), or is not a v3 ClinicalDocument, raises.
     class CcdaParser
       NS = "urn:hl7-org:v3"
       XMLNS = { "xmlns" => NS }.freeze
@@ -42,6 +43,8 @@ module Lakeraven
 
       def parse(xml)
         doc = Nokogiri::XML(xml) { |config| config.strict.nonet }
+        raise Malformed, "C-CDA must not have a DOCTYPE" if doc.internal_subset || doc.external_subset
+
         root = doc.root
         raise Malformed, "Not a C-CDA ClinicalDocument" unless root&.name == "ClinicalDocument" && root.namespace&.href == NS
 
@@ -50,11 +53,15 @@ module Lakeraven
         sections = doc.xpath(SECTIONS.values.map { |template, *| section_xpath(template) }.join(" | "), XMLNS)
         marks = owned_marks(doc, content_entries + sections.to_a)
         document = marks.fetch(nil, [])
+        inheriting = {} # section pointer_ids => fields for document + those sections
 
         entries.transform_values do |list|
           list.map do |entry, fields, _|
-            own = [ entry, *entry.ancestors ].flat_map { |node| marks.fetch(node.pointer_id, []) }
-            fields.merge(Part2RedisclosureNotice.label_fields(document + own))
+            sections, own = [ entry, *entry.ancestors ].select { |node| marks.key?(node.pointer_id) }
+              .partition { |node| node.name == "section" }
+            merge = inheriting[sections.map(&:pointer_id)] ||=
+              Part2RedisclosureNotice.inheriting(document + sections.flat_map { |node| marks[node.pointer_id] })
+            fields.merge(merge.call(own.flat_map { |node| marks[node.pointer_id] }))
           end
         end.merge(
           security_labels: Part2RedisclosureNotice.label_fields(document)[:security_labels],
@@ -88,7 +95,7 @@ module Lakeraven
       def mark(element)
         code = element["code"]
         oid = Part2RedisclosureNotice.unpad(Part2RedisclosureNotice.unpad(element["codeSystem"]).delete_prefix("urn:oid:"))
-        confidentiality = element.name == "confidentialityCode" && element.namespace&.href == NS
+        confidentiality = element.name == "confidentialityCode" # in any namespace
         return unless confidentiality || oid == CONFIDENTIALITY_OID || Part2RedisclosureNotice.part2_code?(code)
         return Part2RedisclosureNotice::UNREADABLE if Part2RedisclosureNotice.unpad(code).empty? || oid.empty?
 
