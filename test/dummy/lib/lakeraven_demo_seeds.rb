@@ -138,6 +138,22 @@ module LakeravenDemoSeeds
     seed_demographics(m)
     seed_clinical(m)
     seed_panel(m)
+    seed_not_sensitive(m)
+  end
+
+  # DG SENSITIVE RECORD ACCESS (PTSEC^DGSEC4) is asked before a record opens
+  # (#613). Every demo patient answers "0", not sensitive, as a broker does
+  # for a record with no DG SECURITY flag. The RPC has no DataMapper mapping
+  # (RpmsRpc::DgSensitive reads it with call_rpc and parses the lines), so
+  # the reply lines go in the mock's raw-lines table, keyed by the DFN, where
+  # MockClient#seed_raw_lines would put them.
+  SENSITIVE_ACCESS_RPC = "DG SENSITIVE RECORD ACCESS"
+
+  def seed_not_sensitive(m)
+    table = m.instance_variable_get(:@lines) || {}
+    replies = (table[SENSITIVE_ACCESS_RPC] ||= {})
+    [ 1, *PANEL.map { |p| p[:dfn] } ].each { |dfn| replies[dfn.to_s] = [ "0" ] }
+    m.instance_variable_set(:@lines, table)
   end
 
   def seed_demographics(m)
