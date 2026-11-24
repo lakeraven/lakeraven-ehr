@@ -331,6 +331,10 @@ Lakeraven::EHR::Engine.routes.draw do
     post "access_types", to: "access_types#create"
     get "access_types/:id/edit", to: "access_types#edit", as: :edit_access_type, constraints: { id: /\d+/ }
     post "access_types/:id", to: "access_types#update", as: :access_type, constraints: { id: /\d+/ }
+    # Site-wide holidays (S-SCH-19, SDZSUP).
+    get "holidays", to: "holidays#index", as: :holidays
+    post "holidays", to: "holidays#create"
+    post "holidays/:date/remove", to: "holidays#remove", as: :remove_holiday, constraints: { date: /\d{4}-\d{2}-\d{2}/ }
     get "resource_groups", to: "resource_groups#index", as: :resource_groups
     get "resource_groups/new", to: "resource_groups#new", as: :new_resource_group
     post "resource_groups", to: "resource_groups#create"
