@@ -269,7 +269,7 @@ module RateLimitTestHelper
     verb = "get" if verb.blank?
     path = route.path.spec.to_s
     path = path.gsub("(.:format)", "").gsub("(.format)", "")
-    path = path.gsub(/:\w+/, "1")
+    path = path.gsub(/:\w+/) { |param| param == ":date" ? "2031-07-04" : "1" }
     path = path.gsub(/\(\?:\/([^)]+)\)\?/, "")
     path = "/lakeraven-ehr#{path}"
     path = path.gsub("//", "/")
