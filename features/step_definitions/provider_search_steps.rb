@@ -28,6 +28,12 @@ When("I search for providers who can prescribe controlled substances") do
   @provider_results = full_providers.select(&:can_prescribe_controlled?)
 end
 
+# The demo site's whole NEW PERSON page, so a new seed user is one edit to
+# features/support/rpms_demo_site.rb.
+Then("I should find every demo provider in the results") do
+  assert_equal RpmsDemoSite::PROVIDERS.size, @provider_results.length
+end
+
 Then("I should find {int} provider(s) in the results") do |count|
   assert_equal count, @provider_results.length
 end
