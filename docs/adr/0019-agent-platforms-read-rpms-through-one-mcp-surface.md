@@ -1,9 +1,9 @@
 # ADR 0019: Agent platforms read RPMS through one MCP surface, and a hosted model runs only in the partner's own cloud project
 
-**Status:** Proposed
+**Status:** Accepted on 25 Nov 2026, by the owner's decision, with the instruction to be strict about data sovereignty and loosen only when a later ADR shows the need. ADR 0016 and 0017 are still proposed; this ADR applies their deny-by-default rules to agent and model paths now.
 **Date:** 2026-11-25
 **Decides:** how an outside agent platform (Gemini for healthcare first) reads RPMS data through this engine; whether a hosted model such as Gemini may sit behind the ADR 0015 `Suggestions` port; and what has to exist before a connector is listed in a vendor catalog
-**Builds on:** ADR 0005 (PHI access audit), ADR 0006 (Part 2 posture), ADR 0010 (authorization derives from RPMS options and keys), ADR 0011 (a broker session is the only way to RPMS), ADR 0012 (every request carries identity and scope), ADR 0013 (a tenant is one RPMS instance), ADR 0015 (assistive AI behind one adapter)
+**Builds on:** ADR 0016 (Indigenous data governance: deny by default, approvals are records, revocation stops the next transfer, no secondary use), ADR 0005 (PHI access audit), ADR 0006 (Part 2 posture), ADR 0010 (authorization derives from RPMS options and keys), ADR 0011 (a broker session is the only way to RPMS), ADR 0012 (every request carries identity and scope), ADR 0013 (a tenant is one RPMS instance), ADR 0015 (assistive AI behind one adapter)
 **Issues:** #1234 (read-only MCP surface), #546 (external MCP client validation)
 
 ## Context
@@ -43,6 +43,25 @@ Binding constraints:
 
 ## Decision
 
+### 0. The strict default
+
+Every path in this ADR moves data out of the tenant: to an agent platform, or to a hosted model. ADR 0016 treats both as egress. The rule for all of them is the same:
+
+- **Refuse when anything is missing, unknown or cannot be checked.** That covers a switch, an approval record, a scope, a consent, a condition of decision 4 or a harness result. The refusal says the service *could not determine* that the path is allowed. It never says the path is denied on the merits, and it never falls back to a looser path.
+- **The tenant's governing body authorizes the path, not only its IT administrator.** Enabling agent access or a hosted model needs an active ADR 0016 approval record. The record names:
+  - the approving body;
+  - the recipient (the agent client or the model project);
+  - the resource types;
+  - the purpose;
+  - an expiry.
+  Revoking it stops the next call (ADR 0016 rule 6).
+- **Collective approval and patient consent are both needed.** Neither overrides the other (ADR 0016 rule 4).
+- **No secondary use.** A recipient may not train on, pool or retain tenant data beyond the purpose in the approval (ADR 0016 rule 10). We record the recipient's attestation, and a missing attestation is a refusal.
+- **Until the ADR 0016 approval contract exists in code, every path here runs on synthetic data only.** No real tenant can be switched on before then.
+- **A tenant whose `part2_program` is true gets no agent or hosted-model path** until labelling and disclosure accounting exist (ADR 0006).
+
+Loosening any of these needs a later ADR, not a configuration change.
+
 ### 1. One vendor-neutral MCP surface on the FHIR service
 
 The FHIR service (OpenRPMS layer C when it is extracted, this engine until then) exposes a
@@ -72,9 +91,11 @@ An agent acting for a clinician reads RPMS **as that clinician**:
 
 ### 3. The partner switches it on, per tenant, and it fails closed
 
-Agent access is off by default for each tenant (ADR 0013). A tenant administrator enables it per
-client application. Disabling it revokes that client's tokens. If the switch cannot be read,
-access is treated as off.
+Agent access is off by default for each tenant (ADR 0013). It is enabled per client application,
+and only while an active ADR 0016 approval covers that client (decision 0). The approval can
+limit the client to fewer resource types than the user could read. Disabling the switch, or the
+approval expiring or being revoked, ends that client's tokens. If the switch or the approval
+cannot be read, access is treated as off.
 
 ### 4. Gemini (and any hosted model) behind `Suggestions` only from the partner's own cloud project
 
@@ -86,7 +107,8 @@ data in development.
   - the model endpoint runs in a cloud project the partner owns and controls;
   - that project is under the partner's own BAA with the cloud provider;
   - the provider does not train on the inputs;
-  - the use case has passed its ADR 0015 validation harness on that adapter and model version.
+  - the use case has passed its ADR 0015 validation harness on that adapter and model version;
+  - an active ADR 0016 approval names that model project as a recipient for that use case.
 - If any condition is unmet, or cannot be checked, the adapter refuses real inputs and the product
   shows no suggestion.
 - The local open-weight adapter remains the default. A Lakeraven-owned Gemini account never
@@ -140,6 +162,7 @@ data in development.
 
 ## Build order
 
+0. The ADR 0016 approval contract (rule 11), at least the read side the switch needs. Nothing here runs on real data before it.
 1. #1234: the read-only MCP surface, with per-user delegation and the per-tenant switch.
    It follows #546 phase 1.
 2. Gemini Enterprise connects to it as a per-user OAuth client, on synthetic data.
@@ -151,7 +174,4 @@ Slices 1, 2 and 4 handle PHI and get the hard panel.
 
 ## Open questions
 
-- Should a tenant be able to limit an agent client to a subset of resource types, below what the
-  user could read? Recommendation: yes, through registered scopes. No new mechanism is needed.
-- When a tenant's `part2_program` is true, should agent access be refused outright until
-  disclosure accounting exists? Recommendation: yes, fail closed.
+- Which ADR 0016 approval shape (ADR 0017's IG profile) the switch reads. Until that contract exists, decision 0 keeps every path synthetic-only.
