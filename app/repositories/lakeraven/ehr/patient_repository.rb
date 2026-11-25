@@ -3,7 +3,9 @@
 module Lakeraven
   module EHR
     # Access layer: hydrates Patient domain objects from RPMS (via rpms-rpc)
-    # and optionally FHIR (via rpms-rpc MockFhirClient or IRIS for Health).
+    # and optionally FHIR, through the engine's configured FHIR client
+    # (Lakeraven::EHR.configuration.fhir_client: FHIR::Client for an endpoint
+    # such as IRIS for Health, FHIR::MockClient in tests).
     #
     # Layer contract:
     # - Only this class calls PatientGateway / DataMapper for patient data
@@ -39,43 +41,94 @@ module Lakeraven
 
         private
 
+        # A FHIR read ends one of three ways (#599):
+        #   [:patient, patient]  the requested Patient, mapped and named
+        #   [:absent]            no client, or a not-found/deleted OperationOutcome
+        #   [:failure, reason]   anything else; reason is PHI-free
+        # A failure is never "no such patient": when RPC has no patient
+        # either, it raises Client::Error.
         def fetch_patient(dfn, source_preference)
           case source_preference
           when :fhir_first
-            patient = try_fhir(dfn)
-            return [ patient, :fhir ] if patient
+            outcome, value = read_fhir(dfn)
+            return [ value, :fhir ] if outcome == :patient
 
             patient = PatientGateway.find(dfn)
+            raise_failure(value) if patient.nil? && outcome == :failure
             [ patient, :rpc ]
           when :rpc_first
             patient = PatientGateway.find(dfn)
             return [ patient, :rpc ] if patient
 
-            patient = try_fhir(dfn)
-            [ patient, :fhir ]
+            outcome, value = read_fhir(dfn)
+            raise_failure(value) if outcome == :failure
+            [ value, :fhir ]
           else # :rpc_only
             [ PatientGateway.find(dfn), :rpc ]
           end
         end
 
-        def try_fhir(dfn)
-          return nil unless fhir_available?
+        def read_fhir(dfn)
+          return [ :absent ] unless fhir_available?
 
-          fhir_data = RpmsRpc.fhir_client.read("Patient", dfn.to_s)
-          return nil if fhir_data.nil? || fhir_data["resourceType"] == "OperationOutcome"
+          answer = fhir_client.read("Patient", dfn.to_s)
+          return [ :absent ] if absent_outcome?(answer)
 
-          patient = Patient.from_fhir(fhir_data)
-          normalize_from_fhir!(patient) if patient
-          patient
-        rescue => e
-          Rails.logger.warn("PatientRepository: FHIR read failed for DFN #{dfn}: #{e.message}")
+          patient_outcome(answer, dfn)
+        rescue Lakeraven::EHR::FHIR::Client::Error => e
+          # Client::Error messages carry no id, params or body.
+          fhir_failure(e.message)
+        rescue StandardError => e
+          # The class only: a message can carry a response body or patient data.
+          fhir_failure(e.class.name)
+        end
+
+        def patient_outcome(answer, dfn)
+          return fhir_failure("not the requested Patient") unless requested_patient?(answer, dfn)
+
+          patient = map_patient(answer)
+          return fhir_failure("could not be mapped") unless patient
+          return fhir_failure("no usable name") if patient.name.blank?
+
+          normalize_from_fhir!(patient)
+          [ :patient, patient ]
+        end
+
+        # One warn per failure, with a reason that names no patient.
+        def fhir_failure(reason)
+          Rails.logger.warn("PatientRepository: FHIR Patient read failed (#{reason})")
+          [ :failure, reason ]
+        end
+
+        def raise_failure(reason)
+          raise Lakeraven::EHR::FHIR::Client::Error, "FHIR Patient read failed (#{reason})", cause: nil
+        end
+
+        def map_patient(answer)
+          Patient.from_fhir(answer)
+        rescue StandardError
+          # A malformed resource, e.g. Date::Error on a partial birthDate.
           nil
         end
 
+        def absent_outcome?(answer)
+          answer.is_a?(Hash) &&
+            answer["resourceType"] == "OperationOutcome" &&
+            Array(answer["issue"]).any? { |issue| issue.is_a?(Hash) && %w[not-found deleted].include?(issue["code"]) }
+        end
+
+        def requested_patient?(answer, dfn)
+          answer.is_a?(Hash) &&
+            answer["resourceType"] == "Patient" &&
+            answer["id"] == dfn.to_s
+        end
+
+        def fhir_client
+          Lakeraven::EHR.configuration.fhir_client
+        end
+
         def fhir_available?
-          RpmsRpc.respond_to?(:fhir_client) && RpmsRpc.fhir_client.present?
-        rescue
-          false
+          !fhir_client.nil?
         end
 
         def normalize_from_fhir!(patient)

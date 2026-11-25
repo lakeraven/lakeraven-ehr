@@ -15,6 +15,14 @@ module Lakeraven
       # `rpms` is the only one registered today (#646).
       attr_accessor :backend
 
+      # The FHIR R4 client PatientRepository reads from when a caller asks
+      # for :fhir_first or :rpc_first (#599): anything that answers
+      # read(type, id) and search(type, params) with FHIR-shaped Hashes, such
+      # as Lakeraven::EHR::FHIR::Client (an HTTP endpoint) or
+      # Lakeraven::EHR::FHIR::MockClient (seeded, for tests). Unset (nil) by
+      # default, and then every patient read goes over RPC.
+      attr_accessor :fhir_client
+
       # Absolute URL of the OAuth token endpoint as published in
       # .well-known/smart-configuration. When set, it is the ONLY audience
       # accepted for backend-services client assertions — the expected aud is
