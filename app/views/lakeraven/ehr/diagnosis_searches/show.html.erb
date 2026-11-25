@@ -1,0 +1,72 @@
+<% page_title "Find a diagnosis" %>
+
+<%= page_header "Find a diagnosis",
+      [ "Search RPMS's SNOMED CT by the clinical term.",
+        "Each concept shows the ICD-10-CM codes RPMS maps it to." ] %>
+
+<%= form_with url: diagnosis_search_path,
+      method: :get,
+      id: "diagnosis-search-form",
+      local: true do |form| %>
+  <%= form.label :q,
+        "Clinical term" %>
+  <%= form.search_field :q,
+        value: @query,
+        id: "diagnosis-search-q",
+        maxlength: 80,
+        autocomplete: "off" %>
+  <%= form.submit "Search",
+        name: nil %>
+<% end %>
+
+<% if @refusal %>
+  <%= alert_box :error,
+        @refusal,
+        id: "diagnosis-search-refused" %>
+<% elsif @concepts %>
+  <% if @words.present? %>
+    <p id="diagnosis-search-words">
+      Words that start with “<%= @query.split.last %>”:
+      <%= safe_join(@words.map { |word| link_to(word, diagnosis_search_path(q: word)) }, ", ") %>
+    </p>
+  <% end %>
+
+  <% if @concepts.empty? %>
+    <%= empty_state "No SNOMED CT concept in RPMS matches “#{@query}”.",
+          "RPMS searched its own terminology; try a shorter or different term.",
+          id: "diagnosis-search-none" %>
+  <% else %>
+    <table
+      id="diagnosis-search-results"
+      class="data-table"
+    >
+      <caption class="sr-only">
+        <%= pluralize(@concepts.size, "SNOMED CT concept") %> matching “<%= @query %>”.
+      </caption>
+      <thead>
+        <tr>
+          <th scope="col">Term</th>
+          <th scope="col">SNOMED CT</th>
+          <th scope="col">ICD-10-CM</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% @concepts.each do |concept| %>
+          <tr
+            data-concept-id="<%= concept[:concept_id] %>"
+          >
+            <th scope="row">
+              <%= link_to concept[:term],
+                    diagnosis_concept_path(concept[:dts_id]) %>
+              <% if concept[:fsn].present? && concept[:fsn] != concept[:term] %>
+                <span class="block text-sm text-slate-600"><%= concept[:fsn] %></span>
+              <% end %>
+            </th>
+            <td data-snomed><%= concept[:concept_id] %></td>
+            <td data-icd><%= concept[:icd].presence&.join(", ") || "None mapped" %></td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  <% end %>
+<% end %>

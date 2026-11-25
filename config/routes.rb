@@ -76,6 +76,17 @@ Lakeraven::EHR::Engine.routes.draw do
     constraints: { dfn: /\d+/ }
 
   # Vitals on an open visit (rpms-ux S-TRI-02). RPMS checks and files them.
+  # The vaccines a patient is due for, from RPMS's immunization forecast
+  # (#865). Read only.
+  get "patients/:dfn/immunizations/due", to: "immunization_forecasts#show", as: :patient_immunization_forecast,
+    constraints: { dfn: /\d+/ }
+
+  # Find a diagnosis by its clinical term, from RPMS's SNOMED CT (BSTS).
+  # Terminology is not patient data, so it is not under a patient.
+  get "diagnosis_search", to: "diagnosis_searches#show", as: :diagnosis_search
+  get "diagnosis_search/concepts/:dts_id", to: "diagnosis_searches#concept", as: :diagnosis_concept,
+    constraints: { dts_id: /\d+/ }
+
   get  "patients/:dfn/vitals/new", to: "vitals#new", as: :new_patient_vitals, constraints: { dfn: /\d+/ }
   post "patients/:dfn/vitals", to: "vitals#create", as: :patient_vitals, constraints: { dfn: /\d+/ }
 

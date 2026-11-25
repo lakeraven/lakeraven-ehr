@@ -1,0 +1,10 @@
+<% page_title "Concept not found", "Find a diagnosis" %>
+
+<%= page_header "Concept not found" %>
+
+<%= empty_state "RPMS's terminology has no concept with that number.",
+      "Search for the diagnosis by its term instead.",
+      id: "diagnosis-concept-missing" do %>
+  <%= link_to "Find a diagnosis",
+        diagnosis_search_path %>
+<% end %>
