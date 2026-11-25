@@ -31,9 +31,23 @@ module Lakeraven
         def add(_dfn, _visit_ien, _code, narrative: nil, modifiers: {}) = { success: true, ien: 501, raw: "1^501" }
       end
 
+      # Per-instance: the controller builds one per request, so the text
+      # written by update_text is what fetch_body returns for signing.
       class DemoNoteGateway
+        def initialize
+          @texts = {}
+        end
+
         def create(_dfn, _visit_ien, _title_ien) = { success: true, ien: 7801, raw: "7801" }
-        def update_text(_note_ien, _text) = { success: true, raw: "1" }
+
+        def update_text(note_ien, text)
+          @texts[note_ien.to_s] = text
+          { success: true, raw: "1" }
+        end
+
+        # The stored text as body rows, the shape ProgressNoteGateway.fetch_body
+        # returns: no TIU header or signature block in the demo.
+        def fetch_body(note_ien) = @texts[note_ien.to_s]&.split(/\r\n|\r|\n/)
       end
 
       class DemoESignatureGateway

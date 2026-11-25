@@ -1,0 +1,79 @@
+<% page_title "Holidays | Scheduling" %>
+
+<%= page_header "Holidays",
+      "The days every clinic is closed." do %>
+  <%= link_to "Back to scheduling",
+        scheduling_home_path %>
+<% end %>
+
+<% if @notice.present? %>
+  <%= alert_box :notice, @notice, id: "holiday-notice" %>
+<% end %>
+
+<%= flash_alert id: "holiday-alert" %>
+
+<p>
+  A holiday applies to every clinic. A clinic set to schedule on holidays
+  still takes bookings on one.
+</p>
+
+<%= form_errors @form,
+      "The holiday was not added.",
+      id: "holiday-errors" %>
+
+<%= form_with scope: :holiday,
+      url: scheduling_holidays_path,
+      method: :post,
+      local: true,
+      id: "holiday-form",
+      class: "card flex flex-col gap-4" do |f| %>
+  <%= form_field :date, "Date", form: f, error: @form.errors[:date].first do |aria| %>
+    <%= f.date_field :date,
+          value: @form.date,
+          required: true,
+          aria: aria %>
+  <% end %>
+  <%= form_field :name, "Name", form: f, error: @form.errors[:name].first, hint: "Up to 30 characters." do |aria| %>
+    <%= f.text_field :name,
+          value: @form.name,
+          maxlength: 30,
+          required: true,
+          aria: aria %>
+  <% end %>
+  <%= f.submit "Add holiday",
+        class: "button-primary self-start" %>
+<% end %>
+
+<% if @holidays.nil? %>
+  <%# The read failed; the alert says so. No list is shown. %>
+<% elsif @holidays.empty? %>
+  <p>There are no holidays on file for the next year.</p>
+<% else %>
+  <table
+    id="holidays"
+    class="data-table"
+  >
+    <caption class="sr-only">Holidays in the next year</caption>
+    <thead>
+      <tr>
+        <th scope="col">Date</th>
+        <th scope="col">Name</th>
+        <th scope="col"><span class="sr-only">Actions</span></th>
+      </tr>
+    </thead>
+    <tbody>
+      <% @holidays.each do |holiday| %>
+        <tr data-holiday="<%= holiday[:date].iso8601 %>">
+          <td><%= holiday[:date].iso8601 %></td>
+          <td><%= holiday[:name] %></td>
+          <td>
+            <%= button_to "Remove",
+                  scheduling_remove_holiday_path(holiday[:date].iso8601),
+                  method: :post,
+                  form: { "aria-label": "Remove the holiday on #{holiday[:date].iso8601}" } %>
+          </td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+<% end %>

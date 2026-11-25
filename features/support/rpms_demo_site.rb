@@ -6,13 +6,15 @@
 # the rpms-rpc API the engine uses. On a mock run it is seeded into the mock,
 # so the mock says what RPMS says. On a live run (LIVE_RPMS=1) it is checked
 # against RPMS before the first scenario, and the run aborts on any
-# difference: the fake cannot drift from the backend it stands in for.
+# difference: the fake cannot drift from the backend it stands in for. A ready
+# stack run (LIVE_STACK, #962) skips the check: it signs on as the demo personas,
+# needs the pinned build, and would print the stack's patient rows on a diff.
 #
 # Values are verbatim, including RPMS's own quirks (trailing spaces in problem
 # narratives, mixed-case ORWU NEWPERS names). Change a value only after
 # reading it from the pinned build.
 module RpmsDemoSite
-  BUILD = "openrpms 3f5487a (bcer-9.0-20261113-3f5487a-ydb, openrpms demo site seed)"
+  BUILD = "openrpms 60d39b6 (bcer-9.0-20261124-60d39b6-ydb-demo, openrpms demo site seed)"
 
   # ORWPT SELECT / ORWPT ID INFO / ORWPT FULLSSN, by DFN.
   PATIENTS = {
@@ -55,6 +57,7 @@ module RpmsDemoSite
   # ORWU NEWPERS: a page of the NEW PERSON name index, in index order.
   PROVIDERS = [
     { ien: "4", name: "Manager,System" },
+    { ien: "211", name: "Profile,Bh" },
     { ien: "209", name: "Profile,Bill" },
     { ien: "204", name: "Profile,Ma" },
     { ien: "206", name: "Profile,Md" },
@@ -161,7 +164,7 @@ module RpmsDemoSite
   end
 end
 
-if LIVE_RPMS
+if LIVE_RPMS && !LIVE_STACK&.ready?
   diffs = RpmsDemoSite.differences
   abort(<<~MSG) unless diffs.empty?
     LIVE_RPMS=1: RPMS disagrees with features/support/rpms_demo_site.rb (#{RpmsDemoSite::BUILD}).

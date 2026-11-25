@@ -29,6 +29,32 @@ module Lakeraven
         via.fetch_text(note_ien.to_s)
       end
 
+      # The body rows of the note, or nil. TIU GET RECORD TEXT returns a
+      # display: header rows, ONE blank row, then the body. The separator is
+      # the first row that is empty after strip. The header changes on
+      # signing (STATUS: UNSIGNED becomes COMPLETED) and TIU appends a
+      # signature block after the body, so only the body rows are evidence
+      # of the note. Text with no blank row is an unrecognised shape, not
+      # evidence, so it gives nil. Nothing after the separator is dropped:
+      # the String fetch_text returns carries no transport terminator
+      # (rpms-rpc Client#split_response removes it, DataMapper#parse_text
+      # joins the lines with "\n"), so a trailing empty element is a blank
+      # row of the note, and blank rows appended or removed after signing
+      # change the body (and the record hash). Known limit outside this
+      # gateway: RpmsRpc::CiaClient#cia_reply_lines drops every trailing
+      # empty reply fragment before the text is joined, so over CIA
+      # trailing blank rows never reach fetch_body.
+      def self.fetch_body(note_ien, via: default_provider)
+        text = fetch_text(note_ien, via: via)
+        return nil unless text.is_a?(String)
+
+        rows = text.split(/\r\n|\r|\n/, -1)
+        header_end = rows.index { |row| row.strip.empty? }
+        return nil if header_end.nil?
+
+        rows.drop(header_end + 1)
+      end
+
       # TIU AUTHORIZATION, TIU LOCK RECORD and TIU UNLOCK RECORD act as the
       # signed-on user (CANDO^TIUSRVA, LOCK^TIUSRVP), so none takes a user.
       def self.authorize(note_ien, action: ::RpmsRpc::ProgressNote::EDIT_RECORD, via: default_provider)
