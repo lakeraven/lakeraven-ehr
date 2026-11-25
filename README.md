@@ -81,6 +81,17 @@ No UCI (namespace) setting is needed on either: the CIA client asks for the brok
 `bin/rails test` and `bundle exec cucumber` run against rpms-rpc's in-memory `MockClient`.
 `test/system/live` signs in against a real broker and skips unless `LIVE_RPMS=1`; its header says how to run it.
 
+### CCD availability
+
+`PatientDataService#ccds` calls the pinned `RpmsRpc::Phr.for_patient` API with `start_date:` and `end_date:`.
+It returns the API's document array, including an empty array after a successful empty read.
+An RPMS M error, such as a build without VistA Imaging, returns `nil` to mean unavailable; other errors still propagate.
+The existing PHR availability guard is unchanged: it currently defaults to false, returns `[]`, and makes no CCD request.
+
+For an authorized HTML chart with `DocumentReference` read scope, a `nil` result shows “CCD documents are not available on this system.”
+This status read happens after the chart's egress filter succeeds and does not display CCD contents, titles, counts, or links.
+FHIR chart requests do not make this additional read.
+
 ## Installation
 Add this line to your application's Gemfile:
 

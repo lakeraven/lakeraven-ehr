@@ -688,6 +688,10 @@ module Lakeraven
         bundle = filter_fhir_for_egress(fhir_bundle)
         return refuse_unfiltered_fhir_egress unless bundle
 
+        # Only availability leaves this read. CCD rows have no filtered chart
+        # projection, so never render their contents, titles, counts or links.
+        # Use the authorized source patient before the filtered projection.
+        @ccds_unavailable = readable?("DocumentReference") && PatientDataService.new(@patient.dfn.to_s).ccds.nil?
         assign_chart_from_bundle(bundle)
         assign_patient_banner
         assign_chart_actions

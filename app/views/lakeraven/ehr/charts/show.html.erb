@@ -83,6 +83,10 @@
   <%= alert_box :notice, flash[:notice], id: "chart-notice" %>
 <% end %>
 
+<% if @ccds_unavailable %>
+  <p id="ccd-unavailable" class="empty" role="status">CCD documents are not available on this system.</p>
+<% end %>
+
 <div class="grid gap-4 md:grid-cols-2">
   <%# ---- Problem list ---- %>
   <section
