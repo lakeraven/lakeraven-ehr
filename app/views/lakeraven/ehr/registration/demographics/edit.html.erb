@@ -72,7 +72,6 @@
       <%= f.select :marital_status,
             options_for_select(@marital_statuses, @demographics.marital_status),
             { include_blank: "Not recorded" },
-            required: @demographics.required_by_site?(:employment_status),
             aria: aria %>
     <% end %>
     <%# RELIGIOUS PREFERENCE, PATIENT (2) field .08. %>
@@ -125,6 +124,7 @@
             options_for_select(Lakeraven::EHR::PatientDemographics::EMPLOYMENT_STATUSES.map { |code, label| [ label, code ] },
                                @demographics.employment_status),
             { include_blank: "Not recorded" },
+            required: @demographics.required_by_site?(:employment_status),
             aria: aria %>
     <% end %>
   </div>

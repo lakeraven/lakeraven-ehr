@@ -50,6 +50,58 @@ class RegistrationSiteRequiredFieldsTest < ActionDispatch::IntegrationTest
       phone_home: "", phone_work: "", phone_other: "", email: "" }.merge(changes)
   end
 
+  EMPLOYMENT_REQUIRED = [ "9000001", "EMPLOYMENT STATUS", true ].freeze
+
+  test "site required employment status is marked required on demographics" do
+    sign_in
+    with_address_rpms(settings(EMPLOYMENT_REQUIRED)) do
+      get "#{BASE}/demographics/edit"
+
+      assert_response :success
+      assert_select "label[for='demographics_employment_status']", text: "Employment status (required)"
+      assert_select "select#demographics_employment_status[required]"
+    end
+  end
+
+  test "requiring employment status does not require marital status" do
+    sign_in
+    with_address_rpms(settings(EMPLOYMENT_REQUIRED)) do
+      get "#{BASE}/demographics/edit"
+
+      assert_response :success
+      assert_select "label[for='demographics_marital_status']", text: "Marital status (optional)"
+      assert_select "select#demographics_marital_status[required]", count: 0
+    end
+  end
+
+  test "employment and marital status remain optional when employment is not site required" do
+    sign_in
+    [ settings, settings([ "9000001", "EMPLOYMENT STATUS", false ]) ].each do |site|
+      with_address_rpms(site) do
+        get "#{BASE}/demographics/edit"
+
+        assert_response :success
+        assert_select "label[for='demographics_employment_status']", text: "Employment status"
+        assert_select "select#demographics_employment_status[required]", count: 0
+        assert_select "select#demographics_marital_status[required]", count: 0
+      end
+    end
+  end
+
+  test "missing site required employment status is refused before an update" do
+    sign_in
+    with_address_rpms(settings(EMPLOYMENT_REQUIRED)) do |updates|
+      patch "#{BASE}/demographics", params: { demographics: { name: "HOTEL,DREW", dob: "1982-11-08", sex: "M",
+                                                               employer: "", employment_status: "" } }
+
+      assert_response :unprocessable_content
+      assert_select "#demographics-errors", text: /Employment status is required by this site/
+      assert_select "label[for='demographics_employment_status']", text: "Employment status (required)"
+      assert_select "select#demographics_employment_status[aria-invalid='true']"
+      assert_empty updates
+    end
+  end
+
   test "a field the site requires is marked required on the form" do
     sign_in
     with_address_rpms(settings(*HOME_PHONE_AND_PREFERRED)) do
