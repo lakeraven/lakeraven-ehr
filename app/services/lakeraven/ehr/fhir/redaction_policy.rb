@@ -95,15 +95,25 @@ module Lakeraven
         end
 
         def remove_tribal_extensions!(resource)
-          return unless resource[:extension]
-
-          resource[:extension].reject! { |e| TRIBAL_URLS.any? { |u| e[:url]&.include?(u) } }
+          remove_extensions!(resource, TRIBAL_URLS)
         end
 
         def remove_sogi_extensions!(resource)
-          return unless resource[:extension]
+          remove_extensions!(resource, SOGI_URLS)
+        end
 
-          resource[:extension].reject! { |e| SOGI_URLS.any? { |u| e[:url]&.include?(u) } }
+        # Removes extensions whose url matches any of `urls`, for symbol- or
+        # string-keyed resources (e.g. after a JSON round trip).
+        def remove_extensions!(resource, urls)
+          exts = resource[:extension] || resource["extension"]
+          return unless exts.is_a?(Array)
+
+          exts.reject! do |e|
+            next false unless e.is_a?(Hash)
+
+            url = (e[:url] || e["url"]).to_s
+            urls.any? { |u| url.include?(u) }
+          end
         end
       end
     end

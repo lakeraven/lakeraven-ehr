@@ -300,6 +300,20 @@ module Lakeraven
         TribalEnrollmentGateway.tribe_info(ien)
       end
 
+      # The tribe for the US Core tribal-affiliation extension (#1187):
+      # nil, or { name:, code:, enrolled: true|nil }. Once RPMS answers it is
+      # authoritative (no tribe_ien → nil); if the read fails or returns nil,
+      # the tribal_affiliation attribute is used with no code. `enrolled` is
+      # true only when RPMS holds an enrollment number, never false, and the
+      # number itself is never part of the result. Memoized per dfn, nil
+      # included.
+      def fhir_tribal_affiliation
+        return @fhir_tribal_affiliation if defined?(@fhir_tribal_affiliation) && @fhir_tribal_affiliation_dfn == dfn
+
+        @fhir_tribal_affiliation_dfn = dfn
+        @fhir_tribal_affiliation = build_fhir_tribal_affiliation
+      end
+
       # -- Providers (ported from the predecessor app) ----------------------------------
 
       def providers
@@ -312,14 +326,15 @@ module Lakeraven
 
       # -- FHIR serialization -----------------------------------------------
 
-      def to_fhir
-        FHIR::PatientSerializer.call(self)
+      # Tribal affiliation is opt-in; egress callers wait for the #566 gate.
+      def to_fhir(tribal_affiliation: false)
+        FHIR::PatientSerializer.call(self, tribal_affiliation: tribal_affiliation)
       end
 
       # -- FHIR deserialization -----------------------------------------------
 
       def self.from_fhir(hash)
-        hash = hash.transform_keys(&:to_s)
+        hash = hash.deep_stringify_keys
         name_entry = Array(hash["name"]).first || {}
         family = name_entry["family"].to_s
         given = Array(name_entry["given"]).join(" ")
@@ -356,11 +371,40 @@ module Lakeraven
           attrs[:race] = text_ext["valueString"] if text_ext
         end
 
-        tribal_ext = Array(hash["extension"]).find { |e| e["url"].to_s.include?("tribal-affiliation") }
-        attrs[:tribal_enrollment_number] = tribal_ext["valueString"] if tribal_ext
+        # US Core tribal-affiliation (#1187): the tribe name from the first
+        # tribal-affiliation extension whose tribalAffiliation CodeableConcept
+        # names one. The extension carries no enrollment number, so none is
+        # read from it.
+        attrs[:tribal_affiliation] = Array(hash["extension"]).lazy
+          .select { |e| e.is_a?(Hash) && e["url"].to_s.include?("tribal-affiliation") }
+          .filter_map { |e| tribe_name_from_fhir_extension(e) }
+          .first
 
         new(**attrs.compact)
       end
+
+      # The tribe name from a tribal-affiliation extension's tribalAffiliation
+      # CodeableConcept: its text, else the first coding's display. Malformed
+      # parts are skipped; nil when no name is found.
+      def self.tribe_name_from_fhir_extension(ext)
+        subs = ext["extension"]
+        return nil unless subs.is_a?(Array)
+
+        tribe_ext = subs.find { |e| e.is_a?(Hash) && e["url"] == "tribalAffiliation" }
+        concept = tribe_ext && tribe_ext["valueCodeableConcept"]
+        return nil unless concept.is_a?(Hash)
+
+        text = concept["text"]
+        return text if text.is_a?(String) && text.present?
+
+        codings = concept["coding"].is_a?(Array) ? concept["coding"] : []
+        codings.each do |coding|
+          display = coding["display"] if coding.is_a?(Hash)
+          return display if display.is_a?(String) && display.present?
+        end
+        nil
+      end
+      private_class_method :tribe_name_from_fhir_extension
 
       def self.from_fhir_attributes(fhir_resource)
         gender_code = map_fhir_gender_to_sex(fhir_resource.gender)
@@ -396,6 +440,42 @@ module Lakeraven
       end
 
       private
+
+      def build_fhir_tribal_affiliation
+        fallback_name = tribal_text(tribal_affiliation)
+        fallback = fallback_name && { name: fallback_name, code: nil, enrolled: nil }
+        return fallback unless dfn
+
+        # A non-Hash read is treated like a failed read.
+        details = tribal_read { tribal_enrollment_details }
+        return fallback unless details.is_a?(Hash)
+
+        ien = details[:tribe_ien]
+        return nil if ien.blank?
+
+        enrolled = details[:enrollment_number].present? || nil
+        tribe = tribal_read { TribalEnrollmentGateway.tribe_info(ien) }
+        tribe = nil unless tribe.is_a?(Hash)
+        if (name = tribe && tribal_text(tribe[:name]))
+          { name: name, code: tribal_text(tribe[:code]), enrolled: enrolled }
+        elsif (name = tribal_text(details[:tribe_name]))
+          { name: name, code: nil, enrolled: enrolled }
+        end
+      end
+
+      # A tribe name or code as a stripped String, or nil when blank.
+      def tribal_text(value)
+        value.to_s.strip.presence
+      end
+
+      # A failed tribal read degrades to nil; the log names the error class
+      # only, never the DFN or any tribe/enrollment value.
+      def tribal_read
+        yield
+      rescue StandardError => e
+        Rails.logger.warn("[tribal-affiliation] tribal read failed: #{e.class}")
+        nil
+      end
 
       def anniversary_in(born, year)
         return Date.new(year, 3, 1) if born.month == 2 && born.day == 29 && !Date.leap?(year)
