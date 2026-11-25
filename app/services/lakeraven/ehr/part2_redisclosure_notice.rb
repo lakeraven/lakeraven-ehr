@@ -33,6 +33,43 @@ module Lakeraven
       PART2_CODES = %w[42CFRPart2 ETH SUD ETHUD OPIOIDUD].freeze
 
       EXTENSION = { "url" => EXTENSION_URL, "valueString" => TEXT }.freeze
+
+      PADDING = /\A[[:space:]\p{Cf}]+|[[:space:]\p{Cf}]+\z/
+
+      # Stands in for a label that is present but unreadable: it marks its
+      # scope as suspected Part 2 without inventing a label value.
+      UNREADABLE = :unreadable
+
+      def self.unpad(value)
+        value.to_s.gsub(PADDING, "")
+      end
+
+      def self.part2_code?(code)
+        value = unpad(code)
+        PART2_CODES.any? { |part2| part2.casecmp?(value) }
+      end
+
+      # The fields an ingested item carries for its marks (label Hashes and
+      # UNREADABLE): the labels de-duplicated on system and code, and whether
+      # any mark is a Part 2 code or unreadable. Labels mark, never block.
+      def self.label_fields(marks)
+        labels = marks.grep(Hash).uniq { |label| label.values_at(:system, :code) }
+        part2 = marks.include?(UNREADABLE) || labels.any? { |label| part2_code?(label[:code]) }
+        { security_labels: labels, part2: part2 }
+      end
+
+      # For items that all inherit the same marks (document, section or
+      # Bundle): dedupes those and works out their part2 once, and returns
+      # a lambda giving label_fields(inherited + own) from an item's own marks.
+      def self.inheriting(inherited)
+        base = label_fields(inherited)
+        keys = base[:security_labels].to_set { |label| label.values_at(:system, :code) }
+        lambda do |own_marks|
+          own = label_fields(own_marks)
+          extra = own[:security_labels].reject { |label| keys.include?(label.values_at(:system, :code)) }
+          { security_labels: base[:security_labels] + extra, part2: base[:part2] || own[:part2] }
+        end
+      end
     end
   end
 end

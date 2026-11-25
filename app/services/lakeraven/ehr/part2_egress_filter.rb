@@ -26,7 +26,7 @@ module Lakeraven
     # a line that opens like JSON and does not parse, invalid encoding,
     # and any error (fail closed).
     # Unlabelled payloads come back unchanged; the input is never mutated.
-    # It does not classify unlabelled records; keeping labels on ingest is #908.
+    # It does not classify unlabelled records; ingest keeps labels (#908).
     class Part2EgressFilter
       Refused = Class.new(StandardError)
       private_constant :Refused
