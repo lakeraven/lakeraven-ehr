@@ -180,6 +180,9 @@ module Lakeraven
         "lakeraven/ehr/scheduling/access_types#create",
         "lakeraven/ehr/scheduling/access_types#edit",
         "lakeraven/ehr/scheduling/access_types#update",
+        "lakeraven/ehr/scheduling/holidays#index",         # Holidays: site-wide dates and names; no patient data
+        "lakeraven/ehr/scheduling/holidays#create",
+        "lakeraven/ehr/scheduling/holidays#remove",
         "lakeraven/ehr/scheduling/resource_groups#index",  # Group names; no patient data
         "lakeraven/ehr/scheduling/resource_groups#new",
         "lakeraven/ehr/scheduling/resource_groups#create",

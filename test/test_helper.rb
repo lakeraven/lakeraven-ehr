@@ -36,6 +36,7 @@ require "rpms_rpc/mock_client"
 require_relative "support/mock_session_user"
 require_relative "support/rate_limit_test_helper"
 require_relative "support/live_stack"
+require_relative "support/sensitive_patient_access_seeds"
 
 # Baseline RpmsRpc mock seeds. Installed at load and again before every
 # example (GlobalStoreIsolation) so a test that adds seeds cannot leak
@@ -207,6 +208,11 @@ BASELINE_MOCK_SEEDS = lambda do |m|
     duz: 101, name: "MARTINEZ,SARAH", user_class: 3,
     kernel_domain: "DEMO.IHS.GOV", site_ien: 8904
   })
+
+  # Opening a record asks RPMS whether it is sensitive first (#613), and an
+  # unanswered check never opens it. The synthetic patients answer "0", not
+  # sensitive; a test of the check seeds its own answer over this.
+  SensitivePatientAccessSeeds.seed_demo_patients_not_sensitive!(m)
 end
 
 # LIVE_RPMS=1 runs the suite against a real broker instead of the mock

@@ -17,6 +17,7 @@ module Lakeraven
       # (#512): an open that cannot be recorded is not completed.
       include BrowserSmartAuthentication
       include ClinicianPatientContext
+      include SensitiveRecordAccess
 
       rate_limit only: :create
 
@@ -24,7 +25,12 @@ module Lakeraven
       before_action :authorize_context_scope!
       before_action :enforce_token_patient_context!
 
+      # RPMS is asked whether the record is sensitive here, after every
+      # before_action has passed: a caller who may not open the record never
+      # causes the check, which itself writes the DG SECURITY LOG (#613).
       def create
+        return unless sensitive_record_cleared?(params[:dfn])
+
         open_patient_context!(params[:dfn])
         # Fixed internal destinations: never a caller-supplied return path, so
         # this cannot be used as an open redirect. The chart when the user may

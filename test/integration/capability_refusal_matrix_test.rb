@@ -90,6 +90,9 @@ class CapabilityRefusalMatrixTest < ActionDispatch::IntegrationTest
     "POST /scheduling/access_types" => "scheduling.supervise",
     "GET /scheduling/access_types/:id/edit" => "scheduling.supervise",
     "POST /scheduling/access_types/:id" => "scheduling.supervise",
+    "GET /scheduling/holidays" => "scheduling.supervise",
+    "POST /scheduling/holidays" => "scheduling.supervise",
+    "POST /scheduling/holidays/:date/remove" => "scheduling.supervise",
     "GET /scheduling/resource_groups" => "scheduling.open",
     "GET /scheduling/resource_groups/new" => "scheduling.supervise",
     "POST /scheduling/resource_groups" => "scheduling.supervise",
@@ -136,7 +139,9 @@ class CapabilityRefusalMatrixTest < ActionDispatch::IntegrationTest
 
   def request_route(route)
     verb, path = route.split(" ", 2)
-    url = "/lakeraven-ehr#{path.gsub(/:\w+/, '3')}"
+    # A :date segment is constrained to an ISO date in the routes, so "3" there
+    # would be a routing 404 and never reach the capability check.
+    url = "/lakeraven-ehr#{path.gsub(/:\w+/) { |param| param == ':date' ? '2031-07-04' : '3' }}"
     public_send(verb.downcase, url)
   end
 

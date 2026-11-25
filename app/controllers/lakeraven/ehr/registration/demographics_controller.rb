@@ -26,6 +26,8 @@ module Lakeraven
 
         private
 
+        def busa_description = "Registration: demographics edited"
+
         def render_form(status)
           @marital_statuses = PatientRecordGateway.choices(:marital_status)
           @religions = PatientRecordGateway.choices(:religion)

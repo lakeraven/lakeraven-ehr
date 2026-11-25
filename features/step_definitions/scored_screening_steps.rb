@@ -245,6 +245,10 @@ Given("the clinician is signed in") do
   get "#{SCREENING_MOUNT}/login"
   @authenticity_token = last_response.body[/name="csrf-token" content="([^"]+)"/, 1]
 
+  # Opening the record asks RPMS whether it is sensitive first (#613). DFN 123
+  # is not one of the demo patients the shared seeds answer for; it answers
+  # "0", not sensitive, as a broker does for a record with no DG SECURITY flag.
+  SensitivePatientAccessSeeds.seed_not_sensitive!(@dfn)
   post "#{SCREENING_MOUNT}/patients/#{@dfn}/context",
        authenticity_token: @authenticity_token
 
