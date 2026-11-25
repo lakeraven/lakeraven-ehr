@@ -175,6 +175,9 @@ module Lakeraven
         "lakeraven/ehr/scheduling/clinic_settings#show",   # A clinic's settings, letters and default provider: no patient data
         "lakeraven/ehr/scheduling/clinic_settings#edit",   # The same, as a form
         "lakeraven/ehr/scheduling/clinic_settings#update", # Files a clinic's settings; no patient data
+        "lakeraven/ehr/scheduling/clinic_providers#index",       # Clinic provider directory and default; no patient data
+        "lakeraven/ehr/scheduling/clinic_providers#set_default", # Files a clinic default provider; no patient data
+        "lakeraven/ehr/scheduling/clinic_providers#destroy",     # Removes a clinic provider; no patient data
         "lakeraven/ehr/scheduling/access_types#index",     # Access types: names, colours, flags; no patient data
         "lakeraven/ehr/scheduling/access_types#new",
         "lakeraven/ehr/scheduling/access_types#create",

@@ -347,6 +347,12 @@ Lakeraven::EHR::Engine.routes.draw do
     get "clinics/:resource_id/settings", to: "clinic_settings#show", as: :clinic_settings, constraints: { resource_id: /\d+/ }
     get "clinics/:resource_id/settings/edit", to: "clinic_settings#edit", as: :edit_clinic_settings, constraints: { resource_id: /\d+/ }
     post "clinics/:resource_id/settings", to: "clinic_settings#update", constraints: { resource_id: /\d+/ }
+    # Existing clinic providers and their default (S-SCH-16).
+    get "clinics/:resource_id/providers", to: "clinic_providers#index", as: :clinic_providers, constraints: { resource_id: /\d+/ }
+    post "clinics/:resource_id/providers/:entry_id/default", to: "clinic_providers#set_default", as: :default_clinic_provider,
+                                                            constraints: { resource_id: /\d+/, entry_id: /\d+/ }
+    delete "clinics/:resource_id/providers/:entry_id", to: "clinic_providers#destroy", as: :clinic_provider,
+                                                        constraints: { resource_id: /\d+/, entry_id: /\d+/ }
     get "clinics/:resource_id/hours/new", to: "hours#new", as: :new_clinic_hours, constraints: { resource_id: /\d+/ }
     post "clinics/:resource_id/hours", to: "hours#create", as: :clinic_hours, constraints: { resource_id: /\d+/ }
     get "patients/:dfn/appointments", to: "patient_appointments#index", as: :patient_appointments, constraints: { dfn: /\d+/ }
