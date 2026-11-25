@@ -10,18 +10,23 @@ module Lakeraven
         # CDC Race & Ethnicity code system OID
         RACE_CODE_SYSTEM = "urn:oid:2.16.840.1.113883.6.238"
 
-        # Map RPMS race values to CDC Race & Ethnicity codes
+        # HL7 v3 NullFlavor code system, for race that is unknown or declined
+        NULL_FLAVOR_SYSTEM = "http://terminology.hl7.org/CodeSystem/v3-NullFlavor"
+
+        # Map RPMS race values to US Core ombCategory codings: the five OMB race
+        # codes, or UNK / ASKU. Values not in this map (e.g. OTHER) are sent as
+        # text only. :text overrides the display as the race text when given.
         RACE_CODE_MAP = {
-          "AMERICAN INDIAN OR ALASKA NATIVE" => { code: "1002-5", display: "American Indian or Alaska Native" },
-          "AMERICAN INDIAN" => { code: "1002-5", display: "American Indian or Alaska Native" },
-          "ALASKA NATIVE" => { code: "1002-5", display: "American Indian or Alaska Native" },
-          "ASIAN" => { code: "2028-9", display: "Asian" },
-          "BLACK OR AFRICAN AMERICAN" => { code: "2054-5", display: "Black or African American" },
-          "BLACK" => { code: "2054-5", display: "Black or African American" },
-          "NATIVE HAWAIIAN OR OTHER PACIFIC ISLANDER" => { code: "2076-8", display: "Native Hawaiian or Other Pacific Islander" },
-          "WHITE" => { code: "2106-3", display: "White" },
-          "OTHER" => { code: "2131-1", display: "Other Race" },
-          "UNKNOWN" => { code: "UNK", display: "Unknown" }
+          "AMERICAN INDIAN OR ALASKA NATIVE" => { system: RACE_CODE_SYSTEM, code: "1002-5", display: "American Indian or Alaska Native" },
+          "AMERICAN INDIAN" => { system: RACE_CODE_SYSTEM, code: "1002-5", display: "American Indian or Alaska Native" },
+          "ALASKA NATIVE" => { system: RACE_CODE_SYSTEM, code: "1002-5", display: "American Indian or Alaska Native" },
+          "ASIAN" => { system: RACE_CODE_SYSTEM, code: "2028-9", display: "Asian" },
+          "BLACK OR AFRICAN AMERICAN" => { system: RACE_CODE_SYSTEM, code: "2054-5", display: "Black or African American" },
+          "BLACK" => { system: RACE_CODE_SYSTEM, code: "2054-5", display: "Black or African American" },
+          "NATIVE HAWAIIAN OR OTHER PACIFIC ISLANDER" => { system: RACE_CODE_SYSTEM, code: "2076-8", display: "Native Hawaiian or Other Pacific Islander" },
+          "WHITE" => { system: RACE_CODE_SYSTEM, code: "2106-3", display: "White" },
+          "UNKNOWN" => { system: NULL_FLAVOR_SYSTEM, code: "UNK", display: "unknown", text: "Unknown" },
+          "DECLINED TO ANSWER" => { system: NULL_FLAVOR_SYSTEM, code: "ASKU", display: "asked but unknown", text: "Declined to answer" }
         }.freeze
 
         def self.call(patient)
@@ -140,12 +145,12 @@ module Lakeraven
             sub_extensions << {
               url: "ombCategory",
               valueCoding: {
-                system: RACE_CODE_SYSTEM,
+                system: mapped[:system],
                 code: mapped[:code],
                 display: mapped[:display]
               }
             }
-            sub_extensions << { url: "text", valueString: mapped[:display] }
+            sub_extensions << { url: "text", valueString: mapped[:text] || mapped[:display] }
           else
             sub_extensions << { url: "text", valueString: @p.race }
           end
