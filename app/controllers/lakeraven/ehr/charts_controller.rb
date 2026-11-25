@@ -88,6 +88,10 @@ module Lakeraven
 
       # Chart sections an IHS capability owns. A backend that withholds one
       # adds an outcome entry instead of those resources (#647).
+      # Screenings span two resource families (answers and scores), so their
+      # failure text names both rather than the one type it is recorded under.
+      SCREENINGS_SUBJECT = "Screenings (QuestionnaireResponse and screening Observation)"
+
       CHART_CAPABILITY_RESOURCES = { ihs_immunization: "Immunization" }.freeze
 
       before_action :authenticate_chart_request!
@@ -352,19 +356,25 @@ module Lakeraven
 
       # -- Data loading (per-type scope enforced; a mock miss yields []) --------
 
+      # Mapping a row after its read (from_rpms_row, Procedure.new,
+      # build_encounter_resources, to_fhir) runs OUTSIDE read_section on
+      # purpose: a malformed row fails the whole request closed (a 500),
+      # never an empty section that reads as "none recorded".
       def load_clinical_collections
         dfn = @patient.dfn.to_s
-        @conditions    = readable?("Condition") ? build_conditions(dfn) : []
-        @medications   = readable?("MedicationRequest") ? build_medications(dfn) : []
+        @section_failures = {}
+        @withheld_sections = {}
+        @conditions    = readable_section?("Condition", "problems") ? build_conditions(dfn) : []
+        @medications   = readable_section?("MedicationRequest", "medications") ? build_medications(dfn) : []
         @allergies     = build_allergies(dfn)
         # Through the seam, like the FHIR search: converting the raw vitals here
         # would stamp this patient's DFN over whatever a row stated, and would
         # omit a configured supplemental provider's rows from the chart while
         # showing them in the search.
-        @observations  = readable?("Observation") ? safe { SupplementalClinicalResources.merged_observations_for_patient(dfn) } || [] : []
+        @observations  = readable_section?("Observation", "vitals") ? build_observations(dfn) : []
         @immunizations = ihs_immunizations(dfn)
         @procedures    = readable?("Procedure") ? build_procedures(dfn) : []
-        @encounters    = readable?("Encounter") ? safe { EncounterGateway.for_patient(dfn) } : []
+        @encounters    = readable_section?("Encounter", "encounters") ? read_section("Encounter", "encounters") { EncounterGateway.for_patient(dfn) } : []
         @encounter_resources = build_encounter_resources(dfn)
         load_screenings(dfn)
       end
@@ -373,20 +383,63 @@ module Lakeraven
       # capability never sees the gateway call, and the card is omitted.
       # A read that raises is a failed card, not an empty list.
       def ihs_immunizations(dfn)
-        return [] unless readable?("Immunization") && BackendRegistry.current.provides?(:ihs_immunization)
+        return [] unless BackendRegistry.current.provides?(:ihs_immunization)
+        return [] unless readable_section?("Immunization", "immunizations")
 
-        Immunization.for_patient(dfn)
+        read_section("Immunization", "immunizations", subject: "Immunizations") { Immunization.for_patient(dfn) }
+      end
+
+      # A section the token cannot read is withheld, which is not a failed read
+      # and not an empty list. It is recorded so the page can say so; the
+      # bundle gets no entry for it.
+      def readable_section?(resource_type, noun)
+        return true if readable?(resource_type)
+
+        @withheld_sections[resource_type] = noun
+        false
+      end
+
+      # The page's sentence for a withheld section. Unlike the failure text,
+      # it makes no claim about the server.
+      def withheld_message(resource_type)
+        noun = @withheld_sections[resource_type]
+        "#{noun.upcase_first} are not included for this access." if noun
+      end
+      helper_method :withheld_message
+
+      # An RPMS-backed read. A raise is recorded as that section's failure
+      # (cause + fixed message, no exception text) and the list is empty, so a
+      # failed read is never rendered as "none recorded". Only the exception
+      # CLASS (and, for a fault, where it was raised) is logged: the message
+      # can carry PHI. subject names the section in the generic failure text
+      # when that is not the resource type.
+      #
+      # A read that returns something other than a list (nil included) is a
+      # failure too, never coerced to []. Errors with their own handlers
+      # (RpmsReadFailure::PASS_THROUGH) leave the action unchanged.
+      def read_section(resource_type, noun, subject: nil)
+        value = yield
+        return value if RpmsReadFailure.list?(value)
+
+        record_read_failure(
+          resource_type, RpmsReadFailure.not_a_list(noun: noun, subject: subject, returned: value.class), noun: noun
+        )
+      rescue *RpmsReadFailure::PASS_THROUGH
+        raise
       rescue StandardError => error
-        record_immunization_load_failure(error)
+        record_read_failure(resource_type, RpmsReadFailure.new(error, noun: noun, subject: subject), noun: noun)
+      end
+
+      # Records the failure and answers the empty list the section renders from.
+      def record_read_failure(resource_type, failure, noun:)
+        failure.log(Rails.logger, "[chart] #{noun} read")
+        @section_failures[resource_type] = failure
         []
       end
 
-      def record_immunization_load_failure(error)
-        @immunizations_load_failed = true
-        Rails.logger.warn(
-          "[chart] immunizations could not be loaded: #{error.class}: " \
-          "#{PhiSanitizer.sanitize_message(error.message)}"
-        )
+      def build_observations(dfn)
+        # Through the seam, like the FHIR search (see load_clinical_collections).
+        read_section("Observation", "vitals") { SupplementalClinicalResources.merged_observations_for_patient(dfn) }
       end
 
       # Scored screening instruments (#474). Engine-owned records rather than an
@@ -400,6 +453,9 @@ module Lakeraven
       # scope but no Observation scope still gets the answers, and vice versa —
       # neither family may be reachable only via the other's scope. One query
       # feeds both; it is skipped entirely when neither scope is held.
+      # A failed query is recorded under QuestionnaireResponse, the type whose
+      # bundle outcome names the section.
+      #
       # A screening row is engine-owned side data. If one of them cannot be
       # rendered or serialized, that must cost AT MOST that row — never the
       # Patient, Conditions, Medications, Allergies and Vitals that the chart
@@ -407,11 +463,16 @@ module Lakeraven
       # ordinal (serializer -> nil choice -> NoMethodError) 500'd the whole
       # bundle. Rows whose instrument no longer exists are dropped up front;
       # anything else that raises is dropped per row by `safe_map`.
+      #
+      # The HTML table is built from the score Observations only, so the HTML
+      # section is withheld whenever Observation scope is missing, even when
+      # the answers are readable (they still go in the bundle).
       def load_screenings(dfn)
         wants_scores  = readable?("Observation")
         wants_answers = readable?("QuestionnaireResponse")
+        @withheld_sections["QuestionnaireResponse"] = "screenings" unless wants_scores
         screenings = if wants_scores || wants_answers
-                       publishable_screenings(safe { ScreeningResponse.for_patient(dfn) })
+                       publishable_screenings(read_screenings(dfn))
         else
                        []
         end
@@ -419,6 +480,18 @@ module Lakeraven
         @screenings = wants_scores ? screenings : []
         @screening_observations = safe_map(@screenings, &:to_observation)
         @screening_answers = wants_answers ? screenings : []
+      end
+
+      # The failure names both families, so a token holding only one of them
+      # is told which of its resources are missing.
+      def read_screenings(dfn)
+        read_section("QuestionnaireResponse", "screenings", subject: SCREENINGS_SUBJECT) do
+          # Loaded here, inside the seam, so a failure on load is a recorded
+          # section failure. The savepoint keeps a failed statement from
+          # aborting the audit wrapper's transaction (PostgreSQL refuses every
+          # later statement of an aborted one, the audit row included).
+          ScreeningResponse.transaction(requires_new: true) { ScreeningResponse.for_patient(dfn).to_a }
+        end
       end
 
       # Validation runs on WRITE; this is the read side of the same contract.
@@ -439,11 +512,11 @@ module Lakeraven
       end
 
       def build_conditions(dfn)
-        safe { Condition.for_patient(dfn) }.map { |h| Condition.from_rpms_row(h, patient_dfn: dfn) }
+        read_section("Condition", "problems") { Condition.for_patient(dfn) }.map { |h| Condition.from_rpms_row(h, patient_dfn: dfn) }
       end
 
       def build_medications(dfn)
-        safe { MedicationRequest.for_patient(dfn) }.map { |h| MedicationRequest.from_rpms_row(h, patient_dfn: dfn) }
+        read_section("MedicationRequest", "medications") { MedicationRequest.for_patient(dfn) }.map { |h| MedicationRequest.from_rpms_row(h, patient_dfn: dfn) }
       end
 
       # `status` has a REQUIRED binding in FHIR. RPMS status text like
@@ -459,11 +532,13 @@ module Lakeraven
       # for the reaction -- and so a configured supplemental provider's rows are
       # in the chart rather than only in the search.
       #
-      # Not `safe`. That helper turns a raise and a real [] into the same [],
-      # and the banner then cannot tell "not loaded" from "none recorded".
-      # Other sections still use `safe`.
+      # Not read_section: the banner and the chart share AllergySource, which
+      # keeps the status the list needs to tell "not loaded" from "none
+      # recorded". Its classified failure joins the section failures, so the
+      # bundle names it.
       def build_allergies(dfn)
         @allergy_source = chart_allergy_source(dfn)
+        @section_failures["AllergyIntolerance"] = @allergy_source.failure if @allergy_source.failure
         @allergy_source.records
       end
 
@@ -485,7 +560,7 @@ module Lakeraven
       end
 
       def build_procedures(dfn)
-        safe { Procedure.for_patient(dfn) }.map do |h|
+        read_section("Procedure", "procedures") { Procedure.for_patient(dfn) }.map do |h|
           Procedure.new(
             ien: h[:ien]&.to_s, patient_dfn: dfn,
             display: h[:name],
@@ -505,13 +580,6 @@ module Lakeraven
         end
       end
 
-      def safe
-        Array(yield)
-      rescue => e
-        Rails.logger.warn("[chart] clinical fetch failed: #{e.class}: #{e.message}")
-        []
-      end
-
       # Per-record projection boundary: one record that cannot be projected is
       # skipped, the rest of the collection survives, and the request does not
       # 500. Used where the projection is derived from stored data rather than
@@ -521,7 +589,7 @@ module Lakeraven
         records.filter_map do |record|
           yield record
         rescue => e
-          Rails.logger.warn("[chart] record #{record.class}##{record.id} skipped: #{e.class}: #{e.message}")
+          Rails.logger.warn("[chart] record #{record.class}##{record.id} skipped: #{e.class}")
           nil
         end
       end
@@ -551,7 +619,7 @@ module Lakeraven
           type: "searchset",
           total: resources.length,
           link: [ { relation: "self", url: request.original_url } ],
-          entry: entries + withheld_chart_outcomes + immunization_load_outcomes
+          entry: entries + withheld_chart_outcomes + section_failure_outcomes
         }
       end
 
@@ -566,12 +634,13 @@ module Lakeraven
         end
       end
 
-      # The capability is present, but the read failed. The diagnostics stay
-      # fixed: the exception message can carry broker detail and stays in the log.
-      def immunization_load_outcomes
-        return [] unless @immunizations_load_failed
-
-        [ chart_feature_outcome(code: "exception", diagnostics: "Immunizations could not be loaded.") ]
+      # The section was readable, but its read failed. The diagnostics are
+      # fixed text naming the resource type: the exception message can carry
+      # broker detail and is never used.
+      def section_failure_outcomes
+        @section_failures.map do |resource_type, failure|
+          chart_feature_outcome(code: failure.fhir_code, diagnostics: failure.diagnostics(resource_type))
+        end
       end
 
       def chart_feature_outcome(code:, diagnostics:)

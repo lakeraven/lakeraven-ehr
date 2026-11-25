@@ -2,13 +2,13 @@
 
 module Lakeraven
   module EHR
-    # The chart's `safe` helper turns both a raise and a genuine [] into [].
-    # Allergy display must not. A raise is "not loaded". [] is "none
+    # Allergy display must not turn both a raise and a genuine [] into [].
+    # A raise is "not loaded", and keeps its classified failure. [] is "none
     # recorded" only when the reading says ORQQAL assessed NKA, nothing was
     # dropped, and the merged list is empty — for_patient returns [] for
     # NKA, not-assessed, and an indeterminate reply alike.
     class AllergySource
-      attr_reader :records, :status, :dropped_count
+      attr_reader :records, :status, :dropped_count, :failure
 
       def self.unauthorized
         new([], :unauthorized)
@@ -16,7 +16,7 @@ module Lakeraven
 
       def self.fetch(log_label:)
         value = yield
-        return failure unless value.is_a?(Array)
+        return not_a_list(value, log_label) unless value.is_a?(Array)
 
         new(
           value,
@@ -26,10 +26,11 @@ module Lakeraven
           conflict: value.is_a?(AllergyIntoleranceReading) && value.conflict
         )
       rescue StandardError => e
-        # Class only. The message from a supplemental provider includes the
+        # Never the message: one from a supplemental provider includes the
         # patient identifier, and a name would be worse.
-        Rails.logger.warn("#{log_label} allergy source failed: #{e.class}")
-        failure
+        failure = RpmsReadFailure.new(e, noun: "allergies")
+        failure.log(Rails.logger, "#{log_label} allergy source")
+        errored(failure)
       end
 
       def self.bundle(records)
@@ -41,12 +42,13 @@ module Lakeraven
         }
       end
 
-      def initialize(records, status, verified_absence: false, dropped_count: 0, conflict: false)
+      def initialize(records, status, verified_absence: false, dropped_count: 0, conflict: false, failure: nil)
         @records = records
         @status = status
         @verified_absence = verified_absence
         @dropped_count = dropped_count.to_i
         @conflict = conflict == true
+        @failure = failure
       end
 
       def ok?
@@ -69,10 +71,18 @@ module Lakeraven
         )
       end
 
-      def self.failure
-        new([], :error)
+      # A reply that is not a list is a failed read, not "none recorded".
+      def self.not_a_list(value, log_label)
+        failure = RpmsReadFailure.not_a_list(noun: "allergies", returned: value.class)
+        failure.log(Rails.logger, "#{log_label} allergy source")
+        errored(failure)
       end
-      private_class_method :failure
+      private_class_method :not_a_list
+
+      def self.errored(failure = nil)
+        new([], :error, failure: failure)
+      end
+      private_class_method :errored
 
       # A plain Array (a stub that only has records) cannot prove an empty
       # list is NKA. Only the reading carries that.
