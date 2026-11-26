@@ -3,7 +3,7 @@
 require "test_helper"
 
 # Tests for EligibilityGateway — VFC eligibility via BIPC ELIGGET / BIPC ELIGLIST.
-# Uses mock data seeded in test_helper.rb via RpmsRpc.mock!
+# Uses the stand-in's baseline (test/support/rpms_stand_in/baseline.rb).
 module Lakeraven
   module EHR
     class EligibilityGatewayTest < ActiveSupport::TestCase

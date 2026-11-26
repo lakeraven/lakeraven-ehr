@@ -7,7 +7,7 @@ require "test_helper"
 # Pacific the host's UTC date is already Monday: the clinic's day must still
 # offer Check in for Sunday's appointments, and the check-in, check-out and
 # walk-in forms must fill in the site's time. RPMS is stood in for at the gem
-# boundary; its clock is the mock broker's ORWU DT answer.
+# boundary; its clock is what RpmsRpc::Orwu.fileman_datetime("NOW") answers.
 class SchedulingSiteTimeTest < ActionDispatch::IntegrationTest
   RESOURCE = { id: 2, name: "DEMO IHS CLINIC", inactive: false, time_scale: 15, hospital_location_id: 3,
                view: true, overbook: true, modify_schedule: true, modify_appointments: true }.freeze
@@ -22,14 +22,13 @@ class SchedulingSiteTimeTest < ActionDispatch::IntegrationTest
     # the process's zone (WallClock), so they are built in UTC here too.
     @tz = ENV["TZ"]
     ENV["TZ"] = "UTC"
-    RpmsRpc.client.seed_scalar(:orwu_dt, "NOW", SITE_NOW)
+    RpmsStandIn.answer(RpmsRpc::Orwu, :fileman_datetime, "NOW", with: SITE_NOW)
     Lakeraven::EHR::SiteTime.reader = nil if defined?(Lakeraven::EHR::SiteTime)
     travel_to HOST_NOW
   end
 
   teardown do
     travel_back
-    RpmsRpc.client.seed_scalar(:orwu_dt, "NOW", "")
     Lakeraven::EHR::SiteTime.reader = -> { Time.now } if defined?(Lakeraven::EHR::SiteTime)
     ENV["TZ"] = @tz
   end

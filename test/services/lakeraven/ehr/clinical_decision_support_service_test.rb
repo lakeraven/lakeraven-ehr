@@ -9,7 +9,7 @@ module Lakeraven
       setup do
         @_orig_patient_find = Patient.method(:find_by_dfn)
         @_orig_rpms_client = RpmsRpc.configuration.client
-        RpmsRpc.mock!(&BASELINE_MOCK_SEEDS)
+        RpmsStandIn.install_baseline!
         @_orig_allergy_for_patient = AllergyIntolerance.method(:for_patient)
         @_orig_device_for_patient = Device.method(:for_patient)
 
@@ -397,14 +397,15 @@ module Lakeraven
         mock_devices(dfn, [])
       end
 
-      # The patient's orders as ORWPS ACTIVE wire, read back through the
-      # gateway and the rpms-rpc parser: order id, drug, expiration, refills,
-      # CPRS order number, the RPMS status (piece 9), then the sig line.
+      # The patient's orders, each as RpmsRpc::Medication.active_for_patient
+      # returns it, read back through the gateway: order id, drug, the RPMS
+      # status, stop date and the sig line.
       def seed_active_medications(dfn, orders)
-        wire = orders.each_with_index.map do |order, i|
-          "~OP^#{4401 + i}R;O^#{order[:drug_name]}^^3271231^3^^^#{120345 + i}^#{order[:status]}\n\\ Sig: TAKE AS DIRECTED"
+        rows = orders.each_with_index.map do |order, i|
+          { order_id: "#{4401 + i}R;O", type: "OP", name: order[:drug_name], status: order[:status],
+            stop_date: Date.new(2027, 12, 31), instructions: [ "Sig: TAKE AS DIRECTED" ], comments: [] }
         end
-        RpmsRpc.client.seed_text(:medication_active, dfn.to_s, wire.join("\n"))
+        RpmsStandIn.answer(RpmsRpc::Medication, :active_for_patient, dfn, with: rows)
       end
 
       def mock_no_allergies(dfn)

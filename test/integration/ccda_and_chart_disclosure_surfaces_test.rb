@@ -70,7 +70,8 @@ module Lakeraven
       setup do
         @saved_options = Rails.application.config.x.lakeraven_ehr
         @original_client = RpmsRpc.configuration.client
-        @broker = RpmsRpc.mock! { |m| LakeravenDemoSeeds.seed(m) }
+        RpmsStandIn.install! { |rpms| LakeravenDemoSeeds.seed(rpms) }
+        @broker = RpmsStandIn.connection
         RateLimit.singleton_class.prepend(RateLimitProbe) unless RateLimit.singleton_class < RateLimitProbe
         RateLimit.reset!
         @work_before = nil

@@ -4,7 +4,7 @@ require "test_helper"
 
 # Tests for PatientGateway — the repository layer that owns
 # all RPMS RPC details for patient demographics.
-# Uses mock data seeded in test_helper.rb via RpmsRpc.mock!
+# Uses the stand-in's baseline (test/support/rpms_stand_in/baseline.rb).
 module Lakeraven
   module EHR
     class PatientGatewayTest < ActiveSupport::TestCase

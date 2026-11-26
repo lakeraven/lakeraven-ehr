@@ -6,7 +6,7 @@ require "capybara/cuprite"
 # rpms-ux S-REG-02 (#975): the new-patient form says which fields RPMS needs
 # before it is refused, and its refusal names them in a clerk's words.
 #
-# A real browser against the app on the mocked broker (test_helper), signing
+# A real browser against the app on the RPMS stand-in (test_helper), signing
 # in through the form as a clerk holding AGZMENU. CI runs these by path:
 #
 #   bin/rails test test/system/*_test.rb
@@ -22,10 +22,8 @@ class RegistrationRequiredFieldsTest < ActionDispatch::SystemTestCase
 
   setup do
     Lakeraven::EHR::LoginThrottle.reset!
-    mock = RpmsRpc.client
-    mock.seed_user("975", credentials: "regclerk;test123", name: "CLERK,REGISTRATION", role: :clerk)
-    mock.seed_held_keys("975", [ "AGZMENU" ])
-    mock.seed_options("975", [ "CIAV VUECENTRIC" ])
+    RpmsStandIn.user(975, access: "regclerk", verify: "test123", name: "CLERK,REGISTRATION", role: :clerk,
+                          keys: [ "AGZMENU" ], options: [ "CIAV VUECENTRIC" ])
   end
 
   test "tribe and community are marked required, and a form without them says so without 'ien'" do

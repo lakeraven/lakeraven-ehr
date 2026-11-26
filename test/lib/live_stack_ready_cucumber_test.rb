@@ -109,7 +109,7 @@ class LiveStackReadyCucumberTest < ActiveSupport::TestCase
     assert_not_run "A gateway is stubbed bare", reason: "a gateway was stubbed: LiveStackReady::ThrowawayGateway.find"
   end
 
-  # The real RpmsRpc::MockClient, watched by LiveStack.install!'s default.
+  # The real RpmsStandIn::Connection, watched by LiveStack.install!'s default.
   test "a scenario the mock answered through call_rpc_lines is not run" do
     assert_not_run "The mock answers through its lines", reason: "ORWPT LIST ALL was answered by the mock"
   end

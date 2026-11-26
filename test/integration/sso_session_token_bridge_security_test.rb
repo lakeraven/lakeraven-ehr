@@ -335,7 +335,7 @@ class SsoSessionTokenBridgeSecurityTest < ActionDispatch::IntegrationTest
   # The whole sign-on sequence runs under the broker wire lock.
   #
   # Behavioral, against the REAL gem lock (rpms-rpc 0.3.0 provides
-  # RpmsRpc.synchronize_wire and its MockClient models it): two concurrent
+  # RpmsRpc.synchronize_wire): two concurrent
   # sign-ons must not interleave on the process-global broker client. If the
   # sequence — authenticate, user_info, ORWU USERKEYS — is one locked unit,
   # thread 2 cannot enter its own `authenticate` until thread 1 releases, so
@@ -447,9 +447,13 @@ class SsoSessionTokenBridgeSecurityTest < ActionDispatch::IntegrationTest
   # -- H1: verify_needs_change ----------------------------------------------
 
   test "a verify code flagged for change does not yield a signed-in session" do
-    RpmsRpc.client.seed_lines(:av_code, "MUSTCHANGE;TEST123", {
-      duz: 304, error_code: 0, verify_needs_change: 1, message: "Change it", user_class: 3
-    })
+    # RPMS accepts the codes and signs the connection on as 304, and says the
+    # verify code must be changed.
+    RpmsStandIn.answer(RpmsRpc::Authentication, :authenticate) do |**|
+      RpmsStandIn.connection.set_authenticated("304")
+      { success: true, duz: 304, provider_ien: 304, message: "Change it", verify_needs_change: true,
+        post_signon_message_count: 0, name: "RODRIGUEZ,LINDA" }
+    end
 
     sign_in("mustchange", "test123")
 

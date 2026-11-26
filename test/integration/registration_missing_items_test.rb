@@ -29,8 +29,12 @@ class RegistrationMissingItemsTest < ActionDispatch::IntegrationTest
     post "/lakeraven-ehr/test_session", params: { duz: "207", user_type: "user", user_name: "PROFILE,REG", security_keys: keys }
   end
 
-  def seed_checks(rows)
-    RpmsRpc.client.seed(:agg_patient_edit_check, "3", ([ HEADER ] + rows).map { |r| "#{r}#{RS}" }.join + US)
+  # AG's reply for patient 3, replayed as the broker frames a global array
+  # (the typed header, $C(30)-ended records, the $C(31) end) and read by
+  # rpms-rpc's own parser (RpmsRpc::Agg.edit_check).
+  def ag_answers(rows, binary: false)
+    reply = ([ HEADER ] + rows).map { |r| "#{r}#{RS}" }.join + US
+    RpmsStandIn.connection.replay("AGG PATIENT EDIT CHECK", binary ? reply.b : reply, first_param: "3")
   end
 
   def edit_checks_asked
@@ -50,7 +54,7 @@ class RegistrationMissingItemsTest < ActionDispatch::IntegrationTest
 
   test "S-REG-23.1 and S-REG-31.1 each item is listed under its section, errors counted apart from warnings" do
     sign_in("registration_menu")
-    seed_checks(MINIMUM)
+    ag_answers(MINIMUM)
 
     get "/lakeraven-ehr/registration/patients/3"
 
@@ -77,7 +81,7 @@ class RegistrationMissingItemsTest < ActionDispatch::IntegrationTest
 
   test "a clerk holding AGZMENU opens the registration of a patient with coverage, its windows as the broker sends them" do
     sign_in("registration_menu")
-    RpmsRpc.client.seed(:agg_patient_edit_check, "3", (([ HEADER ] + WITH_COVERAGE).map { |r| "#{r}#{RS}" }.join + US).b)
+    ag_answers(WITH_COVERAGE, binary: true)
 
     get "/lakeraven-ehr/registration/patients/3"
 
@@ -89,7 +93,7 @@ class RegistrationMissingItemsTest < ActionDispatch::IntegrationTest
 
   test "S-REG-23.2 an item RPMS no longer lists is gone from the page" do
     sign_in("registration_menu")
-    seed_checks(MINIMUM.reject { |row| row.start_with?("807^") })
+    ag_answers(MINIMUM.reject { |row| row.start_with?("807^") })
 
     get "/lakeraven-ehr/registration/patients/3"
 
@@ -99,7 +103,7 @@ class RegistrationMissingItemsTest < ActionDispatch::IntegrationTest
 
   test "S-REG-31.2 and 31.3 a registration AG finds nothing missing on says it is complete" do
     sign_in("registration_menu")
-    seed_checks([])
+    RpmsStandIn.answer(RpmsRpc::Agg, :edit_check, with: { checks: [] })
 
     get "/lakeraven-ehr/registration/patients/3"
 

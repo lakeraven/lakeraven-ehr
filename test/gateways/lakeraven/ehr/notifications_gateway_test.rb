@@ -14,8 +14,7 @@ module Lakeraven
         "2^1^MOUSE,MICKEY M    (1001)^  ^Unscheduled visit (probe).^3261104.175206^MANAGER,SYSTEM^3^OR.19^OR,3,19;4;3261104.175206^1^"
       ].freeze
 
-      setup { RpmsRpc.client.seed_raw_lines(:notifications_inbox, "", CAPTURED) }
-      teardown { RpmsRpc.client.seed_raw_lines(:notifications_inbox, "", []) }
+      setup { RpmsStandIn.connection.replay("BEHOXQ ALRLIST", CAPTURED) }
 
       test "inbox lists the user's alerts newest first, asking RPMS for no user" do
         alerts = NotificationsGateway.inbox
@@ -35,14 +34,12 @@ module Lakeraven
       ].freeze
 
       test "recipients are the users whose names start with the text, without the user themself" do
-        RpmsRpc.client.seed_raw_lines(:user_management_user_list, "PROFILE", NEWPERS_PROFILE)
+        RpmsStandIn.connection.replay("ORWU NEWPERS", NEWPERS_PROFILE, first_param: "PROFILE")
 
         assert_equal %w[Profile,Ma Profile,Reg Profile,Rn Profile,Sched],
           NotificationsGateway.recipients("Profile", except: "206").map { |r| r[:name] }, "not Provider,Test, past the text"
         call = RpmsRpc.client.received_calls.reverse.find { |c| c[:rpc] == "ORWU NEWPERS" }
         assert_equal [ "PROFILE", "1" ], call[:params].to_a, "searched as typed, upper case, forward"
-      ensure
-        RpmsRpc.client.seed_raw_lines(:user_management_user_list, "PROFILE", [])
       end
 
       test "a blank search asks RPMS nothing" do

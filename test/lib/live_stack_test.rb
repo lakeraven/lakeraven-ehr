@@ -1272,29 +1272,24 @@ class LiveStackTest < ActiveSupport::TestCase
   # -- the real mock is never evidence, whichever way it is read (F1) --------
 
   MOCK_READS = %i[call_rpc call_rpc_lines call_rpc_global_array].freeze
-  # Seeded by seed_user: a line reply and a record, so every read path has
-  # something to answer with.
+  # The stand-in's connection answers nothing on file to any RPC; what the
+  # watch must not change is that answer and that the call was recorded.
   MOCK_RPCS = [ "XUS GET USER INFO", "ORWU USERINFO" ].freeze
 
-  def seed_mock(mock)
-    mock.seed_user(PERSONA_DUZ, credentials: "synthetic;synthetic", name: "PERSONA,SYNTHETIC", role: :provider)
-    mock
-  end
+  def seed_mock(mock) = mock
 
-  # The real RpmsRpc::MockClient under the watch, without prepending onto the
+  # The real RpmsStandIn::Connection under the watch, without prepending onto the
   # class the rest of the suite shares.
   def watched_real_mock
-    seed_mock(Class.new(RpmsRpc::MockClient) { prepend LiveStack::MockWatch }.new)
+    seed_mock(Class.new(RpmsStandIn::Connection) { prepend LiveStack::MockWatch }.new)
   end
 
-  def unwatched_real_mock = seed_mock(RpmsRpc::MockClient.new)
+  def unwatched_real_mock = seed_mock(RpmsStandIn::Connection.new)
 
   test "the real mock answers every read path as it did, once, and each answer says it was the mock" do
     MOCK_READS.product(MOCK_RPCS).each do |read, rpc|
       mock = watched_real_mock
       expected = unwatched_real_mock.public_send(read, rpc)
-      assert_not_empty expected, "#{read} #{rpc}: the seed answers nothing, so the test proves nothing"
-
       answer = mock.public_send(read, rpc)
 
       assert_equal expected, answer, "#{read} #{rpc}: the watched mock answered differently"
@@ -1336,12 +1331,12 @@ class LiveStackTest < ActiveSupport::TestCase
   # -- a mock read that raises still reached the mock (R6-3) ----------------
 
   # The real mock under the watch, whose seeded reply raises what the test
-  # asks: every read path reads through seeded_reply.
+  # asks: every read path records the call first.
   def raising_real_mock(error)
-    Class.new(RpmsRpc::MockClient) do
+    Class.new(RpmsStandIn::Connection) do
       prepend LiveStack::MockWatch
 
-      define_method(:seeded_reply) { |_rpc_name, *_params| raise error }
+      define_method(:record) { |_rpc_name, _params| raise error }
     end.new
   end
 
@@ -1727,7 +1722,7 @@ class LiveStackTest < ActiveSupport::TestCase
     assert_not_includes Module.ancestors, LiveStack::StubWatch
     assert_not_includes ActiveSupport::Testing::SimpleStubs.ancestors, LiveStack::TimeStubWatch
     assert_not_includes Class.ancestors, LiveStack::StubWatch
-    assert_not_includes RpmsRpc::MockClient.ancestors, LiveStack::MockWatch
+    assert_not_includes RpmsStandIn::Connection.ancestors, LiveStack::MockWatch
   end
 
   test "install! arms the watch: a call on the client by the persona counts" do

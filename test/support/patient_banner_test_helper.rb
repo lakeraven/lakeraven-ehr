@@ -33,7 +33,7 @@ module PatientBannerTestHelper
 
   def with_demo_clinical_seeds
     @demo_original_client = RpmsRpc.configuration.client
-    RpmsRpc.mock! { |m| LakeravenDemoSeeds.seed(m) }
+    RpmsStandIn.install! { |rpms| LakeravenDemoSeeds.seed(rpms) }
     yield
   ensure
     RpmsRpc.configure { |c| c.client = @demo_original_client } if @demo_original_client
@@ -201,20 +201,21 @@ module PatientBannerTestHelper
   end
   private :banner_request
 
-  # Raw ORQQAL LIST lines for the in-memory mock (assessment sentinels are not
-  # allergy rows and cannot be seeded via seed_keyed_collection).
-  def seed_orqqal_reply!(dfn, lines)
-    client = RpmsRpc.configuration.client
-    mapping = RpmsRpc::DataMapper[:allergy_list]
-    rpc_name = mapping.rpc_name
-    keyed = (client.instance_variable_get(:@keyed_collections) || {}).dup
-    keyed[rpc_name] = (keyed[rpc_name] || {}).dup
-    keyed[rpc_name][dfn.to_s] = Array(lines)
-    client.instance_variable_set(:@keyed_collections, keyed)
+  # What RpmsRpc::Allergy.assessment answers for the patient. Its states:
+  # allergies on file (assessed, rows), no known allergies (assessed, nka),
+  # not assessed (neither), and a conflicting reply (conflict: a marker beside
+  # rows, so the rows are known but are not a complete list).
+  def answer_allergy_assessment!(dfn, assessed:, nka: false, allergens: [], conflict: false)
+    rows = allergens.each_with_index.map do |allergen, i|
+      { ien: (i + 1).to_s, allergen: allergen, severity: nil, signs: nil, altered: false }
+    end
+    assessment = { assessed: assessed, nka: nka, allergies: rows }
+    assessment[:conflict] = true if conflict
+    RpmsStandIn.answer(RpmsRpc::Allergy, :assessment, dfn, with: assessment)
   end
 
   def seed_nka_allergy_assessment!(dfn)
-    seed_orqqal_reply!(dfn, [ RpmsRpc::Allergy::NKA_SENTINEL ])
+    answer_allergy_assessment!(dfn, assessed: true, nka: true)
   end
 
   def assert_allergies_unassessed_or_indeterminate!

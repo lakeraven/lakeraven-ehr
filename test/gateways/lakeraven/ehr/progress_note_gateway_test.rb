@@ -111,15 +111,15 @@ module Lakeraven
       # so a change to the gem's signature fails here. The note is completed, so
       # CANDO refuses EDIT RECORD with its own reason (TIUSRVA.m:23-29).
       test "authorize asks for EDIT RECORD as the signed-on user and reads the refusal" do
-        RpmsRpc.client.seed_raw_lines(:tiu_authorization, "5", [ "0^ You may not edit uncosigned or completed documents" ])
+        RpmsStandIn.connection.replay("TIU AUTHORIZATION", [ "0^ You may not edit uncosigned or completed documents" ], first_param: "5")
 
         refute ProgressNoteGateway.authorize(5)
         assert_equal [ "5", "EDIT RECORD" ], RpmsRpc.client.received_calls.last[:params]
       end
 
       test "lock and unlock send the note alone and read RPMS's 0 as done" do
-        RpmsRpc.client.seed_raw_lines(:tiu_lock_record, "5", [ "0" ])
-        RpmsRpc.client.seed_raw_lines(:tiu_unlock_record, "5", [ "0" ])
+        RpmsStandIn.connection.replay("TIU LOCK RECORD", [ "0" ], first_param: "5")
+        RpmsStandIn.connection.replay("TIU UNLOCK RECORD", [ "0" ], first_param: "5")
 
         assert ProgressNoteGateway.lock(5)
         assert_equal [ "5" ], RpmsRpc.client.received_calls.last[:params]

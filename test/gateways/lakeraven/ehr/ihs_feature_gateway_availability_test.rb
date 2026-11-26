@@ -16,15 +16,13 @@ module Lakeraven
       teardown { teardown_restricted_backend }
 
       test "bprm_scheduling does not gate EncounterGateway.for_patient (stock ORWPT APPTLST chart rows)" do
-        RpmsRpc.client.seed_keyed_collection(:patient_appointments, "1", [
+        RpmsStandIn.answer(RpmsRpc::Encounter, :for_patient, 1, with: [
           { datetime: Date.new(2026, 5, 1), location_ien: 20, location: "Scheduling Clinic Future", status: "SCHEDULED" }
         ])
         with_restricted_backend do
           visits = EncounterGateway.for_patient(1)
           assert visits.any? { |v| v[:location] == "Scheduling Clinic Future" }
         end
-      ensure
-        RpmsRpc.client.seed_keyed_collection(:patient_appointments, "1", [])
       end
 
       PRC_REFERRAL_GATEWAY_CALLS = {

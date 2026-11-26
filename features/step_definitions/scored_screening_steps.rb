@@ -252,15 +252,14 @@ Given("the clinician is signed in") do
   post "#{SCREENING_MOUNT}/patients/#{@dfn}/context",
        authenticity_token: @authenticity_token
 
-  # The Background's active encounter, as RPMS lists it (BEHOENCX VISITLST):
+  # The Background's active encounter, as RpmsRpc::Encounter.visits returns it:
   # the form submits against one of the patient's open visits (#1003).
   # Synthetic clinic and provider; checked in today.
   day = Date.current
-  checked_in_at = Time.zone.local(day.year, day.month, day.day, 9, 30)
-  fileman = "#{checked_in_at.year - 1700}#{checked_in_at.strftime('%m%d')}.#{checked_in_at.strftime('%H%M')}"
-  RpmsRpc.client.seed_keyed_collection(:encounter_visit_list, @dfn.to_s, [
-    { visit_string: "40;#{fileman};A;#{@visit_ien}", location: "Riverbend Behavioral Health",
-      category: "AMBULATORY", datetime: checked_in_at, locked: false,
+  checked_in_at = Time.new(day.year, day.month, day.day, 9, 30) # rubocop:disable Rails/TimeZone -- rpms-rpc builds visit times with Time.new
+  RpmsStandIn.answer(RpmsRpc::Encounter, :visits, @dfn, with: [
+    { visit_ien: @visit_ien.to_i, location_ien: 40, location: "Riverbend Behavioral Health",
+      service_category: "A", category: "AMBULATORY", datetime: checked_in_at, locked: false,
       provider_ien: 9001, provider: "TESTPROVIDER,ALPHA" }
   ])
 end

@@ -483,13 +483,14 @@ module Lakeraven
 
             test "HTML chart retains RPMS text for appointments, missing vitals, and units" do
         begin
-          RpmsRpc.client.seed_keyed_collection(:patient_appointments, "1", [
+          RpmsStandIn.answer(RpmsRpc::Encounter, :for_patient, 1, with: [
             { datetime: Date.new(2026, 2, 1), location_ien: 1, location: "Clinic", status: "no show" }
           ])
-          RpmsRpc.client.seed_keyed_collection(:vitals, "1", [
-            { measurement_ien: 4001, type: "PAIN", value: "4", units: "", recorded_date: DateTime.now },
-            { measurement_ien: 4002, type: "T", value: "98.6", units: "Celsius", recorded_date: DateTime.now },
-            { measurement_ien: 4003, type: "BP", value: "Refused", units: "", recorded_date: DateTime.now }
+          # RpmsRpc::Vital.for_patient returns no units piece: the reply has none.
+          RpmsStandIn.answer(RpmsRpc::Vital, :for_patient, 1, with: [
+            { measurement_ien: 4001, type: "PAIN", value: "4", recorded_date: Time.now },
+            { measurement_ien: 4002, type: "T", value: "98.6", recorded_date: Time.now },
+            { measurement_ien: 4003, type: "BP", value: "Refused", recorded_date: Time.now }
           ])
 
           get "/lakeraven-ehr/patients/1", headers: @headers
@@ -525,16 +526,8 @@ module Lakeraven
           # The chart shows the FHIR unit as a clinician reads it (#976).
           assert_equal Observation.display_unit(fhir_unit).to_s, html_unit.to_s, "Expected HTML chart unit to be the FHIR JSON unit, for display"
         ensure
-          RpmsRpc.client.seed_keyed_collection(:patient_appointments, "1", [])
-          RpmsRpc.client.seed_keyed_collection(:vitals, "1", [
-            { measurement_ien: 4004, type: "BP",  value: "120/80", units: "mm[Hg]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
-            { measurement_ien: 4005, type: "P",   value: "72",     units: "/min",   recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
-            { measurement_ien: 4006, type: "T",   value: "98.6",   units: "[degF]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
-            { measurement_ien: 4007, type: "R",   value: "16",     units: "/min",   recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
-            { measurement_ien: 4008, type: "POX", value: "98",     units: "%",      recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
-            { measurement_ien: 4009, type: "WT",  value: "150",    units: "[lb_av]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
-            { measurement_ien: 4010, type: "HT",  value: "65",     units: "[in_i]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) }
-          ])
+          # Back to the baseline every test starts from.
+          RpmsStandIn.install_baseline!
         end
       end
 
@@ -564,6 +557,9 @@ module Lakeraven
       # Note: Many /:id show routes (like AllergyIntolerance/:id) are omitted here because
       # we do not have seeded data for those specific resource IDs. We use the nearest real path
       # (the index search route) to verify the seam is wired for that controller, rather than inventing IDs that return 404.
+      # One problem for patient 1, as RpmsRpc::Problem.for_patient returns it.
+      DIABETES = { ien: "7", description: "Diabetes", status: "A", icd_code: "E11.9", inactive_icd: false }.freeze
+
       WIRED_ENDPOINTS = [
         { path: "/lakeraven-ehr/Patient", method: :get, params: { name: "Anderson" } },
         { path: "/lakeraven-ehr/Patient/1", method: :get },
@@ -577,26 +573,31 @@ module Lakeraven
         { path: "/lakeraven-ehr/Immunization", method: :get, params: { patient: "1" } },
         { path: "/lakeraven-ehr/Procedure", method: :get, params: { patient: "1" } },
         { path: "/lakeraven-ehr/AllergyIntolerance/1-7", method: :get, setup: -> {
-          RpmsRpc.client.seed_keyed_collection(:allergy_list, "1", [ { ien: 7, allergen: "Penicillin" } ])
+          RpmsStandIn.answer(RpmsRpc::Allergy, :assessment, 1,
+            with: { assessed: true, nka: false,
+                    allergies: [ { ien: "7", allergen: "Penicillin", severity: nil, signs: nil, altered: false } ] })
         } },
         { path: "/lakeraven-ehr/Condition/1-7", method: :get, setup: -> {
-          RpmsRpc.client.seed_keyed_collection(:problem_list, "1", [ { ien: 7, status: "A", icd_code: "E11.9", description: "Diabetes" } ])
+          RpmsStandIn.answer(RpmsRpc::Problem, :for_patient, 1, with: [ DIABETES ])
         } },
         { path: "/lakeraven-ehr/MedicationRequest/1-7R-O", method: :get, setup: -> {
-          RpmsRpc.client.seed_text(:medication_active, "1", "~OP^7R;O^METFORMIN 500MG TAB^^3271231^1^^^120007^ACTIVE\n")
+          RpmsStandIn.answer(RpmsRpc::Medication, :active_for_patient, 1,
+            with: [ { order_id: "7R;O", type: "OP", name: "METFORMIN 500MG TAB", status: "ACTIVE",
+                      stop_date: Date.new(2027, 12, 31), instructions: [], comments: [] } ])
         } },
         { path: "/lakeraven-ehr/Observation/1-8", method: :get },
         { path: "/lakeraven-ehr/ServiceRequest/1-7", method: :get, setup: -> {
-          RpmsRpc.client.seed_keyed_collection(:referral_search, "1", [ { ien: 7, status: "A", purpose: "Cardiology" } ])
+          RpmsStandIn.answer(RpmsRpc::Referral, :for_patient, 1, with: [ { ien: "7", status: "A", purpose: "Cardiology" } ])
         } },
         { path: "/lakeraven-ehr/Immunization/1-7", method: :get, setup: -> {
-          RpmsRpc.client.seed_keyed_collection(:immunization_list, "1^I", [ { record_type: "I", ien: 7, vaccine_display: "Influenza" } ])
+          RpmsStandIn.answer(RpmsRpc::Immunization, :for_patient, 1, with: [ { ien: "7", vaccine_display: "Influenza" } ])
         } },
         { path: "/lakeraven-ehr/Procedure/1-7", method: :get, setup: -> {
-          RpmsRpc.client.seed_keyed_collection(:procedure_list, "1", [ { ien: 7, name: "Office visit", date: Date.new(2026, 3, 10) } ])
+          RpmsStandIn.answer(RpmsRpc::Procedure, :for_patient, 1, with: [ { ien: "7", name: "Office visit" } ])
         } },
         { path: "/lakeraven-ehr/Encounter/1-7", method: :get, setup: -> {
-          RpmsRpc.client.seed_keyed_collection(:encounter_visit_list, "1", [ { visit_string: "1;3260310.09;A;7", location: "Clinic", category: "AMBULATORY" } ])
+          RpmsStandIn.answer(RpmsRpc::Encounter, :visits, 1,
+            with: [ { location: "Clinic", category: "AMBULATORY", visit_ien: 7, location_ien: 1, service_category: "A" } ])
         } },
         { path: "/lakeraven-ehr/CoverageEligibilityRequest", method: :post, params: { patient_dfn: "1", coverage_type: "medicaid" } },
         { path: "/lakeraven-ehr/MeasureReport", method: :get, params: { patient: "1" } },
@@ -993,7 +994,7 @@ module Lakeraven
           instance_exec(&endpoint[:setup]) if endpoint[:setup]
           # A search with a match in it, so the label is on an entry and not
           # only on an empty Bundle.
-          RpmsRpc.client.seed_keyed_collection(:problem_list, "1", [ { ien: 7, status: "A", icd_code: "E11.9", description: "Diabetes" } ]) if label
+          RpmsStandIn.answer(RpmsRpc::Problem, :for_patient, 1, with: [ DIABETES ]) if label
           path = endpoint[:dynamic_path] ? instance_exec(&endpoint[:dynamic_path]) : endpoint[:path]
           ndjson = row == "exports file show"
 
@@ -1034,7 +1035,7 @@ module Lakeraven
 
       test "Part 2 notice survives _elements subsetting of a search Bundle" do
         # A search with a match in it: an empty Bundle has no entry to subset.
-        RpmsRpc.client.seed_keyed_collection(:problem_list, "1", [ { ien: 7, status: "A", icd_code: "E11.9", description: "Diabetes" } ])
+        RpmsStandIn.answer(RpmsRpc::Problem, :for_patient, 1, with: [ DIABETES ])
         results = []
         with_part2_labelled_egress(results) do
           get "/lakeraven-ehr/Condition", params: { patient: "1", _elements: "code" }, headers: @headers

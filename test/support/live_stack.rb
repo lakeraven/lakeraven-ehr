@@ -3,6 +3,7 @@
 require "cucumber/core/test/result"
 require "active_support"
 require "active_support/testing/time_helpers"
+require_relative "rpms_stand_in/connection"
 
 # The binding behind `cucumber --profile stack` (#962). A stack run takes its
 # whole binding from VARIABLES, signs on as that one persona, and is ready only
@@ -77,7 +78,8 @@ module LiveStack
     end
   end
 
-  # Prepended onto the mock client class in a ready stack run: an answer from
+  # Prepended onto the stand-in's connection (RpmsStandIn::Connection, "the
+  # mock" in the reasons below) in a ready stack run: an answer from
   # the mock, through any of its read paths, is never evidence. Each read
   # records that the mock answered, whether it returned or raised, and answers
   # or raises unchanged.
@@ -216,7 +218,7 @@ module LiveStack
   # The ready run's watches: arms the persona's client, and prepends
   # RefusalWatch onto its class, MockWatch onto the mock, StubWatch onto
   # Module and TimeStubWatch onto SimpleStubs, each once.
-  def install!(client:, persona_duz:, mock_class: RpmsRpc::MockClient, module_class: Module,
+  def install!(client:, persona_duz:, mock_class: RpmsStandIn::Connection, module_class: Module,
                time_stubs_class: ActiveSupport::Testing::SimpleStubs)
     arm!(client: client, persona_duz: persona_duz)
     [ [ client.class, RefusalWatch ], [ mock_class, MockWatch ], [ module_class, StubWatch ],

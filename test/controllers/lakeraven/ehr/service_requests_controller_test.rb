@@ -31,7 +31,7 @@ module Lakeraven
       end
 
       test "entries have correct resourceType" do
-        RpmsRpc.client.seed_keyed_collection(:referral_search, "1", [
+        RpmsStandIn.answer(RpmsRpc::Referral, :for_patient, 1, with: [
           { ien: "1001", patient_dfn: 1, status: "active", type: "C",
             date: Date.new(2026, 1, 15), provider: "MARTINEZ,SARAH" }
         ])

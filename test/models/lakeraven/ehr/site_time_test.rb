@@ -13,7 +13,6 @@ class SiteTimeTest < ActiveSupport::TestCase
   end
 
   teardown do
-    RpmsRpc.client.seed_scalar(:orwu_dt, "NOW", "")
     Lakeraven::EHR::SiteTime.reader = -> { Time.now }
     ENV["TZ"] = @tz
   end
@@ -21,7 +20,7 @@ class SiteTimeTest < ActiveSupport::TestCase
   # Sunday Nov 8, 2026, 20:10:30 Pacific (UTC-8) is Monday 04:10:30 UTC.
   def at_sunday_evening_pacific(&)
     # ORWU DT "NOW" answers with FileMan's date and time (DT^ORWU, %DT "TS").
-    RpmsRpc.client.seed_scalar(:orwu_dt, "NOW", "3261108.201030")
+    RpmsStandIn.answer(RpmsRpc::Orwu, :fileman_datetime, "NOW", with: "3261108.201030")
     travel_to(Time.utc(2026, 11, 9, 4, 10, 30), &)
   end
 
@@ -29,16 +28,17 @@ class SiteTimeTest < ActiveSupport::TestCase
     at_sunday_evening_pacific do
       assert_equal Time.new(2026, 11, 8, 20, 10, 30), Lakeraven::EHR::SiteTime.now
       assert_equal Date.new(2026, 11, 8), Lakeraven::EHR::SiteTime.today
-      assert_equal [ "NOW", "TS" ], RpmsRpc.client.received_calls.reverse.find { |c| c[:rpc] == "ORWU DT" }[:params].to_a
+      # "TS" (seconds) is the flag rpms-rpc sends unless told otherwise, so the engine asks for "NOW" alone.
+      assert_equal({ args: [ "NOW" ], kwargs: {} }, RpmsStandIn.calls(RpmsRpc::Orwu, :fileman_datetime).last)
     end
   end
 
   test "RPMS is asked once per request" do
     at_sunday_evening_pacific do
-      before = RpmsRpc.client.received_calls.count { |c| c[:rpc] == "ORWU DT" }
+      before = RpmsStandIn.calls(RpmsRpc::Orwu, :fileman_datetime).length
       3.times { Lakeraven::EHR::SiteTime.now }
       Lakeraven::EHR::SiteTime.local(Time.current)
-      assert_equal before + 1, RpmsRpc.client.received_calls.count { |c| c[:rpc] == "ORWU DT" }
+      assert_equal before + 1, RpmsStandIn.calls(RpmsRpc::Orwu, :fileman_datetime).length
     end
   end
 
@@ -51,7 +51,7 @@ class SiteTimeTest < ActiveSupport::TestCase
   end
 
   test "a site clock a few minutes adrift still gives the site's zone" do
-    RpmsRpc.client.seed_scalar(:orwu_dt, "NOW", "3261108.2017")
+    RpmsStandIn.answer(RpmsRpc::Orwu, :fileman_datetime, "NOW", with: "3261108.2017")
     travel_to(Time.utc(2026, 11, 9, 4, 10)) do
       assert_equal(-8 * 3600, Lakeraven::EHR::SiteTime.utc_offset)
     end

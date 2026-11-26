@@ -9,11 +9,11 @@ module Lakeraven
     class ProcedureGatewayTest < ActiveSupport::TestCase
       # --- read: for_patient ---
 
-      test "for_patient returns the seeded procedure list" do
-        # BGOVCPT GET rows: the visit date as MM/DD/YYYY, and no status (V CPT
-        # has none; rpms-rpc #375).
-        RpmsRpc.client.seed_keyed_collection(:procedure_list, "1", [
-          { ien: 7001, visit_ien: 2090061, date: "03/10/2026", cpt_code: "99213",
+      test "for_patient returns the patient's procedure list" do
+        # One V CPT row as RpmsRpc::Procedure.for_patient returns it: the
+        # visit date, and no status (V CPT has none; rpms-rpc #375).
+        RpmsStandIn.answer(RpmsRpc::Procedure, :for_patient, 1, with: [
+          { ien: "7001", visit_ien: "2090061", date: Date.new(2026, 3, 10), cpt_code: "99213",
             name: "Office visit, established", provider: "MARTINEZ,SARAH" }
         ])
 

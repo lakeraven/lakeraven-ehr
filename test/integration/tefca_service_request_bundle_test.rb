@@ -108,11 +108,9 @@ class TefcaServiceRequestBundleTest < ActionDispatch::IntegrationTest
   private
 
   def seed_service_requests
-    RpmsRpc.client.seed_keyed_collection(:referral_search, "1", [
-      { ien: "1001", patient_dfn: 1, status: "active", type: "C",
-        date: Date.new(2026, 1, 15), provider: "MARTINEZ,SARAH" },
-      { ien: "1002", patient_dfn: 1, status: "completed", type: "N",
-        date: Date.new(2025, 11, 1), provider: "CHEN,JAMES" }
+    RpmsStandIn.answer(RpmsRpc::Referral, :for_patient, 1, with: [
+      { ien: "1001", patient_dfn: 1, status: "active", date: Date.new(2026, 1, 15), provider: "MARTINEZ,SARAH" },
+      { ien: "1002", patient_dfn: 1, status: "completed", date: Date.new(2025, 11, 1), provider: "CHEN,JAMES" }
     ])
   end
 end

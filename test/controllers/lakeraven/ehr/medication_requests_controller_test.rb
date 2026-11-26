@@ -30,11 +30,20 @@ module Lakeraven
         assert_equal "OperationOutcome", body["resourceType"]
       end
 
+      # Patient 1's outpatient orders, each as RpmsRpc::Medication.active_for_patient returns it.
+      def answer_active_medications(*orders)
+        rows = orders.map do |order|
+          { order_id: order.fetch(:order_id), type: "OP", name: order.fetch(:name), status: order[:status],
+            stop_date: order.fetch(:stop_date, Date.new(2027, 12, 31)),
+            instructions: order.fetch(:instructions), comments: [] }
+        end
+        RpmsStandIn.answer(RpmsRpc::Medication, :active_for_patient, "1", with: rows)
+      end
+
       test "entries have correct resourceType" do
-        RpmsRpc.client.seed_text(:medication_active, "1", <<~WIRE)
-          ~OP^1R;O^LISINOPRIL 10MG TAB^^3271231^3^^^120001^ACTIVE
-          \\ Sig: TAKE 1 TABLET BY MOUTH DAILY
-        WIRE
+        answer_active_medications(
+          { order_id: "1R;O", name: "LISINOPRIL 10MG TAB", status: "ACTIVE", instructions: [ "Sig: TAKE 1 TABLET BY MOUTH DAILY" ] }
+        )
 
         get "/lakeraven-ehr/MedicationRequest", params: { patient: "1" }, headers: @headers
         assert_response :ok
@@ -49,15 +58,13 @@ module Lakeraven
       # Lisinopril was discontinued early: its stop date is still in the
       # future, and it is stopped all the same (#628).
       def seed_three_orders
-        future = RpmsRpc::FilemanDateParser.format_date(Date.current + 365)
-        RpmsRpc.client.seed_text(:medication_active, "1", <<~WIRE)
-          ~OP^1R;O^METFORMIN 500MG TAB^^3271231^3^^^120001^ACTIVE
-          \\ Sig: TAKE 1 TABLET BY MOUTH TWICE A DAY
-          ~OP^2R;O^LISINOPRIL 10MG TAB^^#{future}^2^^^120002^DISCONTINUED
-          \\ Sig: TAKE 1 TABLET BY MOUTH DAILY
-          ~OP^3R;O^WARFARIN 5MG TAB^^3271231^0^^^120003^HOLD
-          \\ Sig: TAKE 1 TABLET BY MOUTH DAILY
-        WIRE
+        answer_active_medications(
+          { order_id: "1R;O", name: "METFORMIN 500MG TAB", status: "ACTIVE",
+            instructions: [ "Sig: TAKE 1 TABLET BY MOUTH TWICE A DAY" ] },
+          { order_id: "2R;O", name: "LISINOPRIL 10MG TAB", status: "DISCONTINUED", stop_date: Date.current + 365,
+            instructions: [ "Sig: TAKE 1 TABLET BY MOUTH DAILY" ] },
+          { order_id: "3R;O", name: "WARFARIN 5MG TAB", status: "HOLD", instructions: [ "Sig: TAKE 1 TABLET BY MOUTH DAILY" ] }
+        )
       end
 
       def statuses_by_id(params)

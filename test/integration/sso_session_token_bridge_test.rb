@@ -4,7 +4,7 @@ require "test_helper"
 
 # The browser SSO bridge: a clinician signs in with RPMS access/verify codes,
 # SessionsController validates them (AuthenticationService -> RpmsRpc signon,
-# mocked here via the seeded users), mints a SMART token scoped by that
+# stood in for here by the baseline's users), mints a SMART token scoped by that
 # clinician's security keys, and stashes it in the session. SmartAuthentication
 # accepts that session token when no Authorization header is present — so the
 # human chart runs on real SMART auth without the dev bypass, and without a
@@ -59,15 +59,13 @@ class SsoSessionTokenBridgeTest < ActionDispatch::IntegrationTest
   # refused as unavailable, with no session, rather than going ahead as a user
   # who holds no keys.
   test "a key read RPMS cannot answer refuses the sign-on and establishes no session" do
-    RpmsRpc::Authentication.define_singleton_method(:held_keys) { |_names| nil }
+    RpmsStandIn.answer(RpmsRpc::Authentication, :held_keys) { |_names| nil }
 
     post "/lakeraven-ehr/login", params: KEYED_USER
 
     assert_response :service_unavailable
     assert_nil session[:duz]
     assert_nil session[:smart_token]
-  ensure
-    RpmsRpc::Authentication.singleton_class.send(:remove_method, :held_keys)
   end
 
   test "the rejection reaches RPMS rather than short-circuiting" do
@@ -75,8 +73,11 @@ class SsoSessionTokenBridgeTest < ActionDispatch::IntegrationTest
 
     post "/lakeraven-ehr/login", params: { username: "lindarodriguez", password: "wrongverify" }
 
-    issued = RpmsRpc.client.received_calls[before..].map { |c| c[:rpc] }
-    assert_includes issued, "XUS AV CODE"
+    asked = RpmsRpc.client.received_calls[before..].filter_map { |c| c[:answered] }
+    assert_includes asked, "RpmsRpc::Authentication.authenticate"
+    assert_equal [ { access_code: "lindarodriguez", verify_code: "wrongverify" } ],
+                 RpmsStandIn.calls(RpmsRpc::Authentication, :authenticate).map { |call| call[:kwargs] },
+                 "RPMS was asked to sign on with the codes as typed"
   end
 
   test "a user RPMS gives neither the chart option nor a key signs in but is authorized for nothing" do

@@ -25,7 +25,7 @@ class PatientBannerSpecGapsTest < ActionDispatch::IntegrationTest
     with_demo_clinical_seeds do
       sign_in_clinician!
       open_patient_context!(1)
-      seed_orqqal_reply!("1", [ RpmsRpc::Allergy::NOT_ASSESSED_SENTINEL ])
+      answer_allergy_assessment!("1", assessed: false)
 
       get "#{MOUNT}/dashboard"
       assert_response :ok
@@ -40,16 +40,15 @@ class PatientBannerSpecGapsTest < ActionDispatch::IntegrationTest
 
   # #672: LIST^ORQQAL writes a marker only where it writes no rows, so a marker
   # beside a row, or twice, is a corrupted reply (rpms-rpc#483). Its rows may be
-  # another call's or truncated: shown, never as a complete list.
-  [
-    [ "a marker beside a row", [ "1^LATEX", RpmsRpc::Allergy::NKA_SENTINEL ] ],
-    [ "a marker twice, beside a row", [ RpmsRpc::Allergy::NKA_SENTINEL, "1^LATEX", RpmsRpc::Allergy::NKA_SENTINEL ] ]
-  ].each do |label, lines|
+  # another call's or truncated: shown, never as a complete list. rpms-rpc
+  # reads either reply as the same conflicting assessment, which is what the
+  # stand-in answers here.
+  [ "a marker beside a row", "a marker twice, beside a row" ].each do |label|
     test "a conflicting ORQQAL reply (#{label}) shows its allergies as incomplete on every page" do
       with_demo_clinical_seeds do
         sign_in_clinician!
         open_patient_context!(1)
-        seed_orqqal_reply!("1", lines)
+        answer_allergy_assessment!("1", assessed: false, allergens: [ "LATEX" ], conflict: true)
 
         assert_dashboard_and_chart_allergies_incomplete_with_known_names!("LATEX")
 
@@ -64,7 +63,8 @@ class PatientBannerSpecGapsTest < ActionDispatch::IntegrationTest
     with_demo_clinical_seeds do
       sign_in_clinician!
       open_patient_context!(1)
-      seed_orqqal_reply!("1", [])
+      # rpms-rpc reads a reply with no lines as not assessed.
+      answer_allergy_assessment!("1", assessed: false)
 
       get "#{MOUNT}/dashboard"
       assert_response :ok

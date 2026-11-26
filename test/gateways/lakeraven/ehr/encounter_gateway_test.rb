@@ -3,7 +3,7 @@
 require "test_helper"
 
 # Tests for EncounterGateway — patient appointment/encounter data
-# via ORWPT APPTLST. Uses mock data seeded in test_helper.rb.
+# (RpmsRpc::Encounter.for_patient, ORWPT APPTLST). The appointments are answered in setup.
 module Lakeraven
   module EHR
     class EncounterGatewayTest < ActiveSupport::TestCase
@@ -44,7 +44,7 @@ module Lakeraven
       private
 
       def seed_encounter_data
-        RpmsRpc.client.seed_keyed_collection(:patient_appointments, "1", [
+        RpmsStandIn.answer(RpmsRpc::Encounter, :for_patient, 1, with: [
           { datetime: Date.new(2026, 3, 10), location_ien: 1, location: "Primary Care Clinic", status: "KEPT" },
           { datetime: Date.new(2026, 4, 15), location_ien: 1, location: "Primary Care Clinic", status: "SCHEDULED" }
         ])

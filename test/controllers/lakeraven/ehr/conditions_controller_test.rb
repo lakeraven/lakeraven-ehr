@@ -31,8 +31,8 @@ module Lakeraven
       end
 
       test "entries have correct resourceType" do
-        RpmsRpc.client.seed_keyed_collection(:problem_list, "1", [
-          { ien: 1, status: "A", icd_code: "E11.9", description: "Type 2 diabetes mellitus" }
+        RpmsStandIn.answer(RpmsRpc::Problem, :for_patient, 1, with: [
+          { ien: "1", status: "A", icd_code: "E11.9", description: "Type 2 diabetes mellitus", inactive_icd: false }
         ])
 
         get "/lakeraven-ehr/Condition", params: { patient: "1" }, headers: @headers
@@ -46,10 +46,10 @@ module Lakeraven
       end
 
       test "a diagnosis on a visit is an encounter-diagnosis naming that visit" do
-        RpmsRpc.client.seed_keyed_collection(:encounter_visit_list, "1", [
-          { visit_string: "6;3260825.09;A;7", location: "Clinic", category: "AMBULATORY" }
+        RpmsStandIn.answer(RpmsRpc::Encounter, :visits, 1, with: [
+          { visit_ien: 7, location_ien: 6, location: "Clinic", service_category: "A", category: "AMBULATORY", datetime: nil }
         ])
-        RpmsRpc.client.seed_keyed_collection(:patient_pov_list, "1", [
+        RpmsStandIn.answer(RpmsRpc::Pov, :for_patient, 1, with: [
           { ien: "9", visit_ien: "7", visit_date: "08/25/2026", icd_code: "I10.",
             icd_name: "Essential (primary) hypertension", narrative: "HYPERTENSION" }
         ])
@@ -66,8 +66,8 @@ module Lakeraven
       end
 
       test "a diagnosis on a visit the visit list leaves out does not name it" do
-        RpmsRpc.client.seed_keyed_collection(:encounter_visit_list, "1", [])
-        RpmsRpc.client.seed_keyed_collection(:patient_pov_list, "1", [
+        RpmsStandIn.answer(RpmsRpc::Encounter, :visits, 1, with: [])
+        RpmsStandIn.answer(RpmsRpc::Pov, :for_patient, 1, with: [
           { ien: "9", visit_ien: "4", visit_date: "09/02/2026", icd_code: "E11.9", icd_name: "Diabetes" }
         ])
 
@@ -78,8 +78,10 @@ module Lakeraven
       end
 
       test "a search keeps problems and visit diagnoses apart by category" do
-        RpmsRpc.client.seed_keyed_collection(:problem_list, "1", [ { ien: 1, status: "A", icd_code: "E11.9", description: "Diabetes" } ])
-        RpmsRpc.client.seed_keyed_collection(:patient_pov_list, "1", [
+        RpmsStandIn.answer(RpmsRpc::Problem, :for_patient, 1, with: [
+          { ien: "1", status: "A", icd_code: "E11.9", description: "Diabetes", inactive_icd: false }
+        ])
+        RpmsStandIn.answer(RpmsRpc::Pov, :for_patient, 1, with: [
           { ien: "9", visit_ien: "7", visit_date: "08/25/2026", icd_code: "E11.9", icd_name: "Diabetes" }
         ])
 

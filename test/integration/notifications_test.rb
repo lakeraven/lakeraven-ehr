@@ -22,12 +22,10 @@ class NotificationsTest < ActionDispatch::IntegrationTest
 
   setup { seed_alerts(CAPTURED) }
 
-  teardown do
-    seed_alerts([])
-    teardown_oauth!
-  end
+  teardown { teardown_oauth! }
 
-  def seed_alerts(lines) = RpmsRpc.client.seed_raw_lines(:notifications_inbox, "", lines)
+  # What RPMS answers BEHOXQ ALRLIST: the capture, or no alert at all.
+  def seed_alerts(lines) = RpmsStandIn.connection.replay("BEHOXQ ALRLIST", lines)
 
   def rows = css_select("#notifications tbody tr").map { |tr| tr["data-alert"] }
 

@@ -4,7 +4,7 @@ require "test_helper"
 
 # #976: the chart's Vital signs card shows units and names as a clinician
 # reads them (98 °F, 117/81 mmHg, Pain), while the FHIR output keeps the
-# UCUM codes. The mocked broker answers ORQQVI VITALS (app logic only).
+# UCUM codes. The stand-in answers RpmsRpc::Vital.for_patient (app logic only).
 class ChartVitalDisplayTest < ActionDispatch::IntegrationTest
   include SmartAuthTestHelper
 
@@ -12,20 +12,20 @@ class ChartVitalDisplayTest < ActionDispatch::IntegrationTest
 
   setup do
     setup_smart_auth(scopes: "system/*.read")
-    @vitals_was = mock_vitals.dup
   end
 
   teardown do
-    mock_vitals.replace(@vitals_was)
     teardown_smart_auth
   end
 
   test "every vital type the chart maps shows a display unit and a readable name, and FHIR keeps UCUM" do
     rows = Lakeraven::EHR::Observation::VITAL_TYPE_MAP.keys.each_with_index.map do |type, i|
-      { measurement_ien: 5000 + i, type: type, value: (type == "BP" ? "117/81" : "98"), recorded_date: TAKEN }
+      { measurement_ien: 5000 + i, type: type, value: (type == "BP" ? "117/81" : "98"), recorded_date: TAKEN,
+        display: nil, metric_display: nil, qualifiers: nil }
     end
-    rows << { measurement_ien: 5100, type: "PA", value: "0", recorded_date: TAKEN }
-    RpmsRpc.client.seed_keyed_collection(:vitals, "1", rows)
+    rows << { measurement_ien: 5100, type: "PA", value: "0", recorded_date: TAKEN,
+              display: nil, metric_display: nil, qualifiers: nil }
+    RpmsStandIn.answer(RpmsRpc::Vital, :for_patient, "1", with: rows)
 
     get "/lakeraven-ehr/patients/1", headers: @headers
     assert_response :success
@@ -55,12 +55,5 @@ class ChartVitalDisplayTest < ActionDispatch::IntegrationTest
     end
     assert_equal "[degF]", temperature.dig("valueQuantity", "code")
     assert_equal "[degF]", temperature.dig("valueQuantity", "unit")
-  end
-
-  private
-
-  def mock_vitals
-    rpc = RpmsRpc::DataMapper.vitals.rpc_name
-    RpmsRpc.client.instance_variable_get(:@keyed_collections)[rpc]
   end
 end

@@ -214,7 +214,7 @@ module Lakeraven
       # and decision support read checked_for_patient, which maps them (#680).
       test "from_rpms_row maps gateway active-medication row to US Core MedicationRequest serialization" do
         original_client = RpmsRpc.configuration.client
-        RpmsRpc.mock! do |m|
+        RpmsStandIn.install! do |m|
           require_relative "../../../dummy/lib/lakeraven_demo_seeds"
           LakeravenDemoSeeds.seed(m)
         end
@@ -259,12 +259,14 @@ module Lakeraven
         RpmsRpc.configure { |c| c.client = original_client }
       end
 
-      # One outpatient order on the ORWPS ACTIVE wire, read through the gateway
-      # and the rpms-rpc parser: order id, drug, expiration, refills, CPRS order
-      # number, status (piece 9 of the OCL node), then its instruction lines.
-      def active_medication(status:, stop: "3271231", order_id: "4401R;O", lines: [ "\\ Sig: TAKE 1 TABLET BY MOUTH" ])
-        RpmsRpc.client.seed_text(:medication_active, "1",
-          [ "~OP^#{order_id}^METFORMIN 500MG TAB^^#{stop}^3^^^120345^#{status}", *lines ].join("\n"))
+      # One outpatient order as RpmsRpc::Medication.active_for_patient returns
+      # it, read through the gateway: order id, drug, status, stop date and
+      # its instruction lines.
+      def active_medication(status:, stop: Date.new(2027, 12, 31), order_id: "4401R;O",
+                            instructions: [ "Sig: TAKE 1 TABLET BY MOUTH" ])
+        RpmsStandIn.answer(RpmsRpc::Medication, :active_for_patient, "1",
+          with: [ { order_id: order_id, type: "OP", name: "METFORMIN 500MG TAB", status: status, stop_date: stop,
+                    instructions: instructions, comments: [] } ])
         row = MedicationRequest.for_patient("1").first
         MedicationRequest.from_rpms_row(row, patient_dfn: "1")
       end
@@ -291,15 +293,16 @@ module Lakeraven
       end
 
       test "from_rpms_row keeps a discontinued order stopped when its stop date is still in the future" do
-        future = RpmsRpc::FilemanDateParser.format_date(Date.current + 365)
+        future = Date.current + 365
         mr = active_medication(status: "DISCONTINUED", stop: future)
 
         assert_equal "stopped", mr.status
-        refute_includes mr.to_fhir.to_json, future
+        refute_includes mr.to_fhir.to_json, future.iso8601
+        refute_includes mr.to_fhir.to_json, RpmsRpc::FilemanDateParser.format_date(future)
       end
 
       test "from_rpms_row keeps an ACTIVE order active when its stop date has passed" do
-        mr = active_medication(status: "ACTIVE", stop: "3200101")
+        mr = active_medication(status: "ACTIVE", stop: Date.new(2020, 1, 1))
         assert_equal "active", mr.status
       end
 
@@ -308,7 +311,7 @@ module Lakeraven
       end
 
       test "from_rpms_row maps an order with no status piece to unknown" do
-        mr = active_medication(status: "")
+        mr = active_medication(status: nil)
         assert_equal "unknown", mr.status
         refute_equal "active", mr.status
       end
@@ -322,10 +325,9 @@ module Lakeraven
       end
 
       test "from_rpms_row takes dosageInstruction text from the order's instruction lines" do
-        mr = active_medication(status: "ACTIVE", lines: [
-          " METFORMIN 500MG TAB  Qty: 30 for 30 days",
-          "\\ Sig: TAKE 1 TABLET BY MOUTH",
-          " DAILY WITH BREAKFAST"
+        mr = active_medication(status: "ACTIVE", instructions: [
+          "METFORMIN 500MG TAB  Qty: 30 for 30 days",
+          "Sig: TAKE 1 TABLET BY MOUTH DAILY WITH BREAKFAST"
         ])
 
         expected = "METFORMIN 500MG TAB  Qty: 30 for 30 days Sig: TAKE 1 TABLET BY MOUTH DAILY WITH BREAKFAST"
@@ -334,7 +336,7 @@ module Lakeraven
       end
 
       test "from_rpms_row leaves dosageInstruction absent when the order has no instruction lines" do
-        mr = active_medication(status: "ACTIVE", lines: [])
+        mr = active_medication(status: "ACTIVE", instructions: [])
         assert_nil mr.to_fhir[:dosageInstruction]
       end
 
