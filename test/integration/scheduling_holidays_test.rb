@@ -2,7 +2,9 @@
 
 require "test_helper"
 
-# rpms-ux S-SCH-19 (#616): a scheduling supervisor adds and removes a holiday.
+# rpms-ux S-SCH-19 (#616): a scheduling supervisor keeps the site's holidays. Several tests
+# prove one scenario: 19.1 the list, 19.2 add, 19.3 remove, 19.4 the refusals and
+# unconfirmed changes, 19.5 the key.
 # HOLIDAY (#40.5) is one site-wide file, a row per date, so a holiday applies to
 # every clinic; a clinic set to schedule on holidays still takes bookings. RPMS
 # is stood in for at the gem boundary (RpmsRpc::SchedulingSetup, rpms-rpc
@@ -98,7 +100,7 @@ class SchedulingHolidaysTest < ActionDispatch::IntegrationTest
     assert_nil flash[:notice]
   end
 
-  test "S-SCH-19.1 the supervisor adds a holiday, sent once with its date and its name in capitals" do
+  test "S-SCH-19.2 the supervisor adds a holiday, sent once with its date and its name in capitals" do
     sign_in("scheduling_supervisor")
     with_rpms(holidays: [ { date: Date.new(2031, 11, 27), name: "DEMO HARVEST DAY" }, { date: Date.new(2033, 1, 3), name: "DEMO FAR DAY" } ]) do
       get INDEX
@@ -121,7 +123,7 @@ class SchedulingHolidaysTest < ActionDispatch::IntegrationTest
     assert_instance_of Date, writes.first.last[:date]
   end
 
-  test "S-SCH-19.2 the supervisor removes a listed holiday, sent once by its date" do
+  test "S-SCH-19.3 the supervisor removes a listed holiday, sent once by its date" do
     sign_in("scheduling_supervisor")
     with_rpms(holidays: [ FOUNDERS ]) do
       get INDEX
@@ -137,7 +139,7 @@ class SchedulingHolidaysTest < ActionDispatch::IntegrationTest
     assert_instance_of Date, writes.first.last
   end
 
-  test "S-SCH-19.3 a holiday without a usable name or date is refused here, with no RPC" do
+  test "S-SCH-19.4 a holiday without a usable name or date is refused here, with no RPC" do
     sign_in("scheduling_supervisor")
     refused = {
       "a blank name" => { date: "2031-07-04", name: "   ", error: /Name/i },
@@ -175,7 +177,7 @@ class SchedulingHolidaysTest < ActionDispatch::IntegrationTest
     assert_equal [ [ :add_holiday, { date: FOURTH, name: "DEMO FOUNDERS DAY" } ] ], writes
   end
 
-  test "S-SCH-19.5 removing a date with no holiday says so and claims no success" do
+  test "S-SCH-19.4 removing a date with no holiday says so and claims no success" do
     sign_in("scheduling_supervisor")
     none = ->(_date) { { success: false, error: :not_found, message: "no holiday on that date" } }
     with_rpms(remove: none) do
@@ -192,7 +194,7 @@ class SchedulingHolidaysTest < ActionDispatch::IntegrationTest
     assert_equal [ [ :remove_holiday, FOURTH ] ], writes
   end
 
-  test "S-SCH-19.6 an add or remove RPMS did not confirm fails closed" do
+  test "S-SCH-19.4 an add or remove RPMS did not confirm fails closed" do
     sign_in("scheduling_supervisor")
     unknown = { "no reply" => ->(_) { nil }, "an error" => ->(_) { raise RpmsRpc::Error, "connection lost" } }
     unknown.each do |what, outcome|
@@ -215,7 +217,7 @@ class SchedulingHolidaysTest < ActionDispatch::IntegrationTest
     end
   end
 
-  test "S-SCH-19.7 a failed read of the holidays is not shown as a list with none" do
+  test "S-SCH-19.1 a failed read of the holidays is not shown as a list with none" do
     sign_in("scheduling_supervisor")
     with_rpms(holidays: [ FOUNDERS ], read: -> { raise RpmsRpc::Error, "read failed" }) do
       get INDEX
@@ -228,7 +230,7 @@ class SchedulingHolidaysTest < ActionDispatch::IntegrationTest
     end
   end
 
-  test "S-SCH-19.8 a scheduler without SDZSUP cannot list, add or remove holidays; the supervisor has the link" do
+  test "S-SCH-19.5 a scheduler without SDZSUP cannot list, add or remove holidays; the supervisor has the link" do
     sign_in("scheduling_user")
     with_rpms(holidays: [ FOUNDERS ]) do
       get "/lakeraven-ehr/scheduling"
@@ -252,7 +254,7 @@ class SchedulingHolidaysTest < ActionDispatch::IntegrationTest
     end
   end
 
-  test "S-SCH-19.9 a holiday added for a clinic date removes its open slots, and removing it restores them" do
+  test "S-SCH-19.2 and 19.3 a holiday added for a clinic date removes its open slots, and removing it restores them" do
     sign_in("scheduling_supervisor")
     with_rpms do
       before = open_slots(FOURTH)
@@ -276,7 +278,7 @@ class SchedulingHolidaysTest < ActionDispatch::IntegrationTest
     assert_equal [ [ :add_holiday, { date: FOURTH, name: "DEMO FOUNDERS DAY" } ], [ :remove_holiday, FOURTH ] ], writes
   end
 
-  test "S-SCH-19.10 a remove whose date is not a date is refused with no RPC" do
+  test "S-SCH-19.4 a remove whose date is not a date is refused with no RPC" do
     sign_in("scheduling_supervisor")
     with_rpms(holidays: [ FOUNDERS ]) do
       %w[2031-13-01 2031-02-30 tomorrow 20310704].each do |bad|
@@ -305,7 +307,7 @@ class SchedulingHolidaysTest < ActionDispatch::IntegrationTest
 
   def alert_text = css_select("#holiday-alert").map { |node| node.text.strip }.join(" ")
 
-  test "S-SCH-19.11 today is the site's clock, not the app server's" do
+  test "S-SCH-19.4 today is the site's clock, not the app server's" do
     travel_back
     travel_to Time.new(2031, 6, 3, 2) # the app server is already on the 3rd
     sign_in("scheduling_supervisor")
@@ -335,7 +337,7 @@ class SchedulingHolidaysTest < ActionDispatch::IntegrationTest
     end
   end
 
-  test "S-SCH-19.12 a holidays read that is not a list of dated rows is a failed read" do
+  test "S-SCH-19.1 a holidays read that is not a list of dated rows is a failed read" do
     sign_in("scheduling_supervisor")
     odd = {
       "nil" => nil,
@@ -354,7 +356,7 @@ class SchedulingHolidaysTest < ActionDispatch::IntegrationTest
     end
   end
 
-  test "S-SCH-19.13 a write reply that does not plainly say success is an unknown outcome" do
+  test "S-SCH-19.4 a write reply that does not plainly say success is an unknown outcome" do
     sign_in("scheduling_supervisor")
     replies = { "true" => true, "a string" => "ok", "an empty list" => [], "an empty hash" => {},
                 "success in words" => { success: "no" }, "a failure with no error" => { success: false } }
@@ -378,7 +380,7 @@ class SchedulingHolidaysTest < ActionDispatch::IntegrationTest
     end
   end
 
-  test "S-SCH-19.14 a refusal with an empty message still says RPMS refused" do
+  test "S-SCH-19.4 a refusal with an empty message still says RPMS refused" do
     sign_in("scheduling_supervisor")
     with_rpms(add: ->(_) { { success: false, error: :filer_failed, message: "" } }) do
       add(date: "2031-07-04", name: "DEMO FOUNDERS DAY")
@@ -393,7 +395,7 @@ class SchedulingHolidaysTest < ActionDispatch::IntegrationTest
     assert_equal [ [ :add_holiday, { date: FOURTH, name: "DEMO FOUNDERS DAY" } ] ], writes
   end
 
-  test "S-SCH-19.15 a date past the list's year ahead is refused here, with no RPC" do
+  test "S-SCH-19.4 a date past the list's year ahead is refused here, with no RPC" do
     sign_in("scheduling_supervisor")
     with_site_clock(Time.new(2031, 6, 2, 9)) do
       with_rpms do
@@ -414,7 +416,7 @@ class SchedulingHolidaysTest < ActionDispatch::IntegrationTest
     assert_equal [ [ :add_holiday, { date: Date.new(2032, 6, 2), name: "DEMO FAR DAY" } ] ], writes
   end
 
-  test "S-SCH-19.16 a refused add whose list read also fails says both" do
+  test "S-SCH-19.4 a refused add whose list read also fails says both" do
     sign_in("scheduling_supervisor")
     exists = ->(_args) { { success: false, error: :filer_failed, message: "Entry '3310704,' already exists." } }
     with_rpms(holidays: [ FOUNDERS ], add: exists, read: -> { raise RpmsRpc::Error, "read failed" }) do
@@ -431,7 +433,7 @@ class SchedulingHolidaysTest < ActionDispatch::IntegrationTest
     assert_equal [ [ :add_holiday, { date: FOURTH, name: "DEMO FOUNDERS DAY" } ] ], writes
   end
 
-  test "S-SCH-19.17 the not-found remove alert names the date and does not repeat itself" do
+  test "S-SCH-19.4 the not-found remove alert names the date and does not repeat itself" do
     sign_in("scheduling_supervisor")
     none = ->(_date) { { success: false, error: :not_found, message: "no holiday on that date" } }
     with_rpms(remove: none) do
@@ -455,7 +457,7 @@ class SchedulingHolidaysTest < ActionDispatch::IntegrationTest
   NO_DATA_MARKER = { success: false, error: :filer_failed,
                      message: "no [Data] marker in DDR FILER reply: [Misc]" }.freeze
 
-  test "S-SCH-19.18 a DDR FILER reply with no [Data] line is an unknown outcome, not a refusal" do
+  test "S-SCH-19.4 a DDR FILER reply with no [Data] line is an unknown outcome, not a refusal" do
     sign_in("scheduling_supervisor")
     with_rpms(add: ->(_) { NO_DATA_MARKER }) do
       add(date: "2031-07-04", name: "DEMO FOUNDERS DAY")
@@ -475,7 +477,7 @@ class SchedulingHolidaysTest < ActionDispatch::IntegrationTest
     end
   end
 
-  test "S-SCH-19.19 a refusal with no readable reason never shows an internal code" do
+  test "S-SCH-19.4 a refusal with no readable reason never shows an internal code" do
     sign_in("scheduling_supervisor")
     with_rpms(add: ->(_) { { success: false, error: :filer_failed, message: "" } }) do
       add(date: "2031-07-04", name: "DEMO FOUNDERS DAY")
@@ -491,7 +493,7 @@ class SchedulingHolidaysTest < ActionDispatch::IntegrationTest
     assert_equal [ [ :add_holiday, { date: FOURTH, name: "DEMO FOUNDERS DAY" } ] ], writes
   end
 
-  test "S-SCH-19.20 a holidays read RPMS refuses to this user is a refusal, with RPMS's reason" do
+  test "S-SCH-19.1 a holidays read RPMS refuses to this user is a refusal, with RPMS's reason" do
     sign_in("scheduling_supervisor")
     refusal = "DDR LISTER is not in this user's context"
     with_rpms(holidays: [ FOUNDERS ], read: -> { raise RpmsRpc::Client::RpcRefusedError, refusal }) do
@@ -505,7 +507,7 @@ class SchedulingHolidaysTest < ActionDispatch::IntegrationTest
     end
   end
 
-  test "S-SCH-19.21 a remove for a date before the site's today is refused here, with no RPC" do
+  test "S-SCH-19.4 a remove for a date before the site's today is refused here, with no RPC" do
     sign_in("scheduling_supervisor")
     with_site_clock(Time.new(2031, 6, 2, 9)) do
       with_rpms(holidays: [ { date: Date.new(2031, 6, 1), name: "DEMO PAST DAY" }, { date: TODAY, name: "DEMO SITE DAY" } ]) do
@@ -552,7 +554,7 @@ class SchedulingHolidaysTest < ActionDispatch::IntegrationTest
     web.send(:private, :rpms_connection_closed?)
   end
 
-  test "S-SCH-19.22 an unconfirmed add keeps its warning when RPMS then refuses the holidays read" do
+  test "S-SCH-19.4 an unconfirmed add keeps its warning when RPMS then refuses the holidays read" do
     sign_in("scheduling_supervisor")
     with_rpms(add: ->(_) { nil }, read: REFUSED_READ) do
       add(date: "2031-07-04", name: "DEMO FOUNDERS DAY")
@@ -565,7 +567,7 @@ class SchedulingHolidaysTest < ActionDispatch::IntegrationTest
     end
   end
 
-  test "S-SCH-19.23 an unconfirmed remove keeps its warning when RPMS then refuses the holidays read" do
+  test "S-SCH-19.4 an unconfirmed remove keeps its warning when RPMS then refuses the holidays read" do
     sign_in("scheduling_supervisor")
     with_rpms(holidays: [ FOUNDERS ], remove: ->(_) { nil }, read: REFUSED_READ) do
       post REMOVE_FOURTH
@@ -578,7 +580,7 @@ class SchedulingHolidaysTest < ActionDispatch::IntegrationTest
     end
   end
 
-  test "S-SCH-19.24 a refused add still names its refusal when RPMS then refuses the holidays read" do
+  test "S-SCH-19.4 a refused add still names its refusal when RPMS then refuses the holidays read" do
     sign_in("scheduling_supervisor")
     exists = ->(_args) { { success: false, error: :filer_failed, message: "Entry '3310704,' already exists." } }
     with_rpms(holidays: [ FOUNDERS ], add: exists, read: REFUSED_READ) do
@@ -597,7 +599,7 @@ class SchedulingHolidaysTest < ActionDispatch::IntegrationTest
   # filed, and the redirect's one-shot flash on the sign-in page is the easier
   # of the two to miss. The session still ends on the supervisor's next request
   # (WebController#require_authentication), so nothing stays signed in.
-  test "S-SCH-19.25 an add cut off by a closed RPMS connection still says the change was not confirmed" do
+  test "S-SCH-19.4 an add cut off by a closed RPMS connection still says the change was not confirmed" do
     sign_in("scheduling_supervisor")
     closed = false
     dropped = ->(_) { closed = true; raise IOError, "closed stream" }
@@ -631,7 +633,7 @@ class SchedulingHolidaysTest < ActionDispatch::IntegrationTest
     end
   end
 
-  test "S-SCH-19.26 the pinned gem's words for a DDR FILER reply with no [Data] line are an unknown outcome" do
+  test "S-SCH-19.4 the pinned gem's words for a DDR FILER reply with no [Data] line are an unknown outcome" do
     broker = ReplyingClient.new("[Misc]")
     result = RpmsRpc.with_client(broker) do
       Lakeraven::EHR::SchedulingTablesGateway.add_holiday(FOURTH, "DEMO FOUNDERS DAY")
@@ -648,7 +650,7 @@ class SchedulingHolidaysTest < ActionDispatch::IntegrationTest
     assert filed[:errors].first.start_with?(Lakeraven::EHR::SchedulingTablesGateway::NO_DATA_MARKER), filed[:errors].first
   end
 
-  test "S-SCH-19.27 a holiday parameter that is not a form is refused, with no RPC" do
+  test "S-SCH-19.4 a holiday parameter that is not a form is refused, with no RPC" do
     sign_in("scheduling_supervisor")
     with_rpms do
       post INDEX, params: { holiday: "x" }
