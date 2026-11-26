@@ -21,7 +21,9 @@ class PatientBannerSpecGapsTest < ActionDispatch::IntegrationTest
     Lakeraven::EHR::AuditEvent.delete_all
   end
 
-  test "not assessed ORQQAL reply shows not-loaded on dashboard and chart" do
+  # rpms-rpc reads a not-assessed ORQQAL reply, and one with no lines, as the
+  # same not-assessed assessment, which is what the stand-in answers here.
+  test "a not-assessed or empty ORQQAL reply shows not-loaded on dashboard and chart" do
     with_demo_clinical_seeds do
       sign_in_clinician!
       open_patient_context!(1)
@@ -43,37 +45,17 @@ class PatientBannerSpecGapsTest < ActionDispatch::IntegrationTest
   # another call's or truncated: shown, never as a complete list. rpms-rpc
   # reads either reply as the same conflicting assessment, which is what the
   # stand-in answers here.
-  [ "a marker beside a row", "a marker twice, beside a row" ].each do |label|
-    test "a conflicting ORQQAL reply (#{label}) shows its allergies as incomplete on every page" do
-      with_demo_clinical_seeds do
-        sign_in_clinician!
-        open_patient_context!(1)
-        answer_allergy_assessment!("1", assessed: false, allergens: [ "LATEX" ], conflict: true)
-
-        assert_dashboard_and_chart_allergies_incomplete_with_known_names!("LATEX")
-
-        get "#{MOUNT}/patients/1/screenings"
-        assert_response :ok
-        assert_allergies_incomplete_with_known_names!("LATEX")
-      end
-    end
-  end
-
-  test "empty ORQQAL reply shows not-loaded on dashboard and chart" do
+  test "a conflicting ORQQAL reply (a marker beside a row, or twice) shows its allergies as incomplete on every page" do
     with_demo_clinical_seeds do
       sign_in_clinician!
       open_patient_context!(1)
-      # rpms-rpc reads a reply with no lines as not assessed.
-      answer_allergy_assessment!("1", assessed: false)
+      answer_allergy_assessment!("1", assessed: false, allergens: [ "LATEX" ], conflict: true)
 
-      get "#{MOUNT}/dashboard"
-      assert_response :ok
-      assert_allergies_unassessed_or_indeterminate!
+      assert_dashboard_and_chart_allergies_incomplete_with_known_names!("LATEX")
 
-      setup_chart_bearer!
-      get "#{MOUNT}/patients/1", headers: @chart_headers
+      get "#{MOUNT}/patients/1/screenings"
       assert_response :ok
-      assert_allergies_unassessed_or_indeterminate!
+      assert_allergies_incomplete_with_known_names!("LATEX")
     end
   end
 
