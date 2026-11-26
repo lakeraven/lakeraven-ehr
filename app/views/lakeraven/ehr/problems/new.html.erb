@@ -1,0 +1,111 @@
+<% page_title "Add as a problem", @concept[:preferred_term] %>
+
+<%= page_header "Add #{@concept[:preferred_term]} as a problem",
+      [ "Check what RPMS will file, then save.",
+        "RPMS adds it to the patient's problem list and, when it is today's purpose of visit, to the visit." ] %>
+
+<% if @refusal %>
+  <%= alert_box :error, @refusal, id: "problem-refusal" %>
+<% end %>
+
+<dl
+  id="problem-concept"
+  class="detail-list"
+>
+  <dt>Diagnosis</dt>
+  <dd data-term><%= @concept[:preferred_term] %></dd>
+  <dt>SNOMED CT concept</dt>
+  <dd data-snomed><%= @concept[:concept_id] %></dd>
+  <dt>ICD-10-CM</dt>
+  <dd data-icd><%= @concept[:icd].presence&.join(", ") || "None mapped" %></dd>
+</dl>
+
+<% if @on_file.present? %>
+  <%= alert_box :notice,
+        "This concept is on the patient's problem list already.",
+        id: "problem-on-file" do %>
+    <ul>
+      <% @on_file.each do |problem| %>
+        <li data-problem-ien="<%= problem[:ien] %>"><%= problem[:narrative] %></li>
+      <% end %>
+    </ul>
+  <% end %>
+<% end %>
+
+<% if !@concept[:selectable] %>
+  <%= alert_box :notice,
+        "RPMS's terminology does not let this concept be chosen as a diagnosis.",
+        id: "problem-not-selectable" %>
+<%# A concept that asks for the side may be on the list for another side: RPMS checks the side chosen on save. %>
+<% elsif @on_file.blank? || @concept[:prompt_laterality] %>
+  <%= form_with url: patient_problems_path(@dfn),
+        method: :post,
+        class: "entry-form",
+        id: "problem-form" do |f| %>
+    <%= hidden_field_tag "dts_id", @dts_id %>
+
+    <%= form_field :status, "Status", id: "problem_status" do |aria| %>
+      <%= select_tag "status",
+            options_for_select(Lakeraven::EHR::ProblemEntryGateway::STATUSES, @status),
+            id: "problem_status",
+            aria: aria %>
+    <% end %>
+
+    <% if @concept[:prompt_laterality] %>
+      <fieldset id="problem-laterality">
+        <legend>Side</legend>
+        <% laterality_choices.each do |side| %>
+          <div>
+            <%= radio_button_tag "laterality", side,
+                  @laterality == side,
+                  id: "laterality_#{side.downcase}",
+                  required: true %>
+            <%= label_tag "laterality_#{side.downcase}", side %>
+          </div>
+        <% end %>
+      </fieldset>
+    <% end %>
+
+    <fieldset id="problem-visit">
+      <legend>Today's visit</legend>
+      <% if @open_visits.nil? %>
+        <%= alert_box :error,
+              "The patient's visits could not be read.",
+              "It can be added to the problem list only.",
+              id: "problem-visits-unread" %>
+      <% elsif @open_visits.empty? %>
+        <%= alert_box :notice,
+              "The patient has no open visit today.",
+              "It can be added to the problem list only.",
+              id: "problem-no-open-visit" %>
+      <% else %>
+        <div>
+          <%= hidden_field_tag "pov", "0", id: nil %>
+          <%= check_box_tag "pov", "1",
+                @pov.nil? || @pov,
+                id: "problem_pov" %>
+          <%= label_tag "problem_pov", "Today's purpose of visit" %>
+        </div>
+        <% @open_visits.each do |visit| %>
+          <% ien = visit[:visit_ien].to_s %>
+          <div>
+            <%= radio_button_tag "visit_ien", ien,
+                  @visit_ien == ien || @open_visits.one?,
+                  id: "visit_ien_#{ien}" %>
+            <%= label_tag "visit_ien_#{ien}", visit_label(visit) %>
+          </div>
+        <% end %>
+      <% end %>
+    </fieldset>
+
+    <div class="form-actions">
+      <%= f.submit "Save", name: nil, class: "button-primary" %>
+    </div>
+  <% end %>
+<% end %>
+
+<p>
+  <%= link_to "Back to chart",
+        patient_chart_path(@dfn),
+        class: "button-secondary no-underline" %>
+</p>

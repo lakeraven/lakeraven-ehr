@@ -58,6 +58,9 @@ module Lakeraven
         "lakeraven/ehr/chief_complaints#create", # Session-authenticated chief complaint write (S-TRI-07.1); answers with the form or a redirect, not disclosure
         "lakeraven/ehr/allergy_reviews#new",    # Session-authenticated allergy review (S-TRI-04.1): the open visits' date, time and location; discloses no stored clinical data
         "lakeraven/ehr/allergy_reviews#create", # Session-authenticated allergy review write (S-TRI-04.1); answers with the form or a redirect, not disclosure
+        "lakeraven/ehr/problems#new",    # Session-authenticated problem entry (S-VIS-02.2): one concept, refused before any patient read when it maps into F10-F19 or cannot be classified
+        "lakeraven/ehr/problems#create", # Session-authenticated problem write (S-VIS-02.2, S-VIS-02.3); the same refusal; answers with the form or a redirect
+        "lakeraven/ehr/problems#show",   # The problem just filed, read back; a problem whose codes are in F10-F19 or unclassified is not shown (404)
         "lakeraven/ehr/vitals#new",    # Session-authenticated vitals entry (S-TRI-02): the open visits' date, time and location; discloses no stored clinical data
         "lakeraven/ehr/vitals#create", # Session-authenticated vitals write (S-TRI-02); answers with the form, RPMS's reason for a refused value, or a redirect
         # In-clinic consent (#793). HTML for the chart and the locked tablet,

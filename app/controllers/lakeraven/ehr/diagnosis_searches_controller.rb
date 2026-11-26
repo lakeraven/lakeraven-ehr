@@ -31,9 +31,13 @@ module Lakeraven
         @words = TerminologyGateway.words_starting(@query)
       end
 
+      # With a patient's record open, the concept page offers to add the
+      # concept to that patient's problem list (ProblemsController).
       def concept
         @concept = TerminologyGateway.concept(params[:dts_id])
-        render :concept_missing, status: :not_found if @concept.nil?
+        return render :concept_missing, status: :not_found if @concept.nil?
+
+        @open_dfn = session[ClinicianPatientContext::SESSION_KEY].presence
       end
     end
   end

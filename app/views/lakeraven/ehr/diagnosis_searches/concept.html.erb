@@ -21,6 +21,21 @@
   <dd data-selectable><%= @concept[:selectable] ? "Yes" : "No" %></dd>
 </dl>
 
+<% if @concept[:selectable] && capability?("visit.chart") %>
+  <% if @open_dfn %>
+    <p>
+      <%= link_to "Add as a problem",
+            new_patient_problem_path(@open_dfn, dts_id: @concept[:dts_id]),
+            id: "diagnosis-add-problem",
+            class: "button-primary no-underline" %>
+    </p>
+  <% else %>
+    <p id="diagnosis-open-a-record">
+      Open a patient's record to add this diagnosis to their problem list.
+    </p>
+  <% end %>
+<% end %>
+
 <p>
   <%= link_to "Back to Find a diagnosis",
         diagnosis_search_path %>

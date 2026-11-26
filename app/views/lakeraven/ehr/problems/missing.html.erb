@@ -1,0 +1,15 @@
+<% page_title "Problem", "Problem list" %>
+
+<%= page_header "Nothing to add" %>
+
+<%= empty_state @refusal,
+      id: "problem-missing" do %>
+  <%= link_to "Find a diagnosis",
+        diagnosis_search_path %>
+<% end %>
+
+<p>
+  <%= link_to "Back to chart",
+        patient_chart_path(@dfn),
+        class: "button-secondary no-underline" %>
+</p>

@@ -87,6 +87,16 @@ Lakeraven::EHR::Engine.routes.draw do
   get "diagnosis_search/concepts/:dts_id", to: "diagnosis_searches#concept", as: :diagnosis_concept,
     constraints: { dts_id: /\d+/ }
 
+  # The diagnosis found, added to the patient's problem list and, when it is
+  # why the patient came, as today's purpose of visit (rpms-ux S-VIS-02.2,
+  # S-VIS-02.3). RPMS files both; show reads back what it stored.
+  get  "patients/:dfn/problems/new", to: "problems#new", as: :new_patient_problem,
+    constraints: { dfn: /\d+/ }
+  post "patients/:dfn/problems", to: "problems#create", as: :patient_problems,
+    constraints: { dfn: /\d+/ }
+  get  "patients/:dfn/problems/:id", to: "problems#show", as: :patient_problem,
+    constraints: { dfn: /\d+/, id: /\d+/ }
+
   get  "patients/:dfn/vitals/new", to: "vitals#new", as: :new_patient_vitals, constraints: { dfn: /\d+/ }
   post "patients/:dfn/vitals", to: "vitals#create", as: :patient_vitals, constraints: { dfn: /\d+/ }
 
