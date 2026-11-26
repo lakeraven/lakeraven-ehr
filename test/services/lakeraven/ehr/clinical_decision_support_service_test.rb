@@ -76,11 +76,12 @@ module Lakeraven
       # CLINICAL REMINDERS
       # =============================================================================
 
-      # ORQQPX REMINDERS LIST rows as the pinned build sent them for a
-      # patient (DFN 4, openrpms bcer-9.0 2a9b3fe), read through the gem:
-      # DUE FLAG 1 is due, and the due date is the engine's "DUE NOW" (#986).
+      # The cover-sheet reminders as the pinned build gave them for a patient
+      # (DFN 4, openrpms bcer-9.0 2a9b3fe), as RpmsRpc::HealthSummary
+      # .clinical_reminders returns them: DUE FLAG 1 is due, and the due date
+      # is the engine's "DUE NOW" (#986).
       test "returns preventive care alerts for the reminders RPMS flags due" do
-        RpmsRpc.client.seed_keyed_collection(:reminders_list, "12345", [
+        RpmsStandIn.answer(RpmsRpc::HealthSummary, :clinical_reminders, "12345", with: [
           { ien: 211, name: "Tobacco Screen", due_date: "DUE NOW", priority: 2, due_flag: 1, dialog: true },
           { ien: 274, name: "Domestic Violence", due_date: "DUE NOW", priority: 2, due_flag: 1, dialog: true }
         ])
@@ -95,9 +96,9 @@ module Lakeraven
 
       test "no preventive alerts when reminders are current" do
         # DUE FLAG 0: applicable, not due. 2: not applicable.
-        RpmsRpc.client.seed_keyed_collection(:reminders_list, "12345", [
-          { ien: 211, name: "Tobacco Screen", due_date: "3270601", last_done: "3260601", priority: 2, due_flag: 0, dialog: true },
-          { ien: 123, name: "Depression Screen", due_date: "", priority: 2, due_flag: 2, dialog: true }
+        RpmsStandIn.answer(RpmsRpc::HealthSummary, :clinical_reminders, "12345", with: [
+          { ien: 211, name: "Tobacco Screen", due_date: "3270601", last_done: Date.new(2026, 6, 1), priority: 2, due_flag: 0, dialog: true },
+          { ien: 123, name: "Depression Screen", due_date: nil, priority: 2, due_flag: 2, dialog: true }
         ])
         ClinicalDecisionSupportService.define_singleton_method(:fetch_recent_labs) { [] }
 
