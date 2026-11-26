@@ -47,8 +47,6 @@ module Lakeraven
         false
       end
 
-      def enforce_token_patient_context! = authorize_patient_context!(params[:dfn])
-
       # An open that the audit log has no record of must not survive the
       # request: the whole value of this step is that it is attributable.
       def rollback_unrecorded_access

@@ -49,8 +49,6 @@ module Lakeraven
         @dfn = params[:dfn]
       end
 
-      def enforce_token_patient_context! = authorize_patient_context!(params[:dfn])
-
       def fhir_resource_type = "Patient"
 
       def direct_audit_identifier
