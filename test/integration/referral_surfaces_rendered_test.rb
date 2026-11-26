@@ -11,7 +11,7 @@ require_relative "../support/patient_banner_test_helper"
 # or refused read, a refused window, every other capability's links and
 # counts, and a patient open or searched for. RPMS is stood in for: the
 # referrals, alerts and allergies are what rpms-rpc's reads answer, and the
-# scheduling reads are answered at the wire.
+# scheduling reads are what AppointmentBookingGateway answers.
 class ReferralSurfacesRenderedTest < ActionDispatch::IntegrationTest
   include PatientBannerTestHelper
 
@@ -27,27 +27,22 @@ class ReferralSurfacesRenderedTest < ActionDispatch::IntegrationTest
       status: "APPROVED", chs_eligibility: "DIRECT ONLY", patient_dob: "06/03/1966" }
   ].freeze
 
-  # Synthetic scheduling replies, in the shape the three BSDX reads answer
-  # (test/integration/appointments_needing_action_test.rb): two clinics, and
-  # two appointments today in the second, neither with anything recorded.
-  SYNTHETIC_SCHEDULING = {
-    "BSDX RESOURCES" =>
-      "3\u0000I00010RESOURCEID^T00030RESOURCE_NAME^T00010INACTIVE^I00010TIMESCALE^I00010HOSPITAL_LOCATION_ID^" \
-      "T00030LETTER_TEXT^T00030NO_SHOW_LETTER^T00030CLINIC_CANCELLATION_LETTER^I00010VIEW^I00010OVERBOOK^" \
-      "I00010MODIFY_SCHEDULE^I00010MODIFY_APPOINTMENTS\u001e" \
-      "1^SYNTHETIC CLINIC A^0^15^6^^^^1^1^1^1\u001e2^SYNTHETIC CLINIC B^0^15^3^^^^1^1^1^1\u001e",
-    "BSDX ALL APPOINTMENTS" => [
-      "D00030START_TIME^D00030END_TIME^I00010PAT_ID^T00030RES_NAME",
-      "NOV 04,2026 09:00^NOV 04,2026 09:15^990003^SYNTHETIC CLINIC B",
-      "NOV 04,2026 16:00^NOV 04,2026 16:15^990003^SYNTHETIC CLINIC B"
-    ],
-    "BSDX CREATE APPT SCHEDULE" =>
-      "5\u0000I00020APPOINTMENTID^D00030START_TIME^D00030END_TIME^D00030CHECKIN^D00030AUXTIME^I00020PATIENTID^" \
-      "T00030PATIENTNAME^T00030RESOURCENAME^I00005NOSHOW^T00020HRN^I00005ACCESSTYPEID^I00005WALKIN^D00030CHECKOUT^" \
-      "I00020VPROVIDER^T00020CANCELLED^T00250NOTE\u001e" \
-      "71^NOV 04,2026 09:00^NOV 04,2026 09:15^^^990003^CHARLIE,JORDAN^SYNTHETIC CLINIC B^0^990003^0^0^^^0^\u001e" \
-      "72^NOV 04,2026 16:00^NOV 04,2026 16:15^^^990003^CHARLIE,JORDAN^SYNTHETIC CLINIC B^0^990003^0^0^^^0^\u001e"
-  }.freeze
+  # Scheduling's reads, as AppointmentBookingGateway answers them: two clinics,
+  # two appointments today in the second, and the first of those needing
+  # action (past its time, nothing recorded).
+  SYNTHETIC_CLINICS = [
+    { id: 1, name: "SYNTHETIC CLINIC A", inactive: false, time_scale: 15, hospital_location_id: 6,
+      view: true, overbook: true, modify_schedule: true, modify_appointments: true },
+    { id: 2, name: "SYNTHETIC CLINIC B", inactive: false, time_scale: 15, hospital_location_id: 3,
+      view: true, overbook: true, modify_schedule: true, modify_appointments: true }
+  ].freeze
+  SYNTHETIC_BOOKED_COUNTS = { "SYNTHETIC CLINIC B" => 2 }.freeze
+  SYNTHETIC_NEEDING_ACTION = [
+    { id: 71, start_time: Time.new(2026, 11, 4, 9, 0), end_time: Time.new(2026, 11, 4, 9, 15), checkin_time: nil,
+      patient_dfn: 990003, patient_name: "CHARLIE,JORDAN", resource: "SYNTHETIC CLINIC B", no_show: false,
+      hrn: "990003", access_type_id: 0, walk_in: false, checkout_time: nil, cancelled: false, note: nil,
+      clinic: SYNTHETIC_CLINICS.last }
+  ].freeze
 
   # Two synthetic alerts, as RpmsRpc::Notifications.inbox returns them
   # (test/integration/notifications_test.rb has the reply they are read from).
@@ -137,22 +132,13 @@ class ReferralSurfacesRenderedTest < ActionDispatch::IntegrationTest
     post "/lakeraven-ehr/test_session", params: { duz: "206", user_type: "provider", user_name: "PROFILE,MD", security_keys: keys }
   end
 
-  # Answers the named RPCs on the stand-in's connection, the way
-  # appointments_needing_action_test.rb does: a reply as it comes off the
-  # wire, or an exception to raise.
-  def rpms_answers(replies)
-    client = RpmsRpc.client
-    %i[call_rpc call_rpc_global_array].each do |name|
-      original = client.method(name)
-      client.define_singleton_method(name) do |rpc, *params|
-        next original.call(rpc, *params) unless replies.key?(rpc)
-
-        reply = replies[rpc]
-        raise reply if reply.is_a?(Exception)
-
-        reply.is_a?(Array) ? RpmsRpc::Reply.from_wire(reply) : reply
-      end
-    end
+  # What scheduling's reads answer: the clinics, today's counts and the
+  # appointments needing action.
+  def scheduling_answers
+    booking = Lakeraven::EHR::AppointmentBookingGateway
+    RpmsStandIn.answer(booking, :resources) { |**| SYNTHETIC_CLINICS.map(&:dup) }
+    RpmsStandIn.answer(booking, :booked_counts) { |*, **| SYNTHETIC_BOOKED_COUNTS.dup }
+    RpmsStandIn.answer(booking, :needing_action) { |*, **| SYNTHETIC_NEEDING_ACTION.map(&:dup) }
   end
 
   # What rpms-rpc's read of the pending referrals answers, whatever the window.
@@ -163,13 +149,13 @@ class ReferralSurfacesRenderedTest < ActionDispatch::IntegrationTest
   # scopes: sign on with a SMART token too (the patient banner's reads), with
   # forgery protection on as a browser has it, so each posting form renders
   # its authenticity_token. patient: the DFN of a chart to open first.
-  def page(path, keys: %w[referrals_user], scopes: nil, patient: nil, hour: 9, **params)
+  def page(path, keys: %w[referrals_user], scopes: nil, patient: nil, **params)
     reset!
     GlobalStoreIsolation.reset!
     enable_forgery_protection! if scopes
     pending_answers(SYNTHETIC_PENDING)
     yield if block_given?
-    travel_to(TODAY.to_time.change(hour: hour)) do
+    travel_to(TODAY.to_time.change(hour: 9)) do
       scopes ? sign_in_clinician!(scopes: scopes, keys: keys) : sign_in(keys.join(","))
       open_patient_context!(patient) if patient
       get path, params: params
@@ -247,11 +233,10 @@ class ReferralSurfacesRenderedTest < ActionDispatch::IntegrationTest
   end
 
   # Every capability at once: each link of the main navigation, and on the
-  # dashboard every count, with rows RPMS answered. The hour is past the
-  # first appointment's time, so one needs action.
+  # dashboard every count, with rows RPMS answered.
   def every_capability(path)
-    document = page(path, keys: EVERY_KEY, scopes: BANNER_SCOPES, hour: 15) do
-      rpms_answers(SYNTHETIC_SCHEDULING)
+    document = page(path, keys: EVERY_KEY, scopes: BANNER_SCOPES) do
+      scheduling_answers
       RpmsStandIn.answer(RpmsRpc::Notifications, :inbox) { |**| SYNTHETIC_ALERTS.map(&:dup) }
     end
 
