@@ -8,8 +8,6 @@ module Lakeraven
     # status through BMC REFERRAL STATUS UPDATE (rpms-rpc #380). The old
     # delete sent BMCRPC DELREFRL, which no option on a built image serves.
     class ServiceRequestGatewayCancelTest < ActiveSupport::TestCase
-      include BrokerStubbing
-
       test "cancel files status X for the referral through BMC REFERRAL STATUS UPDATE" do
         # Nothing answers this first call, so it reaches the connection: what
         # the gateway sends is on its record.
@@ -45,12 +43,12 @@ module Lakeraven
       end
 
       test "a broker error is a failure, not a cancellation" do
-        use_broker(FakeBroker.new.raise_with(RpmsRpc::Client::RpcError.new("M ERROR=UPDTSTRF+3^BMCRPC3"))) do
-          result = ServiceRequestGateway.cancel("9003")
+        RpmsStandIn.answer(RpmsRpc::Referral, :cancel, "9003") { raise RpmsRpc::Client::RpcError, "M ERROR=UPDTSTRF+3^BMCRPC3" }
 
-          refute result[:success]
-          assert_match(/BMCRPC3/, result[:error])
-        end
+        result = ServiceRequestGateway.cancel("9003")
+
+        refute result[:success]
+        assert_match(/BMCRPC3/, result[:error])
       end
     end
   end
