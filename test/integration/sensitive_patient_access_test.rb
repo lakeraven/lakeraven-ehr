@@ -304,8 +304,10 @@ class SensitivePatientAccessTest < ActionDispatch::IntegrationTest
 
   # -- No usable answer: fail closed ------------------------------------------
 
-  test "a record does not open when RPMS does not answer the sensitive-record check" do
-    clear_sensitive_access!(PLAIN_DFN) # RPMS answers no code: check_access is nil
+  # check_access is nil when RPMS answers no code, or a first line that is not
+  # a code (an M error's text, say).
+  test "a record does not open when RPMS does not answer the sensitive-record check with a code" do
+    clear_sensitive_access!(PLAIN_DFN)
 
     post_open(PLAIN_DFN)
 
@@ -324,15 +326,13 @@ class SensitivePatientAccessTest < ActionDispatch::IntegrationTest
   end
 
   # What RpmsRpc::DgSensitive.check_access answers for each reply: the code
-  # and lines as RPMS sent them, and nil for a first line that is not a code
-  # (an M error's text, say).
+  # and lines as RPMS sent them.
   {
     "the routine's error code -1" => { result: -1, messages: [ "Required variable missing." ] },
-    "a code PTSEC does not define (7)" => { result: 7, messages: [] },
-    "a reply that is not a code" => nil
+    "a code PTSEC does not define (7)" => { result: 7, messages: [] }
   }.each do |label, outcome|
     test "a record does not open on #{label}" do
-      seed_check_outcome!(PLAIN_DFN, outcome)
+      seed_sensitive_access!(PLAIN_DFN, outcome.fetch(:result), outcome.fetch(:messages))
 
       post_open(PLAIN_DFN)
 
@@ -341,7 +341,7 @@ class SensitivePatientAccessTest < ActionDispatch::IntegrationTest
     end
 
     test "an acknowledgement does not open a record on #{label}" do
-      seed_check_outcome!(PLAIN_DFN, outcome)
+      seed_sensitive_access!(PLAIN_DFN, outcome.fetch(:result), outcome.fetch(:messages))
       seed_sensitive_bulletin!(PLAIN_DFN, true)
 
       post_open(PLAIN_DFN, acknowledge: true)
@@ -628,14 +628,6 @@ class SensitivePatientAccessTest < ActionDispatch::IntegrationTest
       raise error, message
     end
     raised
-  end
-
-  # What check_access answers for DFN: a code and its lines, or nil when RPMS
-  # answered no code.
-  def seed_check_outcome!(dfn, outcome)
-    return clear_sensitive_access!(dfn) if outcome.nil?
-
-    seed_sensitive_access!(dfn, outcome.fetch(:result), outcome.fetch(:messages))
   end
 
   # RPMS serves the RPC, but not to this user: RpcRefusedError, in a broker's
