@@ -149,19 +149,17 @@ module Lakeraven
                      ->(*) { raise ActiveRecord::StatementInvalid, "audit down" }, &block)
       end
 
-      # -- Visits (BEHOENCX VISITLST, through EncounterGateway.visits) ----------
+      # -- Visits (RpmsRpc::Encounter.visits, through EncounterGateway.visits) ---
 
-      # One VISITLST row. The fourth piece of the visit string is the visit
-      # IEN; a row without it is an appointment pending check-in, not a visit.
+      # One of the patient's visits, as RpmsRpc::Encounter.visits returns it.
+      # `at: nil` is a visit whose date RPMS left blank: a nil datetime.
       def visit_row(ien, at:, clinic: CLINIC, provider: PROVIDER, provider_ien: 9001, locked: false)
-        # `at: nil` is a row whose FileMan date is blank: the gem yields a nil datetime.
-        fileman = at && format("%<ymd>s.%<hm>s", ymd: "#{at.year - 1700}#{at.strftime('%m%d')}", hm: at.strftime("%H%M"))
-        { visit_string: "40;#{fileman};A;#{ien}", location: clinic, category: "AMBULATORY",
-          datetime: at, locked: locked, provider_ien: provider_ien, provider: provider }
+        { visit_ien: ien.to_i, location_ien: 40, location: clinic, service_category: "A", category: "AMBULATORY",
+          datetime: at, locked: locked, provider_ien: provider_ien, provider: provider, standalone: nil }
       end
 
       def seed_visits(dfn, rows)
-        RpmsRpc.client.seed_keyed_collection(:encounter_visit_list, dfn.to_s, rows)
+        RpmsStandIn.answer(RpmsRpc::Encounter, :visits, dfn.to_s, with: rows)
       end
 
       # A wall-clock time on a day relative to the process-local date, built
@@ -466,7 +464,7 @@ module Lakeraven
       # it on the site's clock, which RPMS keeps (ORWU DT "NOW"). Sunday Nov 8,
       # 2026, 20:10 Pacific is Monday 04:10 UTC.
       test "the result page and the list show the screening's time on the site's clock, not UTC" do
-        RpmsRpc.client.seed_scalar(:orwu_dt, "NOW", "3261108.201")
+        RpmsStandIn.answer(RpmsRpc::Orwu, :fileman_datetime, "NOW", with: "3261108.201")
         Lakeraven::EHR::SiteTime.reader = nil if defined?(Lakeraven::EHR::SiteTime)
         travel_to(Time.utc(2026, 11, 9, 4, 10)) do
           submit
@@ -477,7 +475,6 @@ module Lakeraven
           assert_select "table td", text: "Nov 8, 2026"
         end
       ensure
-        RpmsRpc.client.seed_scalar(:orwu_dt, "NOW", "")
         Lakeraven::EHR::SiteTime.reader = -> { Time.now } if defined?(Lakeraven::EHR::SiteTime)
       end
 
@@ -1901,8 +1898,8 @@ module Lakeraven
       # 4. A datetime that is not a time (a raw FileMan string that was never
       # parsed) cannot be dated. String#to_date exists — and reads
       # "3261112.0930" as some date — so "responds to to_date" is not the test
-      # of a time. The mock parses whatever is seeded, so the unparsed value is
-      # put on the rows the gateway hands back.
+      # of a time. rpms-rpc hands the engine a Time or nil, so the unparsed value
+      # is put on the rows the gateway hands back.
       UNTIMED_VISIT = "2090043"
       UNPARSED_DATETIME = "3261112.0930"
 

@@ -10,7 +10,7 @@ module Lakeraven
 
       setup do
         @original_client = RpmsRpc.configuration.client
-        RpmsRpc.mock! { |m| LakeravenDemoSeeds.seed(m) }
+        RpmsStandIn.install! { |rpms| LakeravenDemoSeeds.seed(rpms) }
         setup_smart_auth
       end
 
@@ -63,13 +63,21 @@ module Lakeraven
 
       DATA_ABSENT_REASON_URL = "http://hl7.org/fhir/StructureDefinition/data-absent-reason"
 
+      # Patient 1's outpatient orders, each as RpmsRpc::Medication.active_for_patient returns it.
+      def answer_active_medications(*orders)
+        rows = orders.map do |order|
+          { order_id: order.fetch(:order_id), type: "OP", name: order.fetch(:name), status: order[:status],
+            stop_date: order.fetch(:stop_date, Date.new(2027, 12, 31)),
+            instructions: order.fetch(:instructions), comments: [] }
+        end
+        RpmsStandIn.answer(RpmsRpc::Medication, :active_for_patient, "1", with: rows)
+      end
+
       test "search entries use data-absent-reason for authoredOn and requester when RPMS does not supply them" do
-        RpmsRpc.client.seed_text(:medication_active, "1", <<~WIRE)
-          ~OP^1R;O^Lisinopril 10mg^^3271231^3^^^120001^ACTIVE
-          \\ Sig: TAKE 1 TABLET BY MOUTH DAILY
-          ~OP^42R;O^Metformin 500mg^^3271231^2^^^120042^HOLD
-          \\ Sig: TAKE 1 TABLET BY MOUTH TWICE A DAY
-        WIRE
+        answer_active_medications(
+          { order_id: "1R;O", name: "Lisinopril 10mg", status: "ACTIVE", instructions: [ "Sig: TAKE 1 TABLET BY MOUTH DAILY" ] },
+          { order_id: "42R;O", name: "Metformin 500mg", status: "HOLD", instructions: [ "Sig: TAKE 1 TABLET BY MOUTH TWICE A DAY" ] }
+        )
 
         get "/lakeraven-ehr/MedicationRequest", params: { patient: "1" }, headers: @headers
 
@@ -89,12 +97,10 @@ module Lakeraven
       end
 
       test "search entries expose dosageInstruction text from the order's instruction lines" do
-        RpmsRpc.client.seed_text(:medication_active, "1", <<~WIRE)
-          ~OP^1R;O^Lisinopril 10mg^^3271231^3^^^120001^ACTIVE
-           LISINOPRIL 10MG TAB  Qty: 30 for 30 days
-          \\ Sig: TAKE 1 TABLET BY MOUTH
-           DAILY
-        WIRE
+        answer_active_medications(
+          { order_id: "1R;O", name: "Lisinopril 10mg", status: "ACTIVE",
+            instructions: [ "LISINOPRIL 10MG TAB  Qty: 30 for 30 days", "Sig: TAKE 1 TABLET BY MOUTH DAILY" ] }
+        )
 
         get "/lakeraven-ehr/MedicationRequest", params: { patient: "1" }, headers: @headers
 
@@ -110,10 +116,10 @@ module Lakeraven
 
       test "search entry does not map RPMS stop_date to authoredOn or dispense validityPeriod" do
         stop_date = Date.new(2025, 1, 1)
-        RpmsRpc.client.seed_text(:medication_active, "1", <<~WIRE)
-          ~OP^99R;O^Aspirin 81mg^^3250101^1^^^120099^
-          \\ Sig: TAKE 1 TABLET BY MOUTH DAILY
-        WIRE
+        answer_active_medications(
+          { order_id: "99R;O", name: "Aspirin 81mg", status: nil, stop_date: stop_date,
+            instructions: [ "Sig: TAKE 1 TABLET BY MOUTH DAILY" ] }
+        )
 
         get "/lakeraven-ehr/MedicationRequest", params: { patient: "1" }, headers: @headers
 

@@ -3,10 +3,11 @@
 # The demo site of the pinned RPMS build, as the build answers for it.
 #
 # Every fact here was read from a fresh container of the pinned image through
-# the rpms-rpc API the engine uses. On a mock run it is seeded into the mock,
-# so the mock says what RPMS says. On a live run (LIVE_RPMS=1) it is checked
-# against RPMS before the first scenario, and the run aborts on any
-# difference: the fake cannot drift from the backend it stands in for. A ready
+# the rpms-rpc API the engine uses. On a stand-in run each fact answers the
+# rpms-rpc method it was read through (RpmsStandIn), so the engine's gateways
+# read what RPMS says. On a live run (LIVE_RPMS=1) it is checked against RPMS
+# before the first scenario, and the run aborts on any difference: the
+# stand-in cannot drift from the backend it stands in for. A ready
 # stack run (LIVE_STACK, #962) skips the check: it signs on as the demo personas,
 # needs the pinned build, and would print the stack's patient rows on a diff.
 #
@@ -103,24 +104,30 @@ module RpmsDemoSite
 
   module_function
 
-  def seed!(mock)
-    PATIENTS.each do |dfn, p|
-      mock.seed(:patient_select, dfn.to_s, p)
-      mock.seed(:patient_id_info, dfn.to_s, p.slice(:ssn, :dob, :sex, :name))
-      mock.seed(:patient_ssn, p[:ssn], p.slice(:name, :dob, :ssn).merge(dfn: dfn))
+  # Each fact as the answer of the rpms-rpc method #differences reads it
+  # through. A patient here answers beside the baseline's; a list (the patient
+  # name index, the providers, the VFC codes) replaces the baseline's.
+  def stand_in!(rpms)
+    PATIENTS.each { |dfn, p| rpms.answer(RpmsRpc::Patient, :find, dfn, with: p.merge(dfn: dfn)) }
+    by_ssn = PATIENTS.to_h { |dfn, p| [ p[:ssn], p.slice(:name, :dob, :ssn).merge(dfn: dfn) ] }
+    rpms.answer(RpmsRpc::Patient, :find_by_ssn) { |ssn| by_ssn[ssn.to_s.delete("^0-9")]&.dup }
+    # A page of the name index whatever the start text (rpms-rpc #352); the
+    # gateway does the prefix filtering.
+    page = PATIENTS.sort_by { |_, p| p[:name] }.map { |dfn, p| { dfn: dfn, name: p[:name] } }
+    rpms.answer(RpmsRpc::Patient, :search) { |*| page.map(&:dup) }
+    VITALS.each { |dfn, rows| rpms.answer(RpmsRpc::Vital, :for_patient, dfn, with: rows.map(&:dup)) }
+    ALLERGIES.each do |dfn, rows|
+      rpms.answer(RpmsRpc::Allergy, :assessment, dfn, with: { assessed: true, nka: false, allergies: rows.map(&:dup) })
     end
-    # ORWPT LIST ALL answers a page of the name index whatever the start text
-    # (rpms-rpc #352); the gateway does the prefix filtering.
-    mock.seed_collection(:patient_list,
-      PATIENTS.sort_by { |_, p| p[:name] }.map { |dfn, p| { dfn: dfn, name: p[:name] } })
-    VITALS.each { |dfn, rows| mock.seed_keyed_collection(:vitals, dfn.to_s, rows) }
-    ALLERGIES.each { |dfn, rows| mock.seed_keyed_collection(:allergy_list, dfn.to_s, rows) }
-    PROBLEMS.each { |dfn, rows| mock.seed_keyed_collection(:problem_list, dfn.to_s, rows) }
-    mock.seed_collection(:practitioner_list, PROVIDERS)
-    mock.seed_collection(:vfc_eligibility_codes, VFC_CODES)
-    VFC_DEFAULTS.each { |dfn, row| mock.seed(:vfc_default, dfn.to_s, row) }
+    PROBLEMS.each { |dfn, rows| rpms.answer(RpmsRpc::Problem, :for_patient, dfn, with: rows.map { |row| row.merge(inactive_icd: false) }) }
+    rpms.answer(RpmsRpc::Practitioner, :search) { |*, **| PROVIDERS.map(&:dup) }
+    rpms.answer(RpmsRpc::Eligibility, :codes, with: VFC_CODES.map { |row| row.slice(:code, :label) })
+    VFC_DEFAULTS.each do |dfn, row|
+      code = VFC_CODES.find { |c| c[:label] == row[:default_label] }&.slice(:code, :label)
+      rpms.answer(RpmsRpc::Eligibility, :for_patient, dfn, with: code || RpmsRpc::Eligibility::NIL_ELIGIBILITY.dup)
+    end
     PERSONAS.each do |access, p|
-      mock.seed_user(p[:duz], credentials: "#{access};#{p[:verify]}", name: p[:name], role: p[:user_type].to_sym)
+      rpms.user(p[:duz], access: access, verify: p[:verify], name: p[:name], role: p[:user_type])
     end
   end
 

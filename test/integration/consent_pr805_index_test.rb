@@ -16,7 +16,7 @@ class ConsentPr805IndexTest < ActionDispatch::IntegrationTest
     Lakeraven::EHR::LoginThrottle.reset!
     Lakeraven::EHR::AuditEvent.delete_all
     @demo_original_client = RpmsRpc.configuration.client
-    RpmsRpc.mock! { |m| LakeravenDemoSeeds.seed(m) }
+    RpmsStandIn.install! { |rpms| LakeravenDemoSeeds.seed(rpms) }
     sign_in_clinician_for_consent!(scopes: WRITE_SCOPES)
     open_patient_context!(DFN)
     install_consent_templates!

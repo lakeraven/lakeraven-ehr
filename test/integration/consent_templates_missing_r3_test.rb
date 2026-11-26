@@ -12,7 +12,7 @@ class ConsentTemplatesMissingR3Test < ActionDispatch::IntegrationTest
     ActionController::Base.allow_forgery_protection = true
     Lakeraven::EHR::AuditEvent.delete_all
     @demo_original_client = RpmsRpc.configuration.client
-    RpmsRpc.mock! { |m| LakeravenDemoSeeds.seed(m) }
+    RpmsStandIn.install! { |rpms| LakeravenDemoSeeds.seed(rpms) }
     sign_in_clinician!(scopes: WRITE_SCOPES)
     open_patient_context!(DFN)
     Lakeraven::EHR::ConsentTemplate.delete_all

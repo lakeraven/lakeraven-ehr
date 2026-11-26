@@ -49,7 +49,7 @@ end
 
 Given("demo clinical seeds are loaded") do
   @demo_original_client = RpmsRpc.configuration.client
-  RpmsRpc.mock! { |m| LakeravenDemoSeeds.seed(m) }
+  RpmsStandIn.install! { |rpms| LakeravenDemoSeeds.seed(rpms) }
 end
 
 Given("patient {string} is the active patient context") do |name|

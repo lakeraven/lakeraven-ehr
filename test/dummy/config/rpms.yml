@@ -24,7 +24,7 @@ development:
   <<: *default
   host: "<%= ENV.fetch("VISTA_RPC_HOST", "127.0.0.1") %>"
 
-# The suite runs on rpms-rpc's MockClient (test_helper.rb), which replaces any
+# The suite runs on the engine's stand-in for RPMS (test_helper.rb), which replaces any
 # client built here. Only test/system/live names a broker, through VISTA_*.
 test:
   <<: *default

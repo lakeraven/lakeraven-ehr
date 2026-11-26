@@ -80,7 +80,7 @@ module Lakeraven
         setup_smart_auth(scopes: "system/*.read system/*.write")
         ExportsController.reset_store!
         assert Patient.find_by_dfn(EXPORT_TEST_PATIENT_DFN),
-          "Expected patient DFN #{EXPORT_TEST_PATIENT_DFN} from BASELINE_MOCK_SEEDS in test/test_helper.rb"
+          "Expected patient DFN #{EXPORT_TEST_PATIENT_DFN} from RpmsStandIn::Baseline (test/support/rpms_stand_in/baseline.rb)"
       end
 
       teardown do
@@ -181,7 +181,7 @@ module Lakeraven
         setup_smart_auth(scopes: "system/*.read system/*.write")
         ExportsController.reset_store!
         assert Patient.find_by_dfn(EXPORT_TEST_PATIENT_DFN),
-          "Expected patient DFN #{EXPORT_TEST_PATIENT_DFN} from BASELINE_MOCK_SEEDS in test/test_helper.rb"
+          "Expected patient DFN #{EXPORT_TEST_PATIENT_DFN} from RpmsStandIn::Baseline (test/support/rpms_stand_in/baseline.rb)"
       end
 
       teardown do

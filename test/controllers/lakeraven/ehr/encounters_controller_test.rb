@@ -183,11 +183,11 @@ module Lakeraven
       private
 
       def seed_encounters
-        RpmsRpc.client.seed_keyed_collection(:encounter_visit_list, "1", [
-          { visit_string: "1;3260310.09;A;71", location: "Primary Care Clinic", category: "AMBULATORY",
-            datetime: Time.new(2026, 3, 10, 9, 0, 0), provider_ien: 101, provider: "MARTINEZ,SARAH" },
-          { visit_string: "1;3260215.1;H;70", location: "Ward", category: "HOSPITALIZATION",
-            datetime: Time.new(2026, 2, 15, 10, 0, 0) }
+        RpmsStandIn.answer(RpmsRpc::Encounter, :visits, 1, with: [
+          { visit_ien: 71, location_ien: 1, location: "Primary Care Clinic", service_category: "A", category: "AMBULATORY",
+            datetime: Time.new(2026, 3, 10, 9, 0, 0), locked: nil, provider_ien: 101, provider: "MARTINEZ,SARAH" },
+          { visit_ien: 70, location_ien: 1, location: "Ward", service_category: "H", category: "HOSPITALIZATION",
+            datetime: Time.new(2026, 2, 15, 10, 0, 0), locked: nil, provider_ien: nil, provider: nil }
         ])
       end
     end

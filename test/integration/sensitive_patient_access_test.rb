@@ -20,9 +20,10 @@ require_relative "../support/sensitive_patient_access_seeds"
 #   anything else, no answer, or an error: not opened. An absent answer is
 #            never "not sensitive".
 #
-# RPMS is the mock, seeded with wire reply lines so the gem's parser runs
-# (SensitivePatientAccessSeeds). Synthetic patients only: DFN 1 and DFN 3 of
-# the baseline seeds.
+# RPMS is the stand-in: each test states what RpmsRpc::DgSensitive answers
+# the engine (SensitivePatientAccessSeeds), and the engine's own gateway and
+# controller run on that. Synthetic patients only: DFN 1 and DFN 3 of the
+# baseline.
 class SensitivePatientAccessTest < ActionDispatch::IntegrationTest
   include UrlPatientContextTestHelper
   include SensitivePatientAccessSeeds
@@ -30,7 +31,7 @@ class SensitivePatientAccessTest < ActionDispatch::IntegrationTest
   AuditEvent = Lakeraven::EHR::AuditEvent
   PLAIN_DFN = "1"
   SENSITIVE_DFN = "3"
-  # What the baseline seeds hold for DFN 3 (test/test_helper.rb). None of it
+  # What the baseline holds for DFN 3 (test/support/rpms_stand_in/baseline.rb). None of it
   # belongs on a page shown before the user may see the record.
   SENSITIVE_PATIENT_DETAILS = [
     /\bDOE\b/i, /\bJANE\b/i, /555667777/, /555-66-7777/, /1990/, /12\/25/, /Dec(ember)? 25/i
@@ -48,6 +49,11 @@ class SensitivePatientAccessTest < ActionDispatch::IntegrationTest
     "XWB" => "The remote procedure %s is not registered to the option #{OPTION}."
   }.freeze
   ACCOUNT_NOT_SET_UP = /RPMS account is not set up for the sensitive-record check/i
+  # The rpms-rpc method the engine calls for each RPC, and how an answered
+  # call to it reads on the connection's record.
+  TYPED_METHODS = { ACCESS_RPC => :check_access, BULLETIN_RPC => :record_bulletin }.freeze
+  ANSWERED_CHECK = "RpmsRpc::DgSensitive.check_access"
+  ANSWERED_BULLETIN = "RpmsRpc::DgSensitive.record_bulletin"
 
   setup do
     enable_forgery_protection!
@@ -160,10 +166,10 @@ class SensitivePatientAccessTest < ActionDispatch::IntegrationTest
 
     assert_opened!(SENSITIVE_DFN)
     assert_checked_once!(SENSITIVE_DFN) # in this request: the acknowledgement alone is not trusted
-    assert_equal [ [ SENSITIVE_DFN, OPTION, LOG_AND_SEND ] ], sensitive_bulletin_calls.map { |c| c[:params].to_a },
-                 "DG SENSITIVE RECORD BULLETIN is sent once: DFN, option, action 3"
-    rpcs = RpmsRpc.client.received_calls.map { |c| c[:rpc] }
-    assert_operator rpcs.index(ACCESS_RPC), :<, rpcs.index(BULLETIN_RPC), "the check comes before the bulletin"
+    assert_equal [ { dfn: SENSITIVE_DFN, action: LOG_AND_SEND, option: OPTION } ], sensitive_bulletin_calls,
+                 "DG SENSITIVE RECORD BULLETIN is asked for once: DFN, option, action 3"
+    asked = RpmsRpc.client.received_calls.filter_map { |c| c[:answered] }
+    assert_equal [ ANSWERED_CHECK, ANSWERED_BULLETIN ], asked.grep(/DgSensitive/), "the check comes before the bulletin"
     assert_open_audited_as_success!(SENSITIVE_DFN)
   end
 
@@ -187,7 +193,8 @@ class SensitivePatientAccessTest < ActionDispatch::IntegrationTest
 
   test "an acknowledged open does not happen when RPMS does not answer the bulletin" do
     seed_sensitive_access!(SENSITIVE_DFN, 2, WARNING_LINES)
-    # no bulletin reply seeded: RpmsRpc::DgSensitive.record_bulletin reads nil
+    # no bulletin answer stated: record_bulletin runs on the connection, which
+    # answers nothing, and reads nil
 
     post_open(SENSITIVE_DFN, acknowledge: true)
 
@@ -298,7 +305,7 @@ class SensitivePatientAccessTest < ActionDispatch::IntegrationTest
   # -- No usable answer: fail closed ------------------------------------------
 
   test "a record does not open when RPMS does not answer the sensitive-record check" do
-    clear_sensitive_access!(PLAIN_DFN) # the mock's "" for an unseeded RPC: check_access reads nil
+    clear_sensitive_access!(PLAIN_DFN) # RPMS answers no code: check_access is nil
 
     post_open(PLAIN_DFN)
 
@@ -316,13 +323,16 @@ class SensitivePatientAccessTest < ActionDispatch::IntegrationTest
     assert_checked_once!(SENSITIVE_DFN)
   end
 
+  # What RpmsRpc::DgSensitive.check_access answers for each reply: the code
+  # and lines as RPMS sent them, and nil for a first line that is not a code
+  # (an M error's text, say).
   {
-    "the routine's error code -1" => [ "-1", "Required variable missing." ],
-    "a code PTSEC does not define (7)" => [ "7" ],
-    "a reply that is not a code" => [ "M ERROR: <UNDEFINED>PTSEC+3^DGSEC4" ]
-  }.each do |label, lines|
+    "the routine's error code -1" => { result: -1, messages: [ "Required variable missing." ] },
+    "a code PTSEC does not define (7)" => { result: 7, messages: [] },
+    "a reply that is not a code" => nil
+  }.each do |label, outcome|
     test "a record does not open on #{label}" do
-      seed_access_reply!(PLAIN_DFN, lines)
+      seed_check_outcome!(PLAIN_DFN, outcome)
 
       post_open(PLAIN_DFN)
 
@@ -331,7 +341,7 @@ class SensitivePatientAccessTest < ActionDispatch::IntegrationTest
     end
 
     test "an acknowledgement does not open a record on #{label}" do
-      seed_access_reply!(PLAIN_DFN, lines)
+      seed_check_outcome!(PLAIN_DFN, outcome)
       seed_sensitive_bulletin!(PLAIN_DFN, true)
 
       post_open(PLAIN_DFN, acknowledge: true)
@@ -377,7 +387,7 @@ class SensitivePatientAccessTest < ActionDispatch::IntegrationTest
 
     assert_opened!("0#{SENSITIVE_DFN}") # the session keeps the route's segment
     assert_checked_once!(SENSITIVE_DFN)
-    assert_equal [ [ SENSITIVE_DFN, OPTION, LOG_AND_SEND ] ], sensitive_bulletin_calls.map { |c| c[:params].to_a },
+    assert_equal [ { dfn: SENSITIVE_DFN, action: LOG_AND_SEND, option: OPTION } ], sensitive_bulletin_calls,
                  "the bulletin names record 3, not \"03\""
     assert_open_audited_as_success!(SENSITIVE_DFN)
   end
@@ -607,18 +617,25 @@ class SensitivePatientAccessTest < ActionDispatch::IntegrationTest
     end
   end
 
-  # RPMS raises for one RPC, as a broker that drops the call does. The mock is
+  # RPMS raises for one RPC, as a broker that drops the call does: the
+  # rpms-rpc method the engine calls for it raises, for every patient, and
+  # each call that raised is returned by its keywords. The stand-in is
   # rebuilt before every test (GlobalStoreIsolation), so nothing to restore.
   def rpms_raises_on!(rpc_name, error: RpmsRpc::Client::RpcError, message: "broker dropped #{rpc_name}")
     raised = []
-    RpmsRpc.client.define_singleton_method(:call_rpc) do |rpc, *params|
-      if rpc == rpc_name
-        raised << params
-        raise error, message
-      end
-      super(rpc, *params)
+    RpmsStandIn.answer(RpmsRpc::DgSensitive, TYPED_METHODS.fetch(rpc_name)) do |**kwargs|
+      raised << kwargs
+      raise error, message
     end
     raised
+  end
+
+  # What check_access answers for DFN: a code and its lines, or nil when RPMS
+  # answered no code.
+  def seed_check_outcome!(dfn, outcome)
+    return clear_sensitive_access!(dfn) if outcome.nil?
+
+    seed_sensitive_access!(dfn, outcome.fetch(:result), outcome.fetch(:messages))
   end
 
   # RPMS serves the RPC, but not to this user: RpcRefusedError, in a broker's
@@ -664,6 +681,7 @@ class SensitivePatientAccessTest < ActionDispatch::IntegrationTest
     post_open(dfn)
     assert_equal dfn, session_open_patient_dfn, "precondition: the record is open"
     RpmsRpc.client.received_calls.clear
+    TYPED_METHODS.each_value { |name| RpmsStandIn.calls(RpmsRpc::DgSensitive, name).clear }
     AuditEvent.delete_all
   end
 
@@ -681,11 +699,11 @@ class SensitivePatientAccessTest < ActionDispatch::IntegrationTest
   def assert_checked_once!(dfn)
     calls = sensitive_access_calls
     assert_equal 1, calls.size, "expected one DG SENSITIVE RECORD ACCESS, got #{calls.size}"
-    assert_equal dfn, calls.first[:params][0], "the check names the route's patient"
-    assert_equal OPTION, calls.first[:params][2], "the check sends the option the open runs under"
+    assert_equal dfn, calls.first[:dfn], "the check names the route's patient"
+    assert_equal OPTION, calls.first[:option], "the check sends the option the open runs under"
   end
 
-  # DGMSG, the check's second parameter, is "1". The only captured reply that
+  # DGMSG, the check's generate_message, is 1. The only captured reply that
   # carried RPMS's warning lines was sent with DGMSG=1 (rpms-rpc
   # test/fixtures/captured_replies/dg-sensitive.yml, capture sensitive/1,
   # inputs ["990028", "1", "OR CPRS GUI CHART"]); the not-sensitive captures,
@@ -694,7 +712,7 @@ class SensitivePatientAccessTest < ActionDispatch::IntegrationTest
   def assert_check_asks_for_message!
     call = sensitive_access_calls.first
     assert call, "expected a DG SENSITIVE RECORD ACCESS call"
-    assert_equal "1", call[:params][1], "the check is sent with DGMSG (generate_message) \"1\""
+    assert_equal 1, call[:generate_message], "the check is asked with DGMSG (generate_message) 1"
   end
 
   def assert_no_bulletin!

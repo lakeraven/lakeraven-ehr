@@ -9,7 +9,7 @@ module Lakeraven
       setup do
         @_orig_patient_find = Patient.method(:find_by_dfn)
         @_orig_rpms_client = RpmsRpc.configuration.client
-        RpmsRpc.mock!(&BASELINE_MOCK_SEEDS)
+        RpmsStandIn.install_baseline!
         @_orig_allergy_for_patient = AllergyIntolerance.method(:for_patient)
         @_orig_device_for_patient = Device.method(:for_patient)
         @_orig_fetch_reminders = ClinicalDecisionSupportService.method(:fetch_clinical_reminders)
@@ -76,11 +76,12 @@ module Lakeraven
       # CLINICAL REMINDERS
       # =============================================================================
 
-      # ORQQPX REMINDERS LIST rows as the pinned build sent them for a
-      # patient (DFN 4, openrpms bcer-9.0 2a9b3fe), read through the gem:
-      # DUE FLAG 1 is due, and the due date is the engine's "DUE NOW" (#986).
+      # The cover-sheet reminders as the pinned build gave them for a patient
+      # (DFN 4, openrpms bcer-9.0 2a9b3fe), as RpmsRpc::HealthSummary
+      # .clinical_reminders returns them: DUE FLAG 1 is due, and the due date
+      # is the engine's "DUE NOW" (#986).
       test "returns preventive care alerts for the reminders RPMS flags due" do
-        RpmsRpc.client.seed_keyed_collection(:reminders_list, "12345", [
+        RpmsStandIn.answer(RpmsRpc::HealthSummary, :clinical_reminders, "12345", with: [
           { ien: 211, name: "Tobacco Screen", due_date: "DUE NOW", priority: 2, due_flag: 1, dialog: true },
           { ien: 274, name: "Domestic Violence", due_date: "DUE NOW", priority: 2, due_flag: 1, dialog: true }
         ])
@@ -95,9 +96,9 @@ module Lakeraven
 
       test "no preventive alerts when reminders are current" do
         # DUE FLAG 0: applicable, not due. 2: not applicable.
-        RpmsRpc.client.seed_keyed_collection(:reminders_list, "12345", [
-          { ien: 211, name: "Tobacco Screen", due_date: "3270601", last_done: "3260601", priority: 2, due_flag: 0, dialog: true },
-          { ien: 123, name: "Depression Screen", due_date: "", priority: 2, due_flag: 2, dialog: true }
+        RpmsStandIn.answer(RpmsRpc::HealthSummary, :clinical_reminders, "12345", with: [
+          { ien: 211, name: "Tobacco Screen", due_date: "3270601", last_done: Date.new(2026, 6, 1), priority: 2, due_flag: 0, dialog: true },
+          { ien: 123, name: "Depression Screen", due_date: nil, priority: 2, due_flag: 2, dialog: true }
         ])
         ClinicalDecisionSupportService.define_singleton_method(:fetch_recent_labs) { [] }
 
@@ -400,14 +401,15 @@ module Lakeraven
         mock_devices(dfn, [])
       end
 
-      # The patient's orders as ORWPS ACTIVE wire, read back through the
-      # gateway and the rpms-rpc parser: order id, drug, expiration, refills,
-      # CPRS order number, the RPMS status (piece 9), then the sig line.
+      # The patient's orders, each as RpmsRpc::Medication.active_for_patient
+      # returns it, read back through the gateway: order id, drug, the RPMS
+      # status, stop date and the sig line.
       def seed_active_medications(dfn, orders)
-        wire = orders.each_with_index.map do |order, i|
-          "~OP^#{4401 + i}R;O^#{order[:drug_name]}^^3271231^3^^^#{120345 + i}^#{order[:status]}\n\\ Sig: TAKE AS DIRECTED"
+        rows = orders.each_with_index.map do |order, i|
+          { order_id: "#{4401 + i}R;O", type: "OP", name: order[:drug_name], status: order[:status],
+            stop_date: Date.new(2027, 12, 31), instructions: [ "Sig: TAKE AS DIRECTED" ], comments: [] }
         end
-        RpmsRpc.client.seed_text(:medication_active, dfn.to_s, wire.join("\n"))
+        RpmsStandIn.answer(RpmsRpc::Medication, :active_for_patient, dfn, with: rows)
       end
 
       def mock_no_allergies(dfn)

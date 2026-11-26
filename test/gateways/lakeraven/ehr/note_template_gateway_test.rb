@@ -72,16 +72,16 @@ module Lakeraven
       end
 
       # Through the real RpmsRpc::NoteTemplate, so a change to the gem's
-      # signature fails here. Replies are what a fresh rpms-ydb e9b78c8 sent.
+      # signature fails here. Replies are what a fresh rpms-ydb e9b78c8 sent:
+      # nothing for template 3454's boilerplate, which is what the stand-in's
+      # connection answers unasked.
       test "boilerplate sends the template alone (GETBOIL)" do
-        RpmsRpc.client.seed_raw_lines(:template_boilerplate, "3454", [])
-
         assert_nil NoteTemplateGateway.boilerplate(3454)
         assert_equal [ "3454" ], RpmsRpc.client.received_calls.last[:params]
       end
 
       test "text sends the patient and the lines, and returns the RPMS expansion (GETTEXT)" do
-        RpmsRpc.client.seed_raw_lines(:template_text, "4", [ "^^1^1^3261027^^", "Patient: DEMO,PATIENT ONE" ])
+        RpmsStandIn.connection.replay("TIU TEMPLATE GETTEXT", [ "^^1^1^3261027^^", "Patient: DEMO,PATIENT ONE" ], first_param: "4")
 
         expanded = NoteTemplateGateway.text([ "Patient: |PATIENT NAME|" ], dfn: 4)
 

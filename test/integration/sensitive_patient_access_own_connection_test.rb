@@ -120,7 +120,8 @@ class SensitivePatientAccessOwnConnectionTest < ActionDispatch::IntegrationTest
     assert_empty @clients[0].sent(ACCESS_RPC), "the other user's connection is not asked"
     assert_empty @clients[0].sent(BULLETIN_RPC), "the other user's connection sends no bulletin"
     assert_equal [ SENSITIVE_DFN ], @clients[1].sent(ACCESS_RPC).map { |call| call[:params].first.to_s }
-    assert_equal [ [ SENSITIVE_DFN, SensitivePatientAccessSeeds::OPTION, SensitivePatientAccessSeeds::LOG_AND_SEND ] ],
+    # On the wire the action is the string rpms-rpc sends for the gateway's 3.
+    assert_equal [ [ SENSITIVE_DFN, SensitivePatientAccessSeeds::OPTION, SensitivePatientAccessSeeds::LOG_AND_SEND.to_s ] ],
                  @clients[1].sent(BULLETIN_RPC).map { |call| call[:params].map(&:to_s) },
                  "DG SENSITIVE RECORD BULLETIN is sent as the user who acknowledged: DFN, option, action 3"
     rpcs = @clients[1].rpcs.map { |call| call[:rpc] }

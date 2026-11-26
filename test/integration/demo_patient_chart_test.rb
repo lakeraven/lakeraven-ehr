@@ -7,8 +7,8 @@ require_relative "../dummy/lib/lakeraven_demo_seeds"
 #
 # Exercises the content-negotiated /patients/:dfn endpoint against the test/dummy
 # host with the shared synthetic seed set — the SAME data the SPIKE dev
-# initializer loads. Installs a fully-seeded mock for the test and restores
-# the suite-wide shared mock afterward so global state stays clean.
+# initializer loads. Installs a stand-in holding the demo panel for the test
+# and restores the suite-wide client afterward so global state stays clean.
 #
 # Auth is enforced for BOTH representations (HTML + FHIR JSON): SMART bearer
 # token (Doorkeeper), per-resource read scope, and patient-context binding.
@@ -17,7 +17,7 @@ class DemoPatientChartTest < ActionDispatch::IntegrationTest
 
   setup do
     @original_client = RpmsRpc.configuration.client
-    RpmsRpc.mock! { |m| LakeravenDemoSeeds.seed(m) }
+    RpmsStandIn.install! { |rpms| LakeravenDemoSeeds.seed(rpms) }
     setup_smart_auth(scopes: "system/*.read") # @headers => full read token
   end
 
@@ -68,13 +68,12 @@ class DemoPatientChartTest < ActionDispatch::IntegrationTest
   # "Unknown" on every row (#628). The discontinued order's stop date is
   # still in the future.
   test "HTML chart shows each medication's RPMS order status" do
-    future = RpmsRpc::FilemanDateParser.format_date(Date.current + 365)
-    RpmsRpc.client.seed_text(:medication_active, "1", <<~WIRE)
-      ~OP^1R;O^Lisinopril 10mg^^3271231^3^^^120001^ACTIVE
-      \\ Sig: TAKE 1 TABLET BY MOUTH DAILY
-      ~OP^2R;O^Metformin 500mg^^#{future}^2^^^120002^DISCONTINUED
-      \\ Sig: TAKE 1 TABLET BY MOUTH TWICE A DAY
-    WIRE
+    RpmsStandIn.answer(RpmsRpc::Medication, :active_for_patient, "1", with: [
+      { order_id: "1R;O", type: "OP", name: "Lisinopril 10mg", status: "ACTIVE", stop_date: Date.new(2027, 12, 31),
+        instructions: [ "Sig: TAKE 1 TABLET BY MOUTH DAILY" ], comments: [] },
+      { order_id: "2R;O", type: "OP", name: "Metformin 500mg", status: "DISCONTINUED", stop_date: Date.current + 365,
+        instructions: [ "Sig: TAKE 1 TABLET BY MOUTH TWICE A DAY" ], comments: [] }
+    ])
 
     get "/patients/1", headers: @headers
 

@@ -78,7 +78,8 @@ No UCI (namespace) setting is needed on either: the CIA client asks for the brok
 `RPMS_UCI` overrides that, only to run in another namespace.
 
 **Tests need no backend.**
-`bin/rails test` and `bundle exec cucumber` run against rpms-rpc's in-memory `MockClient`.
+`bin/rails test` and `bundle exec cucumber` run on the engine's own stand-in for RPMS, `test/support/rpms_stand_in.rb`: a test states what a gateway's read returns, and a pass proves the engine's logic.
+What RPMS answers is proven by the `@live` Cucumber profile against the RPMS image.
 `test/system/live` signs in against a real broker and skips unless `LIVE_RPMS=1`; its header says how to run it.
 
 ## Installation

@@ -49,8 +49,8 @@ module Lakeraven
         skip "Requires RpmsRpc::Session.bootstrap (lakeraven/rpms-rpc#99)" unless
           SessionGateway.default_provider
 
-        RpmsRpc.client.seed(:session_vim_info, "301", {
-          duz: 301, user_name: "PROVIDER,TEST", timeouts: "300"
+        RpmsStandIn.answer(RpmsRpc::Session, :bootstrap, "301", with: {
+          vim_info: { duz: 301, user_name: "PROVIDER,TEST", timeouts: "300", compose_mode: nil, design_mode: nil }
         })
 
         result = SessionGateway.bootstrap("301")

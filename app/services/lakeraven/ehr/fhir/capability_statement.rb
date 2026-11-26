@@ -142,18 +142,22 @@ module Lakeraven
         private
 
         # The engine cannot tell synthetic records from real ones on a live
-        # RPMS, so it says so only when it knows: the in-process mock client
-        # serves nothing but invented records.
+        # RPMS, so it says so only when it knows: a connection that says it is
+        # a stand-in for RPMS serves nothing but invented records.
         def implementation_description
           description = "Lakeraven EHR FHIR API over RPMS."
-          return description unless mock_backend?
+          return description unless stand_in_backend?
 
           "#{description} This instance serves a synthetic dataset from an in-process mock " \
             "of RPMS: invented records, no real patient data."
         end
 
-        def mock_backend?
-          defined?(RpmsRpc::MockClient) && BackendRegistry.current.client.is_a?(RpmsRpc::MockClient)
+        # No rpms-rpc client answers stand_in?. The engine's own stand-in for
+        # RPMS does (test/support/rpms_stand_in.rb, used by the tests and the
+        # dummy app's local demo).
+        def stand_in_backend?
+          client = BackendRegistry.current.client
+          client.respond_to?(:stand_in?) && client.stand_in? == true
         end
 
         def security

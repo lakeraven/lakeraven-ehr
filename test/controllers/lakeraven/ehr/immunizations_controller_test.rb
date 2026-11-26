@@ -31,13 +31,13 @@ module Lakeraven
       end
 
       test "entries have correct resourceType" do
-        # BGOVIMM GET rows ("DFN^I", the immunization records only): the
-        # pieces GET^BGOVIMM5 returns, with "IEN~NAME" pairs for the
-        # performer and the site (rpms-rpc #378).
-        RpmsRpc.client.seed_keyed_collection(:immunization_list, "1^I", [
-          { record_type: "I", ien: 7001, vaccine_display: "COVID-19 Pfizer-BioNTech, mRNA",
+        # One dose as RpmsRpc::Immunization.for_patient returns it: what
+        # BGOVIMM GET carries, the performer and the site by name
+        # (rpms-rpc #378).
+        RpmsStandIn.answer(RpmsRpc::Immunization, :for_patient, 1, with: [
+          { ien: "7001", vaccine_display: "COVID-19 Pfizer-BioNTech, mRNA",
             lot_number: "EX1234", occurrence_datetime: Time.utc(2026, 1, 15, 10, 0, 0),
-            site: "3~Left deltoid", performer: "301~PROVIDER,TEST",
+            site: "Left deltoid", performer_duz: "301", performer_name: "PROVIDER,TEST",
             dose_quantity: 0.3, manufacturer: "Pfizer-BioNTech" }
         ])
 
@@ -69,13 +69,13 @@ module Lakeraven
       # Entries should be proper FHIR resources from Immunization#to_fhir,
       # not raw gateway hashes merged into a thin envelope.
       test "entries render as FHIR-conformant Immunization resources" do
-        # BGOVIMM GET rows ("DFN^I", the immunization records only): the
-        # pieces GET^BGOVIMM5 returns, with "IEN~NAME" pairs for the
-        # performer and the site (rpms-rpc #378).
-        RpmsRpc.client.seed_keyed_collection(:immunization_list, "1^I", [
-          { record_type: "I", ien: 7001, vaccine_display: "COVID-19 Pfizer-BioNTech, mRNA",
+        # One dose as RpmsRpc::Immunization.for_patient returns it: what
+        # BGOVIMM GET carries, the performer and the site by name
+        # (rpms-rpc #378).
+        RpmsStandIn.answer(RpmsRpc::Immunization, :for_patient, 1, with: [
+          { ien: "7001", vaccine_display: "COVID-19 Pfizer-BioNTech, mRNA",
             lot_number: "EX1234", occurrence_datetime: Time.utc(2026, 1, 15, 10, 0, 0),
-            site: "3~Left deltoid", performer: "301~PROVIDER,TEST",
+            site: "Left deltoid", performer_duz: "301", performer_name: "PROVIDER,TEST",
             dose_quantity: 0.3, manufacturer: "Pfizer-BioNTech" }
         ])
 
@@ -84,7 +84,7 @@ module Lakeraven
 
         body = JSON.parse(response.body)
         assert body["entry"].is_a?(Array), "bundle should have entries"
-        assert_equal 1, body["entry"].length, "expected one seeded immunization to render"
+        assert_equal 1, body["entry"].length, "expected the one immunization to render"
 
         resource = body["entry"].first["resource"]
 

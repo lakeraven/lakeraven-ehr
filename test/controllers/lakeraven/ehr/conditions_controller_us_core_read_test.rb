@@ -10,7 +10,7 @@ module Lakeraven
 
       setup do
         @original_client = RpmsRpc.configuration.client
-        RpmsRpc.mock! { |m| LakeravenDemoSeeds.seed(m) }
+        RpmsStandIn.install! { |rpms| LakeravenDemoSeeds.seed(rpms) }
         setup_smart_auth
       end
 
@@ -72,9 +72,10 @@ module Lakeraven
       DATA_ABSENT_REASON_URL = "http://hl7.org/fhir/StructureDefinition/data-absent-reason"
 
       test "search entries map seeded inactive problem to clinicalStatus inactive" do
-        RpmsRpc.client.seed_keyed_collection(:problem_list, "1",
-          [ { ien: 1, status: "A", icd_code: "E11.9", description: "Type 2 diabetes mellitus" },
-            { ien: 99, status: "I", icd_code: "J44.9", description: "Chronic obstructive pulmonary disease" } ])
+        RpmsStandIn.answer(RpmsRpc::Problem, :for_patient, 1, with: [
+          { ien: "1", status: "A", icd_code: "E11.9", description: "Type 2 diabetes mellitus", inactive_icd: false },
+          { ien: "99", status: "I", icd_code: "J44.9", description: "Chronic obstructive pulmonary disease", inactive_icd: false }
+        ])
 
         get "/lakeraven-ehr/Condition", params: { patient: "1" }, headers: @headers
 

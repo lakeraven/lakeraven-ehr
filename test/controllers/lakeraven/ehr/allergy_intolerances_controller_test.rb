@@ -31,9 +31,9 @@ module Lakeraven
       end
 
       test "entries have correct resourceType" do
-        RpmsRpc.client.seed_keyed_collection(:allergy_list, "1", [
-          { ien: 1, allergen: "Penicillin", severity: "moderate", signs: "Hives" }
-        ])
+        RpmsStandIn.answer(RpmsRpc::Allergy, :assessment, 1, with: { assessed: true, nka: false, allergies: [
+          { ien: "1", allergen: "Penicillin", severity: "moderate", signs: "Hives", altered: false }
+        ] })
 
         get "/lakeraven-ehr/AllergyIntolerance", params: { patient: "1" }, headers: @headers
         assert_response :ok

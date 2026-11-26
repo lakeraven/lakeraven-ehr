@@ -40,26 +40,25 @@ class NotificationActionsTest < ActionDispatch::IntegrationTest
     RpmsRpc.client.received_calls.clear
     @lines = CAPTURED.dup
     seed_alerts
-    RpmsRpc.client.seed_raw_lines(:user_management_user_list, "PROFILE", NEWPERS_PROFILE)
-    RpmsRpc.client.seed_scalar(:notifications_forward, KEPT, 0)
-    RpmsRpc.client.seed_text(:notifications_message, KEPT, COMMENT)
+    RpmsStandIn.connection.replay("ORWU NEWPERS", NEWPERS_PROFILE, first_param: "PROFILE")
+    RpmsStandIn.connection.replay("BEHOXQ FORWARD", "0", first_param: KEPT)
+    RpmsStandIn.connection.replay("BEHOXQ ALRMSG", [ COMMENT ], first_param: KEPT)
     @restore_rpc = rpms_removes_on_alrpp!
   end
 
   teardown do
     @restore_rpc&.call
-    RpmsRpc.client.seed_raw_lines(:notifications_inbox, "", [])
-    RpmsRpc.client.seed_raw_lines(:user_management_user_list, "PROFILE", [])
     restore_forgery_protection!
     teardown_oauth!
   end
 
-  def seed_alerts = RpmsRpc.client.seed_raw_lines(:notifications_inbox, "", @lines)
+  # What RPMS answers BEHOXQ ALRLIST now: the captured rows still in the list.
+  def seed_alerts = RpmsStandIn.connection.replay("BEHOXQ ALRLIST", @lines)
 
   # BEHOXQ ALRPP answers its handler's IEN (3, as the container did) and, on
   # RPMS, the alert leaves the user's list: the next ALRLIST does not carry it.
   def rpms_removes_on_alrpp!
-    RpmsRpc.client.seed_scalar(:notifications_remove, REMOVABLE, 3)
+    RpmsStandIn.connection.replay("BEHOXQ ALRPP", "3", first_param: REMOVABLE)
     client = RpmsRpc.client
     test = self
     original = client.method(:call_rpc)

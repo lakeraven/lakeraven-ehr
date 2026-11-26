@@ -14,8 +14,8 @@ module Lakeraven
       # --- read: for_patient ---
 
       test "for_patient returns the seeded problem list" do
-        RpmsRpc.client.seed_keyed_collection(:problem_list, "1", [
-          { ien: 1, icd_code: "E11.9", description: "Type 2 diabetes", status: "A" }
+        RpmsStandIn.answer(RpmsRpc::Problem, :for_patient, 1, with: [
+          { ien: "1", icd_code: "E11.9", description: "Type 2 diabetes", status: "A", inactive_icd: false }
         ])
 
         result = ConditionGateway.for_patient(1)
@@ -53,11 +53,10 @@ module Lakeraven
       end
 
       test "delete surfaces a server error reply as failure" do
-        # The mock CAN express this failure: an error reply is "-CODE^text",
-        # keyed (like every scalar seed) by the RPC's first param. The mock is
-        # process-global, so this seed uses its own IEN/reason key to avoid
-        # bleeding into the success-path test in other run orders.
-        RpmsRpc.client.seed_scalar(:problem_remove, "66^^Wrong patient", "-1^Cannot delete")
+        # What RpmsRpc::Problem.delete returns when RPMS refuses the delete
+        # with "-1^text": a failure carrying the reply, and no IEN.
+        RpmsStandIn.answer(RpmsRpc::Problem, :delete, 1, 66,
+                           with: { success: false, ien: nil, raw: "-1^Cannot delete" })
 
         result = ConditionGateway.delete(1, 66, reason: "Wrong patient")
 

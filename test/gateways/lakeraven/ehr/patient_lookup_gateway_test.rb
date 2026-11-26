@@ -75,7 +75,7 @@ module Lakeraven
       # live e9b78c8 build answered for MOUSE.
       test "decodes the live reply shape through RpmsRpc::Patient.lookup" do
         header = "I00010DFN^T00030PATIENT_NAME^T00030HRN^T00009SSN^D00030DOB^D00030DOD^T00003SENS_FLAG^T01024ALIAS^T00001INACTIVE"
-        RpmsRpc.client.seed_text(:patient_lookup_agg, "MOUSE", "\x00#{header}\x1e3^MOUSE,MICKEY M^1001^XXX-XX-9999^FEB 14,1910^^N^^N\x1e\x1f")
+        RpmsStandIn.connection.replay("AGG LOOKUP PATIENTS", "\x00#{header}\x1e3^MOUSE,MICKEY M^1001^XXX-XX-9999^FEB 14,1910^^N^^N\x1e\x1f", first_param: "MOUSE")
 
         match = PatientLookupGateway.find("MOUSE").sole
 

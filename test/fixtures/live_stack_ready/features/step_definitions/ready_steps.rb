@@ -58,15 +58,15 @@ After do
   end
 end
 
-# The real mock, unseeded: it answers every read path with an empty reply.
+# The real stand-in connection: it answers every read path with an empty reply.
 When("the mock answers through its lines") do
   RpmsRpc.configuration.client.call_rpc("ORWU USERINFO")
-  RpmsRpc::MockClient.new.call_rpc_lines("ORWPT LIST ALL", "A", 1)
+  RpmsStandIn::Connection.new.call_rpc_lines("ORWPT LIST ALL", "A", 1)
 end
 
 When("the mock answers through its global array") do
   RpmsRpc.configuration.client.call_rpc("ORWU USERINFO")
-  RpmsRpc::MockClient.new.call_rpc_global_array("ORWPT LIST ALL", "A", 1)
+  RpmsStandIn::Connection.new.call_rpc_global_array("ORWPT LIST ALL", "A", 1)
 end
 
 # travel_to stubs Time.now, Date.today and DateTime.now through SimpleStubs:

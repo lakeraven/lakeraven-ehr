@@ -9,8 +9,9 @@ require_relative "../support/patient_banner_test_helper"
 # the whole response, layout and every partial and helper included, however
 # a control was built, in every state the two pages have: rows, none, a failed
 # or refused read, a refused window, every other capability's links and
-# counts, and a patient open or searched for. RPMS is stood in for at the
-# wire, as in test/integration/pending_referrals_test.rb.
+# counts, and a patient open or searched for. RPMS is stood in for: the
+# referrals, alerts and allergies are what rpms-rpc's reads answer, and the
+# scheduling reads are answered at the wire.
 class ReferralSurfacesRenderedTest < ActionDispatch::IntegrationTest
   include PatientBannerTestHelper
 
@@ -18,10 +19,13 @@ class ReferralSurfacesRenderedTest < ActionDispatch::IntegrationTest
   PENDING = "/lakeraven-ehr/referrals/pending"
   DASHBOARD = "/lakeraven-ehr/dashboard"
 
-  # Two synthetic referrals, in the shape BMC SEARCH REFERRAL answers.
-  SYNTHETIC_PENDING =
-    "~`1^NOV 01, 2026^^990003^CHARLIE,JORDAN^^^<UNKNOWN>^^ACTIVE^^^DIRECT ONLY^^^^^^^^^^06/03/1966^^" \
-    "~`2^NOV 01, 2026^^990003^CHARLIE,JORDAN^^^<UNKNOWN>^^APPROVED^^^DIRECT ONLY^^^^^^^^^^06/03/1966^^"
+  # Two synthetic referrals, as RpmsRpc::Referral.pending returns them.
+  SYNTHETIC_PENDING = [
+    { ien: "1", date: Date.new(2026, 11, 1), patient_dfn: 990003, patient_name: "CHARLIE,JORDAN", facility: "<UNKNOWN>",
+      status: "ACTIVE", chs_eligibility: "DIRECT ONLY", patient_dob: "06/03/1966" },
+    { ien: "2", date: Date.new(2026, 11, 1), patient_dfn: 990003, patient_name: "CHARLIE,JORDAN", facility: "<UNKNOWN>",
+      status: "APPROVED", chs_eligibility: "DIRECT ONLY", patient_dob: "06/03/1966" }
+  ].freeze
 
   # Synthetic scheduling replies, in the shape the three BSDX reads answer
   # (test/integration/appointments_needing_action_test.rb): two clinics, and
@@ -45,12 +49,25 @@ class ReferralSurfacesRenderedTest < ActionDispatch::IntegrationTest
       "72^NOV 04,2026 16:00^NOV 04,2026 16:15^^^990003^CHARLIE,JORDAN^SYNTHETIC CLINIC B^0^990003^0^0^^^0^\u001e"
   }.freeze
 
-  # Two synthetic alerts, in the shape BEHOXQ ALRLIST answers
-  # (test/integration/notifications_test.rb).
+  # Two synthetic alerts, as RpmsRpc::Notifications.inbox returns them
+  # (test/integration/notifications_test.rb has the reply they are read from).
   SYNTHETIC_ALERTS = [
-    "1^0^^  ^Staff meeting moved to 3 PM.^3261104.075352^PROFILE,MANAGER^0^BEHOXQ^BEHOXQ,PROBE;4;3261104.075352^0^PRI=1^INF=0",
-    "2^1^CHARLIE,JORDAN    (990003)^  ^Unscheduled visit.^3261104.074742^PROFILE,MANAGER^3^OR.19^OR,3,19;.5;3261104.074742^1^"
+    { alert_id: "BEHOXQ,PROBE;4;3261104.075352", patient_dfn: nil, patient_name: nil, hrn: nil, location: nil,
+      message: "Staff meeting moved to 3 PM.", delivered_at: Time.new(2026, 11, 4, 7, 53, 52), sender: "PROFILE,MANAGER",
+      priority: :high, info_only: false, removable: false, type: "BEHOXQ" },
+    { alert_id: "OR,3,19;.5;3261104.074742", patient_dfn: 3, patient_name: "CHARLIE,JORDAN", hrn: "990003", location: nil,
+      message: "Unscheduled visit.", delivered_at: Time.new(2026, 11, 4, 7, 47, 42), sender: "PROFILE,MANAGER",
+      priority: :moderate, info_only: true, removable: true, type: "OR.19" }
   ].freeze
+
+  # The two allergies of the chart a state opens, as RpmsRpc::Allergy.assessment returns them.
+  SYNTHETIC_ALLERGIES = {
+    assessed: true, nka: false,
+    allergies: [
+      { ien: "1", allergen: "LATEX", severity: nil, signs: nil, altered: false },
+      { ien: "2", allergen: "PENICILLIN", severity: nil, signs: nil, altered: false }
+    ]
+  }.freeze
 
   # The keys of a user every link of the main navigation shows to, and every
   # count of the dashboard: all three referral keys, registration (search and
@@ -120,7 +137,7 @@ class ReferralSurfacesRenderedTest < ActionDispatch::IntegrationTest
     post "/lakeraven-ehr/test_session", params: { duz: "206", user_type: "provider", user_name: "PROFILE,MD", security_keys: keys }
   end
 
-  # Answers the named RPCs for the fake client, the way
+  # Answers the named RPCs on the stand-in's connection, the way
   # appointments_needing_action_test.rb does: a reply as it comes off the
   # wire, or an exception to raise.
   def rpms_answers(replies)
@@ -138,10 +155,11 @@ class ReferralSurfacesRenderedTest < ActionDispatch::IntegrationTest
     end
   end
 
-  def pending_answers(lines) = RpmsRpc.client.seed_raw_lines(:referral_search, "", lines)
+  # What rpms-rpc's read of the pending referrals answers, whatever the window.
+  def pending_answers(rows) = RpmsStandIn.answer(RpmsRpc::Referral, :pending) { |**| rows.map(&:dup) }
 
-  # One rendered page, from a fresh session and a fresh fake RPMS that
-  # answers the two synthetic referrals unless the block seeds otherwise.
+  # One rendered page, from a fresh session and a fresh stand-in for RPMS that
+  # answers the two synthetic referrals unless the block says otherwise.
   # scopes: sign on with a SMART token too (the patient banner's reads), with
   # forgery protection on as a browser has it, so each posting form renders
   # its authenticity_token. patient: the DFN of a chart to open first.
@@ -149,7 +167,7 @@ class ReferralSurfacesRenderedTest < ActionDispatch::IntegrationTest
     reset!
     GlobalStoreIsolation.reset!
     enable_forgery_protection! if scopes
-    pending_answers([ SYNTHETIC_PENDING ])
+    pending_answers(SYNTHETIC_PENDING)
     yield if block_given?
     travel_to(TODAY.to_time.change(hour: hour)) do
       scopes ? sign_in_clinician!(scopes: scopes, keys: keys) : sign_in(keys.join(","))
@@ -201,7 +219,7 @@ class ReferralSurfacesRenderedTest < ActionDispatch::IntegrationTest
 
   # The read of the pending referrals raises: nothing else of RPMS does.
   def unread(path, error, selector, text)
-    document = page(path) { rpms_answers("BMC SEARCH REFERRAL" => error) }
+    document = page(path) { RpmsStandIn.answer(RpmsRpc::Referral, :pending) { |**| raise error } }
 
     assert_empty document.css("#pending-referrals, #no-pending-referrals, #referral-counts"), "#{error.class}: a failed read shows no list or count"
     shown!(document, selector, text, error.class.name)
@@ -234,7 +252,7 @@ class ReferralSurfacesRenderedTest < ActionDispatch::IntegrationTest
   def every_capability(path)
     document = page(path, keys: EVERY_KEY, scopes: BANNER_SCOPES, hour: 15) do
       rpms_answers(SYNTHETIC_SCHEDULING)
-      RpmsRpc.client.seed_raw_lines(:notifications_inbox, "", SYNTHETIC_ALERTS)
+      RpmsStandIn.answer(RpmsRpc::Notifications, :inbox) { |**| SYNTHETIC_ALERTS.map(&:dup) }
     end
 
     assert_equal NAV_LINKS, document.css("nav[aria-label='Main'] a").to_h { |a| [ a.text.squish, a["href"] ] }, "#{path}: every link of the navigation"
@@ -257,7 +275,7 @@ class ReferralSurfacesRenderedTest < ActionDispatch::IntegrationTest
   # A chart open in the session: the banner names the patient and their
   # allergies, and offers another patient or none.
   def patient_open(path)
-    document = page(path, keys: REFERRAL_KEYS, scopes: BANNER_SCOPES, patient: 1) { seed_orqqal_reply!("1", [ "1^LATEX", "2^PENICILLIN" ]) }
+    document = page(path, keys: REFERRAL_KEYS, scopes: BANNER_SCOPES, patient: 1) { RpmsStandIn.answer(RpmsRpc::Allergy, :assessment, 1, with: SYNTHETIC_ALLERGIES) }
     banner = "#patient-banner"
 
     shown!(document, "#{banner} .patient-banner__name", /\S/, "patient open")

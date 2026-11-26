@@ -68,7 +68,7 @@ class ChartEncounterAppointmentIdsTest < ActionDispatch::IntegrationTest
   private
 
   def seed_appointments(*rows)
-    RpmsRpc.client.seed_keyed_collection(:patient_appointments, PATIENT_DFN, rows)
+    RpmsStandIn.answer(RpmsRpc::Encounter, :for_patient, PATIENT_DFN, with: rows)
   end
 
   def chart_bundle

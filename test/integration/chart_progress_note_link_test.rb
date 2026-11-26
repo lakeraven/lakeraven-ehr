@@ -22,7 +22,7 @@ class ChartProgressNoteLinkTest < ActionDispatch::IntegrationTest
     @forgery_was = ActionController::Base.allow_forgery_protection
     ActionController::Base.allow_forgery_protection = true
     @demo_original_client = RpmsRpc.configuration.client
-    RpmsRpc.mock! { |m| LakeravenDemoSeeds.seed(m) }
+    RpmsStandIn.install! { |rpms| LakeravenDemoSeeds.seed(rpms) }
   end
 
   teardown do

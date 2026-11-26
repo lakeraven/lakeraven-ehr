@@ -241,7 +241,7 @@ module Lakeraven
       # for_patient must keep returning those Hashes for charts, CDS, CPOE, and export callers.
       test "from_rpms_row maps gateway problem-list row to US Core Condition serialization" do
         original_client = RpmsRpc.configuration.client
-        RpmsRpc.mock! do |m|
+        RpmsStandIn.install! do |m|
           require_relative "../../../dummy/lib/lakeraven_demo_seeds"
           LakeravenDemoSeeds.seed(m)
         end

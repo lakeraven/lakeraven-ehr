@@ -5,14 +5,13 @@
 # over a fake broker client (#962). It stands where test/test_helper.rb stands
 # in a ready `cucumber --profile stack` run: a ready LIVE_STACK, the persona's
 # LIVE_STACK_CLIENT, and the watches installed by the same LiveStack.install!
-# test_helper calls (so the real RpmsRpc::MockClient, Module and
+# test_helper calls (so the real RpmsStandIn::Connection, Module and
 # ActiveSupport::Testing::SimpleStubs are watched in this process, as in a
 # ready run). The persona's DUZ is synthetic and there
 # are no codes here at all.
 # Run by test/lib/live_stack_ready_cucumber_test.rb.
 require "rpms_rpc"
 require "rpms_rpc/client"
-require "rpms_rpc/mock_client"
 require "active_support"
 require "active_support/testing/time_helpers"
 
@@ -38,9 +37,11 @@ module LiveStackReady
     end
   end
 
-  # The real mock, refusing every read.
-  class RefusingMock < RpmsRpc::MockClient
-    def seeded_reply(_rpc_name, *_params) = raise(RpmsRpc::Client::RpcRefusedError, "refused")
+  # The real stand-in connection, refusing every read.
+  class RefusingMock < RpmsStandIn::Connection
+    private
+
+    def record(_rpc_name, _params) = raise(RpmsRpc::Client::RpcRefusedError, "refused")
   end
 
   # What a gateway stub is installed on.

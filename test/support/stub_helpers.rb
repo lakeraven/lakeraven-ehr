@@ -49,6 +49,14 @@ module StubHelpers
     restore
   end
 
+  # Like install_singleton_stub, with a body in place of a fixed value: the
+  # block is the method. RpmsStandIn installs its gateway answers with it.
+  def install_singleton_method(klass, method_name, &body)
+    restore = singleton_method_restore(klass, method_name)
+    klass.define_singleton_method(method_name, &body)
+    restore
+  end
+
   def singleton_method_restore(klass, method_name)
     sc = klass.singleton_class
     name = method_name.to_sym

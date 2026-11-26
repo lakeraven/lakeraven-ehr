@@ -5,17 +5,17 @@ require_relative "../../test/support/sensitive_patient_access_seeds"
 
 # Steps for features/bprm_twin/sensitive_patient_access.feature (#613).
 #
-# RPMS is the mock, seeded with the wire reply lines of DG SENSITIVE RECORD
-# ACCESS and DG SENSITIVE RECORD BULLETIN (SensitivePatientAccessSeeds), so
-# the gem's own parser reads them. Synthetic patients: DFN 1 and DFN 3 of the
-# baseline seeds. Sign-in, the CSRF token and the session read are the
+# RPMS is the stand-in: each Given states what RpmsRpc::DgSensitive answers
+# the engine for DG SENSITIVE RECORD ACCESS and DG SENSITIVE RECORD BULLETIN
+# (SensitivePatientAccessSeeds). Synthetic patients: DFN 1 and DFN 3 of the
+# baseline. Sign-in, the CSRF token and the session read are the
 # URL-patient-context helpers, already in the World.
 module SensitivePatientAccessStepHelpers
   include UrlPatientContextTestHelper
   include SensitivePatientAccessSeeds
 
   DENIED_MESSAGE = "Access to your own record is not allowed."
-  # What the baseline seeds hold for the synthetic patients (test/test_helper.rb).
+  # What the baseline holds for the synthetic patients (test/support/rpms_stand_in/baseline.rb).
   PATIENT_DETAILS = {
     1 => [ /\bAnderson\b/i, /\bAlice\b/i, /111-11-1111/, /111111111/, /1980/ ],
     3 => [ /\bDOE\b/i, /\bJANE\b/i, /555667777/, /555-66-7777/, /1990/ ]
@@ -127,8 +127,8 @@ end
 Then("RPMS was asked whether patient {int} is a sensitive record") do |dfn|
   calls = sensitive_access_calls
   assert_equal 1, calls.size, "expected one DG SENSITIVE RECORD ACCESS, got #{calls.size}"
-  assert_equal dfn.to_s, calls.first[:params][0]
-  assert_equal SensitivePatientAccessSeeds::OPTION, calls.first[:params][2]
+  assert_equal dfn.to_s, calls.first[:dfn]
+  assert_equal SensitivePatientAccessSeeds::OPTION, calls.first[:option]
 end
 
 Then("no sensitive record bulletin was sent") do
@@ -137,6 +137,6 @@ end
 
 Then("RPMS was asked to write the security log entry and send the bulletin for patient {int}") do |dfn|
   assert_equal 2, sensitive_access_calls.size, "the check runs on the first open and again on the acknowledgement"
-  expected = [ [ dfn.to_s, SensitivePatientAccessSeeds::OPTION, SensitivePatientAccessSeeds::LOG_AND_SEND ] ]
-  assert_equal expected, sensitive_bulletin_calls.map { |call| call[:params].to_a }
+  expected = [ { dfn: dfn.to_s, action: SensitivePatientAccessSeeds::LOG_AND_SEND, option: SensitivePatientAccessSeeds::OPTION } ]
+  assert_equal expected, sensitive_bulletin_calls
 end

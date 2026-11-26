@@ -29,8 +29,8 @@ class USCoreSamplesExport < ActionDispatch::IntegrationTest
     FileUtils.rm_rf(@dir)
     FileUtils.mkdir_p(@dir.join("resources"))
 
-    RpmsRpc.mock! do |m|
-      BASELINE_MOCK_SEEDS.call(m)
+    RpmsStandIn.install! do |m|
+      RpmsStandIn::Baseline.call(m)
       LakeravenDemoSeeds.seed(m)
     end
     seed_beyond_the_demo_chart
@@ -44,7 +44,7 @@ class USCoreSamplesExport < ActionDispatch::IntegrationTest
 
   teardown do
     teardown_smart_auth
-    RpmsRpc.mock!(&BASELINE_MOCK_SEEDS)
+    RpmsStandIn.install_baseline!
     Lakeraven::EHR::TerminologyService.additional_valueset_paths = @valueset_paths_were
     FileUtils.rm_rf(@valueset_dir)
   end
@@ -128,9 +128,8 @@ class USCoreSamplesExport < ActionDispatch::IntegrationTest
   # The demo chart has no referrals and no audit trail: add one of each so
   # ServiceRequest and AuditEvent are sampled with content.
   def seed_beyond_the_demo_chart
-    RpmsRpc.client.seed_keyed_collection(:referral_search, "1", [
-      { ien: "1001", patient_dfn: 1, status: "active", type: "C",
-        date: Date.new(2026, 1, 15), provider: "MARTINEZ,SARAH" }
+    RpmsStandIn.answer(RpmsRpc::Referral, :for_patient, 1, with: [
+      { ien: "1001", patient_dfn: 1, status: "active", date: Date.new(2026, 1, 15), provider: "MARTINEZ,SARAH" }
     ])
     @audit_event = Lakeraven::EHR::AuditEvent.create!(event_type: "rest", action: "R", outcome: "0",
                                        entity_type: "Patient", entity_identifier: "1")
