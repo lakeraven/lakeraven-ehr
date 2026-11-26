@@ -76,6 +76,9 @@
     <%= link_to "Record chief complaint",
           new_patient_chief_complaint_path(@patient.dfn),
           class: "button-secondary no-underline" %>
+    <%= link_to "Find a diagnosis",
+          diagnosis_search_path,
+          class: "button-secondary no-underline" %>
   <% end %>
 <% end %>
 

@@ -1,0 +1,71 @@
+<% page_title @problem[:narrative].to_s, "Problem list" %>
+
+<%= page_header "On the problem list",
+      "What RPMS stored, read back from the patient's problem list and the visit." %>
+
+<% if flash[:notice].present? %>
+  <%= alert_box :notice, flash[:notice], id: "problem-notice" %>
+<% end %>
+<%= flash_alert(id: "problem-alert") %>
+
+<dl
+  id="problem-stored"
+  class="detail-list"
+  data-problem-ien="<%= @problem[:ien] %>"
+>
+  <dt>Problem</dt>
+  <dd data-narrative><%= @problem[:narrative] %></dd>
+  <dt>Problem number</dt>
+  <dd data-number><%= @problem[:number] %></dd>
+  <dt>SNOMED CT concept</dt>
+  <dd data-snomed><%= @problem[:snomed_concept] %></dd>
+  <dt>ICD-10-CM</dt>
+  <dd data-icd><%= Lakeraven::EHR::ProblemEntryGateway.problem_codes(@problem).join(", ") %></dd>
+  <dt>Status</dt>
+  <dd data-status><%= @problem[:status] %></dd>
+  <% if @problem[:laterality].present? %>
+    <dt>Side</dt>
+    <dd data-laterality><%= Lakeraven::EHR::ProblemEntryGateway.side(@problem[:laterality]) %></dd>
+  <% end %>
+</dl>
+
+<% if @visit_ien %>
+  <section
+    id="problem-visit-diagnoses"
+    aria-labelledby="problem-visit-diagnoses-heading"
+  >
+    <h2 id="problem-visit-diagnoses-heading">
+      Purpose of visit<% if @visit %>, <%= visit_label(@visit) %><% end %>
+    </h2>
+    <% if @diagnoses.any? %>
+      <table class="data-table">
+        <caption class="sr-only">The visit's diagnoses filed for this problem</caption>
+        <thead>
+          <tr>
+            <th scope="col">ICD-10-CM</th>
+            <th scope="col">Diagnosis</th>
+            <th scope="col">Primary or secondary</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% @diagnoses.each do |row| %>
+            <tr data-pov-ien="<%= row[:ien] %>">
+              <td data-icd><%= row[:icd_code] %></td>
+              <td data-narrative><%= row[:icd_name].presence || row[:narrative] %></td>
+              <td data-primary><%= row[:primary_or_secondary] %></td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    <% else %>
+      <%= empty_state "RPMS holds no purpose of visit for this problem on the visit.",
+            id: "problem-no-visit-diagnosis" %>
+    <% end %>
+  </section>
+<% end %>
+
+<p>
+  <%= link_to "Back to chart",
+        patient_chart_path(@dfn),
+        class: "button-secondary no-underline" %>
+</p>
