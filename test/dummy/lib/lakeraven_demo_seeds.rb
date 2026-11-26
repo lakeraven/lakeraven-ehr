@@ -1,29 +1,31 @@
 # frozen_string_literal: true
 
-# Synthetic demo seed data for the read-only patient chart (issue #452),
-# expanded to a small believable clinic panel for the local UIO demo.
+# Synthetic demo data for the read-only patient chart (issue #452), expanded
+# to a small believable clinic panel for the local demo.
 #
 # Single source of truth shared by:
 #   * test/dummy/config/initializers/zz_spike_mock_rpc.rb  (dev, SPIKE-gated)
-#   * the chart request test
+#   * the chart request tests
 #
-# Seeds RpmsRpc's in-memory MockClient so the chart endpoint serves real
-# FHIR reads through the engine's own gateways/models with NO live RPMS.
+# It answers the engine's stand-in for RPMS (test/support/rpms_stand_in.rb):
+# each fact is what the rpms-rpc method the engine's gateways call returns, so
+# the chart endpoint serves real FHIR reads through the engine's own gateways
+# and models with NO live RPMS.
 #
-# SYNTHETIC DATA ONLY — invented patients (DFN 1 "Anderson, Alice" plus a
+# SYNTHETIC DATA ONLY: invented patients (DFN 1 "Anderson, Alice" plus a
 # DEMOPATIENT,* panel with 900-prefix pseudo-SSNs) and an invented facility
-# ("Riverbend Family Health Clinic"). No PHI, no real person/tribe/org names.
+# ("Riverbend Family Health Clinic"). No PHI, no real person or organization names.
 module LakeravenDemoSeeds
   module_function
 
   # When the panel's vitals were taken (one recent clinic morning).
-  VITALS_TAKEN = DateTime.new(2026, 8, 25, 9, 30, 0)
+  VITALS_TAKEN = Time.new(2026, 8, 25, 9, 30, 0)
 
   # The demo panel: a small, clinically believable UIO clinic day.
   # Clustered chronic comorbidity (diabetes / hypertension / CKD), one
   # behavioral-health patient, one prenatal, one pediatric asthma.
   #
-  # Vitals are shaped as ORQQVI VITALS answers on RPMS: IHS MEASUREMENT TYPE
+  # Vitals are as RpmsRpc::Vital.for_patient returns them on RPMS: IHS MEASUREMENT TYPE
   # codes (BP, PU, WT; TMP, RS, O2 for the others), the recorded text in
   # display, and no units piece (the reply has none). The engine's
   # Observation.from_vital_hashes VITAL_TYPE_MAP maps each into valid FHIR. BP carries both components in one reading ("systolic/
@@ -133,150 +135,90 @@ module LakeravenDemoSeeds
       ] }
   ].freeze
 
-  # Seed a MockClient (`m`) with demographics + clinical data for the panel.
-  def seed(m)
-    seed_demographics(m)
-    seed_clinical(m)
-    seed_panel(m)
+  # Answer the stand-in (`rpms`, RpmsStandIn) with demographics and clinical
+  # data for the panel.
+  def seed(rpms)
+    patients = { 1 => ALICE }.merge(PANEL.to_h { |p| [ p[:dfn], p ] })
+    seed_demographics(rpms, patients)
+    seed_alice(rpms)
+    PANEL.each { |p| seed_panel_member(rpms, p) }
+    # Opening a record asks RPMS whether it is sensitive first (#613), and an
+    # unanswered check never opens it. Every demo patient answers 0.
+    rpms.not_sensitive(*patients.keys)
   end
 
-  def seed_demographics(m)
-    m.seed(:patient_select, "1", { name: "Anderson,Alice", sex: "F",
-                                    dob: Date.parse("1980-05-15"), ssn: "111-11-1111", age: 45 })
-    m.seed(:patient_id_info, "1", {
-      ssn: "111-11-1111", dob: Date.parse("1980-05-15"), sex: "F",
-      veteran: "", ward_location: "", name: "Anderson,Alice"
-    })
-    m.seed(:patient_ssn, "111111111", { dfn: 1, name: "Anderson,Alice", ssn: "111111111" })
+  ALICE = { dfn: 1, name: "Anderson,Alice", sex: "F", dob: Date.new(1980, 5, 15), ssn: "111-11-1111", age: 45 }.freeze
+  CLINIC = "Riverbend Family Health Clinic"
 
-    # Tribal detail for DFN 1 — #9000001 (^AUPNPAT) read via DDR GETS ENTRY
-    # DATA, which is where RPMS actually stores this. ORWPT ID INFO does NOT
-    # carry it; an earlier mapping claimed it did and was corrected.
-    # Fields: .07 enrollment no, 1108 tribe (pointer -> #9999999.03),
-    # 1109 tribe quantum, 1110 Indian blood quantum,
-    # 1111 classification/beneficiary (pointer -> #9999999.25),
-    # 1112 eligibility status (set I/D/C/P), 1118 current community.
-    # Synthetic values throughout.
-    m.seed(:ddr_gets_entry_data,
-      RpmsRpc::DdrFileman.gets_entry_param(
-        file: "9000001", iens: "1,",
-        fields: ".07;1108;1109;1110;1111;1112;1118", flags: "IE"
-      ).to_s,
-      <<~REPLY.chomp)
-        [Data]
-        9000001^1^.07^EXNH-12345^EXNH-12345
-        9000001^1^1108^41^Example Tribe
-        9000001^1^1109^4/4^4/4
-        9000001^1^1110^4/4^4/4
-        9000001^1^1111^1^Indian/Alaska Native
-        9000001^1^1112^I^Indian/Alaska Native
-        9000001^1^1118^Example Community^Example Community
-      REPLY
-
-    # Patient search (lookup/select beat): Alice + the whole DEMOPATIENT
-    # panel, as the one page of the name index ORWPT LIST ALL answers.
-    panel_rows = PANEL.map { |p| { dfn: p[:dfn], name: p[:name] } }
-    m.seed_collection(:patient_list, [ { dfn: 1, name: "Anderson,Alice" } ] + panel_rows)
-  end
-
-  def seed_clinical(m)
-    # Problem list (ORQQPL LIST) — Condition
-    m.seed_keyed_collection(:problem_list, "1",
-      [ { ien: 1, status: "A", icd_code: "E11.9", description: "Type 2 diabetes mellitus" },
-        { ien: 2, status: "A", icd_code: "I10", description: "Essential hypertension" },
-        { ien: 3, status: "A", icd_code: "E78.5", description: "Hyperlipidemia" } ])
-
-    # Allergies (ORQQAL LIST) — AllergyIntolerance
-    m.seed_keyed_collection(:allergy_list, "1",
-      [ { ien: 1, allergen: "Penicillin", reaction: "Hives", severity: "moderate" },
-        { ien: 2, allergen: "Shellfish", reaction: "Anaphylaxis", severity: "severe" } ])
-
-    # Vitals (ORQQVI VITALS) — Observation. recorded_date feeds
-    # Observation.effectiveDateTime (required 1..1 by the vital-signs
-    # profile) and the deterministic per-vital FHIR id.
-    vitals_taken = DateTime.new(2026, 2, 1, 9, 30, 0)
-    m.seed_keyed_collection(:vitals, "1",
-      [ { measurement_ien: 2019, type: "BP", value: "128/82", recorded_date: vitals_taken, display: "128/82" },
-        { measurement_ien: 2020, type: "PU", value: "74", recorded_date: vitals_taken, display: "74" },
-        { measurement_ien: 2021, type: "WT", value: "180", recorded_date: vitals_taken, display: "180" },
-        { measurement_ien: 2022, type: "TMP", value: "98.6", recorded_date: vitals_taken, display: "98.6 F", metric_display: "(37.0 C)" } ])
-
-    # Medications (ORWPS ACTIVE) — MedicationRequest
-    m.seed_text(:medication_active, "1", active_medication_wire(
-      [ { id: "1", name: "Lisinopril 10mg", sig: "1 tab PO daily", status: "ACTIVE" },
-        { id: "2", name: "Metformin 500mg", sig: "1 tab PO BID", status: "ACTIVE" } ]
-    ))
-    m.seed(:medication_detail, "1",
-      "Drug: Lisinopril 10mg\nSIG: Take 1 tablet by mouth daily\nStatus: Active\nRefills: 3")
-
-    # Procedures (BGOVCPT GET, V CPT) — Procedure. The visit date comes as
-    # MM/DD/YYYY; V CPT carries no status.
-    m.seed_keyed_collection(:procedure_list, "1",
-      [ { ien: 1, visit_ien: 1, date: "01/15/2026", cpt_code: "80053",
-          name: "Comprehensive metabolic panel" } ])
-
-    # Appointments (ORWPT APPTLST) — Encounter
-    m.seed_keyed_collection(:patient_appointments, "1",
-      [ { datetime: Date.new(2026, 2, 1), location_ien: 1,
-          location: "Riverbend Family Health Clinic", status: "scheduled" } ])
-
-    # Visits (BEHOENCX VISITLST) and their diagnoses (BGOVPOV RECENT).
-    m.seed_keyed_collection(:encounter_visit_list, "1",
-      [ { visit_string: "1;3260115.09;A;1", location: "Riverbend Family Health Clinic",
-          datetime: Time.new(2026, 1, 15, 9, 0, 0), category: "AMBULATORY", provider_ien: 101,
-          provider: "MARTINEZ,SARAH" } ])
-    m.seed_keyed_collection(:patient_pov_list, "1",
-      [ { ien: "1", visit_ien: "1", visit_date: "01/15/2026", icd_code: "I10.",
-          icd_name: "Essential (primary) hypertension", narrative: "HYPERTENSION" } ])
-
-    # Immunizations — V IMMUNIZATION through BGOVIMM GET ("DFN^I") drives
-    # Immunization.for_patient.
-    m.seed_keyed_collection(:immunization_list, "1^I",
-      [ { record_type: "I", ien: 1, vaccine_display: "COVID-19 Vaccine",
-          lot_number: "LOT-ABC", site: "1~Left Deltoid",
-          occurrence_datetime: DateTime.new(2026, 1, 15, 9, 0, 0), manufacturer: "Synthetic Bio" } ])
-  end
-
-  # ORWPS ACTIVE as RPMS sends it: one ~OP header per outpatient order
-  # (order id, drug, CPRS order number, status), then its sig line.
-  def active_medication_wire(meds)
-    meds.map { |med| "~OP^#{med[:id]}R;O^#{med[:name]}^^^^^^#{med[:id]}^#{med[:status]}\n\\ Sig: #{med[:sig]}" }.join("\n")
-  end
-
-  # Seed the DEMOPATIENT panel (DFNs 2-7) — demographics + per-patient
-  # clinical lists keyed by DFN so each chart renders its own data.
-  def seed_panel(m)
-    PANEL.each do |p|
-      dfn = p[:dfn].to_s
-      age = ((Date.new(2026, 8, 25) - p[:dob]) / 365.25).floor
-
-      m.seed(:patient_select, dfn, { name: p[:name], sex: p[:sex],
-                                      dob: p[:dob], ssn: p[:ssn], age: age })
-      m.seed(:patient_id_info, dfn, {
-        ssn: p[:ssn], dob: p[:dob], sex: p[:sex],
-        veteran: "", ward_location: "", name: p[:name]
-      })
-      bare_ssn = p[:ssn].delete("-")
-      m.seed(:patient_ssn, bare_ssn, { dfn: p[:dfn], name: p[:name], ssn: bare_ssn })
-
-      m.seed_keyed_collection(:problem_list, dfn, p[:problems])
-      m.seed_text(:medication_active, dfn, active_medication_wire(p[:medications]))
-      m.seed_keyed_collection(:allergy_list, dfn, p[:allergies])
-      m.seed_keyed_collection(:vitals, dfn, p[:vitals])
-
-      # Every panel member has a chart-able clinic-day encounter.
-      m.seed_keyed_collection(:patient_appointments, dfn,
-        [ { datetime: Date.new(2026, 9, 3), location_ien: 1,
-            location: "Riverbend Family Health Clinic", status: "scheduled" } ])
-
-      m.seed_keyed_collection(:encounter_visit_list, dfn,
-        [ { visit_string: "1;3260903.09;A;#{dfn}", location: "Riverbend Family Health Clinic",
-            datetime: Time.new(2026, 9, 3, 9, 0, 0), category: "AMBULATORY" } ])
-
-      # Keep sections that would otherwise fall through to another patient's
-      # unkeyed data explicitly empty instead.
-      m.seed_keyed_collection(:procedure_list, dfn, [])
-      m.seed_keyed_collection(:immunization_list, "#{dfn}^I", [])
+  def seed_demographics(rpms, patients)
+    patients.each do |dfn, p|
+      age = p[:age] || ((Date.new(2026, 8, 25) - p[:dob]) / 365.25).floor
+      rpms.answer(RpmsRpc::Patient, :find, dfn, with: p.slice(:name, :sex, :dob, :ssn).merge(age: age, dfn: dfn))
     end
+    # The SSN index holds the SSN without punctuation and no date of birth.
+    by_ssn = patients.to_h { |dfn, p| [ p[:ssn].delete("-"), { dfn: dfn, name: p[:name], dob: nil, ssn: p[:ssn].delete("-") } ] }
+    rpms.answer(RpmsRpc::Patient, :find_by_ssn) { |ssn| by_ssn[ssn.to_s.delete("^0-9")]&.dup }
+    # Patient search (lookup/select beat): Alice and the whole DEMOPATIENT
+    # panel, as the one page of the name index a search reads.
+    rpms.answer(RpmsRpc::Patient, :search) { |*| patients.map { |dfn, p| { dfn: dfn, name: p[:name] } } }
+  end
+
+  def seed_alice(rpms)
+    seed_chart(rpms, 1,
+      problems: [ { ien: 1, status: "A", icd_code: "E11.9", description: "Type 2 diabetes mellitus" },
+                  { ien: 2, status: "A", icd_code: "I10", description: "Essential hypertension" },
+                  { ien: 3, status: "A", icd_code: "E78.5", description: "Hyperlipidemia" } ],
+      allergies: [ { ien: 1, allergen: "Penicillin", severity: "moderate" },
+                   { ien: 2, allergen: "Shellfish", severity: "severe" } ],
+      # recorded_date feeds Observation.effectiveDateTime (required 1..1 by the
+      # vital-signs profile) and the deterministic per-vital FHIR id.
+      vitals: [ { measurement_ien: 2019, type: "BP", value: "128/82", recorded_date: Time.new(2026, 2, 1, 9, 30, 0), display: "128/82" },
+                { measurement_ien: 2020, type: "PU", value: "74", recorded_date: Time.new(2026, 2, 1, 9, 30, 0), display: "74" },
+                { measurement_ien: 2021, type: "WT", value: "180", recorded_date: Time.new(2026, 2, 1, 9, 30, 0), display: "180" },
+                { measurement_ien: 2022, type: "TMP", value: "98.6", recorded_date: Time.new(2026, 2, 1, 9, 30, 0), display: "98.6 F", metric_display: "(37.0 C)" } ],
+      medications: [ { id: "1", name: "Lisinopril 10mg", sig: "1 tab PO daily", status: "ACTIVE" },
+                     { id: "2", name: "Metformin 500mg", sig: "1 tab PO BID", status: "ACTIVE" } ],
+      appointment_on: Date.new(2026, 2, 1),
+      visit: { datetime: Time.new(2026, 1, 15, 9, 0, 0), visit_ien: 1, provider_ien: 101, provider: "MARTINEZ,SARAH" })
+
+    # Procedures (V CPT). V CPT carries no status.
+    rpms.answer(RpmsRpc::Procedure, :for_patient, 1,
+      with: [ { ien: "1", visit_ien: "1", date: Date.new(2026, 1, 15), cpt_code: "80053", name: "Comprehensive metabolic panel" } ])
+    # The visit's diagnosis.
+    rpms.answer(RpmsRpc::Pov, :for_patient, 1,
+      with: [ { ien: "1", visit_ien: "1", visit_date: "01/15/2026", icd_code: "I10.",
+                icd_name: "Essential (primary) hypertension", narrative: "HYPERTENSION" } ])
+    rpms.answer(RpmsRpc::Immunization, :for_patient, 1,
+      with: [ { ien: "1", vaccine_display: "COVID-19 Vaccine", lot_number: "LOT-ABC", site: "Left Deltoid",
+                occurrence_datetime: Time.new(2026, 1, 15, 9, 0, 0), manufacturer: "Synthetic Bio" } ])
+  end
+
+  # A DEMOPATIENT panel member (DFNs 2-7): each chart renders its own data,
+  # and every member has a chart-able clinic-day encounter.
+  def seed_panel_member(rpms, p)
+    seed_chart(rpms, p[:dfn], problems: p[:problems], allergies: p[:allergies], vitals: p[:vitals],
+               medications: p[:medications], appointment_on: Date.new(2026, 9, 3),
+               visit: { datetime: Time.new(2026, 9, 3, 9, 0, 0), visit_ien: p[:dfn] })
+  end
+
+  # One patient's lists, each as the rpms-rpc read the gateway makes returns it.
+  def seed_chart(rpms, dfn, problems:, allergies:, vitals:, medications:, appointment_on:, visit:)
+    rpms.answer(RpmsRpc::Problem, :for_patient, dfn,
+      with: problems.map { |row| row.merge(ien: row[:ien].to_s, inactive_icd: false) })
+    rows = allergies.map { |row| row.slice(:ien, :allergen, :severity).merge(ien: row[:ien].to_s, signs: nil, altered: false) }
+    rpms.answer(RpmsRpc::Allergy, :assessment, dfn, with: { assessed: rows.any?, nka: false, allergies: rows })
+    rpms.answer(RpmsRpc::Vital, :for_patient, dfn, with: vitals.map(&:dup))
+    rpms.answer(RpmsRpc::Medication, :active_for_patient, dfn, with: medications.map { |med| active_medication(med) })
+    rpms.answer(RpmsRpc::Encounter, :for_patient, dfn,
+      with: [ { datetime: appointment_on, location_ien: 1, location: CLINIC, status: "scheduled" } ])
+    rpms.answer(RpmsRpc::Encounter, :visits, dfn,
+      with: [ { location: CLINIC, category: "AMBULATORY", location_ien: 1, service_category: "A" }.merge(visit) ])
+  end
+
+  # An outpatient order as RpmsRpc::Medication.active_for_patient returns it:
+  # the order id, the drug, its status, and the sig as its instruction line.
+  def active_medication(med)
+    { order_id: "#{med[:id]}R;O", type: "OP", name: med[:name], status: med[:status], stop_date: nil,
+      instructions: [ "Sig: #{med[:sig]}" ], comments: [] }
   end
 end

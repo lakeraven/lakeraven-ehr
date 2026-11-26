@@ -3,8 +3,8 @@
 # Replies RPMS sent for allergy entry's two lookups (#1109), line for line,
 # from a container of the build rpms-rpc pins (bcer-9.0-20261012-e7923a4-ydb),
 # signed on as PMD123 in CIAV VUECENTRIC. ORWDAL32 ALLERGY MATCH for STRAWB is
-# also in rpms-rpc's test/fixtures/captured_replies/allergen.yml. Seeded into
-# the mock broker so the form's lookups parse what RPMS really sends.
+# also in rpms-rpc's test/fixtures/captured_replies/allergen.yml. Replayed on
+# the stand-in's connection so the form's lookups parse what RPMS really sends.
 module CapturedAllergyLookupReplies
   # ORWDAL32 ALLERGY MATCH, "STRAWB": GMR ALLERGIES by name and by synonym.
   ALLERGEN_STRAWB = [
@@ -43,9 +43,9 @@ module CapturedAllergyLookupReplies
     "381^RENAL FAILURE SYNDROME"
   ].freeze
 
-  def seed_allergy_lookups!(client = RpmsRpc.client)
-    client.seed_raw_lines(:allergen_match, "STRAWB", ALLERGEN_STRAWB)
-    client.seed_raw_lines(:allergen_match, "STRAWBERRIES", ALLERGEN_STRAWBERRIES)
-    client.seed_raw_lines(:symptom_search, "RAR~", SYMPTOMS_FROM_RAR)
+  def seed_allergy_lookups!(connection = RpmsStandIn.connection)
+    connection.replay("ORWDAL32 ALLERGY MATCH", ALLERGEN_STRAWB, first_param: "STRAWB")
+    connection.replay("ORWDAL32 ALLERGY MATCH", ALLERGEN_STRAWBERRIES, first_param: "STRAWBERRIES")
+    connection.replay("ORWDAL32 SYMPTOMS", SYMPTOMS_FROM_RAR, first_param: "RAR~")
   end
 end

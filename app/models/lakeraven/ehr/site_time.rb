@@ -46,8 +46,8 @@ module Lakeraven
           utc_offset_on_file
         end
 
-        # How the clock is read: returns the site's wall-clock Time. The mocked
-        # test suite, whose broker has no server clock, sets its own
+        # How the clock is read: returns the site's wall-clock Time. The test
+        # suite, whose stand-in for RPMS has no server clock, sets its own
         # (test/test_helper.rb).
         attr_writer :reader
 

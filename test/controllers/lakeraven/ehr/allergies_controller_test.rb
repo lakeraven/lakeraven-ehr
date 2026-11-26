@@ -27,7 +27,7 @@ module Lakeraven
         ActionController::Base.allow_forgery_protection = true
         Lakeraven::EHR::AuditEvent.delete_all
         @demo_original_client = RpmsRpc.configuration.client
-        RpmsRpc.mock! { |m| LakeravenDemoSeeds.seed(m) }
+        RpmsStandIn.install! { |rpms| LakeravenDemoSeeds.seed(rpms) }
         sign_in_clinician!(scopes: WRITE_SCOPES, keys: MEDICAL_ASSISTANT_KEYS)
         open_patient_context!(DFN)
         @tracker = TrackingAllergyGateway.new
@@ -474,7 +474,11 @@ module Lakeraven
       test "after successful add chart reload shows the new allergen in the banner" do
         post_allergy
         assert_redirected_to CHART
-        seed_synthetic_allergy_row!(DFN)
+        # The filed entry, as RpmsRpc::Allergy.assessment returns it on the reload.
+        RpmsStandIn.answer(RpmsRpc::Allergy, :assessment, DFN, with: {
+          assessed: true, nka: false,
+          allergies: [ { ien: "901", allergen: SYNTHETIC_AGENT, severity: "MODERATE", signs: SYNTHETIC_SYMPTOM, altered: false } ]
+        })
 
         follow_chart_redirect!
         assert_response :ok

@@ -50,9 +50,9 @@ module Lakeraven
         # keys may not. The registration clerk may still start a handover (the
         # CIAV VUECENTRIC user/Consent.c scope is unchanged).
         "consent.revoke" => rule(any: %i[orders_sign orders_release]),
-        # Chart on one of the patient's open visits: vitals (S-TRI-02), allergies reviewed (S-TRI-04.1) and the chief complaint
-        # (rpms-ux S-TRI-07.1). VueCentric's BGO components edit for PROVIDER
-        # or BGOZ CAC and are read-only under BGOZ VIEW ONLY (BGOUTL CHKSEC,
+        # Chart on one of the patient's open visits: vitals (S-TRI-02), allergies reviewed (S-TRI-04.1), the chief complaint
+        # (rpms-ux S-TRI-07.1), and a diagnosis added to the problem list and as the purpose of visit (S-VIS-02.2, S-VIS-02.3).
+        # VueCentric's BGO components edit for PROVIDER or BGOZ CAC and are read-only under BGOZ VIEW ONLY (BGOUTL CHKSEC,
         # seen in a medical assistant's trace). The medical assistant, nurse
         # and provider personas hold PROVIDER.
         "visit.chart" => rule(any: %i[provider charting_coordinator], deny: %i[charting_view_only]),

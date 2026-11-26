@@ -2,10 +2,10 @@
 
 # Live system tests: a real browser against a real RPMS broker.
 #
-# Everything else in this suite runs against RpmsRpc.mock! (test_helper.rb).
+# Everything else in this suite runs against the RPMS stand-in (test_helper.rb).
 # These tests deliberately do NOT load test_helper, so the broker client is the
 # one the engine builds from the environment at boot (#539) — the same path a
-# deployed app takes. Run them on their own, never alongside the mocked suite:
+# deployed app takes. Run them on their own, never alongside the stand-in suite:
 #
 #   LIVE_RPMS=1 VISTA_BROKER=cia VISTA_RPC_HOST=127.0.0.1 VISTA_RPC_PORT=19200 \
 #   LIVE_RPMS_ACCESS=... LIVE_RPMS_VERIFY=... \

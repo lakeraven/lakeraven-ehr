@@ -3,6 +3,7 @@
 module Lakeraven
   module EHR
     class ValueSetsController < ApplicationController
+      disclosure_surface :fhir_api
       rate_limit only: %i[index show expand]
 
       def index

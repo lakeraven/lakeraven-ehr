@@ -29,8 +29,12 @@ class RegistrationMissingItemsTest < ActionDispatch::IntegrationTest
     post "/lakeraven-ehr/test_session", params: { duz: "207", user_type: "user", user_name: "PROFILE,REG", security_keys: keys }
   end
 
-  def seed_checks(rows)
-    RpmsRpc.client.seed(:agg_patient_edit_check, "3", ([ HEADER ] + rows).map { |r| "#{r}#{RS}" }.join + US)
+  # AG's reply for patient 3, replayed as the broker frames a global array
+  # (the typed header, $C(30)-ended records, the $C(31) end) and read by
+  # rpms-rpc's own parser (RpmsRpc::Agg.edit_check).
+  def ag_answers(rows, binary: false)
+    reply = ([ HEADER ] + rows).map { |r| "#{r}#{RS}" }.join + US
+    RpmsStandIn.connection.replay("AGG PATIENT EDIT CHECK", binary ? reply.b : reply, first_param: "3")
   end
 
   def edit_checks_asked
@@ -50,7 +54,7 @@ class RegistrationMissingItemsTest < ActionDispatch::IntegrationTest
 
   test "S-REG-23.1 and S-REG-31.1 each item is listed under its section, errors counted apart from warnings" do
     sign_in("registration_menu")
-    seed_checks(MINIMUM)
+    ag_answers(MINIMUM)
 
     get "/lakeraven-ehr/registration/patients/3"
 
@@ -63,9 +67,33 @@ class RegistrationMissingItemsTest < ActionDispatch::IntegrationTest
     assert_select "#missing-items li[data-check='40'][data-kind='warning']", text: /Warning\s+Patient's Homeless information incomplete/
   end
 
+  # What AG answered live (openrpms bcer-9.0 2a9b3fe) for DEMO,PATIENT ONE, a
+  # patient with Medicare on file: coverage items name windows (Medicare
+  # Eligibility, Emergency Contact Info) that SECTIONS does not map. The
+  # broker hands its text over as ASCII-8BIT; the section heading read that
+  # name, and parameterize raised on it, a 500 for every registration clerk
+  # (#973).
+  WITH_COVERAGE = [
+    "15^Emergency contact information incomplete^WARNING^Emergency Contact Info^AGGECNME^Demographics^C",
+    "21^Group number/Plan Number incomplete^WARNING^^^AltRes^",
+    "29^Medicare eligibility data incomplete (#)^ERROR^Medicare Eligibility^^AltRes^"
+  ].freeze
+
+  test "a clerk holding AGZMENU opens the registration of a patient with coverage, its windows as the broker sends them" do
+    sign_in("registration_menu")
+    ag_answers(WITH_COVERAGE, binary: true)
+
+    get "/lakeraven-ehr/registration/patients/3"
+
+    assert_response :ok
+    assert_select "#missing-items h3[data-section='medicare-eligibility']", text: "Medicare Eligibility"
+    assert_select "#missing-items h3[data-section='emergency-contact-info']", text: "Emergency Contact Info"
+    assert_select "#missing-items li[data-check='29'][data-kind='error']", text: /Medicare eligibility data incomplete/
+  end
+
   test "S-REG-23.2 an item RPMS no longer lists is gone from the page" do
     sign_in("registration_menu")
-    seed_checks(MINIMUM.reject { |row| row.start_with?("807^") })
+    ag_answers(MINIMUM.reject { |row| row.start_with?("807^") })
 
     get "/lakeraven-ehr/registration/patients/3"
 
@@ -75,7 +103,7 @@ class RegistrationMissingItemsTest < ActionDispatch::IntegrationTest
 
   test "S-REG-31.2 and 31.3 a registration AG finds nothing missing on says it is complete" do
     sign_in("registration_menu")
-    seed_checks([])
+    RpmsStandIn.answer(RpmsRpc::Agg, :edit_check, with: { checks: [] })
 
     get "/lakeraven-ehr/registration/patients/3"
 

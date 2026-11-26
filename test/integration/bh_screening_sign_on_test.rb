@@ -16,6 +16,7 @@ class BhScreeningSignOnTest < ActionDispatch::IntegrationTest
   setup do
     Lakeraven::EHR::LoginThrottle.reset!
     seed_bh_users
+    seed_open_visit
     @forgery_was = ActionController::Base.allow_forgery_protection
     ActionController::Base.allow_forgery_protection = true
   end
@@ -78,16 +79,24 @@ class BhScreeningSignOnTest < ActionDispatch::IntegrationTest
 
   private
 
-  def rpms_mock = RpmsRpc.client
-
   def seed_bh_users
-    rpms_mock.seed_user("305", credentials: "bhtestuser;test123", name: "BH,TESTUSER", role: :provider)
-    rpms_mock.seed_held_keys("305", [ "AMHZMENU" ])
-    rpms_mock.seed_options("305", [ "CIAV VUECENTRIC" ])
+    RpmsStandIn.user(305, access: "bhtestuser", verify: "test123", name: "BH,TESTUSER", role: :provider,
+                          keys: [ "AMHZMENU" ], options: [ "CIAV VUECENTRIC" ])
+    RpmsStandIn.user(306, access: "bhmgr", verify: "test123", name: "BH,MANAGER", role: :provider,
+                          keys: [ "AMHZMGR" ], options: [ "CIAV VUECENTRIC" ])
+  end
 
-    rpms_mock.seed_user("306", credentials: "bhmgr;test123", name: "BH,MANAGER", role: :provider)
-    rpms_mock.seed_held_keys("306", [ "AMHZMGR" ])
-    rpms_mock.seed_options("306", [ "CIAV VUECENTRIC" ])
+  # A screening is saved only against one of the patient's open visits
+  # (#1003), read with the Encounter scope CIAV VUECENTRIC grants at sign-on.
+  # Synthetic clinic and provider; checked in today.
+  def seed_open_visit
+    day = Date.current
+    at = Time.new(day.year, day.month, day.day, 9, 30) # rubocop:disable Rails/TimeZone -- rpms-rpc builds visit times with Time.new
+    RpmsStandIn.answer(RpmsRpc::Encounter, :visits, 1, with: [
+      { visit_ien: VISIT.to_i, location_ien: 40, location: "Riverbend Behavioral Health",
+        service_category: "A", category: "AMBULATORY", datetime: at, locked: false,
+        provider_ien: 9001, provider: "TESTPROVIDER,ALPHA" }
+    ])
   end
 
   def sign_in_through_bridge(username, password)

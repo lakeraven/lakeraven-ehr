@@ -1,7 +1,7 @@
 GIT
   remote: https://github.com/lakeraven/rpms-rpc.git
-  revision: 286b65896ae61b6599907367e2d1b3674d5a8241
-  ref: 286b65896ae61b6599907367e2d1b3674d5a8241
+  revision: 7a74e2f9725449c7cb2cfbfa839a5729011c344c
+  ref: 7a74e2f
   specs:
     rpms-rpc (0.4.0)
       bigdecimal (>= 3.1)
@@ -254,7 +254,7 @@ GEM
       activesupport (>= 7.0.0)
       rack
     public_suffix (7.0.5)
-    puma (8.0.3)
+    puma (8.1.2)
       nio4r (~> 2.0)
     pundit (2.5.2)
       activesupport (>= 3.0.0)

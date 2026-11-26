@@ -32,189 +32,29 @@ require_relative "support/registration_form_helper"
 require_relative "support/browser_form_helper"
 require_relative "support/patient_profile_stubs"
 require_relative "support/ihs_feature_availability_test_helper"
-require "rpms_rpc/mock_client"
-require_relative "support/mock_session_user"
+require_relative "support/rpms_stand_in"
 require_relative "support/rate_limit_test_helper"
+require_relative "support/live_stack"
+require_relative "support/sensitive_patient_access_seeds"
 
-# Baseline RpmsRpc mock seeds. Installed at load and again before every
-# example (GlobalStoreIsolation) so a test that adds seeds cannot leak
-# them into the next example.
-BASELINE_MOCK_SEEDS = lambda do |m|
-  # Patients (DFN 1-3)
-  m.seed(:patient_select, "1", { name: "Anderson,Alice", sex: "F", dob: Date.parse("1980-05-15"), ssn: "111-11-1111", age: 45 })
-  m.seed(:patient_select, "2", { name: "MOUSE,MICKEY M", sex: "M", dob: Date.parse("2010-02-14"), ssn: "000009999", age: 16 })
-  m.seed(:patient_select, "3", { name: "DOE,JANE", sex: "F", dob: Date.parse("1990-12-25"), ssn: "555667777", age: 35 })
-
-  # patient_id_info returns ORWPT ID INFO as IDINFO^ORWPT writes it
-  # (SSN/DOB/sex/veteran/SC%/ward/room-bed/name, rpms-rpc #309) — not the
-  # race code and site the earlier mapping read there, and not the extended demographics
-  # that the prior mapping hallucinated. Address, phone, service_area and
-  # coverage_type still have NO known RPC source — the old "BHDPTRPC, not
-  # installed on staging" attribution was itself unverified (see rpms-rpc
-  # docs/RPC_COVERAGE.md, "BHDPTRPC provenance"); a real demographics read
-  # path for those is future work (lakeraven-ehr#564). Tests that need them
-  # construct Patient.new(...) directly rather than going through the gateway.
-  #
-  # TRIBAL detail is no longer in that list. RPMS stores it in #9000001
-  # (^AUPNPAT) and it is read via DDR GETS ENTRY DATA, seeded below.
-  m.seed(:patient_id_info, "1", {
-    ssn: "111-11-1111", dob: Date.parse("1980-05-15"), sex: "F",
-    veteran: "", ward_location: "", name: "Anderson,Alice"
-  })
-  m.seed(:patient_id_info, "2", {
-    ssn: "000009999", dob: Date.parse("2010-02-14"), sex: "M",
-    veteran: "", ward_location: "", name: "MOUSE,MICKEY M"
-  })
-  m.seed(:patient_id_info, "3", {
-    ssn: "555667777", dob: Date.parse("1990-12-25"), sex: "F",
-    veteran: "", ward_location: "", name: "DOE,JANE"
-  })
-
-  # Tribal detail for DFN 1 — #9000001 (^AUPNPAT) via DDR GETS ENTRY DATA,
-  # which is where RPMS actually keeps it. Wire form per field is
-  # FILE^IEN^FIELD^INTERNAL^EXTERNAL. Fields: .07 enrollment no, 1108 tribe
-  # (pointer -> TRIBE #9999999.03), 1109 tribe quantum, 1110 Indian blood
-  # quantum, 1111 classification/beneficiary (pointer -> BENEFICIARY
-  # #9999999.25), 1112 eligibility status (set I/D/C/P), 1118 current
-  # community. Synthetic values throughout.
-  m.seed(:ddr_gets_entry_data,
-    RpmsRpc::DdrFileman.gets_entry_param(
-      file: "9000001", iens: "1,",
-      fields: ".07;1108;1109;1110;1111;1112;1118", flags: "IE"
-    ).to_s,
-    <<~TRIBAL.chomp)
-      [Data]
-      9000001^1^.07^EXNH-12345^EXNH-12345
-      9000001^1^1108^41^Example Tribe
-      9000001^1^1109^4/4^4/4
-      9000001^1^1110^4/4^4/4
-      9000001^1^1111^1^Indian/Alaska Native
-      9000001^1^1112^I^Indian/Alaska Native
-      9000001^1^1118^Example Community^Example Community
-    TRIBAL
-
-  # The SSN index holds the SSN without punctuation; Patient.find_by_ssn
-  # strips it before the call (rpms-rpc #352).
-  m.seed(:patient_ssn, "111111111", { dfn: 1, name: "Anderson,Alice", ssn: "111111111" })
-
-  # ORWPT LIST ALL answers a page of the name index, { dfn:, name: } rows,
-  # whatever the start text (rpms-rpc #352): seeded unfiltered, so the
-  # gateway's own filtering is what a search test exercises.
-  m.seed_collection(:patient_list,
-    [
-      { dfn: 1, name: "Anderson,Alice" },
-      { dfn: 2, name: "MOUSE,MICKEY M" },
-      { dfn: 3, name: "DOE,JANE" }
-    ])
-
-  m.seed_collection(:practitioner_list,
-    [ { ien: 101, name: "MARTINEZ,SARAH", title: "MD" }, { ien: 102, name: "CHEN,JAMES", title: "DO" } ],
-    filter_field: :name)
-
-  # Institution IEN 1 (#4) and hospital location IEN 1 (#44): DDR GETS ENTRY
-  # DATA, which Organization.find and Location.find read since rpms-rpc
-  # #379/#377 (the BHDO INST DATA / HOSP LOC DATA names were registered
-  # nowhere). Wire form per field is FILE^IEN^FIELD^INTERNAL^EXTERNAL; #4
-  # has no phone field. Synthetic values throughout.
-  m.seed(:ddr_gets_entry_data,
-    RpmsRpc::DdrFileman.gets_entry_param(
-      file: RpmsRpc::Organization::FILE, iens: "1,",
-      fields: RpmsRpc::Organization::FIELDS.join(";"), flags: "IE"
-    ).to_s,
-    <<~INSTITUTION.chomp)
-      [Data]
-      4^1^.01^Example Health Center^Example Health Center
-      4^1^99^463^463
-      4^1^1.01^500 Example Way^500 Example Way
-      4^1^1.03^Anchorage^Anchorage
-      4^1^.02^2^ALASKA
-      4^1^1.04^99508^99508
-    INSTITUTION
-  m.seed(:ddr_gets_entry_data,
-    RpmsRpc::DdrFileman.gets_entry_param(
-      file: RpmsRpc::Location::FILE, iens: "1,",
-      fields: RpmsRpc::Location::FIELDS.values.join(";"), flags: "IE"
-    ).to_s,
-    <<~LOCATION.chomp)
-      [Data]
-      44^1^.01^Primary Care Clinic^Primary Care Clinic
-      44^1^1^PCC^PCC
-      44^1^2^C^CLINIC
-      44^1^3.5^1^Example Health Center
-    LOCATION
-
-  # VFC eligibility: BGOVIMM2 GETELIG (the code table) and BGOVIMM GETVFC
-  # (DFN 1's default, which answers a label, not a code), read by
-  # Eligibility.codes and .for_patient since rpms-rpc #376.
-  m.seed_collection(:vfc_eligibility_codes, [
-    { ien: 1, code: "V01", label: "Not VFC eligible" },
-    { ien: 2, code: "V02", label: "VFC eligible - Medicaid" },
-    { ien: 3, code: "V03", label: "VFC eligible - Uninsured" },
-    { ien: 4, code: "V04", label: "Am Indian/AK Native" },
-    { ien: 5, code: "V05", label: "VFC eligible - FQHC" },
-    { ien: 6, code: "V06", label: "VFC eligible - State specific" },
-    { ien: 7, code: "V07", label: "VFC eligible - Local specific" }
-  ])
-  m.seed(:vfc_default, "1", { ihs_site: 1, age: 45, default_label: "Am Indian/AK Native" })
-
-  # Tribal enrollment / eligibility seeds REMOVED with the rpms-rpc 0.3.0 bump.
-  # #235 deleted the invented placeholder mappings these seeded against
-  # (:tribal_enrollment, :tribal_validation, :enrollment_eligibility,
-  # :service_unit, :tribe_info — "no known server implementation") and rebuilt
-  # RpmsRpc::Tribal on real DDR FileMan reads. The tribal tests now stub
-  # TribalEnrollmentGateway / RpmsRpc::Tribal at the API boundary rather than
-  # seeding removed wire mappings. Interim eligibility behaviour is fail-closed
-  # (undetermined ⇒ not eligible); the eligibility_status (I/D/C/P) product
-  # mapping is tracked in #520 and is out of Sprint 1 (BH-only) scope.
-
-  # Vitals (ORQQVI VITALS) for patient DFN 1: the rows a fresh rpms-ydb
-  # e9b78c8 sent for DFN 4 (DEMO,PATIENT ONE), so their shape is the wire's.
-  # On RPMS VITAL^ORQQVI answers from MSR^ORQQVI with IHS MEASUREMENT TYPE
-  # codes (TMP, PU, RS, BP, PA, O2), and the reply has no units piece: the
-  # recorded text is display ("98 F") and metric_display ("(36.7 C)").
-  m.seed_keyed_collection(:vitals, "1", [
-    { measurement_ien: 5,  type: "TMP", value: "98",     recorded_date: Time.new(2026, 9, 11, 21, 34), display: "98 F", metric_display: "(36.7 C)" },
-    { measurement_ien: 6,  type: "PU",  value: "50",     recorded_date: Time.new(2026, 9, 11, 21, 34), display: "50" },
-    { measurement_ien: 7,  type: "RS",  value: "20",     recorded_date: Time.new(2026, 9, 11, 21, 34), display: "20" },
-    { measurement_ien: 8,  type: "BP",  value: "117/81", recorded_date: Time.new(2026, 9, 11, 21, 34), display: "117/81" },
-    { measurement_ien: 10, type: "PA",  value: "0",      recorded_date: Time.new(2026, 9, 11, 21, 34), display: "0" },
-    { measurement_ien: 9,  type: "O2",  value: "98",     recorded_date: Time.new(2026, 9, 11, 21, 34), display: "98" }
-  ])
-
-  # Test users
-  m.seed_user("301", credentials: "testprovider;test123", name: "PROVIDER,TEST", role: :provider)
-  m.seed_user("302", credentials: "testnurse;test123", name: "NURSE,TEST", role: :nurse)
-  m.seed_user("303", credentials: "testclerk;test123", name: "CLERK,TEST", role: :clerk)
-  m.seed_user("304", credentials: "lindarodriguez;test123", name: "RODRIGUEZ,LINDA", role: :case_manager)
-  # The SECURITY KEYs DUZ 304 holds, answered to ORWU NPHASKEY for 304.
-  m.seed_held_keys("304", [ "BMCZSUPERVISOR", "ORELSE" ])
-  # Everyone RPMS signs on over CIA holds CIAV VUECENTRIC, the context the
-  # sign-on binds to. This mock signs on over XWB, where a user can sign on
-  # without it: CLERK,TEST (303) is that user, with no VueCentric access and no key.
-  %w[301 302 304].each { |duz| m.seed_options(duz, [ "CIAV VUECENTRIC" ]) }
-
-  # Practitioner — ORWU USERINFO is single-session-user (per rr-fyf); the
-  # mock dispatches on "" since the wrapper passes no params. Test code
-  # that "looks up" IEN 101 works iff the seeded duz matches; IEN 102 or
-  # any other returns nil. The practitioner_list (ORWU NEWPERS) is a
-  # genuine multi-record search and continues to surface both.
-  #
-  # Seeded after the test users: MockClient#seed_user writes the same
-  # session-user reply for each user it seeds (rpms-rpc 0.4), so seeding
-  # it first would leave the last test user as the session user.
-  m.seed(:practitioner_info, "", {
-    duz: 101, name: "MARTINEZ,SARAH", user_class: 3,
-    kernel_domain: "DEMO.IHS.GOV", site_ien: 8904
-  })
-end
-
-# LIVE_RPMS=1 runs the suite against a real broker instead of the mock
+# The suite runs on the engine's own stand-in for RPMS (support/rpms_stand_in.rb):
+# a pass proves the engine's logic, not what RPMS answers.
+#
+# LIVE_RPMS=1 runs it against a real broker instead
 # (cucumber --profile live). The broker is the one the engine built at boot
 # from config/rpms.yml (VISTA_BROKER, VISTA_RPC_HOST, VISTA_RPC_PORT), the
 # path a deployed app takes, and the run signs on through the engine's own
 # AuthenticationService as LIVE_RPMS_ACCESS / LIVE_RPMS_VERIFY. It never falls
 # back to the mock: a missing broker or a refused sign-on aborts the run.
-LIVE_RPMS = ENV["LIVE_RPMS"] == "1"
+#
+# LIVE_STACK=1 (cucumber --profile stack, #962) binds the run from
+# LiveStack::VARIABLES alone and signs on as that persona, who must not hold
+# XUPROGMODE. A stack it cannot confirm runs on the mock, and @live scenarios
+# report not run (features/support/live_stack.rb).
+LIVE_STACK = LiveStack.requested?(ENV) ? LiveStack.prepare(ENV) : nil
+LIVE_STACK_BINDING = (LiveStack.binding(ENV) if LIVE_STACK&.ready?)
+LIVE_RPMS = ENV["LIVE_RPMS"] == "1" || LIVE_STACK&.ready? == true
+warn "[stack] #{LiveStack.not_run_message(LIVE_STACK)}" if LIVE_STACK && !LIVE_STACK.ready?
 if LIVE_RPMS
   abort "LIVE_RPMS=1: no broker configured (set VISTA_RPC_HOST)" unless RpmsRpc.configuration.client
 
@@ -225,27 +65,53 @@ if LIVE_RPMS
     # sign on as someone else call this afterwards, since one process holds
     # one broker identity (rpms-rpc#234).
     def sign_on!
-      result = Lakeraven::EHR::AuthenticationService.new.authenticate(
-        access_code: ENV.fetch("LIVE_RPMS_ACCESS"), verify_code: ENV.fetch("LIVE_RPMS_VERIFY")
-      )
-      abort "LIVE_RPMS=1: sign-on refused: #{result.error}" unless result.success?
+      if LIVE_STACK_BINDING
+        stack_sign_on!
+      else
+        result = Lakeraven::EHR::AuthenticationService.new.authenticate(
+          access_code: ENV.fetch("LIVE_RPMS_ACCESS"), verify_code: ENV.fetch("LIVE_RPMS_VERIFY")
+        )
+        abort "LIVE_RPMS=1: sign-on refused: #{result.error}" unless result.success?
+        result
+      end
+    end
+
+    # The stack persona again, and again without XUPROGMODE, for scenarios
+    # that signed on as someone else (LiveStack.re_sign_on). Called from an
+    # After hook: a failure clears LIVE_STACK_CLIENT's identity and raises
+    # NotRun (LiveStack.decline_sign_on!), so this scenario is skipped as not
+    # run and every later one fails the verdict's DUZ check.
+    def stack_sign_on!
+      result, reason = LiveStack.re_sign_on(client: LIVE_STACK_CLIENT, binding: LIVE_STACK_BINDING)
+      LiveStack.decline_sign_on!(LIVE_STACK_CLIENT, reason) if reason
       result
     end
   end
 
-  live_user = LiveRpmsSession.sign_on!.value
-  settings = Lakeraven::EHR::Engine.rpms_settings
-  warn "[live] RPMS #{settings[:broker]} #{settings[:host]}:#{settings[:port]} signed on as #{live_user.inspect[0, 120]}"
+  if LIVE_STACK_BINDING
+    # prepare signed the persona on and checked XUPROGMODE: no second sign-on.
+    # The client the persona is signed on through: a call counts as evidence,
+    # and a scenario as run, only on this very object (LiveStack.verdict).
+    # install! arms the watch and watches the client, the mock and gateway
+    # stubs.
+    LIVE_STACK_CLIENT = RpmsRpc.configuration.client
+    LiveStack.install!(client: LIVE_STACK_CLIENT, persona_duz: LIVE_STACK.persona_duz)
+    warn "[stack] ready: #{LIVE_STACK_BINDING.broker} #{LIVE_STACK_BINDING.host}:#{LIVE_STACK_BINDING.port}"
+  else
+    live_user = LiveRpmsSession.sign_on!.value
+    settings = Lakeraven::EHR::Engine.rpms_settings
+    warn "[live] RPMS #{settings[:broker]} #{settings[:host]}:#{settings[:port]} signed on as #{live_user.inspect[0, 120]}"
+  end
 else
-  RpmsRpc.mock!(&BASELINE_MOCK_SEEDS)
-  # The mock broker has no division, so the registration settings read
+  RpmsStandIn.install_baseline!
+  # The stand-in has no division, so the registration settings read
   # (REGISTRATION PARAMETERS, #980/#981) answers as a site with none set:
   # nothing required beyond the forms' own rules, every section asked. A test
   # that needs a site's settings stubs RegistrationSettingsGateway.current.
   Lakeraven::EHR::RegistrationSettingsGateway.reader = -> { Lakeraven::EHR::RegistrationSiteSettings.not_on_file }
-  # The mock broker has no server clock, so the site's clock (ORWU DT "NOW",
+  # The stand-in has no server clock, so the site's clock (ORWU DT "NOW",
   # #1065, #1114) is the app's. A test that needs the site's clock elsewhere
-  # sets SiteTime.reader, or clears it and seeds ORWU DT "NOW". The process
+  # sets SiteTime.reader, or clears it and answers RpmsRpc::Orwu.fileman_datetime. The process
   # runs in UTC, as CI and the deployed host do, so the app's date
   # (Date.current) and its wall clock (Time.now) are the same day on any
   # workstation.
@@ -255,12 +121,13 @@ else
   Lakeraven::EHR::SiteTime.reader = -> { Time.now } if defined?(Lakeraven::EHR::SiteTime)
 end
 
-# Scripted RPC broker for the BPRM reg/sched/ADT twin gateway tests.
+# A scripted RPC client, for the tests whose subject is the client itself: the
+# audited wrapper (AuditedBroker, RpcSupport.broker), the backend registry, a
+# backend that must not be called, and the few that check what the real gem
+# sends. A test of what a gateway answers states it on RpmsStandIn instead.
 #
-# The reg/sched gateways call RpmsRpc.client.call_rpc(rpc_name, *params)
-# directly and parse the caret response, so a gateway unit test just needs a
-# client that (a) records the calls it received and (b) returns a scripted
-# response per RPC name. `on(rpc, *responses)` queues responses (a single
+# It records the calls it received and returns a scripted response per RPC
+# name. `on(rpc, *responses)` queues responses (a single
 # response is reused for every call; multiple are consumed in order — handy
 # for composite flows like rebook). `raise_with` simulates a broker-unreachable
 # socket error. Swap it in with `use_broker(fake) { ... }` from a test.
@@ -328,7 +195,7 @@ class FakeBroker
 end
 
 # Install a FakeBroker as RpmsRpc.client for the duration of the block,
-# restoring the shared MockClient afterward.
+# restoring the stand-in's connection afterward.
 module BrokerStubbing
   def use_broker(fake)
     original = RpmsRpc.configuration.client

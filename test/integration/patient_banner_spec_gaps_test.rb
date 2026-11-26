@@ -21,11 +21,13 @@ class PatientBannerSpecGapsTest < ActionDispatch::IntegrationTest
     Lakeraven::EHR::AuditEvent.delete_all
   end
 
-  test "not assessed ORQQAL reply shows not-loaded on dashboard and chart" do
+  # rpms-rpc reads a not-assessed ORQQAL reply, and one with no lines, as the
+  # same not-assessed assessment, which is what the stand-in answers here.
+  test "a not-assessed or empty ORQQAL reply shows not-loaded on dashboard and chart" do
     with_demo_clinical_seeds do
       sign_in_clinician!
       open_patient_context!(1)
-      seed_orqqal_reply!("1", [ RpmsRpc::Allergy::NOT_ASSESSED_SENTINEL ])
+      answer_allergy_assessment!("1", assessed: false)
 
       get "#{MOUNT}/dashboard"
       assert_response :ok
@@ -40,40 +42,20 @@ class PatientBannerSpecGapsTest < ActionDispatch::IntegrationTest
 
   # #672: LIST^ORQQAL writes a marker only where it writes no rows, so a marker
   # beside a row, or twice, is a corrupted reply (rpms-rpc#483). Its rows may be
-  # another call's or truncated: shown, never as a complete list.
-  [
-    [ "a marker beside a row", [ "1^LATEX", RpmsRpc::Allergy::NKA_SENTINEL ] ],
-    [ "a marker twice, beside a row", [ RpmsRpc::Allergy::NKA_SENTINEL, "1^LATEX", RpmsRpc::Allergy::NKA_SENTINEL ] ]
-  ].each do |label, lines|
-    test "a conflicting ORQQAL reply (#{label}) shows its allergies as incomplete on every page" do
-      with_demo_clinical_seeds do
-        sign_in_clinician!
-        open_patient_context!(1)
-        seed_orqqal_reply!("1", lines)
-
-        assert_dashboard_and_chart_allergies_incomplete_with_known_names!("LATEX")
-
-        get "#{MOUNT}/patients/1/screenings"
-        assert_response :ok
-        assert_allergies_incomplete_with_known_names!("LATEX")
-      end
-    end
-  end
-
-  test "empty ORQQAL reply shows not-loaded on dashboard and chart" do
+  # another call's or truncated: shown, never as a complete list. rpms-rpc
+  # reads either reply as the same conflicting assessment, which is what the
+  # stand-in answers here.
+  test "a conflicting ORQQAL reply (a marker beside a row, or twice) shows its allergies as incomplete on every page" do
     with_demo_clinical_seeds do
       sign_in_clinician!
       open_patient_context!(1)
-      seed_orqqal_reply!("1", [])
+      answer_allergy_assessment!("1", assessed: false, allergens: [ "LATEX" ], conflict: true)
 
-      get "#{MOUNT}/dashboard"
-      assert_response :ok
-      assert_allergies_unassessed_or_indeterminate!
+      assert_dashboard_and_chart_allergies_incomplete_with_known_names!("LATEX")
 
-      setup_chart_bearer!
-      get "#{MOUNT}/patients/1", headers: @chart_headers
+      get "#{MOUNT}/patients/1/screenings"
       assert_response :ok
-      assert_allergies_unassessed_or_indeterminate!
+      assert_allergies_incomplete_with_known_names!("LATEX")
     end
   end
 
@@ -296,6 +278,9 @@ class PatientBannerSpecGapsTest < ActionDispatch::IntegrationTest
   test "closed banner explains when open patient dfn does not exist" do
     with_demo_clinical_seeds do
       sign_in_clinician!
+      # The open asks RPMS whether the record is sensitive first (#613); this
+      # record is not in the shared seeds, and answers "0", not sensitive.
+      SensitivePatientAccessSeeds.seed_not_sensitive!(424_242)
       open_patient_context!(424_242)
 
       get "#{MOUNT}/dashboard"

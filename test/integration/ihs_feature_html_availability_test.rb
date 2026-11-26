@@ -19,7 +19,6 @@ class IhsFeatureHtmlAvailabilityTest < ActionDispatch::IntegrationTest
   teardown do
     teardown_smart_auth
     teardown_restricted_backend
-    reset_chart_rows
   end
 
   test "dashboard omits the Pending Referrals count without prc_referrals" do
@@ -77,15 +76,9 @@ class IhsFeatureHtmlAvailabilityTest < ActionDispatch::IntegrationTest
   end
 
   def seed_chart_rows
-    RpmsRpc.client.seed_keyed_collection(:patient_appointments, PATIENT_DFN, [ KEPT_ENCOUNTER, SCHEDULED_APPT ])
-    RpmsRpc.client.seed_keyed_collection(:immunization_list, "#{PATIENT_DFN}^I", [
-      { record_type: "I", ien: 9001, vaccine_code: "207", vaccine_display: "Synthetic COVID-19",
-        status: "completed", occurrence_datetime: Time.utc(2026, 1, 10, 9, 0, 0) }
+    RpmsStandIn.answer(RpmsRpc::Encounter, :for_patient, PATIENT_DFN, with: [ KEPT_ENCOUNTER, SCHEDULED_APPT ])
+    RpmsStandIn.answer(RpmsRpc::Immunization, :for_patient, PATIENT_DFN, with: [
+      { ien: "9001", vaccine_display: "Synthetic COVID-19", occurrence_datetime: Time.utc(2026, 1, 10, 9, 0, 0) }
     ])
-  end
-
-  def reset_chart_rows
-    RpmsRpc.client.seed_keyed_collection(:patient_appointments, PATIENT_DFN, [])
-    RpmsRpc.client.seed_keyed_collection(:immunization_list, "#{PATIENT_DFN}^I", [])
   end
 end

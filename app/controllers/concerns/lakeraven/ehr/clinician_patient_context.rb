@@ -15,10 +15,15 @@ module Lakeraven
     # a gate that opens itself is not a gate.
     #
     # What this is NOT: a treating-relationship check. The engine has no
-    # provider-patient relationship data and no sensitive-patient (DG SECURITY)
-    # feed yet, so this makes cross-patient access deliberate and attributable
-    # rather than impossible. Real relationship-based authorization is tracked
-    # separately — do not read this concern as more than it is.
+    # provider-patient relationship data, so this makes cross-patient access
+    # deliberate and attributable rather than impossible. Real
+    # relationship-based authorization is tracked separately — do not read
+    # this concern as more than it is.
+    #
+    # Sensitive records (DG SECURITY): the open step now asks RPMS's
+    # sensitive-record check first (SensitiveRecordAccess, #613). The other
+    # paths to a patient — the chart GET, search, registration, scheduling —
+    # do not ask it yet (#613).
     module ClinicianPatientContext
       extend ActiveSupport::Concern
 
@@ -47,6 +52,10 @@ module Lakeraven
         render template: "lakeraven/ehr/patient_contexts/new", status: :forbidden
         false
       end
+
+      # A patient-scoped SMART token reads only its own patient
+      # (SmartAuthentication#authorize_patient_context!): the record the route names.
+      def enforce_token_patient_context! = authorize_patient_context!(params[:dfn])
     end
   end
 end

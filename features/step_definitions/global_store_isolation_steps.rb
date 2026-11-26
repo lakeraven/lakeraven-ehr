@@ -16,7 +16,7 @@ Given("a synthetic provenance record for isolation patient {string}") do |patien
 end
 
 Given("an isolation mock referral is seeded for patient DFN {string}") do |dfn|
-  RpmsRpc.client.seed_keyed_collection(:referral_search, dfn, [
+  RpmsStandIn.answer(RpmsRpc::Referral, :for_patient, dfn, with: [
     { ien: ISOLATION_REFERRAL_IEN, patient_dfn: dfn.to_i, status: "active", type: "C",
       date: Date.new(2026, 2, 1), provider: "SYNTHETIC,PROVIDER" }
   ])
@@ -33,13 +33,13 @@ Then("no isolation mock referral exists for patient DFN {string}") do |dfn|
   referrals = Lakeraven::EHR::ServiceRequestGateway.for_patient(dfn)
   leaked = referrals.any? { |row| row[:ien].to_s == ISOLATION_REFERRAL_IEN }
   refute leaked,
-         "RpmsRpc mock client leaked a referral_search seed from a prior scenario; suite results depend on scenario order"
+         "The RPMS stand-in leaked a referral answer from a prior scenario; suite results depend on scenario order"
 end
 
 Then("mock patient DFN {string} resolves to {string}") do |dfn, expected_name|
   patient = Lakeraven::EHR::PatientGateway.find(dfn)
   assert_not_nil patient,
-                 "Baseline mock patient seed was wiped by an over-broad reset; suite results depend on scenario order"
+                 "The stand-in's baseline patient answer was wiped by an over-broad reset; suite results depend on scenario order"
   assert_equal expected_name, patient.name,
-               "Baseline mock patient_select seed was wiped by an over-broad reset; suite results depend on scenario order"
+               "The stand-in's baseline patient answer was wiped by an over-broad reset; suite results depend on scenario order"
 end

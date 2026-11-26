@@ -1,0 +1,42 @@
+<% page_title @concept[:preferred_term], "Find a diagnosis" %>
+
+<%= page_header @concept[:preferred_term],
+      [ "SNOMED CT concept #{@concept[:concept_id]}, as RPMS's terminology holds it." ] %>
+
+<dl
+  id="diagnosis-concept"
+  class="detail-list"
+>
+  <dt>Fully specified name</dt>
+  <dd data-fsn><%= @concept[:fsn] %></dd>
+  <dt>SNOMED CT concept</dt>
+  <dd data-snomed><%= @concept[:concept_id] %></dd>
+  <dt>ICD-10-CM</dt>
+  <dd data-icd><%= @concept[:icd].presence&.join(", ") || "None mapped" %></dd>
+  <dt>Default status on the problem list</dt>
+  <dd data-default-status><%= @concept[:default_status].presence || "None" %></dd>
+  <dt>Asks for laterality</dt>
+  <dd data-laterality><%= @concept[:prompt_laterality] ? "Yes" : "No" %></dd>
+  <dt>Can be chosen as a diagnosis</dt>
+  <dd data-selectable><%= @concept[:selectable] ? "Yes" : "No" %></dd>
+</dl>
+
+<% if @concept[:selectable] && capability?("visit.chart") %>
+  <% if @open_dfn %>
+    <p>
+      <%= link_to "Add as a problem",
+            new_patient_problem_path(@open_dfn, dts_id: @concept[:dts_id]),
+            id: "diagnosis-add-problem",
+            class: "button-primary no-underline" %>
+    </p>
+  <% else %>
+    <p id="diagnosis-open-a-record">
+      Open a patient's record to add this diagnosis to their problem list.
+    </p>
+  <% end %>
+<% end %>
+
+<p>
+  <%= link_to "Back to Find a diagnosis",
+        diagnosis_search_path %>
+</p>

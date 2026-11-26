@@ -4,7 +4,7 @@ require "test_helper"
 
 # #873: a user who works referrals sees the referrals pending at the facility,
 # and the dashboard counts them, linked to that list. RPMS is stood in for at
-# the wire: the mock broker answers BMC SEARCH REFERRAL with the reply a live
+# the wire: the stand-in replays to BMC SEARCH REFERRAL the reply a live
 # rpms-ydb 7c3119b build gave the provider persona (BMCZMENU) on 2026-11-04,
 # after test/integration/live_pending_referrals_test.rb filed an ACTIVE, an
 # APPROVED and a CLOSED referral for a synthetic patient. RPMS's own status
@@ -25,7 +25,7 @@ class PendingReferralsTest < ActionDispatch::IntegrationTest
   end
 
   def answer(lines)
-    RpmsRpc.client.seed_raw_lines(:referral_search, "", lines)
+    RpmsStandIn.connection.replay("BMC SEARCH REFERRAL", lines, first_param: "")
   end
 
   # The parameters of each BMC SEARCH REFERRAL RPMS was asked.

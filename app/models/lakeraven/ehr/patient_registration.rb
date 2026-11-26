@@ -37,7 +37,8 @@ module Lakeraven
       # none answers it, since AG then files a pseudo SSN there.
       site_required ssn: [ "2", "SOCIAL SECURITY NUMBER" ]
 
-      NAMES = { ssn: "Social security number" }.freeze
+      # What the clerk reads on the form, never the FileMan pointer (#975).
+      NAMES = { ssn: "Social security number", tribe_ien: "Tribe of membership", community_ien: "Community of residence" }.freeze
 
       def self.human_attribute_name(attribute, options = {})
         NAMES.fetch(attribute.to_sym) { super }
@@ -50,8 +51,10 @@ module Lakeraven
       validate :dob_in_range
       validates :ssn, format: { with: /\A\d{9}\z/, message: "must be nine digits" }, allow_blank: true
       validates :no_ssn_reason, inclusion: { in: NO_SSN_REASONS.keys, message: "is not one of RPMS's reasons" }, allow_blank: true
-      validates :tribe_ien, presence: { message: "of membership is required" }
-      validates :community_ien, presence: { message: "of residence is required" }
+      # RPMS registers no patient without both (PATIENT 9000001 fields 1108
+      # and 1118), so the form marks them required.
+      validates :tribe_ien, presence: { message: "is required" }
+      validates :community_ien, presence: { message: "is required" }
 
       def initialize(attrs = {})
         super

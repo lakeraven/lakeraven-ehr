@@ -38,10 +38,10 @@ class FhirSearchEntriesAreFhirTest < ActionDispatch::IntegrationTest
 
   setup do
     setup_smart_auth(scopes: "system/*.read")
-    RpmsRpc.mock! do |m|
-      BASELINE_MOCK_SEEDS.call(m)
+    RpmsStandIn.install! do |m|
+      RpmsStandIn::Baseline.call(m)
       LakeravenDemoSeeds.seed(m)
-      m.seed_keyed_collection(:referral_search, "1", [
+      m.answer(RpmsRpc::Referral, :for_patient, 1, with: [
         { ien: "1001", date: Date.new(2026, 1, 15), referral_number: "2026-1001", patient_dfn: 1,
           patient_name: "ANDERSON,ALICE", hrn: "12345", provider: "MARTINEZ,SARAH", facility: "CARDIOLOGY CLINIC",
           status: "A", purpose: "Cardiology consult" }
@@ -51,7 +51,7 @@ class FhirSearchEntriesAreFhirTest < ActionDispatch::IntegrationTest
 
   teardown do
     teardown_smart_auth
-    RpmsRpc.mock!(&BASELINE_MOCK_SEEDS)
+    RpmsStandIn.install_baseline!
   end
 
   test "every declared search serves only FHIR elements" do

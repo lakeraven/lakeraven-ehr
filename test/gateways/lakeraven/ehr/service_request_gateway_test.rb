@@ -4,7 +4,7 @@ require "test_helper"
 
 # Tests for ServiceRequestGateway — referral search via BMCRPC SRCHREF.
 # The gateway currently only exposes for_patient (returns raw hashes
-# from the DataMapper). Tests verify shape and mock data round-trip.
+# from rpms-rpc). Tests verify shape and that rpms-rpc's rows round-trip.
 module Lakeraven
   module EHR
     class ServiceRequestGatewayTest < ActiveSupport::TestCase
@@ -37,8 +37,8 @@ module Lakeraven
       private
 
       def seed_referral_data
-        # Seed referral search results via the mock client
-        RpmsRpc.client.seed_keyed_collection(:referral_search, "1", [
+        # What rpms-rpc's referral read answers for patient DFN 1
+        RpmsStandIn.answer(RpmsRpc::Referral, :for_patient, 1, with: [
           { ien: "1001", patient_dfn: 1, status: "active", type: "C",
             date: Date.new(2026, 1, 15), provider: "MARTINEZ,SARAH" },
           { ien: "1002", patient_dfn: 1, status: "completed", type: "N",

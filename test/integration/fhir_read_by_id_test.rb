@@ -12,15 +12,36 @@ class FhirReadByIdTest < ActionDispatch::IntegrationTest
 
   ENGINE = "/lakeraven-ehr"
 
+  # What each rpms-rpc read the gateways make returns for patient 1: one record, IEN 41.
   SEEDS = {
-    "Condition" => -> { RpmsRpc.client.seed_keyed_collection(:problem_list, "1", [ { ien: 41, status: "A", icd_code: "E11.9", description: "Diabetes" } ]) },
-    "AllergyIntolerance" => -> { RpmsRpc.client.seed_keyed_collection(:allergy_list, "1", [ { ien: 41, allergen: "Penicillin" } ]) },
-    "MedicationRequest" => -> { RpmsRpc.client.seed_text(:medication_active, "1", "~OP^41R;O^METFORMIN 500MG TAB^^3271231^1^^^120041^ACTIVE\n") },
+    "Condition" => -> {
+      RpmsStandIn.answer(RpmsRpc::Problem, :for_patient, 1,
+        with: [ { ien: "41", description: "Diabetes", status: "A", icd_code: "E11.9", inactive_icd: false } ])
+    },
+    "AllergyIntolerance" => -> {
+      RpmsStandIn.answer(RpmsRpc::Allergy, :assessment, 1,
+        with: { assessed: true, nka: false,
+                allergies: [ { ien: "41", allergen: "Penicillin", severity: nil, signs: nil, altered: false } ] })
+    },
+    "MedicationRequest" => -> {
+      RpmsStandIn.answer(RpmsRpc::Medication, :active_for_patient, 1,
+        with: [ { order_id: "41R;O", type: "OP", name: "METFORMIN 500MG TAB", status: "ACTIVE",
+                  stop_date: Date.new(2027, 12, 31), instructions: [], comments: [] } ])
+    },
     "Observation" => -> { },
-    "Immunization" => -> { RpmsRpc.client.seed_keyed_collection(:immunization_list, "1^I", [ { record_type: "I", ien: 41, vaccine_display: "Influenza" } ]) },
-    "Encounter" => -> { RpmsRpc.client.seed_keyed_collection(:encounter_visit_list, "1", [ { visit_string: "1;3260310.09;A;41", location: "Clinic", category: "AMBULATORY" } ]) },
-    "Procedure" => -> { RpmsRpc.client.seed_keyed_collection(:procedure_list, "1", [ { ien: 41, name: "Office visit", date: Date.new(2026, 3, 10) } ]) },
-    "ServiceRequest" => -> { RpmsRpc.client.seed_keyed_collection(:referral_search, "1", [ { ien: 41, status: "A", purpose: "Cardiology" } ]) }
+    "Immunization" => -> {
+      RpmsStandIn.answer(RpmsRpc::Immunization, :for_patient, 1, with: [ { ien: "41", vaccine_display: "Influenza" } ])
+    },
+    "Encounter" => -> {
+      RpmsStandIn.answer(RpmsRpc::Encounter, :visits, 1,
+        with: [ { location: "Clinic", category: "AMBULATORY", visit_ien: 41, location_ien: 1, service_category: "A" } ])
+    },
+    "Procedure" => -> {
+      RpmsStandIn.answer(RpmsRpc::Procedure, :for_patient, 1, with: [ { ien: "41", name: "Office visit" } ])
+    },
+    "ServiceRequest" => -> {
+      RpmsStandIn.answer(RpmsRpc::Referral, :for_patient, 1, with: [ { ien: "41", status: "A", purpose: "Cardiology" } ])
+    }
   }.freeze
 
   setup { setup_smart_auth(scopes: "system/*.read") }

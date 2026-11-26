@@ -30,6 +30,17 @@ module Lakeraven
         row && ADMINISTERED.merge(row)
       end
 
+      # The vaccines the patient is due for, from the Immunization
+      # package's forecast: [{ vaccine:, status:, risk_based: }], [] when
+      # it says none are due. When it produced no forecast it raises
+      # RpmsRpc::Immunization::ForecastError with its own reason, never an
+      # empty list.
+      def self.forecast(dfn, via: default_provider)
+        CapabilityGuard.ensure!(:ihs_immunization)
+
+        via.forecast(dfn.to_s)
+      end
+
       def self.default_provider
         ::RpmsRpc::Immunization
       end

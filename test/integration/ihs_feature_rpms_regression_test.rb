@@ -18,7 +18,6 @@ class IhsFeatureRpmsRegressionTest < ActionDispatch::IntegrationTest
 
   teardown do
     teardown_smart_auth
-    reset_surface_data
   end
 
   test "GET ServiceRequest still returns a referral bundle on rpms" do
@@ -52,24 +51,18 @@ class IhsFeatureRpmsRegressionTest < ActionDispatch::IntegrationTest
 
   private
 
+  # What the rpms-rpc reads behind these surfaces return for the patient.
   def seed_surface_data
-    RpmsRpc.client.seed_keyed_collection(:referral_search, PATIENT_DFN, [
-      { ien: "5001", patient_dfn: 1, status: "pending", type: "C", date: Date.new(2026, 3, 1), provider: "SYNTH,PROVIDER" }
+    RpmsStandIn.answer(RpmsRpc::Referral, :for_patient, PATIENT_DFN, with: [
+      { ien: "5001", patient_dfn: 1, status: "pending", date: Date.new(2026, 3, 1), provider: "SYNTH,PROVIDER" }
     ])
-    RpmsRpc.client.seed_keyed_collection(:patient_appointments, PATIENT_DFN, [
+    RpmsStandIn.answer(RpmsRpc::Encounter, :for_patient, PATIENT_DFN, with: [
       { datetime: Date.new(2026, 2, 1), location_ien: 10, location: "Stock Encounter Ward", status: "KEPT" },
       { datetime: Date.new(2026, 5, 1), location_ien: 20, location: "Scheduling Clinic Future", status: "SCHEDULED" }
     ])
-    RpmsRpc.client.seed_keyed_collection(:immunization_list, "#{PATIENT_DFN}^I", [
-      { record_type: "I", ien: 9001, vaccine_code: "207", vaccine_display: "Synthetic COVID-19",
-        status: "completed", occurrence_datetime: Time.utc(2026, 1, 10, 9, 0, 0) }
+    RpmsStandIn.answer(RpmsRpc::Immunization, :for_patient, PATIENT_DFN, with: [
+      { ien: "9001", vaccine_display: "Synthetic COVID-19", occurrence_datetime: Time.utc(2026, 1, 10, 9, 0, 0) }
     ])
-  end
-
-  def reset_surface_data
-    RpmsRpc.client.seed_keyed_collection(:referral_search, PATIENT_DFN, [])
-    RpmsRpc.client.seed_keyed_collection(:patient_appointments, PATIENT_DFN, [])
-    RpmsRpc.client.seed_keyed_collection(:immunization_list, "#{PATIENT_DFN}^I", [])
   end
 
   def registration_patient_json

@@ -9,9 +9,10 @@ module Lakeraven
       setup do
         @_orig_patient_find = Patient.method(:find_by_dfn)
         @_orig_rpms_client = RpmsRpc.configuration.client
-        RpmsRpc.mock!(&BASELINE_MOCK_SEEDS)
+        RpmsStandIn.install_baseline!
         @_orig_allergy_for_patient = AllergyIntolerance.method(:for_patient)
         @_orig_device_for_patient = Device.method(:for_patient)
+        @_orig_fetch_reminders = ClinicalDecisionSupportService.method(:fetch_clinical_reminders)
 
         # Default mocks: empty data
         mock_no_allergies("12345")
@@ -27,6 +28,7 @@ module Lakeraven
         RpmsRpc.configure { |c| c.client = @_orig_rpms_client }
         AllergyIntolerance.define_singleton_method(:for_patient, @_orig_allergy_for_patient)
         Device.define_singleton_method(:for_patient, @_orig_device_for_patient)
+        ClinicalDecisionSupportService.define_singleton_method(:fetch_clinical_reminders, @_orig_fetch_reminders)
 
         ClinicalDecisionSupportService.reload_rules!
         ClinicalDecisionSupportService.rule_overrides.clear
@@ -74,28 +76,30 @@ module Lakeraven
       # CLINICAL REMINDERS
       # =============================================================================
 
-      test "returns preventive care alerts for overdue reminders" do
-        reminders = [
-          { ien: "1", name: "Influenza Vaccine", status: "DUE", due_date: 1.month.ago.to_date },
-          { ien: "2", name: "Colorectal Cancer Screening", status: "DUE", due_date: 3.months.ago.to_date }
-        ]
-
-        ClinicalDecisionSupportService.define_singleton_method(:fetch_clinical_reminders) { reminders }
+      # The cover-sheet reminders as the pinned build gave them for a patient
+      # (DFN 4, openrpms bcer-9.0 2a9b3fe), as RpmsRpc::HealthSummary
+      # .clinical_reminders returns them: DUE FLAG 1 is due, and the due date
+      # is the engine's "DUE NOW" (#986).
+      test "returns preventive care alerts for the reminders RPMS flags due" do
+        RpmsStandIn.answer(RpmsRpc::HealthSummary, :clinical_reminders, "12345", with: [
+          { ien: 211, name: "Tobacco Screen", due_date: "DUE NOW", priority: 2, due_flag: 1, dialog: true },
+          { ien: 274, name: "Domestic Violence", due_date: "DUE NOW", priority: 2, due_flag: 1, dialog: true }
+        ])
         ClinicalDecisionSupportService.define_singleton_method(:fetch_recent_labs) { [] }
 
         result = ClinicalDecisionSupportService.evaluate_patient("12345")
 
         reminder_alerts = result.alerts_by_category("preventive-care")
         assert_equal 2, reminder_alerts.length
-        assert_includes reminder_alerts.first[:message], "Influenza Vaccine"
+        assert_equal [ "Tobacco Screen is due", "Domestic Violence is due" ], reminder_alerts.map { |a| a[:message] }
       end
 
       test "no preventive alerts when reminders are current" do
-        reminders = [
-          { ien: "1", name: "Influenza Vaccine", status: "DONE", last_done: 2.months.ago.to_date }
-        ]
-
-        ClinicalDecisionSupportService.define_singleton_method(:fetch_clinical_reminders) { reminders }
+        # DUE FLAG 0: applicable, not due. 2: not applicable.
+        RpmsStandIn.answer(RpmsRpc::HealthSummary, :clinical_reminders, "12345", with: [
+          { ien: 211, name: "Tobacco Screen", due_date: "3270601", last_done: Date.new(2026, 6, 1), priority: 2, due_flag: 0, dialog: true },
+          { ien: 123, name: "Depression Screen", due_date: nil, priority: 2, due_flag: 2, dialog: true }
+        ])
         ClinicalDecisionSupportService.define_singleton_method(:fetch_recent_labs) { [] }
 
         result = ClinicalDecisionSupportService.evaluate_patient("12345")
@@ -114,7 +118,7 @@ module Lakeraven
             reference_high: "5.0", flag: "critical" }
         ]
 
-        ClinicalDecisionSupportService.define_singleton_method(:fetch_clinical_reminders) { [] }
+        ClinicalDecisionSupportService.define_singleton_method(:fetch_clinical_reminders) { |_dfn| [] }
         ClinicalDecisionSupportService.define_singleton_method(:fetch_recent_labs) { labs }
 
         result = ClinicalDecisionSupportService.evaluate_patient("12345")
@@ -131,7 +135,7 @@ module Lakeraven
             reference_high: "145", flag: nil }
         ]
 
-        ClinicalDecisionSupportService.define_singleton_method(:fetch_clinical_reminders) { [] }
+        ClinicalDecisionSupportService.define_singleton_method(:fetch_clinical_reminders) { |_dfn| [] }
         ClinicalDecisionSupportService.define_singleton_method(:fetch_recent_labs) { labs }
 
         result = ClinicalDecisionSupportService.evaluate_patient("12345")
@@ -149,7 +153,7 @@ module Lakeraven
           { ien: "1", description: "Diabetes mellitus type 2", icd10: "E11.9", status: "active" }
         ])
 
-        ClinicalDecisionSupportService.define_singleton_method(:fetch_clinical_reminders) { [] }
+        ClinicalDecisionSupportService.define_singleton_method(:fetch_clinical_reminders) { |_dfn| [] }
         ClinicalDecisionSupportService.define_singleton_method(:fetch_recent_labs) { [] }
 
         result = ClinicalDecisionSupportService.evaluate_patient("12345")
@@ -221,7 +225,7 @@ module Lakeraven
 
       test "alerts on elderly patient for fall risk" do
         mock_patient_with_demographics("12345", dob: 70.years.ago.to_date, sex: "M")
-        ClinicalDecisionSupportService.define_singleton_method(:fetch_clinical_reminders) { [] }
+        ClinicalDecisionSupportService.define_singleton_method(:fetch_clinical_reminders) { |_dfn| [] }
         ClinicalDecisionSupportService.define_singleton_method(:fetch_recent_labs) { [] }
 
         result = ClinicalDecisionSupportService.evaluate_patient("12345")
@@ -234,7 +238,7 @@ module Lakeraven
 
       test "alerts on female patient for cervical cancer screening" do
         mock_patient_with_demographics("12345", dob: 35.years.ago.to_date, sex: "F")
-        ClinicalDecisionSupportService.define_singleton_method(:fetch_clinical_reminders) { [] }
+        ClinicalDecisionSupportService.define_singleton_method(:fetch_clinical_reminders) { |_dfn| [] }
         ClinicalDecisionSupportService.define_singleton_method(:fetch_recent_labs) { [] }
 
         result = ClinicalDecisionSupportService.evaluate_patient("12345")
@@ -246,7 +250,7 @@ module Lakeraven
 
       test "no demographic alerts for young male without matching rules" do
         mock_patient_with_demographics("12345", dob: 30.years.ago.to_date, sex: "M")
-        ClinicalDecisionSupportService.define_singleton_method(:fetch_clinical_reminders) { [] }
+        ClinicalDecisionSupportService.define_singleton_method(:fetch_clinical_reminders) { |_dfn| [] }
         ClinicalDecisionSupportService.define_singleton_method(:fetch_recent_labs) { [] }
 
         result = ClinicalDecisionSupportService.evaluate_patient("12345")
@@ -257,7 +261,7 @@ module Lakeraven
 
       test "pediatric lead screening for child under 6" do
         mock_patient_with_demographics("12345", dob: 3.years.ago.to_date, sex: "M")
-        ClinicalDecisionSupportService.define_singleton_method(:fetch_clinical_reminders) { [] }
+        ClinicalDecisionSupportService.define_singleton_method(:fetch_clinical_reminders) { |_dfn| [] }
         ClinicalDecisionSupportService.define_singleton_method(:fetch_recent_labs) { [] }
 
         result = ClinicalDecisionSupportService.evaluate_patient("12345")
@@ -277,7 +281,7 @@ module Lakeraven
           OpenStruct.new(ien: "1", device_name: "Cardiac pacemaker dual-chamber",
                          type_code: "14106009", type_display: "Cardiac pacemaker")
         ])
-        ClinicalDecisionSupportService.define_singleton_method(:fetch_clinical_reminders) { [] }
+        ClinicalDecisionSupportService.define_singleton_method(:fetch_clinical_reminders) { |_dfn| [] }
         ClinicalDecisionSupportService.define_singleton_method(:fetch_recent_labs) { [] }
 
         result = ClinicalDecisionSupportService.evaluate_patient("12345")
@@ -294,7 +298,7 @@ module Lakeraven
           OpenStruct.new(ien: "2", device_name: "Total knee replacement prosthesis",
                          type_code: "304120007", type_display: "Joint prosthesis")
         ])
-        ClinicalDecisionSupportService.define_singleton_method(:fetch_clinical_reminders) { [] }
+        ClinicalDecisionSupportService.define_singleton_method(:fetch_clinical_reminders) { |_dfn| [] }
         ClinicalDecisionSupportService.define_singleton_method(:fetch_recent_labs) { [] }
 
         result = ClinicalDecisionSupportService.evaluate_patient("12345")
@@ -306,7 +310,7 @@ module Lakeraven
 
       test "no device alerts when patient has no devices" do
         mock_patient_with_demographics("12345", dob: 50.years.ago.to_date, sex: "M")
-        ClinicalDecisionSupportService.define_singleton_method(:fetch_clinical_reminders) { [] }
+        ClinicalDecisionSupportService.define_singleton_method(:fetch_clinical_reminders) { |_dfn| [] }
         ClinicalDecisionSupportService.define_singleton_method(:fetch_recent_labs) { [] }
 
         result = ClinicalDecisionSupportService.evaluate_patient("12345")
@@ -348,7 +352,7 @@ module Lakeraven
         mock_conditions("12345", [
           { ien: "1", description: "Diabetes mellitus type 2", icd10: "E11.9", status: "active" }
         ])
-        ClinicalDecisionSupportService.define_singleton_method(:fetch_clinical_reminders) { [] }
+        ClinicalDecisionSupportService.define_singleton_method(:fetch_clinical_reminders) { |_dfn| [] }
         ClinicalDecisionSupportService.define_singleton_method(:fetch_recent_labs) { [] }
 
         result = ClinicalDecisionSupportService.evaluate_patient("12345")
@@ -363,7 +367,7 @@ module Lakeraven
 
       test "demographic alerts include source URL" do
         mock_patient_with_demographics("12345", dob: 70.years.ago.to_date, sex: "M")
-        ClinicalDecisionSupportService.define_singleton_method(:fetch_clinical_reminders) { [] }
+        ClinicalDecisionSupportService.define_singleton_method(:fetch_clinical_reminders) { |_dfn| [] }
         ClinicalDecisionSupportService.define_singleton_method(:fetch_recent_labs) { [] }
 
         result = ClinicalDecisionSupportService.evaluate_patient("12345")
@@ -397,14 +401,15 @@ module Lakeraven
         mock_devices(dfn, [])
       end
 
-      # The patient's orders as ORWPS ACTIVE wire, read back through the
-      # gateway and the rpms-rpc parser: order id, drug, expiration, refills,
-      # CPRS order number, the RPMS status (piece 9), then the sig line.
+      # The patient's orders, each as RpmsRpc::Medication.active_for_patient
+      # returns it, read back through the gateway: order id, drug, the RPMS
+      # status, stop date and the sig line.
       def seed_active_medications(dfn, orders)
-        wire = orders.each_with_index.map do |order, i|
-          "~OP^#{4401 + i}R;O^#{order[:drug_name]}^^3271231^3^^^#{120345 + i}^#{order[:status]}\n\\ Sig: TAKE AS DIRECTED"
+        rows = orders.each_with_index.map do |order, i|
+          { order_id: "#{4401 + i}R;O", type: "OP", name: order[:drug_name], status: order[:status],
+            stop_date: Date.new(2027, 12, 31), instructions: [ "Sig: TAKE AS DIRECTED" ], comments: [] }
         end
-        RpmsRpc.client.seed_text(:medication_active, dfn.to_s, wire.join("\n"))
+        RpmsStandIn.answer(RpmsRpc::Medication, :active_for_patient, dfn, with: rows)
       end
 
       def mock_no_allergies(dfn)

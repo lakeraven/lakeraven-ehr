@@ -35,8 +35,6 @@ module Lakeraven
         @dfn = params[:dfn]
       end
 
-      def enforce_token_patient_context! = authorize_patient_context!(params[:dfn])
-
       # The connection files as its own user, so the token's DUZ must be the
       # session's: the two are minted together.
       def require_clinician_credential!

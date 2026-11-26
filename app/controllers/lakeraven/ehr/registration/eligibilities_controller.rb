@@ -30,6 +30,8 @@ module Lakeraven
 
         private
 
+        def busa_description = "Registration: eligibility edited"
+
         def enrollment = RpmsRpc::Tribal.enrollment(dfn) || {}
 
         def render_form(status)

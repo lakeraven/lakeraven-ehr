@@ -22,7 +22,7 @@ module Lakeraven
       setup do
         enable_forgery_protection!
         @original_client = RpmsRpc.configuration.client
-        RpmsRpc.mock! { |m| LakeravenDemoSeeds.seed(m) }
+        RpmsStandIn.install! { |rpms| LakeravenDemoSeeds.seed(rpms) }
         sign_in_as(MEDICAL_ASSISTANT)
       end
 

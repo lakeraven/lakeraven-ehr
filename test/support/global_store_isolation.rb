@@ -3,9 +3,8 @@
 # Process-global in-memory stores survive from one example to the next unless
 # something clears them. Reset the whole list before every example.
 module GlobalStoreIsolation
-  # Any new process-global in-memory store must be added here.
-  # BASELINE_MOCK_SEEDS is defined in test/test_helper.rb; the proc looks it
-  # up when reset! runs, after that constant exists.
+  # Any new process-global in-memory store must be added here. The RPMS
+  # stand-in is one: every example starts from its baseline answers.
   STORE_RESETS = [
     -> { Lakeraven::EHR::AssertionReplayGuard.reset! },
     -> { Lakeraven::EHR::ProvenanceStore.reset_instance! },
@@ -19,7 +18,7 @@ module GlobalStoreIsolation
     -> { Lakeraven::EHR::MedicationStore.reset_instance! },
     -> { Lakeraven::EHR::CarePlanStore.reset_instance! },
     -> { Lakeraven::EHR::DiagnosticReportStore.reset_instance! },
-    -> { RpmsRpc.mock!(&BASELINE_MOCK_SEEDS) unless LIVE_RPMS },
+    -> { RpmsStandIn.install_baseline! unless LIVE_RPMS },
     -> { Lakeraven::EHR::DrugInteraction::AdapterFactory.reset_registrations! }
   ].freeze
 

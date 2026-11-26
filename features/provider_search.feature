@@ -9,6 +9,7 @@ Feature: Provider Search and Management
     Given these RPMS demo providers:
       | ien | name           |
       | 4   | Manager,System |
+      | 211 | Profile,Bh     |
       | 209 | Profile,Bill   |
       | 204 | Profile,Ma     |
       | 206 | Profile,Md     |
@@ -42,7 +43,7 @@ Feature: Provider Search and Management
   @live
   Scenario: List all providers
     When I search for all providers
-    Then I should find 9 providers in the results
+    Then I should find every demo provider in the results
 
   # DEFERRED (@unsourced): the read this needs lives in rpms-rpc, not the
     # engine, and the field numbers were only verified against the live DD on

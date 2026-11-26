@@ -78,7 +78,8 @@ No UCI (namespace) setting is needed on either: the CIA client asks for the brok
 `RPMS_UCI` overrides that, only to run in another namespace.
 
 **Tests need no backend.**
-`bin/rails test` and `bundle exec cucumber` run against rpms-rpc's in-memory `MockClient`.
+`bin/rails test` and `bundle exec cucumber` run on the engine's own stand-in for RPMS, `test/support/rpms_stand_in.rb`: a test states what a gateway's read returns, and a pass proves the engine's logic.
+What RPMS answers is proven by the `@live` Cucumber profile against the RPMS image.
 `test/system/live` signs in against a real broker and skips unless `LIVE_RPMS=1`; its header says how to run it.
 
 ## Installation
@@ -129,7 +130,13 @@ The names are `fhir_api`, `bulk_export` and `ccda`.
 The setting fails closed: only an Array opens anything, and only its entries that spell a name exactly.
 A bare name, `true`, a Hash or an unknown name opens nothing.
 A closed surface answers a bare 404 before authentication, audit or the action runs.
-Only `bulk_export` (`/exports` and its files) is gated so far.
+`bulk_export` gates `/exports` and its files.
+`fhir_api` gates the FHIR resource routes, `Measure/$import`, and any `Authorization: Bearer` request to a SMART-authenticated controller (the chart included) unless that controller names its own surface for bearer clients, as `/exports` (`bulk_export`) and `/transitions_of_care` (`ccda`) do; a browser session without a bearer header is untouched.
+The chart's FHIR form (`.json`, `?_format=json`, `Accept: application/fhir+json`) is `fhir_api` even for a browser session; the HTML chart offers "View as FHIR" only while `fhir_api` is open.
+`fhir_api` also gates SMART App Launch: `smart/launch`, `oauth/authorize*` and the authorization-code `oauth/token`. The backend services (client_credentials) token stays open for bulk export.
+`ccda` gates `/transitions_of_care` and `/ccda_imports` (#969).
+`/ccda_imports` also needs `fhir_api`, as inbound C-CDA drops Part 2 labels today.
+`/metadata` and SMART discovery stay open.
 
 ## Contributing
 Contribution directions go here.

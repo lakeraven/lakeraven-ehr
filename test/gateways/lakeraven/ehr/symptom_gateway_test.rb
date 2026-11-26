@@ -59,7 +59,8 @@ module Lakeraven
 
       test "starting_with walks from just before the text and keeps the names that start with it" do
         original = RpmsRpc.configuration.client
-        RpmsRpc.mock! { |m| m.seed_raw_lines(:symptom_search, "RAR~", CapturedAllergyLookupReplies::SYMPTOMS_FROM_RAR) }
+        RpmsStandIn.install!
+        RpmsStandIn.connection.replay("ORWDAL32 SYMPTOMS", CapturedAllergyLookupReplies::SYMPTOMS_FROM_RAR, first_param: "RAR~")
 
         assert_equal [ { ien: "133", name: "RASH", label: "RASH" } ], SymptomGateway.starting_with("ras")
         assert_equal [ "RAR~", "1" ], RpmsRpc.client.received_calls.last[:params].to_a

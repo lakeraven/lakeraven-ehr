@@ -47,8 +47,8 @@ module Lakeraven
         "lakeraven/ehr/demo_visits#reset",    # Dev-gated demo UI
         "lakeraven/ehr/demo_visits#new",      # Dev-gated demo UI
         "lakeraven/ehr/demo_visits#summary",  # Dev-gated demo UI
-        "lakeraven/ehr/screenings#create",    # Session-authenticated clinician UI (entry, not disclosure)
-        "lakeraven/ehr/screenings#new",       # Session-authenticated clinician UI (entry, not disclosure)
+        "lakeraven/ehr/screenings#create",    # Clinician entry form (#1003): renders the patient's open visits (date, clinic, provider) only from Encounter resources passed through filter_fhir_for_egress; not a FHIR read
+        "lakeraven/ehr/screenings#new",       # Clinician entry form (#1003): renders the patient's open visits (date, clinic, provider) only from Encounter resources passed through filter_fhir_for_egress; not a FHIR read
         "lakeraven/ehr/allergies#new",              # Session-authenticated clinician entry/write surface (#644); discloses no stored clinical data
         "lakeraven/ehr/allergies#create",            # Session-authenticated clinician entry/write surface (#644); discloses no stored clinical data
         "lakeraven/ehr/allergies#no_known_allergies", # Session-authenticated clinician entry/write surface (#644); discloses no stored clinical data
@@ -58,6 +58,9 @@ module Lakeraven
         "lakeraven/ehr/chief_complaints#create", # Session-authenticated chief complaint write (S-TRI-07.1); answers with the form or a redirect, not disclosure
         "lakeraven/ehr/allergy_reviews#new",    # Session-authenticated allergy review (S-TRI-04.1): the open visits' date, time and location; discloses no stored clinical data
         "lakeraven/ehr/allergy_reviews#create", # Session-authenticated allergy review write (S-TRI-04.1); answers with the form or a redirect, not disclosure
+        "lakeraven/ehr/problems#new",    # Session-authenticated problem entry (S-VIS-02.2): one concept, refused before any patient read when it maps into F10-F19 or cannot be classified
+        "lakeraven/ehr/problems#create", # Session-authenticated problem write (S-VIS-02.2, S-VIS-02.3); the same refusal; answers with the form or a redirect
+        "lakeraven/ehr/problems#show",   # The problem just filed, read back; a problem whose codes are in F10-F19 or unclassified is not shown (404)
         "lakeraven/ehr/vitals#new",    # Session-authenticated vitals entry (S-TRI-02): the open visits' date, time and location; discloses no stored clinical data
         "lakeraven/ehr/vitals#create", # Session-authenticated vitals write (S-TRI-02); answers with the form, RPMS's reason for a refused value, or a redirect
         # In-clinic consent (#793). HTML for the chart and the locked tablet,
@@ -181,6 +184,9 @@ module Lakeraven
         "lakeraven/ehr/scheduling/access_types#create",
         "lakeraven/ehr/scheduling/access_types#edit",
         "lakeraven/ehr/scheduling/access_types#update",
+        "lakeraven/ehr/scheduling/holidays#index",         # Holidays: site-wide dates and names; no patient data
+        "lakeraven/ehr/scheduling/holidays#create",
+        "lakeraven/ehr/scheduling/holidays#remove",
         "lakeraven/ehr/scheduling/resource_groups#index",  # Group names; no patient data
         "lakeraven/ehr/scheduling/resource_groups#new",
         "lakeraven/ehr/scheduling/resource_groups#create",
@@ -218,6 +224,9 @@ module Lakeraven
         "lakeraven/ehr/value_sets#index",     # Terminology
         "lakeraven/ehr/value_sets#show",      # Terminology
         "lakeraven/ehr/value_sets#expand",    # Terminology
+        "lakeraven/ehr/diagnosis_searches#show",    # Terminology: SNOMED CT concepts from RPMS's BSTS, no patient
+        "lakeraven/ehr/diagnosis_searches#concept", # Terminology: one concept's detail, no patient
+        "lakeraven/ehr/immunization_forecasts#show", # Vaccine names due from RPMS's forecast, or its reason; no Part 2 content; revisit with Part 2 (#494)
         "lakeraven/ehr/measures#index",       # Measure definitions
         "lakeraven/ehr/measures#import"       # Measure definitions
       ].freeze
@@ -481,13 +490,14 @@ module Lakeraven
 
             test "HTML chart retains RPMS text for appointments, missing vitals, and units" do
         begin
-          RpmsRpc.client.seed_keyed_collection(:patient_appointments, "1", [
+          RpmsStandIn.answer(RpmsRpc::Encounter, :for_patient, 1, with: [
             { datetime: Date.new(2026, 2, 1), location_ien: 1, location: "Clinic", status: "no show" }
           ])
-          RpmsRpc.client.seed_keyed_collection(:vitals, "1", [
-            { measurement_ien: 4001, type: "PAIN", value: "4", units: "", recorded_date: DateTime.now },
-            { measurement_ien: 4002, type: "T", value: "98.6", units: "Celsius", recorded_date: DateTime.now },
-            { measurement_ien: 4003, type: "BP", value: "Refused", units: "", recorded_date: DateTime.now }
+          # RpmsRpc::Vital.for_patient returns no units piece: the reply has none.
+          RpmsStandIn.answer(RpmsRpc::Vital, :for_patient, 1, with: [
+            { measurement_ien: 4001, type: "PAIN", value: "4", recorded_date: Time.now },
+            { measurement_ien: 4002, type: "T", value: "98.6", recorded_date: Time.now },
+            { measurement_ien: 4003, type: "BP", value: "Refused", recorded_date: Time.now }
           ])
 
           get "/lakeraven-ehr/patients/1", headers: @headers
@@ -520,18 +530,11 @@ module Lakeraven
           vital_div = html.css("[data-vital]").find { |div| div.at_css("dt")&.text == "Body Temperature" }
           html_unit = vital_div.at_css("[data-vital-unit]")&.text
 
-          assert_equal fhir_unit.to_s, html_unit.to_s, "Expected HTML chart unit to match FHIR JSON unit"
+          # The chart shows the FHIR unit as a clinician reads it (#976).
+          assert_equal Observation.display_unit(fhir_unit).to_s, html_unit.to_s, "Expected HTML chart unit to be the FHIR JSON unit, for display"
         ensure
-          RpmsRpc.client.seed_keyed_collection(:patient_appointments, "1", [])
-          RpmsRpc.client.seed_keyed_collection(:vitals, "1", [
-            { measurement_ien: 4004, type: "BP",  value: "120/80", units: "mm[Hg]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
-            { measurement_ien: 4005, type: "P",   value: "72",     units: "/min",   recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
-            { measurement_ien: 4006, type: "T",   value: "98.6",   units: "[degF]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
-            { measurement_ien: 4007, type: "R",   value: "16",     units: "/min",   recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
-            { measurement_ien: 4008, type: "POX", value: "98",     units: "%",      recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
-            { measurement_ien: 4009, type: "WT",  value: "150",    units: "[lb_av]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) },
-            { measurement_ien: 4010, type: "HT",  value: "65",     units: "[in_i]", recorded_date: Time.new(2025, 1, 15, 9, 0, 0) }
-          ])
+          # Back to the baseline every test starts from.
+          RpmsStandIn.install_baseline!
         end
       end
 
@@ -561,6 +564,9 @@ module Lakeraven
       # Note: Many /:id show routes (like AllergyIntolerance/:id) are omitted here because
       # we do not have seeded data for those specific resource IDs. We use the nearest real path
       # (the index search route) to verify the seam is wired for that controller, rather than inventing IDs that return 404.
+      # One problem for patient 1, as RpmsRpc::Problem.for_patient returns it.
+      DIABETES = { ien: "7", description: "Diabetes", status: "A", icd_code: "E11.9", inactive_icd: false }.freeze
+
       WIRED_ENDPOINTS = [
         { path: "/lakeraven-ehr/Patient", method: :get, params: { name: "Anderson" } },
         { path: "/lakeraven-ehr/Patient/1", method: :get },
@@ -574,26 +580,31 @@ module Lakeraven
         { path: "/lakeraven-ehr/Immunization", method: :get, params: { patient: "1" } },
         { path: "/lakeraven-ehr/Procedure", method: :get, params: { patient: "1" } },
         { path: "/lakeraven-ehr/AllergyIntolerance/1-7", method: :get, setup: -> {
-          RpmsRpc.client.seed_keyed_collection(:allergy_list, "1", [ { ien: 7, allergen: "Penicillin" } ])
+          RpmsStandIn.answer(RpmsRpc::Allergy, :assessment, 1,
+            with: { assessed: true, nka: false,
+                    allergies: [ { ien: "7", allergen: "Penicillin", severity: nil, signs: nil, altered: false } ] })
         } },
         { path: "/lakeraven-ehr/Condition/1-7", method: :get, setup: -> {
-          RpmsRpc.client.seed_keyed_collection(:problem_list, "1", [ { ien: 7, status: "A", icd_code: "E11.9", description: "Diabetes" } ])
+          RpmsStandIn.answer(RpmsRpc::Problem, :for_patient, 1, with: [ DIABETES ])
         } },
         { path: "/lakeraven-ehr/MedicationRequest/1-7R-O", method: :get, setup: -> {
-          RpmsRpc.client.seed_text(:medication_active, "1", "~OP^7R;O^METFORMIN 500MG TAB^^3271231^1^^^120007^ACTIVE\n")
+          RpmsStandIn.answer(RpmsRpc::Medication, :active_for_patient, 1,
+            with: [ { order_id: "7R;O", type: "OP", name: "METFORMIN 500MG TAB", status: "ACTIVE",
+                      stop_date: Date.new(2027, 12, 31), instructions: [], comments: [] } ])
         } },
         { path: "/lakeraven-ehr/Observation/1-8", method: :get },
         { path: "/lakeraven-ehr/ServiceRequest/1-7", method: :get, setup: -> {
-          RpmsRpc.client.seed_keyed_collection(:referral_search, "1", [ { ien: 7, status: "A", purpose: "Cardiology" } ])
+          RpmsStandIn.answer(RpmsRpc::Referral, :for_patient, 1, with: [ { ien: "7", status: "A", purpose: "Cardiology" } ])
         } },
         { path: "/lakeraven-ehr/Immunization/1-7", method: :get, setup: -> {
-          RpmsRpc.client.seed_keyed_collection(:immunization_list, "1^I", [ { record_type: "I", ien: 7, vaccine_display: "Influenza" } ])
+          RpmsStandIn.answer(RpmsRpc::Immunization, :for_patient, 1, with: [ { ien: "7", vaccine_display: "Influenza" } ])
         } },
         { path: "/lakeraven-ehr/Procedure/1-7", method: :get, setup: -> {
-          RpmsRpc.client.seed_keyed_collection(:procedure_list, "1", [ { ien: 7, name: "Office visit", date: Date.new(2026, 3, 10) } ])
+          RpmsStandIn.answer(RpmsRpc::Procedure, :for_patient, 1, with: [ { ien: "7", name: "Office visit" } ])
         } },
         { path: "/lakeraven-ehr/Encounter/1-7", method: :get, setup: -> {
-          RpmsRpc.client.seed_keyed_collection(:encounter_visit_list, "1", [ { visit_string: "1;3260310.09;A;7", location: "Clinic", category: "AMBULATORY" } ])
+          RpmsStandIn.answer(RpmsRpc::Encounter, :visits, 1,
+            with: [ { location: "Clinic", category: "AMBULATORY", visit_ien: 7, location_ien: 1, service_category: "A" } ])
         } },
         { path: "/lakeraven-ehr/CoverageEligibilityRequest", method: :post, params: { patient_dfn: "1", coverage_type: "medicaid" } },
         { path: "/lakeraven-ehr/MeasureReport", method: :get, params: { patient: "1" } },
@@ -920,6 +931,141 @@ module Lakeraven
         end
       end
 
+      # 42 CFR § 2.32 (#909): no redisclosure path can omit the notice. Every
+      # non-HTML wired endpoint is driven with its own payload labelled Part 2
+      # on the way into the REAL filter. The response is the notice on every
+      # labelled resource, or a 503 with no clinical content.
+      #
+      # The HTML rows (the screenings pages; the chart page has its own tests
+      # above) are excluded from that claim, and are named for what they do
+      # prove. A page shown to the program's own workforce is a USE of the
+      # record inside the program, not a redisclosure to an outside
+      # recipient, so § 2.32 does not require the page to render the notice
+      # and these tests do not look for it in the HTML. They assert only on
+      # the filter output: the view is handed noticed data, or the filter
+      # refused and nothing is rendered.
+      WIRED_ENDPOINTS.each do |endpoint|
+        test_name = endpoint[:name] || endpoint[:path]
+        # Known when the test is named, before a dynamic path is built: the
+        # HTML rows are the browser-session ones. Checked against the path
+        # inside the test, so a row that is named wrongly fails.
+        html_row = endpoint[:session_auth] ? true : false
+        claim = if html_row
+          "Part 2-labelled payload: HTML use path hands the view only noticed or refused data for"
+        else
+          "Part 2-labelled payload leaves noticed or not at all for"
+        end
+
+        test "#{claim} #{endpoint[:method].to_s.upcase} #{test_name}" do
+          instance_exec(&endpoint[:setup]) if endpoint[:setup]
+          path = endpoint[:dynamic_path] ? instance_exec(&endpoint[:dynamic_path]) : endpoint[:path]
+          is_html = path.include?("/patients/") && !path.end_with?(".json")
+          assert_equal html_row, is_html,
+            "#{test_name}: the test name says #{html_row ? 'HTML use' : 'redisclosure'} but the path #{path} says otherwise"
+
+          results = []
+          with_part2_labelled_egress(results) do
+            request_wired_endpoint(endpoint, path)
+          end
+
+          refute_empty results, "#{test_name} did not hand a payload to Part2EgressFilter"
+          if is_html
+            # Workforce use, not a redisclosure (see above): the page is not
+            # required to show the notice. What the view is given is what
+            # the real filter returned: noticed, or nothing.
+            assert_part2_html_noticed_or_refused(test_name, results)
+          else
+            assert_part2_noticed_or_refused(test_name, ndjson: test_name == "exports file show")
+          end
+        end
+      end
+
+      # The proof above accepts a 503, so a filter that refused everything
+      # would pass it. These rows have nothing in them that calls for a
+      # refusal: a labelled read, search and export file must be SERVED, with
+      # the notice on them.
+      PART2_SERVED_ROWS = [ "/lakeraven-ehr/Patient/1", "/lakeraven-ehr/Condition", "exports file show" ].freeze
+
+      # The same rows again with the sensitivity code alone and no system
+      # (`{ "code" => "SUD" }`): a label that is not 42CFRPart2 is served
+      # with the notice at the endpoint too, not only in the filter's tests.
+      PART2_SERVED_LABELS = {
+        "Part 2-labelled" => nil,
+        "SUD-labelled (code only, no system)" => { "code" => "SUD" }.freeze
+      }.freeze
+
+      PART2_SERVED_ROWS.product(PART2_SERVED_LABELS.to_a).each do |row, (label_name, label)|
+        test "#{label_name} payload is served with the notice, not refused, for GET #{row}" do
+          endpoint = WIRED_ENDPOINTS.find { |candidate| (candidate[:name] || candidate[:path]) == row && candidate[:method] == :get }
+          assert endpoint, "#{row} is no longer a WIRED_ENDPOINTS row; name its replacement here"
+          instance_exec(&endpoint[:setup]) if endpoint[:setup]
+          # A search with a match in it, so the label is on an entry and not
+          # only on an empty Bundle.
+          RpmsStandIn.answer(RpmsRpc::Problem, :for_patient, 1, with: [ DIABETES ]) if label
+          path = endpoint[:dynamic_path] ? instance_exec(&endpoint[:dynamic_path]) : endpoint[:path]
+          ndjson = row == "exports file show"
+
+          results = []
+          with_part2_labelled_egress(results, label: label || PART2_TEST_LABEL) { request_wired_endpoint(endpoint, path) }
+
+          refute_empty results, "#{row} did not hand a payload to Part2EgressFilter"
+          refute results.any?(&:nil?), "#{row}: the filter refused a labelled payload it can notice"
+          assert_response :ok, "#{row}: a labelled payload must be served with the notice. Body: #{response.body[0, 300]}"
+          resources = ndjson ? part2_ndjson_resources(response.body) : [ JSON.parse(response.body) ]
+          refute_empty resources, "#{row}: the response has no resource in it"
+          labelled = resources.flat_map { |resource| part2_labelled_resources(resource) }
+          refute_empty labelled, "#{row}: the response has no Part 2-labelled resource, so the label was lost"
+          labelled.each { |resource| assert_part2_noticed(resource, row) }
+          if label
+            carried = labelled.reject { |resource| resource["resourceType"] == "Bundle" }
+            refute_empty carried, "#{row}: no resource in the response carries the #{label.inspect} label"
+            carried.each do |resource|
+              assert_includes resource.dig("meta", "security"), label, "#{row}: the label itself must still be on the resource"
+            end
+          end
+          if ndjson
+            assert_equal resources.size, labelled.size, "#{row}: every line was labelled, so every line is noticed"
+          else
+            assert_part2_noticed(resources.first, row)
+          end
+        end
+      end
+
+      test "the Part 2 test helper matches a label the way the filter does" do
+        [ "42cfrpart2", "SUD ", " eth", "\u00A0SUD", "ETHUD\u200B", "\uFEFFOPIOIDUD", :ETH ].each do |code|
+          assert part2_labelled?({ "meta" => { "security" => [ { "code" => code } ] } }), "#{code.inspect} is a Part 2 label"
+        end
+        [ "N", "SUDS", "METH", nil, "" ].each do |code|
+          refute part2_labelled?({ "meta" => { "security" => [ { "code" => code } ] } }), "#{code.inspect} is not a Part 2 label"
+        end
+      end
+
+      test "Part 2 notice survives _elements subsetting of a search Bundle" do
+        # A search with a match in it: an empty Bundle has no entry to subset.
+        RpmsStandIn.answer(RpmsRpc::Problem, :for_patient, 1, with: [ DIABETES ])
+        results = []
+        with_part2_labelled_egress(results) do
+          get "/lakeraven-ehr/Condition", params: { patient: "1", _elements: "code" }, headers: @headers
+        end
+
+        refute_empty results, "Condition search did not hand a payload to Part2EgressFilter"
+        # Survival, not refusal: a 503 here would prove nothing about
+        # _elements. The subsetted Bundle is served, and it and every entry
+        # still carry the notice.
+        refute results.any?(&:nil?), "the filter refused a labelled search Bundle it can notice"
+        assert_response :ok, "a labelled _elements search must be served with the notice. Body: #{response.body[0, 300]}"
+        bundle = JSON.parse(response.body)
+        assert_equal "Bundle", bundle["resourceType"]
+        assert_part2_noticed(bundle, "Condition search with _elements")
+        entries = Array(bundle["entry"]).filter_map { |entry| entry["resource"] }
+        refute_empty entries, "the _elements search returned no entry, so survival on an entry cannot be proved"
+        entries.each do |resource|
+          assert part2_labelled?(resource), "#{resource['resourceType']}/#{resource['id']}: the Part 2 label was lost in _elements subsetting"
+          assert_part2_noticed(resource, "Condition search with _elements")
+          refute resource.key?("clinicalStatus"), "_elements=code was not applied, so this proves nothing about subsetting"
+        end
+      end
+
       private
 
       # session_auth rows (screenings) authenticate through the browser session
@@ -931,6 +1077,174 @@ module Lakeraven
         yield
       ensure
         filter.define_method(:call, original)
+      end
+
+      PART2_TEST_LABEL = {
+        "system" => "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+        "code" => "42CFRPart2"
+      }.freeze
+
+      def request_wired_endpoint(endpoint, path)
+        if endpoint[:method] == :post
+          post path, params: endpoint[:params],
+            headers: @headers.merge("Content-Type" => endpoint[:content_type] || "application/x-www-form-urlencoded")
+        else
+          get path, params: endpoint[:params], headers: (endpoint[:session_auth] ? {} : @headers)
+        end
+      end
+
+      # Labels every FHIR resource in the payload as Part 2, then runs the
+      # REAL Part2EgressFilter.call on it. `results` collects what the real
+      # filter returned.
+      def with_part2_labelled_egress(results = [], label: PART2_TEST_LABEL, &block)
+        @part2_test_label = label
+        real = Part2EgressFilter.singleton_class.instance_method(:call).bind(Part2EgressFilter)
+        test = self # define_method runs the lambda with the filter class as self
+        stub_egress_filter(->(payload) {
+          result = real.call(test.send(:part2_label_payload, payload))
+          results << result
+          result
+        }, &block)
+      end
+
+      def part2_label_payload(payload)
+        case payload
+        when Hash then part2_label_resource(payload)
+        when String then payload.each_line.map { |line| part2_label_ndjson_line(line) }.join
+        else payload
+        end
+      end
+
+      def part2_label_ndjson_line(line)
+        parsed = JSON.parse(line)
+        return line unless fhir_resource_hash?(parsed)
+
+        part2_label_resource(parsed).to_json + (line.end_with?("\n") ? "\n" : "")
+      rescue JSON::ParserError
+        line
+      end
+
+      def fhir_resource_hash?(value)
+        return false unless value.is_a?(Hash)
+
+        type = value["resourceType"] || value[:resourceType]
+        type.is_a?(String) && !type.empty?
+      end
+
+      # The resource and each Bundle entry resource, in the key style
+      # (string or symbol) the payload already uses. The caller's hash is
+      # left alone.
+      def part2_label_resource(resource)
+        return resource unless fhir_resource_hash?(resource)
+
+        symbols = resource.key?(:resourceType)
+        key = ->(name) { symbols ? name.to_sym : name }
+        test_label = @part2_test_label || PART2_TEST_LABEL
+        label = symbols ? test_label.transform_keys(&:to_sym) : test_label.dup
+
+        labelled = resource.dup
+        meta = labelled[key.("meta")].is_a?(Hash) ? labelled[key.("meta")].dup : {}
+        meta[key.("security")] = Array(meta[key.("security")]) + [ label ]
+        labelled[key.("meta")] = meta
+
+        entries = labelled[key.("entry")]
+        if entries.is_a?(Array)
+          labelled[key.("entry")] = entries.map do |entry|
+            next entry unless entry.is_a?(Hash)
+
+            entry_key = entry.key?(:resource) ? :resource : "resource"
+            entry.merge(entry_key => part2_label_resource(entry[entry_key]))
+          end
+        end
+        labelled
+      end
+
+      # A success whose every labelled resource is noticed, or a 503 with no
+      # clinical content. A success with no labelled resource in it means the
+      # label was lost on the way out, which is a failure too.
+      def assert_part2_noticed_or_refused(row, ndjson:)
+        if response.status == 503
+          assert_part2_refusal_has_no_clinical_content(ndjson: ndjson)
+          return
+        end
+
+        assert_response :success, "#{row}: expected success or 503, got #{response.status}. Body: #{response.body[0, 300]}"
+        resources = ndjson ? part2_ndjson_resources(response.body) : [ JSON.parse(response.body) ]
+        labelled = resources.flat_map { |resource| part2_labelled_resources(resource) }
+        refute_empty labelled, "#{row}: the response has no Part 2-labelled resource, so the notice cannot be proved"
+        labelled.each { |resource| assert_part2_noticed(resource, row) }
+      end
+
+      def assert_part2_html_noticed_or_refused(row, results)
+        if results.any?(&:nil?)
+          assert_response :service_unavailable, "#{row}: the filter refused, so the page must not render"
+          return
+        end
+
+        results.each do |result|
+          labelled = part2_labelled_resources(result.deep_stringify_keys)
+          refute_empty labelled, "#{row}: the filter returned no Part 2-labelled resource, so the notice cannot be proved"
+          labelled.each { |resource| assert_part2_noticed(resource, row) }
+        end
+      end
+
+      def assert_part2_refusal_has_no_clinical_content(ndjson:)
+        if ndjson
+          refute_includes response.body, "resourceType"
+        else
+          body = JSON.parse(response.body)
+          assert_equal "OperationOutcome", body["resourceType"]
+          refute body.key?("entry")
+          refute_includes response.body, "Anderson"
+        end
+      end
+
+      def part2_ndjson_resources(body)
+        body.each_line.map(&:strip).reject(&:empty?).map { |line| JSON.parse(line) }
+      end
+
+      # Every resource in the response whose meta.security holds a Part 2
+      # code: the resource itself, Bundle entries, and contained resources.
+      # A Bundle that holds one counts as well, since the Bundle carries the
+      # notice for what is inside it.
+      def part2_labelled_resources(resource)
+        return [] unless fhir_resource_hash?(resource)
+
+        nested = Array(resource["entry"]).filter_map { |entry| entry["resource"] if entry.is_a?(Hash) } +
+          Array(resource["contained"])
+        inner = nested.flat_map { |child| part2_labelled_resources(child) }
+        own = part2_labelled?(resource) || (resource["resourceType"] == "Bundle" && inner.any?)
+        (own ? [ resource ] : []) + inner
+      end
+
+      def part2_labelled?(resource)
+        security = resource.dig("meta", "security")
+        Array(security).any? { |coding| coding.is_a?(Hash) && part2_code?(coding["code"]) }
+      end
+
+      # The filter's own rule: the code as text, with whitespace (Unicode
+      # spaces and zero-width characters included) taken off both ends,
+      # compared without regard to case.
+      PART2_PADDING = /\A[[:space:]\u200B\u200C\u200D\u2060\uFEFF]+|[[:space:]\u200B\u200C\u200D\u2060\uFEFF]+\z/
+
+      def part2_code?(code)
+        value = code.to_s.gsub(PART2_PADDING, "")
+        Part2RedisclosureNotice::PART2_CODES.any? { |part2| part2.casecmp?(value) }
+      end
+
+      def assert_part2_noticed(resource, row)
+        meta = resource["meta"].is_a?(Hash) ? resource["meta"] : {}
+        where = "#{row}: #{resource['resourceType']}/#{resource['id']}"
+        refrain = Part2RedisclosureNotice::REFRAIN
+        notice = {
+          "url" => Part2RedisclosureNotice::EXTENSION_URL,
+          "valueString" => Part2RedisclosureNotice::TEXT
+        }
+
+        assert Array(meta["security"]).any? { |coding| coding.is_a?(Hash) && coding.slice("system", "code") == refrain },
+          "#{where} is Part 2-labelled and left without the NORDSCLCD refrain coding"
+        assert_includes Array(meta["extension"]), notice,
+          "#{where} is Part 2-labelled and left without the 2.32 notice"
       end
     end
   end

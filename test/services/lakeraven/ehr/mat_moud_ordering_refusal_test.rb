@@ -40,7 +40,7 @@ module Lakeraven
 
       setup do
         @_orig_rpms_client = RpmsRpc.configuration.client
-        RpmsRpc.mock!(&BASELINE_MOCK_SEEDS)
+        RpmsStandIn.install_baseline!
         @_orig_allergy_for_patient = AllergyIntolerance.method(:for_patient)
         AllergyIntolerance.define_singleton_method(:for_patient) { |_dfn| [] }
         @adapter = SpyAdapter.new

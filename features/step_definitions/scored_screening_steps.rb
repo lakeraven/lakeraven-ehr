@@ -12,7 +12,12 @@
 SCREENING_PHQ9 = Lakeraven::EHR::ScreeningInstrument::PHQ9
 SCREENING_GAD7 = Lakeraven::EHR::ScreeningInstrument::GAD7
 SCREENING_MOUNT = "/lakeraven-ehr"
-SCREENING_SCOPES = Lakeraven::EHR::SessionScopePolicy.scope_string(security_keys: [ :behavioral_health_user ])
+# The behavioral health key, plus the Encounter read the form needs to offer
+# the patient's open visits and create needs to accept one of them (#1003).
+SCREENING_SCOPES = [
+  Lakeraven::EHR::SessionScopePolicy.scope_string(security_keys: [ :behavioral_health_user ]),
+  "user/Encounter.rs"
+].join(" ")
 
 module ScreeningStepHelpers
   def instrument_named(name)
@@ -240,8 +245,23 @@ Given("the clinician is signed in") do
   get "#{SCREENING_MOUNT}/login"
   @authenticity_token = last_response.body[/name="csrf-token" content="([^"]+)"/, 1]
 
+  # Opening the record asks RPMS whether it is sensitive first (#613). DFN 123
+  # is not one of the demo patients the shared seeds answer for; it answers
+  # "0", not sensitive, as a broker does for a record with no DG SECURITY flag.
+  SensitivePatientAccessSeeds.seed_not_sensitive!(@dfn)
   post "#{SCREENING_MOUNT}/patients/#{@dfn}/context",
        authenticity_token: @authenticity_token
+
+  # The Background's active encounter, as RpmsRpc::Encounter.visits returns it:
+  # the form submits against one of the patient's open visits (#1003).
+  # Synthetic clinic and provider; checked in today.
+  day = Date.current
+  checked_in_at = Time.new(day.year, day.month, day.day, 9, 30) # rubocop:disable Rails/TimeZone -- rpms-rpc builds visit times with Time.new
+  RpmsStandIn.answer(RpmsRpc::Encounter, :visits, @dfn, with: [
+    { visit_ien: @visit_ien.to_i, location_ien: 40, location: "Riverbend Behavioral Health",
+      service_category: "A", category: "AMBULATORY", datetime: checked_in_at, locked: false,
+      provider_ien: 9001, provider: "TESTPROVIDER,ALPHA" }
+  ])
 end
 
 After do

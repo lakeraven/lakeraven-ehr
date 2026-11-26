@@ -13,9 +13,9 @@ module Lakeraven
       AGET_DFN4 = [ "1^2^3261024.062548", "1;1^13^3261023.2048^^" ].freeze
       UNSIGN_DFN4 = [ "1;1^206^Nursing^0^0^0^0" ].freeze
 
-      def seed_live_replies
-        RpmsRpc.client.seed_raw_lines(:orders_list, "4", AGET_DFN4)
-        RpmsRpc.client.seed_raw_lines(:orders_unsigned, "4", UNSIGN_DFN4)
+      def replay_live_replies
+        RpmsStandIn.connection.replay("ORWORR AGET", AGET_DFN4, first_param: "4")
+        RpmsStandIn.connection.replay("ORWOR UNSIGN", UNSIGN_DFN4, first_param: "4")
       end
 
       # --- via: nil ---
@@ -31,14 +31,14 @@ module Lakeraven
       # --- through RpmsRpc::Order ---
 
       test "unsigned_for_patient sends the patient and reads the order actions" do
-        seed_live_replies
+        replay_live_replies
 
         assert_equal [ { order_id: "1;1", ien: 1, action_ien: 1 } ], OrderGateway.unsigned_for_patient(4)
         assert_equal [ "4" ], RpmsRpc.client.received_calls.last[:params]
       end
 
       test "list sends the active view and the default display group, and reads the rows" do
-        seed_live_replies
+        replay_live_replies
 
         rows = OrderGateway.list(4)
 
@@ -47,7 +47,7 @@ module Lakeraven
       end
 
       test "list passes a named view through to ORWORR AGET" do
-        seed_live_replies
+        replay_live_replies
 
         OrderGateway.list(4, filter: :unsigned, display_group: 13)
 

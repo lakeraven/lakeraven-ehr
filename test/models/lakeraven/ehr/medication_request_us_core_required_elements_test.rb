@@ -7,11 +7,12 @@ module Lakeraven
     class MedicationRequestUsCoreRequiredElementsTest < ActiveSupport::TestCase
       DATA_ABSENT_REASON_URL = "http://hl7.org/fhir/StructureDefinition/data-absent-reason"
 
-      # One ORWPS ACTIVE outpatient order, parsed by rpms-rpc: the row the
-      # gateway hands from_rpms_row.
-      def wire_medication_row(stop: "", status: "ACTIVE")
-        RpmsRpc.client.seed_text(:medication_active, "1",
-          "~OP^42R;O^METFORMIN 500MG TAB^^#{stop}^2^^^120042^#{status}\n\\ Sig: TAKE 1 TABLET BY MOUTH TWICE A DAY")
+      # One outpatient order as RpmsRpc::Medication.active_for_patient returns
+      # it: the row the gateway hands from_rpms_row.
+      def active_medication_row(stop: nil, status: "ACTIVE")
+        RpmsStandIn.answer(RpmsRpc::Medication, :active_for_patient, "1",
+          with: [ { order_id: "42R;O", type: "OP", name: "METFORMIN 500MG TAB", status: status, stop_date: stop,
+                    instructions: [ "Sig: TAKE 1 TABLET BY MOUTH TWICE A DAY" ], comments: [] } ])
         MedicationRequest.for_patient("1").first
       end
 
@@ -124,7 +125,7 @@ module Lakeraven
       end
 
       test "from_rpms_row serialization includes every US Core 3.1.1 required MedicationRequest element" do
-        mr = MedicationRequest.from_rpms_row(wire_medication_row, patient_dfn: "1")
+        mr = MedicationRequest.from_rpms_row(active_medication_row, patient_dfn: "1")
         fhir = mr.to_fhir
 
         assert_equal "MedicationRequest", fhir[:resourceType]
@@ -138,7 +139,7 @@ module Lakeraven
       end
 
       test "from_rpms_row does not map stop_date to authoredOn, status, or dispense validityPeriod" do
-        row = wire_medication_row(stop: "3250101", status: "")
+        row = active_medication_row(stop: Date.new(2025, 1, 1), status: nil)
         assert_equal Date.new(2025, 1, 1), row[:stop_date]
 
         fhir = MedicationRequest.from_rpms_row(row, patient_dfn: "1").to_fhir

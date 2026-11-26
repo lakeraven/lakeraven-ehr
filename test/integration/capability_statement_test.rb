@@ -74,26 +74,27 @@ class CapabilityStatementTest < ActionDispatch::IntegrationTest
       assert_refused("Observation", patient: "1", date: "soon")
     },
     %w[Procedure date] => lambda {
-      RpmsRpc.client.seed_keyed_collection(:procedure_list, "1", [ { ien: 7001, name: "Office visit", date: "03/10/2026",
-                                                                     provider: "MARTINEZ,SARAH", status: "C" } ])
+      RpmsStandIn.answer(RpmsRpc::Procedure, :for_patient, 1,
+        with: [ { ien: "7001", name: "Office visit", date: Date.new(2026, 3, 10), provider: "MARTINEZ,SARAH" } ])
       assert_equal %w[1-7001], search_ids("Procedure", patient: "1", date: "2026-03")
       assert_equal %w[1-7001], search_ids("Procedure", patient: "1", date: "le2026-03-10")
       assert_empty search_ids("Procedure", patient: "1", date: "gt2026-03-31")
     },
     %w[Encounter date] => lambda {
-      RpmsRpc.client.seed_keyed_collection(:encounter_visit_list, "1", [ { visit_string: "1;3260310.09;A;11", location: "Clinic",
-                                                                           category: "AMBULATORY", datetime: Time.new(2026, 3, 10, 9, 0, 0) } ])
+      RpmsStandIn.answer(RpmsRpc::Encounter, :visits, 1,
+        with: [ { location: "Clinic", category: "AMBULATORY", datetime: Time.new(2026, 3, 10, 9, 0, 0),
+                  visit_ien: 11, location_ien: 1, service_category: "A" } ])
       refute_empty search_ids("Encounter", patient: "1", date: "ge2026-03-10")
       assert_empty search_ids("Encounter", patient: "1", date: "lt2026-03-01")
     },
     %w[Immunization date] => lambda {
-      RpmsRpc.client.seed_keyed_collection(:immunization_list, "1^I", [ { record_type: "I", ien: 1, vaccine_display: "COVID-19 Vaccine",
-                                                                          occurrence_datetime: DateTime.new(2026, 1, 15, 9, 0, 0) } ])
+      RpmsStandIn.answer(RpmsRpc::Immunization, :for_patient, 1,
+        with: [ { ien: "1", vaccine_display: "COVID-19 Vaccine", occurrence_datetime: Time.new(2026, 1, 15, 9, 0, 0) } ])
       refute_empty search_ids("Immunization", patient: "1", date: "2026")
       assert_empty search_ids("Immunization", patient: "1", date: "2025")
     },
     %w[ServiceRequest authored] => lambda {
-      RpmsRpc.client.seed_keyed_collection(:referral_search, "1", [ { ien: 41, date: Date.new(2026, 3, 10), status: "A" } ])
+      RpmsStandIn.answer(RpmsRpc::Referral, :for_patient, 1, with: [ { ien: "41", date: Date.new(2026, 3, 10), status: "A" } ])
       refute_empty search_ids("ServiceRequest", patient: "1", authored: "2026-03-10")
       assert_empty search_ids("ServiceRequest", patient: "1", authored: "eb2026-01-01")
     },
@@ -107,10 +108,12 @@ class CapabilityStatementTest < ActionDispatch::IntegrationTest
       refute_includes ids, theirs.id.to_s
     },
     %w[MedicationRequest status] => lambda {
-      RpmsRpc.client.seed_text(:medication_active, "1", <<~WIRE)
-        ~OP^1R;O^LISINOPRIL 10MG TAB^^3271231^3^^^120001^ACTIVE
-        ~OP^2R;O^METFORMIN 500MG TAB^^3271231^1^^^120002^DISCONTINUED
-      WIRE
+      RpmsStandIn.answer(RpmsRpc::Medication, :active_for_patient, 1, with: [
+        { order_id: "1R;O", type: "OP", name: "LISINOPRIL 10MG TAB", status: "ACTIVE", stop_date: Date.new(2027, 12, 31),
+          instructions: [], comments: [] },
+        { order_id: "2R;O", type: "OP", name: "METFORMIN 500MG TAB", status: "DISCONTINUED", stop_date: Date.new(2027, 12, 31),
+          instructions: [], comments: [] }
+      ])
       assert_equal %w[1-1R-O], search_ids("MedicationRequest", patient: "1", status: "active")
       assert_equal %w[1-2R-O], search_ids("MedicationRequest", patient: "1", status: "stopped")
       assert_equal %w[1-1R-O], search_ids("MedicationRequest", patient: "1",
@@ -120,7 +123,10 @@ class CapabilityStatementTest < ActionDispatch::IntegrationTest
     # US Core 6.1.0's mandatory MedicationRequest search is patient + intent
     # (Inferno (g)(10), single patient API).
     %w[MedicationRequest intent] => lambda {
-      RpmsRpc.client.seed_text(:medication_active, "1", "~OP^1R;O^LISINOPRIL 10MG TAB^^3271231^3^^^120001^ACTIVE\n")
+      RpmsStandIn.answer(RpmsRpc::Medication, :active_for_patient, 1, with: [
+        { order_id: "1R;O", type: "OP", name: "LISINOPRIL 10MG TAB", status: "ACTIVE", stop_date: Date.new(2027, 12, 31),
+          instructions: [], comments: [] }
+      ])
       assert_equal %w[1-1R-O], search_ids("MedicationRequest", patient: "1", intent: "order")
       assert_equal %w[1-1R-O], search_ids("MedicationRequest", patient: "1", intent: "plan,order")
       assert_equal %w[1-1R-O], search_ids("MedicationRequest", patient: "1",
@@ -136,9 +142,9 @@ class CapabilityStatementTest < ActionDispatch::IntegrationTest
       assert_refused("Location", name: "")
     },
     %w[Encounter _id] => lambda {
-      RpmsRpc.client.seed_keyed_collection(:encounter_visit_list, "1", [
-        { visit_string: "1;3260310.09;A;11", location: "Clinic", category: "AMBULATORY" },
-        { visit_string: "1;3260311.09;A;12", location: "Clinic", category: "AMBULATORY" }
+      RpmsStandIn.answer(RpmsRpc::Encounter, :visits, 1, with: [
+        { location: "Clinic", category: "AMBULATORY", visit_ien: 11, location_ien: 1, service_category: "A" },
+        { location: "Clinic", category: "AMBULATORY", visit_ien: 12, location_ien: 1, service_category: "A" }
       ])
       assert_equal %w[1-11], search_ids("Encounter", _id: "1-11")
       assert_equal %w[1-12], search_ids("Encounter", _id: "1-12", patient: "1")
@@ -146,23 +152,23 @@ class CapabilityStatementTest < ActionDispatch::IntegrationTest
       assert_empty search_ids("Encounter", _id: "not-an-id")
     },
     %w[ServiceRequest _id] => lambda {
-      RpmsRpc.client.seed_keyed_collection(:referral_search, "1", [ { ien: 11, status: "A", purpose: "Cardiology" } ])
+      RpmsStandIn.answer(RpmsRpc::Referral, :for_patient, 1, with: [ { ien: "11", status: "A", purpose: "Cardiology" } ])
       assert_equal %w[1-11], search_ids("ServiceRequest", _id: "1-11")
       assert_empty search_ids("ServiceRequest", _id: "1-12")
     },
     %w[ServiceRequest category] => lambda {
-      RpmsRpc.client.seed_keyed_collection(:referral_search, "1", [ { ien: 11, status: "A", purpose: "Cardiology" } ])
+      RpmsStandIn.answer(RpmsRpc::Referral, :for_patient, 1, with: [ { ien: "11", status: "A", purpose: "Cardiology" } ])
       assert_equal %w[1-11], search_ids("ServiceRequest", patient: "1", category: "http://snomed.info/sct|3457005")
       assert_empty search_ids("ServiceRequest", patient: "1", category: "108252007")
     },
     %w[ServiceRequest code] => lambda {
-      RpmsRpc.client.seed_keyed_collection(:referral_search, "1", [ { ien: 11, status: "A", purpose: "Cardiology" } ])
+      RpmsStandIn.answer(RpmsRpc::Referral, :for_patient, 1, with: [ { ien: "11", status: "A", purpose: "Cardiology" } ])
       assert_equal %w[1-11], search_ids("ServiceRequest", patient: "1", code: "3457005")
       assert_empty search_ids("ServiceRequest", patient: "1", code: "http://example.org/other|3457005")
     },
     %w[Condition category] => lambda {
-      RpmsRpc.client.seed_keyed_collection(:problem_list, "1", [
-        { ien: 11, status: "A", icd_code: "E11.9", description: "Type 2 diabetes" }
+      RpmsStandIn.answer(RpmsRpc::Problem, :for_patient, 1, with: [
+        { ien: "11", status: "A", icd_code: "E11.9", description: "Type 2 diabetes", inactive_icd: false }
       ])
       assert_equal %w[1-11], search_ids("Condition", patient: "1", category: "problem-list-item")
       assert_equal %w[1-11], search_ids("Condition", patient: "1",
@@ -171,9 +177,9 @@ class CapabilityStatementTest < ActionDispatch::IntegrationTest
       assert_empty search_ids("Condition", patient: "1", category: "|problem-list-item")
     },
     %w[Condition clinical-status] => lambda {
-      RpmsRpc.client.seed_keyed_collection(:problem_list, "1", [
-        { ien: 11, status: "A", icd_code: "E11.9", description: "Type 2 diabetes" },
-        { ien: 12, status: "I", icd_code: "J45.909", description: "Asthma" }
+      RpmsStandIn.answer(RpmsRpc::Problem, :for_patient, 1, with: [
+        { ien: "11", status: "A", icd_code: "E11.9", description: "Type 2 diabetes", inactive_icd: false },
+        { ien: "12", status: "I", icd_code: "J45.909", description: "Asthma", inactive_icd: false }
       ])
       assert_equal %w[1-11], search_ids("Condition", patient: "1", "clinical-status": "active")
       assert_equal %w[1-12], search_ids("Condition", patient: "1",
@@ -183,9 +189,9 @@ class CapabilityStatementTest < ActionDispatch::IntegrationTest
       assert_equal %w[1-11], search_ids("Condition", patient: "1", category: "problem-list-item", "clinical-status": "active")
     },
     %w[AllergyIntolerance clinical-status] => lambda {
-      RpmsRpc.client.seed_keyed_collection(:allergy_list, "1", [
-        { allergen: "Penicillin", reaction: "Hives", severity: "moderate" }
-      ])
+      RpmsStandIn.answer(RpmsRpc::Allergy, :assessment, 1, with: { assessed: true, nka: false, allergies: [
+        { ien: "11", allergen: "Penicillin", severity: "moderate", signs: "Hives", altered: false }
+      ] })
       assert_equal 1, search_resources("AllergyIntolerance", patient: "1", "clinical-status": "active").length
       assert_equal 1, search_resources("AllergyIntolerance", patient: "1",
                                        "clinical-status": "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical|active").length
@@ -195,23 +201,48 @@ class CapabilityStatementTest < ActionDispatch::IntegrationTest
   }.freeze
 
   # The patient compartment parameter: required, and it selects the patient.
-  # Where the mock backend can hold a row for patient 1, patient 3 must not
-  # see it.
+  # Where a test here gives patient 1 a row, patient 3 must not see it. Each
+  # is what the rpms-rpc read the type's gateway makes returns for patient 1.
   PATIENT_SEEDS = {
-    "AllergyIntolerance" => [ :allergy_list, { allergen: "Penicillin", reaction: "Hives", severity: "moderate" } ],
-    "Condition" => [ :problem_list, { ien: 11, status: "A", icd_code: "E11.9", description: "Type 2 diabetes" } ],
-    "MedicationRequest" => [ :medication_active, "~OP^11R;O^METFORMIN 500MG TAB^^3271231^1^^^120011^ACTIVE\n" ],
-    "Procedure" => [ :procedure_list, { ien: 7001, name: "Office visit", date: Date.new(2026, 3, 10),
-                                        provider: "MARTINEZ,SARAH", status: "C" } ]
+    "AllergyIntolerance" => -> {
+      RpmsStandIn.answer(RpmsRpc::Allergy, :assessment, 1, with: { assessed: true, nka: false, allergies: [
+        { ien: "11", allergen: "Penicillin", severity: "moderate", signs: "Hives", altered: false }
+      ] })
+    },
+    "Condition" => -> {
+      RpmsStandIn.answer(RpmsRpc::Problem, :for_patient, 1, with: [
+        { ien: "11", status: "A", icd_code: "E11.9", description: "Type 2 diabetes", inactive_icd: false }
+      ])
+    },
+    "MedicationRequest" => -> {
+      RpmsStandIn.answer(RpmsRpc::Medication, :active_for_patient, 1, with: [
+        { order_id: "11R;O", type: "OP", name: "METFORMIN 500MG TAB", status: "ACTIVE", stop_date: Date.new(2027, 12, 31),
+          instructions: [], comments: [] }
+      ])
+    },
+    "Procedure" => -> {
+      RpmsStandIn.answer(RpmsRpc::Procedure, :for_patient, 1,
+        with: [ { ien: "7001", name: "Office visit", date: Date.new(2026, 3, 10), provider: "MARTINEZ,SARAH" } ])
+    }
   }.freeze
 
   READ_SEEDS = PATIENT_SEEDS.merge(
-    "AllergyIntolerance" => [ :allergy_list, { ien: 11, allergen: "Penicillin" } ],
-    "ServiceRequest" => [ :referral_search, { ien: 11, status: "A", purpose: "Cardiology" } ],
-    "Immunization" => [ :immunization_list, { record_type: "I", ien: 11, vaccine_display: "Influenza" } ],
-    "Encounter" => [ :encounter_visit_list, { visit_string: "1;3260310.09;A;11", location: "Clinic", category: "AMBULATORY" } ]
+    "AllergyIntolerance" => -> {
+      RpmsStandIn.answer(RpmsRpc::Allergy, :assessment, 1, with: { assessed: true, nka: false, allergies: [
+        { ien: "11", allergen: "Penicillin", severity: nil, signs: nil, altered: false }
+      ] })
+    },
+    "ServiceRequest" => -> {
+      RpmsStandIn.answer(RpmsRpc::Referral, :for_patient, 1, with: [ { ien: "11", status: "A", purpose: "Cardiology" } ])
+    },
+    "Immunization" => -> {
+      RpmsStandIn.answer(RpmsRpc::Immunization, :for_patient, 1, with: [ { ien: "11", vaccine_display: "Influenza" } ])
+    },
+    "Encounter" => -> {
+      RpmsStandIn.answer(RpmsRpc::Encounter, :visits, 1,
+        with: [ { location: "Clinic", category: "AMBULATORY", visit_ien: 11, location_ien: 1, service_category: "A" } ])
+    }
   ).freeze
-  READ_SEED_KEYS = { "Immunization" => "1^I" }.freeze
 
   setup do
     setup_smart_auth(scopes: "system/*.*")
@@ -245,7 +276,7 @@ class CapabilityStatementTest < ActionDispatch::IntegrationTest
     assert_equal "http://www.example.com#{ENGINE}", statement.dig("implementation", "url")
   end
 
-  test "the in-process mock backend is disclosed as synthetic data" do
+  test "the in-process stand-in backend is disclosed as synthetic data" do
     get METADATA
 
     assert_includes statement.dig("implementation", "description"), "synthetic"
@@ -310,13 +341,7 @@ class CapabilityStatementTest < ActionDispatch::IntegrationTest
   end
 
   test "the patient parameter is required and selects the patient" do
-    PATIENT_SEEDS.each do |type, (collection, row)|
-      if row.is_a?(String)
-        RpmsRpc.client.seed_text(collection, "1", row)
-      else
-        RpmsRpc.client.seed_keyed_collection(collection, "1", [ row ])
-      end
-    end
+    PATIENT_SEEDS.each_value(&:call)
 
     patient_compartment_types.each do |type|
       get "#{ENGINE}/#{type}", headers: @headers
@@ -476,11 +501,7 @@ class CapabilityStatementTest < ActionDispatch::IntegrationTest
 
   # A search hands back the id a read takes (FHIR::PatientScopedId).
   def patient_scoped_read_probe_id(type)
-    collection, row = READ_SEEDS.fetch(type) { return search_ids(type, patient: "1").first }
-    case row
-    when String then RpmsRpc.client.seed_text(collection, "1", row)
-    else RpmsRpc.client.seed_keyed_collection(collection, READ_SEED_KEYS.fetch(type, "1"), [ row ])
-    end
+    READ_SEEDS[type]&.call
     search_ids(type, patient: "1").first
   end
 

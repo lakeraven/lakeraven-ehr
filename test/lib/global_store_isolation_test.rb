@@ -3,7 +3,7 @@
 require "test_helper"
 
 # Process-global singletons (provenance, bulk exports, login throttle, CDS
-# overrides, RpmsRpc mock seeds) survive from one example to the next unless
+# overrides, the RPMS stand-in's answers) survive from one example to the next unless
 # the suite resets them. i_suck_and_my_tests_are_order_dependent! runs
 # examples alphabetically so test_2 always follows test_1.
 module GlobalStoreIsolationTestHelpers
@@ -38,7 +38,7 @@ module GlobalStoreIsolationTestHelpers
       ISOLATION_CDS_RULE, false, provider_duz: "synthetic-provider"
     )
 
-    RpmsRpc.client.seed_keyed_collection(:referral_search, BASELINE_PATIENT_DFN.to_s, [
+    RpmsStandIn.answer(RpmsRpc::Referral, :for_patient, BASELINE_PATIENT_DFN, with: [
       { ien: ISOLATION_REFERRAL_IEN, patient_dfn: BASELINE_PATIENT_DFN, status: "active", type: "C",
         date: Date.new(2026, 2, 1), provider: "SYNTHETIC,PROVIDER" }
     ])
@@ -57,7 +57,7 @@ module GlobalStoreIsolationTestHelpers
 
     referrals = Lakeraven::EHR::ServiceRequestGateway.for_patient(BASELINE_PATIENT_DFN)
     assert referrals.any? { |row| row[:ien].to_s == ISOLATION_REFERRAL_IEN },
-           "RpmsRpc mock should return the synthetic referral seed within the same example"
+           "The RPMS stand-in should give the synthetic referral answer within the same example"
   end
 
   def assert_process_global_state_reset!(provenance_target_id:)
@@ -73,13 +73,13 @@ module GlobalStoreIsolationTestHelpers
 
     referrals = Lakeraven::EHR::ServiceRequestGateway.for_patient(BASELINE_PATIENT_DFN)
     refute referrals.any? { |row| row[:ien].to_s == ISOLATION_REFERRAL_IEN },
-           "RpmsRpc mock client leaked a referral_search seed from a prior test; suite results depend on test order"
+           "The RPMS stand-in leaked a referral answer from a prior test; suite results depend on test order"
 
     patient = Lakeraven::EHR::PatientGateway.find(BASELINE_PATIENT_DFN)
     assert_not_nil patient,
-                   "Baseline mock patient seed was wiped by an over-broad reset; suite results depend on test order"
+                   "The stand-in's baseline patient answer was wiped by an over-broad reset; suite results depend on test order"
     assert_equal BASELINE_PATIENT_NAME, patient.name,
-                 "Baseline mock patient_select seed was wiped by an over-broad reset; suite results depend on test order"
+                 "The stand-in's baseline patient answer was wiped by an over-broad reset; suite results depend on test order"
   end
 end
 

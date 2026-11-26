@@ -90,7 +90,7 @@ module Lakeraven
         # current site in a one-element Array for backward compat.
         skip "Requires RpmsRpc::Site (lakeraven/rpms-rpc#100)" unless SiteGateway.default_provider
 
-        RpmsRpc.client.seed_lines(:site_info, "", {
+        RpmsStandIn.answer(RpmsRpc::Site, :current, "301", with: {
           domain: "RPMS.LAKERAVEN.COM", name: "TEST SERVICE UNIT",
           abbreviation: "TSU", state: "AK", address: "1 Test St",
           city: "TestCity", zip: "99501", ien: 539
