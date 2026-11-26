@@ -1,0 +1,43 @@
+<% page_title "Vaccines due" %>
+
+<%= page_header "Vaccines due",
+      [ "The vaccines this patient is due for, from RPMS's immunization forecast." ] %>
+
+<% if @no_forecast %>
+  <%= alert_box :error,
+        "RPMS did not produce an immunization forecast for this patient, so no vaccine is listed as due.",
+        "The Immunization package says: “#{@no_forecast[:reason]}”#{" (error #{@no_forecast[:code]})" if @no_forecast[:code]}.",
+        "Check the patient's immunization history before deciding what to give.",
+        id: "immunization-forecast-unavailable" %>
+<% elsif @due.empty? %>
+  <%= empty_state "RPMS's forecast lists no vaccine due for this patient.",
+        id: "immunization-forecast-none-due" %>
+<% else %>
+  <table
+    id="immunization-forecast"
+    class="data-table"
+  >
+    <caption class="sr-only">
+      <%= pluralize(@due.size, "vaccine") %> due.
+    </caption>
+    <thead>
+      <tr>
+        <th scope="col">Vaccine</th>
+        <th scope="col">Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% @due.each do |row| %>
+        <tr>
+          <th scope="row"><%= row[:vaccine] %></th>
+          <td data-status>
+            <%= row[:status].capitalize %>
+            <% if row[:risk_based] %>
+              <span class="block text-sm text-slate-600">Risk based.</span>
+            <% end %>
+          </td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+<% end %>

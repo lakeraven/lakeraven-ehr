@@ -220,6 +220,9 @@ module Lakeraven
         "lakeraven/ehr/value_sets#index",     # Terminology
         "lakeraven/ehr/value_sets#show",      # Terminology
         "lakeraven/ehr/value_sets#expand",    # Terminology
+        "lakeraven/ehr/diagnosis_searches#show",    # Terminology: SNOMED CT concepts from RPMS's BSTS, no patient
+        "lakeraven/ehr/diagnosis_searches#concept", # Terminology: one concept's detail, no patient
+        "lakeraven/ehr/immunization_forecasts#show", # Vaccine names due from RPMS's forecast, or its reason; no Part 2 content; revisit with Part 2 (#494)
         "lakeraven/ehr/measures#index",       # Measure definitions
         "lakeraven/ehr/measures#import"       # Measure definitions
       ].freeze

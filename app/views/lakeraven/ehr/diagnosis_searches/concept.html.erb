@@ -1,0 +1,27 @@
+<% page_title @concept[:preferred_term], "Find a diagnosis" %>
+
+<%= page_header @concept[:preferred_term],
+      [ "SNOMED CT concept #{@concept[:concept_id]}, as RPMS's terminology holds it." ] %>
+
+<dl
+  id="diagnosis-concept"
+  class="detail-list"
+>
+  <dt>Fully specified name</dt>
+  <dd data-fsn><%= @concept[:fsn] %></dd>
+  <dt>SNOMED CT concept</dt>
+  <dd data-snomed><%= @concept[:concept_id] %></dd>
+  <dt>ICD-10-CM</dt>
+  <dd data-icd><%= @concept[:icd].presence&.join(", ") || "None mapped" %></dd>
+  <dt>Default status on the problem list</dt>
+  <dd data-default-status><%= @concept[:default_status].presence || "None" %></dd>
+  <dt>Asks for laterality</dt>
+  <dd data-laterality><%= @concept[:prompt_laterality] ? "Yes" : "No" %></dd>
+  <dt>Can be chosen as a diagnosis</dt>
+  <dd data-selectable><%= @concept[:selectable] ? "Yes" : "No" %></dd>
+</dl>
+
+<p>
+  <%= link_to "Back to Find a diagnosis",
+        diagnosis_search_path %>
+</p>
