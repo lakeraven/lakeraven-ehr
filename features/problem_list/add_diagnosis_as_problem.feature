@@ -14,7 +14,7 @@ Feature: Add the diagnosis a provider found as a problem, and as today's purpose
   # with none), and remove what they filed.
 
   @live
-  Scenario: The provider adds the diagnosis as a problem and today's purpose of visit (rpms-ux S-VIS-02.2)
+  Scenario: The provider adds the diagnosis as a problem and today's purpose of visit (rpms-ux S-VIS-02.2) (whole Then)
     Given patient "990022", whom this feature owns, has an open visit today
     And the provider has signed on as "PMD123" and opened the record of patient "990022"
     When the provider finds "major depress" and opens the SNOMED CT concept "370143000"
@@ -28,7 +28,7 @@ Feature: Add the diagnosis a provider found as a problem, and as today's purpose
     And the patient's chart lists the problem "Major depressive disorder"
 
   @live
-  Scenario: With the box cleared only the problem is added (rpms-ux S-VIS-02.3)
+  Scenario: With the box cleared only the problem is added (rpms-ux S-VIS-02.3) (whole Then)
     Given patient "990022", whom this feature owns, has an open visit today
     And the provider has signed on as "PMD123" and opened the record of patient "990022"
     When the provider finds "generalized anxiety" and opens the SNOMED CT concept "21897009"
@@ -39,7 +39,7 @@ Feature: Add the diagnosis a provider found as a problem, and as today's purpose
     And RPMS holds no purpose of visit on today's visit for that problem
 
   @live
-  Scenario: A concept BSTS maps to two ICD-10-CM codes carries both (rpms-ux S-VIS-02.2)
+  Scenario: A concept BSTS maps to two ICD-10-CM codes carries both (rpms-ux S-VIS-02.2) (whole Then)
     Given patient "990022", whom this feature owns, has an open visit today
     And the provider has signed on as "PMD123" and opened the record of patient "990022"
     When the provider finds "diabetic nephropathy" and opens the SNOMED CT concept "421986006"

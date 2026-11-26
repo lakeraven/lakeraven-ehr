@@ -3,7 +3,8 @@
 
 # This repo's rows of the rpms-ux test plan: docs/product-cycle/tests/lakeraven-ehr.tsv
 # (rpms-ux IMPLEMENTATIONS.md, "Producers"). One row per scenario a test names in its
-# title, read from the tests themselves, so the plan cannot drift from them.
+# title, read from the tests themselves, so the plan cannot drift from them: minitest's
+# `test "..."` titles and cucumber's `Scenario:` titles.
 #
 #   bin/scenario-plan                  print the rows
 #   bin/scenario-plan --write RPMS_UX  write them into an rpms-ux checkout
@@ -57,20 +58,42 @@ def persona(body, file)
   "-"
 end
 
-def rows(root)
+def row(id, title, as, spec)
+  proves = title.include?("(whole Then)") ? "full" : "partial"
+  [ id, proves, "lakeraven-ehr", "written", as, "lakeraven-ehr", spec, title ]
+end
+
+# Minitest: one row per scenario a `test "..."` title names.
+def test_rows(root)
   Dir.glob("test/**/*_test.rb", base: root).sort.flat_map do |path|
     lines = File.readlines(File.join(root, path))
     starts = lines.each_index.select { |i| lines[i].match?(/^\s*test "/) }
     starts.each_with_index.flat_map do |start, n|
       title = lines[start][/test "(.*)" do/, 1].to_s
       body = lines[start...(starts[n + 1] || lines.size)].join
-      scenario_ids(title).map do |id|
-        proves = title.include?("(whole Then)") ? "full" : "partial"
-        [ id, proves, "lakeraven-ehr", "written", persona(body, lines.join), "lakeraven-ehr", "#{path}:#{start + 1}", title ]
-      end
+      scenario_ids(title).map { |id| row(id, title, persona(body, lines.join), "#{path}:#{start + 1}") }
     end
   end
 end
+
+# Cucumber: one row per scenario a `Scenario:` title names, the same way ("(rpms-ux
+# S-VIS-02.2)"). as is the demo persona a step signs on as by its access code
+# ('signed on as "PMD123"'), or "-".
+SCENARIO = /^\s*Scenario(?: Outline)?:\s*(.*?)\s*$/
+def feature_rows(root)
+  Dir.glob("features/**/*.feature", base: root).sort.flat_map do |path|
+    lines = File.readlines(File.join(root, path))
+    starts = lines.each_index.select { |i| lines[i].match?(SCENARIO) }
+    starts.each_with_index.flat_map do |start, n|
+      title = lines[start][SCENARIO, 1]
+      body = lines[start...(starts[n + 1] || lines.size)].join
+      access = body[/signed on as "(P[A-Z]+123)"/, 1]
+      scenario_ids(title).map { |id| row(id, title, PERSONA_BY_ACCESS.fetch(access, "-"), "#{path}:#{start + 1}") }
+    end
+  end
+end
+
+def rows(root) = test_rows(root) + feature_rows(root)
 
 def tsv(rows) = ([ COLUMNS ] + rows).map { |r| r.join("\t") }.join("\n") + "\n"
 
