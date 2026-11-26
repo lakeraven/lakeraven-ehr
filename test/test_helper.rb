@@ -121,12 +121,13 @@ else
   Lakeraven::EHR::SiteTime.reader = -> { Time.now } if defined?(Lakeraven::EHR::SiteTime)
 end
 
-# Scripted RPC broker for the BPRM reg/sched/ADT twin gateway tests.
+# A scripted RPC client, for the tests whose subject is the client itself: the
+# audited wrapper (AuditedBroker, RpcSupport.broker), the backend registry, a
+# backend that must not be called, and the few that check what the real gem
+# sends. A test of what a gateway answers states it on RpmsStandIn instead.
 #
-# The reg/sched gateways call RpmsRpc.client.call_rpc(rpc_name, *params)
-# directly and parse the caret response, so a gateway unit test just needs a
-# client that (a) records the calls it received and (b) returns a scripted
-# response per RPC name. `on(rpc, *responses)` queues responses (a single
+# It records the calls it received and returns a scripted response per RPC
+# name. `on(rpc, *responses)` queues responses (a single
 # response is reused for every call; multiple are consumed in order — handy
 # for composite flows like rebook). `raise_with` simulates a broker-unreachable
 # socket error. Swap it in with `use_broker(fake) { ... }` from a test.

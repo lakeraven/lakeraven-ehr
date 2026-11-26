@@ -6,7 +6,6 @@ module Lakeraven
   module EHR
     class TreatmentPlanServiceTest < ActiveSupport::TestCase
       include ActiveSupport::Testing::TimeHelpers
-      include BrokerStubbing
 
       PROGRAM = "bh_outpatient"
       DFN = 1
@@ -37,13 +36,11 @@ module Lakeraven
       end
 
       test "creating a plan persists in Postgres and issues no RPMS RPC" do
-        use_broker(FakeBroker.new) do |broker|
-          result = create_plan
+        result = create_plan
 
-          assert result.success?, result.error.inspect
-          assert_equal 1, TreatmentPlan.count
-          assert_empty broker.calls, "treatment plans must not write to shared RPMS files (#560)"
-        end
+        assert result.success?, result.error.inspect
+        assert_equal 1, TreatmentPlan.count
+        assert_empty RpmsRpc.client.received_calls, "treatment plans must not write to shared RPMS files (#560)"
       end
 
       test "creating a plan computes review due dates from configured intervals" do
