@@ -52,6 +52,10 @@ module Lakeraven
         render template: "lakeraven/ehr/patient_contexts/new", status: :forbidden
         false
       end
+
+      # A patient-scoped SMART token reads only its own patient
+      # (SmartAuthentication#authorize_patient_context!): the record the route names.
+      def enforce_token_patient_context! = authorize_patient_context!(params[:dfn])
     end
   end
 end

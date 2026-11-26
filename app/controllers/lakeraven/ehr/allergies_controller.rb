@@ -107,8 +107,6 @@ module Lakeraven
         can_read?(ALLERGY_RESOURCE) && capability?("allergy.record")
       end
 
-      def enforce_token_patient_context! = authorize_patient_context!(params[:dfn])
-
       def require_clinician_credential!
         return true if current_duz.present?
 

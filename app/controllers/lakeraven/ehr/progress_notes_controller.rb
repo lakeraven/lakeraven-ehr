@@ -151,8 +151,6 @@ module Lakeraven
         @dfn = params[:dfn]
       end
 
-      def enforce_token_patient_context! = authorize_patient_context!(params[:dfn])
-
       # The author is the sign-on credential's own DUZ, and it must be the
       # session's: the two are minted together, so a difference is refused.
       def require_clinician_credential!

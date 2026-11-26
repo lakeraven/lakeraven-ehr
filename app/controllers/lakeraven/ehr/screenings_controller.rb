@@ -340,8 +340,6 @@ module Lakeraven
         false
       end
 
-      def enforce_token_patient_context! = authorize_patient_context!(params[:dfn])
-
       # The DUZ follows the TOKEN, never the ambient session: the identity a
       # write is signed under has to come from the same credential the
       # authorization was decided by, or the record disagrees with the
