@@ -9,6 +9,15 @@ module Lakeraven
     # code before any sign action reaches the record — an invalid code
     # never touches the note.
     #
+    # 42 CFR Part 2 (#906, slice of #522): substance-use content in a note is
+    # LABELLED, never blocked. Once the gateway has given the note its IEN,
+    # and before the text is written, text that SudContentSuspicion reads as
+    # :suspected or :unclassified gets a Part2Label row. A failed label write
+    # does not stop the note (part2_label is :label_failed, on the Result and
+    # on the instance); the controller records it in the note submission's
+    # audit row, and read-time Part2Posture still treats an unlabelled
+    # suspected note as Part 2.
+    #
     # ESignatureGateway.validate answers what RpmsRpc::ESignature.validate
     # answers: true when RPMS accepts the code, false when it does not. Only
     # true is an accepted code. Any other answer (nil, a hash, a string) is a
@@ -48,6 +57,8 @@ module Lakeraven
     # the success row fails after the sign action, the RPMS signature stands
     # and the exception surfaces to the caller.
     class ProgressNoteService
+      PART2_RECORD_TYPE = Part2Label::TIU_NOTE
+
       # Serious failures ("8"): gateway errors, raised gateway calls and a
       # sign whose outcome is unknown. Every other refusal is minor ("4").
       SERIOUS_REASONS = %i[gateway_error gateway_exception sign_outcome_unknown].freeze
@@ -59,7 +70,7 @@ module Lakeraven
       # text), :sign_action (the note and its text are saved, unsigned: TIU
       # did not answer that the author may sign it), or :sign (the note and
       # its text are saved, unsigned).
-      Result = Struct.new(:success, :note_ien, :error, :raw, :stage, keyword_init: true) do
+      Result = Struct.new(:success, :note_ien, :error, :raw, :stage, :part2_label, keyword_init: true) do
         def success? = success
       end
 
@@ -79,6 +90,12 @@ module Lakeraven
       # The note created by this service, once TIU answered with its IEN.
       attr_reader :created_note_ien
 
+      # The Part 2 label outcome of create (:labelled, :not_suspected or
+      # :label_failed): nil before create labels anything, and set as soon
+      # as the label step returns, before the text is written, so a later
+      # step that raises does not lose it.
+      attr_reader :part2_label
+
       # Whether a TIU write (note creation) has been sent. Once it has, a
       # raised call leaves the chart in an unknown state.
       def write_sent? = @write_sent
@@ -93,12 +110,14 @@ module Lakeraven
 
         note_ien = created[:ien]
         @created_note_ien = note_ien
+        part2_label = @part2_label = label_part2(note_ien, text)
+
         written = @gateway.update_text(note_ien, text)
         unless written.is_a?(Hash) && written[:success]
-          return failure(:gateway_error, raw: written, stage: :text, note_ien: note_ien)
+          return failure(:gateway_error, raw: written, stage: :text, note_ien: note_ien, part2_label: part2_label)
         end
 
-        Result.new(success: true, note_ien: note_ien, raw: written)
+        Result.new(success: true, note_ien: note_ien, raw: written, part2_label: part2_label)
       end
 
       # Whether RPMS accepts the author's signature code, asked before
@@ -159,7 +178,10 @@ module Lakeraven
       # written. TIU is asked which signing action the author holds on it,
       # and only :sign signs it, with the code just checked. Any other answer
       # (:cosign, nil) leaves the note saved unsigned, and the code is not
-      # sent.
+      # sent. Every Result once the note exists carries the part2_label
+      # create computed, and the instance's part2_label keeps it even when a
+      # later step raises; ProgressNotesController records a :label_failed
+      # in the note submission's audit row ("part 2 label failed").
       def create_and_sign(title_ien:, text:, signature_code:)
         checked = check_signature_code(signature_code)
         return checked unless checked.success?
@@ -168,19 +190,46 @@ module Lakeraven
         return created unless created.success?
 
         note_ien = created.note_ien
+        part2_label = created.part2_label
         action = @esignature_gateway.which_action(note_ien, @author_duz)
-        return failure(:sign_not_permitted, stage: :sign_action, note_ien: note_ien) unless action == :sign
+        unless action == :sign
+          return failure(:sign_not_permitted, stage: :sign_action, note_ien: note_ien, part2_label: part2_label)
+        end
 
-        add_signature(note_ien, signature_code)
+        add_signature(note_ien, signature_code, part2_label: part2_label)
       end
 
       private
 
-      def add_signature(note_ien, signature_code)
-        raw = @esignature_gateway.add(note_ien, @author_duz, signature_code, action: :sign)
-        return failure(:gateway_error, raw: raw, stage: :sign, note_ien: note_ien) unless raw.is_a?(Hash) && raw[:success]
+      # Labels before the text is written, so the label never trails the
+      # content. classify never raises (blank or unreadable text is
+      # :unclassified and labelled). A note the gateway gave no IEN cannot be
+      # labelled, so it is never reported as :labelled. Only database errors
+      # are rescued: the note must not be blocked by a label write, and
+      # Part2Posture fails closed for it. The failure is logged so the gap
+      # can be found and repaired: the error class and the note IEN only,
+      # never the note text or the exception message (which can carry SQL
+      # with bound values).
+      def label_part2(note_ien, text)
+        return :not_suspected if SudContentSuspicion.classify(text) == :not_suspected
+        return :label_failed if note_ien.to_s.blank?
 
-        Result.new(success: true, note_ien: note_ien, raw: raw)
+        Part2Label.mark!(patient_dfn: @dfn.to_s, record_type: PART2_RECORD_TYPE, record_id: note_ien.to_s)
+        :labelled
+      rescue ActiveRecord::ActiveRecordError => e
+        Rails.logger.warn("Part 2 label write failed (#{e.class.name}) for tiu note #{note_ien}")
+        :label_failed
+      end
+
+      # part2_label is passed through to the Result unchanged; sign leaves it
+      # nil because it labels nothing.
+      def add_signature(note_ien, signature_code, part2_label: nil)
+        raw = @esignature_gateway.add(note_ien, @author_duz, signature_code, action: :sign)
+        unless raw.is_a?(Hash) && raw[:success]
+          return failure(:gateway_error, raw: raw, stage: :sign, note_ien: note_ien, part2_label: part2_label)
+        end
+
+        Result.new(success: true, note_ien: note_ien, raw: raw, part2_label: part2_label)
       end
 
       # The value as a String when it is all digits, else nil, so a
@@ -278,8 +327,8 @@ module Lakeraven
         )
       end
 
-      def failure(reason, raw: nil, stage: nil, note_ien: nil)
-        Result.new(success: false, error: reason, raw: raw, stage: stage, note_ien: note_ien)
+      def failure(reason, raw: nil, stage: nil, note_ien: nil, part2_label: nil)
+        Result.new(success: false, error: reason, raw: raw, stage: stage, note_ien: note_ien, part2_label: part2_label)
       end
     end
   end

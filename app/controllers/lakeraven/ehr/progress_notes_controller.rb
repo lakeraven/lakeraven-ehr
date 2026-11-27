@@ -297,7 +297,17 @@ module Lakeraven
       end
 
       def audit_outcome_desc
-        [ super, NOTE_OUTCOME_NOTES[@note_outcome], filed_note_description ].compact.join("; ").presence
+        [ super, NOTE_OUTCOME_NOTES[@note_outcome], filed_note_description, part2_label_description ]
+          .compact.join("; ").presence
+      end
+
+      # A Part 2 label that could not be written is recorded in the note
+      # submission's audit row, on every outcome path. Read from the service
+      # instance, which keeps the label outcome even when a later step
+      # raised and no Result came back. The outcome only: never the note
+      # text, the signature code or an exception message.
+      def part2_label_description
+        "part 2 label failed" if @note_service&.part2_label == :label_failed
       end
 
       # The note and the visit a TIU write was sent for, by IEN only.
