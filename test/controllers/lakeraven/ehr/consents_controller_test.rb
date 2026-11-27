@@ -184,6 +184,27 @@ module Lakeraven
         assert_response :forbidden
       end
 
+      test "a patient-scoped token bound to another patient cannot read this one's consents" do
+        SignedConsent.create!(
+          patient_dfn: DFN,
+          consent_template: ConsentTemplate.current(TEMPLATE_BH),
+          template_key: TEMPLATE_BH,
+          template_version: 1,
+          template_body_digest: body_digest(ConsentTemplate.current(TEMPLATE_BH).body),
+          signature_png: TINY_PNG,
+          signed_at: Time.zone.now,
+          witness_duz: DUZ,
+          kind: "signature",
+          recorded_by_duz: DUZ
+        )
+        other = clinician_token(scopes: "patient/Consent.read", app_name: "smart-patient-app", duz: OTHER_DFN)
+
+        get BASE, headers: bearer_headers(other)
+
+        assert_response :forbidden
+        assert_equal "Forbidden: Patient context mismatch", response.body
+      end
+
       test "GET index is audited as a read of the patient chart consents" do
         AuditEvent.delete_all
 

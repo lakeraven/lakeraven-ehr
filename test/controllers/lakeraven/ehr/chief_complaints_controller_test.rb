@@ -91,6 +91,19 @@ module Lakeraven
         end
       end
 
+      # VisitCharting's gate, so every form that charts on a visit is walked.
+      test "a patient-scoped token bound to another patient cannot open charting on this one's visits" do
+        sign_in_as(MEDICAL_ASSISTANT)
+        other = clinician_token(scopes: "patient/*.read", app_name: "smart-patient-app", duz: "2")
+
+        %w[chief_complaints vitals allergy_reviews problems].each do |form|
+          with_visits([ OPEN ]) { get "#{MOUNT}/patients/#{DFN}/#{form}/new", headers: bearer_headers(other) }
+
+          assert_response :forbidden, form
+          assert_equal "Forbidden: Patient context mismatch", response.body, form
+        end
+      end
+
       private
 
       def sign_in_as(keys)

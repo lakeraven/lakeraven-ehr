@@ -225,6 +225,17 @@ module Lakeraven
         assert_empty @tiu.calls
       end
 
+      test "a patient-scoped token bound to another patient cannot open this one's note form" do
+        sign_in_provider!
+        other = clinician_token(scopes: "patient/*.read", app_name: "smart-patient-app", duz: OTHER_DFN)
+
+        with_fake_tiu(@tiu) { get NEW, headers: bearer_headers(other) }
+
+        assert_response :forbidden
+        assert_equal "Forbidden: Patient context mismatch", response.body
+        assert_empty @tiu.calls
+      end
+
       test "GET new answers 404 when no note title is configured" do
         sign_in_provider!
         get_new
