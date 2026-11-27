@@ -417,6 +417,15 @@ module Lakeraven
         assert_empty @tracker.add_calls
       end
 
+      test "a patient-scoped token bound to another patient cannot open this one's allergy entry" do
+        other = patient_token(dfn: "2", scopes: "patient/AllergyIntolerance.read")
+
+        get "#{BASE}/new", headers: auth_headers(other)
+
+        assert_response :forbidden
+        assert_equal "Forbidden: Patient context mismatch", response.body
+      end
+
       test "missing CSRF token refuses create" do
         with_tracking_allergy_gateway(@tracker) do
           post BASE, params: allergy_form_params
