@@ -46,6 +46,18 @@ module Lakeraven
       # AUTH's WID): this application, and the host it runs on.
       def self.workstation = "lakeraven-ehr #{Socket.gethostname}"[0, 40]
 
+      # The sign-on exchange alone, on RpmsRpc.client, for the broker kind it
+      # is: { success:, duz:, ... } or { success: false, error: }. The caller
+      # scopes the client. A user's sign-on goes on to read who they are; the
+      # service account (RpmsSessions.with_service_account) needs only this.
+      def sign_on(access_code, verify_code, client_ip = nil)
+        if cia_broker?
+          cia_signon(access_code, verify_code, client_ip)
+        else
+          RpmsRpc::Authentication.authenticate(access_code: access_code, verify_code: verify_code)
+        end
+      end
+
       private
 
       # Sign on over a fresh connection of the user's own (ADR 0011 §3). The
@@ -80,12 +92,7 @@ module Lakeraven
       end
 
       def resolve_signon(access_code, verify_code, client_ip)
-        auth =
-          if cia_broker?
-            cia_signon(access_code, verify_code, client_ip)
-          else
-            RpmsRpc::Authentication.authenticate(access_code: access_code, verify_code: verify_code)
-          end
+        auth = sign_on(access_code, verify_code, client_ip)
         return failure(auth[:error] || "Invalid access/verify code") unless auth[:success]
 
         duz_s = auth[:duz].to_s

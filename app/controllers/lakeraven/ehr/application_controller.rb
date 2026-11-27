@@ -28,8 +28,10 @@ module Lakeraven
       before_action :validate_fhir_paging!, if: :fhir_search?
       before_action :validate_fhir_sort_and_include!, if: :fhir_search?
       # A launched token reads RPMS on its user's own connection (#844, ADR
-      # 0011), after every check above has passed. Any other token has none.
-      around_action :run_on_launched_users_connection
+      # 0011), and a Backend Services token on its client application's own
+      # service account's (#996, ADR 0011 §6, ADR 0013 decision 4), after every
+      # check above has passed. Any other token has none.
+      around_action :run_on_rpms_connection
 
       # Actions that DISCLOSE clinical data even though they are shaped as
       # writes — generating a C-CDA, running a bulk export, requesting an
@@ -59,6 +61,21 @@ module Lakeraven
       end
 
       private
+
+      def run_on_rpms_connection(&action)
+        return RpmsSessions.with_service_account(current_token, &action) if backend_services_token?
+
+        run_on_launched_users_connection(&action)
+      end
+
+      # A SMART Backend Services token (BackendServicesToken): a client
+      # application's own, with no person behind it. Anything else never rides
+      # its application's service account.
+      def backend_services_token?
+        return false unless current_token && RpmsSessions.enabled?
+
+        BackendServicesToken.match?(current_token, launched: launched_authorization.present?)
+      end
 
       # The request runs inside the approving user's RPMS connection
       # (RpmsSessions.with_user), so every RPC it makes runs as that user. Using
@@ -128,10 +145,12 @@ module Lakeraven
       # is caller-visible and the same reasoning as the audit note below applies
       # -- a rescued message is free text that can carry PHI.
       # An API request carries a token, not a signed-in user's RPMS connection,
-      # and this process holds no shared one (ADR 0011). Until a deployment
-      # gives backend clients a named service account (ADR 0011 §6), a request
-      # that reaches for RPMS is refused, never served on another user's
-      # connection.
+      # and this process holds no shared one (ADR 0011). A Backend Services
+      # token reads on its client application's own service account (ADR 0011
+      # §6, ADR 0013 decision 4) when one is configured for that client; with
+      # none, or when its sign-on fails, it lands here. A
+      # request that reaches for RPMS with no connection of its own is refused,
+      # never served on another user's connection.
       rescue_from RpmsRpc::NotConfiguredError do
         Rails.logger.warn("[rpms] API request with no RPMS identity: #{controller_path}##{action_name}")
         render_operation_outcome(
