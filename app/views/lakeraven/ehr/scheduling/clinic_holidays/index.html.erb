@@ -1,0 +1,35 @@
+<% page_title "Holidays | #{@resource[:name]}" %>
+
+<%= page_header "Clinic holidays", @resource[:name] do %>
+  <%= link_to "Back to clinic settings", scheduling_clinic_settings_path(@resource[:id]) %>
+<% end %>
+
+<p>These are site-wide RPMS holidays, not dates owned by this clinic. This page is read-only.</p>
+<p id="clinic-holiday-policy">
+  Current clinic setting:
+  <% if @calendar.schedule_on_holidays %>
+    This clinic schedules on holidays. Its other booking rules still apply.
+  <% else %>
+    This clinic does not schedule on holidays. These dates are excluded from open-time searches.
+  <% end %>
+</p>
+
+<%= form_with url: scheduling_clinic_holidays_path(@resource[:id]), method: :get, local: true do %>
+  <%= label_tag :year, "Year" %>
+  <%= number_field_tag :year, @year, min: 1800, max: 2699, required: true %>
+  <%= submit_tag "Show holidays" %>
+<% end %>
+
+<% if @calendar.holidays.empty? %>
+  <p id="clinic-holidays-empty">No site holidays are recorded for <%= @year %>.</p>
+<% else %>
+  <table class="data-table" id="clinic-holidays">
+    <caption>Site holidays for <%= @year %></caption>
+    <thead><tr><th scope="col">Date</th><th scope="col">Holiday</th></tr></thead>
+    <tbody>
+      <% @calendar.holidays.each do |holiday| %>
+        <tr><td><time datetime="<%= holiday[:date].iso8601 %>"><%= holiday[:date].iso8601 %></time></td><td><%= holiday[:name] %></td></tr>
+      <% end %>
+    </tbody>
+  </table>
+<% end %>
