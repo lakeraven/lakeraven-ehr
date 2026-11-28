@@ -3,6 +3,7 @@
 <%= page_header "Clinic settings",
       @settings[:name] do %>
   <% if supervisor? %>
+    <%= link_to "Clinic users", scheduling_clinic_users_path(@resource[:id]), id: "clinic-users-link" %>
     <%= link_to "Change settings",
           scheduling_edit_clinic_settings_path(@resource[:id]),
           id: "edit-settings" %>

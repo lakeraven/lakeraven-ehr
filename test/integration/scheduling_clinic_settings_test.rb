@@ -130,6 +130,7 @@ class SchedulingClinicSettingsTest < ActionDispatch::IntegrationTest
 
       assert_select "#default-provider-warning", count: 0
       assert_select "dd[data-setting='default_provider']", text: "PROFILE,MD"
+      assert_select "a#clinic-users-link[href='/lakeraven-ehr/scheduling/clinics/5/users']", text: "Clinic users"
     end
   end
 
@@ -140,6 +141,7 @@ class SchedulingClinicSettingsTest < ActionDispatch::IntegrationTest
       assert_response :success
       assert_select "dd[data-setting='length_minutes']", text: "30"
       assert_select "#edit-settings", count: 0
+      assert_select "#clinic-users-link", count: 0
 
       get "/lakeraven-ehr/scheduling/clinics/5/settings/edit"
       assert_response :forbidden

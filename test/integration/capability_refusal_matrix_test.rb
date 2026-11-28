@@ -82,6 +82,7 @@ class CapabilityRefusalMatrixTest < ActionDispatch::IntegrationTest
     "POST /scheduling/clinics/:resource_id/wait_list/:entry_id/removal" => "scheduling.open",
     "GET /scheduling/clinics/:resource_id/wait_list/:entry_id/booking" => "scheduling.open",
     "POST /scheduling/clinics/:resource_id/wait_list/:entry_id/booking" => "scheduling.open",
+    "GET /scheduling/clinics/:resource_id/users" => "scheduling.supervise",
     "GET /scheduling/clinics/:resource_id/settings" => "scheduling.open",
     "GET /scheduling/clinics/:resource_id/settings/edit" => "scheduling.supervise",
     "POST /scheduling/clinics/:resource_id/settings" => "scheduling.supervise",

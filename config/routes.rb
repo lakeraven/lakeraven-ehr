@@ -365,6 +365,7 @@ Lakeraven::EHR::Engine.routes.draw do
                                                          constraints: { id: /\d+/, item_id: /\d+/ }
     get "clinics/:id/open_times", to: "open_times#index", as: :clinic_open_times, constraints: { id: /\d+/ }
     # A clinic's scheduling settings and letters (S-SCH-15); changing them takes SDZSUP.
+    get "clinics/:resource_id/users", to: "clinic_users#index", as: :clinic_users, constraints: { resource_id: /\d+/ }
     get "clinics/:resource_id/settings", to: "clinic_settings#show", as: :clinic_settings, constraints: { resource_id: /\d+/ }
     get "clinics/:resource_id/settings/edit", to: "clinic_settings#edit", as: :edit_clinic_settings, constraints: { resource_id: /\d+/ }
     post "clinics/:resource_id/settings", to: "clinic_settings#update", constraints: { resource_id: /\d+/ }
